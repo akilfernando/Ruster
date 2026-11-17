@@ -1,0 +1,14 @@
+{
+  "case": "burst",
+  "observed": {
+    "revision": 1,
+    "outcomes": null
+  },
+  "error": "rapid commands need explicit outcomes, not silent return",
+  "cleanup": {
+    "host_stopped": true,
+    "chrome_stopped": true,
+    "capability_removed": true,
+    "profile_removed": true
+  }
+}

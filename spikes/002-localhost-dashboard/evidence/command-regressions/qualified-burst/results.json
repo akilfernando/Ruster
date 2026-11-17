@@ -1,0 +1,102 @@
+{
+  "case": "burst",
+  "observed": {
+    "revision": 1,
+    "outcomes": [
+      {
+        "id": 1,
+        "operation": "refresh",
+        "status": "completed",
+        "reason": ""
+      },
+      {
+        "id": 2,
+        "operation": "scene_transform",
+        "status": "completed",
+        "reason": ""
+      },
+      {
+        "id": 3,
+        "operation": "scene_transform",
+        "status": "rejected",
+        "reason": "busy"
+      },
+      {
+        "id": 4,
+        "operation": "scene_transform",
+        "status": "rejected",
+        "reason": "busy"
+      },
+      {
+        "id": 5,
+        "operation": "scene_transform",
+        "status": "rejected",
+        "reason": "busy"
+      },
+      {
+        "id": 6,
+        "operation": "scene_transform",
+        "status": "rejected",
+        "reason": "busy"
+      },
+      {
+        "id": 7,
+        "operation": "scene_transform",
+        "status": "rejected",
+        "reason": "busy"
+      },
+      {
+        "id": 8,
+        "operation": "scene_transform",
+        "status": "rejected",
+        "reason": "busy"
+      },
+      {
+        "id": 9,
+        "operation": "scene_transform",
+        "status": "rejected",
+        "reason": "busy"
+      },
+      {
+        "id": 10,
+        "operation": "scene_transform",
+        "status": "rejected",
+        "reason": "busy"
+      },
+      {
+        "id": 11,
+        "operation": "scene_transform",
+        "status": "rejected",
+        "reason": "busy"
+      }
+    ],
+    "visible": "Commands: {\"accepted\":2,\"completed\":2,\"rejected\":9,\"failed\":0} \u00b7 latest #2 scene_transform completed \u00b7 capacity 1 active / 0 queued \u00b7 recent 64 outcomes retained"
+  },
+  "bounded_mixed": {
+    "completed": 1,
+    "rejected": 79,
+    "retained": 64,
+    "revision": 3
+  },
+  "refusals": {
+    "save": {
+      "id": 93,
+      "operation": "scene_save",
+      "status": "failed",
+      "reason": "save_permission_required"
+    },
+    "stale": {
+      "id": 94,
+      "operation": "scene_transform",
+      "status": "failed",
+      "reason": "stale_revision"
+    }
+  },
+  "pass": true,
+  "cleanup": {
+    "host_stopped": true,
+    "chrome_stopped": true,
+    "capability_removed": true,
+    "profile_removed": true
+  }
+}

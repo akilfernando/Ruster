@@ -90,6 +90,19 @@ fn main() {
     );
     let scene = owner.scene();
     scene.validate().unwrap();
+    let mut textures = std::collections::BTreeMap::new();
+    if let Ok(path) = std::env::var("SPIKE_BENCH_TEXTURE") {
+        let texture = ruster_assets::decode_png(&std::fs::read(path).unwrap()).unwrap();
+        textures.insert("bench-texture".to_owned(), std::sync::Arc::new(texture));
+    }
+    for material in scene.materials.values() {
+        if let Some(id) = &material.base_color_texture {
+            assert!(
+                textures.contains_key(id),
+                "benchmark must not silently omit textures"
+            );
+        }
+    }
     // Exactly one immutable authored scene. No alternate JS project model.
     std::fs::write(
         out.join("scene.json"),
@@ -161,11 +174,12 @@ fn main() {
                                 }),
                                 ..Default::default()
                             };
-                            ruster_render::viewport_with_navigation(
+                            ruster_render::viewport_with_materials(
                                 ui,
                                 &scene,
                                 &[],
                                 &Default::default(),
+                                &textures,
                                 &mut navigation,
                             );
                         });
@@ -301,7 +315,7 @@ fn main() {
         assert!(m.frames > 0 && m.draw_calls > 0);
         println!(
             "{}",
-            serde_json::json!({"render_only":render_only,"passes":passes,"render_cpu_ms":render_cpu_ms,"submit_to_mapped_ms":readback_ms,"png_encode_ms":encode_ms,"native_total_ms":started.elapsed().as_secs_f64()*1000.,"frames":m.frames,"draw_calls":m.draw_calls,"revision":scene.revision,"objects":scene.objects.len(),"adapter":render.adapter.get_info().name,"backend":"Vulkan","width":768,"height":512,"read_only":false,"authority":authority,"command":command,"command_to_commit_ms":command_to_commit_ms})
+            serde_json::json!({"render_only":render_only,"passes":passes,"render_cpu_ms":render_cpu_ms,"submit_to_mapped_ms":readback_ms,"png_encode_ms":encode_ms,"native_total_ms":started.elapsed().as_secs_f64()*1000.,"frames":m.frames,"draw_calls":m.draw_calls,"texture_bytes":m.texture_bytes,"texture_uploads":m.texture_uploads,"mesh_bytes":m.mesh_bytes,"target_bytes":m.target_bytes,"sample_count":m.sample_count,"gpu_scene_last_us":m.gpu_scene_us.last(),"revision":scene.revision,"objects":scene.objects.len(),"adapter":render.adapter.get_info().name,"backend":"Vulkan","width":768,"height":512,"read_only":false,"authority":authority,"command":command,"command_to_commit_ms":command_to_commit_ms})
         );
         std::io::stdout().flush().unwrap();
     }

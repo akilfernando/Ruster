@@ -1,0 +1,7100 @@
+{
+  "id": "benchmark-moderate-textured",
+  "revision": 0,
+  "objects": [
+    {
+      "id": "object-0",
+      "transform": {
+        "translation": [
+          -2.34375,
+          0,
+          -2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-1",
+      "transform": {
+        "translation": [
+          -2.03125,
+          0,
+          -2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-2",
+      "transform": {
+        "translation": [
+          -1.71875,
+          0,
+          -2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-3",
+      "transform": {
+        "translation": [
+          -1.40625,
+          0,
+          -2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-4",
+      "transform": {
+        "translation": [
+          -1.09375,
+          0,
+          -2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-5",
+      "transform": {
+        "translation": [
+          -0.78125,
+          0,
+          -2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-6",
+      "transform": {
+        "translation": [
+          -0.46875,
+          0,
+          -2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-7",
+      "transform": {
+        "translation": [
+          -0.15625,
+          0,
+          -2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-8",
+      "transform": {
+        "translation": [
+          0.15625,
+          0,
+          -2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-9",
+      "transform": {
+        "translation": [
+          0.46875,
+          0,
+          -2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-10",
+      "transform": {
+        "translation": [
+          0.78125,
+          0,
+          -2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-11",
+      "transform": {
+        "translation": [
+          1.09375,
+          0,
+          -2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-12",
+      "transform": {
+        "translation": [
+          1.40625,
+          0,
+          -2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-13",
+      "transform": {
+        "translation": [
+          1.71875,
+          0,
+          -2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-14",
+      "transform": {
+        "translation": [
+          2.03125,
+          0,
+          -2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-15",
+      "transform": {
+        "translation": [
+          2.34375,
+          0,
+          -2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-16",
+      "transform": {
+        "translation": [
+          -2.34375,
+          0,
+          -2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-17",
+      "transform": {
+        "translation": [
+          -2.03125,
+          0,
+          -2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-18",
+      "transform": {
+        "translation": [
+          -1.71875,
+          0,
+          -2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-19",
+      "transform": {
+        "translation": [
+          -1.40625,
+          0,
+          -2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-20",
+      "transform": {
+        "translation": [
+          -1.09375,
+          0,
+          -2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-21",
+      "transform": {
+        "translation": [
+          -0.78125,
+          0,
+          -2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-22",
+      "transform": {
+        "translation": [
+          -0.46875,
+          0,
+          -2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-23",
+      "transform": {
+        "translation": [
+          -0.15625,
+          0,
+          -2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-24",
+      "transform": {
+        "translation": [
+          0.15625,
+          0,
+          -2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-25",
+      "transform": {
+        "translation": [
+          0.46875,
+          0,
+          -2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-26",
+      "transform": {
+        "translation": [
+          0.78125,
+          0,
+          -2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-27",
+      "transform": {
+        "translation": [
+          1.09375,
+          0,
+          -2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-28",
+      "transform": {
+        "translation": [
+          1.40625,
+          0,
+          -2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-29",
+      "transform": {
+        "translation": [
+          1.71875,
+          0,
+          -2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-30",
+      "transform": {
+        "translation": [
+          2.03125,
+          0,
+          -2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-31",
+      "transform": {
+        "translation": [
+          2.34375,
+          0,
+          -2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-32",
+      "transform": {
+        "translation": [
+          -2.34375,
+          0,
+          -1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-33",
+      "transform": {
+        "translation": [
+          -2.03125,
+          0,
+          -1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-34",
+      "transform": {
+        "translation": [
+          -1.71875,
+          0,
+          -1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-35",
+      "transform": {
+        "translation": [
+          -1.40625,
+          0,
+          -1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-36",
+      "transform": {
+        "translation": [
+          -1.09375,
+          0,
+          -1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-37",
+      "transform": {
+        "translation": [
+          -0.78125,
+          0,
+          -1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-38",
+      "transform": {
+        "translation": [
+          -0.46875,
+          0,
+          -1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-39",
+      "transform": {
+        "translation": [
+          -0.15625,
+          0,
+          -1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-40",
+      "transform": {
+        "translation": [
+          0.15625,
+          0,
+          -1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-41",
+      "transform": {
+        "translation": [
+          0.46875,
+          0,
+          -1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-42",
+      "transform": {
+        "translation": [
+          0.78125,
+          0,
+          -1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-43",
+      "transform": {
+        "translation": [
+          1.09375,
+          0,
+          -1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-44",
+      "transform": {
+        "translation": [
+          1.40625,
+          0,
+          -1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-45",
+      "transform": {
+        "translation": [
+          1.71875,
+          0,
+          -1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-46",
+      "transform": {
+        "translation": [
+          2.03125,
+          0,
+          -1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-47",
+      "transform": {
+        "translation": [
+          2.34375,
+          0,
+          -1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-48",
+      "transform": {
+        "translation": [
+          -2.34375,
+          0,
+          -1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-49",
+      "transform": {
+        "translation": [
+          -2.03125,
+          0,
+          -1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-50",
+      "transform": {
+        "translation": [
+          -1.71875,
+          0,
+          -1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-51",
+      "transform": {
+        "translation": [
+          -1.40625,
+          0,
+          -1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-52",
+      "transform": {
+        "translation": [
+          -1.09375,
+          0,
+          -1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-53",
+      "transform": {
+        "translation": [
+          -0.78125,
+          0,
+          -1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-54",
+      "transform": {
+        "translation": [
+          -0.46875,
+          0,
+          -1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-55",
+      "transform": {
+        "translation": [
+          -0.15625,
+          0,
+          -1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-56",
+      "transform": {
+        "translation": [
+          0.15625,
+          0,
+          -1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-57",
+      "transform": {
+        "translation": [
+          0.46875,
+          0,
+          -1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-58",
+      "transform": {
+        "translation": [
+          0.78125,
+          0,
+          -1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-59",
+      "transform": {
+        "translation": [
+          1.09375,
+          0,
+          -1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-60",
+      "transform": {
+        "translation": [
+          1.40625,
+          0,
+          -1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-61",
+      "transform": {
+        "translation": [
+          1.71875,
+          0,
+          -1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-62",
+      "transform": {
+        "translation": [
+          2.03125,
+          0,
+          -1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-63",
+      "transform": {
+        "translation": [
+          2.34375,
+          0,
+          -1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-64",
+      "transform": {
+        "translation": [
+          -2.34375,
+          0,
+          -1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-65",
+      "transform": {
+        "translation": [
+          -2.03125,
+          0,
+          -1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-66",
+      "transform": {
+        "translation": [
+          -1.71875,
+          0,
+          -1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-67",
+      "transform": {
+        "translation": [
+          -1.40625,
+          0,
+          -1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-68",
+      "transform": {
+        "translation": [
+          -1.09375,
+          0,
+          -1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-69",
+      "transform": {
+        "translation": [
+          -0.78125,
+          0,
+          -1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-70",
+      "transform": {
+        "translation": [
+          -0.46875,
+          0,
+          -1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-71",
+      "transform": {
+        "translation": [
+          -0.15625,
+          0,
+          -1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-72",
+      "transform": {
+        "translation": [
+          0.15625,
+          0,
+          -1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-73",
+      "transform": {
+        "translation": [
+          0.46875,
+          0,
+          -1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-74",
+      "transform": {
+        "translation": [
+          0.78125,
+          0,
+          -1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-75",
+      "transform": {
+        "translation": [
+          1.09375,
+          0,
+          -1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-76",
+      "transform": {
+        "translation": [
+          1.40625,
+          0,
+          -1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-77",
+      "transform": {
+        "translation": [
+          1.71875,
+          0,
+          -1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-78",
+      "transform": {
+        "translation": [
+          2.03125,
+          0,
+          -1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-79",
+      "transform": {
+        "translation": [
+          2.34375,
+          0,
+          -1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-80",
+      "transform": {
+        "translation": [
+          -2.34375,
+          0,
+          -0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-81",
+      "transform": {
+        "translation": [
+          -2.03125,
+          0,
+          -0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-82",
+      "transform": {
+        "translation": [
+          -1.71875,
+          0,
+          -0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-83",
+      "transform": {
+        "translation": [
+          -1.40625,
+          0,
+          -0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-84",
+      "transform": {
+        "translation": [
+          -1.09375,
+          0,
+          -0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-85",
+      "transform": {
+        "translation": [
+          -0.78125,
+          0,
+          -0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-86",
+      "transform": {
+        "translation": [
+          -0.46875,
+          0,
+          -0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-87",
+      "transform": {
+        "translation": [
+          -0.15625,
+          0,
+          -0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-88",
+      "transform": {
+        "translation": [
+          0.15625,
+          0,
+          -0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-89",
+      "transform": {
+        "translation": [
+          0.46875,
+          0,
+          -0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-90",
+      "transform": {
+        "translation": [
+          0.78125,
+          0,
+          -0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-91",
+      "transform": {
+        "translation": [
+          1.09375,
+          0,
+          -0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-92",
+      "transform": {
+        "translation": [
+          1.40625,
+          0,
+          -0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-93",
+      "transform": {
+        "translation": [
+          1.71875,
+          0,
+          -0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-94",
+      "transform": {
+        "translation": [
+          2.03125,
+          0,
+          -0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-95",
+      "transform": {
+        "translation": [
+          2.34375,
+          0,
+          -0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-96",
+      "transform": {
+        "translation": [
+          -2.34375,
+          0,
+          -0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-97",
+      "transform": {
+        "translation": [
+          -2.03125,
+          0,
+          -0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-98",
+      "transform": {
+        "translation": [
+          -1.71875,
+          0,
+          -0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-99",
+      "transform": {
+        "translation": [
+          -1.40625,
+          0,
+          -0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-100",
+      "transform": {
+        "translation": [
+          -1.09375,
+          0,
+          -0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-101",
+      "transform": {
+        "translation": [
+          -0.78125,
+          0,
+          -0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-102",
+      "transform": {
+        "translation": [
+          -0.46875,
+          0,
+          -0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-103",
+      "transform": {
+        "translation": [
+          -0.15625,
+          0,
+          -0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-104",
+      "transform": {
+        "translation": [
+          0.15625,
+          0,
+          -0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-105",
+      "transform": {
+        "translation": [
+          0.46875,
+          0,
+          -0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-106",
+      "transform": {
+        "translation": [
+          0.78125,
+          0,
+          -0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-107",
+      "transform": {
+        "translation": [
+          1.09375,
+          0,
+          -0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-108",
+      "transform": {
+        "translation": [
+          1.40625,
+          0,
+          -0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-109",
+      "transform": {
+        "translation": [
+          1.71875,
+          0,
+          -0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-110",
+      "transform": {
+        "translation": [
+          2.03125,
+          0,
+          -0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-111",
+      "transform": {
+        "translation": [
+          2.34375,
+          0,
+          -0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-112",
+      "transform": {
+        "translation": [
+          -2.34375,
+          0,
+          -0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-113",
+      "transform": {
+        "translation": [
+          -2.03125,
+          0,
+          -0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-114",
+      "transform": {
+        "translation": [
+          -1.71875,
+          0,
+          -0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-115",
+      "transform": {
+        "translation": [
+          -1.40625,
+          0,
+          -0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-116",
+      "transform": {
+        "translation": [
+          -1.09375,
+          0,
+          -0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-117",
+      "transform": {
+        "translation": [
+          -0.78125,
+          0,
+          -0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-118",
+      "transform": {
+        "translation": [
+          -0.46875,
+          0,
+          -0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-119",
+      "transform": {
+        "translation": [
+          -0.15625,
+          0,
+          -0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-120",
+      "transform": {
+        "translation": [
+          0.15625,
+          0,
+          -0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-121",
+      "transform": {
+        "translation": [
+          0.46875,
+          0,
+          -0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-122",
+      "transform": {
+        "translation": [
+          0.78125,
+          0,
+          -0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-123",
+      "transform": {
+        "translation": [
+          1.09375,
+          0,
+          -0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-124",
+      "transform": {
+        "translation": [
+          1.40625,
+          0,
+          -0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-125",
+      "transform": {
+        "translation": [
+          1.71875,
+          0,
+          -0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-126",
+      "transform": {
+        "translation": [
+          2.03125,
+          0,
+          -0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-127",
+      "transform": {
+        "translation": [
+          2.34375,
+          0,
+          -0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-128",
+      "transform": {
+        "translation": [
+          -2.34375,
+          0,
+          0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-129",
+      "transform": {
+        "translation": [
+          -2.03125,
+          0,
+          0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-130",
+      "transform": {
+        "translation": [
+          -1.71875,
+          0,
+          0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-131",
+      "transform": {
+        "translation": [
+          -1.40625,
+          0,
+          0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-132",
+      "transform": {
+        "translation": [
+          -1.09375,
+          0,
+          0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-133",
+      "transform": {
+        "translation": [
+          -0.78125,
+          0,
+          0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-134",
+      "transform": {
+        "translation": [
+          -0.46875,
+          0,
+          0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-135",
+      "transform": {
+        "translation": [
+          -0.15625,
+          0,
+          0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-136",
+      "transform": {
+        "translation": [
+          0.15625,
+          0,
+          0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-137",
+      "transform": {
+        "translation": [
+          0.46875,
+          0,
+          0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-138",
+      "transform": {
+        "translation": [
+          0.78125,
+          0,
+          0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-139",
+      "transform": {
+        "translation": [
+          1.09375,
+          0,
+          0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-140",
+      "transform": {
+        "translation": [
+          1.40625,
+          0,
+          0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-141",
+      "transform": {
+        "translation": [
+          1.71875,
+          0,
+          0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-142",
+      "transform": {
+        "translation": [
+          2.03125,
+          0,
+          0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-143",
+      "transform": {
+        "translation": [
+          2.34375,
+          0,
+          0.15625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-144",
+      "transform": {
+        "translation": [
+          -2.34375,
+          0,
+          0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-145",
+      "transform": {
+        "translation": [
+          -2.03125,
+          0,
+          0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-146",
+      "transform": {
+        "translation": [
+          -1.71875,
+          0,
+          0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-147",
+      "transform": {
+        "translation": [
+          -1.40625,
+          0,
+          0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-148",
+      "transform": {
+        "translation": [
+          -1.09375,
+          0,
+          0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-149",
+      "transform": {
+        "translation": [
+          -0.78125,
+          0,
+          0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-150",
+      "transform": {
+        "translation": [
+          -0.46875,
+          0,
+          0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-151",
+      "transform": {
+        "translation": [
+          -0.15625,
+          0,
+          0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-152",
+      "transform": {
+        "translation": [
+          0.15625,
+          0,
+          0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-153",
+      "transform": {
+        "translation": [
+          0.46875,
+          0,
+          0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-154",
+      "transform": {
+        "translation": [
+          0.78125,
+          0,
+          0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-155",
+      "transform": {
+        "translation": [
+          1.09375,
+          0,
+          0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-156",
+      "transform": {
+        "translation": [
+          1.40625,
+          0,
+          0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-157",
+      "transform": {
+        "translation": [
+          1.71875,
+          0,
+          0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-158",
+      "transform": {
+        "translation": [
+          2.03125,
+          0,
+          0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-159",
+      "transform": {
+        "translation": [
+          2.34375,
+          0,
+          0.46875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-160",
+      "transform": {
+        "translation": [
+          -2.34375,
+          0,
+          0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-161",
+      "transform": {
+        "translation": [
+          -2.03125,
+          0,
+          0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-162",
+      "transform": {
+        "translation": [
+          -1.71875,
+          0,
+          0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-163",
+      "transform": {
+        "translation": [
+          -1.40625,
+          0,
+          0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-164",
+      "transform": {
+        "translation": [
+          -1.09375,
+          0,
+          0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-165",
+      "transform": {
+        "translation": [
+          -0.78125,
+          0,
+          0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-166",
+      "transform": {
+        "translation": [
+          -0.46875,
+          0,
+          0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-167",
+      "transform": {
+        "translation": [
+          -0.15625,
+          0,
+          0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-168",
+      "transform": {
+        "translation": [
+          0.15625,
+          0,
+          0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-169",
+      "transform": {
+        "translation": [
+          0.46875,
+          0,
+          0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-170",
+      "transform": {
+        "translation": [
+          0.78125,
+          0,
+          0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-171",
+      "transform": {
+        "translation": [
+          1.09375,
+          0,
+          0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-172",
+      "transform": {
+        "translation": [
+          1.40625,
+          0,
+          0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-173",
+      "transform": {
+        "translation": [
+          1.71875,
+          0,
+          0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-174",
+      "transform": {
+        "translation": [
+          2.03125,
+          0,
+          0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-175",
+      "transform": {
+        "translation": [
+          2.34375,
+          0,
+          0.78125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-176",
+      "transform": {
+        "translation": [
+          -2.34375,
+          0,
+          1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-177",
+      "transform": {
+        "translation": [
+          -2.03125,
+          0,
+          1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-178",
+      "transform": {
+        "translation": [
+          -1.71875,
+          0,
+          1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-179",
+      "transform": {
+        "translation": [
+          -1.40625,
+          0,
+          1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-180",
+      "transform": {
+        "translation": [
+          -1.09375,
+          0,
+          1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-181",
+      "transform": {
+        "translation": [
+          -0.78125,
+          0,
+          1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-182",
+      "transform": {
+        "translation": [
+          -0.46875,
+          0,
+          1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-183",
+      "transform": {
+        "translation": [
+          -0.15625,
+          0,
+          1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-184",
+      "transform": {
+        "translation": [
+          0.15625,
+          0,
+          1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-185",
+      "transform": {
+        "translation": [
+          0.46875,
+          0,
+          1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-186",
+      "transform": {
+        "translation": [
+          0.78125,
+          0,
+          1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-187",
+      "transform": {
+        "translation": [
+          1.09375,
+          0,
+          1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-188",
+      "transform": {
+        "translation": [
+          1.40625,
+          0,
+          1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-189",
+      "transform": {
+        "translation": [
+          1.71875,
+          0,
+          1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-190",
+      "transform": {
+        "translation": [
+          2.03125,
+          0,
+          1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-191",
+      "transform": {
+        "translation": [
+          2.34375,
+          0,
+          1.09375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-192",
+      "transform": {
+        "translation": [
+          -2.34375,
+          0,
+          1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-193",
+      "transform": {
+        "translation": [
+          -2.03125,
+          0,
+          1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-194",
+      "transform": {
+        "translation": [
+          -1.71875,
+          0,
+          1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-195",
+      "transform": {
+        "translation": [
+          -1.40625,
+          0,
+          1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-196",
+      "transform": {
+        "translation": [
+          -1.09375,
+          0,
+          1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-197",
+      "transform": {
+        "translation": [
+          -0.78125,
+          0,
+          1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-198",
+      "transform": {
+        "translation": [
+          -0.46875,
+          0,
+          1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-199",
+      "transform": {
+        "translation": [
+          -0.15625,
+          0,
+          1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-200",
+      "transform": {
+        "translation": [
+          0.15625,
+          0,
+          1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-201",
+      "transform": {
+        "translation": [
+          0.46875,
+          0,
+          1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-202",
+      "transform": {
+        "translation": [
+          0.78125,
+          0,
+          1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-203",
+      "transform": {
+        "translation": [
+          1.09375,
+          0,
+          1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-204",
+      "transform": {
+        "translation": [
+          1.40625,
+          0,
+          1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-205",
+      "transform": {
+        "translation": [
+          1.71875,
+          0,
+          1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-206",
+      "transform": {
+        "translation": [
+          2.03125,
+          0,
+          1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-207",
+      "transform": {
+        "translation": [
+          2.34375,
+          0,
+          1.40625
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-208",
+      "transform": {
+        "translation": [
+          -2.34375,
+          0,
+          1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-209",
+      "transform": {
+        "translation": [
+          -2.03125,
+          0,
+          1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-210",
+      "transform": {
+        "translation": [
+          -1.71875,
+          0,
+          1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-211",
+      "transform": {
+        "translation": [
+          -1.40625,
+          0,
+          1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-212",
+      "transform": {
+        "translation": [
+          -1.09375,
+          0,
+          1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-213",
+      "transform": {
+        "translation": [
+          -0.78125,
+          0,
+          1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-214",
+      "transform": {
+        "translation": [
+          -0.46875,
+          0,
+          1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-215",
+      "transform": {
+        "translation": [
+          -0.15625,
+          0,
+          1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-216",
+      "transform": {
+        "translation": [
+          0.15625,
+          0,
+          1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-217",
+      "transform": {
+        "translation": [
+          0.46875,
+          0,
+          1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-218",
+      "transform": {
+        "translation": [
+          0.78125,
+          0,
+          1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-219",
+      "transform": {
+        "translation": [
+          1.09375,
+          0,
+          1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-220",
+      "transform": {
+        "translation": [
+          1.40625,
+          0,
+          1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-221",
+      "transform": {
+        "translation": [
+          1.71875,
+          0,
+          1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-222",
+      "transform": {
+        "translation": [
+          2.03125,
+          0,
+          1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-223",
+      "transform": {
+        "translation": [
+          2.34375,
+          0,
+          1.71875
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-224",
+      "transform": {
+        "translation": [
+          -2.34375,
+          0,
+          2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-225",
+      "transform": {
+        "translation": [
+          -2.03125,
+          0,
+          2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-226",
+      "transform": {
+        "translation": [
+          -1.71875,
+          0,
+          2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-227",
+      "transform": {
+        "translation": [
+          -1.40625,
+          0,
+          2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-228",
+      "transform": {
+        "translation": [
+          -1.09375,
+          0,
+          2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-229",
+      "transform": {
+        "translation": [
+          -0.78125,
+          0,
+          2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-230",
+      "transform": {
+        "translation": [
+          -0.46875,
+          0,
+          2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-231",
+      "transform": {
+        "translation": [
+          -0.15625,
+          0,
+          2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-232",
+      "transform": {
+        "translation": [
+          0.15625,
+          0,
+          2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-233",
+      "transform": {
+        "translation": [
+          0.46875,
+          0,
+          2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-234",
+      "transform": {
+        "translation": [
+          0.78125,
+          0,
+          2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-235",
+      "transform": {
+        "translation": [
+          1.09375,
+          0,
+          2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-236",
+      "transform": {
+        "translation": [
+          1.40625,
+          0,
+          2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-237",
+      "transform": {
+        "translation": [
+          1.71875,
+          0,
+          2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-238",
+      "transform": {
+        "translation": [
+          2.03125,
+          0,
+          2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-239",
+      "transform": {
+        "translation": [
+          2.34375,
+          0,
+          2.03125
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-240",
+      "transform": {
+        "translation": [
+          -2.34375,
+          0,
+          2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-241",
+      "transform": {
+        "translation": [
+          -2.03125,
+          0,
+          2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-242",
+      "transform": {
+        "translation": [
+          -1.71875,
+          0,
+          2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-243",
+      "transform": {
+        "translation": [
+          -1.40625,
+          0,
+          2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-244",
+      "transform": {
+        "translation": [
+          -1.09375,
+          0,
+          2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-245",
+      "transform": {
+        "translation": [
+          -0.78125,
+          0,
+          2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-246",
+      "transform": {
+        "translation": [
+          -0.46875,
+          0,
+          2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-247",
+      "transform": {
+        "translation": [
+          -0.15625,
+          0,
+          2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-248",
+      "transform": {
+        "translation": [
+          0.15625,
+          0,
+          2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-249",
+      "transform": {
+        "translation": [
+          0.46875,
+          0,
+          2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-250",
+      "transform": {
+        "translation": [
+          0.78125,
+          0,
+          2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-251",
+      "transform": {
+        "translation": [
+          1.09375,
+          0,
+          2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-252",
+      "transform": {
+        "translation": [
+          1.40625,
+          0,
+          2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    },
+    {
+      "id": "object-253",
+      "transform": {
+        "translation": [
+          1.71875,
+          0,
+          2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.9,
+        0.4,
+        0.16,
+        1.0
+      ],
+      "primitive": "sphere",
+      "material": "checker"
+    },
+    {
+      "id": "object-254",
+      "transform": {
+        "translation": [
+          2.03125,
+          0,
+          2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.3,
+        0.75,
+        0.45,
+        1.0
+      ],
+      "primitive": "capsule",
+      "material": "checker"
+    },
+    {
+      "id": "object-255",
+      "transform": {
+        "translation": [
+          2.34375,
+          0,
+          2.34375
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.1875,
+          0.1875,
+          0.1875
+        ]
+      },
+      "color": [
+        0.12,
+        0.58,
+        0.85,
+        1.0
+      ],
+      "material": "checker"
+    }
+  ],
+  "materials": {
+    "checker": {
+      "tint": [
+        1,
+        1,
+        1
+      ],
+      "base_color_texture": "bench-texture",
+      "filter": "linear",
+      "address": "repeat"
+    }
+  }
+}

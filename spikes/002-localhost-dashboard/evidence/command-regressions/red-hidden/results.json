@@ -1,0 +1,17 @@
+{
+  "case": "hidden",
+  "hidden": {
+    "busy": true,
+    "revision": 1,
+    "samples": 1,
+    "receipt": "Revision 0 \u00b7 native frame 4 \u00b7 768\u00d7512 \u00b7 Vulkan",
+    "presentation": null
+  },
+  "error": "hidden RAF must not hold operation admission busy",
+  "cleanup": {
+    "host_stopped": true,
+    "chrome_stopped": true,
+    "capability_removed": true,
+    "profile_removed": true
+  }
+}

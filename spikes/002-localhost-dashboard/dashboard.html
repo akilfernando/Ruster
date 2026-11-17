@@ -6,8 +6,36 @@
 <section><img id="preview" alt="Native-rendered scene preview"><p>Selection: none · Last error: <span id="error">none</span></p><p id="receipt">No frame received.</p><details><summary>Native scene & timing detail</summary><pre id="timing"></pre><pre id="state">Awaiting native host</pre></details></section>
 <script nonce="NONCE">
 let capability='',frames=0,busy=false,lastVisible=0,nativeState=null;window.samples=[];
+window.presentationState={pending:false,revision:null};let presentationRAF=0;
+function presentationLabel(){
+ let label=document.querySelector('#presentation');
+ if(!label){label=document.createElement('p');label.id='presentation';document.querySelector('#receipt').after(label);}
+ label.textContent=presentationState.pending?'Preview stale/unconfirmed · decoded revision '+presentationState.decodedRevision+' · paint opportunity pending (may pause while hidden)':'Preview revision '+presentationState.revision+' · two-RAF paint-opportunity proxy only; physical visibility unverified';
+}
+// One in flight, zero queued: discrete commands are never coalesced or rebased.
+window.commandOutcomes=[];
+let nextCommand=0;const outcomeCounts={accepted:0,completed:0,rejected:0,failed:0};
+function reportOutcome(entry,status,reason=''){
+ entry.status=status;entry.reason=reason;entry[status+'_at_ms']=performance.now();outcomeCounts[status]++;
+ if(status==='accepted'){
+  window.commandOutcomes.push(entry);
+  if(window.commandOutcomes.length>64)window.commandOutcomes.shift();
+ }else if(!window.commandOutcomes.includes(entry)){
+  window.commandOutcomes.push(entry);
+  if(window.commandOutcomes.length>64)window.commandOutcomes.shift();
+ }
+ let output=document.querySelector('#outcomes');
+ if(!output){output=document.createElement('p');output.id='outcomes';output.setAttribute('role','status');document.querySelector('#receipt').after(output);}
+ output.textContent='Commands: '+JSON.stringify(outcomeCounts)+' · latest #'+entry.id+' '+entry.operation+' '+status+(reason?' ('+reason+')':'')+' · capacity 1 active / 0 queued · recent 64 outcomes retained';
+ let history=document.querySelector('#outcome-history');
+ if(!history){const detail=document.createElement('details');const summary=document.createElement('summary');summary.textContent='Recent command outcomes';history=document.createElement('pre');history.id='outcome-history';detail.append(summary,history);output.after(detail);}
+ history.textContent=window.commandOutcomes.map(row=>'#'+row.id+' '+row.operation+' '+row.status+(row.reason?' · '+row.reason:'')).join('\n');
+ return entry;
+}
 async function render(operation=null){
- if(busy)return;busy=true;
+ const outcome={id:++nextCommand,operation:operation||'refresh'};
+ if(busy)return reportOutcome(outcome,'rejected','busy');
+ reportOutcome(outcome,'accepted');busy=true;
  const started=performance.now(),status=document.querySelector('#status');
  document.querySelector('#refresh').disabled=true;document.querySelector('#connect').disabled=true;
  status.textContent='Rendering native scene…';
@@ -31,19 +59,32 @@ async function render(operation=null){
   nativeState=value;
   const image=document.querySelector('#preview');image.src='data:image/png;base64,'+value.png;
   await image.decode();const decoded=performance.now();
-  await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
-  lastVisible=performance.now();frames++;
-  window.samples.push({...value.metrics,request_start_ms:started,http_body_received_ms:received-started,image_decode_ms:decoded-received,request_to_raf_ms:lastVisible-started});
+  frames++;
+  // Completion/receipt/sample do not wait for the browser to paint.
+  const sample={...value.metrics,request_start_ms:started,http_body_received_ms:received-started,image_decode_ms:decoded-received,request_to_raf_ms:null,presentation:'pending'};
+  window.samples.push(sample);
+  cancelAnimationFrame(presentationRAF);
+  const previous=window.samples.at(-2);
+  if(previous?.presentation==='pending')previous.presentation='superseded';
+  presentationState.pending=true;presentationState.decodedRevision=value.metrics.revision;presentationLabel();
+  presentationRAF=requestAnimationFrame(()=>{
+   presentationRAF=requestAnimationFrame(()=>{
+    lastVisible=performance.now();sample.request_to_raf_ms=lastVisible-started;sample.presentation='paint-opportunity';
+    presentationState.pending=false;presentationState.revision=value.metrics.revision;presentationLabel();
+    document.querySelector('#timing').textContent=JSON.stringify(sample,null,2);
+   });
+  });
   document.querySelector('#state').textContent=JSON.stringify(value.scene,null,2);
   document.querySelector('#receipt').textContent='Revision '+value.metrics.revision+' · native frame '+value.metrics.frames+' · '+value.metrics.width+'×'+value.metrics.height+' · Vulkan';
   document.querySelector('#timing').textContent=JSON.stringify(window.samples.at(-1),null,2);
   document.querySelector('#access').open=false;document.querySelector('#error').textContent='none';
   status.textContent='Native frame received · request '+frames;
   document.querySelector('#refresh').disabled=false;document.querySelector('#edit').disabled=false;document.querySelector('#undo').disabled=value.authority.result.undo_len===0;document.querySelector('#save').disabled=false;document.querySelector('#reopen').disabled=!value.authority.result.persistence.associated_path;
- }catch(error){status.textContent=error.message;document.querySelector('#error').textContent=error.message;}
+  return reportOutcome(outcome,'completed');
+ }catch(error){status.textContent=error.message;document.querySelector('#error').textContent=error.message;return reportOutcome(outcome,'failed',error.message);}
  finally{busy=false;document.querySelector('#connect').disabled=false;}
 }
-setInterval(()=>{if(lastVisible&&!busy)document.querySelector('#status').textContent='Native frame '+frames+' · age '+((performance.now()-lastVisible)/1000).toFixed(1)+'s · on-demand, not live motion';},1000);
+setInterval(()=>{if(lastVisible&&!busy&&!presentationState.pending&&document.querySelector('#error').textContent==='none')document.querySelector('#status').textContent='Native frame '+frames+' · paint-opportunity age '+((performance.now()-lastVisible)/1000).toFixed(1)+'s · on-demand, not live motion';},1000);
 document.querySelector('#connect').onclick=()=>{capability=document.querySelector('#token').value;document.querySelector('#token').value='';render();};
 document.querySelector('#token').onkeydown=e=>{if(e.key==='Enter')document.querySelector('#connect').click();};document.querySelector('#refresh').onclick=()=>render();
 document.querySelector('#save').onclick=()=>render('scene_save');document.querySelector('#reopen').onclick=()=>render('reopen_fixture');

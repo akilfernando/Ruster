@@ -26,10 +26,12 @@ def main():
     parser.add_argument('--grant-disposable-edit-undo', action='store_true', required=True)
     parser.add_argument('--grant-disposable-fixed-save', action='store_true')
     parser.add_argument('--save-qualification', action='store_true')
+    parser.add_argument('--benchmark-output', type=Path)
     args = parser.parse_args()
     gate = open('/home/akilf/.hermes/qa/rusterize/state/gate.lock', 'a')
     fcntl.flock(gate, fcntl.LOCK_EX | fcntl.LOCK_NB)  # Refuse overlapping native QA.
     run = ROOT / 'evidence' / ('scoped-save' if args.grant_disposable_fixed_save else 'scoped-save-denied' if args.save_qualification else 'guarded-edit')
+    if args.benchmark_output: run = args.benchmark_output.resolve()
     run.mkdir(parents=True, exist_ok=True)
     destination = run / 'disposable-destination'
     if args.grant_disposable_fixed_save:

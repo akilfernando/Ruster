@@ -1,0 +1,15 @@
+{
+  "binary_sha256": "7d45f4adf2a3c119aed449f345855652b6f3396639826bfd8d4f5cf27ceb8426",
+  "started": "2026-11-14T14:53:46+0530",
+  "resolution": [
+    768,
+    512
+  ],
+  "msaa": 4,
+  "cadence_s": 0.25,
+  "fixtures": {
+    "small.json": "89d8fd688852c18feee4068119d356c52980d693bdfd01df671de350618ab73f",
+    "moderate.json": "2224ee06fecdbd2908151ce589ed7b006112923623329a12d98214d6fbaabc6b",
+    "moderate-textured.json": "bebc06e5e88c46acc308619c3d12b1334ecdbee226ec9ef7eb512c5f3194129b"
+  }
+}

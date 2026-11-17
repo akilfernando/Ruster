@@ -9,7 +9,7 @@
         "paint_cleanup_pending": false,
         "phase": "idle"
       },
-      "asset_revision": "0",
+      "asset_revision": null,
       "capabilities": [
         "lighting_inspect",
         "scene_light_create",
@@ -92,7 +92,7 @@
         "shader_refresh"
       ],
       "dirty": true,
-      "document_label": "fixture",
+      "document_label": "procedural-demo",
       "drafts_pending": false,
       "history_evictions": 0,
       "light_count": 0,
@@ -181,8 +181,8 @@
         }
       ],
       "persistence": {
-        "associated_path": "/home/akilf/Projects/rusterize-localhost-spike-20261114/spikes/002-localhost-dashboard/evidence/scoped-save/disposable-destination/fixture.json",
-        "can_save": true,
+        "associated_path": null,
+        "can_save": false,
         "can_save_as": true,
         "dirty": true,
         "drafts_pending": false,
@@ -194,18 +194,21 @@
         "persistence_token": "scene:1:save:0",
         "receipt_scope": "Last successful save in this scene incarnation; not a claim that the file remains unchanged on disk. After a timeout inspect this receipt before deciding the next action; do not blindly retry.",
         "recovered_copy": false,
-        "revision": "2",
+        "revision": "4",
         "save_as_block": null,
-        "save_block": null,
-        "session_token": "localhost-fixture-1060859:scene:1"
+        "save_block": {
+          "code": "fresh_filename_required",
+          "message": "This scene has no saved association; provide a fresh filename"
+        },
+        "session_token": "localhost-fixture-1161045:scene:1"
       },
-      "preview_fingerprint": "d4b2615d9abd82eb",
+      "preview_fingerprint": "c8f582038015666b",
       "preview_stale": true,
       "preview_tick": "0",
       "recovery_pending": false,
-      "revision": "2",
+      "revision": "4",
       "scene_id": "procedural-demo",
-      "session_token": "localhost-fixture-1060859:scene:1",
+      "session_token": "localhost-fixture-1161045:scene:1",
       "shader_revision": "0",
       "target_count": 3,
       "undo_len": 0,
@@ -320,23 +323,29 @@
         "mode": "legacy"
       },
       "lighting_changed": false,
-      "revision": "2",
-      "session_token": "localhost-fixture-1060859:scene:1"
+      "revision": "4",
+      "session_token": "localhost-fixture-1161045:scene:1"
     }
   },
-  "command_to_commit_ms": 0.051771000000000005,
+  "command_to_commit_ms": 0.130223,
   "draw_calls": 1,
-  "frames": 4,
+  "frames": 9,
+  "gpu_scene_last_us": null,
   "height": 512,
-  "native_total_ms": 4.23223,
+  "mesh_bytes": 61560,
+  "native_total_ms": 13.726239,
   "objects": 3,
   "passes": 1,
-  "png_encode_ms": 3.254986,
+  "png_encode_ms": 7.6727430000000005,
   "read_only": false,
-  "render_cpu_ms": 0.183509,
+  "render_cpu_ms": 0.598909,
   "render_only": false,
-  "revision": 2,
-  "submit_to_mapped_ms": 0.721649,
+  "revision": 4,
+  "sample_count": 4,
+  "submit_to_mapped_ms": 5.214413,
+  "target_bytes": 13519872,
+  "texture_bytes": 9,
+  "texture_uploads": 0,
   "width": 768,
-  "host_roundtrip_ms": 4.512220009928569
+  "host_roundtrip_ms": 14.522587996907532
 }

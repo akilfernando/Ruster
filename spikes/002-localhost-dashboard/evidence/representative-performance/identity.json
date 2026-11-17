@@ -1,0 +1,21 @@
+{
+  "binary_sha256": "e1d2012e43574f40fdd6876b81bb0b8faa5d21279c66a71ba64eefcdc739501b",
+  "started": "2026-11-14T14:57:25+0530",
+  "resolution": [
+    768,
+    512
+  ],
+  "msaa": 4,
+  "cadence_s": 0.25,
+  "fixtures": {
+    "small.json": "89d8fd688852c18feee4068119d356c52980d693bdfd01df671de350618ab73f",
+    "moderate.json": "2224ee06fecdbd2908151ce589ed7b006112923623329a12d98214d6fbaabc6b",
+    "moderate-textured.json": "d3e2214f05942b60df28e6caae829dd826646926df4699ef420d11408cc8663c"
+  },
+  "measured_source_sha256": {
+    "src/main.rs": "d8cc3f28cf605ccc397e1dd737132828a61e1940d692118bb2e1f685158db1cf",
+    "src/authority.rs": "4ce4ac7b43fe22e798e751ec177161f4537943f6f19b8a5836fe705fcc92a8b2",
+    "server.py": "e78f04970eae6ff79838144c8abb5bd951583c4fcd7cbf93cb9aa000733b6c0a",
+    "dashboard.html": "7f761588351c13e53b9a8018e0b336f559d08e170c4e7029f8bcf362d8d780e1"
+  }
+}

@@ -1,3 +1,26 @@
+# Explicit command admission / hidden-tab completion — 2026-11-14
+
+**Implemented bounded refusal, not a command queue or latest-intent coalescer.** The dashboard permits one active operation and zero queued operations. Every invocation gets a monotonic ID and either accepted → completed/failed or immediate rejected/busy, with timestamps, cumulative visible counters and a collapsible 64-entry outcome history. Rejected edits, Undo, Save and reopen are never implicitly retried, rebased or combined. This deliberately chooses honest visible refusal over inventing unsafe queue/revision semantics.
+
+Operation completion now publishes the native receipt, decoded sample and controls independently of RAF. A separate preview label remains stale/unconfirmed until the latest decoded frame gets two RAF callbacks. Superseded pending presentation callbacks are cancelled; their samples retain null RAF timing and `superseded`, not invented zero latency. RAF remains a paint-opportunity proxy, never physical visibility. Errors remain visible instead of being overwritten by the age timer. Existing server origin/capability checks, guarded tokens/revisions, persistence authority and native code are unchanged by this fix.
+
+Actual owned headless Chromium + real native Vulkan regressions reproduce both failures before repair and pass afterward: ten edit attempts → one completed + nine explicit busy refusals; 80 mixed edit/Undo/Save/reopen/refresh attempts → one completed + 79 refusals and a 64-entry retained ledger; stale revision and no-grant Save still refuse, followed by explicit refresh recovery. While genuinely hidden, edit completes with revision 1, `busy=false`, fresh native receipt and pending presentation; another hidden Undo completes at revision 2. Resume observes only revision 2 presentation. Evidence: `evidence/command-regressions/` (RED records retained; final runs `verified-burst-after-gate` / `verified-hidden`; the first `verified-burst` preparation was refused by an occupied QA lock, preserved with cleanup and not counted as a pass). Screenshot inspection confirms revision, qualification and outcome status are legible. All owned runners stopped; capability and temporary browser profile removed.
+
+```sh
+python3 test_browser_commands.py burst evidence/command-regressions/new-burst
+python3 test_browser_commands.py hidden evidence/command-regressions/new-hidden
+```
+
+Output directories must be fresh. The timing runner now explicitly waits for presentation in the **measurement harness only**; production operations do not. Historical latency tables below remain pre-fix measurements, not post-fix performance qualification. No new speedup, normally visible native parity, actual ChatGPT-panel acceptance or production consent claim. Full workspace gate was not rerun for this HTML/harness-only slice; focused browser journeys, Python boundary and native validation-log checks cover its changed boundary.
+
+---
+
+# Historical representative performance checkpoint — 2026-11-14
+
+**PARTIAL:** [Matched measurements, UX risks and exact next panel validation](PERFORMANCE.md). Three real native-validated benchmark fixtures; N=20 per condition; foreground-headless p95 preview 48.10–59.30 ms and edit/Undo p95 44.20–69.90 ms. This is an offscreen native pipeline baseline, **not ordinary native-frontend or ChatGPT-panel parity**. Ten immediate edit intents commit only one: bounded single-flight suppression **fails latest-intent/coalescing semantics**. A hidden owned tab commits natively but stays pending until RAF resumes. Separate 60 s native-only/dashboard idle and selected browser process observations, final build/Clippy/validation, raw records, plot and cleanup are retained. No new queue architecture, production consent or client acceptance. All owned processes stopped; no demo server remains running.
+
+---
+
 # Scoped disposable Save / fresh-process reopen — 2026-11-14
 
 ## Verdict: PARTIAL — real persistence feasibility verified; production consent unqualified

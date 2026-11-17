@@ -1,0 +1,38 @@
+{
+  "small": {
+    "native": true,
+    "http": true,
+    "browser": true,
+    "renderer-1071664": true,
+    "renderer-1071671": true,
+    "renderer-1071701": true,
+    "renderer-1071721": true,
+    "gpu-process": true
+  },
+  "moderate": {
+    "native": true,
+    "http": true,
+    "browser": true,
+    "renderer-1071910": true,
+    "renderer-1071933": true,
+    "renderer-1071955": true,
+    "gpu-process": true
+  },
+  "moderate-textured": {
+    "native": true,
+    "http": true,
+    "browser": true,
+    "renderer-1072210": true,
+    "renderer-1072237": true,
+    "renderer-1072253": true,
+    "renderer-1072266": true,
+    "gpu-process": true
+  },
+  "gate_reacquired": true,
+  "environment": {
+    "kernel": "7.3.3-1-cachyos",
+    "python": "3.14.9",
+    "nvidia_smi": "NVIDIA GeForce RTX 4060 Laptop GPU, 620.70.06, 1055 MiB, 0 %",
+    "note": "shared-host observation after cleanup, not measured per-process GPU memory"
+  }
+}

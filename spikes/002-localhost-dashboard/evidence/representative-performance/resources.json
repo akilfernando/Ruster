@@ -1,0 +1,208 @@
+{
+  "small": {
+    "direct_active": {
+      "seconds": 10.506428281019907,
+      "processes": {
+        "native": {
+          "cpu_percent_one_core": 4.663811400922954,
+          "rss_after_mib": 298.6953125,
+          "rss_delta_mib": 298.00390625
+        }
+      }
+    },
+    "browser_active": {
+      "seconds": 5.002514146006433,
+      "processes": {
+        "native": {
+          "cpu_percent_one_core": 4.397788663438936,
+          "rss_after_mib": 294.703125,
+          "rss_delta_mib": 0.21875
+        },
+        "http": {
+          "cpu_percent_one_core": 0.5996984541053093,
+          "rss_after_mib": 24.7265625,
+          "rss_delta_mib": 0.00390625
+        },
+        "browser": {
+          "cpu_percent_one_core": 3.7980902093336257,
+          "rss_after_mib": 204.62109375,
+          "rss_delta_mib": 3.5234375
+        },
+        "renderer-1071664": {
+          "cpu_percent_one_core": 0.0,
+          "rss_after_mib": 75.30078125,
+          "rss_delta_mib": 0.44921875
+        },
+        "renderer-1071671": {
+          "cpu_percent_one_core": 7.196381449263713,
+          "rss_after_mib": 141.40234375,
+          "rss_delta_mib": 5.51953125
+        },
+        "renderer-1071701": {
+          "cpu_percent_one_core": 0.19989948470176983,
+          "rss_after_mib": 74.8125,
+          "rss_delta_mib": 0.44921875
+        },
+        "renderer-1071721": {
+          "cpu_percent_one_core": 0.0,
+          "rss_after_mib": 93.18359375,
+          "rss_delta_mib": 0.2578125
+        },
+        "gpu-process": {
+          "cpu_percent_one_core": 1.9989948470176981,
+          "rss_after_mib": 125.19140625,
+          "rss_delta_mib": 0.1796875
+        }
+      }
+    }
+  },
+  "moderate": {
+    "direct_active": {
+      "seconds": 10.50627540401183,
+      "processes": {
+        "native": {
+          "cpu_percent_one_core": 6.757865872513545,
+          "rss_after_mib": 299.01953125,
+          "rss_delta_mib": 298.99609375
+        }
+      }
+    },
+    "browser_active": {
+      "seconds": 5.003100913017988,
+      "processes": {
+        "native": {
+          "cpu_percent_one_core": 7.995041614275788,
+          "rss_after_mib": 294.73046875,
+          "rss_delta_mib": 0.1328125
+        },
+        "http": {
+          "cpu_percent_one_core": 0.7995041614275786,
+          "rss_after_mib": 24.91015625,
+          "rss_delta_mib": 0.13671875
+        },
+        "browser": {
+          "cpu_percent_one_core": 4.996901008922367,
+          "rss_after_mib": 205.6328125,
+          "rss_delta_mib": 14.08203125
+        },
+        "renderer-1071910": {
+          "cpu_percent_one_core": 0.19987604035689469,
+          "rss_after_mib": 75.1015625,
+          "rss_delta_mib": 0.26171875
+        },
+        "renderer-1071933": {
+          "cpu_percent_one_core": 8.794545775703366,
+          "rss_after_mib": 148.8046875,
+          "rss_delta_mib": 14.26171875
+        },
+        "renderer-1071955": {
+          "cpu_percent_one_core": 0.0,
+          "rss_after_mib": 93.16015625,
+          "rss_delta_mib": 0.19140625
+        },
+        "gpu-process": {
+          "cpu_percent_one_core": 1.9987604035689468,
+          "rss_after_mib": 123.8203125,
+          "rss_delta_mib": 0.4609375
+        }
+      }
+    }
+  },
+  "moderate-textured": {
+    "direct_active": {
+      "seconds": 10.50591866398463,
+      "processes": {
+        "native": {
+          "cpu_percent_one_core": 7.9003086407410095,
+          "rss_after_mib": 299.72265625,
+          "rss_delta_mib": 299.62109375
+        }
+      }
+    },
+    "browser_active": {
+      "seconds": 5.002644506981596,
+      "processes": {
+        "native": {
+          "cpu_percent_one_core": 9.594925230647933,
+          "rss_after_mib": 295.828125,
+          "rss_delta_mib": 0.0859375
+        },
+        "http": {
+          "cpu_percent_one_core": 1.1993656538309914,
+          "rss_after_mib": 25.09765625,
+          "rss_delta_mib": -0.09765625
+        },
+        "browser": {
+          "cpu_percent_one_core": 3.1983084102159776,
+          "rss_after_mib": 208.26953125,
+          "rss_delta_mib": 2.83203125
+        },
+        "renderer-1072210": {
+          "cpu_percent_one_core": 0.0,
+          "rss_after_mib": 75.05859375,
+          "rss_delta_mib": 0.37890625
+        },
+        "renderer-1072237": {
+          "cpu_percent_one_core": 7.995771025539944,
+          "rss_after_mib": 166.84375,
+          "rss_delta_mib": 30.0546875
+        },
+        "renderer-1072253": {
+          "cpu_percent_one_core": 0.0,
+          "rss_after_mib": 75.34375,
+          "rss_delta_mib": 0.375
+        },
+        "renderer-1072266": {
+          "cpu_percent_one_core": 0.19989427563849854,
+          "rss_after_mib": 93.1171875,
+          "rss_delta_mib": 0.31640625
+        },
+        "gpu-process": {
+          "cpu_percent_one_core": 1.998942756384986,
+          "rss_after_mib": 125.3828125,
+          "rss_delta_mib": 0.0390625
+        }
+      }
+    },
+    "browser_idle": {
+      "seconds": 60.00018463601009,
+      "processes": {
+        "native": {
+          "cpu_percent_one_core": 0.016666615379043927,
+          "rss_after_mib": 299.9140625,
+          "rss_delta_mib": 0.0
+        },
+        "http": {
+          "cpu_percent_one_core": 0.016666615379043927,
+          "rss_after_mib": 25.11328125,
+          "rss_delta_mib": 0.0
+        },
+        "browser": {
+          "cpu_percent_one_core": 0.6333313844036684,
+          "rss_after_mib": 234.9765625,
+          "rss_delta_mib": 27.1484375
+        },
+        "renderer-1072210": {
+          "cpu_percent_one_core": 0.0,
+          "rss_after_mib": 75.07421875,
+          "rss_delta_mib": 0.26171875
+        },
+        "renderer-1072237": {
+          "cpu_percent_one_core": 0.5499983075084488,
+          "rss_after_mib": 153.98046875,
+          "rss_delta_mib": -18.75390625
+        },
+        "renderer-1072253": {
+          "cpu_percent_one_core": 0.0,
+          "rss_after_mib": 75.33984375,
+          "rss_delta_mib": 0.2578125
+        },
+        "gpu-process": {
+          "cpu_percent_one_core": 0.1666661537904391,
+          "rss_after_mib": 122.85546875,
+          "rss_delta_mib": -1.3984375
+        }
+      }
+    }
+  }
+}

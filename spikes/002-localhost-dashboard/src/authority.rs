@@ -10,7 +10,12 @@ impl Owner {
         let session = if reopen {
             Session::open(destination.join("fixture.json")).unwrap()
         } else {
-            Session::new(Scene::demo()).unwrap()
+            let fixture = std::env::var("SPIKE_BENCH_SCENE").ok();
+            let scene = fixture.map_or_else(Scene::demo, |path| {
+                serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+            });
+            scene.validate().unwrap();
+            Session::new(scene).unwrap()
         };
         let mut editor = SceneEditor::with_workspace(session, Workspace::detached());
         // Existing document-open worker must settle before accepting a command.

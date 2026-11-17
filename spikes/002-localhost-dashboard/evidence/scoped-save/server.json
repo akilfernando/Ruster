@@ -1,7 +1,7 @@
 {
-  "url": "http://127.0.0.1:38735/",
-  "pid": 1060844,
-  "native_pid": 1060845,
+  "url": "http://127.0.0.1:43191/",
+  "pid": 1161044,
+  "native_pid": 1161045,
   "mode": "explicit startup edit/Undo disposable fixture",
   "initial": {
     "adapter": "NVIDIA GeForce RTX 4060 Laptop GPU",
@@ -205,7 +205,7 @@
             "code": "fresh_filename_required",
             "message": "This scene has no saved association; provide a fresh filename"
           },
-          "session_token": "localhost-fixture-1060845:scene:1"
+          "session_token": "localhost-fixture-1161045:scene:1"
         },
         "preview_fingerprint": "c8f582038015666b",
         "preview_stale": false,
@@ -213,7 +213,7 @@
         "recovery_pending": false,
         "revision": "0",
         "scene_id": "procedural-demo",
-        "session_token": "localhost-fixture-1060845:scene:1",
+        "session_token": "localhost-fixture-1161045:scene:1",
         "shader_revision": "0",
         "target_count": 3,
         "undo_len": 0,
@@ -222,20 +222,26 @@
     },
     "backend": "Vulkan",
     "command": null,
-    "command_to_commit_ms": 4.2e-05,
+    "command_to_commit_ms": 4.4e-05,
     "draw_calls": 1,
     "frames": 3,
+    "gpu_scene_last_us": null,
     "height": 512,
-    "native_total_ms": 14.203841,
+    "mesh_bytes": 61560,
+    "native_total_ms": 14.533563,
     "objects": 3,
     "passes": 3,
-    "png_encode_ms": 9.608168000000001,
+    "png_encode_ms": 9.598456,
     "read_only": false,
-    "render_cpu_ms": 1.808929,
+    "render_cpu_ms": 1.810166,
     "render_only": false,
     "revision": 0,
-    "submit_to_mapped_ms": 2.638057,
+    "sample_count": 4,
+    "submit_to_mapped_ms": 2.983408,
+    "target_bytes": 13519872,
+    "texture_bytes": 9,
+    "texture_uploads": 0,
     "width": 768,
-    "host_roundtrip_ms": 141.7820689966902
+    "host_roundtrip_ms": 133.6283799901139
   }
 }

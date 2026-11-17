@@ -1,0 +1,7 @@
+# Matched pipeline timing (ms, median / nearest-rank p95)
+
+| Workload | Native render-only | Native PNG | Browser native | Browser body received | Browser decode + 2 RAF | Edit commit | Edit request → RAF |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| small | 3.78 / 5.52 | 12.05 / 13.17 | 10.74 / 12.42 | 16.85 / 18.70 | 47.10 / 48.10 | 0.22 / 0.35 | 42.50 / 44.20 |
+| moderate | 4.00 / 4.71 | 21.20 / 23.62 | 20.64 / 22.32 | 27.70 / 31.20 | 57.40 / 59.30 | 0.70 / 1.00 | 53.25 / 54.60 |
+| moderate-textured | 4.28 / 6.59 | 24.44 / 27.29 | 22.25 / 28.30 | 31.70 / 38.30 | 56.85 / 58.50 | 1.32 / 2.50 | 55.05 / 69.90 |

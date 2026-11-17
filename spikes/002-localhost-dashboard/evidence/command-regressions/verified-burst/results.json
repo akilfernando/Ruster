@@ -1,0 +1,10 @@
+{
+  "case": "burst",
+  "error": "condition timed out",
+  "cleanup": {
+    "host_stopped": true,
+    "chrome_stopped": true,
+    "capability_removed": true,
+    "profile_removed": true
+  }
+}
