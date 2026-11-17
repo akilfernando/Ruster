@@ -44,8 +44,6 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
   Rot connection…, and an editor serves one adapter at a time (A-02, A-03).
 - An editor serves one AI adapter at a time, and the adapter does not
   reconnect after a transport error (A-03).
-- The MCP demo scripts and parts of `crates/rot-mcp/README.md` describe
-  variables the code no longer reads (A-06).
 - Play checks refuse scenes that use groups, so they cannot cover an animated
   model.
 - Outside the repository, still using old names: two MCP entries in `~/.codex/config.toml`,
@@ -89,14 +87,6 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
   the editor on a folder. Checked with a hidden-workspace editor and a
   terminal `rot-mcp` (initialize, tools/list, approve, `scene_inspect`) and a
   headless two-editors-plus-dead-record test. Approval is unchanged.
-- 2026-11-17 · Working framework: [PLAYBOOK](PLAYBOOK.md),
-  [parity plan](PARITY-PLAN.md), [BACKLOG](BACKLOG.md),
-  [UX standards](UX-STANDARDS.md), and `scripts/ui_drive.py` for driving and
-  screenshotting the editor. Written by the agent at the user's request; the
-  architecture decisions and vocabulary in them are agent-selected.
-- 2026-11-17 · Imported GLB transform animation: import, Place, Play, Refresh
-  and Build, checked with a real Blender export, a scripted editor run and a
-  relocated build. [Details](evidence/IMPORTED-TRANSFORM-ANIMATION-2026-11-17.md).
 
 ## Not verified
 
