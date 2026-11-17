@@ -11,6 +11,8 @@ use eframe::egui;
 use serde_json::{json, Value};
 
 const LIMIT: u64 = 65536;
+/// Requests that may wait for the editor at once.
+const QUEUE: usize = 32;
 
 struct Pending {
     request: Value,
@@ -573,6 +575,8 @@ impl From<tempfile::TempDir> for EndpointDir {
 pub struct Bridge {
     browser: Option<browser::BrowserPairing>,
     receiver: mpsc::Receiver<Pending>,
+    /// A request taken off the queue to look at, not yet dispatched.
+    next: Option<Pending>,
     directory: EndpointDir,
     nonce: String,
     authority: Authority,
@@ -681,7 +685,8 @@ impl Bridge {
         file.write_all(&serde_json::to_vec(&locator)?)?;
         use std::os::unix::fs::MetadataExt;
         let file_identity = (file.metadata()?.dev(), file.metadata()?.ino());
-        let (sender, receiver) = mpsc::sync_channel(1);
+        // One adapter sends one request at a time; the room is for bursts.
+        let (sender, receiver) = mpsc::sync_channel(QUEUE);
         let (wake, wake_receiver) = mpsc::sync_channel(1);
         let authority = Authority::new();
         authority.0.lock().unwrap().listener_owned = true;
@@ -835,6 +840,7 @@ impl Bridge {
         Ok(Self {
             browser: None,
             receiver,
+            next: None,
             directory,
             nonce: locator.incarnation.clone(),
             authority,
@@ -935,7 +941,8 @@ impl Bridge {
         self.stop.store(true, Ordering::Release);
         let _ = self.wake.try_send(());
         // Bounded queue cancellation needs no further editor dispatch pass.
-        let _ = self.receiver.try_recv();
+        self.next = None;
+        while self.receiver.try_recv().is_ok() {}
     }
     /// Never join a running thread on the UI. Revoked may still be draining
     /// authorized publication; retired requires both owned obligations gone.
@@ -985,12 +992,29 @@ impl Bridge {
 
     /// Admit at most one request this frame. A deferred handler retains its lease
     /// during preparation and consumes it at final publication authorization.
+    /// The operation of the next waiting request, if any.
+    pub fn waiting(&mut self) -> Option<String> {
+        if self.next.is_none() {
+            self.next = self.receiver.try_recv().ok();
+        }
+        self.next
+            .as_ref()
+            .map(|p| p.request["operation"].as_str().unwrap_or("").to_owned())
+    }
+    /// Like `waiting`, but waits until `deadline` for a request to arrive.
+    pub fn wait_for_request(&mut self, deadline: Instant) -> Option<String> {
+        if self.next.is_none() {
+            let left = deadline.saturating_duration_since(Instant::now());
+            self.next = self.receiver.recv_timeout(left).ok();
+        }
+        self.waiting()
+    }
     pub fn dispatch_request(
         &mut self,
         handle: impl FnOnce(&str, &str, Value, RequestLease),
     ) -> bool {
         // One command per frame; never drain unbounded external work into UI.
-        if let Ok(pending) = self.receiver.try_recv() {
+        if let Some(pending) = self.next.take().or_else(|| self.receiver.try_recv().ok()) {
             if !pending.lease.shared.begin_prepare() {
                 return false;
             }
@@ -1126,6 +1150,7 @@ pub(crate) fn queued_test_bridge(
         Bridge {
             browser: None,
             receiver,
+            next: None,
             directory: tempfile::tempdir().unwrap().into(),
             nonce: "test".into(),
             authority: Authority::new(),
@@ -1239,6 +1264,7 @@ pub(crate) mod tests {
         let bridge = Bridge {
             browser: None,
             receiver: mpsc::sync_channel(1).1,
+            next: None,
             directory: tempfile::tempdir().unwrap().into(),
             nonce: "drop-test".into(),
             authority: authority.clone(),
@@ -1816,6 +1842,7 @@ pub(crate) mod tests {
         let mut bridge = Bridge {
             browser: None,
             receiver,
+            next: None,
             directory: directory.into(),
             nonce: "test".into(),
             authority: Authority::new(),

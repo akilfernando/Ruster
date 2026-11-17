@@ -57,6 +57,9 @@ struct Server {
     lifecycle: Lifecycle,
     /// clientInfo.name from initialize; names the AI app to the editor.
     client_name: Option<String>,
+    /// Last known scene session token and revision, for edits that leave
+    /// them out.
+    scene_guards: Option<[Value; 2]>,
 }
 
 fn rpc_error(id: Value, code: i64, message: &str) -> Value {
@@ -697,44 +700,167 @@ fn listed() -> Value {
     listed
 }
 
-/// Fill in left-out scene guards from the open scene.
-fn fill_scene_guards(
-    name: &str,
-    arguments: &mut Value,
-    bridge: &mut impl FnMut(&str, &Value) -> Value,
-) {
+/// Tools whose full schema requires the scene guards.
+fn guarded(name: &str) -> bool {
     static GUARDED: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-    let guarded = GUARDED.get_or_init(|| {
-        tools()["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|t| {
-                t["inputSchema"]["required"]
-                    .as_array()
-                    .is_some_and(|r| r.iter().any(|f| f == "expected_revision"))
-            })
-            .map(|t| t["name"].as_str().unwrap().to_owned())
-            .collect()
-    });
-    let Some(map) = arguments.as_object() else {
-        return;
-    };
-    if !guarded.iter().any(|g| g == name)
-        || SCENE_GUARDS
-            .iter()
-            .all(|(guard, _)| map.contains_key(*guard))
-    {
-        return;
-    }
-    let current = bridge("viewport_inspect", &json!({}));
-    if current["ok"] != true {
-        return;
-    }
-    for (guard, field) in SCENE_GUARDS {
-        if arguments.get(guard).is_none() {
-            arguments[guard] = current["result"][field].clone();
+    GUARDED
+        .get_or_init(|| {
+            tools()["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|t| {
+                    t["inputSchema"]["required"]
+                        .as_array()
+                        .is_some_and(|r| r.iter().any(|f| f == "expected_revision"))
+                })
+                .map(|t| t["name"].as_str().unwrap().to_owned())
+                .collect()
+        })
+        .iter()
+        .any(|g| g == name)
+}
+
+/// Accept JSON integers wherever a tool takes a decimal string, by turning
+/// them into that string before validation.
+fn decimals_as_strings(schema: &Value, value: &mut Value) {
+    if schema["pattern"] == "^(0|[1-9][0-9]*)$" {
+        if let Some(number) = value.as_u64() {
+            *value = json!(number.to_string());
         }
+        return;
+    }
+    match value {
+        Value::Object(map) => {
+            for (key, item) in map.iter_mut() {
+                decimals_as_strings(&schema["properties"][key], item);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                decimals_as_strings(&schema["items"], item);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn full_schema(name: &str) -> Value {
+    static SCHEMAS: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    SCHEMAS
+        .get_or_init(|| {
+            Value::Object(
+                tools()["tools"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|t| {
+                        (
+                            t["name"].as_str().unwrap().to_owned(),
+                            t["inputSchema"].clone(),
+                        )
+                    })
+                    .collect(),
+            )
+        })
+        .get(name)
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+impl Server {
+    /// Fill in left-out scene guards from the last known scene state, reading
+    /// it from the editor only when nothing is known. True when filled.
+    fn fill_scene_guards(
+        &mut self,
+        name: &str,
+        arguments: &mut Value,
+        bridge: &mut impl FnMut(&str, &Value) -> Value,
+    ) -> bool {
+        let Some(map) = arguments.as_object() else {
+            return false;
+        };
+        if !guarded(name)
+            || SCENE_GUARDS
+                .iter()
+                .all(|(guard, _)| map.contains_key(*guard))
+        {
+            return false;
+        }
+        if self.scene_guards.is_none() {
+            let current = bridge("viewport_inspect", &json!({}));
+            if current["ok"] != true {
+                return false;
+            }
+            self.observe_guards(&current["result"]);
+        }
+        let Some(known) = &self.scene_guards else {
+            return false;
+        };
+        for (index, (guard, _)) in SCENE_GUARDS.iter().enumerate() {
+            if arguments.get(*guard).is_none() {
+                arguments[*guard] = known[index].clone();
+            }
+        }
+        true
+    }
+
+    /// Remember the session token and revision any reply reports.
+    fn observe_guards(&mut self, value: &Value) {
+        let token = &value["session_token"];
+        let revision = &value["revision"];
+        match (
+            &mut self.scene_guards,
+            token.is_string(),
+            revision.is_string(),
+        ) {
+            (_, true, true) => self.scene_guards = Some([token.clone(), revision.clone()]),
+            (Some(known), false, true) => known[1] = revision.clone(),
+            _ => {}
+        }
+    }
+
+    /// Run a tool call. An edit whose guards were filled in here and that met
+    /// a newer scene (the creator edited meanwhile) did not apply, so it is
+    /// sent once more against the current scene.
+    fn call_tool(
+        &mut self,
+        name: &str,
+        mut arguments: Value,
+        bridge: &mut impl FnMut(&str, &Value) -> Value,
+    ) -> Value {
+        decimals_as_strings(&full_schema(name), &mut arguments);
+        let filled = self.fill_scene_guards(name, &mut arguments, bridge);
+        if !valid_arguments(name, &arguments) {
+            return domain_error("invalid_arguments", "Arguments must match the tool schema; transform vectors contain exactly three numbers");
+        }
+        let mut result = bridge(name, &arguments);
+        for _ in 0..2 {
+            let stale = matches!(
+                result["error"]["code"].as_str(),
+                Some("stale_revision" | "stale_session")
+            );
+            if result["ok"] == true {
+                self.observe_guards(&result["result"]);
+                if guarded(name) && !result["result"]["revision"].is_string() {
+                    self.scene_guards = None;
+                }
+            } else {
+                self.observe_guards(&result["error"]);
+            }
+            if !(filled && stale) {
+                break;
+            }
+            if result["error"]["revision"].is_null() {
+                self.scene_guards = None;
+            }
+            for (guard, _) in SCENE_GUARDS {
+                arguments.as_object_mut().unwrap().remove(guard);
+            }
+            self.fill_scene_guards(name, &mut arguments, bridge);
+            result = bridge(name, &arguments);
+        }
+        result
     }
 }
 
@@ -858,7 +984,7 @@ impl Server {
                     unreachable!()
                 };
                 let name = params.get("name").and_then(Value::as_str).unwrap_or("");
-                let mut arguments = params
+                let arguments = params
                     .get("arguments")
                     .cloned()
                     .unwrap_or_else(|| json!({}));
@@ -916,13 +1042,8 @@ impl Server {
                             "viewport_screenshot takes no arguments",
                         )))
                     }
-                } else if !{
-                    fill_scene_guards(name, &mut arguments, &mut bridge);
-                    valid_arguments(name, &arguments)
-                } {
-                    Ok(tool_result(domain_error("invalid_arguments", "Arguments must match the tool schema; u64 values are canonical decimal strings and transform vectors contain exactly three JSON numbers")))
                 } else {
-                    Ok(tool_result(bridge(name, &arguments)))
+                    Ok(tool_result(self.call_tool(name, arguments, &mut bridge)))
                 }
             }
             _ => Err((-32601, "Method not found")),
@@ -1545,6 +1666,38 @@ mod tests {
         assert_eq!(calls, vec![("scene_transform".to_owned(), guarded)]);
     }
 
+    // The creator edits between the AI's read and its write: the edit, which
+    // did not apply, is sent again against the current scene, once.
+    #[test]
+    fn edit_after_a_human_change_applies_to_the_current_scene() {
+        let mut server = ready();
+        let edit = json!({"object_id":"cube","transform":{"translation":[1,2,3],"rotation":[0,0,0],"scale":[1,1,1]}});
+        let mut revisions = Vec::new();
+        let mut current = 8u64;
+        for id in 0..3 {
+            let request = json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":"scene_transform","arguments":edit}});
+            let reply = server
+                .handle(request.to_string().as_bytes(), |name, args| {
+                    if name == "viewport_inspect" {
+                        return json!({"ok":true,"result":{"session_token":"s:1","revision":"7"}});
+                    }
+                    let sent = args["expected_revision"].as_str().unwrap().to_owned();
+                    revisions.push(sent.clone());
+                    if sent == current.to_string() {
+                        // This edit lands, then the creator edits once more.
+                        let after = current + 1;
+                        current += 2;
+                        json!({"ok":true,"result":{"revision":after.to_string()}})
+                    } else {
+                        json!({"ok":false,"error":{"code":"stale_revision","session_token":"s:1","revision":current.to_string()}})
+                    }
+                })
+                .unwrap();
+            assert_eq!(reply["result"]["isError"], false, "{reply}");
+        }
+        assert_eq!(revisions, ["7", "8", "9", "10", "11", "12"]);
+    }
+
     #[test]
     fn schemas_and_validation_prevent_unknown_or_rounded_arguments() {
         let mut server = ready();
@@ -1689,8 +1842,21 @@ mod tests {
         ));
         assert!(!valid_arguments("behavior_runtime_step", &base));
 
+        // JSON integers are accepted for decimal fields and sent as strings.
+        let mut numeric = base.clone();
+        numeric["expected_revision"] = json!(7);
+        let mut forwarded = Value::Null;
+        server.handle(
+            json!({"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"scene_undo","arguments":numeric}}).to_string().as_bytes(),
+            |_, args| {
+                forwarded = args.clone();
+                json!({"ok":true,"result":{}})
+            },
+        );
+        assert_eq!(forwarded["expected_revision"], "7");
         for bad in [
-            json!(1),
+            json!(-1),
+            json!(1.5),
             json!(null),
             json!(""),
             json!("01"),

@@ -192,32 +192,42 @@ impl Framing {
     pub fn deadline(&self) -> Instant {
         self.last_deadline.expect("complete frame")
     }
+    /// Read one newline-terminated frame. Reads in chunks rather than a byte
+    /// per system call; a peer sends one frame and waits, so bytes after the
+    /// newline are a protocol error rather than a queued request.
     pub fn poll(&mut self, stream: &mut UnixStream) -> io::Result<Option<Value>> {
         stream.set_read_timeout(Some(POLL))?;
-        let mut byte = [0u8; 1];
-        for _ in 0..1024 {
+        let mut chunk = [0u8; 8192];
+        loop {
             if self
                 .started
                 .is_some_and(|start| start.elapsed() >= DEADLINE)
             {
                 return Err(io::Error::other("framing deadline"));
             }
-            match stream.read(&mut byte) {
+            match stream.read(&mut chunk) {
                 Ok(0) => return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "owner closed")),
-                Ok(_) => {
+                Ok(read) => {
                     self.started.get_or_insert_with(Instant::now);
-                    self.bytes.push(byte[0]);
+                    self.bytes.extend_from_slice(&chunk[..read]);
+                    let Some(end) = self.bytes.iter().position(|b| *b == b'\n') else {
+                        if self.bytes.len() > LIMIT {
+                            return Err(io::Error::other("oversized frame"));
+                        }
+                        continue;
+                    };
+                    if end + 1 != self.bytes.len() {
+                        return Err(io::Error::other("pipelined frame"));
+                    }
                     if self.bytes.len() > LIMIT {
                         return Err(io::Error::other("oversized frame"));
                     }
-                    if byte[0] == b'\n' {
-                        let value = crate::strict_json::parse(&self.bytes)
-                            .map_err(|_| io::Error::other("invalid frame"))?;
-                        self.bytes.clear();
-                        self.last_deadline = self.started.map(|start| start + DEADLINE);
-                        self.started = None;
-                        return Ok(Some(value));
-                    }
+                    let value = crate::strict_json::parse(&self.bytes)
+                        .map_err(|_| io::Error::other("invalid frame"))?;
+                    self.bytes.clear();
+                    self.last_deadline = self.started.map(|start| start + DEADLINE);
+                    self.started = None;
+                    return Ok(Some(value));
                 }
                 Err(e)
                     if matches!(
@@ -230,7 +240,6 @@ impl Framing {
                 Err(e) => return Err(e),
             }
         }
-        Ok(None)
     }
 }
 

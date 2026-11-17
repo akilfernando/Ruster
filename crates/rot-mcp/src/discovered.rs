@@ -86,6 +86,23 @@ impl Adapter {
         if self.client.as_ref().is_some_and(|c| c.available()) {
             return Ok(());
         }
+        // After a dropped connection the editor listens again within a frame
+        // or two; wait briefly for it rather than failing the call.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match self.reach_once(directory, cwd) {
+                Err(error)
+                    if error["error"]["code"] == "bridge_unavailable"
+                        && Instant::now() < deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                result => return result,
+            }
+        }
+    }
+
+    fn reach_once(&mut self, directory: &Path, cwd: Option<&Path>) -> Result<(), Value> {
         let running = discovery::list(directory);
         if let Some(pid) = self.pinned {
             let Some(editor) = running.iter().find(|r| r.pid == pid) else {
