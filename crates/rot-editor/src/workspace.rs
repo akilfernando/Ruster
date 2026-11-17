@@ -46,9 +46,12 @@ pub(super) enum Action {
     CreateSphere,
     CreateCapsule,
     CreateLight,
+    Play,
+    Pause,
+    Step,
 }
 impl Action {
-    pub const ALL: [Self; 34] = [
+    pub const ALL: [Self; 37] = [
         Self::New,
         Self::Open,
         Self::Save,
@@ -83,6 +86,9 @@ impl Action {
         Self::CreateSphere,
         Self::CreateCapsule,
         Self::CreateLight,
+        Self::Play,
+        Self::Pause,
+        Self::Step,
     ];
     /// Title Case menu label (UX-STANDARDS §8). `name` stays the stored id.
     pub fn label(self) -> &'static str {
@@ -121,6 +127,9 @@ impl Action {
             Self::CreateSphere => "Sphere",
             Self::CreateCapsule => "Capsule",
             Self::CreateLight => "Point Light",
+            Self::Play => "Play",
+            Self::Pause => "Pause",
+            Self::Step => "Step",
         }
     }
     pub fn name(self) -> &'static str {
@@ -159,6 +168,9 @@ impl Action {
             Self::CreateSphere => "Create sphere",
             Self::CreateCapsule => "Create capsule",
             Self::CreateLight => "Create light",
+            Self::Play => "Play",
+            Self::Pause => "Pause",
+            Self::Step => "Step",
         }
     }
 }
@@ -258,7 +270,9 @@ impl Default for Preferences {
             (Action::FindContent, Key::F, true, true),
             (Action::Rename, Key::F2, false, false),
             (Action::SelectAll, Key::A, true, false),
-            (Action::FocusRuntime, Key::P, true, true),
+            (Action::FocusRuntime, Key::G, true, true),
+            (Action::Play, Key::P, true, false),
+            (Action::Pause, Key::P, true, true),
         ];
         Self {
             hierarchy_width: 180.0,
@@ -304,6 +318,14 @@ impl Default for Preferences {
                         alt: false,
                     }),
                 )
+                // Step is Ctrl+Alt+P, as in Unity.
+                .chain([Binding {
+                    action: Action::Step,
+                    key: Some(Key::P),
+                    ctrl: true,
+                    shift: false,
+                    alt: true,
+                }])
                 .collect(),
         }
     }
@@ -968,7 +990,12 @@ impl Workspace {
         // in this frame. Preserve Ctrl+Shift+S independently from Ctrl+S.
         self.prefs.bindings.iter().find_map(|binding| {
             // Focus navigation remains reachable from ordinary focused controls.
-            if widget_focused && binding.action != Action::FocusRuntime {
+            if widget_focused
+                && !matches!(
+                    binding.action,
+                    Action::FocusRuntime | Action::Play | Action::Pause | Action::Step
+                )
+            {
                 return None;
             }
             let key = binding.key?;
@@ -1570,12 +1597,35 @@ mod tests {
                 },
             ]
         };
-        assert_eq!(w.shortcut_text(Action::FocusRuntime), "Ctrl+Shift+P");
+        assert_eq!(w.shortcut_text(Action::FocusRuntime), "Ctrl+Shift+G");
+        // S-05: Unity's Play-mode shortcuts.
+        assert_eq!(
+            frame(
+                &mut w,
+                true,
+                key(egui::Key::P, egui::Modifiers::CTRL),
+                false
+            ),
+            Some(Action::Play)
+        );
         assert_eq!(
             frame(&mut w, true, key(egui::Key::P, runtime_modifiers), false),
+            Some(Action::Pause)
+        );
+        assert_eq!(
+            frame(
+                &mut w,
+                true,
+                key(egui::Key::P, egui::Modifiers::CTRL | egui::Modifiers::ALT),
+                false
+            ),
+            Some(Action::Step)
+        );
+        assert_eq!(
+            frame(&mut w, true, key(egui::Key::G, runtime_modifiers), false),
             Some(Action::FocusRuntime)
         );
-        let mut released_shortcut = key(egui::Key::P, runtime_modifiers);
+        let mut released_shortcut = key(egui::Key::G, runtime_modifiers);
         released_shortcut.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
         assert_eq!(
             frame(&mut w, true, released_shortcut, false),
@@ -1618,13 +1668,13 @@ mod tests {
         }
         w.settings_open = true;
         assert_eq!(
-            frame(&mut w, true, key(egui::Key::P, runtime_modifiers), false),
+            frame(&mut w, true, key(egui::Key::G, runtime_modifiers), false),
             None
         );
         w.settings_open = false;
         w.capture = Some(Action::FocusRuntime);
         assert_eq!(
-            frame(&mut w, true, key(egui::Key::P, runtime_modifiers), false),
+            frame(&mut w, true, key(egui::Key::G, runtime_modifiers), false),
             None,
             "Shortcut capture owns the key before runtime focus dispatch"
         );
@@ -1709,6 +1759,9 @@ mod tests {
                     Action::Rename,
                     Action::SelectAll,
                     Action::FocusRuntime,
+                    Action::Play,
+                    Action::Pause,
+                    Action::Step,
                 ]
                 .iter()
                 .any(|action| binding["action"] == action.name())
@@ -1802,7 +1855,7 @@ mod tests {
             Some(Action::FindObjects)
         );
         // An older custom shortcut keeps CtrlShiftP. Only the newly added
-        // runtime-focus default becomes Unbound, then supports normal remapping.
+        // Pause default becomes Unbound, then supports normal remapping.
         let mut runtime_conflict = previous.clone();
         let custom = runtime_conflict["bindings"]
             .as_array_mut()
@@ -1819,7 +1872,7 @@ mod tests {
             migrated_runtime
                 .bindings
                 .iter()
-                .find(|binding| binding.action == Action::FocusRuntime)
+                .find(|binding| binding.action == Action::Pause)
                 .unwrap()
                 .key,
             None
@@ -1828,7 +1881,7 @@ mod tests {
         let path = dir.path().join("runtime-shortcut.json");
         let mut remapped = Workspace::at(Some(path.clone()));
         remapped.prefs = migrated_runtime;
-        assert_eq!(remapped.shortcut_text(Action::FocusRuntime), "Unbound");
+        assert_eq!(remapped.shortcut_text(Action::Pause), "Unbound");
         assert_eq!(
             frame(
                 &mut remapped,
@@ -1838,7 +1891,7 @@ mod tests {
             ),
             Some(Action::Frame)
         );
-        remapped.capture = Some(Action::FocusRuntime);
+        remapped.capture = Some(Action::Pause);
         assert_eq!(
             frame(
                 &mut remapped,
@@ -1856,7 +1909,7 @@ mod tests {
                 key(egui::Key::R, runtime_modifiers),
                 false
             ),
-            Some(Action::FocusRuntime)
+            Some(Action::Pause)
         );
         remapped.flush();
         assert!(remapped.error.is_empty());
@@ -1866,7 +1919,7 @@ mod tests {
         duplicate["bindings"][13]["ctrl"] = true.into();
         assert!(Preferences::parse(&serde_json::to_vec(&duplicate).unwrap()).is_err());
         for (pressed, modifiers, expected) in [
-            (egui::Key::P, runtime_modifiers, Some(Action::FocusRuntime)),
+            (egui::Key::G, runtime_modifiers, Some(Action::FocusRuntime)),
             (egui::Key::G, egui::Modifiers::NONE, None),
         ] {
             let mut output = ctx.run_ui(

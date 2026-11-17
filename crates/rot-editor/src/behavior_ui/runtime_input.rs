@@ -92,12 +92,16 @@ impl RuntimeUi {
             self.revoke_input_control();
         }
     }
-    pub(super) fn input_control_button(
+    /// Clicking the running Game view gives it the keyboard; Escape gives it
+    /// back. `clicked` is the view's click this frame.
+    pub(crate) fn input_control_click(
         &mut self,
-        ui: &mut egui::Ui,
+        ctx: &egui::Context,
         blocked: bool,
         has_actions: bool,
+        clicked: bool,
     ) {
+        let ui = ctx;
         // Keep the release gesture through pointer-up, including when the
         // press and release arrive in separate UI frames. It cannot reacquire.
         if self.input_control.release_pointer_gesture
@@ -121,15 +125,12 @@ impl RuntimeUi {
             && self.debug_snapshot().is_none()
             && self.input_control.surface.is_some();
         let owned = self.input_owned();
-        let button = ui.add_enabled(enabled || owned, egui::Button::new(if owned || release_gesture { "Release controls (Esc)" } else { "Control runtime" }))
-            .on_hover_text("Give the scene keyboard control. Escape releases it; Pause and Stop remain available.")
-            .on_disabled_hover_text(if has_actions { "Reset, view and play the current runtime before claiming controls." } else { "Define an input action to enable scene keyboard controls." });
-        if button.clicked()
-            && self.input_control.last_button_frame != Some(ui.ctx().cumulative_frame_nr())
+        if clicked
+            && (enabled || owned)
+            && self.input_control.last_button_frame != Some(ui.cumulative_frame_nr())
         {
-            self.input_control.last_button_frame = Some(ui.ctx().cumulative_frame_nr());
+            self.input_control.last_button_frame = Some(ui.cumulative_frame_nr());
             if owned || release_gesture {
-                self.release_input(ui.ctx());
                 return;
             }
             let Some(worker) = &self.worker else {
@@ -140,10 +141,10 @@ impl RuntimeUi {
                     // This exact epoch also guards an explicit post-debugger
                     // Play→claim intent. A newer stop invalidates that intent.
                     self.input_control.intent = Some(meta);
-                    self.input_control.activation_frame = Some(ui.ctx().cumulative_frame_nr());
+                    self.input_control.activation_frame = Some(ui.cumulative_frame_nr());
                     if !meta.enabled {
                         if let Err(error) = self.queue_control(Operation::Play) {
-                            self.release_input(ui.ctx());
+                            self.release_input(ui);
                             self.status = error;
                         }
                     }
@@ -287,7 +288,7 @@ impl RuntimeUi {
                         ui.label(if self.input_owned() {
                             "Scene controls active. Escape releases ownership."
                         } else if self.playing {
-                            "Preview playing with neutral input until Control runtime claims it."
+                            "Playing. Click the game view to give it the keyboard."
                         } else {
                             "Preview paused. Ordinary Step uses a neutral input frame."
                         });
@@ -413,7 +414,7 @@ impl RuntimeUi {
                         .current_input_meta(intent.key)
                         .map_err(|error| format!("{error:?}"))?;
                     if meta.epoch != intent.epoch || meta.map_identity != intent.map_identity {
-                        return Err("Control request expired; choose Control runtime again.".into());
+                        return Err("Control request expired; click the game view again.".into());
                     }
                     if !meta.enabled || self.pending.is_some() || self.awaiting.is_some() {
                         return Ok(None);
@@ -499,7 +500,7 @@ impl RuntimeUi {
         });
         if events.len() > 256 {
             self.release_input(ctx);
-            self.status = "Keyboard input overflow; choose Control runtime again.".into();
+            self.status = "Keyboard input overflow; click the game view again.".into();
             return;
         }
         let (Some(worker), Some(lease)) = (&self.worker, self.input_control.lease) else {
@@ -524,7 +525,7 @@ impl RuntimeUi {
         });
         if let Err(error) = result {
             self.release_input(ctx);
-            self.status = format!("{error} Choose Control runtime again.");
+            self.status = format!("{error} Click the game view again.");
         }
     }
 }
@@ -743,6 +744,7 @@ mod tests {
         let controls_blocked = std::cell::Cell::new(false);
         let reset_admissions = std::cell::RefCell::new(Vec::new());
         let surface_focused_before_finish = std::cell::Cell::new(false);
+        let surface_center = std::cell::Cell::new(egui::Pos2::ZERO);
         let mut draw = |runtime: &mut RuntimeUi, events, discard: bool| {
             time += 0.1;
             let mut output = ctx.run_ui(
@@ -773,6 +775,9 @@ mod tests {
                     let (_, surface) = ui
                         .allocate_exact_size(egui::vec2(900., 500.), egui::Sense::click_and_drag());
                     surface_focused_before_finish.set(surface.has_focus());
+                    surface_center.set(surface.rect.center());
+                    // S-05: clicking the running game view claims the keyboard.
+                    runtime.input_control_click(&ctx, false, true, surface.clicked());
                     runtime.input_finish(&ctx, &surface, false);
                     if discard && ctx.current_pass_index() == 0 {
                         ctx.request_discard("control activation replay");
@@ -780,21 +785,8 @@ mod tests {
                 },
             );
             output.textures_delta.clear();
-            let button = output
-                .shapes
-                .iter()
-                .find_map(|shape| match &shape.shape {
-                    egui::epaint::Shape::Text(text)
-                        if matches!(
-                            text.galley.job.text.as_str(),
-                            "Control runtime" | "Release controls (Esc)"
-                        ) =>
-                    {
-                        Some(egui::Rect::from_min_size(text.pos, text.galley.size()).center())
-                    }
-                    _ => None,
-                })
-                .unwrap();
+            // The click target is the game view itself (S-05).
+            let button = surface_center.get();
             *accessible_buttons.borrow_mut() = output
                 .platform_output
                 .accesskit_update
@@ -930,7 +922,7 @@ mod tests {
             "contention starts with the genuine viewport focus owner"
         );
         assert!(!runtime.input_owned(), "a busy key-up must fail closed");
-        assert_eq!(runtime.status, "Busy Choose Control runtime again.");
+        assert_eq!(runtime.status, "Busy Click the game view again.");
         assert_eq!(ctx.memory(|memory| memory.focused()), None);
         resume_slot.send(()).unwrap();
         slot_holder.join().unwrap();
@@ -995,14 +987,15 @@ mod tests {
             );
             assert!(runtime.input_owned());
         }
-        button = draw(&mut runtime, vec![], false);
+        // A press outside the game view (here the toolbar row) releases.
+        let outside = egui::pos2(4.0, 4.0);
         draw(
             &mut runtime,
-            vec![egui::Event::PointerMoved(button), pointer(button, true)],
+            vec![egui::Event::PointerMoved(outside), pointer(outside, true)],
             false,
         );
         assert!(!runtime.input_owned(), "outside press releases immediately");
-        draw(&mut runtime, vec![pointer(button, false)], true);
+        draw(&mut runtime, vec![pointer(outside, false)], true);
         assert!(
             !runtime.input_owned(),
             "release gesture cannot reacquire on pointer-up or discarded pass"
@@ -1169,7 +1162,12 @@ mod tests {
         let focused_control = |label: &str| {
             // Transport icons preserve real named button bounds, not painted
             // text glyphs. Keep the same enabled/focus/clipping ownership checks.
-            let bounds = accessible_buttons.borrow()[label];
+            let bounds = *accessible_buttons.borrow().get(label).unwrap_or_else(|| {
+                panic!(
+                    "no accessible button {label}: {:?}",
+                    accessible_buttons.borrow().keys().collect::<Vec<_>>()
+                )
+            });
             let rect = egui::Rect::from_min_max(
                 egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
                 egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
@@ -1187,42 +1185,21 @@ mod tests {
             assert!(response.interact_rect.contains_rect(response.rect));
             response.id
         };
+        // S-05: there is no Reset button. The focus shortcut lands on Play,
+        // which toggles the already-current run without another reset.
+        if runtime.playing {
+            let current = runtime.worker.as_ref().unwrap().current_key();
+            runtime.pending = Some(Request::Pause(current));
+            runtime.flush();
+            wait(&mut runtime, false);
+        }
         runtime.focus_controls = true;
-        draw(&mut runtime, vec![], false);
-        let reset_id = focused_control("Reset");
-        draw(&mut runtime, vec![key_event(egui::Key::Enter, true)], true);
-        assert_eq!(reset_admissions.borrow().len(), 1);
-        let reset_key = runtime.worker.as_ref().unwrap().current_key();
-        controls_blocked.set(true);
-        draw(
-            &mut runtime,
-            vec![key_event(egui::Key::Enter, false)],
-            false,
-        );
         for _ in 0..2 {
             draw(&mut runtime, vec![], false);
         }
-        wait(&mut runtime, false);
-        assert_eq!(runtime.frame.as_ref().unwrap().tick, 0);
-        controls_blocked.set(false);
-        for _ in 0..2 {
-            draw(&mut runtime, vec![], false);
-        }
-        assert_eq!(
-            focused_control("Reset"),
-            reset_id,
-            "Reset completion must restore its genuine activation owner after blocking"
-        );
-        assert_eq!(
-            reset_admissions.borrow().len(),
-            1,
-            "Enter release/idle cannot admit another Reset"
-        );
-        assert_eq!(runtime.worker.as_ref().unwrap().current_key(), reset_key);
-
-        draw(&mut runtime, vec![key_event(egui::Key::Tab, true)], false);
-        draw(&mut runtime, vec![key_event(egui::Key::Tab, false)], false);
         let play_id = focused_control("Play");
+        let reset_key = runtime.worker.as_ref().unwrap().current_key();
+        let admitted = reset_admissions.borrow().len();
         for playing in [true, false] {
             draw(&mut runtime, vec![key_event(egui::Key::Enter, true)], false);
             assert!(runtime.awaiting.is_some() || runtime.pending.is_some());
@@ -1250,7 +1227,7 @@ mod tests {
                 runtime.playing, playing,
                 "Enter release cannot toggle again"
             );
-            assert_eq!(reset_admissions.borrow().len(), 1);
+            assert_eq!(reset_admissions.borrow().len(), admitted);
         }
         draw(&mut runtime, vec![key_event(egui::Key::Tab, true)], false);
         draw(&mut runtime, vec![key_event(egui::Key::Tab, false)], false);
@@ -1309,9 +1286,12 @@ mod tests {
 
         // Genuine Tab traversal to the Inspector cancels the outstanding
         // continuity request. Completion must not reclaim the old focus.
+        // After Stop, Play resets from the scene and then plays (S-05).
         runtime.focus_controls = true;
-        draw(&mut runtime, vec![], false);
-        focused_control("Reset");
+        for _ in 0..2 {
+            draw(&mut runtime, vec![], false);
+        }
+        focused_control("Play");
         draw(&mut runtime, vec![key_event(egui::Key::Enter, true)], false);
         controls_blocked.set(true);
         draw(
@@ -1322,7 +1302,7 @@ mod tests {
         draw(&mut runtime, vec![key_event(egui::Key::Tab, true)], false);
         draw(&mut runtime, vec![key_event(egui::Key::Tab, false)], false);
         let inspector_id = focused_control("Inspector control");
-        wait(&mut runtime, false);
+        wait(&mut runtime, true);
         controls_blocked.set(false);
         for _ in 0..2 {
             draw(&mut runtime, vec![], false);
@@ -1332,7 +1312,7 @@ mod tests {
             inspector_id,
             "a completed operation cannot restore stale focus over a genuine new owner"
         );
-        assert_eq!(reset_admissions.borrow().len(), 2);
+        assert_eq!(reset_admissions.borrow().len(), admitted + 1);
         assert_eq!(session.snapshot_bytes().unwrap(), authored);
         runtime.shutdown();
         let until = Instant::now() + Duration::from_secs(5);

@@ -1877,8 +1877,32 @@ pub(super) struct RuntimeUi {
     reset_ack: Option<RunKey>,
     reset_frame: Option<Frame>,
     pub reset_succeeded: Option<RunKey>,
+    /// Play or Step pressed while the run was not ready: Play resets from
+    /// the current scene first, then runs this once the reset completes.
+    after_reset: Option<(RunKey, Operation)>,
+    /// The scene changed during Play: Play restarts from the new scene.
+    restart_play: bool,
+    /// A Play, Pause or Step shortcut waiting for the next toolbar frame.
+    shortcut: Option<PlayShortcut>,
+}
+/// Play-mode shortcuts (Ctrl+P, Ctrl+Shift+P, Ctrl+Alt+P), as in Unity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlayShortcut {
+    /// Enter Play mode, or Stop when already in it.
+    Play,
+    /// Pause, or resume when paused.
+    Pause,
+    Step,
 }
 impl RuntimeUi {
+    pub fn queue_shortcut(&mut self, shortcut: PlayShortcut) {
+        self.shortcut = Some(shortcut);
+    }
+    /// Play mode: the game view is showing a run that has not been stopped.
+    pub fn in_play_mode(&self) -> bool {
+        self.visible && self.worker.is_some() && (self.ready || self.playing)
+            || self.after_reset.is_some()
+    }
     pub fn cancel_control_focus(&mut self) {
         self.control_focus = None;
     }
@@ -2010,13 +2034,20 @@ impl RuntimeUi {
                 Ok(key) => self.pending = Some(Request::Invalidate(key)),
                 Err(error) => self.status = error.to_string(),
             }
+            // An edit during Play applies to the scene and restarts Play.
+            let was_playing =
+                self.playing || matches!(self.after_reset, Some((_, Operation::Play)));
+            self.after_reset = None;
+            self.restart_play |= was_playing;
             self.stale = self.frame.is_some();
             self.ready = false;
             self.playing = false;
-            self.visible = false;
-            self.status =
-                "Authored scene/content changed; runtime cancelled. Reset to run the current data."
-                    .into();
+            self.visible = was_playing;
+            self.status = if was_playing {
+                "Scene changed; Play restarts with it.".into()
+            } else {
+                "Scene changed; press Play to run it.".into()
+            };
         }
         if previous.is_some_and(|old| old.0 != generation) {
             self.clear_debug_document();
@@ -2136,6 +2167,16 @@ impl RuntimeUi {
                 self.visible = true;
                 self.reset_succeeded = Some(key);
                 self.status = "Runtime reset successfully; authored data unchanged.".into();
+                if let Some((after, operation)) = self.after_reset.take() {
+                    if after == key && self.pending.is_none() {
+                        self.pending = Some(if operation == Operation::Step {
+                            Request::Step(key)
+                        } else {
+                            Request::Play(key)
+                        });
+                        self.flush();
+                    }
+                }
             }
         }
     }
@@ -2382,7 +2423,6 @@ impl RuntimeUi {
     ) -> Option<RunKey> {
         self.controls_with_sounds(ui, session, generation, blocked, focus_shortcut, None)
     }
-    #[allow(clippy::too_many_arguments)]
     /// Window → Script Debugger.
     pub fn open_debugger(&mut self) {
         self.debug.open = true;
@@ -2391,13 +2431,14 @@ impl RuntimeUi {
     pub fn open_game_controls(&mut self, ctx: &egui::Context) {
         self.open_input_help(ctx);
     }
+    #[allow(clippy::too_many_arguments)]
     pub fn controls_with_sounds(
         &mut self,
         ui: &mut egui::Ui,
         session: &Session,
         generation: u64,
         blocked: bool,
-        focus_shortcut: &str,
+        _focus_shortcut: &str,
         assets: Option<&rot_assets::AssetStore>,
     ) -> Option<RunKey> {
         let mut reset = None;
@@ -2405,60 +2446,96 @@ impl RuntimeUi {
         self.maintain_control_focus(ui.ctx());
         let inline_feedback = ui.available_width() >= 560.0;
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x=4.0;
-            ui.spacing_mut().button_padding.x=6.0;
-            let reset_button = ui
-                .add_enabled(
-                    !blocked && !self.shutdown,
-                    egui::Button::new("Reset"),
-                ).on_hover_text(format!("Reset behavior runtime from the current scene. Runtime changes never edit the scene.\nFocus runtime controls ({focus_shortcut})."));
-            self.restore_control_focus(&reset_button);
-            if focus_controls && reset_button.enabled() {
-                reset_button.request_focus();
-                reset_button.scroll_to_me(Some(egui::Align::Center));
-            }
-            if reset_button.clicked() {
-                match self.reset_with_resources(ui.ctx(), session, generation, assets) {
-                    Ok(key) => {
-                        reset = Some(key);
-                        self.arm_control_focus(&reset_button, key, Operation::Reset);
-                    }
-                    Err(error) => self.status = error,
-                }
-            }
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.spacing_mut().button_padding.x = 6.0;
             let stopped = self.debug_snapshot().is_some();
-            let ready = self.ready
-                && !blocked
+            let idle = !blocked
                 && self.pending.is_none()
                 && self.awaiting.is_none()
                 && !self.hud_activation_busy()
                 && !stopped
                 && !self.shutdown;
-            let play_button = crate::editor_theme::playback_button(ui, ready,
-                if self.playing { crate::editor_theme::PlaybackIcon::Pause } else { crate::editor_theme::PlaybackIcon::Play });
-            self.restore_control_focus(&play_button);
-            if play_button.clicked() {
-                let key = self.worker.as_ref().unwrap().current_key();
-                let operation = if self.playing { Operation::Pause } else { Operation::Play };
-                self.pending = Some(if self.playing {
-                    Request::Pause(key)
+            let fresh = self.ready && !self.stale;
+            // Play and Step run the current scene in one action: when the run
+            // is not ready for it, they reset from the scene first.
+            let ctx = ui.ctx().clone();
+            let mut start = |runtime: &mut Self, operation: Operation| {
+                if fresh && runtime.worker.is_some() {
+                    let key = runtime.worker.as_ref().unwrap().current_key();
+                    runtime.visible = true;
+                    runtime.pending = Some(match operation {
+                        Operation::Step => Request::Step(key),
+                        _ => Request::Play(key),
+                    });
+                    return Some(key);
+                }
+                match runtime.reset_with_resources(&ctx, session, generation, assets) {
+                    Ok(key) => {
+                        reset = Some(key);
+                        runtime.after_reset = Some((key, operation));
+                        runtime.visible = true;
+                        Some(key)
+                    }
+                    Err(error) => {
+                        runtime.status = error;
+                        None
+                    }
+                }
+            };
+            let shortcut = if idle { self.shortcut.take() } else { None };
+            if idle && std::mem::take(&mut self.restart_play) {
+                start(self, Operation::Play);
+            }
+            let play_button = crate::editor_theme::playback_button(
+                ui,
+                idle,
+                if self.playing {
+                    crate::editor_theme::PlaybackIcon::Pause
                 } else {
-                    Request::Play(key)
-                });
-                self.arm_control_focus(&play_button, key, operation);
+                    crate::editor_theme::PlaybackIcon::Play
+                },
+            );
+            self.restore_control_focus(&play_button);
+            if focus_controls && play_button.enabled() {
+                play_button.request_focus();
+                play_button.scroll_to_me(Some(egui::Align::Center));
             }
-            let step_button = crate::editor_theme::playback_button(ui, ready && !self.playing, crate::editor_theme::PlaybackIcon::Step);
+            let in_play_mode = self.in_play_mode();
+            let toggle_play =
+                play_button.clicked() || (shortcut == Some(PlayShortcut::Pause) && in_play_mode);
+            if shortcut == Some(PlayShortcut::Play) && in_play_mode {
+                self.stop(generation, session.scene().revision);
+            } else if toggle_play || shortcut == Some(PlayShortcut::Play) {
+                if self.playing {
+                    let key = self.worker.as_ref().unwrap().current_key();
+                    self.pending = Some(Request::Pause(key));
+                    self.arm_control_focus(&play_button, key, Operation::Pause);
+                } else if let Some(key) = start(self, Operation::Play) {
+                    self.arm_control_focus(&play_button, key, Operation::Play);
+                }
+            }
+            let step_button = crate::editor_theme::playback_button(
+                ui,
+                idle && !self.playing,
+                crate::editor_theme::PlaybackIcon::Step,
+            );
             self.restore_control_focus(&step_button);
-            if step_button.clicked() {
-                let key = self.worker.as_ref().unwrap().current_key();
-                self.pending = Some(Request::Step(key));
-                self.arm_control_focus(&step_button, key, Operation::Step);
+            if step_button.clicked() || (shortcut == Some(PlayShortcut::Step) && !self.playing) {
+                if let Some(key) = start(self, Operation::Step) {
+                    self.arm_control_focus(&step_button, key, Operation::Step);
+                }
             }
-            let stop_button = crate::editor_theme::playback_button(ui, self.worker.is_some() && !self.shutdown, crate::editor_theme::PlaybackIcon::Stop);
+            let stop_button = crate::editor_theme::playback_button(
+                ui,
+                self.worker.is_some() && !self.shutdown,
+                crate::editor_theme::PlaybackIcon::Stop,
+            );
             self.restore_control_focus(&stop_button);
             if stop_button.clicked() {
                 self.stop(generation, session.scene().revision);
-                let key = self.awaiting.filter(|(_, operation)| *operation == Operation::Stop)
+                let key = self
+                    .awaiting
+                    .filter(|(_, operation)| *operation == Operation::Stop)
                     .map(|(key, _)| key)
                     .or(match &self.pending {
                         Some(Request::Stop(key)) => Some(*key),
@@ -2470,11 +2547,28 @@ impl RuntimeUi {
             }
             // Play options: game-view toggle, controls help and run status.
             // The Script Debugger lives under Window, Game Controls also under Help.
-            let runtime_menu = ui.menu_button("…",|ui| {
-                if ui.button("Game Controls…").clicked(){self.open_input_help(ui.ctx());ui.close();}
-                ui.add_enabled(self.frame.is_some(),egui::Checkbox::new(&mut self.visible,if self.stale {"View retained runtime (stale)"}else{"View runtime"}));
+            let runtime_menu = ui.menu_button("…", |ui| {
+                if ui.button("Game Controls…").clicked() {
+                    self.open_input_help(ui.ctx());
+                    ui.close();
+                }
+                ui.add_enabled(
+                    self.frame.is_some(),
+                    egui::Checkbox::new(
+                        &mut self.visible,
+                        if self.stale {
+                            "Show Last Game Frame"
+                        } else {
+                            "Show Game"
+                        },
+                    ),
+                );
                 self.spatial_feedback_menu(ui);
-                if let Some(report) = self.worker.as_ref().and_then(|worker| worker.audio_report(worker.current_key())) {
+                if let Some(report) = self
+                    .worker
+                    .as_ref()
+                    .and_then(|worker| worker.audio_report(worker.current_key()))
+                {
                     use rot_app::audio::OutputStatus;
                     ui.label(match report.status {
                         OutputStatus::Idle => "Audio: ready for first cue",
@@ -2485,18 +2579,42 @@ impl RuntimeUi {
                         OutputStatus::VoiceLimit => "Audio: voice limit reached",
                     });
                     if let Some(batch) = &report.last_batch {
-                        ui.label(format!("Last committed audio batch: {} cue{}", batch.cues.len(), if batch.cues.len() == 1 {""} else {"s"}));
+                        ui.label(format!(
+                            "Last committed audio batch: {} cue{}",
+                            batch.cues.len(),
+                            if batch.cues.len() == 1 { "" } else { "s" }
+                        ));
                     }
                 }
-                if let Some(frame)=&self.frame {ui.label(format!("Committed tick {}",frame.tick));}
-                if !self.status.is_empty(){ui.label(&self.status);}
-                if let Some(diagnostic)=&self.diagnostic {ui.collapsing("Last failure details",|ui| {
-                    ui.set_max_width(360.0);
-                    egui::ScrollArea::vertical().id_salt("runtime_diagnostic_details").max_height(160.0).show(ui,|ui| {
-                    ui.colored_label(ui.visuals().error_fg_color,&diagnostic.message);
-                    ui.label(format!("Source {} · hash {} · line {} · object {} · binding {}",diagnostic.source_id.as_deref().unwrap_or("—"),diagnostic.source_hash.as_deref().unwrap_or("—"),diagnostic.line.map(|line|line.to_string()).as_deref().unwrap_or("—"),diagnostic.object_id.as_deref().unwrap_or("—"),diagnostic.binding_id.as_deref().unwrap_or("—")));
+                if let Some(frame) = &self.frame {
+                    ui.label(format!("Committed tick {}", frame.tick));
+                }
+                if !self.status.is_empty() {
+                    ui.label(&self.status);
+                }
+                if let Some(diagnostic) = &self.diagnostic {
+                    ui.collapsing("Last failure details", |ui| {
+                        ui.set_max_width(360.0);
+                        egui::ScrollArea::vertical()
+                            .id_salt("runtime_diagnostic_details")
+                            .max_height(160.0)
+                            .show(ui, |ui| {
+                                ui.colored_label(ui.visuals().error_fg_color, &diagnostic.message);
+                                ui.label(format!(
+                                    "Source {} · hash {} · line {} · object {} · binding {}",
+                                    diagnostic.source_id.as_deref().unwrap_or("—"),
+                                    diagnostic.source_hash.as_deref().unwrap_or("—"),
+                                    diagnostic
+                                        .line
+                                        .map(|line| line.to_string())
+                                        .as_deref()
+                                        .unwrap_or("—"),
+                                    diagnostic.object_id.as_deref().unwrap_or("—"),
+                                    diagnostic.binding_id.as_deref().unwrap_or("—")
+                                ));
+                            });
                     });
-                });}
+                }
             });
             self.input_help_menu_response(&runtime_menu.response);
             if inline_feedback {
@@ -2505,34 +2623,25 @@ impl RuntimeUi {
                 ui.allocate_ui_with_layout(
                     egui::vec2(width, ui.spacing().interact_size.y),
                     egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| self.control_feedback(ui, blocked, !session.authoring().actions.is_empty()),
+                    |ui| {
+                        self.control_feedback(ui, blocked, !session.authoring().actions.is_empty())
+                    },
                 );
             }
         });
         if !inline_feedback {
-            // Narrow toolbar: keep the one row; status shows in the Play tooltip.
-            self.input_control_button(ui, blocked, !session.authoring().actions.is_empty());
+            // Narrow toolbar: keep the one row; status lives in the "…" menu.
         }
         self.flush();
         self.input_help_window(ui.ctx(), session, generation);
         reset
     }
 
-    fn control_feedback(&mut self, ui: &mut egui::Ui, blocked: bool, has_actions: bool) {
-        self.input_control_button(ui, blocked, has_actions);
-        let status = if self.debug_snapshot().is_some() {
-            Some((
-                "Paused in debugger",
-                "Open Runtime → Behavior debugger for the stopped source, line and tick.",
-            ))
-        } else if self.stale && self.diagnostic.is_none() {
-            Some((
-                "Reset required",
-                "The scene or its controls changed. Reset to preview the current authored state.",
-            ))
-        } else {
-            None
-        };
+    fn control_feedback(&mut self, ui: &mut egui::Ui, _blocked: bool, _has_actions: bool) {
+        let status = self.debug_snapshot().is_some().then_some((
+            "Paused in debugger",
+            "Window → Script Debugger shows where the script stopped.",
+        ));
         if let Some((label, detail)) = status {
             ui.add_sized(
                 egui::vec2(ui.available_width().max(0.0), ui.spacing().interact_size.y),
@@ -2549,6 +2658,55 @@ impl RuntimeUi {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// S-05: Play runs the current scene in one action, an edit during Play
+    /// restarts it from the edited scene, and Ctrl+P again stops.
+    #[test]
+    fn play_runs_the_current_scene_and_an_edit_restarts_play() {
+        let mut session = Session::new(rot_scene::Scene::demo()).unwrap();
+        let ctx = egui::Context::default();
+        let mut runtime = RuntimeUi::default();
+        let frame = |runtime: &mut RuntimeUi, session: &Session| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    ..Default::default()
+                },
+                |ui| {
+                    runtime.observe(1, session.scene().revision, None, 0);
+                    runtime.poll(ui.ctx());
+                    runtime.controls(ui, session, 1, false, "");
+                },
+            );
+            output.textures_delta.clear();
+        };
+        let until =
+            |runtime: &mut RuntimeUi, session: &Session, done: &dyn Fn(&RuntimeUi) -> bool| {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                while !done(runtime) {
+                    assert!(std::time::Instant::now() < deadline, "{}", runtime.status);
+                    frame(runtime, session);
+                    std::thread::yield_now();
+                }
+            };
+        frame(&mut runtime, &session);
+        assert!(!runtime.in_play_mode());
+        runtime.queue_shortcut(PlayShortcut::Play);
+        until(&mut runtime, &session, &|r| r.playing);
+        assert!(runtime.in_play_mode() && runtime.visible);
+        let first = runtime.worker.as_ref().unwrap().current_key();
+        session
+            .set_action(session.scene().revision, "jump", Some(Default::default()))
+            .unwrap();
+        until(&mut runtime, &session, &|r| {
+            r.playing && r.worker.as_ref().unwrap().current_key() != first
+        });
+        assert!(!runtime.stale, "the restarted run uses the edited scene");
+        runtime.queue_shortcut(PlayShortcut::Play);
+        until(&mut runtime, &session, &|r| !r.in_play_mode());
+        assert!(!runtime.visible, "Stop returns to the edit view");
+        runtime.shutdown();
+    }
     fn key(key: egui::Key, modifiers: egui::Modifiers) -> Vec<egui::Event> {
         vec![
             egui::Event::ModifiersChanged(modifiers),

@@ -21,7 +21,7 @@ Choose a fresh archive path. Preparation verifies the Linux executable/profile a
 ## Create and export in the editor
 
 1. Start with the empty welcome scene or **File → New scene**. Create an object, name it, save into your own project directory and import a triangle OBJ through Content. Assign it using **Edit → Assign mesh…** while the object is selected (or the Content item’s **Assign to active object** context menu). Drag-and-drop is also available; physical-focus validation remains separately recorded.
-2. Add a Lua behavior, edit its source and typed properties, and use Preview/Reset/Step to check it. Correct any reported source/runtime errors. Stop preview before editing authored transforms; running transforms are separate from saved values.
+2. Add a Lua behavior, edit its source and typed properties, and press **Play** (Ctrl+P) or **Step** to check it. Correct any reported source/runtime errors. Stop preview before editing authored transforms; running transforms are separate from saved values.
 3. Save the scene. **File → Export application…** or **Ctrl+Shift+E** opens export. Enter a title, the prepared template directory and a fresh `.tar.gz` destination. An authored Scene21 **Player View** owns standalone framing and needs a template advertising `authored_player_view`. For a scene without a player view, choose **Use current view** to freeze the Scene View camera as the standalone's initial framing, or leave it unselected to start with Fit. Legacy initial framing requires a template advertising camera support. Relative archive paths resolve beside the saved scene. Shortcuts are remappable in editor settings.
 4. Enter submits text fields; Tab traverses controls, Enter on Cancel cancels, and Escape closes the dialog. Export runs in the background with a status/cancel window. A clean saved scene and accepted mesh sources are required. Resolve drafts/dialogs first; changed OBJ sources require explicit Refresh. Custom shaders require an explicit choice of built-in appearance for this session; their source file is preserved.
 5. Extract the archive elsewhere and run `application/application`. It discovers its adjacent `app.json`, starts the saved creation and needs neither editor nor MCP. For a deterministic check, run `application/application --headless --ticks 10` from another working directory. At the default100ms step, ten ticks simulate one second.
@@ -41,8 +41,8 @@ using the normal editor controls.
 
 When the source geometry or embedded base-color image changes, overwrite
 the editable GLB and use the model row's **Refresh**. Keep the source node
-paths, transforms and material settings equivalent. **Reset** refreshes an
-active preview. A malformed or structurally incompatible source keeps the
+paths, transforms and material settings equivalent. An edit during **Play** restarts
+it with the new data. A malformed or structurally incompatible source keeps the
 last accepted version available. Repair the source and Refresh, or import a
 structurally different model with a fresh identity. When copying an editable
 project, include its asset catalog and `.rot-models` directory.
@@ -55,7 +55,7 @@ enabled. Import it as above. The model row reads **Animated model** with
 each clip's name and length. **Place** attaches the first clip to the new
 placement Group and plays it in a loop.
 
-**Reset** shows the clip's first pose. **Play**, **Pause** and **Step**
+**Step** from stopped shows the clip's first pose. **Play**, **Pause** and **Step**
 advance it with every other runtime motion, and **Stop** returns to the
 authored rest pose, which the clip never changes. Select the placement
 Group to find **Animation** in the Inspector: choose another clip from
@@ -135,9 +135,10 @@ The obstacles may be rotated and must stay stationary during the run.
 Create Axis actions with the keys you want for X and Z. Select the mover,
 then choose **Behavior** → **Add behavior…** → **Lua kinematic mover**.
 Set `axis_x` and `axis_z` to the saved Axis IDs, and `speed` to scene units
-per second. A blank axis is neutral. Reset and use scene controls to play,
-or pause and Step. Under **Runtime** → **Spatial feedback**, inspect the
-committed outcome and contact targets, normals and viewport markers.
+per second. A blank axis is neutral. Press **Play** and click the game view to
+give it the keyboard, or pause and Step. **Spatial feedback**, in the **…**
+menu beside Stop, shows the committed outcome and contact targets, normals
+and viewport markers.
 
 Save the authored scene before creating a repeatable play check. Expect the
 mover's terminal translation and any declared contact-count state you use in
@@ -152,7 +153,7 @@ Copy a short PCM16 WAV into the project. In **Content**, import the file
 with a stable asset ID. On a Lua behavior, use **Add property** and choose
 **Sound**. Give it a name, choose the WAV from the Sound selector and set
 gain from 0 to 1. Enter commits the focused field and Escape cancels its
-draft. Save the scene, Reset, Play and use the normal runtime controls.
+draft. Save the scene and press **Play**.
 
 Call `host.play_sound("confirm")` in the enabled behavior's update when
 the action or owned state crosses the desired edge. `confirm` is the

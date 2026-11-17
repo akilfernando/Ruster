@@ -157,7 +157,7 @@ viewport at 1280×800 is at least 520 px tall; `tabwalk` still reaches
 everything.
 
 #### S-05 · Play, Pause, Step, Stop — M — ready
-Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
+Status: done — 2026-11-17, see git log
 **Outcome.** Pressing Play runs the current scene. There is no Reset.
 **Facts.** The runtime toolbar is in
 `crates/rot-editor/src/behavior_ui.rs:2386-2511`. Play is enabled only after
@@ -173,6 +173,10 @@ the views while playing. The MCP play tool gets the same one-step behavior.
 **Done when.** New scene, add a script, press Play: it runs. No "Reset",
 "Runtime" or "Control runtime" label remains. Stop restores the edit view.
 **Not now.** Editing the running game's live values (Phase 2).
+**Notes (agent, 2026-11-17).** No MCP tool starts Play today (play checks run
+headless), so there was nothing to change on the MCP side. About 30 status
+messages still mention Reset; S-08 rewrites them. Focus Game Controls moved
+from Ctrl+Shift+P to Ctrl+Shift+G so Pause can use Unity's key.
 
 #### S-06 · Console, status bar and toasts — M — ready
 Status: open

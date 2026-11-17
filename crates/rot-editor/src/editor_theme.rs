@@ -189,7 +189,6 @@ impl StyleProvider<ButtonStyle> for EditorButtons {
 }
 
 /// Sampled from the opaque face of the bundled mushroom artwork.
-#[cfg(unix)]
 pub const ROT_RED: Color32 = rgb(0xfa2934);
 /// Menu text is quiet at rest and uses egui's normal hover and focus states.
 pub fn text_menu(ui: &mut egui::Ui, label: &str, contents: impl FnOnce(&mut egui::Ui)) {
@@ -310,10 +309,10 @@ pub fn playback_button(ui: &mut egui::Ui, enabled: bool, icon: PlaybackIcon) -> 
         }
     }
     let tooltip = match icon {
-        PlaybackIcon::Play => "Play · run the captured scene",
-        PlaybackIcon::Pause => "Pause · retain the current runtime state",
-        PlaybackIcon::Step => "Step · advance one simulation tick while paused",
-        PlaybackIcon::Stop => "Stop · return to the authored scene",
+        PlaybackIcon::Play => "Play (Ctrl+P)",
+        PlaybackIcon::Pause => "Pause (Ctrl+Shift+P)",
+        PlaybackIcon::Step => "Step (Ctrl+Alt+P)",
+        PlaybackIcon::Stop => "Stop (Ctrl+P)",
     };
     response
         .on_hover_text(tooltip)

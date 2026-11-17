@@ -25,7 +25,7 @@ behind the order is the [parity plan](PARITY-PLAN.md).
 Create a project and a scene; add cubes, spheres, capsules, lights and groups;
 move, rotate and scale with gizmos; assign textures and materials; import OBJ,
 PNG, WAV and simple GLB models, including one transform animation clip;
-attach small Lua scripts; preview with Reset then Play; build a Linux
+attach small Lua scripts; press Play to run the scene; build a Linux
 application through a prepared runtime kit; and let an AI app edit the scene
 through MCP after a scripted setup. The limits are tight (256 objects, 64
 assets, opaque materials only). The honest inventory is in the
@@ -56,6 +56,10 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
   committed first, a drag is waited on up to a second; JSON numbers accepted;
   a restarted adapter reconnects; Edit shows "Undo AI: Move …". Fifty edits:
   0.80 s release, 3.65 s debug (hidden workspace, scripted run).
+- 2026-11-17 · S-05: Play runs the current scene in one action (no Reset);
+  Step from stopped starts paused on the first tick; an edit during Play
+  restarts it; Stop returns to editing. Ctrl+P, Ctrl+Shift+P, Ctrl+Alt+P.
+  A red frame marks Play mode; clicking the playing view takes the keyboard.
 - 2026-11-17 · S-04: one toolbar row (Move/Rotate/Scale, World, Center,
   Snap; Play controls centered; Layout and the AI indicator right; a »
   menu below 1180 px). Scene/Game tabs sit above the viewport; Perspective,

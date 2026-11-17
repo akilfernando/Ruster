@@ -4153,7 +4153,7 @@ impl SceneEditor {
             );
             if self.runtime.visible {
                 ui.strong("Authored components");
-                ui.small("Reset preview to use authored changes.");
+                ui.small("Edits apply to the scene and restart Play.");
             }
             self.ambient_inspector_ui(ui);
             self.display_inspector_ui(ui);
@@ -5128,6 +5128,13 @@ impl SceneEditor {
             Action::Open => self.dialog = Some(true),
             Action::Save => self.save(),
             Action::Export => self.open_export_dialog(),
+            Action::Play | Action::Pause | Action::Step => {
+                self.runtime.queue_shortcut(match action {
+                    Action::Play => crate::behavior_ui::PlayShortcut::Play,
+                    Action::Pause => crate::behavior_ui::PlayShortcut::Pause,
+                    _ => crate::behavior_ui::PlayShortcut::Step,
+                });
+            }
             Action::SaveAs => {
                 if self.apply() {
                     self.save_dialog_continuation = save_commands::Continuation::SaveOnly;
@@ -5633,17 +5640,11 @@ impl SceneEditor {
             });
             ui.separator();
             let dirty = self.session.is_dirty() || self.pending_recovery_drafts();
-            let mode = if self.runtime.frame.is_some() {
-                if self.runtime.visible {
-                    if self.runtime.stale {
-                        "Runtime (stale) · "
-                    } else {
-                        "Runtime · "
-                    }
-                } else if self.runtime.stale {
-                    "Authored / stale runtime · "
+            let mode = if self.runtime.in_play_mode() {
+                if self.runtime.is_playing() {
+                    "Playing · "
                 } else {
-                    "Authored · "
+                    "Paused · "
                 }
             } else {
                 ""
@@ -5917,6 +5918,8 @@ impl SceneEditor {
                 && !(self.recovered_input.is_some() && ui.available_height() < 215.0);
             self.navigation.selection_feedback = true;
             self.navigation.show_editor_grid = !player_view;
+            self.navigation.focusable =
+                self.runtime.input_owned() || (self.runtime.visible && self.runtime.is_playing());
             self.navigation.enabled = !player_view
                 && !self.ai_release_navigation
                 && !self
@@ -6073,6 +6076,15 @@ impl SceneEditor {
             {
                 self.error.clear();
             }
+            // Clicking the running Game view gives it the keyboard.
+            let has_actions = !self.session.authoring().actions.is_empty();
+            let playing_view = self.runtime.visible && self.runtime.is_playing();
+            self.runtime.input_control_click(
+                &ctx,
+                blocked || hud_owns || sidebar_pressed,
+                has_actions,
+                playing_view && viewport.response.clicked(),
+            );
             self.runtime.input_finish(
                 &ctx,
                 &viewport.response,
@@ -6174,6 +6186,15 @@ impl SceneEditor {
             self.paint_hud_overlay(ui, hud_rect, shown_frame.as_ref());
             sidebars.show(self, ui);
             sidebars::round_viewport(ui, hud_rect);
+            if self.runtime.in_play_mode() {
+                // A thin live-red frame marks Play mode (UX-STANDARDS §6).
+                ui.painter().rect_stroke(
+                    hud_rect,
+                    0.0,
+                    egui::Stroke::new(2.0, crate::editor_theme::ROT_RED),
+                    egui::StrokeKind::Inside,
+                );
+            }
         });
         self.process_queued_selection();
         self.observe_view();
@@ -6752,22 +6773,20 @@ mod tests {
                             return None;
                         };
                         let label = text.galley.job.text.as_str();
-                        ["Save", "Scene", "World", "Reset"]
-                            .contains(&label)
-                            .then_some((
-                                label.to_owned(),
-                                text.galley
-                                    .rows
-                                    .iter()
-                                    .fold(egui::Rect::NOTHING, |rect, row| {
-                                        rect.union(row.rect_without_leading_space())
-                                    })
-                                    .translate(text.pos.to_vec2()),
-                            ))
+                        ["Save", "Scene", "World", "…"].contains(&label).then_some((
+                            label.to_owned(),
+                            text.galley
+                                .rows
+                                .iter()
+                                .fold(egui::Rect::NOTHING, |rect, row| {
+                                    rect.union(row.rect_without_leading_space())
+                                })
+                                .translate(text.pos.to_vec2()),
+                        ))
                     })
                     .collect();
                 reset_label.set(output.shapes.iter().find_map(|shape| match &shape.shape {
-                    egui::epaint::Shape::Text(text) if text.galley.job.text == "Reset" => Some((
+                    egui::epaint::Shape::Text(text) if text.galley.job.text == "…" => Some((
                         egui::Rect::from_min_size(text.pos, text.galley.size()),
                         shape.clip_rect,
                     )),
@@ -6786,11 +6805,11 @@ mod tests {
                     }
                     _ => None,
                 });
-                if editor.runtime.frame.is_some() {
-                    let mode = if editor.runtime.visible {
-                        "Runtime"
+                if editor.runtime.in_play_mode() {
+                    let mode = if editor.runtime.is_playing() {
+                        "Playing"
                     } else {
-                        "Authored"
+                        "Paused"
                     };
                     assert!(output.shapes.iter().any(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text.contains(mode) && text.galley.job.text.contains(&editor.session.scene().id))),"rendered scene label must identify the displayed view");
                 }
@@ -6829,12 +6848,12 @@ mod tests {
                 // S-04: one toolbar row (tools left, Play controls centered)
                 // with the Scene/Game tabs below it, above the viewport.
                 assert!(
-                    chrome["World"].right() < chrome["Reset"].left()
-                        && chrome["Reset"].left() > wide_size.x * 0.3
-                        && chrome["Reset"].left() < wide_size.x * 0.6
-                        && chrome["World"].top() < chrome["Reset"].bottom()
-                        && chrome["Reset"].top() < chrome["World"].bottom()
-                        && chrome["Scene"].top() > chrome["Reset"].bottom(),
+                    chrome["World"].right() < chrome["…"].left()
+                        && chrome["…"].left() > wide_size.x * 0.3
+                        && chrome["…"].left() < wide_size.x * 0.6
+                        && chrome["World"].top() < chrome["…"].bottom()
+                        && chrome["…"].top() < chrome["World"].bottom()
+                        && chrome["Scene"].top() > chrome["…"].bottom(),
                     "tools and Play controls share one row above the view tabs: {:?}",
                     *chrome
                 );
@@ -6853,8 +6872,8 @@ mod tests {
                 ..Default::default()
             };
             for (size, key, modifiers) in [
-                (normal_size, egui::Key::P, focus_modifiers),
-                (egui::vec2(640.0, 480.0), egui::Key::P, focus_modifiers),
+                (normal_size, egui::Key::G, focus_modifiers),
+                (egui::vec2(640.0, 480.0), egui::Key::G, focus_modifiers),
                 (normal_size, egui::Key::ArrowRight, egui::Modifiers::NONE),
             ] {
                 let binding = editor
@@ -6889,19 +6908,25 @@ mod tests {
                     },
                 ];
                 frame(&mut editor, size);
-                let (label, clip) = reset_label.get().expect("visible Reset label");
+                // S-05: the focus shortcut lands on Play, just left of "…".
+                let (label, clip) = reset_label.get().expect("visible play options label");
                 let (id, focused, enabled, has_focus) = focused_response
                     .get()
-                    .expect("runtime shortcut must focus Reset");
-                assert!(enabled && has_focus && focused.contains_rect(label));
+                    .expect("runtime shortcut must focus Play");
+                assert!(
+                    enabled
+                        && has_focus
+                        && focused.max.x <= label.min.x + 1.0
+                        && (focused.center().y - label.center().y).abs() < 8.0
+                );
                 assert_eq!(
                     ctx.memory(|memory| memory.focused()),
                     Some(id),
-                    "consumed navigation shortcut must retain Reset focus after end_pass"
+                    "consumed navigation shortcut must retain Play focus after end_pass"
                 );
                 assert!(
                     clip.contains_rect(label),
-                    "focused Reset must be fully visible"
+                    "Play options beside focused Play must be fully visible"
                 );
                 assert!(
                     !editor.runtime.focus_controls,
