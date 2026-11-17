@@ -207,7 +207,7 @@ mod tests {
             SceneEditor::new(rot_scene::Session::new(rot_scene::Scene::demo()).unwrap());
         let ctx = egui::Context::default();
         crate::editor_theme::configure(&ctx);
-        let mut frame = |editor: &mut SceneEditor| {
+        let frame = |editor: &mut SceneEditor| {
             let mut output = ctx.run_ui(
                 egui::RawInput {
                     focused: true,
