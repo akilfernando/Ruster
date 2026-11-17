@@ -56,6 +56,13 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
   Project…; right-click shows in file manager or removes from list. New
   Project offers Empty or Basic 3D (Ground, Cube, Sun, Game view camera).
   First launch: style chooser, then an optional Connect an AI App… row.
+- 2026-11-17 · S-12: Assets is a grid of thumbnails (textures show their
+  image) or a list, with search and a size slider; click shows the asset in
+  the Inspector; drag models into the Scene view, meshes and textures onto
+  objects and material slots; context menu per asset. Files dropped on the
+  editor or picked with Import… (system dialog via `rfd`) are copied into
+  `Assets/` and imported with no form. OS drop not exercised end to end.
+
 - 2026-11-17 · S-07a: Hierarchy, Scene/Game, Inspector and Assets/Console
   are docked tabs (egui_tiles); tabs drag between docks; nothing is painted
   over the view. S-07b: Hierarchy, Inspector, Assets and Console close (×) and
@@ -75,15 +82,6 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
   a row and color them differently": in 16 s it made Red, Green and Blue
   cubes at x = −2, 0, 2 and checked with a screenshot, without prompting.
 
-- 2026-11-17 · A-05: the toolbar mushroom is grey when no AI app is
-  connected, Rot red when one is, and pulses while it works. Clicking it
-  shows the app, Pause AI Edits (edits wait, reads continue), recent AI
-  changes with Undo, Connect an AI App… and Disconnect; toasts on connect and
-  disconnect. AI Connection panel and Preferences → AI in plain words.
-- 2026-11-17 · T-01: Style (Rot or Plain) beside Mode (Dark, Light, System,
-  OLED black) in preferences; switching is instant; a first-launch chooser
-  in the project hub previews both. Themed Wording checkbox stored (used by
-  S-08). Plain Light's accent darkened to #1A62B6 to pass 4.5:1.
 - Older entries: [archive](archive/STATUS-2026-11-17.md).
 
 ## Not verified

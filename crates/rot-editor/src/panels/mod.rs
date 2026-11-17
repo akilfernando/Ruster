@@ -299,7 +299,9 @@ impl egui_tiles::Behavior<Pane> for Dock<'_> {
                     if editor.navigation.player_view != game {
                         editor.set_player_preview(game);
                     }
+                    let rect = ui.max_rect();
                     editor.viewport_pane_ui(ui, self.about_open);
+                    editor.accept_model_drop(ui, rect);
                 }
             }
             Pane::Hierarchy => {

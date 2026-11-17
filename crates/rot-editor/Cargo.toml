@@ -29,6 +29,8 @@ png = "0.18.1"
 tempfile = "3"
 rustix = { version = "0.38.44", features = ["net", "process"] }
 egui_tiles = { path = "../../third_party/egui_tiles" }
+# Native file dialogs through the desktop portal.
+rfd = { version = "0.18", default-features = false, features = ["xdg-portal"] }
 
 [lints]
 workspace = true
