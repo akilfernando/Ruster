@@ -1,5 +1,7 @@
 # Model routing
 
+> **Superseded 2026-11-17.** Model choice is now one small table in the playbook; per-session routing refreshes are retired. Kept as history; do not use it to choose or plan work. See [PLAYBOOK](../PLAYBOOK.md#10-models-and-helpers).
+
 Checked 2026-11-17 for a Claude Code root session; the Codex snapshot was checked 2026-11-16 UTC. This snapshot describes the session's tools. The policy lives in [the development skill](../../skills/rot-development/SKILL.md).
 
 ## Current routing — Claude Code host, 2026-11-17

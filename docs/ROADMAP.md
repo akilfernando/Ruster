@@ -1,5 +1,7 @@
 # Milestone roadmap
 
+> **Superseded 2026-11-17.** The active plan is now the parity plan and backlog. Kept as history; do not use it to choose or plan work. See [PARITY-PLAN](PARITY-PLAN.md) and [BACKLOG](BACKLOG.md).
+
 ## Current delivery roadmap — 2026-11-16
 
 **Latest engine milestone:** [imported transform animation](plans/IMPORTED-TRANSFORM-ANIMATION.md)
@@ -118,7 +120,7 @@ assembly contract below.
 The [assembly runtime/delivery plan](plans/ASSEMBLY-RUNTIME-DELIVERY.md) scopes
 the accepted goal: author a nested mechanism, express a Group-local hinge
 behavior, run it, and ship the same result standalone. Static hierarchy and
-articulated delivery passed through matched kits. See the [acceptance record](STATUS.md#articulated-assembly-delivery-accepted-for-the-bounded-goal--2026-11-16). This bounded follow-up leaves the
+articulated delivery passed through matched kits. See the [acceptance record](archive/STATUS-2026-11-17.md#articulated-assembly-delivery-accepted-for-the-bounded-goal--2026-11-16). This bounded follow-up leaves the
 larger F4a package, prefabs and scene transitions separate. The evening
 editor familiarity walkthrough is independent of implementation.
 
@@ -134,7 +136,7 @@ records the contracts.
 
 [Static glTF import and safe reimport](plans/STATIC-GLTF-REIMPORT.md) covers
 one textured model through placement, source revision, save/reopen and
-standalone delivery. The [verification record](STATUS.md#static-glb-import-and-safe-reimport-integrated-locally--2026-11-16)
+standalone delivery. The [verification record](archive/STATUS-2026-11-17.md#static-glb-import-and-safe-reimport-integrated-locally--2026-11-16)
 records the production identity and failure recovery checks.
 
 ### Post-GLB priority and next capabilities — 2026-11-16
@@ -157,7 +159,7 @@ capability remain primary, and checks do not certify a whole game.
 
 | Order | Bounded creator outcome to scope next | Selection criterion / dependency |
 | --- | --- | --- |
-| 1 | Repeatable play checks | Locally verified through ordinary editor, guarded MCP and relocated runtime. [Acceptance](STATUS.md#repeatable-play-checks-integrated-locally--2026-11-16). |
+| 1 | Repeatable play checks | Locally verified through ordinary editor, guarded MCP and relocated runtime. [Acceptance](archive/STATUS-2026-11-17.md#repeatable-play-checks-integrated-locally--2026-11-16). |
 | 2 | Collision-aware movement | [Bounded kinematic slide](plans/KINEMATIC-MOVE-AND-SLIDE.md) covers one sphere against stationary primitive blockers. Existing overlap and typed state cover the selected occupancy workflow. Cross-binding event delivery remains a separate candidate when a creator workflow needs it. |
 | 3 | Packaged audio feedback | [One-shot WAV feedback](plans/PACKAGED-AUDIO-FEEDBACK.md) passed ordinary authoring, guarded MCP and relocated playback. The bounded output owner supports pause, resume, Stop and Reset. |
 | 4 | Imported transform animation | [Bounded node-transform clips](plans/IMPORTED-TRANSFORM-ANIMATION.md) passed real Blender import and Refresh, the ordinary native editor journey and relocated playback on 2026-11-17. [Evidence](evidence/IMPORTED-TRANSFORM-ANIMATION-2026-11-17.md). Keyboard reach of the Inspector, an actual MCP client run and cost measurement remain open. Skeletal data/blending is separate; move it earlier only for a concrete required actor workflow. |

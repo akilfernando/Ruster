@@ -1,7 +1,7 @@
 # Imported transform animation
 
 Active 2026-11-17 on `claude/rot-next-20261117`, from cumulative
-`09bce7e` plus the [identifier rename](../STATUS.md#identifier-rename-to-rot--2026-11-17).
+`09bce7e` plus the [identifier rename](../archive/STATUS-2026-11-17.md#identifier-rename-to-rot--2026-11-17).
 The user asked the root (Claude Code, `claude-fable-5-2`) to select and
 complete the next slice, which lifts the earlier feature hold for this
 slice. The root selected roadmap row 4 from the

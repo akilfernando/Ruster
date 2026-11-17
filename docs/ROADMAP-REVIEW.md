@@ -1,5 +1,7 @@
 # Post-M3 roadmap review
 
+> **Superseded 2026-11-17.** This decision log belongs to the earlier roadmap. Kept as history; do not use it to choose or plan work. See [PARITY-PLAN](PARITY-PLAN.md).
+
 ## Post-assembly goal selection — 2026-11-16
 
 The user asked Astra to select the next goal independently, plan it, and

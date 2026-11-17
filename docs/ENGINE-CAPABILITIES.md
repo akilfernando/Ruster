@@ -1,5 +1,7 @@
 # Engine capability gaps
 
+> **Superseded 2026-11-17.** The current capability inventory is in the parity plan. Kept as history; do not use it to choose or plan work. See [PARITY-PLAN](PARITY-PLAN.md#2-where-we-are).
+
 Updated2026-11-10. Root/Astra strategic assessment, with state/UI rows reconciled against accepted F2a source `6e44269`, F3a source `7b89344` F3b production source `2eb37a8` and accepted F3c product source `01fe8f9`. Other rows retain their recorded subsystem evidence. This is a product gap inventory and proposed dependency order, not an approved implementation schedule, feature-parity promise or evidence of support. [STATUS](STATUS.md) owns verified deliveries; [ROADMAP](ROADMAP.md) owns milestones.
 
 For a current cross-engine view, see the

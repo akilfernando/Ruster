@@ -34,8 +34,8 @@ Familiarity for experienced Unity and Unreal creators, including everyday editor
 The current cumulative Linux workflow includes static GLB import and
 safe reimport, authored player view, fixed-input play checks, bounded
 kinematic movement and packaged one-shot WAV feedback. See the
-[roadmap](docs/ROADMAP.md) and [current status](docs/STATUS.md) for verified
-scope and remaining acceptance gates.
+[parity plan](docs/PARITY-PLAN.md) and [current status](docs/STATUS.md) for what
+works today and what is planned.
 
 ## Quickstart
 
@@ -147,14 +147,15 @@ python3 scripts/check.py
 
 For a pull request, pass `--base` with its actual target reference. Use `--full` when dependency impact is uncertain. The runner selects formatting, strict Clippy, affected-package tests, tooling tests and documentation checks. GPU lifecycle, native UI and performance evidence are separate checks required when those boundaries change; ordinary CI does not claim to validate a GPU.
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a change. [AGENTS.md](AGENTS.md) documents the human/agent continuity workflow, and [docs/TESTING.md](docs/TESTING.md) is the single testing policy. The project is developed with AI assistance; implementation claims are backed by recorded commands and evidence, not generated-code confidence alone.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a change. [AGENTS.md](AGENTS.md) and the [playbook](docs/PLAYBOOK.md) describe how work is done, and [docs/TESTING.md](docs/TESTING.md) is the single testing policy. The project is developed with AI assistance; implementation claims are backed by recorded commands and evidence, not generated-code confidence alone.
 
 ## Documentation
 
 | Topic | Entry point |
 | --- | --- |
 | Current implementation, verification and limitations | [Status](docs/STATUS.md) |
-| Delivery sequence and acceptance gates | [Roadmap](docs/ROADMAP.md) |
+| Plan and ordered work | [Parity plan](docs/PARITY-PLAN.md), [backlog](docs/BACKLOG.md) |
+| Editor UI standards | [UX standards](docs/UX-STANDARDS.md) |
 | Create, modify and package an application | [Application kit](crates/rot-app/README.md), [distribution](docs/DISTRIBUTION.md), [M7 evidence](docs/evidence/M7.md) |
 | Product direction | [Direction](docs/DIRECTION.md) |
 | Architecture and tradeoffs | [Decisions](docs/decisions/README.md) |

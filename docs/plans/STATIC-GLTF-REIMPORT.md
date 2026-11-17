@@ -1,7 +1,7 @@
 # Static glTF import and safe reimport
 
 Approved on 2026-11-16 after Astra's independent assessment of cumulative
-source `005b33b`. The [acceptance record](../STATUS.md#static-glb-import-and-safe-reimport-integrated-locally--2026-11-16)
+source `005b33b`. The [acceptance record](../archive/STATUS-2026-11-17.md#static-glb-import-and-safe-reimport-integrated-locally--2026-11-16)
 records the verified workflow. The authored player view already gives
 creators a way to preview and ship a small 3D game. The current OBJ and PNG
 catalog supports stable references and refresh for individually imported

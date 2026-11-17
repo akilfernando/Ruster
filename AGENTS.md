@@ -1,35 +1,77 @@
-# Project continuity
+# Rot Engine: instructions for agents
 
-Read `skills/rot-development/SKILL.md` at the start of each root session and follow its model refresh and selective delegation workflow. This project explicitly authorizes delegation under that skill. Child agents use the root's model snapshot and bounded assignment.
+Rot Engine is an open Rust and Vulkan game engine with an editor. The goal is
+feature and UX parity with Unity and Unreal, with performance as a core
+requirement, for two workflows: using the editor by hand, and using it beside
+an AI app that edits the open project through MCP.
 
-For changes and verification, apply `skills/rot-testing/SKILL.md` and the single policy in `docs/TESTING.md`. Select affected checks, justify new tests by unique failure modes, and reuse valid final-state evidence rather than rerunning it across agents.
+## Start here
 
-Read `docs/STATUS.md` before project work, then the relevant design and research documents linked there. Inspect actual code, configuration, and git state before making claims about implementation. Documentation is context, not proof of current behavior.
+1. [docs/PLAYBOOK.md](docs/PLAYBOOK.md): how to work. Short. Read it every
+   session.
+2. [docs/STATUS.md](docs/STATUS.md): where things stand. One page.
+3. [docs/BACKLOG.md](docs/BACKLOG.md): what to do next. Take the first open
+   package.
+4. [docs/UX-STANDARDS.md](docs/UX-STANDARDS.md): read before any editor UI
+   work.
+5. [docs/PARITY-PLAN.md](docs/PARITY-PLAN.md): the phases, the architecture
+   decisions and the performance budgets, when you need the reasons.
 
-For performance-sensitive architecture and optimization, follow `docs/PERFORMANCE.md`: learn from primary engine sources, record tradeoffs, measure before/after, and revise foundations when evidence warrants it. Do not claim competitive superiority from language choice or toy benchmarks.
+Do not read `docs/archive/`, `docs/evidence/`, `docs/HISTORY.md`,
+`docs/ROADMAP.md`, `docs/ROADMAP-REVIEW.md`, `docs/workflow/` or old files in
+`docs/plans/` unless something links you to a specific section. They are
+history, they are large, and they describe ways of working that no longer
+apply. Check the code before believing any document about what the code does.
 
-The user requires proper documentation throughout the work so future Codex sessions do not infer decisions or rely on stale data.
+## What the user requires
 
-For each meaningful change, update the relevant documentation in the same work session:
+These are confirmed by the user. Do not trade them away.
 
-- Keep `docs/STATUS.md` current: implemented state, verification, next steps, unresolved questions, and blockers. Date substantive updates.
-- Separate confirmed user requirements, proposed choices, accepted decisions, and verified implementation. Never promote a proposal through repetition or user silence.
-- Record consequential accepted architecture decisions in `docs/decisions/`, including context, alternatives, rationale, consequences, status, and superseding decisions.
-- Keep research sources and access dates with claims; label conclusions and untested hypotheses. Recheck changeable facts before relying on them.
-- Record verification commands and results, including failures and checks not performed. Do not claim tests or benchmarks that were not run.
-- Update affected setup/API/workflow documentation when behavior changes. Remove or explicitly supersede obsolete guidance; avoid competing sources of truth.
-- Finish substantial work with a concise handoff in `docs/STATUS.md`. Keep current state concise; historical milestones belong in `docs/HISTORY.md`.
+- Parity with Unity and Unreal in features and in everyday editor experience.
+  A creator from either engine should feel at home at once. Small
+  quality-of-life behavior and keyboard use (Enter submits, Escape cancels,
+  Tab traverses, shortcuts are discoverable and remappable) are part of every
+  feature, not polish.
+- Performance and efficiency are core requirements. Lean code, measured.
+- Both workflows are first class. The editor works fully without any AI.
+  Connecting an AI app must be as hands-off as possible.
+- The editor UI follows industry standards and looks finished. Clean, simple,
+  readable.
+- The Rot brand is part of the appeal: visually appealing, the rot motif used
+  subtly, some themed wording. It is opt-out: a plain interface must be
+  available.
+- Spend effort on features and fixes that change the product. Do not build
+  elaborate supporting process.
+- Rust, Vulkan, an open project, creators own their own game logic, and
+  lighting, shaders and textures are core, with LOD and ray tracing later.
+- Be honest in every report: say what was verified and how, and never present
+  an agent's choice as the user's decision.
 
-The user has authorized engine development as of 2026-11-04. Follow `docs/DIRECTION.md` and decision records for the current working scope. Rust, Vulkan, openness, native MCP, documentation continuity and developer experience are requirements. Distinguish agent-selected defaults from explicit user decisions.
+[docs/DIRECTION.md](docs/DIRECTION.md) has the dated history of these.
 
-The user-confirmed [project ethos](docs/DIRECTION.md#project-ethos-serve-the-creator) is to make systems serve creators and their intended creations. Evaluate work by the creation workflow it enables, while preserving explicit milestone scope and distinguishing ambition from verified capability.
+## Testing on the user's desktop
 
-The user requires immediate familiarity for experienced Unity/Unreal creators and treats everyday editor quality of life as non-negotiable. Follow [EDITOR-EXPERIENCE.md](docs/EDITOR-EXPERIENCE.md) for relevant workflow acceptance; do not defer routine usability as optional polish or infer it from system tests.
+The user works on Hyprland workspace 1. While they are using the computer,
+editor test windows must open on workspace 2 without switching workspace or
+taking focus. [`scripts/ui_drive.py`](scripts/ui_drive.py) does this; use it
+instead of launching the editor yourself.
 
-The target creator is comfortable using a keyboard. Treat Enter-to-submit, Escape-to-cancel, keyboard traversal, discoverable/remappable shortcuts and focus ownership as required workflow behavior, including dialogs and numeric/name fields. The 2026-11-04 Unity walkthrough also requires usable antialiasing and perspective/orthographic (ISO) plus axis-view navigation; verify actual quality/cost and interaction rather than relying on system tests.
+- Never send global keyboard or mouse input. Use only the app-scoped events
+  the tool sends to the test window.
+- Never read or change the clipboard, and never touch the user's own windows
+  or projects.
+- Rendering on a hidden workspace can be throttled. Do not report frame
+  rates from it as performance evidence.
+- When the user says they are away, a focused test window is allowed
+  (`--foreground`). Restore the original workspace and window afterwards, and
+  stop if the user becomes active.
+- Injected events are not a human walkthrough. Do not call them one.
 
-## Local desktop testing
+## Commands
 
-The user works on workspace 1. **While the user is actively using the computer**, open Rot Engine test windows on Hyprland workspace 2 silently, without switching the active workspace or stealing focus. Apply Hyprland’s `workspace = "2 silent"` and `no_initial_focus = true` rules to each disposable test launch with `hl.exec_cmd`. The application launcher uses the focused workspace. Verify routing before UI automation; target the exact test window and never send global input to the user's active window. Do not change the user's clipboard for unattended tests. Hidden-workspace rendering may be throttled: label performance evidence accordingly and compare matching conditions. Visual interaction that cannot run in isolation must wait for a suitable opportunity rather than interrupt the user.
-
-Clarified by the user on2026-11-05 while accessing the session from their phone: the no-switch/no-focus stipulation applies when they are actively using the computer. Required desktop tests while they are away are authorized, including focusing workspace2 and exact owned test windows. Do not request the same per-test exception again while that authorization applies. Record the original workspace/window identity and restore them afterward; if unexpected user focus/workspace/input activity appears, stop and revalidate rather than overriding it. Existing human projects/windows and the system clipboard remain protected. App-scoped events are preferred; do not fake internal focus flags or call injected-input evidence a physical human walkthrough.
+```sh
+python3 scripts/check.py                      # the gate: format, Clippy, tests, docs links
+cargo test -p <crate> <test-name>             # one test while iterating
+cargo build -p rot-editor --features inspection
+python3 scripts/ui_drive.py --help            # drive and screenshot the editor
+```

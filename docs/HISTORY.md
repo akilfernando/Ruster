@@ -1,5 +1,7 @@
 # Project history
 
+> **2026-11-17.** Historical record. Do not use it to choose or plan work; see [STATUS](STATUS.md) for the current state.
+
 ## 2026-11-04
 
 - User requested research before implementation for an open Rust/Vulkan game engine with native MCP and support for manual and AI-assisted programmers.
@@ -209,7 +211,7 @@ Named matched medians and foreground/resource investigation references pass with
 
 ## 2026-11-08 — P2a implementation and qualification chronology
 
-The following entries retain checkpoint chronology and failures. Earlier live-process identities and pending-work statements describe their recorded checkpoint. [Current status](STATUS.md#p2a-spatial-queries--clearance-bench--accepted) owns the current handoff.
+The following entries retain checkpoint chronology and failures. Earlier live-process identities and pending-work statements describe their recorded checkpoint. [Current status](archive/STATUS-2026-11-17.md#p2a-spatial-queries--clearance-bench--accepted) owns the current handoff.
 
 ### Original active-goal checkpoint — P2a Spatial Queries / Clearance Bench
 
@@ -353,7 +355,7 @@ The first affected gate stops at strict Clippy's unnecessary lazy Option fallbac
 
 ## 2026-11-08 — P2a final keyboard, idle and delivery qualification
 
-Checkpoint statements below retain their original pending states and failures. Current acceptance is in [status](STATUS.md#p2a-spatial-queries--clearance-bench--accepted).
+Checkpoint statements below retain their original pending states and failures. Current acceptance is in [status](archive/STATUS-2026-11-17.md#p2a-spatial-queries--clearance-bench--accepted).
 
 ### P2a final qualification checkpoints
 

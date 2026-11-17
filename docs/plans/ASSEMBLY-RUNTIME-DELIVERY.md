@@ -1,7 +1,7 @@
 # Assembly runtime and standalone delivery
 
 Accepted within the documented scope on 2026-11-16.
-See the [acceptance record](../STATUS.md#articulated-assembly-delivery-accepted-for-the-bounded-goal--2026-11-16).
+See the [acceptance record](../archive/STATUS-2026-11-17.md#articulated-assembly-delivery-accepted-for-the-bounded-goal--2026-11-16).
 Activated from cumulative source `5e83590`. This plan scopes the
 runtime/delivery follow-up to the [accepted bounds of the hierarchy milestone](../decisions/2026-11-15-bounded-assembly-hierarchy.md).
 Astra reviewed the scope on 2026-11-16. API/format decisions remain open. The

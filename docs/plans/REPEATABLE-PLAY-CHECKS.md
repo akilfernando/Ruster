@@ -2,7 +2,7 @@
 
 Prepared 2026-11-16 by Astra after [research assimilation](../research/AGENT-WORKFLOW-STRATEGY.md).
 The user approved implementation on 2026-11-16 from cumulative source
-`3ca65df`. The [acceptance record](../STATUS.md#repeatable-play-checks-integrated-locally--2026-11-16)
+`3ca65df`. The [acceptance record](../archive/STATUS-2026-11-17.md#repeatable-play-checks-integrated-locally--2026-11-16)
 records the locally verified workflow. The
 [ownership decision](../decisions/2026-11-16-repeatable-play-checks.md)
 captures the implemented sidecar, isolation and packaging contracts.

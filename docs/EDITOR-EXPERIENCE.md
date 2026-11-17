@@ -1,5 +1,7 @@
 # Editor familiarity and everyday usability
 
+> **2026-11-17.** The user requirement stated here stands. The working standard that implements it is [UX-STANDARDS](UX-STANDARDS.md); the allocation tables below are history.
+
 Updated 2026-11-04. **Confirmed user requirement:** an experienced Unity or Unreal creator should arrive in Rot Engine and feel at home immediately. The small quality-of-life behaviors people rely on every day are non-negotiable product requirements. They must be designed into workflows and verified, rather than left as optional polish after the systems work.
 
 This requirement strengthens the [creator ethos](DIRECTION.md#project-ethos-serve-the-creator). It does not assert that the current prototype already meets it. Historical M0–M6 prototype acceptance remains historical; it cannot substitute for editor experience acceptance.

@@ -1,5 +1,7 @@
 # Performance learning and improvement
 
+> **2026-11-17.** Current performance budgets are in the [parity plan](PARITY-PLAN.md#5-performance-budgets). The measurements below are history from the prototype.
+
 Updated2026-11-05. The user explicitly wants ongoing learning from established engines, documented findings and willingness to redesign early foundations. Competitive performance is an objective, not an established result.
 
 ## Working method

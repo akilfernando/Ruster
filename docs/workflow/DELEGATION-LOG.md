@@ -1,5 +1,7 @@
 # Delegation outcomes
 
+> **Superseded 2026-11-17.** Delegation logging is retired. Kept as history; do not use it to choose or plan work. See [PLAYBOOK](../PLAYBOOK.md#10-models-and-helpers).
+
 ## 2026-11-16 — Rot connection presentation
 
 An inherited-model worker reviewed connection UI and ownership read-only. It

@@ -1,6 +1,6 @@
 interface:
   display_name: "Rot Engine Development"
-  short_description: "Adaptive model delegation for Rot Engine development"
-  default_prompt: "Use $rot-development to continue Rot Engine work with current model routing and documented verification."
+  short_description: "Follow the Rot Engine playbook and backlog"
+  default_prompt: "Use $rot-development to pick up the next Rot Engine backlog package and follow the playbook."
 policy:
   allow_implicit_invocation: true

@@ -1,5 +1,7 @@
 # Rot Engine editor design direction
 
+> **Superseded 2026-11-17.** The working editor standard is now UX-STANDARDS. Kept as history; do not use it to choose or plan work. See [UX-STANDARDS](UX-STANDARDS.md).
+
 Updated2026-11-05. This is a working design specification and source record; implementation/acceptance is reported separately in STATUS. The creator workflow and data-safety contracts remain authoritative.
 
 ## Rot Engine identity update — 2026-11-10

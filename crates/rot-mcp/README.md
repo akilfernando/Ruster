@@ -435,7 +435,7 @@ native workflow or exported-application qualification; consult current project
 
 `scene_material_set.material` accepts optional `roughness_texture` (stable asset ID or null). This is a full material replacement: omission means no roughness map, as does explicit null. Inspect/copy the complete material before editing fields you intend to preserve. New/changed references and assignments validate the accepted role and complete UVs for all users, including inactive maps. Unchanged broken references remain repairable during unrelated edits. `material_inspect` returns the canonical map reference and a separate availability/role diagnostic; ready asset content does not mean that an inactive/custom display lane renders it. Shared revision/catalog/pending-draft authority is unchanged.
 
-Scene10/Recovery8/catalog4/content6/descriptor4 and exact appended `roughness_maps` runtime capability are implemented foundation contracts, not completed V3b creator acceptance. Current ordinary map-selection controls are pending the early rendered/exported quality gate. See [V3b status](../../docs/STATUS.md#active-goal--v3b-finish-patterns).
+Scene10/Recovery8/catalog4/content6/descriptor4 and exact appended `roughness_maps` runtime capability are implemented foundation contracts, not completed V3b creator acceptance. Current ordinary map-selection controls are pending the early rendered/exported quality gate. See [V3b status](../../docs/archive/STATUS-2026-11-17.md#active-goal--v3b-finish-patterns).
 
 
 ## Creator input actions (I1a working integration)
@@ -450,7 +450,7 @@ Inspection distinguishes last committed input from current physical keys. Comple
 
 Updated2026-11-07. The outgoing bridge response now uses serde_json's precise float-roundtrip parser so f64contact geometry survives the adapter's structured/text MCP representations. A retained native failure and owning red→green case demonstrate the previous one-bit loss. The actual corrected adapter passes a fresh three-tick SDK trace against unchanged editor/runtime binaries. Combined Cargo builds can unify this feature into other members. This check establishes the outgoing relay boundary. [Accepted0038](../../docs/decisions/0038-spatial-query-feasibility.md) records evidence and remaining P2a acceptance.
 
-Export lifecycle update2026-11-09. Inspect `operation.cleanup_pending` and optional `operation.cleanup_warning` alongside the existing state and receipt. `committed` preserves publication success through later cleanup or scene replacement. `busy` remains true until staging cleanup and worker exit. Cancel applies before publication. A new export waits for the existing worker. Candidate implementation verification and native acceptance are tracked in [current status](../../docs/STATUS.md#reliability-milestones--in-progress).
+Export lifecycle update2026-11-09. Inspect `operation.cleanup_pending` and optional `operation.cleanup_warning` alongside the existing state and receipt. `committed` preserves publication success through later cleanup or scene replacement. `busy` remains true until staging cleanup and worker exit. Cancel applies before publication. A new export waits for the existing worker. Candidate implementation verification and native acceptance are tracked in [current status](../../docs/archive/STATUS-2026-11-17.md#reliability-milestones--in-progress).
 
 ## Owned runtime state — F1 implementation
 
