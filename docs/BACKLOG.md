@@ -51,7 +51,7 @@ packages edit: keep changes there small and merge to the trunk often.
 ### UX lane
 
 #### S-01 · Tab reaches every panel — S — ready
-Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
+Status: done — 2026-11-17, 9fc6522
 **Outcome.** Tab and Shift+Tab move through every control in the Hierarchy
 and Inspector panels.
 **Facts.** Today focus goes menu → Assets controls → toolbar → "Fit", then
