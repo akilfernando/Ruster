@@ -53,8 +53,9 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 
 - 2026-11-17 · S-07a: Hierarchy, Scene/Game, Inspector and Assets/Console
   are docked tabs (egui_tiles); tabs drag between docks; nothing is painted
-  over the view; Window checkboxes hide and show panels. Layout is not saved
-  yet (S-07b).
+  over the view. S-07b: Hierarchy, Inspector, Assets and Console close (×) and
+  reopen from Window into the same dock; the layout is saved to layout.json
+  beside editor.json; F6/Shift+F6 move between docks; Reset Layout.
 - 2026-11-17 · S-11: the Scene view navigates like Unity (Alt+left-drag
   orbit, middle pan, right-drag look, wheel or Alt+right zoom, right button +
   WASD/QE fly, Shift faster, wheel sets fly speed); left-drag box-selects

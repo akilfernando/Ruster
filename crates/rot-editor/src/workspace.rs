@@ -49,9 +49,11 @@ pub(super) enum Action {
     Play,
     Pause,
     Step,
+    NextPanel,
+    PreviousPanel,
 }
 impl Action {
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 39] = [
         Self::New,
         Self::Open,
         Self::Save,
@@ -89,6 +91,8 @@ impl Action {
         Self::Play,
         Self::Pause,
         Self::Step,
+        Self::NextPanel,
+        Self::PreviousPanel,
     ];
     /// Title Case menu label (UX-STANDARDS §8). `name` stays the stored id.
     pub fn label(self) -> &'static str {
@@ -130,6 +134,8 @@ impl Action {
             Self::Play => "Play",
             Self::Pause => "Pause",
             Self::Step => "Step",
+            Self::NextPanel => "Next Panel",
+            Self::PreviousPanel => "Previous Panel",
         }
     }
     pub fn name(self) -> &'static str {
@@ -171,6 +177,8 @@ impl Action {
             Self::Play => "Play",
             Self::Pause => "Pause",
             Self::Step => "Step",
+            Self::NextPanel => "Next panel",
+            Self::PreviousPanel => "Previous panel",
         }
     }
 }
@@ -277,6 +285,8 @@ impl Default for Preferences {
             (Action::FocusRuntime, Key::G, true, true),
             (Action::Play, Key::P, true, false),
             (Action::Pause, Key::P, true, true),
+            (Action::NextPanel, Key::F6, false, false),
+            (Action::PreviousPanel, Key::F6, false, true),
         ];
         Self {
             hierarchy_width: 180.0,
@@ -1142,21 +1152,28 @@ impl Workspace {
             return None;
         }
         let widget_focused = ctx.egui_wants_keyboard_input();
-        if blocked
-            || self.settings_open
-            || (widget_focused && ctx.text_edit_focused())
-            || !ctx.input(|i| i.focused)
-        {
+        if blocked || self.settings_open || !ctx.input(|i| i.focused) {
             return None;
         }
+        // Text fields own typing; only panel switching (F6) passes through.
+        let text_focused = widget_focused && ctx.text_edit_focused();
         // Match each press exactly, even if its modifiers were released later
         // in this frame. Preserve Ctrl+Shift+S independently from Ctrl+S.
         self.prefs.bindings.iter().find_map(|binding| {
             // Focus navigation remains reachable from ordinary focused controls.
+            if text_focused && !matches!(binding.action, Action::NextPanel | Action::PreviousPanel)
+            {
+                return None;
+            }
             if widget_focused
                 && !matches!(
                     binding.action,
-                    Action::FocusRuntime | Action::Play | Action::Pause | Action::Step
+                    Action::FocusRuntime
+                        | Action::Play
+                        | Action::Pause
+                        | Action::Step
+                        | Action::NextPanel
+                        | Action::PreviousPanel
                 )
             {
                 return None;
@@ -1317,29 +1334,6 @@ impl Workspace {
                                 .speed(0.1),
                         );
                     });
-                    ui.checkbox(&mut self.prefs.hierarchy_visible, "Show hierarchy");
-                    ui.checkbox(&mut self.prefs.inspector_visible, "Show inspector");
-                    ui.checkbox(&mut self.prefs.content_visible,"Show Content browser");
-                    for (label, side) in [
-                        ("Hierarchy side", &mut self.prefs.hierarchy_side),
-                        ("Inspector side", &mut self.prefs.inspector_side),
-                    ] {
-                        ui.horizontal(|ui| {
-                            ui.label(label);
-                            ui.selectable_value(side, Side::Left, "Left");
-                            ui.selectable_value(side, Side::Right, "Right");
-                        });
-                    }
-                    if ui.button("Reset layout").clicked() {
-                        let defaults = Preferences::default();
-                        self.prefs.hierarchy_width = defaults.hierarchy_width;
-                        self.prefs.inspector_width = defaults.inspector_width;
-                        self.prefs.hierarchy_side = defaults.hierarchy_side;
-                        self.prefs.inspector_side = defaults.inspector_side;
-                        self.prefs.hierarchy_visible = true;
-                        self.prefs.inspector_visible = true;
-                        self.prefs.content_visible = true;
-                    }
                     ui.separator();
                     ui.strong("AI");
                     ui.checkbox(&mut self.prefs.allow_ai_connections, "Allow AI apps to connect")

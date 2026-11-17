@@ -524,6 +524,11 @@ pub struct SceneEditor {
     dock: Option<egui_tiles::Tree<panels::Pane>>,
     /// A dock tab is being dragged: the viewport ignores the pointer.
     dock_dragging: bool,
+    /// The layout changed since it was last written to layout.json.
+    dock_dirty: bool,
+    /// Move keyboard focus into this pane's first control; the frame it was
+    /// armed in once the anchor holds focus.
+    pane_focus: Option<(panels::Pane, Option<u64>)>,
     ai_drawer: Option<ai_workspace::Drawer>,
     ai_connection_requested: bool,
     ai_release_navigation: bool,
@@ -753,6 +758,8 @@ impl SceneEditor {
             console: Default::default(),
             dock: None,
             dock_dragging: false,
+            dock_dirty: false,
+            pane_focus: None,
             ai_drawer: None,
             ai_connection_requested: false,
             ai_release_navigation: false,
@@ -1943,6 +1950,7 @@ impl SceneEditor {
                 self.close_ready_to_exit = true;
                 self.remember_camera();
                 self.workspace.flush();
+                self.flush_layout();
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             } else {
                 // Existing close-only retry: terminal notifications can arrive
@@ -2842,6 +2850,14 @@ impl SceneEditor {
         );
     }
     fn layout_menu(&mut self, ui: &mut egui::Ui) {
+        self.layout_menu_items(ui);
+        ui.separator();
+        if ui.button("Reset Layout").clicked() {
+            self.reset_layout();
+            ui.close();
+        }
+    }
+    fn layout_menu_items(&mut self, ui: &mut egui::Ui) {
         if ui
             .add(egui::Button::selectable(!self.ai_workspace, "Default"))
             .clicked()
@@ -4729,10 +4745,6 @@ impl SceneEditor {
                 ui.menu_button("Tools", |ui| self.shader_tools_ui(ui))
                     .response
                     .on_hover_text("Shader and content tools");
-                if ui.button("Hide Assets").clicked() {
-                    self.workspace.prefs.content_visible = false;
-                    self.workspace.changed();
-                }
                 if wide {
                     Some(search_field(self, ui, 220.0))
                 } else {
@@ -5344,6 +5356,7 @@ impl SceneEditor {
         self.manipulation.cancel();
         self.remember_camera();
         self.workspace.flush();
+        self.flush_layout();
         if self.recovery.open {
             self.recovery.open = false;
         }
@@ -5469,6 +5482,9 @@ impl SceneEditor {
             Action::Open => self.dialog = Some(true),
             Action::Save => self.save(),
             Action::Export => self.open_export_dialog(),
+            Action::NextPanel | Action::PreviousPanel => {
+                self.cycle_panel(action == Action::NextPanel);
+            }
             Action::Play | Action::Pause | Action::Step => {
                 self.runtime.queue_shortcut(match action {
                     Action::Play => crate::behavior_ui::PlayShortcut::Play,
@@ -5506,8 +5522,7 @@ impl SceneEditor {
                 if self.ai_workspace {
                     self.ai_drawer = Some(ai_workspace::Drawer::Objects);
                 } else {
-                    self.workspace.prefs.hierarchy_visible = true;
-                    self.workspace.changed();
+                    self.show_pane(panels::Pane::Hierarchy, false);
                 }
                 self.hierarchy_focus = true;
             }
@@ -5515,8 +5530,7 @@ impl SceneEditor {
                 if self.ai_workspace {
                     self.ai_drawer = Some(ai_workspace::Drawer::Content);
                 } else {
-                    self.workspace.prefs.content_visible = true;
-                    self.workspace.changed();
+                    self.show_pane(panels::Pane::Assets, false);
                 }
                 self.content_focus = true;
             }
@@ -5996,16 +6010,21 @@ impl SceneEditor {
             });
             crate::editor_theme::text_menu(ui, "Window", |ui| {
                 if !self.ai_workspace {
-                    let mut visibility_changed = false;
-                    for (label, visible) in [
-                        ("Hierarchy", &mut self.workspace.prefs.hierarchy_visible),
-                        ("Inspector", &mut self.workspace.prefs.inspector_visible),
-                        ("Assets", &mut self.workspace.prefs.content_visible),
+                    // Checking a panel shows, selects and focuses its tab.
+                    for pane in [
+                        panels::Pane::Hierarchy,
+                        panels::Pane::Inspector,
+                        panels::Pane::Assets,
+                        panels::Pane::Console,
                     ] {
-                        visibility_changed |= ui.checkbox(visible, label).changed();
-                    }
-                    if visibility_changed {
-                        self.workspace.changed();
+                        let mut visible = self.pane_visible(pane);
+                        if ui.checkbox(&mut visible, pane.title()).changed() {
+                            if visible {
+                                self.show_pane(pane, true);
+                            } else {
+                                self.hide_pane(pane);
+                            }
+                        }
                     }
                     ui.separator();
                 }
@@ -6243,6 +6262,7 @@ impl SceneEditor {
         if ctx.input(|i| i.pointer.any_released()) {
             self.remember_camera();
             self.workspace.flush();
+            self.flush_layout();
         }
         self.show_hud_editor(&ctx);
         self.show_player_view_editor(&ctx);
@@ -7389,8 +7409,10 @@ mod tests {
             frame(&mut editor, egui::vec2(640.0, 480.0));
             editor.runtime.visible = false;
             frame(&mut editor, egui::vec2(640.0, 480.0));
-            editor.workspace.prefs.hierarchy_visible = false;
-            editor.workspace.prefs.inspector_visible = false;
+            // S-07b: closing panels is a dock change, not a preference.
+            editor.hide_pane(panels::Pane::Hierarchy);
+            editor.hide_pane(panels::Pane::Inspector);
+            frame(&mut editor, egui::vec2(640.0, 480.0));
             let viewport = frame(&mut editor, egui::vec2(640.0, 480.0));
             assert!(
                 viewport.width() > 600.0,

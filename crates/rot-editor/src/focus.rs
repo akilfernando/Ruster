@@ -10,9 +10,26 @@ fn pending_id() -> egui::Id {
     egui::Id::unique("rot_focus_scroll_pending")
 }
 
+fn move_on_id() -> egui::Id {
+    egui::Id::unique("rot_focus_move_on")
+}
+
+/// Move focus one stop forward at the start of the next frame. (egui clears
+/// a focus move made late in a frame, so it is replayed here.)
+pub fn move_on_next_frame(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.insert_temp(move_on_id(), true));
+    ctx.request_repaint();
+}
+
 /// Notice when keyboard focus moved to another widget. Call once at the start
 /// of each frame; [`scroll_focus_into_view`] then scrolls it into view.
 pub fn track_focus(ctx: &egui::Context) {
+    if ctx
+        .data_mut(|data| data.remove_temp::<bool>(move_on_id()))
+        .is_some()
+    {
+        ctx.memory_mut(|memory| memory.move_focus(egui::FocusDirection::Next));
+    }
     let focused = ctx.memory(|memory| memory.focused());
     let previous = ctx.data(|data| data.get_temp::<egui::Id>(last_id()));
     if focused == previous {

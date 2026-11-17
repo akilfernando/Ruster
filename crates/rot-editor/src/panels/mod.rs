@@ -4,6 +4,7 @@
 use super::SceneEditor;
 use eframe::egui;
 use egui_tiles::{Container, Linear, LinearDir, SimplificationOptions, Tile, TileId, Tiles, Tree};
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Pane {
@@ -16,6 +17,20 @@ pub enum Pane {
 }
 
 impl Pane {
+    pub const ALL: [Self; 6] = [
+        Self::Hierarchy,
+        Self::Scene,
+        Self::Game,
+        Self::Inspector,
+        Self::Assets,
+        Self::Console,
+    ];
+
+    /// Scene and Game never close: they are the one render surface.
+    pub fn closable(self) -> bool {
+        !matches!(self, Self::Scene | Self::Game)
+    }
+
     pub fn title(self) -> &'static str {
         match self {
             Self::Hierarchy => "Hierarchy",
@@ -54,6 +69,72 @@ pub fn default_tree() -> Tree<Pane> {
     Tree::new(egui::Id::unique("rot_dock"), root, tiles)
 }
 
+/// `layout.json` sits beside the preferences file (S-07b).
+pub fn layout_path(state: Option<&Path>) -> Option<PathBuf> {
+    Some(state?.parent()?.join("layout.json"))
+}
+
+/// Each pane exactly once, as panes.
+fn complete(tree: &Tree<Pane>) -> bool {
+    Pane::ALL.iter().all(|pane| {
+        tree.tiles
+            .iter()
+            .filter(|(_, tile)| matches!(tile, Tile::Pane(found) if found == pane))
+            .count()
+            == 1
+    })
+}
+
+/// The saved layout, or the default with a warning when the file is
+/// missing parts, unreadable or corrupt. A missing file is not a problem.
+pub fn load_tree(path: Option<&Path>) -> (Tree<Pane>, Option<String>) {
+    let Some(path) = path else {
+        return (default_tree(), None);
+    };
+    let bytes = match rot_assets::read_regular_file(path, 1024 * 1024) {
+        Ok(bytes) => bytes,
+        Err(_) if path.symlink_metadata().is_err() => return (default_tree(), None),
+        Err(error) => {
+            return (
+                default_tree(),
+                Some(format!(
+                    "Couldn't read the panel layout; using the default. {error}"
+                )),
+            )
+        }
+    };
+    let tree = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .filter(|value| value["format"] == "rot-editor-layout" && value["version"] == 1)
+        .and_then(|value| {
+            serde_json::from_value::<Tree<Pane>>(value["layouts"]["default"].clone()).ok()
+        })
+        .filter(complete);
+    match tree {
+        Some(tree) => (tree, None),
+        None => (
+            default_tree(),
+            Some("The saved panel layout is damaged; using the default layout.".into()),
+        ),
+    }
+}
+
+/// Write the layout by temporary file and rename.
+pub fn save_tree(path: &Path, tree: &Tree<Pane>) -> std::io::Result<()> {
+    let value = serde_json::json!({
+        "format": "rot-editor-layout",
+        "version": 1,
+        "layouts": { "default": tree },
+    });
+    let bytes = serde_json::to_vec_pretty(&value)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let temp = path.with_extension("json.tmp");
+    std::fs::write(&temp, bytes)?;
+    std::fs::rename(&temp, path)
+}
+
 /// The tile showing `pane`, if the tree has one.
 pub fn tile_of(tree: &Tree<Pane>, pane: Pane) -> Option<TileId> {
     tree.tiles.find_pane(&pane)
@@ -79,6 +160,30 @@ impl egui_tiles::Behavior<Pane> for Dock<'_> {
     ) -> egui_tiles::UiResponse {
         let editor = &mut *self.editor;
         let margin = crate::ui_kit::tokens::SPACE_S as i8;
+        // Window, Find and F6 focus a pane's first control: an anchor takes
+        // focus for one frame, then Tab-order moves on to the next widget.
+        if let Some((target, armed)) = editor.pane_focus {
+            if target == *pane {
+                // Stages follow frames, not passes: egui may lay a frame out twice.
+                let frame = ui.ctx().cumulative_frame_nr();
+                // An explicit id: allocating would shift the pane's auto ids
+                // and the focused control would lose focus next frame.
+                let anchor = ui.interact(
+                    egui::Rect::from_min_size(ui.cursor().min, egui::Vec2::ZERO),
+                    ui.scope_id().with("rot_pane_focus_anchor"),
+                    egui::Sense::FOCUSABLE,
+                );
+                match armed {
+                    None => {
+                        anchor.request_focus();
+                        editor.pane_focus = Some((target, Some(frame)));
+                        crate::focus::move_on_next_frame(ui.ctx());
+                    }
+                    Some(armed_frame) if frame > armed_frame => editor.pane_focus = None,
+                    Some(_) => {}
+                }
+            }
+        }
         match pane {
             Pane::Scene | Pane::Game => {
                 // One render surface: the active tab picks what it shows.
@@ -152,6 +257,21 @@ impl egui_tiles::Behavior<Pane> for Dock<'_> {
         }
     }
 
+    fn is_tab_closable(&self, tiles: &Tiles<Pane>, tile_id: TileId) -> bool {
+        matches!(tiles.get(tile_id), Some(Tile::Pane(pane)) if pane.closable())
+    }
+
+    /// Closing hides the tab in place, so Window brings it back there.
+    fn on_tab_close(&mut self, tiles: &mut Tiles<Pane>, tile_id: TileId) -> bool {
+        tiles.set_visible(tile_id, false);
+        self.editor.dock_dirty = true;
+        false
+    }
+
+    fn on_edit(&mut self, _edit_action: egui_tiles::EditAction) {
+        self.editor.dock_dirty = true;
+    }
+
     fn tab_bar_height(&self, _style: &egui::Style) -> f32 {
         crate::ui_kit::tokens::PANEL_TAB
     }
@@ -215,27 +335,12 @@ impl egui_tiles::Behavior<Pane> for Dock<'_> {
 impl SceneEditor {
     /// The dock below the toolbar: every panel in a tab (S-07a).
     pub(super) fn dock_ui(&mut self, ui: &mut egui::Ui, about_open: bool) {
-        let mut tree = self.dock.take().unwrap_or_else(default_tree);
-        // Window menu checkboxes show and hide panels.
-        let prefs = &self.workspace.prefs;
-        for (pane, visible) in [
-            (Pane::Hierarchy, prefs.hierarchy_visible),
-            (Pane::Inspector, prefs.inspector_visible),
-            (Pane::Assets, prefs.content_visible),
-            (Pane::Console, prefs.content_visible),
-        ] {
-            if let Some(tile) = tile_of(&tree, pane) {
-                if tree.is_visible(tile) != visible {
-                    tree.set_visible(tile, visible);
-                }
-            }
-        }
+        self.ensure_dock();
         // The status bar's counts ask to show the Console.
         if std::mem::take(&mut self.console.open) {
-            if let Some(tile) = tile_of(&tree, Pane::Console) {
-                tree.make_active(|id, _| id == tile);
-            }
+            self.show_pane(Pane::Console, false);
         }
+        let mut tree = self.dock.take().unwrap_or_else(default_tree);
         self.dock_dragging = tree.dragged_id(ui.ctx()).is_some();
         tree.ui(
             &mut Dock {
@@ -246,11 +351,254 @@ impl SceneEditor {
         );
         self.dock = Some(tree);
     }
+
+    /// Load the saved layout once.
+    fn ensure_dock(&mut self) {
+        if self.dock.is_none() {
+            let path = layout_path(self.workspace.state_path());
+            let (tree, warning) = load_tree(path.as_deref());
+            if let Some(warning) = warning {
+                self.console
+                    .push(crate::console::Level::Warning, "Layout", warning);
+            }
+            self.dock = Some(tree);
+        }
+    }
+
+    pub(super) fn pane_visible(&self, pane: Pane) -> bool {
+        self.dock
+            .as_ref()
+            .is_none_or(|tree| tile_of(tree, pane).is_some_and(|tile| tree.is_visible(tile)))
+    }
+
+    /// Show `pane`'s tab, bring it to the front, and optionally focus its
+    /// first control.
+    pub(super) fn show_pane(&mut self, pane: Pane, focus: bool) {
+        self.ensure_dock();
+        let tree = self.dock.as_mut().unwrap();
+        if let Some(tile) = tile_of(tree, pane) {
+            tree.set_visible(tile, true);
+            tree.make_active(|id, _| id == tile);
+            self.dock_dirty = true;
+            if focus {
+                self.pane_focus = Some((pane, None));
+            }
+        }
+    }
+
+    pub(super) fn hide_pane(&mut self, pane: Pane) {
+        if !pane.closable() {
+            return;
+        }
+        self.ensure_dock();
+        let tree = self.dock.as_mut().unwrap();
+        if let Some(tile) = tile_of(tree, pane) {
+            tree.set_visible(tile, false);
+            self.dock_dirty = true;
+        }
+    }
+
+    pub(super) fn reset_layout(&mut self) {
+        self.dock = Some(default_tree());
+        self.dock_dirty = true;
+    }
+
+    /// Write layout.json if the layout changed.
+    pub(super) fn flush_layout(&mut self) {
+        if !std::mem::take(&mut self.dock_dirty) {
+            return;
+        }
+        let (Some(tree), Some(path)) = (&self.dock, layout_path(self.workspace.state_path()))
+        else {
+            return;
+        };
+        if let Err(error) = save_tree(&path, tree) {
+            self.console.push(
+                crate::console::Level::Warning,
+                "Layout",
+                format!("Couldn't save the panel layout: {error}"),
+            );
+        }
+    }
+
+    /// F6 / Shift+F6: the next visible dock in reading order, focusing the
+    /// first control of its active tab.
+    pub(super) fn cycle_panel(&mut self, forward: bool) {
+        let Some(tree) = &self.dock else {
+            return;
+        };
+        let mut docks: Vec<(egui::Rect, Pane)> = tree
+            .tiles
+            .iter()
+            .filter(|(id, _)| tree.is_visible(**id))
+            .filter_map(|(id, tile)| match tile {
+                Tile::Container(Container::Tabs(tabs)) => {
+                    let active = tabs.active.filter(|active| tree.is_visible(*active))?;
+                    match tree.tiles.get(active) {
+                        Some(Tile::Pane(pane)) => Some((tree.tiles.rect(*id)?, *pane)),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+        if docks.is_empty() {
+            return;
+        }
+        docks.sort_by(|a, b| {
+            (a.0.top().round(), a.0.left().round())
+                .partial_cmp(&(b.0.top().round(), b.0.left().round()))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let focused = self
+            .export_context
+            .as_ref()
+            .and_then(|ctx| {
+                ctx.memory(|m| m.focused())
+                    .and_then(|id| ctx.read_response(id))
+            })
+            .map(|response| response.rect.center());
+        let current =
+            focused.and_then(|point| docks.iter().position(|(rect, _)| rect.contains(point)));
+        let count = docks.len();
+        let next = match (current, forward) {
+            (Some(index), true) => (index + 1) % count,
+            (Some(index), false) => (index + count - 1) % count,
+            (None, true) => 0,
+            (None, false) => count - 1,
+        };
+        self.pane_focus = Some((docks[next].1, None));
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn run(editor: &mut SceneEditor, ctx: &egui::Context, events: Vec<egui::Event>) {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                focused: true,
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280.0, 800.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| editor.ui(ui),
+        );
+        output.textures_delta.clear();
+    }
+
+    /// S-07b: a closed panel reopens in the same dock, the layout survives a
+    /// restart, and a damaged file falls back to the default with a warning.
+    #[test]
+    fn layout_saves_reopens_and_survives_damage() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("editor.json");
+        let session = || rot_scene::Session::new(rot_scene::Scene::demo()).unwrap();
+        let ctx = egui::Context::default();
+        crate::editor_theme::configure(&ctx);
+        let mut editor = SceneEditor::with_workspace(
+            session(),
+            crate::workspace::Workspace::at_for_test(state.clone()),
+        );
+        run(&mut editor, &ctx, vec![]);
+        let tree = editor.dock.as_ref().unwrap();
+        let parent = tree
+            .tiles
+            .parent_of(tile_of(tree, Pane::Hierarchy).unwrap());
+        editor.hide_pane(Pane::Hierarchy);
+        run(&mut editor, &ctx, vec![]);
+        assert!(
+            !editor.pane_visible(Pane::Hierarchy),
+            "Window shows it unchecked"
+        );
+        editor.flush_layout();
+        let layout = layout_path(Some(&state)).unwrap();
+        assert!(layout.is_file());
+
+        let mut reopened = SceneEditor::with_workspace(
+            session(),
+            crate::workspace::Workspace::at_for_test(state.clone()),
+        );
+        run(&mut reopened, &ctx, vec![]);
+        assert!(
+            !reopened.pane_visible(Pane::Hierarchy),
+            "closed after restart"
+        );
+        reopened.show_pane(Pane::Hierarchy, true);
+        run(&mut reopened, &ctx, vec![]);
+        let tree = reopened.dock.as_ref().unwrap();
+        assert!(reopened.pane_visible(Pane::Hierarchy));
+        assert_eq!(
+            tree.tiles
+                .parent_of(tile_of(tree, Pane::Hierarchy).unwrap()),
+            parent,
+            "reopens in the same dock"
+        );
+
+        std::fs::write(&layout, b"{not json").unwrap();
+        let mut damaged =
+            SceneEditor::with_workspace(session(), crate::workspace::Workspace::at_for_test(state));
+        run(&mut damaged, &ctx, vec![]);
+        assert!(damaged.pane_visible(Pane::Hierarchy), "default layout");
+        assert_eq!(damaged.console.count(crate::console::Level::Warning), 1);
+    }
+
+    /// S-07b: F6 visits each dock once in reading order and wraps.
+    #[test]
+    fn f6_visits_each_dock_once_and_wraps() {
+        let mut editor =
+            SceneEditor::new(rot_scene::Session::new(rot_scene::Scene::demo()).unwrap());
+        let ctx = egui::Context::default();
+        crate::editor_theme::configure(&ctx);
+        run(&mut editor, &ctx, vec![]);
+        run(&mut editor, &ctx, vec![]);
+        let f6 = egui::Event::Key {
+            key: egui::Key::F6,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let mut visited = Vec::new();
+        for _ in 0..5 {
+            run(&mut editor, &ctx, vec![f6.clone()]);
+            for _ in 0..3 {
+                run(&mut editor, &ctx, vec![]);
+            }
+            let center = ctx
+                .memory(|m| m.focused())
+                .and_then(|id| ctx.read_response(id))
+                .expect("F6 focuses a control")
+                .rect
+                .center();
+            let tree = editor.dock.as_ref().unwrap();
+            let pane = Pane::ALL
+                .into_iter()
+                .find(|pane| {
+                    tile_of(tree, *pane)
+                        .and_then(|tile| tree.tiles.rect(tile))
+                        .is_some_and(|rect| {
+                            tree.is_visible(tile_of(tree, *pane).unwrap()) && rect.contains(center)
+                        })
+                })
+                .expect("focus inside a pane");
+            visited.push(pane);
+        }
+        assert_eq!(
+            visited,
+            vec![
+                Pane::Hierarchy,
+                Pane::Scene,
+                Pane::Inspector,
+                Pane::Assets,
+                Pane::Hierarchy
+            ]
+        );
+    }
 
     /// S-07a: Tab skips the dock's divider strips and tab-bar backgrounds.
     #[test]
