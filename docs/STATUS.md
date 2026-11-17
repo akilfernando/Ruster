@@ -86,10 +86,6 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
   saves (and, in a Rot project, builds) with no environment variables.
   [Decision](decisions/2026-11-17-trust-ai-apps-once.md). Checked with two
   hidden-workspace editor runs around a rebuild, plus a headless test.
-- 2026-11-17 · S-02: UI kit (`crates/rot-editor/src/ui_kit/`) with tokens,
-  palette roles and shared controls; Inter 13 px and JetBrains Mono bundled;
-  24 px controls; Transform is three rows and dragging an axis letter scrubs
-  (Shift fast, Alt slow), committing as one Undo. Fields accept `2*3`, `+=1`.
 - Older entries: [archive](archive/STATUS-2026-11-17.md).
 
 ## Not verified
