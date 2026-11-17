@@ -101,7 +101,12 @@ impl SceneSidebars {
                 "overlay_objects"
             };
             let id = ui.scope_id().with(name);
-            ui.interact(panel.rect, id.with("panel"), egui::Sense::click_and_drag());
+            // Panel backdrop and resize handle are surfaces, not Tab stops.
+            ui.interact(
+                panel.rect,
+                id.with("panel"),
+                egui::Sense::CLICK | egui::Sense::DRAG,
+            );
 
             let content = panel.rect.shrink(8.0);
             let palette = crate::editor_theme::colors(ui);
@@ -134,7 +139,7 @@ impl SceneSidebars {
                     Side::Right => handle.max.x = handle.min.x + 5.0,
                 }
                 let resize = ui
-                    .interact(handle, id.with("resize"), egui::Sense::drag())
+                    .interact(handle, id.with("resize"), egui::Sense::DRAG)
                     .on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
                     .on_hover_text("Drag to resize panel");
                 let sign = if panel.side == Side::Left { 1.0 } else { -1.0 };
@@ -193,6 +198,62 @@ pub(super) fn round_viewport(ui: &egui::Ui, rect: egui::Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// S-01: Tab must walk into the Hierarchy and Inspector and never drop
+    /// focus on a surface such as the viewport (which used to reset to File).
+    #[test]
+    fn tab_reaches_both_side_panels_without_losing_focus() {
+        let mut editor =
+            SceneEditor::new(rot_scene::Session::new(rot_scene::Scene::demo()).unwrap());
+        editor.select_object(Some("left".into()), false);
+        let ctx = egui::Context::default();
+        crate::editor_theme::configure(&ctx);
+        let mut time = 0.;
+        let mut frame = |editor: &mut SceneEditor, events| {
+            time += 0.1;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 800.0),
+                    )),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| editor.ui(ui),
+            );
+            output.textures_delta.clear();
+        };
+        let tab = egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(&mut editor, vec![]);
+        frame(&mut editor, vec![]);
+        let panels = SceneSidebars::new(&editor, editor.captures.rect.unwrap());
+        let mut inside = [false, false];
+        let mut seen = Vec::new();
+        for _ in 0..90 {
+            frame(&mut editor, vec![tab.clone()]);
+            frame(&mut editor, vec![]);
+            let focused = ctx.memory(|memory| memory.focused());
+            let focused = focused.expect("Tab never leaves focus on nothing");
+            if seen.contains(&focused) {
+                break;
+            }
+            seen.push(focused);
+            let center = ctx.read_response(focused).unwrap().rect.center();
+            for (index, panel) in panels.panels.iter().flatten().enumerate() {
+                inside[index] |= panel.rect.contains(center);
+            }
+        }
+        assert_eq!(inside, [true, true], "Tab reached both side panels");
+    }
 
     #[test]
     fn full_height_panels_block_zoom_while_center_uses_the_scene_camera() {

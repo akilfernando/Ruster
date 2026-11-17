@@ -20,6 +20,7 @@ mod editor_theme;
 #[path = "../../support/enrollment.rs"]
 #[allow(dead_code)]
 mod enrollment;
+mod focus;
 mod input_ui;
 mod manipulation;
 mod model;

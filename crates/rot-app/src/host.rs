@@ -453,6 +453,8 @@ impl<A: Application> Host<A> {
                 let mut surface = {
                     let app = self.runtime.app();
                     let selected = app.selected();
+                    // Only a game with keyboard actions makes the surface a focus target.
+                    self.navigation.focusable = app.keyboard_actions().is_some();
                     rot_render::allocate_viewport(
                         ui, app.content().scene(), selected.as_slice(), &mut self.navigation,
                     )

@@ -545,6 +545,9 @@ pub struct NavigationOptions {
     /// A frontend-owned Fit succeeded outside the shared geometry route.
     /// Consumed once to clear its old diagnostic, without claiming a shared Fit.
     pub clear_fit_error: bool,
+    /// The surface may hold keyboard focus (a running game owns the keys).
+    /// Off by default so Tab skips the viewport like any other surface.
+    pub focusable: bool,
 }
 impl Default for NavigationOptions {
     fn default() -> Self {
@@ -562,6 +565,7 @@ impl Default for NavigationOptions {
             toggle_projection: false,
             view_preset: None,
             clear_fit_error: false,
+            focusable: false,
         }
     }
 }
@@ -1030,7 +1034,12 @@ pub fn allocate_viewport(
     }
     let (rect, response) = ui.allocate_exact_size(
         ui.available_size().max(egui::vec2(1.0, 1.0)),
-        egui::Sense::click_and_drag(),
+        // A surface, not a control: Tab skips it unless a game owns the keys.
+        if navigation.focusable {
+            egui::Sense::click_and_drag()
+        } else {
+            egui::Sense::CLICK | egui::Sense::DRAG
+        },
     );
     ViewportSurface {
         rect,

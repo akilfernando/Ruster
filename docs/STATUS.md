@@ -38,7 +38,6 @@ names (`ruster-editor`, `ruster-mcp`). Nothing from this branch is installed.
 
 ## Known problems
 
-- Tab never enters the Hierarchy or Inspector panels (BACKLOG S-01).
 - Connecting an AI app needs scripts and environment variables, and any
   rebuild breaks the registration (A-01, A-02).
 - The MCP demo scripts and parts of `crates/rot-mcp/README.md` describe
@@ -52,6 +51,9 @@ names (`ruster-editor`, `ruster-mcp`). Nothing from this branch is installed.
 
 ## Recently finished
 
+- 2026-11-17 · S-01: Tab and Shift+Tab walk menu → Assets → toolbar →
+  Hierarchy → Inspector and back to File; the focused control scrolls into
+  view. The viewport, panel backdrops and resize handles are no longer stops.
 - 2026-11-17 · Working framework: [PLAYBOOK](PLAYBOOK.md),
   [parity plan](PARITY-PLAN.md), [BACKLOG](BACKLOG.md),
   [UX standards](UX-STANDARDS.md), and `scripts/ui_drive.py` for driving and

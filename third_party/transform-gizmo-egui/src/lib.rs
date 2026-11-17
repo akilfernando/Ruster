@@ -87,7 +87,8 @@ impl GizmoExt for Gizmo {
         let interaction = ui.interact(
             Rect::from_center_size(cursor_pos, Vec2::splat(1.0)),
             ui.scope_id().with("_interaction"),
-            Sense::click_and_drag(),
+            // Not a Tab stop: the 1x1 widget is an input sink, not a control.
+            Sense::CLICK | Sense::DRAG,
         );
         let hovered = interaction.hovered();
 

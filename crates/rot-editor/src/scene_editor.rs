@@ -3825,6 +3825,7 @@ impl SceneEditor {
         egui::ScrollArea::vertical()
             .id_salt("scene_object_scroll")
             .show(ui, |ui| {
+                crate::focus::scroll_focus_into_view(ui);
                 ui.spacing_mut().item_spacing.y = 4.0;
                 ui.spacing_mut().interact_size.y = 26.0;
                 ui.spacing_mut().button_padding.y = 3.0;
@@ -3936,9 +3937,10 @@ impl SceneEditor {
     }
     fn inspector_scroll_ui(&mut self, ui: &mut egui::Ui) {
         self.recovered_input_notice(ui);
-        egui::ScrollArea::vertical()
-            .animated(false)
-            .show(ui, |ui| self.inspector_contents(ui));
+        egui::ScrollArea::vertical().animated(false).show(ui, |ui| {
+            crate::focus::scroll_focus_into_view(ui);
+            self.inspector_contents(ui)
+        });
     }
     fn behavior_inspector_ui(&mut self, ui: &mut egui::Ui) {
         let editable = self.behavior_editable();
@@ -5628,6 +5630,7 @@ impl SceneEditor {
             ui.spacing_mut().item_spacing.y = 7.0;
         }
         let ctx = ui.ctx().clone();
+        crate::focus::track_focus(&ctx);
         self.export_context = Some(ctx.clone());
         self.poll_play_checks();
         self.asset_begin_root_frame(&ctx);
@@ -5741,7 +5744,10 @@ impl SceneEditor {
                     .id_salt("content_panel_scroll")
                     .min_scrolled_height(0.0)
                     .max_height(ui.available_height())
-                    .show(ui, |ui| self.browser_contents(ui));
+                    .show(ui, |ui| {
+                        crate::focus::scroll_focus_into_view(ui);
+                        self.browser_contents(ui)
+                    });
             });
         }
         if self.ai_workspace {
