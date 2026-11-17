@@ -7,6 +7,10 @@ mod color_tools;
 #[allow(dead_code)]
 #[path = "../../support/connection.rs"]
 mod connection;
+mod discovered;
+#[path = "../../support/discovery.rs"]
+#[allow(dead_code)]
+mod discovery;
 #[path = "../../support/enrollment.rs"]
 #[allow(dead_code)]
 mod enrollment;
@@ -198,7 +202,7 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
             .is_some_and(|o| exact_keys(o, &["project"], &[]))
             && arguments["project"]
                 .as_str()
-                .is_some_and(|s| !s.is_empty() && s.len() <= 128);
+                .is_some_and(|s| !s.is_empty() && s.len() <= 1024);
     }
     if player_view_tools::supported(name) {
         return player_view_tools::valid(name, arguments);
@@ -494,8 +498,8 @@ fn tools() -> Value {
     let decimal = json!({"type":"string", "pattern":"^(0|[1-9][0-9]*)$", "maxLength":20,
         "description":"Canonical decimal u64; maximum 18446744073709551615."});
     let mut tools = vec![
-        json!({"name":"project_list","description":"List explicitly registered project records only. Routing is not access approval. Use the host native question UI only if identity needs clarification; never scan filesystem or select newest editor.","inputSchema":object_schema(json!({}),vec![])}),
-        json!({"name":"project_connect","description":"Connect the exact registered project name or ID. A registered saved-project startup may start its pinned native owner; otherwise attach its exact publication. Skip selection when already exact. An enrolled local connector connects without native approval, codes or a browser; legacy manual approval stays separate. Browser handoff is optional. No newest-editor fallback, background reconnect or mutation replay. Include the returned connection project/epoch in every subsequent project call; explicitly disconnect before switching projects.","inputSchema":object_schema(json!({"project":{"type":"string","minLength":1,"maxLength":128}}),vec!["project"])}),
+        json!({"name":"project_list","description":"List the Rot Engine editors that are open, with their project folder and scene (or the registered projects, when a registry is configured).","inputSchema":object_schema(json!({}),vec![])}),
+        json!({"name":"project_connect","description":"Choose which open editor to work with, by project name, project folder, scene file or ID from project_list. A folder or scene file that is not open is opened in Rot Engine. Only needed when several editors are open or none is. With a registry configured, connect the exact registered project and include the returned connection in later calls.","inputSchema":object_schema(json!({"project":{"type":"string","minLength":1,"maxLength":1024}}),vec!["project"])}),
     ];
     for (name, description) in [
         ("inspect", "Inspect the attached editor's session, authored configuration, revision and mutation guards. No history arrays, files or logs."),
@@ -847,6 +851,10 @@ struct Adapter {
     verified: bool,
     startup_error: Option<String>,
     startup_diagnostics: StartupDiagnostics,
+    /// No configuration: find running editors in this directory.
+    discovery: Option<std::path::PathBuf>,
+    /// The editor chosen with project_connect, by process ID.
+    pinned: Option<u32>,
 }
 impl Adapter {
     fn startup_failure(&self, source: StartupResponseSource) -> Value {
@@ -866,12 +874,18 @@ impl Adapter {
             }
             project_tools::Registry::load(std::path::Path::new(&path))
         });
+        let discovery = (registry.is_none() && std::env::var_os("ROT_MCP_LOCATOR").is_none())
+            .then(discovery::directory);
         Self {
             registry,
+            discovery,
             ..Self::default()
         }
     }
     fn call(&mut self, name: &str, arguments: &Value) -> Value {
+        if let Some(directory) = self.discovery.clone() {
+            return self.call_discovered(&directory, name, arguments);
+        }
         if let Some(registry) = &self.registry {
             let Ok(registry) = registry else {
                 return domain_error(

@@ -275,6 +275,8 @@ impl Host {
     pub(super) fn service_bridge(&mut self, ctx: &egui::Context) {
         #[cfg(unix)]
         self.poll_connection(ctx);
+        #[cfg(unix)]
+        self.keep_listening(ctx);
         if self.input.bridge_serviced || self.input.human_pending || self.input.close_requested {
             return;
         }

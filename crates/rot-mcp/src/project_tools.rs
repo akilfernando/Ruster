@@ -315,7 +315,7 @@ mod tests {
         let locator =
             connection::Locator::capture(&socket, "incarnation".into(), "generation".into())
                 .unwrap();
-        let locator_path = dir.path().join("connection.json");
+        let locator_path = dir.path().join("editor.json");
         fs::write(&locator_path, serde_json::to_vec(&locator).unwrap()).unwrap();
         fs::set_permissions(&locator_path, fs::Permissions::from_mode(0o600)).unwrap();
         let path = dir.path().join("registry.json");

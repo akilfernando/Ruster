@@ -457,6 +457,10 @@ pub struct SceneEditor {
     connection_authority: Option<crate::bridge::Authority>,
     connection_incarnation: String,
     connection_generation: String,
+    /// Listen for AI apps whenever a scene is open (the running editor only).
+    ai_listen: bool,
+    ai_listen_retry: Option<std::time::Instant>,
+    ai_listen_scene: Option<PathBuf>,
     retired_connection_receipts: std::collections::VecDeque<Value>,
     save_grant: Option<persistence_commands::SaveGrant>,
     save_sequence: u64,
@@ -671,6 +675,9 @@ impl SceneEditor {
                 .expect("editor incarnation entropy unavailable"),
             connection_generation: crate::connection::unpredictable()
                 .expect("project generation entropy unavailable"),
+            ai_listen: false,
+            ai_listen_retry: None,
+            ai_listen_scene: None,
             retired_connection_receipts: Default::default(),
             save_grant: None,
             save_sequence: 0,
@@ -6550,6 +6557,7 @@ fn run_session(session: Session, startup_projects: bool) -> Result<(), String> {
                     }
                     editor.save_grant = save_grant;
                     editor.creation_export = creation_export;
+                    editor.ai_listen = true;
                     if let Some(path) = editor.session.path() {
                         editor.workspace.remember(path);
                         editor.workspace.welcome = false;

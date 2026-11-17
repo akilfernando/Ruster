@@ -15,6 +15,10 @@ mod commands;
 mod connection;
 mod creation_export;
 mod directory_grant;
+#[cfg(unix)]
+#[path = "../../support/discovery.rs"]
+#[allow(dead_code)]
+mod discovery;
 mod editor_theme;
 #[cfg(unix)]
 #[path = "../../support/enrollment.rs"]

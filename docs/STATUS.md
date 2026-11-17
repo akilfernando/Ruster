@@ -39,8 +39,8 @@ names (`ruster-editor`, `ruster-mcp`). Nothing from this branch is installed.
 ## Known problems
 
 - Tab never enters the Hierarchy or Inspector panels (BACKLOG S-01).
-- Connecting an AI app needs scripts and environment variables, and any
-  rebuild breaks the registration (A-01, A-02).
+- Every new AI adapter process still needs approval in File → Advanced →
+  Rot connection…, and an editor serves one adapter at a time (A-02, A-03).
 - The MCP demo scripts and parts of `crates/rot-mcp/README.md` describe
   variables the code no longer reads (A-06).
 - Play checks refuse scenes that use groups, so they cannot cover an animated
@@ -51,6 +51,13 @@ names (`ruster-editor`, `ruster-mcp`). Nothing from this branch is installed.
   build from this branch until their files are renamed.
 
 ## Recently finished
+
+- 2026-11-17 · A-01: `rot-mcp` with no configuration finds the open editor
+  (`$XDG_RUNTIME_DIR/rot/<pid>.sock` + `.json`), by working directory or as
+  the only one; `project_list`/`project_connect` choose among several or start
+  the editor on a folder. Checked with a hidden-workspace editor and a
+  terminal `rot-mcp` (initialize, tools/list, approve, `scene_inspect`) and a
+  headless two-editors-plus-dead-record test. Approval is unchanged.
 
 - 2026-11-17 · Working framework: [PLAYBOOK](PLAYBOOK.md),
   [parity plan](PARITY-PLAN.md), [BACKLOG](BACKLOG.md),

@@ -1,5 +1,21 @@
 # Rot Engine native MCP adapter
 
+## Connecting (no configuration)
+
+Register `rot-mcp` as a stdio MCP server with no arguments or environment
+variables. While a scene is open, every editor listens at
+`$XDG_RUNTIME_DIR/rot/<pid>.sock` and describes itself in `<pid>.json`
+(project folder, scene, process start). `rot-mcp` picks the editor whose
+project folder contains its working directory, else the only one open.
+With several open, `project_list` lists them and `project_connect` takes a
+project name, folder, scene file or ID; given a folder or scene that is not
+open, it starts Rot Engine on it. With none open, tools answer "Rot Engine
+is not running". The first call still waits for the creator to approve the
+app in File → Advanced → Rot connection…. Turning off
+`allow_ai_connections` in the editor preferences stops listening. The
+`ROT_MCP_PROJECT_REGISTRY` and `ROT_MCP_LOCATOR` modes below still work when
+set.
+
 ## Enrolled native-first connection (implementation candidate)
 
 With matched upgraded artifacts, deliberate one-time local connector enrollment
