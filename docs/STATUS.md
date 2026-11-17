@@ -79,17 +79,6 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
   OLED black) in preferences; switching is instant; a first-launch chooser
   in the project hub previews both. Themed Wording checkbox stored (used by
   S-08). Plain Light's accent darkened to #1A62B6 to pass 4.5:1.
-- 2026-11-17 · A-04: Window → AI Connection… → Connect an AI App… lists the
-  AI apps found (Claude Code, Codex, Claude Desktop, Cursor, VS Code) with
-  Connect, Undo, Copy Configuration and Add AI Configuration to This Project.
-  Only the `rot` entry changes; a backup sits beside the file. Checked on the
-  user's real Claude Code and Codex configs (user go-ahead): connect, the app
-  ran `scene_inspect`, Undo; Codex file byte-identical after.
-
-- 2026-11-17 · S-06: a Console tab beside Assets logs every message once
-  (notices, errors, script errors with file and line, engine warnings); Clear,
-  Collapse and level filters; double-click a script error to open it. The
-  status bar is one line with warning/error counts; toasts confirm actions.
 - Older entries: [archive](archive/STATUS-2026-11-17.md).
 
 ## Not verified
