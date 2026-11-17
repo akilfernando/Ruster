@@ -269,6 +269,7 @@ pub(super) struct AssetDrag {
 #[derive(Clone, Copy)]
 enum ContextAction {
     Create(Action),
+    CreateEmpty,
     DirectionalLight,
     Rename,
     Duplicate,
@@ -589,6 +590,10 @@ pub struct SceneEditor {
     shader_notice: String,
     shader_builtin: bool,
 }
+/// Where Help → Documentation goes: the creator guide in the repository.
+const DOCUMENTATION_URL: &str =
+    "https://github.com/akilfernando/Ruster/blob/main/docs/CREATOR-WORKFLOW.md";
+
 impl SceneEditor {
     fn new(session: Session) -> Self {
         let mut editor = Self::with_workspace(
@@ -2721,6 +2726,11 @@ impl SceneEditor {
             }
             match action {
                 ContextAction::Create(action) => self.queued_action = Some(action),
+                ContextAction::CreateEmpty => {
+                    if self.guard().is_ok() && !self.manipulation.offset_pending() {
+                        self.create_empty();
+                    }
+                }
                 ContextAction::DirectionalLight => {
                     self.create_light_ui(rot_scene::LightKind::Directional {
                         shadow: Default::default(),
@@ -3629,23 +3639,29 @@ impl SceneEditor {
     }
     fn create_entries(ui: &mut egui::Ui) -> Option<ContextAction> {
         let mut selected = None;
-        for (label, action) in [
-            ("Cube", Action::CreateCube),
-            ("Sphere", Action::CreateSphere),
-            ("Capsule", Action::CreateCapsule),
-        ] {
-            if ui.button(label).clicked() {
-                selected = Some(ContextAction::Create(action));
-                ui.close();
-            }
+        if ui.button("Create Empty").clicked() {
+            selected = Some(ContextAction::CreateEmpty);
+            ui.close();
         }
+        ui.menu_button("3D Object", |ui| {
+            for action in [
+                Action::CreateCube,
+                Action::CreateSphere,
+                Action::CreateCapsule,
+            ] {
+                if ui.button(action.label()).clicked() {
+                    selected = Some(ContextAction::Create(action));
+                    ui.close();
+                }
+            }
+        });
         ui.menu_button("Light", |ui| {
-            if ui.button("Point light").clicked() {
-                selected = Some(ContextAction::Create(Action::CreateLight));
+            if ui.button("Directional Light").clicked() {
+                selected = Some(ContextAction::DirectionalLight);
                 ui.close();
             }
-            if ui.button("Directional light").clicked() {
-                selected = Some(ContextAction::DirectionalLight);
+            if ui.button("Point Light").clicked() {
+                selected = Some(ContextAction::Create(Action::CreateLight));
                 ui.close();
             }
         });
@@ -3661,8 +3677,26 @@ impl SceneEditor {
     fn new_group_button(&mut self, ui: &mut egui::Ui) {
         let enabled = self.guard().is_ok() && !self.manipulation.offset_pending();
         if ui.add_enabled(enabled,egui::Button::new("New group")).on_hover_text("Create an empty assembly group. Parent targets through the Inspector; shared Undo and save.").clicked() {
-            let result=self.session.allocate_group_ids(1).and_then(|ids| {let id=ids[0].clone();self.session.create_group(self.session.scene().revision,&id,Some(id.clone()))?;Ok(id)});
-            match result {Ok(id)=>{self.selected=Some(id);self.manipulation.select_only(self.selected.clone());self.sync_draft();self.error.clear();self.notice="Created assembly group; one Undo removes it.".into();},Err(e)=>self.error=e.to_string()}
+            self.create_empty();
+        }
+    }
+    /// Object → Create Empty: an empty group, selected, one Undo step.
+    fn create_empty(&mut self) {
+        let result = self.session.allocate_group_ids(1).and_then(|ids| {
+            let id = ids[0].clone();
+            self.session
+                .create_group(self.session.scene().revision, &id, Some(id.clone()))?;
+            Ok(id)
+        });
+        match result {
+            Ok(id) => {
+                self.selected = Some(id);
+                self.manipulation.select_only(self.selected.clone());
+                self.sync_draft();
+                self.error.clear();
+                self.notice = "Created assembly group; one Undo removes it.".into();
+            }
+            Err(e) => self.error = e.to_string(),
         }
     }
     fn assembly_parent_ui(&mut self, ui: &mut egui::Ui) {
@@ -3728,7 +3762,7 @@ impl SceneEditor {
         }
     }
     fn hierarchy_contents(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Objects");
+        ui.heading("Hierarchy");
         let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
         let escape = ui.input(|i| i.key_pressed(egui::Key::Escape) && i.modifiers.is_none());
         let search = ui.add(
@@ -4266,14 +4300,14 @@ impl SceneEditor {
         };
         let search = ui
             .horizontal_wrapped(|ui| {
-                ui.heading("Content");
+                ui.heading("Assets");
                 if crate::editor_theme::primary_button(ui, "Import Asset…").clicked() {
                     self.open_asset_import();
                 }
                 ui.menu_button("Tools", |ui| self.shader_tools_ui(ui))
                     .response
                     .on_hover_text("Shader and content tools");
-                if ui.button("Hide Content").clicked() {
+                if ui.button("Hide Assets").clicked() {
                     self.workspace.prefs.content_visible = false;
                     self.workspace.changed();
                 }
@@ -5337,7 +5371,24 @@ impl SceneEditor {
                 ui.spacing_mut().item_spacing.x = 3.0;
             }
             crate::editor_theme::text_menu(ui, "File", |ui| {
-                if ui.button("Switch Project…").clicked() {
+                for action in [Action::New, Action::Open] {
+                    self.command_menu_item(ui, action.label(), action);
+                }
+                self.recent_scenes_menu(ui, "Open Recent");
+                for action in [Action::Save, Action::SaveAs] {
+                    self.command_menu_item(ui, action.label(), action);
+                }
+                ui.separator();
+                if ui.button("New Project…").clicked() {
+                    if self.session.is_dirty() || self.guard().is_err() || self.asset_busy() {
+                        self.error = "Save the current project and finish or cancel pending edits before creating a project.".into();
+                    } else {
+                        self.runtime.release_input(ui.ctx());
+                        self.new_project_form = Some(project_picker::ProjectForm::new_project());
+                    }
+                    ui.close();
+                }
+                if ui.button("Open Project…").clicked() {
                     if self.needs_recovery() || self.guard().is_err() || self.asset_busy() {
                         self.error = "Save the current scene and finish or cancel pending edits before switching projects.".into();
                     } else {
@@ -5349,62 +5400,64 @@ impl SceneEditor {
                     }
                     ui.close();
                 }
-                if ui.button("New Project…").clicked() {
-                    if self.session.is_dirty() || self.guard().is_err() || self.asset_busy() {
-                        self.error = "Save the current project and finish or cancel pending edits before creating a project.".into();
-                    } else {
-                        self.runtime.release_input(ui.ctx());
-                        self.new_project_form = Some(project_picker::ProjectForm::new_project());
-                    }
-                    ui.close();
-                }
-                for (label, action) in [
-                    ("New scene", Action::New),
-                    ("Open scene…", Action::Open),
-                    ("Save", Action::Save),
-                    ("Save as…", Action::SaveAs),
-                    ("Export application…", Action::Export),
-                ] {
-                    self.command_menu_item(ui, label, action);
-                }
-                if ui.button("Play checks…").clicked() {
-                    self.open_play_checks();
-                    ui.close();
-                }
-                self.recent_scenes_menu(ui, "Recent scenes");
                 ui.separator();
-                if ui.button("Recovery checkpoints…").clicked() {
-                    self.recovery.show_picker();
-                    self.manipulation.cancel();
-                    ui.close();
+                self.command_menu_item(ui, Action::Export.label(), Action::Export);
+                ui.separator();
+                self.command_menu_item(ui, Action::Quit.label(), Action::Quit);
+            });
+            crate::editor_theme::text_menu(ui, "Edit", |ui| {
+                for action in [Action::Undo, Action::Redo] {
+                    self.command_menu_item(ui, action.label(), action);
                 }
-                if ui.button("Workspace and shortcuts…").clicked() {
-                    self.workspace.settings_open = true;
-                    ui.close();
+                ui.separator();
+                for action in [
+                    Action::Copy,
+                    Action::Paste,
+                    Action::Duplicate,
+                    Action::Rename,
+                    Action::Delete,
+                ] {
+                    self.command_menu_item(ui, action.label(), action);
                 }
-                ui.menu_button("Advanced", |ui| {
-                    #[cfg(unix)]
-                    if ui.button("Rot connection…").clicked() {
-                        self.ai_connection_requested = true;
-                        ui.close();
-                    }
-                    if !self.ai_workspace && ui.button("AI workspace").clicked() {
-                        self.set_ai_workspace(true, &ui.ctx().clone());
+                ui.separator();
+                for action in [Action::SelectAll, Action::Frame] {
+                    self.command_menu_item(ui, action.label(), action);
+                }
+                ui.separator();
+                ui.menu_button("Project Settings", |ui| {
+                    if ui.button("Input Actions…").clicked() {
+                        if self.recovered_input.is_some() {
+                            self.recovered_input_open = true;
+                            self.recovered_input_focused = false;
+                        } else {
+                            self.input_actions_open = true;
+                        }
+                        self.runtime.release_input(ui.ctx());
                         ui.close();
                     }
                 });
-                if compact && ui.button("About Rot Engine").clicked() {
-                    open_about = true;
+                if ui.button("Preferences…").clicked() {
+                    self.workspace.settings_open = true;
                     ui.close();
                 }
-                self.command_menu_item(ui, "Close window", Action::Quit);
             });
-            self.create_menu(ui);
-            crate::editor_theme::text_menu(ui, "Edit", |ui| {
+            crate::editor_theme::text_menu(ui, "Assets", |ui| {
+                if ui.button("Import…").clicked() {
+                    self.open_asset_import();
+                    ui.close();
+                }
+                ui.menu_button("Create", |ui| self.shader_tools_ui(ui));
+            });
+            crate::editor_theme::text_menu(ui, "Object", |ui| {
+                if let Some(action) = Self::create_entries(ui) {
+                    self.queued_context = Some((None, action));
+                }
+                ui.separator();
+                self.player_view_controls(ui, true);
                 if ui
                     .add_enabled(
                         self.hud_draft.is_some() || self.hud_editable(),
-                        egui::Button::new("HUD…"),
+                        egui::Button::new("Game UI…"),
                     )
                     .clicked()
                 {
@@ -5412,38 +5465,9 @@ impl SceneEditor {
                     self.runtime.release_input(ui.ctx());
                     ui.close();
                 }
-                if ui.button("Input actions…").clicked() {
-                    if self.recovered_input.is_some() {
-                        self.recovered_input_open = true;
-                        self.recovered_input_focused = false;
-                    } else {
-                        self.input_actions_open = true;
-                    }
-                    self.runtime.release_input(ui.ctx());
-                    ui.close();
-                }
                 ui.separator();
-                for action in [
-                    Action::Undo,
-                    Action::Redo,
-                    Action::Copy,
-                    Action::Paste,
-                    Action::Duplicate,
-                    Action::Delete,
-                    Action::Rename,
-                    Action::SelectAll,
-                ] {
-                    self.command_menu_item(ui, action.name(), action);
-                }
-                ui.menu_button("Tools", |ui| {
-                    for action in [Action::Move, Action::Rotate, Action::Scale] {
-                        self.command_menu_item(ui, action.name(), action);
-                    }
-                });
-                ui.separator();
-
-                ui.menu_button("Assign mesh…", |ui| {
-                    if ui.button("Procedural cube").clicked() {
+                ui.menu_button("Mesh", |ui| {
+                    if ui.button("Procedural Cube").clicked() {
                         if let Err(error) = self.assign_mesh(None) {
                             self.error = error;
                         }
@@ -5470,78 +5494,68 @@ impl SceneEditor {
                     }
                 });
             });
-            crate::editor_theme::text_menu(ui, "View", |ui| {
-                self.player_view_controls(ui, true);
-                ui.separator();
+            crate::editor_theme::text_menu(ui, "Window", |ui| {
                 if !self.ai_workspace {
                     let mut visibility_changed = false;
                     for (label, visible) in [
-                        ("Objects", &mut self.workspace.prefs.hierarchy_visible),
+                        ("Hierarchy", &mut self.workspace.prefs.hierarchy_visible),
                         ("Inspector", &mut self.workspace.prefs.inspector_visible),
-                        ("Content browser", &mut self.workspace.prefs.content_visible),
+                        ("Assets", &mut self.workspace.prefs.content_visible),
                     ] {
                         visibility_changed |= ui.checkbox(visible, label).changed();
                     }
                     if visibility_changed {
                         self.workspace.changed();
                     }
+                    ui.separator();
                 }
-                ui.separator();
-                for action in [
-                    Action::Frame,
-                    Action::Projection,
-                    Action::FindObjects,
-                    Action::FindContent,
-                    Action::FocusRuntime,
-                ] {
-                    self.command_menu_item(ui, action.name(), action);
+                #[cfg(unix)]
+                if ui.button("AI Connection…").clicked() {
+                    self.ai_connection_requested = true;
+                    ui.close();
                 }
-                ui.menu_button("View presets", |ui| {
-                    for action in [
-                        Action::Front,
-                        Action::Back,
-                        Action::Left,
-                        Action::Right,
-                        Action::Top,
-                        Action::Bottom,
-                        Action::Isometric,
-                        Action::FreeView,
-                    ] {
-                        self.command_menu_item(ui, action.name(), action);
-                    }
-                });
-                if ui.button("Reset camera").clicked() {
-                    self.navigation.reset = true;
+                if ui.button("Play Checks…").clicked() {
+                    self.open_play_checks();
+                    ui.close();
+                }
+                if ui.button("Recovery Checkpoints…").clicked() {
+                    self.recovery.show_picker();
+                    self.manipulation.cancel();
                     ui.close();
                 }
                 ui.separator();
-                ui.menu_button("Theme", |ui| {
-                    for choice in crate::editor_theme::ThemeChoice::ALL {
-                        if ui
-                            .radio_value(&mut self.workspace.prefs.theme, choice, choice.label())
-                            .clicked()
-                        {
-                            self.workspace.changed();
-                            ui.close();
-                        }
+                ui.menu_button("Layouts", |ui| {
+                    if ui
+                        .add(egui::Button::selectable(!self.ai_workspace, "Default"))
+                        .clicked()
+                    {
+                        self.set_ai_workspace(false, &ui.ctx().clone());
+                        ui.close();
                     }
-                });
-            });
-            crate::editor_theme::text_menu(ui, "Content", |ui| {
-                if ui.button("Import Asset…").clicked() {
-                    self.open_asset_import();
-                    ui.close();
-                }
-                self.shader_tools_ui(ui);
-            });
-            if !compact {
-                crate::editor_theme::text_menu(ui, "Help", |ui| {
-                    if ui.button("About Rot Engine").clicked() {
-                        open_about = true;
+                    if ui
+                        .add(egui::Button::selectable(self.ai_workspace, "AI Workspace"))
+                        .clicked()
+                    {
+                        self.set_ai_workspace(true, &ui.ctx().clone());
                         ui.close();
                     }
                 });
-            }
+            });
+            crate::editor_theme::text_menu(ui, "Help", |ui| {
+                if ui.button("Documentation").clicked() {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(DOCUMENTATION_URL));
+                    ui.close();
+                }
+                if ui.button("Keyboard Shortcuts…").clicked() {
+                    self.workspace.settings_open = true;
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button("About Rot Engine").clicked() {
+                    open_about = true;
+                    ui.close();
+                }
+            });
             ui.separator();
             let dirty = self.session.is_dirty() || self.pending_recovery_drafts();
             let mode = if self.runtime.frame.is_some() {
@@ -6701,7 +6715,7 @@ mod tests {
                             return None;
                         };
                         let label = text.galley.job.text.as_str();
-                        ["Save", "Scene View", "Space", "Reset"]
+                        ["Save", "Scene", "Space", "Reset"]
                             .contains(&label)
                             .then_some((
                                 label.to_owned(),
@@ -6776,11 +6790,11 @@ mod tests {
                 let chrome = chrome.borrow();
                 assert!(!chrome.contains_key("Save"), "Save belongs in File");
                 assert!(
-                    chrome["Scene View"].right() < chrome["Space"].left()
+                    chrome["Scene"].right() < chrome["Space"].left()
                         && chrome["Space"].right() < chrome["Reset"].left()
                         && chrome["Reset"].left() > wide_size.x * 0.6
-                        && chrome["Scene View"].top() < chrome["Reset"].bottom()
-                        && chrome["Reset"].top() < chrome["Scene View"].bottom(),
+                        && chrome["Scene"].top() < chrome["Reset"].bottom()
+                        && chrome["Reset"].top() < chrome["Scene"].bottom(),
                     "wide view, tools, and runtime groups share one row: {:?}",
                     *chrome
                 );

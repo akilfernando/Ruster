@@ -52,6 +52,9 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 
 ## Recently finished
 
+- 2026-11-17 · S-03: menus are File, Edit, Assets, Object, Window, Help in
+  Title Case with shortcuts; panels are titled Hierarchy and Assets; the
+  view toggle reads Scene and Game; Reset Camera moved to View Presets.
 - 2026-11-17 · S-02: UI kit (`crates/rot-editor/src/ui_kit/`) with tokens,
   palette roles and shared controls; Inter 13 px and JetBrains Mono bundled;
   24 px controls; Transform is three rows and dragging an axis letter scrubs

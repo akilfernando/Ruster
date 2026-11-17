@@ -17,7 +17,7 @@ impl Icon {
             Self::Move => "Move",
             Self::Rotate => "Rotate",
             Self::Scale => "Scale",
-            Self::Camera => "Edit Player View…",
+            Self::Camera => "Game Camera…",
             Self::Duplicate => "Duplicate",
             Self::Delete => "Delete",
         }

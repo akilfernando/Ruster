@@ -146,29 +146,32 @@ impl SceneEditor {
             || self.hud_open
             || self.input_actions_open;
         let mut close = false;
-        if ui
-            .add_enabled(
-                !blocked,
-                egui::Button::selectable(!self.navigation.player_view, "Scene View"),
-            )
-            .clicked()
+        // The menu offers only Camera…; Scene and Game are view tabs.
+        if !menu
+            && ui
+                .add_enabled(
+                    !blocked,
+                    egui::Button::selectable(!self.navigation.player_view, "Scene"),
+                )
+                .clicked()
         {
             self.set_player_preview(false);
             close = true;
         }
-        if ui
-            .add_enabled(
-                !blocked && available,
-                egui::Button::selectable(self.navigation.player_view, "Player View"),
-            )
-            .on_disabled_hover_text("Author a player view to preview its framing.")
-            .clicked()
+        if !menu
+            && ui
+                .add_enabled(
+                    !blocked && available,
+                    egui::Button::selectable(self.navigation.player_view, "Game"),
+                )
+                .on_disabled_hover_text("Set up the game camera to see what the player sees.")
+                .clicked()
         {
             self.set_player_preview(true);
             close = true;
         }
         let edit = if menu {
-            ui.add_enabled(!blocked, egui::Button::new("Edit Player View…"))
+            ui.add_enabled(!blocked, egui::Button::new("Camera…"))
         } else {
             super::toolbar_icons::Icon::Camera.button(ui, !blocked, None, "")
         };

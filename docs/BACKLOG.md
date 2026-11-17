@@ -33,7 +33,7 @@ One line each. Anyone may add; the user or a planning pass orders them.
 - An open scene repaints about 3 frames per 10 s while idle; the hub draws
   none (P-01, 2026-11-17).
 - Scrubbing an Inspector axis letter commits on release; the viewport does not follow live during the drag (S-02).
-- `human_and_deferred_assets_share_admission_authority_and_terminal_adoption` failed 2 of ~40 runs, only while other builds loaded the machine; cause not found.
+- `human_and_deferred_assets_share_admission_authority_and_terminal_adoption` races the asset worker thread and fails under CPU load, on main too (9 of 18 runs with three suites in parallel, 2026-11-17).
 - The legacy logistics prototype (`rot-core`, `rot-cli`, `rot-viewer`,
   `rot-script`, `examples/yard-app`, editor `ui.rs` and `model.rs`, five
   legacy MCP tools) is unused by the scene editor. Proposal: delete it.
@@ -106,7 +106,7 @@ the gate passes.
 rebuilt in later packages.
 
 #### S-03 · Menu bar and names — S — ready
-Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
+Status: done — 2026-11-17, see git log
 **Outcome.** Menus are where a Unity or Unreal user looks, with standard
 names.
 **Facts.** Menus are built in `scene_menu_contents`
@@ -128,6 +128,10 @@ Rename panel titles to Hierarchy, Assets, Scene and Game.
 **Done when.** The menus match this list in screenshots; every old command
 is still reachable; compact-width collapsing still works.
 **Not now.** A Component menu (arrives with components in Phase 2).
+**Left for later (agent, 2026-11-17).** Build and Run (C-09), Assets → Refresh
+(C-04), Play/Pause/Step in Edit (S-05), Script Debugger in Window (no
+standalone window yet), real Project Settings… and Preferences… windows (S-10;
+today Project Settings ▸ Input Actions… and Preferences… open the old modal).
 
 #### S-04 · One toolbar; view options move into the viewport — M — ready
 Status: open

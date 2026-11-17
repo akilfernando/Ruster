@@ -48,7 +48,7 @@ impl SceneEditor {
                         self.ai_tools(ui);
                     }
                     self.scene_menus(ui);
-                    if ui.button("Content").clicked() && !self.drafts() {
+                    if ui.button("Assets").clicked() && !self.drafts() {
                         self.ai_drawer = Some(Drawer::Content);
                         ui.close();
                     }
@@ -128,7 +128,7 @@ impl SceneEditor {
         let output = egui::Window::new(match drawer {
             Drawer::Objects => "Objects",
             Drawer::Selection => "Selection",
-            Drawer::Content => "Content",
+            Drawer::Content => "Assets",
         })
         .id(egui::Id::unique("ai_workspace_drawer"))
         .open(&mut open)

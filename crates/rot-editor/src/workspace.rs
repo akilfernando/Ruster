@@ -84,6 +84,45 @@ impl Action {
         Self::CreateCapsule,
         Self::CreateLight,
     ];
+    /// Title Case menu label (UX-STANDARDS §8). `name` stays the stored id.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::New => "New Scene",
+            Self::Open => "Open Scene…",
+            Self::Save => "Save",
+            Self::SaveAs => "Save As…",
+            Self::Export => "Build…",
+            Self::Undo => "Undo",
+            Self::Redo => "Redo",
+            Self::Copy => "Copy",
+            Self::Paste => "Paste",
+            Self::Duplicate => "Duplicate",
+            Self::Delete => "Delete",
+            Self::Move => "Move Tool",
+            Self::Rotate => "Rotate Tool",
+            Self::Scale => "Scale Tool",
+            Self::Frame => "Frame Selected",
+            Self::Projection => "Toggle Projection",
+            Self::Front => "Front View",
+            Self::Back => "Back View",
+            Self::Left => "Left View",
+            Self::Right => "Right View",
+            Self::Top => "Top View",
+            Self::Bottom => "Bottom View",
+            Self::Isometric => "Isometric View",
+            Self::FreeView => "Free View",
+            Self::Quit => "Exit",
+            Self::FindObjects => "Search Hierarchy",
+            Self::FindContent => "Search Assets",
+            Self::Rename => "Rename",
+            Self::SelectAll => "Select All",
+            Self::FocusRuntime => "Focus Game Controls",
+            Self::CreateCube => "Cube",
+            Self::CreateSphere => "Sphere",
+            Self::CreateCapsule => "Capsule",
+            Self::CreateLight => "Point Light",
+        }
+    }
     pub fn name(self) -> &'static str {
         match self {
             Self::New => "New scene",

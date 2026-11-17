@@ -1022,6 +1022,16 @@ pub fn allocate_viewport(
                     ui.close();
                 }
             }
+            ui.separator();
+            if ui
+                .add_enabled(navigation_enabled, egui::Button::new("Reset Camera"))
+                .clicked()
+            {
+                // Applied at the start of the next frame.
+                navigation.reset = true;
+                ui.ctx().request_repaint();
+                ui.close();
+            }
         });
         if ui
             .add_enabled(navigation_enabled, egui::Button::new("Fit"))
