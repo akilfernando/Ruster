@@ -19,6 +19,12 @@ package in your lane under **Now**. How to work is in the
 - **Outside the repository.** The installed editor is still the pre-rename
   build. Two MCP entries in `~/.codex/config.toml` point at old names. Projects in
   `~/Projects/Ruster-Creations` use pre-rename file names.
+- **For the user (2026-11-17).** A-04's real-config test left
+  `~/.claude.json.rot-backup` and `~/.codex/config.toml.rot-backup` (safe to
+  delete) and an empty `"mcpServers": {}` in `~/.claude.json`; no `rot`
+  entry remains in either config. The installed `~/.local/bin` build is
+  P-01's; reinstall with `scripts/install_local.py`, then use Window ▸ AI
+  Connection… ▸ Connect an AI App… from the installed editor.
 - **Answered 2026-11-17 (user).** A-04 may add the `rot` entry to the user's
   real Claude Code and Codex configs (backup, that entry only, Undo). P-02 may
   replace the installed pre-rename build (old one kept for `--rollback`).
@@ -326,7 +332,7 @@ holds no panel body; one `ui_drive.py` screenshot is unchanged; the gate
 passes.
 
 #### S-08 · String table and wording pass — M — ready
-Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
+Status: in progress (paused 2026-11-17). Part 1 merged (1e740e1): `strings.rs` table, themed wording. Part 2 not started: the long-message and internal-word sweep (252 literals over 80 chars, 351 banned-word hits before exclusions; many are AI-facing protocol text to leave), and wiring EmptyHierarchy, OpeningProject, Building, BuildFinished, then removing `#[allow(dead_code)]` on `Text`.
 **Outcome.** All text follows the [writing rules](UX-STANDARDS.md#8-writing)
 and comes from one table with Plain and Rot wording.
 **Facts.** Strings are inline. About 337 literals are longer than 80
@@ -361,7 +367,7 @@ label; the palette can run every command.
 **Not now.** Routing MCP through commands (C-06).
 
 #### S-10 · Preferences, Project Settings and Shortcuts — M — ready
-Status: open
+Status: in progress (paused 2026-11-17) on branch `work/S-10-settings` (4c6bd2d, based on 4055938, builds and tests pass, gate not run). Done: Preferences window with pages, Shortcuts page, Project Settings window. Left: rebase on main, screenshots, Tab order, gate, docs.
 **Outcome.** Standard settings windows under Edit.
 **Facts.** Settings are the "Workspace and shortcuts" modal
 (`workspace.rs:1027`, about 670 lines) with explicit Save and Close buttons.
@@ -417,7 +423,7 @@ camera). First launch shows the style chooser from T-01 and an optional
 **Done when.** Screenshots pass the checklist in both styles.
 
 #### T-02 · Rot motif and themed wording — S — ready
-Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
+Status: in progress (paused 2026-11-17) on branch `work/T-02-motif` (3323680). Done: `ui_kit/motif.rs` (sprout line art in empty states, spore spinner, hub and About backgrounds). Left: view Rot and Plain screenshots, one themed line per screen, show the user.
 **Outcome.** The Rot style has its character, lightly.
 **Do.** Follow [the motif](UX-STANDARDS.md#the-motif): empty-state line art,
 the three-spore loading indicator, the AI mushroom pulse, hub and About

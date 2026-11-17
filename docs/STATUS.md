@@ -6,9 +6,9 @@ Updated 2026-11-17. This file stays under 100 lines. Older entries are in
 ## Where to work
 
 - **Trunk:** `main`, on `origin`. Branch from it and merge back to it.
-- **One checkout:** `/home/akilf/Projects/rot_engine`. All other branches
-  were removed on 2026-11-17; each tip is kept as an `archive/<name>` tag on
-  `origin`, including work that had not been merged. Two git stashes hold
+- **One checkout:** `/home/akilf/Projects/rot_engine`. Open branches on
+  `origin`: `work/S-10-settings`, `work/T-02-motif` (paused work). Older
+  branch tips are kept as `archive/<name>` tags on `origin`. Two git stashes hold
   small status notes from older sessions. The detached worktrees under
   `~/Projects/Ruster-Audits` and `~/Projects/Ruster-Creations` are retained
   evidence; leave them.
@@ -17,8 +17,13 @@ Updated 2026-11-17. This file stays under 100 lines. Older entries are in
 
 ## What to do next
 
-Take the first open package in [BACKLOG](BACKLOG.md) under **Now**. The plan
-behind the order is the [parity plan](PARITY-PLAN.md).
+Phase 1 is paused (user, 2026-11-17) with three packages left; everything
+else in **Now** is done. Resume in this order:
+1. **S-10:** rebase `work/S-10-settings` on main, check, merge.
+2. **S-08 part 2:** the wording sweep (see its BACKLOG status).
+3. **T-02:** finish `work/T-02-motif` and show the user screenshots.
+Then run Phase 1's exit test in the [parity plan](PARITY-PLAN.md) and start
+Phase 2 (C-01 first).
 
 ## What a creator can do today
 
