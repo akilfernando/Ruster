@@ -51,6 +51,13 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 
 ## Recently finished
 
+- 2026-11-17 · S-12: Assets is a grid of thumbnails (textures show their
+  image) or a list, with search and a size slider; click shows the asset in
+  the Inspector; drag models into the Scene view, meshes and textures onto
+  objects and material slots; context menu per asset. Files dropped on the
+  editor or picked with Import… (system dialog via `rfd`) are copied into
+  `Assets/` and imported with no form. OS drop not exercised end to end.
+
 - 2026-11-17 · S-07a: Hierarchy, Scene/Game, Inspector and Assets/Console
   are docked tabs (egui_tiles); tabs drag between docks; nothing is painted
   over the view. S-07b: Hierarchy, Inspector, Assets and Console close (×) and
@@ -84,10 +91,6 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
   user's real Claude Code and Codex configs (user go-ahead): connect, the app
   ran `scene_inspect`, Undo; Codex file byte-identical after.
 
-- 2026-11-17 · S-06: a Console tab beside Assets logs every message once
-  (notices, errors, script errors with file and line, engine warnings); Clear,
-  Collapse and level filters; double-click a script error to open it. The
-  status bar is one line with warning/error counts; toasts confirm actions.
 - Older entries: [archive](archive/STATUS-2026-11-17.md).
 
 ## Not verified

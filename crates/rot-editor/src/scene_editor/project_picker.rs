@@ -422,38 +422,29 @@ impl FileBrowser {
     }
 }
 
+/// The system's file dialog (through the desktop portal on Linux), on a
+/// worker thread so the editor keeps drawing while it is open.
 #[cfg(target_os = "linux")]
 fn browse(ctx: egui::Context, kind: BrowseKind) -> std::sync::mpsc::Receiver<BrowseResult> {
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     std::thread::spawn(move || {
-        let mut picker = std::process::Command::new("zenity");
-        picker.arg("--file-selection");
-        match kind {
-            BrowseKind::Directory => {
-                picker.args(["--directory", "--title=Choose a project location"]);
-            }
-            BrowseKind::OpenScene => {
-                picker.arg("--title=Choose a Rot scene file");
-            }
-            BrowseKind::ImportAsset => {
-                picker.arg("--title=Choose an asset inside this project");
-            }
-            BrowseKind::SaveScene => {
-                picker.args([
-                    "--save",
-                    "--title=Save Rot scene as",
-                    "--filename=scene.json",
-                ]);
-            }
-        }
-        let result = match picker.output() {
-            Ok(output) if output.status.success() => String::from_utf8(output.stdout)
-                .map(|path| Some(path.trim_end_matches('\n').to_owned()))
-                .map_err(|error| error.to_string()),
-            Ok(output) if output.status.code() == Some(1) => Ok(None),
-            _ => Err("The system file picker is unavailable. Enter the path directly.".into()),
+        let dialog = rfd::FileDialog::new();
+        let picked = match kind {
+            BrowseKind::Directory => dialog.set_title("Choose a project location").pick_folder(),
+            BrowseKind::OpenScene => dialog
+                .set_title("Open Scene")
+                .add_filter("Rot scene", &["json"])
+                .pick_file(),
+            BrowseKind::ImportAsset => dialog
+                .set_title("Import Asset")
+                .add_filter("Assets", &["glb", "obj", "png", "wav"])
+                .pick_file(),
+            BrowseKind::SaveScene => dialog
+                .set_title("Save Scene As")
+                .set_file_name("scene.json")
+                .save_file(),
         };
-        let _ = tx.send(result);
+        let _ = tx.send(Ok(picked.map(|path| path.to_string_lossy().into_owned())));
         ctx.request_repaint();
     });
     rx

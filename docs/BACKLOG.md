@@ -387,7 +387,7 @@ time, fps, draw calls, triangles) toggled from the viewport.
 anything; Stats shows live numbers.
 
 #### S-12 · Assets browser — M — ready
-Status: in progress — Claude Opus 5.5 (AI lane helper), 2026-11-17
+Status: done — Claude Opus 5.5 (AI lane helper), 2026-11-17
 **Outcome.** Assets are a grid of thumbnails you drag from, not a list of
 rows with buttons.
 **Facts.** The panel is `browser_contents` (`scene_editor.rs:4248`). Import

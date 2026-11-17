@@ -9,6 +9,7 @@ mod asset_commands;
 mod asset_inspection;
 #[cfg(feature = "inspection")]
 mod asset_timing;
+mod assets_browser;
 mod behavior_commands;
 mod capture_commands;
 mod capture_timing;
@@ -451,6 +452,7 @@ pub struct SceneEditor {
     #[cfg(unix)]
     ai_apps: connection::AppsDialog,
     ai_steps: ai_steps::AiSteps,
+    assets_view: assets_browser::AssetsView,
     ai_status: ai_indicator::AiStatus,
     /// Since when an AI request has waited for the creator's input to finish.
     ai_wait: Option<std::time::Instant>,
@@ -694,6 +696,7 @@ impl SceneEditor {
             #[cfg(unix)]
             ai_apps: Default::default(),
             ai_steps: Default::default(),
+            assets_view: Default::default(),
             ai_status: Default::default(),
             ai_wait: None,
             retired_connection_receipts: Default::default(),
@@ -4446,6 +4449,10 @@ impl SceneEditor {
             .command_controls(ui, &self.session, command_editable);
     }
     fn inspector_contents_inner(&mut self, ui: &mut egui::Ui) {
+        if self.inspecting_asset() {
+            self.asset_inspector_ui(ui);
+            return;
+        }
         let title = if self.manipulation.ids.len() > 1 {
             format!("{} selected", self.manipulation.ids.len())
         } else {
@@ -4716,276 +4723,7 @@ impl SceneEditor {
         self.asset_ops.timing_admitted(observed);
     }
     fn open_asset_import(&mut self) {
-        self.asset_dialog = true;
-        self.asset_focused = false;
-        self.asset_source_focus = true;
-        self.asset_rename_intent = false;
-        self.asset_normal_policy = rot_assets::MeshNormalPolicy::AuthoredWhenComplete;
-        self.asset_texture_role = rot_assets::TextureRole::BaseColor;
-        self.asset_id.clear();
-        self.asset_source.clear();
-        self.error.clear();
-    }
-
-    fn browser_contents(&mut self, ui: &mut egui::Ui) {
-        let wide = ui.available_width() >= 640.0;
-        let search_field = |editor: &mut Self, ui: &mut egui::Ui, width| {
-            ui.add(
-                egui::TextEdit::singleline(&mut editor.content_query)
-                    .hint_text("Search content…")
-                    .char_limit(128)
-                    .desired_width(width),
-            )
-        };
-        let search = ui
-            .horizontal_wrapped(|ui| {
-                if crate::editor_theme::primary_button(ui, "Import Asset…").clicked() {
-                    self.open_asset_import();
-                }
-                ui.menu_button("Tools", |ui| self.shader_tools_ui(ui))
-                    .response
-                    .on_hover_text("Shader and content tools");
-                if wide {
-                    Some(search_field(self, ui, 220.0))
-                } else {
-                    None
-                }
-            })
-            .inner
-            .unwrap_or_else(|| search_field(self, ui, f32::INFINITY));
-        self.content_diagnostics_ui(ui);
-        let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
-        let escape = ui.input(|i| i.key_pressed(egui::Key::Escape) && i.modifiers.is_none());
-        if self.content_focus {
-            search.request_focus();
-            search.scroll_to_me(Some(egui::Align::Min));
-            self.content_focus = false;
-        }
-        if (search.has_focus() || search.lost_focus()) && escape {
-            self.content_query.clear();
-            search.surrender_focus();
-        }
-        self.content_search
-            .update(self.assets.as_ref(), &self.content_query);
-        if (search.has_focus() || search.lost_focus()) && enter {
-            if let Some(index) = self.content_search.visible.first() {
-                self.content_selected = Some(self.content_search.rows[*index].info.id.clone());
-                self.content_scroll_to = true;
-                search.surrender_focus();
-            }
-        }
-        if self.asset_loading() {
-            ui.label("Loading project content…");
-            return;
-        }
-        if self.assets.is_none() {
-            if let Some(root) = self.asset_origin.clone() {
-                ui.label(format!("Project content origin: {}", root.display()));
-                if ui
-                    .button(
-                        if self.recovered_origin.is_some() || self.session.path().is_none() {
-                            "Retry recovered content"
-                        } else {
-                            "Retry content"
-                        },
-                    )
-                    .clicked()
-                {
-                    if let Err(error) = self.retry_asset_open() {
-                        self.error = error;
-                    }
-                }
-            }
-            ui.label("Save or open a scene to use its content catalog.");
-            return;
-        }
-        self.models_ui(ui);
-        let visible = self.content_search.visible.len();
-        let count = self.content_search.rows.len();
-        if count == 0 {
-            ui.small("Import a mesh, texture or WAV sound to add it to this project.");
-        } else if visible == 0 {
-            ui.small("No assets match this search.");
-        } else {
-            let asset_label = if count == 1 { "asset" } else { "assets" };
-            let summary = if visible == count {
-                format!("{count} {asset_label}")
-            } else {
-                format!("{visible} of {count} {asset_label}")
-            };
-            ui.label(egui::RichText::new(summary).small().weak());
-        }
-        let mut selected = None;
-        let mut assign = None;
-        let mut use_texture = None;
-        let mut refresh = None;
-        let mut edit = None;
-        let mut refs = None;
-        egui::ScrollArea::vertical()
-            .id_salt("content_assets_scroll")
-            .show(ui, |ui| {
-                for index in &self.content_search.visible {
-                    let row = &self.content_search.rows[*index];
-                    let available = match row.info.kind {
-                        rot_assets::AssetKind::Mesh => self.resolved.contains_key(&row.info.id),
-                        rot_assets::AssetKind::Sound => self
-                            .assets
-                            .as_ref()
-                            .is_some_and(|store| store.sound(&row.info.id).is_some()),
-                        rot_assets::AssetKind::Texture => {
-                            self.resolved_textures.contains_key(&row.info.id)
-                        }
-                    };
-                    let response = ui
-                        .add(
-                            egui::Button::selectable(
-                                self.content_selected.as_ref() == Some(&row.info.id),
-                                &row.label,
-                            )
-                            .truncate()
-                            .sense(
-                                if available && row.info.kind != rot_assets::AssetKind::Sound {
-                                    egui::Sense::click_and_drag()
-                                } else {
-                                    egui::Sense::click()
-                                },
-                            ),
-                        )
-                        .on_hover_text(&row.label);
-                    if response.clicked() {
-                        selected = Some(row.info.id.clone());
-                    }
-                    if self.content_scroll_to
-                        && self.content_selected.as_ref() == Some(&row.info.id)
-                    {
-                        response.scroll_to_me(Some(egui::Align::Center));
-                    }
-                    if response.drag_started() {
-                        match self.asset_payload(&row.info.id) {
-                            Ok(payload) => response.dnd_set_drag_payload(payload),
-                            Err(error) => self.error = error,
-                        }
-                    }
-                    response.context_menu(|ui| {
-                        if row.info.kind == rot_assets::AssetKind::Mesh
-                            && ui
-                                .add_enabled(
-                                    available && self.selected.is_some(),
-                                    egui::Button::new("Assign to active object"),
-                                )
-                                .clicked()
-                        {
-                            assign = Some(row.info.id.clone());
-                            ui.close();
-                        }
-                        if row.info.kind == rot_assets::AssetKind::Texture
-                            && ui
-                                .add_enabled(
-                                    available && self.selected.is_some(),
-                                    egui::Button::new(match row.info.texture_role {
-                                        Some(rot_assets::TextureRole::Roughness) => {
-                                            "Use as roughness map"
-                                        }
-                                        _ => "Use as base color",
-                                    }),
-                                )
-                                .clicked()
-                        {
-                            use_texture = row
-                                .info
-                                .texture_role
-                                .map(|role| (row.info.id.clone(), role));
-                            ui.close();
-                        }
-                        if ui.button("Refresh source").clicked() {
-                            refresh = Some(row.info.id.clone());
-                            ui.close();
-                        }
-                        if ui.button("Rename source…").clicked() {
-                            edit = Some((row.info.id.clone(), row.info.source.clone()));
-                            ui.close();
-                        }
-                        if ui.button("Select referencing objects").clicked() {
-                            refs = Some(row.info.id.clone());
-                            ui.close();
-                        }
-                    });
-                    if let Some(error) = &row.info.diagnostic {
-                        response.on_hover_text(error);
-                    }
-                }
-            });
-        self.content_scroll_to = false;
-        if let Some(id) = selected {
-            self.content_selected = Some(id);
-        }
-        if let Some(id) = assign {
-            if let Some(target) = self.selected.clone() {
-                match self.asset_payload(&id) {
-                    Ok(payload) => self.queued_drop = Some((target, payload)),
-                    Err(error) => self.error = error,
-                }
-            }
-        }
-        if let Some((id, role)) = use_texture {
-            if let Err(error) = self.stage_material_texture(&id, role) {
-                self.error = error;
-            }
-        }
-        if let Some(id) = refresh {
-            self.queued_refresh = Some(id);
-        }
-        if let Some((id, source)) = edit {
-            self.asset_id = id;
-            self.asset_source = source;
-            self.asset_rename_intent = true;
-            self.asset_source_focus = true;
-            self.asset_focused = false;
-            self.asset_dialog = true;
-        }
-        if let Some(id) = refs {
-            self.queued_references = Some(id);
-        }
-        if let Some(id) = &self.content_selected {
-            if let Some(row) = self
-                .content_search
-                .rows
-                .iter()
-                .find(|row| &row.info.id == id)
-            {
-                ui.separator();
-                ui.label(&row.label);
-                ui.add(egui::Label::new(format!("Source: {}", row.info.source)).wrap());
-                if let Some(role) = row.info.texture_role {
-                    ui.label(match role {
-                        rot_assets::TextureRole::BaseColor => "Interpretation: Base color (sRGB)",
-                        rot_assets::TextureRole::Roughness => {
-                            "Interpretation: Roughness map (linear)"
-                        }
-                    });
-                    ui.label("Interpretation is fixed. Import with a new ID to change it.");
-                }
-                if let Some(policy) = row.info.mesh_normal_policy {
-                    ui.label(match policy {
-                        rot_assets::MeshNormalPolicy::Flat => "Normals: Flat",
-                        rot_assets::MeshNormalPolicy::AuthoredWhenComplete => "Normals: Authored when complete",
-                    }).on_hover_text("This import setting is fixed for this asset. To change it, import the source with a new ID, then assign that mesh. Mesh assignment supports Undo.");
-                }
-                if let Some(error) = &row.info.diagnostic {
-                    ui.colored_label(crate::editor_theme::colors(ui).warning, error);
-                }
-                if (self.resolved.contains_key(id) || self.resolved_textures.contains_key(id))
-                    && row.info.status != rot_assets::AssetStatus::Ready
-                {
-                    ui.label(
-                        "Last-good content remains available; fix and explicitly refresh the source.",
-                    );
-                }
-                ui.label("Content source updates save separately from scene Undo and Save.");
-            } else {
-                ui.label(format!("Reference {id} is not registered in this catalog; import or repair its source."));
-            }
-        }
+        self.pick_imports();
     }
 
     fn content_diagnostics_ui(&mut self, ui: &mut egui::Ui) {
@@ -6577,6 +6315,7 @@ impl eframe::App for Host {
         #[cfg(unix)]
         self.refresh_ai_status();
         self.editor.ai_toast_ui(ui.ctx());
+        self.editor.assets_frame(ui.ctx());
         self.editor.workspace_ui(ui);
         self.editor.poll_capture(ui.ctx());
         // Widgets, dialogs and cancellation own this frame's input first.
@@ -7034,7 +6773,7 @@ mod tests {
                     assert_eq!(summary_count,1,"identical multiline error/shader messages must share one concise footer summary at {size:?}");
                     full_problem_count.set(output.shapes.iter().filter(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text==editor.error)).count());
                 }
-                asset_row_visible.set(output.shapes.iter().any(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text.starts_with("triangle · Mesh · Ready") && egui::Rect::from_min_size(text.pos,text.galley.size()).intersect(shape.clip_rect).height()>=text.galley.size().y-0.5)));
+                asset_row_visible.set(output.shapes.iter().any(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if (text.galley.job.text == "triangle" || text.galley.job.text.starts_with("triangle · Mesh · Ready")) && egui::Rect::from_min_size(text.pos,text.galley.size()).intersect(shape.clip_rect).height()>=text.galley.size().y-0.5)));
                 viewport.expect("production viewport callback must remain present")
             };
             // The full-width toolbar keeps contextual groups adjacent.

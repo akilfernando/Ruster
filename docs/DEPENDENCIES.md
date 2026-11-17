@@ -5,7 +5,7 @@ This inventory covers every external package in the locked workspace resolution,
 Cargo's declared SPDX license expression is metadata supplied by each package. Its presence is not an independent license review or certification.
 Project source licensing does not change the licenses of dependencies.
 
-External locked package versions: **481**. Packages with no discovered readable license text: **71**.
+External locked package versions: **483**. Packages with no discovered readable license text: **72**.
 
 | Package | Version | Cargo source | Declared license expression | Upstream repository |
 | --- | --- | --- | --- | --- |
@@ -273,6 +273,7 @@ External locked package versions: **481**. Packages with no discovered readable 
 | objc2-ui-kit | 0.2.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | objc2-ui-kit | 0.3.2 | `registry+https://github.com/rust-lang/crates.io-index` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | objc2-uniform-type-identifiers | 0.2.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
+| objc2-uniform-type-identifiers | 0.3.2 | `registry+https://github.com/rust-lang/crates.io-index` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | objc2-user-notifications | 0.2.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | once_cell | 1.21.4 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/matklad/once_cell](https://github.com/matklad/once_cell) |
 | orbclient | 0.3.55 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://gitlab.redox-os.org/redox-os/orbclient](https://gitlab.redox-os.org/redox-os/orbclient) |
@@ -324,6 +325,7 @@ External locked package versions: **481**. Packages with no discovered readable 
 | redox_syscall | 0.5.18 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://gitlab.redox-os.org/redox-os/syscall](https://gitlab.redox-os.org/redox-os/syscall) |
 | redox_syscall | 0.9.5 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://gitlab.redox-os.org/redox-os/kernel](https://gitlab.redox-os.org/redox-os/kernel) |
 | renderdoc-sys | 1.1.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/ebkalderon/renderdoc-rs](https://github.com/ebkalderon/renderdoc-rs) |
+| rfd | 0.18.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/PolyMeilex/rfd](https://github.com/PolyMeilex/rfd) |
 | rhai | 1.27.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rhaiscript/rhai](https://github.com/rhaiscript/rhai) |
 | rhai_codegen | 3.3.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rhaiscript/rhai](https://github.com/rhaiscript/rhai) |
 | robust | 1.2.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/georust/robust](https://github.com/georust/robust) |
@@ -569,6 +571,7 @@ No readable matching source text was found for the following packages; metadata 
 - `objc2-ui-kit 0.2.2`
 - `objc2-ui-kit 0.3.2`
 - `objc2-uniform-type-identifiers 0.2.2`
+- `objc2-uniform-type-identifiers 0.3.2`
 - `objc2-user-notifications 0.2.2`
 - `parry3d-f64 0.31.1`
 - `profiling 1.0.18`
