@@ -196,7 +196,7 @@ double-clicking opens the configured code editor; the status bar never
 wraps at 960 px.
 
 #### T-01 · Rot and Plain styles — M — ready
-Status: open
+Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
 **Outcome.** A creator picks Rot or Plain, dark or light, and can switch at
 any time.
 **Facts.** `ThemeChoice` has System, Dark, Light and OLED black
