@@ -203,6 +203,8 @@ Helpers (subagents): use a read-only search agent to map unfamiliar code. Use
 at most two implementing helpers at once, on files that do not overlap, each
 in its own worktree, each told the exact commit to start from, its files, and
 its done-when list. Otherwise work in the main session.
+Helpers that cannot write to the main checkout (sandboxed worktrees) push
+their branch instead; the coordinating session merges it.
 
 ## 11. Git
 
@@ -214,6 +216,35 @@ its done-when list. Otherwise work in the main session.
 - Do not rewrite history on the trunk. Do not leave work only in a stash or a
   worktree.
 - The push policy is the user's and is recorded in STATUS.
+- Tool-created worktrees (`.claude/worktrees/`, `.codex-attachments/`) are
+  local leftovers. Once their branch is merged or pushed, remove them with
+  `git worktree remove --force <path>`.
+
+## 11a. Known gotchas (found in Phase 1)
+
+- **`ui_drive.py` on the hidden workspace.** The test window never has OS
+  focus, so the editor ignores keyboard shortcuts there; test shortcuts
+  in-process (see `workspace.rs` tests). Screenshots taken after key-only
+  input can be stale frames; use `--foreground` only when the user is away,
+  or check focus in-process. `click:` matches the first control with that
+  exact label (use `LABEL#2`); menu items' labels include their shortcut
+  text (`"Command Palette… Ctrl+K"`). Pointer drags cannot be sent; use
+  in-process egui event tests.
+- **egui focus.** A widget sensed without `FOCUSABLE` drops focus, and
+  allocating an extra widget shifts auto ids so the focused one loses
+  focus next frame; give helper widgets explicit ids (`ui.interact`). A
+  focus move made at the end of a frame is reset; replay it at the next
+  frame's start (`focus::move_on_next_frame`).
+- **Fonts.** Inter and the egui fallbacks lack some symbols (▾ ⋯ ✖ ⓘ).
+  Check a glyph with `fontTools` before using it, or paint it.
+- **Flaky tests under load.** `connection/worker.rs`
+  `conflict_never_reads_back…` and `bridge.rs`
+  `enrolled_local_transport…` failed once each under heavy parallel load;
+  if the gate fails only there, rerun once and add an Inbox line if it
+  repeats.
+- **Vendored crates.** `third_party/egui_tiles` and
+  `third_party/transform-gizmo*` carry small patches; read their
+  `ROT-PATCH.md` before upgrading.
 
 ## 12. When the user gives feedback
 

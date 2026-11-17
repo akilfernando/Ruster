@@ -7,8 +7,9 @@ Updated 2026-11-17. This file stays under 100 lines. Older entries are in
 
 - **Trunk:** `main`, on `origin`. Branch from it and merge back to it.
 - **One checkout:** `/home/akilf/Projects/rot_engine`. Open branches on
-  `origin`: `work/S-10-settings`, `work/T-02-motif` (paused work). Older
-  branch tips are kept as `archive/<name>` tags on `origin`. Two git stashes hold
+  `origin`: `work/S-10-settings`, `work/T-02-motif` (paused work). Two local
+  worktrees under `.claude/worktrees/` are leftovers (their work is pushed
+  or merged); remove them per PLAYBOOK §11. Older tips: `archive/<name>`. Two git stashes hold
   small status notes from older sessions. The detached worktrees under
   `~/Projects/Ruster-Audits` and `~/Projects/Ruster-Creations` are retained
   evidence; leave them.
