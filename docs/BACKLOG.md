@@ -279,7 +279,7 @@ temporary state path and a new editor loads it; a corrupt file opens the
 default; F6 visits each dock once and wraps, and is remappable.
 
 #### S-07c · Default and Side by Side layouts; no AI workspace — M — ready
-Status: open
+Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
 **Outcome.** Two layouts, picked from the toolbar or by window width. The
 editor beside an AI app is the same editor.
 **Facts.** The AI workspace is the `ai_workspace` flag with `ai_header`,
