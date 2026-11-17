@@ -451,7 +451,7 @@ variables; a headless test covers discovery with two editors and a dead
 entry.
 
 #### A-02 · Trust once — M — ready
-Status: open
+Status: in progress — Claude Opus 5.5 (AI lane helper), 2026-11-17
 **Outcome.** An AI app is approved once and never again, across restarts and
 rebuilds.
 **Facts.** Unenrolled adapters need approval after every restart
