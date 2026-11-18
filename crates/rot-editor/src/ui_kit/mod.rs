@@ -297,7 +297,10 @@ pub fn search_field(ui: &mut egui::Ui, text: &mut String, hint: &str) -> egui::R
 pub fn empty_state(ui: &mut egui::Ui, line: &str, action: Option<&str>) -> Option<egui::Response> {
     ui.vertical_centered(|ui| {
         ui.add_space(SPACE_XL);
-        motif::sprout(ui);
+        // The line art only where the line still fits below it.
+        if ui.available_height() > 110.0 {
+            motif::sprout(ui);
+        }
         ui.label(RichText::new(line).color(colors(ui).secondary));
         action.map(|label| {
             ui.add_space(SPACE_S);

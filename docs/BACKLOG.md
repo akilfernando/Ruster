@@ -423,7 +423,7 @@ camera). First launch shows the style chooser from T-01 and an optional
 **Done when.** Screenshots pass the checklist in both styles.
 
 #### T-02 · Rot motif and themed wording — S — ready
-Status: in progress (paused 2026-11-17) on branch `work/T-02-motif` (3323680). Done: `ui_kit/motif.rs` (sprout line art in empty states, spore spinner, hub and About backgrounds). Left: view Rot and Plain screenshots, one themed line per screen, show the user.
+Status: done — 2026-11-18, see git log; screenshots sent to the user for review
 **Outcome.** The Rot style has its character, lightly.
 **Do.** Follow [the motif](UX-STANDARDS.md#the-motif): empty-state line art,
 the three-spore loading indicator, the AI mushroom pulse, hub and About

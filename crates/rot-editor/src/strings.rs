@@ -97,12 +97,27 @@ pub fn themed(ctx: &egui::Context) -> bool {
         .unwrap_or(false)
 }
 
-/// The words for `key` in the current style.
+fn shown_id() -> egui::Id {
+    egui::Id::unique("rot_themed_line_frame")
+}
+
+/// The words for `key` in the current style. At most one themed line shows
+/// per screen (UX-STANDARDS §9): after the first in a frame, the rest of
+/// that frame gets Plain wording.
 pub fn tr(ctx: &egui::Context, key: Text) -> &'static str {
-    if themed(ctx) {
-        key.rot().unwrap_or(key.plain())
-    } else {
-        key.plain()
+    let Some(rot) = key.rot().filter(|_| themed(ctx)) else {
+        return key.plain();
+    };
+    let frame = ctx.cumulative_frame_nr();
+    let owner = ctx.data(|data| data.get_temp::<(u64, Text)>(shown_id()));
+    match owner {
+        // Another line already took this frame; the same key may repeat
+        // (egui can lay a frame out twice).
+        Some((shown, other)) if shown == frame && other != key => key.plain(),
+        _ => {
+            ctx.data_mut(|data| data.insert_temp(shown_id(), (frame, key)));
+            rot
+        }
     }
 }
 
@@ -118,6 +133,11 @@ mod tests {
         assert_eq!(
             tr(&ctx, Text::EmptyConsole),
             "All quiet in the undergrowth."
+        );
+        assert_eq!(
+            tr(&ctx, Text::EmptyAssets),
+            Text::EmptyAssets.plain(),
+            "one themed line per screen"
         );
         assert_eq!(tr(&ctx, Text::LoadingContent), "Loading project content…");
         for key in Text::ALL {

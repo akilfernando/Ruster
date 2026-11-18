@@ -6,9 +6,8 @@ Updated 2026-11-18. This file stays under 100 lines. Older entries are in
 ## Where to work
 
 - **Trunk:** `main`, on `origin`. Branch from it and merge back to it.
-- **One checkout:** `/home/akilf/Projects/rot_engine`. Open branch on
-  `origin`: `work/T-02-motif` (paused work). Older tips:
-  `archive/<name>`. Two git stashes hold
+- **One checkout:** `/home/akilf/Projects/rot_engine`. Older branch tips are
+  `archive/<name>` tags on `origin`. Two git stashes hold
   small status notes from older sessions. The detached worktrees under
   `~/Projects/Ruster-Audits` and `~/Projects/Ruster-Creations` are retained
   evidence; leave them.
@@ -17,10 +16,9 @@ Updated 2026-11-18. This file stays under 100 lines. Older entries are in
 
 ## What to do next
 
-Phase 1 resumed 2026-11-18 with two packages left; everything
+Phase 1 resumed 2026-11-18 with one package left; everything
 else in **Now** is done. Resume in this order:
 1. **S-08 part 2:** the wording sweep (see its BACKLOG status).
-2. **T-02:** finish `work/T-02-motif` and show the user screenshots.
 Then run Phase 1's exit test in the [parity plan](PARITY-PLAN.md) and start
 Phase 2 (C-01 first).
 
@@ -56,6 +54,10 @@ entry `org.rot.editor.desktop`. Reinstall with
 
 ## Recently finished
 
+- 2026-11-18 · T-02: the Rot style has a quiet motif (sprout line art in
+  empty states, three-spore loading dots, mycelium in the hub and About,
+  the About tagline); at most one themed line shows per screen; Plain
+  shows none of it.
 - 2026-11-18 · S-10: Edit → Preferences… (Ctrl+,) is a window with General,
   Appearance, Viewport, Shortcuts (every command, search, conflicts),
   External Tools and AI pages; changes apply at once, no Save button. Edit
