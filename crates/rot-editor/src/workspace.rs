@@ -847,6 +847,8 @@ pub(super) struct Workspace {
     editor_dirty: bool,
     /// The Preferences page on show.
     pub settings_page: SettingsPage,
+    /// Keyboard focus was placed in the Preferences window.
+    settings_focused: bool,
     shortcut_query: String,
 }
 
@@ -912,6 +914,7 @@ impl Workspace {
             layout_generation: 0,
             capture: None,
             settings_page: SettingsPage::General,
+            settings_focused: false,
             shortcut_query: String::new(),
             style_preview: None,
             storage: Storage {
@@ -1473,6 +1476,7 @@ impl Workspace {
     }
     fn close_settings(&mut self) {
         self.capture = None;
+        self.settings_focused = false;
         self.settings_open = false;
         self.flush();
     }
@@ -1499,26 +1503,12 @@ impl Workspace {
         }
     }
     fn general_page(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label("UI scale");
-            ui.add(egui::Slider::new(&mut self.prefs.scale, 0.75..=2.0));
+        crate::ui_kit::property_row(ui, "UI Scale", |ui| {
+            ui.add(egui::Slider::new(&mut self.prefs.scale, 0.75..=2.0).fixed_decimals(2));
         });
-        if let Some(path) = self.state_path() {
-            let path = path.display().to_string();
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(format!("Saved in {path}"))
-                        .small()
-                        .weak(),
-                )
-                .truncate(),
-            )
-            .on_hover_text(path);
-        }
     }
     fn appearance_page(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Style");
+        crate::ui_kit::property_row(ui, "Style", |ui| {
             let mut style = self.prefs.style.unwrap_or_default();
             for choice in crate::editor_theme::Style::ALL {
                 ui.selectable_value(&mut style, choice, choice.label());
@@ -1529,34 +1519,32 @@ impl Workspace {
                 self.prefs.style = Some(style);
             }
         });
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Mode");
-            for choice in crate::editor_theme::ThemeChoice::ALL {
-                ui.selectable_value(&mut self.prefs.theme, choice, choice.label());
-            }
+        crate::ui_kit::property_row(ui, "Mode", |ui| {
+            ui.horizontal_wrapped(|ui| {
+                for choice in crate::editor_theme::ThemeChoice::ALL {
+                    ui.selectable_value(&mut self.prefs.theme, choice, choice.label());
+                }
+            });
         });
-        ui.checkbox(&mut self.prefs.themed_wording, "Themed Wording")
-            .on_hover_text("Occasional Rot-flavored lines in empty states and messages");
+        crate::ui_kit::property_row(ui, "Themed Wording", |ui| {
+            ui.checkbox(&mut self.prefs.themed_wording, "")
+                .on_hover_text("Occasional Rot-flavored lines in empty states and messages");
+        });
     }
     fn viewport_page(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label("Fly speed (units/second)");
+        crate::ui_kit::property_row(ui, "Fly Speed", |ui| {
             ui.add(
                 egui::DragValue::new(&mut self.prefs.movement_speed)
                     .range(0.05..=1000.0)
-                    .speed(0.1),
-            );
-        })
-        .response
-        .on_hover_text("Scroll while flying with the right mouse button to change it");
+                    .speed(0.1)
+                    .suffix(" units/s"),
+            )
+            .on_hover_text("Scroll while flying with the right mouse button to change it");
+        });
     }
     fn shortcuts_page(&mut self, ui: &mut egui::Ui) {
-        ui.add(
-            egui::TextEdit::singleline(&mut self.shortcut_query)
-                .hint_text("Search")
-                .desired_width(f32::INFINITY),
-        );
-        ui.weak("Click a shortcut, then press the new keys. Escape cancels.");
+        crate::ui_kit::search_field(ui, &mut self.shortcut_query, "Search");
+        ui.add_space(crate::ui_kit::tokens::SPACE_XS);
         let query = self.shortcut_query.to_lowercase();
         for action in Action::ALL {
             if !query.is_empty() && !action.label().to_lowercase().contains(&query) {
@@ -1581,14 +1569,17 @@ impl Workspace {
                 .iter()
                 .find(|other| other.action != action && other.same_keys(binding))
                 .map(|other| other.action.label());
-            ui.horizontal(|ui| {
-                ui.add_sized([200.0, 20.0], egui::Label::new(action.label()).truncate());
+            crate::ui_kit::property_row(ui, action.label(), |ui| {
                 let text = if self.capture == Some(action) {
                     "Press keys…".into()
                 } else {
                     binding.text()
                 };
-                if ui.button(text).clicked() {
+                if ui
+                    .add(egui::Button::new(text).min_size(egui::vec2(140.0, 0.0)))
+                    .on_hover_text("Click, then press the new keys. Escape cancels.")
+                    .clicked()
+                {
                     self.capture = Some(action);
                 }
                 if binding.key.is_some()
@@ -1650,7 +1641,13 @@ impl Workspace {
                     ui.vertical(|ui| {
                         ui.set_width(120.0);
                         for page in SettingsPage::ALL {
-                            ui.selectable_value(&mut self.settings_page, page, page.label());
+                            let tab =
+                                ui.selectable_value(&mut self.settings_page, page, page.label());
+                            // Focus starts in the window, on the open page.
+                            if !self.settings_focused && page == self.settings_page {
+                                tab.request_focus();
+                                self.settings_focused = true;
+                            }
                         }
                     });
                     ui.separator();

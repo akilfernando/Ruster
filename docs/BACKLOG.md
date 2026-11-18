@@ -367,7 +367,7 @@ label; the palette can run every command.
 **Not now.** Routing MCP through commands (C-06).
 
 #### S-10 · Preferences, Project Settings and Shortcuts — M — ready
-Status: in progress (paused 2026-11-17) on branch `work/S-10-settings` (4c6bd2d, based on 4055938, builds and tests pass, gate not run). Done: Preferences window with pages, Shortcuts page, Project Settings window. Left: rebase on main, screenshots, Tab order, gate, docs.
+Status: done — 2026-11-18, see git log
 **Outcome.** Standard settings windows under Edit.
 **Facts.** Settings are the "Workspace and shortcuts" modal
 (`workspace.rs:1027`, about 670 lines) with explicit Save and Close buttons.

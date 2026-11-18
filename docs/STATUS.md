@@ -1,15 +1,14 @@
 # Status
 
-Updated 2026-11-17. This file stays under 100 lines. Older entries are in
+Updated 2026-11-18. This file stays under 100 lines. Older entries are in
 [the archive](archive/STATUS-2026-11-17.md) and are history, not instructions.
 
 ## Where to work
 
 - **Trunk:** `main`, on `origin`. Branch from it and merge back to it.
-- **One checkout:** `/home/akilf/Projects/rot_engine`. Open branches on
-  `origin`: `work/S-10-settings`, `work/T-02-motif` (paused work). Two local
-  worktrees under `.claude/worktrees/` are leftovers (their work is pushed
-  or merged); remove them per PLAYBOOK §11. Older tips: `archive/<name>`. Two git stashes hold
+- **One checkout:** `/home/akilf/Projects/rot_engine`. Open branch on
+  `origin`: `work/T-02-motif` (paused work). Older tips:
+  `archive/<name>`. Two git stashes hold
   small status notes from older sessions. The detached worktrees under
   `~/Projects/Ruster-Audits` and `~/Projects/Ruster-Creations` are retained
   evidence; leave them.
@@ -18,11 +17,10 @@ Updated 2026-11-17. This file stays under 100 lines. Older entries are in
 
 ## What to do next
 
-Phase 1 is paused (user, 2026-11-17) with three packages left; everything
+Phase 1 resumed 2026-11-18 with two packages left; everything
 else in **Now** is done. Resume in this order:
-1. **S-10:** rebase `work/S-10-settings` on main, check, merge.
-2. **S-08 part 2:** the wording sweep (see its BACKLOG status).
-3. **T-02:** finish `work/T-02-motif` and show the user screenshots.
+1. **S-08 part 2:** the wording sweep (see its BACKLOG status).
+2. **T-02:** finish `work/T-02-motif` and show the user screenshots.
 Then run Phase 1's exit test in the [parity plan](PARITY-PLAN.md) and start
 Phase 2 (C-01 first).
 
@@ -58,6 +56,10 @@ entry `org.rot.editor.desktop`. Reinstall with
 
 ## Recently finished
 
+- 2026-11-18 · S-10: Edit → Preferences… (Ctrl+,) is a window with General,
+  Appearance, Viewport, Shortcuts (every command, search, conflicts),
+  External Tools and AI pages; changes apply at once, no Save button. Edit
+  → Project Settings… has Project, Input Actions and Build pages.
 - 2026-11-17 · S-07d: Hierarchy, Inspector and Scene/Game panel bodies now live in
   `panels/hierarchy.rs`, `inspector.rs`, `viewport.rs`; code motion only.
 - 2026-11-17 · S-13: the project hub lists every project (name, path,
@@ -83,12 +85,6 @@ entry `org.rot.editor.desktop`. Reinstall with
   beside editor.json; F6/Shift+F6 move between docks; Reset Layout. S-07c:
   Default and Side by Side layouts, switched by window width (1100 px) or
   Window ▸ Layouts; the separate AI workspace is gone.
-- 2026-11-17 · S-11: the Scene view navigates like Unity (Alt+left-drag
-  orbit, middle pan, right-drag look, wheel or Alt+right zoom, right button +
-  WASD/QE fly, Shift faster, wheel sets fly speed); left-drag box-selects
-  (Ctrl/Shift adds); double-click frames; orientation gizmo top-right (axis
-  click = view, center = projection); Stats shows frame, FPS, GPU, draw
-  calls, triangles, repainting 4×/s only while open.
 - Older entries: [archive](archive/STATUS-2026-11-17.md).
 
 ## Not verified

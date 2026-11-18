@@ -34,44 +34,48 @@ impl SceneEditor {
             .as_ref()
             .and_then(|p| p.parent())
             .map(Path::to_path_buf);
-        egui::Grid::new("project-settings-project")
-            .num_columns(2)
-            .spacing([12.0, 6.0])
-            .show(ui, |ui| {
-                ui.label("Name");
-                ui.label(
-                    folder
-                        .as_ref()
-                        .and_then(|f| f.file_name())
-                        .map_or_else(|| "Untitled".into(), |n| n.to_string_lossy().into_owned()),
-                )
-                .on_hover_text("The project folder's name");
-                ui.end_row();
-                ui.label("Location");
-                ui.label(
-                    folder
-                        .as_ref()
-                        .map_or_else(|| "Not saved yet".into(), |f| f.display().to_string()),
-                );
-                ui.end_row();
-                ui.label("Startup scene");
-                ui.label(path.as_ref().and_then(|p| p.file_name()).map_or_else(
-                    || "Not saved yet".into(),
-                    |n| n.to_string_lossy().into_owned(),
-                ))
+        let name = folder
+            .as_ref()
+            .and_then(|f| f.file_name())
+            .map_or_else(|| "Untitled".into(), |n| n.to_string_lossy().into_owned());
+        let location = folder
+            .as_ref()
+            .map_or_else(|| "Not saved yet".into(), |f| f.display().to_string());
+        let startup = path.as_ref().and_then(|p| p.file_name()).map_or_else(
+            || "Not saved yet".into(),
+            |n| n.to_string_lossy().into_owned(),
+        );
+        crate::ui_kit::property_row(ui, "Name", |ui| {
+            ui.label(name).on_hover_text("The project folder's name");
+        });
+        crate::ui_kit::property_row(ui, "Location", |ui| {
+            ui.add(egui::Label::new(&location).truncate())
+                .on_hover_text(&location);
+        });
+        crate::ui_kit::property_row(ui, "Startup Scene", |ui| {
+            ui.label(startup)
                 .on_hover_text("A project has one scene for now; it is the one that starts");
-                ui.end_row();
-            });
+        });
     }
 
     fn build_page(&mut self, ui: &mut egui::Ui) {
-        ui.label("Target: Linux (x86_64)");
-        let kit = self.creation_export.runtime_kit().map(Path::to_path_buf);
-        ui.label(match &kit {
-            Some(kit) => format!("Runtime kit: {}", kit.display()),
-            None => "Runtime kit: not set; Build… asks for one".into(),
+        crate::ui_kit::property_row(ui, "Target", |ui| {
+            ui.label("Linux (x86_64)");
         });
-        if crate::editor_theme::primary_button(ui, "Build…").clicked() {
+        let kit = self.creation_export.runtime_kit().map(Path::to_path_buf);
+        crate::ui_kit::property_row(ui, "Runtime Kit", |ui| match &kit {
+            Some(kit) => {
+                let text = kit.display().to_string();
+                ui.add(egui::Label::new(&text).truncate())
+                    .on_hover_text(text);
+            }
+            None => {
+                ui.weak("Not set")
+                    .on_hover_text("Build… asks for a runtime kit the first time");
+            }
+        });
+        ui.add_space(crate::ui_kit::tokens::SPACE_S);
+        if crate::editor_theme::primary_button(ui, Action::Export.label()).clicked() {
             self.queued_action = Some(Action::Export);
         }
     }

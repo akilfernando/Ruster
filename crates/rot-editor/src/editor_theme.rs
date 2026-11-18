@@ -208,7 +208,9 @@ fn visuals(p: &Palette, theme: Theme) -> egui::Visuals {
     visuals.widgets.noninteractive.bg_fill = p.surface;
     visuals.widgets.noninteractive.weak_bg_fill = p.surface;
     visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, p.divider);
-    visuals.widgets.inactive.bg_fill = p.raised;
+    // `bg_fill` paints slider rails and check boxes; buttons use `weak_bg_fill`.
+    // Raised would vanish on raised windows, so use the divider tone.
+    visuals.widgets.inactive.bg_fill = p.divider;
     visuals.widgets.inactive.weak_bg_fill = p.raised;
     visuals.widgets.hovered.bg_fill = p.hover;
     visuals.widgets.hovered.weak_bg_fill = p.hover;
@@ -216,7 +218,9 @@ fn visuals(p: &Palette, theme: Theme) -> egui::Visuals {
     visuals.widgets.active.bg_fill = p.selection;
     visuals.widgets.active.weak_bg_fill = p.selection;
     visuals.widgets.active.bg_stroke = Stroke::new(crate::ui_kit::tokens::FOCUS_RING, p.accent);
-    visuals.widgets.open = visuals.widgets.active;
+    // `open` fills window title bars and open dropdown buttons: keep it
+    // neutral, like Unity's title bars, rather than the pressed accent.
+    visuals.widgets.open = visuals.widgets.hovered;
     visuals
 }
 

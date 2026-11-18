@@ -276,7 +276,7 @@ pub fn search_field(ui: &mut egui::Ui, text: &mut String, hint: &str) -> egui::R
                 (ui.available_width() - clear_width).max(MIN_HIT * 2.0),
                 CONTROL_HEIGHT,
             ],
-            egui::TextEdit::singleline(text).hint_text(format!("🔍 {hint}")),
+            egui::TextEdit::singleline(text).hint_text(hint),
         );
         let escaped = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape));
         if escaped && !text.is_empty() {
