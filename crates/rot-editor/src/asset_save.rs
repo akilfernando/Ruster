@@ -204,7 +204,7 @@ impl Request {
         validate_fresh_destination(&self.session, &path, self.fresh_destination)?;
         let different_root = self.original_asset_root.as_deref() != Some(directory.root());
         if different_root && self.session.has_asset_references() {
-            return Err(SaveFailure::new(SaveFailureKind::AssetRootMismatch, "Save As across asset roots is unavailable while scene or undo/redo history references project assets; save beside the existing project."));
+            return Err(SaveFailure::new(SaveFailureKind::AssetRootMismatch, "Couldn't Save As here. Save inside the current project."));
         }
         // snapshot_bytes and Session::save use the same canonical encoding,
         // including current-format migration, history, behavior and final newline.

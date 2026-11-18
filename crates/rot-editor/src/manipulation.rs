@@ -362,7 +362,7 @@ impl Clipboard {
                 .collect();
             let order: BTreeSet<_> = self.target_order.iter().map(String::as_str).collect();
             if self.target_order.len() != count || targets != order {
-                return Err("Clipboard target order contains missing, repeated or unknown identities; copy again.".into());
+                return Err("Couldn't paste. Copy the objects again.".into());
             }
         }
         Ok(())
@@ -559,7 +559,7 @@ impl Manipulation {
                 .enumerate()
                 .any(|(i, text)| !draft.edited[i] && text != &baseline[i])
         {
-            return Err("Recovery precision drafts have invalid selection, masks, revision or text bounds; checkpoint preserved.".into());
+            return Err("Couldn't restore the checkpoint. Its drafts are not valid.".into());
         }
         self.rotation_unit = draft.rotation_unit;
         self.precision_had_focus = false;
@@ -735,7 +735,7 @@ impl Manipulation {
         let mut focused_field = None;
         let mut field_has_focus = false;
         if mixed.iter().any(|mixed| *mixed) {
-            ui.label("— = mixed values").on_hover_text("Editing a component replaces only that component for all selected targets; other components keep their individual values.");
+            ui.label("— = mixed values").on_hover_text("Applies to this component on every selected object.");
         }
         let mut scrub_released = false;
         for (row, label) in ["Position", unit.label(), "Scale"].into_iter().enumerate() {
@@ -865,7 +865,7 @@ impl Manipulation {
         root: Option<&Path>,
         document_generation: u64,
     ) -> Result<(), String> {
-        session.scene().require_flat().map_err(|_|"Assembly clipboard is not supported in this milestone; no local transforms were copied.".to_string())?;
+        session.scene().require_flat().map_err(|_|"Couldn't copy. Groups with nested objects aren't supported yet.".to_string())?;
         selected_transforms(session.scene(), &self.ids)?;
         let mut objects = Vec::new();
         let mut lights = BTreeMap::new();
@@ -967,7 +967,7 @@ impl Manipulation {
                 || root.is_none()
                 || clipboard.source_root.as_deref() != root)
         {
-            return Err("Mesh/texture references belong to another or unknown project catalog; paste beside the source project or remove those references first.".into());
+            return Err("Couldn't paste. The assets are from another project.".into());
         }
         let source_ids = clipboard.target_ids();
         // One allocation reserves all incoming target IDs together, including

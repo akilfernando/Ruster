@@ -127,7 +127,7 @@ impl SceneEditor {
                     mixed_fit_error = Some(rot_render::FIT_ERROR);
                 }
             } else if self.runtime.visible {
-                self.notice = "Switch to the authored view to frame selected lights.".into();
+                self.notice = "Switch to the Scene view to frame selected lights.".into();
             }
         }
         if let Some(error) = mixed_fit_error {

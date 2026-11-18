@@ -87,7 +87,7 @@ impl SceneEditor {
         self.notice = if removed {
             "Animation removed; one Undo restores it."
         } else {
-            "Animation updated; Reset the preview to play it. One Undo restores the previous clip."
+            "Animation updated."
         }
         .into();
         Ok(())
@@ -262,7 +262,7 @@ impl SceneEditor {
                     ui.colored_label(
                         ui.visuals().warn_fg_color,
                         format!(
-                            "Clip unavailable: {}. Refresh or re-import the source model; the binding is kept.",
+                            "Clip {} is missing. Refresh or re-import the model.",
                             binding.clip
                         ),
                     );
@@ -275,7 +275,6 @@ impl SceneEditor {
                 .on_hover_text("Stop animating this placement. One Undo restores it.")
                 .clicked();
         });
-        ui.small("Preview Reset or Play uses the authored clip.");
         let revision = self.session.scene().revision;
         let result = if remove {
             self.commit_animation(revision, &owner, None)

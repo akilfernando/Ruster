@@ -107,7 +107,7 @@ impl SceneEditor {
                 egui::RichText::new("Select an object or light to edit its properties.").weak(),
             );
             if self.runtime.visible {
-                ui.strong("Authored components");
+                ui.strong("Components");
                 ui.small(crate::strings::tr(
                     ui.ctx(),
                     crate::strings::Text::EditsRestartPlay,
@@ -186,8 +186,7 @@ impl SceneEditor {
         }
         if self.runtime.visible {
             ui.separator();
-            ui.strong("Authored components");
-            ui.small("Reset preview to use authored changes.");
+            ui.strong("Components");
         }
         self.light_inspector_ui(ui);
         ui.separator();

@@ -910,7 +910,7 @@ impl SceneEditor {
             return;
         }
         if !self.behavior_editable() {
-            self.error="Resolve transform fields, gestures and modal dialogs before behavior edits; drafts preserved.".into();
+            self.error="Couldn't edit the Script. Finish your open edits first.".into();
             return;
         }
         if matches!(action, Action::Save) {
@@ -944,7 +944,7 @@ impl SceneEditor {
                 self.sync_draft();
                 self.observe_runtime();
                 self.error.clear();
-                self.notice="Behavior data updated through shared history; Reset runtime to use authored changes.".into();
+                self.notice="Script updated.".into();
             }
             Err(error) => {
                 self.behavior.error = error.clone();
@@ -1077,10 +1077,10 @@ impl SceneEditor {
                 || self.rename_pending
                 || self.draft != self.baseline_fields)
         {
-            return Err("HUD and other unfinished edits cannot share a checkpoint; previous checkpoint preserved.".into());
+            return Err("Couldn't save the checkpoint. HUD and other edits are both open.".into());
         }
         if self.recovered_input.is_some() && self.input_actions.pending() {
-            return Err("Both live and deferred input drafts exist; checkpoint preserved for explicit repair.".into());
+            return Err("Couldn't save the checkpoint. Two input drafts are open.".into());
         }
         Ok(RecoveryDrafts {
             version: 15,
@@ -1209,7 +1209,7 @@ impl SceneEditor {
                 .and_then(Value::as_object)
                 .is_some_and(|material| !material.contains_key("roughness_texture"))
         {
-            return Err("Recovery8+ material drafts require roughness_texture, including null; checkpoint preserved.".into());
+            return Err("Couldn't restore the checkpoint. A material draft is incomplete.".into());
         }
         // Presence matters, including null/default values. Never reinterpret a
         // relabeled surface checkpoint as a genuine pre-surface draft.
@@ -1267,7 +1267,7 @@ impl SceneEditor {
             _ => false,
         } {
             return Err(
-                "Recovery drafts have unsupported version or rotation units; checkpoint preserved."
+                "Couldn't restore the checkpoint. Its drafts are an unsupported version."
                     .into(),
             );
         }
@@ -1317,7 +1317,7 @@ impl SceneEditor {
                 .as_ref()
                 .is_some_and(|text| text.chars().count() > 128 || draft.selection.is_empty())
         {
-            return Err("Recovery drafts have unsupported version, selection, revision or text bounds; checkpoint preserved.".into());
+            return Err("Couldn't restore the checkpoint. Its drafts are not valid.".into());
         }
         if draft.hud.is_some()
             && (draft.color.is_some()
@@ -1347,7 +1347,7 @@ impl SceneEditor {
         }
         if let Some(hud) = &draft.hud {
             if !hud.validate_snapshot(&self.session) {
-                return Err("HUD recovery draft has invalid bounds, revision or baseline; checkpoint preserved.".into());
+                return Err("Couldn't restore the HUD draft. It is not valid.".into());
             }
         }
         if let Some(collider) = &draft.collider {
@@ -1566,7 +1566,7 @@ impl SceneEditor {
                     || self.draft != self.baseline_fields
                     || self.manipulation.offset_pending())
             {
-                return Err("Unsupported compound transform/behavior recovery drafts; original record preserved.".into());
+                return Err("Couldn't restore the checkpoint. Its drafts are not supported.".into());
             }
             self.behavior.restore(&self.session, behavior)?;
         }
@@ -1609,7 +1609,7 @@ impl SceneEditor {
             || self.new_scene_pending
             || self.close_pending
         {
-            return Err("Save your current work or use New scene and resolve its recovery first, then restore this checkpoint. Current work was preserved.".into());
+            return Err("Couldn't restore the checkpoint. Save your current work first.".into());
         }
         let (journal, snapshot) = self
             .recovery
@@ -1650,7 +1650,7 @@ impl SceneEditor {
         }
         next.workspace.welcome = false;
         next.render = render;
-        next.notice = "Recovered as an unsaved copy. Save requests a fresh filename. The original checkpoint is preserved until explicitly discarded in Recovery.".into();
+        next.notice = "Recovered as an unsaved copy. Save it under a new name.".into();
         if let Some(origin) = snapshot.origin.as_ref().or(snapshot.asset_origin.as_ref()) {
             let parent = if snapshot.origin.is_some() {
                 origin.parent().unwrap_or(origin)
@@ -1859,7 +1859,7 @@ impl SceneEditor {
                 ui.heading("Recovery cleanup failed");
                 egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-130.0).max(48.0)).show(ui,|ui| {
                     ui.label(&error);
-                    ui.label("The preserved checkpoint may reappear next launch. Close anyway, or keep this window open.");
+                    ui.label("The checkpoint may reappear next launch.");
                 });
                 ui.horizontal_wrapped(|ui| {
                 if ui.button("Close anyway").clicked() {self.close_cleanup_error=None;self.recovery.shutdown();self.runtime.shutdown();self.close_shutdown=true;}
@@ -2090,11 +2090,11 @@ impl SceneEditor {
             return false;
         }
         if self.recovered_input.is_some() {
-            self.error = "Resolve the recovered visual draft in its own controls, then review or discard the recovered action before saving or changing selection.".into();
+            self.error = "Couldn't continue. Finish or discard the recovered draft first.".into();
             return false;
         }
         if self.asset_publishing() || self.asset_loading() {
-            self.error="Asset publication is finishing; authored edits are reserved until acknowledgement.".into();
+            self.error="Assets are still saving. Wait a moment, then edit.".into();
             return false;
         }
         if self.hud_draft.is_some() {
@@ -2125,7 +2125,7 @@ impl SceneEditor {
         }
         self.observe_runtime();
         if self.manipulation.precision_pending() && self.draft != self.baseline_fields {
-            self.error = "Both recovered transform drafts are pending. Revert transform drafts to discard them, or keep this checkpoint for repair; no text was applied.".into();
+            self.error = "Couldn't apply. Two recovered transform drafts are open.".into();
             return false;
         }
         if self.manipulation.precision_pending() {
@@ -2173,7 +2173,7 @@ impl SceneEditor {
             Ok(_) => {
                 self.sync_draft();
                 self.error.clear();
-                self.notice = "Authored transform applied. Reset preview to use it.".into();
+                self.notice = "Transform applied.".into();
                 true
             }
             Err(e) => {
@@ -2199,7 +2199,7 @@ impl SceneEditor {
         match result {
             Ok(_) => {
                 self.sync_draft();
-                self.notice = "Authored history changed; preview unchanged.".into()
+                self.notice = "History changed.".into()
             }
             Err(e) => self.error = e.to_string(),
         }
@@ -2279,7 +2279,7 @@ impl SceneEditor {
                 }
                 self.sync_draft();
                 self.error.clear();
-                self.notice = format!("Authored {action}; preview unchanged until Reset.");
+                self.notice = format!("{action}.");
             }
             Err(error) => self.error = error.to_string(),
         }
@@ -2638,7 +2638,7 @@ impl SceneEditor {
             .session
             .set_mesh(self.session.scene().revision, id, mesh)
             .map_err(|e| e.to_string())?;
-        self.notice=format!("Mesh assigned to {id} only, revision{revision}; Undo restores the assignment, preview unchanged until Reset.");
+        self.notice=format!("Mesh assigned to {id}.");
         Ok(revision)
     }
     /// Changing geometry must not introduce missing UVs beneath an assigned
@@ -2701,7 +2701,7 @@ impl SceneEditor {
             ..object.clone()
         };
         if textured && !rot_render::object_has_complete_uvs(&candidate, &self.resolved) {
-            return Err("A textured material requires complete mesh UVs; assign a UV-mapped mesh or clear the material first.".into());
+            return Err("Couldn't use the texture. The mesh has no complete UVs.".into());
         }
         Ok(())
     }
@@ -2709,10 +2709,10 @@ impl SceneEditor {
         let store = self
             .assets
             .as_ref()
-            .ok_or("Open a saved scene with a valid content catalog first.")?;
+            .ok_or("Couldn't find the project assets. Open a saved scene first.")?;
         if !self.resolved.contains_key(id) && !self.resolved_textures.contains_key(id) {
             return Err(format!(
-                "Asset {id} has no accepted mesh or texture content."
+                "Asset {id} has no usable mesh or texture."
             ));
         }
         Ok(AssetDrag {
@@ -2766,16 +2766,16 @@ impl SceneEditor {
         let store = self
             .assets
             .as_ref()
-            .ok_or("Content catalog is unavailable; reopen the scene.")?;
+            .ok_or("Couldn't find the project assets. Reopen the scene.")?;
         if payload.catalog_root != store.root() {
             return Err(
-                "Content belongs to another project catalog; import it into this project first."
+                "That asset is from another project. Import it here first."
                     .into(),
             );
         }
         if payload.catalog_revision != store.revision() {
             return Err(
-                "The catalog changed during the content drag; inspect it and drag again.".into(),
+                "The assets changed during the drag. Drag again.".into(),
             );
         }
         Ok(())
@@ -2876,7 +2876,7 @@ impl SceneEditor {
         if self.error == self.shader_notice {
             self.error.clear();
         }
-        self.shader_notice = format!("Project shader revision {} active", self.shader_revision);
+        self.shader_notice = format!("Project shader reloaded ({})", self.shader_revision);
         Ok(())
     }
     fn content_command(
@@ -3138,7 +3138,7 @@ impl SceneEditor {
                 .set_mesh(self.session.scene().revision, id, mesh.clone())
                 .map_err(|e| err("invalid_arguments", e.to_string()))?;
             self.notice =
-                format!("Agent assigned mesh to {id}, revision{revision}; preview unchanged.");
+                format!("AI assigned a mesh to {id}.");
             return Ok(
                 json!({"revision":revision.to_string(),"asset_revision":expected_asset.to_string(),"object_id":id,"before":previous,"after":mesh,"dirty":self.session.is_dirty()}),
             );
@@ -3711,7 +3711,7 @@ impl SceneEditor {
         let lighting_changed = before.lighting != self.session.scene().lighting;
         let diff_truncated = diff_count > diff.len();
         self.notice = format!(
-            "Agent {op}: revision {revision}; {} targets changed. Preview unchanged.",
+            "AI {op}: {} objects changed.",
             changed_targets.len()
         );
         Ok(
@@ -3741,7 +3741,7 @@ impl SceneEditor {
     }
     fn new_group_button(&mut self, ui: &mut egui::Ui) {
         let enabled = self.guard().is_ok() && !self.manipulation.offset_pending();
-        if ui.add_enabled(enabled,egui::Button::new("New group")).on_hover_text("Create an empty assembly group. Parent targets through the Inspector; shared Undo and save.").clicked() {
+        if ui.add_enabled(enabled,egui::Button::new("New group")).on_hover_text("Create an empty group.").clicked() {
             self.create_empty();
         }
     }
@@ -3908,13 +3908,13 @@ impl SceneEditor {
                 let response = egui::ComboBox::from_id_salt("asset_import_normals")
                     .selected_text(match self.asset_normal_policy {
                         rot_assets::MeshNormalPolicy::Flat => "Flat normals",
-                        rot_assets::MeshNormalPolicy::AuthoredWhenComplete => "Authored normals",
+                        rot_assets::MeshNormalPolicy::AuthoredWhenComplete => "Mesh Normals",
                     })
                     .show_ui(ui, |ui| {
                         for (value, label) in [
                             (
                                 rot_assets::MeshNormalPolicy::AuthoredWhenComplete,
-                                "Authored normals",
+                                "Mesh Normals",
                             ),
                             (rot_assets::MeshNormalPolicy::Flat, "Flat normals"),
                         ] {
@@ -3929,7 +3929,7 @@ impl SceneEditor {
                     });
                 focus.restore(ui, &response.response, selected);
             });
-            ui.weak("Choose Flat for hard faces.").on_hover_text("Authored normals use the complete normals in your OBJ. A mesh with no normals uses flat shading; incomplete normals need repair.");
+            ui.weak("Choose Flat for hard faces.").on_hover_text("Uses the normals in your OBJ. Meshes without them are flat shaded.");
         }
         if self.import_texture_role().is_some() {
             crate::editor_theme::dialog_section(ui, "Texture import settings");
@@ -4177,7 +4177,7 @@ impl SceneEditor {
             return false;
         }
         self.notice.push_str(&format!(
-            " Undo budget: {removed} older step(s) removed; {} pressure removals in this session.",
+            " Undo history trimmed: {removed} older step(s) removed.",
             count
         ));
         true
@@ -4341,7 +4341,7 @@ impl SceneEditor {
             Action::Export => self.open_export_dialog(),
             Action::NewProject => {
                 if self.session.is_dirty() || self.guard().is_err() || self.asset_busy() {
-                    self.error = "Save the current project and finish or cancel pending edits before creating a project.".into();
+                    self.error = "Couldn't create a project. Save your work first.".into();
                 } else {
                     self.release_runtime_input();
                     self.new_project_form = Some(project_picker::ProjectForm::new_project());
@@ -4349,7 +4349,7 @@ impl SceneEditor {
             }
             Action::OpenProject => {
                 if self.needs_recovery() || self.guard().is_err() || self.asset_busy() {
-                    self.error = "Save the current scene and finish or cancel pending edits before switching projects.".into();
+                    self.error = "Couldn't switch projects. Save your scene first.".into();
                 } else {
                     self.release_runtime_input();
                     self.runtime.cancel_native_hud_activation();
@@ -5104,7 +5104,7 @@ impl SceneEditor {
                 || self.recovery.open)
         {
             self.manipulation.cancel();
-            self.notice = "Transform cancelled; authored state unchanged.".into();
+            self.notice = "Transform cancelled.".into();
         }
         let input_blocked = self.hud_open
             || self.input_actions_open

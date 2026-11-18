@@ -549,7 +549,7 @@ impl Preferences {
             || v["format"] != "rot-editor-preferences"
             || v["version"] != 1
         {
-            return Err("Unsupported editor preference format/version or fields; Reset preferences to recover.".into());
+            return Err("Couldn't read your preferences. Reset them to continue.".into());
         }
         let number = |key: &str, low: f64, high: f64| {
             v[key]
@@ -932,11 +932,11 @@ impl Workspace {
             if path.exists() || path.symlink_metadata().is_ok() {
                 match rot_assets::read_regular_file(path,MAX_WORKSPACE_BYTES) {
                     Ok(bytes)=> {match Preferences::parse(&bytes) {Ok(prefs)=>workspace.prefs=prefs,Err(e)=>{workspace.error=e;workspace.recovery_required=true;}}workspace.storage.baseline=Some(bytes);},
-                    Err(e)=>workspace.error=format!("Cannot read editor preferences {}: {e}. Move this file aside or repair access, then reopen. Reset cannot replace an unreadable, oversized or nonregular baseline.",path.display()),
+                    Err(e)=>workspace.error=format!("Couldn't read preferences at {}: {e}. Move the file aside, then reopen.",path.display()),
                 }
             }
         } else {
-            workspace.error="Editor preferences path unavailable; this window still works without saving preferences.".into();
+            workspace.error="Couldn't find a place to save preferences.".into();
         }
         workspace.reset_editor_draft();
         workspace
@@ -1155,7 +1155,7 @@ impl Workspace {
     }
     pub fn persist(&mut self) -> Result<(), String> {
         if self.recovery_required {
-            return Err("Preferences are invalid; use Reset preferences explicitly before saving replacements.".into());
+            return Err("Preferences are invalid. Reset them before saving.".into());
         }
         let path = self
             .storage
@@ -1171,15 +1171,15 @@ impl Workspace {
         let lock = PreferenceLock::acquire(path)?;
         let path = &lock.path;
         if path.symlink_metadata().is_ok_and(|m| !m.is_file()) {
-            return Err(format!("Preference destination {} must be a regular file. Move it aside or repair access, then reopen.",path.display()));
+            return Err(format!("Couldn't use {} for preferences. Move it aside, then reopen.",path.display()));
         }
         let current = match rot_assets::read_regular_file(path, MAX_WORKSPACE_BYTES) {
             Ok(bytes) => Some(bytes),
             Err(_) if !path.exists() => None,
-            Err(e) => return Err(format!("Cannot read preference baseline {}: {e}. Move this file aside or repair access, then reopen; Reset cannot replace an unreadable or oversized baseline.",path.display())),
+            Err(e) => return Err(format!("Couldn't read preferences at {}: {e}. Move the file aside, then reopen.",path.display())),
         };
         if current != self.storage.baseline {
-            return Err("Editor preferences changed outside this window; reopen the editor or choose another state path before saving.".into());
+            return Err("Preferences changed outside the editor. Reopen it to save.".into());
         }
         let bytes = serde_json::to_vec_pretty(&self.prefs.json()).map_err(|e| e.to_string())?;
         Preferences::parse(&bytes)?;
@@ -1342,7 +1342,7 @@ impl Workspace {
                     .iter()
                     .any(|b| b.action != action && b.same_keys(candidate))
                 {
-                    self.error="Shortcut already belongs to another action; choose another combination or Escape.".into();
+                    self.error="That shortcut is taken. Choose another, or press Escape.".into();
                 } else if let Some(binding) =
                     self.prefs.bindings.iter_mut().find(|b| b.action == action)
                 {
