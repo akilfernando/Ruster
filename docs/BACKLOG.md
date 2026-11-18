@@ -332,7 +332,7 @@ holds no panel body; one `ui_drive.py` screenshot is unchanged; the gate
 passes.
 
 #### S-08 · String table and wording pass — M — ready
-Status: in progress (paused 2026-11-17). Part 1 merged (1e740e1): `strings.rs` table, themed wording. Part 2 not started: the long-message and internal-word sweep (252 literals over 80 chars, 351 banned-word hits before exclusions; many are AI-facing protocol text to leave), and wiring EmptyHierarchy, OpeningProject, Building, BuildFinished, then removing `#[allow(dead_code)]` on `Text`.
+Status: wording sweep landed 2026-11-19. Empty Hierarchy, project opening and build states use the shared table. Full acceptance still needs an audit of indirect messages, tooltips and remaining inline copy.
 **Outcome.** All text follows the [writing rules](UX-STANDARDS.md#8-writing)
 and comes from one table with Plain and Rot wording.
 **Facts.** Strings are inline. About 337 literals are longer than 80

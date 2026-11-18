@@ -474,7 +474,7 @@ impl SceneEditor {
             .map_err(|failure| error("invalid_arguments", failure.to_string()))?;
         self.sync_draft();
         self.observe_runtime();
-        self.notice=format!("Agent {op} applied at revision{next}; unsaved, shared Undo. Reset preview to capture authored changes.");
+        self.notice = format!("AI {op}: HUD changed.");
         Ok(
             json!({"session_token":token,"revision":next.to_string(),"changed":next!=revision,"dirty":self.session.is_dirty()}),
         )

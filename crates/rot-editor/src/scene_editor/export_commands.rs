@@ -43,7 +43,7 @@ impl SceneEditor {
             return Err("Save the scene before exporting.".into());
         }
         if !self.shader_builtin {
-            return Err("Custom shaders cannot be exported yet. Choose the built-in appearance for this session.".into());
+            return Err("Couldn't export. Custom shaders aren't supported yet.".into());
         }
         if self.play_check_write_busy() {
             return Err("Wait for the play-check save before exporting.".into());
@@ -70,7 +70,7 @@ impl SceneEditor {
     ) -> std::result::Result<Value, String> {
         self.export_ready(false)?;
         if initial_camera.is_some() && self.session.scene().player_view.is_some() {
-            return Err("The saved Player View owns playback framing. Export without legacy initial framing.".into());
+            return Err("The saved Game view sets the camera. Turn off the start camera.".into());
         }
         if title.trim().is_empty()
             || title.trim() != title
@@ -106,17 +106,23 @@ impl SceneEditor {
             Some(store) => {
                 for id in &mesh_ids {
                     if store.mesh(id).is_none() {
-                        return Err(format!("Mesh {id} has no accepted mesh content; repair its source and Refresh before exporting."));
+                        return Err(format!(
+                            "Couldn't export. Mesh {id} has no usable content. Refresh it."
+                        ));
                     }
                 }
                 for id in &texture_ids {
                     if store.texture(id).is_none() {
-                        return Err(format!("Texture {id} has no accepted texture content; repair its source and Refresh before exporting."));
+                        return Err(format!(
+                            "Couldn't export. Texture {id} has no usable content. Refresh it."
+                        ));
                     }
                 }
                 for id in &sound_ids {
                     if store.sound(id).is_none() {
-                        return Err(format!("Sound {id} has no accepted WAV content; repair its source and Refresh before exporting."));
+                        return Err(format!(
+                            "Couldn't export. Sound {id} has no usable content. Refresh it."
+                        ));
                     }
                 }
                 Some(store.export_snapshot(&ids).map_err(|e| e.to_string())?)
@@ -128,9 +134,7 @@ impl SceneEditor {
             {
                 None
             }
-            None => {
-                return Err("Repair the content catalog before exporting imported assets.".into())
-            }
+            None => return Err("Couldn't export. Repair the project assets first.".into()),
         };
         let ctx = self
             .export_context
@@ -159,8 +163,7 @@ impl SceneEditor {
             self.creation_export
                 .attach_agent_authority(self.connection_authority.clone());
         }
-        self.notice =
-            "Exporting application… You can keep editing; changed work cancels this export.".into();
+        self.notice = crate::strings::tr(&ctx, crate::strings::Text::Building).into();
         // MCP already receives the operation/receipt through inspection. Do not
         // open an unsolicited window over its subsequent viewport captures.
         // Existing human-opened status windows remain under human ownership.
@@ -478,7 +481,7 @@ impl SceneEditor {
                 crate::editor_theme::dialog_section(ui, "Starting camera");
                 let has_player_view = self.session.scene().player_view.is_some();
                 let current_view = ui.add_enabled(!has_player_view, egui::Checkbox::new(&mut self.export_use_current_view, "Use current view"))
-                    .on_hover_text("Start the exported application with this camera and projection. Requires a current Linux export template.");
+                    .on_hover_text("Start the game with this camera.");
                 if has_player_view {
                     ui.label("The saved Player View controls application framing.");
                 }
@@ -539,7 +542,7 @@ impl SceneEditor {
                         };
                         self.export_dialog = false;
                         let initial_camera = if self.export_use_current_view {
-                            Some(self.navigation.camera.filter(|camera| camera.is_valid()).ok_or("The current viewport camera is not ready; close this dialog and frame the view first.")?)
+                            Some(self.navigation.camera.filter(|camera| camera.is_valid()).ok_or("The Scene camera isn't ready. Close this and frame the view.")?)
                         } else { None };
                         self.start_creation_export(self.export_title.clone(), destination, false, initial_camera)
                             .map(|_| ())
@@ -567,13 +570,19 @@ impl SceneEditor {
                     if let Ok(state) = self.creation_export.inspect(None) {
                         match state["operation"]["state"].as_str() {
                             Some("running") => {
-                                ui.label("Preparing your application…");
+                                ui.label(crate::strings::tr(
+                                    ui.ctx(),
+                                    crate::strings::Text::Building,
+                                ));
                             }
                             Some("cancelling") => {
                                 ui.label("Cancelling export…");
                             }
                             Some("committed") => {
-                                ui.heading("Export ready");
+                                ui.heading(crate::strings::tr(
+                                    ui.ctx(),
+                                    crate::strings::Text::BuildFinished,
+                                ));
                                 ui.label(
                                     state["operation"]["receipt"]["archive"]
                                         .as_str()

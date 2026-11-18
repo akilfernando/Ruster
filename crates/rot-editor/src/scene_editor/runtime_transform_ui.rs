@@ -55,16 +55,16 @@ impl SceneEditor {
                 ui.label("The selected target is not present in this runtime frame.");
             }
         } else {
-            ui.label("Runtime frame unavailable. Reset to inspect its transform.");
+            ui.label("Transform unavailable. Press Play to see it.");
         }
-        let edit = ui.button("Edit authored transform");
+        let edit = ui.button("Edit Saved Transform");
         if edit.gained_focus() {
             edit.scroll_to_me(Some(egui::Align::Center));
         }
         if edit.clicked() {
             self.runtime.release_input(ui.ctx());
             self.runtime.visible = false;
-            self.notice = "Showing authored scene transforms.".into();
+            self.notice = "Showing the saved scene transforms.".into();
             ui.ctx().request_repaint();
         }
     }

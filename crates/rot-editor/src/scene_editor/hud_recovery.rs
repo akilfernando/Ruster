@@ -122,7 +122,7 @@ pub(super) fn upgrade(session: &Session, value: Value) -> Result<HudDraft, Strin
         selected: legacy.selected,
     };
     if !draft.validate_snapshot(session) {
-        return Err("Legacy HUD recovery draft has invalid bounds, revision or baseline. Original preserved.".into());
+        return Err("Couldn't restore the HUD draft. It is not valid.".into());
     }
     Ok(draft)
 }

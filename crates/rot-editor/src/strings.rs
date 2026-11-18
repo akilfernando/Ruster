@@ -6,9 +6,6 @@
 //! Command names live in `Action::label`; this table holds the rest.
 use eframe::egui;
 
-// EmptyHierarchy, OpeningProject, Building and BuildFinished are wired by
-// the rest of the wording sweep (BACKLOG S-08 notes).
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Text {
     Welcome,

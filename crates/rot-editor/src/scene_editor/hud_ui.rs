@@ -516,50 +516,100 @@ fn condition_ui(
         let mut active = condition.is_some();
         fields.push(ui.checkbox(&mut active, format!("{title} condition")));
         if active != condition.is_some() {
-            *condition = active.then(|| BoolCondition { binding_id: String::new(), field: String::new(), expected: true });
+            *condition = active.then(|| BoolCondition {
+                binding_id: String::new(),
+                field: String::new(),
+                expected: true,
+            });
         }
-        let Some(condition) = condition else { return; };
-        fields.push(raw_field(ui, &format!("{title} binding ID"), &mut condition.binding_id, 128, scope.with("binding")));
+        let Some(condition) = condition else {
+            return;
+        };
+        fields.push(raw_field(
+            ui,
+            &format!("{title} ID"),
+            &mut condition.binding_id,
+            128,
+            scope.with("binding"),
+        ));
         let focus = ComboFocus::capture(ui, "condition_binding");
         let mut selected = false;
         let response = egui::ComboBox::from_id_salt("condition_binding")
-            .selected_text("Choose enabled Bool binding").show_ui(ui, |ui| {
+            .selected_text("Choose enabled Bool")
+            .show_ui(ui, |ui| {
                 for (id, binding) in &session.authoring().bindings {
-                    if binding.enabled && session.source(&binding.source_id).is_some()
-                        && binding.state_defaults.values().any(|value| matches!(value, StateValue::Bool(_)))
-                        && ui.selectable_label(id == &condition.binding_id, id).clicked() {
+                    if binding.enabled
+                        && session.source(&binding.source_id).is_some()
+                        && binding
+                            .state_defaults
+                            .values()
+                            .any(|value| matches!(value, StateValue::Bool(_)))
+                        && ui
+                            .selectable_label(id == &condition.binding_id, id)
+                            .clicked()
+                    {
                         if id != &condition.binding_id {
                             condition.binding_id = id.clone();
-                            condition.field = binding.state_defaults.iter().find(|(_, value)| matches!(value, StateValue::Bool(_)))
-                                .map(|(name, _)| name.clone()).unwrap_or_default();
+                            condition.field = binding
+                                .state_defaults
+                                .iter()
+                                .find(|(_, value)| matches!(value, StateValue::Bool(_)))
+                                .map(|(name, _)| name.clone())
+                                .unwrap_or_default();
                         }
-                        selected = true; ui.close();
+                        selected = true;
+                        ui.close();
                     }
                 }
             });
-        focus.restore(ui, &response.response, selected); fields.push(response.response);
-        fields.push(raw_field(ui, &format!("{title} Bool field"), &mut condition.field, 128, scope.with("field")));
+        focus.restore(ui, &response.response, selected);
+        fields.push(response.response);
+        fields.push(raw_field(
+            ui,
+            &format!("{title} Bool field"),
+            &mut condition.field,
+            128,
+            scope.with("field"),
+        ));
         let focus = ComboFocus::capture(ui, "condition_field");
         let mut selected = false;
         let response = egui::ComboBox::from_id_salt("condition_field")
-            .selected_text("Choose Bool field").show_ui(ui, |ui| {
-                if let Some(binding) = session.binding(&condition.binding_id).filter(|binding| binding.enabled) {
+            .selected_text("Choose Bool field")
+            .show_ui(ui, |ui| {
+                if let Some(binding) = session
+                    .binding(&condition.binding_id)
+                    .filter(|binding| binding.enabled)
+                {
                     for (name, value) in &binding.state_defaults {
-                        if matches!(value, StateValue::Bool(_)) && ui.selectable_label(name == &condition.field, name).clicked() {
-                            condition.field = name.clone(); selected = true; ui.close();
+                        if matches!(value, StateValue::Bool(_))
+                            && ui
+                                .selectable_label(name == &condition.field, name)
+                                .clicked()
+                        {
+                            condition.field = name.clone();
+                            selected = true;
+                            ui.close();
                         }
                     }
                 }
             });
-        focus.restore(ui, &response.response, selected); fields.push(response.response);
+        focus.restore(ui, &response.response, selected);
+        fields.push(response.response);
         ui.horizontal_wrapped(|ui| {
             ui.label("Expected value");
-            fields.push(selector(ui, "condition_expected", &mut condition.expected, &[(true, "True"), (false, "False")]));
+            fields.push(selector(
+                ui,
+                "condition_expected",
+                &mut condition.expected,
+                &[(true, "True"), (false, "False")],
+            ));
         });
-        if let Some(diagnostic) = rot_scene::hud::bool_condition_diagnostic(session.authoring(), condition) {
+        if let Some(diagnostic) =
+            rot_scene::hud::bool_condition_diagnostic(session.authoring(), condition)
+        {
             ui.colored_label(ui.visuals().warn_fg_color, diagnostic.message());
         }
-        ui.small("Clear the checkbox to remove the condition. Unavailable or differently typed state blocks it.");
+        ui.small("Clear the checkbox to remove the condition.");
     });
 }
 
@@ -730,9 +780,7 @@ impl SceneEditor {
                 );
             }
             if !draft.validate_snapshot(&self.session) {
-                return Err(
-                    "The authored HUD changed. Cancel this draft and inspect again.".into(),
-                );
+                return Err("The HUD changed. Cancel this edit and start again.".into());
             }
             self.session
                 .set_hud(draft.revision, draft.value()?)
@@ -745,7 +793,7 @@ impl SceneEditor {
                 self.sync_draft();
                 self.observe_runtime();
                 self.error.clear();
-                self.notice = "HUD applied. Shared Undo restores the group. Reset runtime preview to capture the authored changes.".into();
+                self.notice = "HUD applied.".into();
                 true
             }
             Err(error) => {
@@ -795,7 +843,7 @@ impl SceneEditor {
             input.key_pressed(egui::Key::Enter) || input.key_pressed(egui::Key::Space)
         });
         ui.weak("Screen-space HUD · up to 4 panels and 32 total rows");
-        ui.small("Apply stops preview and shows authored defaults. Reset initializes live values.");
+        ui.small("Apply restarts Play with the saved values.");
         // Budget in current logical points after the wrapping header. Only the
         // body scrolls, keeping Apply, Cancel and validation feedback reachable.
         let spacing = ui.spacing().item_spacing.y;
@@ -1194,7 +1242,7 @@ impl SceneEditor {
                             ));
                             fields.push(raw_field(
                                 ui,
-                                "Application binding ID",
+                                "Application ID",
                                 &mut command.binding_id,
                                 128,
                                 egui::Id::unique(("hud_button_binding", &label.id)),
@@ -1203,7 +1251,7 @@ impl SceneEditor {
                             let mut selected = false;
                             let mut defaults = None;
                             let choice = egui::ComboBox::from_id_salt("hud_button_binding_choice")
-                                .selected_text("Choose enabled API5 Application binding")
+                                .selected_text("Choose enabled Application")
                                 .show_ui(ui, |ui| {
                                     for (id, binding) in &self.session.authoring().bindings {
                                         let supported = binding.enabled
@@ -1353,7 +1401,9 @@ impl SceneEditor {
                                     format!("Command unavailable. {diagnostic:?}"),
                                 );
                             }
-                            ui.small("Choose a binding and command to copy its typed defaults, then edit every argument. Broken targets remain available for caption and layout repair.");
+                            ui.small(
+                                "Choose a command to copy its defaults, then edit the arguments.",
+                            );
                         }
                         HudSource::State {
                             binding_id,
@@ -1365,7 +1415,7 @@ impl SceneEditor {
                         } => {
                             fields.push(raw_field(
                                 ui,
-                                "Binding ID",
+                                "ID",
                                 binding_id,
                                 128,
                                 egui::Id::unique(("hud_binding", &label.id)),
@@ -1373,7 +1423,7 @@ impl SceneEditor {
                             let focus = ComboFocus::capture(ui, "hud_binding_choice");
                             let mut selected = false;
                             let choice = egui::ComboBox::from_id_salt("hud_binding_choice")
-                                .selected_text("Choose enabled binding")
+                                .selected_text("Choose enabled")
                                 .show_ui(ui, |ui| {
                                     for (id, binding) in &self.session.authoring().bindings {
                                         if binding.enabled
@@ -1478,7 +1528,7 @@ impl SceneEditor {
                                 64,
                                 egui::Id::unique(("hud_precision", &label.id)),
                             ));
-                            ui.small("Broken references stay visible for repair. A new reference must select an enabled typed state field.");
+                            ui.small("Pick an enabled state field.");
                         }
                     }
                     if matches!(label.source, HudSource::Button { .. }) {

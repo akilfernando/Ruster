@@ -188,7 +188,9 @@ impl super::SceneEditor {
                 .as_ref()
                 .is_some_and(|texture| !self.resolved_textures.contains_key(texture))
             {
-                return Err("Model texture unavailable; refresh its source or reopen the project before placing.".into());
+                return Err(
+                    "Couldn't place the model. Its texture is missing. Refresh the model.".into(),
+                );
             }
         }
         let placement = model_placement(&self.session, model, name.unwrap_or(id).into())
@@ -199,7 +201,7 @@ impl super::SceneEditor {
             .map_err(|error| error.to_string())?;
         self.select_object(Some(root.clone()), false);
         self.error.clear();
-        self.notice = format!("Placed {id}. Scene Undo removes this placement; source refresh preserves scene edits. Preview updates on Reset.");
+        self.notice = format!("Placed {id}.");
         Ok(root)
     }
 }

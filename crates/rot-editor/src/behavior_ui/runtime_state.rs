@@ -74,38 +74,68 @@ impl RuntimeUi {
     }
 
     pub fn state_inspector(&mut self, ui: &mut egui::Ui) {
-        egui::CollapsingHeader::new("Committed runtime state").show(ui,|ui| {
-            let Some(frame)=self.frame.as_ref() else {ui.label("Reset preview to inspect committed state.");return;};
-            let key=(frame.key,frame.tick,frame.commit_revision);
+        egui::CollapsingHeader::new("Committed runtime state").show(ui, |ui| {
+            let Some(frame) = self.frame.as_ref() else {
+                ui.label("Reset preview to inspect committed state.");
+                return;
+            };
+            let key = (frame.key, frame.tick, frame.commit_revision);
             if self.state_page_key != Some(key) {
-                self.state_page_key=Some(key);
-                self.state_offset=0;
+                self.state_page_key = Some(key);
+                self.state_offset = 0;
             }
-            ui.label(format!("Run {}:{}:{} · tick {}",frame.key.generation,
-                frame.key.reset_epoch,frame.key.authored_revision,frame.tick));
-            ui.label(format!("Commit revision {} · last Step {:?}",frame.commit_revision,frame.last_step_commit_revision));
+            ui.label(format!(
+                "Run {}:{}:{} · tick {}",
+                frame.key.generation,
+                frame.key.reset_epoch,
+                frame.key.authored_revision,
+                frame.tick
+            ));
+            ui.label(format!(
+                "Commit revision {} · last Step {:?}",
+                frame.commit_revision, frame.last_step_commit_revision
+            ));
             if self.stale || !self.ready || Some(frame.key) != self.current_run() {
-                ui.colored_label(ui.visuals().warn_fg_color,"Historical snapshot. Reset to inspect current authored defaults.");
+                ui.colored_label(
+                    ui.visuals().warn_fg_color,
+                    "Historical snapshot. Reset to inspect current authored defaults.",
+                );
             }
             if frame.state.binding(&self.state_binding).is_none() {
-                self.state_binding=frame.state.binding_ids().next().unwrap_or("").into();
-                self.state_offset=0;
+                self.state_binding = frame.state.binding_ids().next().unwrap_or("").into();
+                self.state_offset = 0;
             }
-            if self.state_binding.is_empty() {ui.label("This run has no state-capable owners.");return;}
-            let previous=self.state_binding.clone();
-            egui::ComboBox::from_label("State owner").selected_text(&self.state_binding).show_ui(ui,|ui| {
-                for id in frame.state.binding_ids() {ui.selectable_value(&mut self.state_binding,id.into(),id);}
-            });
-            if previous != self.state_binding {self.state_offset=0;}
-            let fields=frame.state.binding(&self.state_binding).expect("selected snapshot owner");
-            ui.label(format!("{} fields · {} encoded bytes across the snapshot",fields.len(),frame.state.encoded_bytes()));
-            if self.playing && fields.len()>16 {
+            if self.state_binding.is_empty() {
+                ui.label("This run has no state-capable owners.");
+                return;
+            }
+            let previous = self.state_binding.clone();
+            egui::ComboBox::from_label("State owner")
+                .selected_text(&self.state_binding)
+                .show_ui(ui, |ui| {
+                    for id in frame.state.binding_ids() {
+                        ui.selectable_value(&mut self.state_binding, id.into(), id);
+                    }
+                });
+            if previous != self.state_binding {
+                self.state_offset = 0;
+            }
+            let fields = frame
+                .state
+                .binding(&self.state_binding)
+                .expect("selected snapshot owner");
+            ui.label(format!(
+                "{} fields · {} encoded bytes across the snapshot",
+                fields.len(),
+                frame.state.encoded_bytes()
+            ));
+            if self.playing && fields.len() > 16 {
                 ui.label("Pause preview to browse stable state pages.");
             }
-            for (name,value) in fields.iter().skip(self.state_offset).take(16) {
+            for (name, value) in fields.iter().skip(self.state_offset).take(16) {
                 ui.horizontal_wrapped(|ui| {
                     ui.strong(name);
-                    if let StateValue::Text(value)=value {
+                    if let StateValue::Text(value) = value {
                         ui.small("Text");
                         ui.label(value);
                     } else {
@@ -114,18 +144,42 @@ impl RuntimeUi {
                 });
             }
             ui.horizontal_wrapped(|ui| {
-                if ui.add_enabled(!self.playing && self.state_offset>0,egui::Button::new("Previous state fields")).clicked() {
-                    self.state_offset=self.state_offset.saturating_sub(16);
+                if ui
+                    .add_enabled(
+                        !self.playing && self.state_offset > 0,
+                        egui::Button::new("Previous state fields"),
+                    )
+                    .clicked()
+                {
+                    self.state_offset = self.state_offset.saturating_sub(16);
                 }
-                if ui.add_enabled(!self.playing && self.state_offset.saturating_add(16)<fields.len(),egui::Button::new("Next state fields")).clicked() {
-                    self.state_offset=self.state_offset.saturating_add(16);
+                if ui
+                    .add_enabled(
+                        !self.playing && self.state_offset.saturating_add(16) < fields.len(),
+                        egui::Button::new("Next state fields"),
+                    )
+                    .clicked()
+                {
+                    self.state_offset = self.state_offset.saturating_add(16);
                 }
             });
-            ui.collapsing("State snapshot identity",|ui| {
-                ui.label(format!("Source {}",frame.state.source_hash(&self.state_binding).unwrap_or("unavailable")));
-                ui.label(format!("Schema {}",frame.state.schema_hash(&self.state_binding).unwrap_or("unavailable")));
+            ui.collapsing("State snapshot identity", |ui| {
+                ui.label(format!(
+                    "Source {}",
+                    frame
+                        .state
+                        .source_hash(&self.state_binding)
+                        .unwrap_or("unavailable")
+                ));
+                ui.label(format!(
+                    "Schema {}",
+                    frame
+                        .state
+                        .schema_hash(&self.state_binding)
+                        .unwrap_or("unavailable")
+                ));
             });
-            ui.label("Values are committed runtime data. Edit authored defaults above and Reset to initialize a new run.");
+            ui.label("Live values. Reset to restore the defaults.");
         });
     }
 }

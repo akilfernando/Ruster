@@ -259,7 +259,10 @@ impl SceneEditor {
             } else {
                 self.sync_draft();
             }
-            self.notice = format!("Agent {op}: revision {result}. Authored lighting changed; preview unchanged. Created lights: {}.", created_ids.join(", "));
+            self.notice = format!(
+                "AI {op}: lighting changed. New lights: {}.",
+                created_ids.join(", ")
+            );
         }
         Ok(
             json!({"session_token":token,"revision":result.to_string(),"changed":result!=revision,"light_id":light_id,"created_ids":created_ids,"lighting":self.session.scene().lighting,"display":self.session.scene().display,"dirty":self.session.is_dirty()}),

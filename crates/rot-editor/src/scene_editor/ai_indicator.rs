@@ -84,7 +84,9 @@ impl SceneEditor {
                 crate::branding::idle_tint(ui),
             ),
         };
-        if status.active() {
+        if status.active()
+            && crate::editor_theme::style(ui.ctx()) == crate::editor_theme::Style::Rot
+        {
             // A slow pulse while requests are arriving.
             let phase = ui.input(|i| i.time) as f32 * std::f32::consts::TAU / 1.6;
             tint = tint.gamma_multiply(0.6 + 0.4 * phase.cos().abs());

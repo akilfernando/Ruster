@@ -910,7 +910,7 @@ impl SceneEditor {
             return;
         }
         if !self.behavior_editable() {
-            self.error="Couldn't edit the Script. Finish your open edits first.".into();
+            self.error = "Couldn't edit the Script. Finish your open edits first.".into();
             return;
         }
         if matches!(action, Action::Save) {
@@ -944,7 +944,7 @@ impl SceneEditor {
                 self.sync_draft();
                 self.observe_runtime();
                 self.error.clear();
-                self.notice="Script updated.".into();
+                self.notice = "Script updated.".into();
             }
             Err(error) => {
                 self.behavior.error = error.clone();
@@ -1267,8 +1267,7 @@ impl SceneEditor {
             _ => false,
         } {
             return Err(
-                "Couldn't restore the checkpoint. Its drafts are an unsupported version."
-                    .into(),
+                "Couldn't restore the checkpoint. Its drafts are an unsupported version.".into(),
             );
         }
         if version.is_some_and(|version| version < 7) {
@@ -1566,7 +1565,9 @@ impl SceneEditor {
                     || self.draft != self.baseline_fields
                     || self.manipulation.offset_pending())
             {
-                return Err("Couldn't restore the checkpoint. Its drafts are not supported.".into());
+                return Err(
+                    "Couldn't restore the checkpoint. Its drafts are not supported.".into(),
+                );
             }
             self.behavior.restore(&self.session, behavior)?;
         }
@@ -1854,20 +1855,35 @@ impl SceneEditor {
     }
     fn close_finalization_ui(&mut self, ctx: &egui::Context) {
         if let Some(error) = self.close_cleanup_error.clone() {
-            egui::Modal::new(egui::Id::unique("close_recovery_failed")).show(ctx,|ui| {
-                ui.set_width((ctx.content_rect().width()-48.0).clamp(220.0,520.0));
+            egui::Modal::new(egui::Id::unique("close_recovery_failed")).show(ctx, |ui| {
+                ui.set_width((ctx.content_rect().width() - 48.0).clamp(220.0, 520.0));
                 ui.heading("Recovery cleanup failed");
-                egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-130.0).max(48.0)).show(ui,|ui| {
-                    ui.label(&error);
-                    ui.label("The checkpoint may reappear next launch.");
-                });
+                egui::ScrollArea::vertical()
+                    .max_height((ctx.content_rect().height() - 130.0).max(48.0))
+                    .show(ui, |ui| {
+                        ui.label(&error);
+                        ui.label("The checkpoint may reappear next launch.");
+                    });
                 ui.horizontal_wrapped(|ui| {
-                if ui.button("Close anyway").clicked() {self.close_cleanup_error=None;self.recovery.shutdown();self.runtime.shutdown();self.close_shutdown=true;}
-                let cancel=ui.button("Cancel closing");
-                if self.confirm_focused!=Some("cleanup-error") {cancel.request_focus();self.confirm_focused=Some("cleanup-error");}
-                if cancel.clicked() || ui.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Escape)) {
-                    self.close_cleanup_error=None;self.close_approved=false;self.close_pending=false;self.recovery.reschedule();
-                }
+                    if ui.button("Close anyway").clicked() {
+                        self.close_cleanup_error = None;
+                        self.recovery.shutdown();
+                        self.runtime.shutdown();
+                        self.close_shutdown = true;
+                    }
+                    let cancel = ui.button("Cancel closing");
+                    if self.confirm_focused != Some("cleanup-error") {
+                        cancel.request_focus();
+                        self.confirm_focused = Some("cleanup-error");
+                    }
+                    if cancel.clicked()
+                        || ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+                    {
+                        self.close_cleanup_error = None;
+                        self.close_approved = false;
+                        self.close_pending = false;
+                        self.recovery.reschedule();
+                    }
                 });
             });
         } else if let Some(RecoveryTransition::Close { cancelled, .. }) =
@@ -2094,7 +2110,7 @@ impl SceneEditor {
             return false;
         }
         if self.asset_publishing() || self.asset_loading() {
-            self.error="Assets are still saving. Wait a moment, then edit.".into();
+            self.error = "Assets are still saving. Wait a moment, then edit.".into();
             return false;
         }
         if self.hud_draft.is_some() {
@@ -2638,7 +2654,7 @@ impl SceneEditor {
             .session
             .set_mesh(self.session.scene().revision, id, mesh)
             .map_err(|e| e.to_string())?;
-        self.notice=format!("Mesh assigned to {id}.");
+        self.notice = format!("Mesh assigned to {id}.");
         Ok(revision)
     }
     /// Changing geometry must not introduce missing UVs beneath an assigned
@@ -2711,9 +2727,7 @@ impl SceneEditor {
             .as_ref()
             .ok_or("Couldn't find the project assets. Open a saved scene first.")?;
         if !self.resolved.contains_key(id) && !self.resolved_textures.contains_key(id) {
-            return Err(format!(
-                "Asset {id} has no usable mesh or texture."
-            ));
+            return Err(format!("Asset {id} has no usable mesh or texture."));
         }
         Ok(AssetDrag {
             catalog_root: store.root().to_path_buf(),
@@ -2768,15 +2782,10 @@ impl SceneEditor {
             .as_ref()
             .ok_or("Couldn't find the project assets. Reopen the scene.")?;
         if payload.catalog_root != store.root() {
-            return Err(
-                "That asset is from another project. Import it here first."
-                    .into(),
-            );
+            return Err("That asset is from another project. Import it here first.".into());
         }
         if payload.catalog_revision != store.revision() {
-            return Err(
-                "The assets changed during the drag. Drag again.".into(),
-            );
+            return Err("The assets changed during the drag. Drag again.".into());
         }
         Ok(())
     }
@@ -3137,8 +3146,7 @@ impl SceneEditor {
                 .session
                 .set_mesh(self.session.scene().revision, id, mesh.clone())
                 .map_err(|e| err("invalid_arguments", e.to_string()))?;
-            self.notice =
-                format!("AI assigned a mesh to {id}.");
+            self.notice = format!("AI assigned a mesh to {id}.");
             return Ok(
                 json!({"revision":revision.to_string(),"asset_revision":expected_asset.to_string(),"object_id":id,"before":previous,"after":mesh,"dirty":self.session.is_dirty()}),
             );
@@ -3710,10 +3718,7 @@ impl SceneEditor {
         }
         let lighting_changed = before.lighting != self.session.scene().lighting;
         let diff_truncated = diff_count > diff.len();
-        self.notice = format!(
-            "AI {op}: {} objects changed.",
-            changed_targets.len()
-        );
+        self.notice = format!("AI {op}: {} objects changed.", changed_targets.len());
         Ok(
             json!({"session_token":token,"revision":revision.to_string(),"changed":changed,"hierarchy":Self::hierarchy_page(self.session.scene(),0),"resolved_world_count":self.session.scene().target_count(),"resolved_world_next_offset":if self.session.scene().target_count()>16{Some("16")}else{None},"stored_coordinate_space":"local","resolved_world":self.session.scene().resolve_poses().map_err(|e| ("invalid_scene".into(),e.to_string()))?.transforms.into_iter().take(16).collect::<BTreeMap<_,_>>(),"diff":diff,"diff_count":diff_count,"diff_truncated":diff_truncated,"light_diff":light_diff,"lighting_changed":lighting_changed,"lighting":self.session.scene().lighting,"changed_target_count":changed_targets.len(),"hierarchy_changed":hierarchy_changed,"changed_target_ids":changed_targets.iter().take(16).collect::<Vec<_>>(),"dirty":self.session.is_dirty()}),
         )
@@ -3741,7 +3746,11 @@ impl SceneEditor {
     }
     fn new_group_button(&mut self, ui: &mut egui::Ui) {
         let enabled = self.guard().is_ok() && !self.manipulation.offset_pending();
-        if ui.add_enabled(enabled,egui::Button::new("New group")).on_hover_text("Create an empty group.").clicked() {
+        if ui
+            .add_enabled(enabled, egui::Button::new("New group"))
+            .on_hover_text("Create an empty group.")
+            .clicked()
+        {
             self.create_empty();
         }
     }
@@ -3929,7 +3938,9 @@ impl SceneEditor {
                     });
                 focus.restore(ui, &response.response, selected);
             });
-            ui.weak("Choose Flat for hard faces.").on_hover_text("Uses the normals in your OBJ. Meshes without them are flat shaded.");
+            ui.weak("Choose Flat for hard faces.").on_hover_text(
+                "Uses the normals in your OBJ. Meshes without them are flat shaded.",
+            );
         }
         if self.import_texture_role().is_some() {
             crate::editor_theme::dialog_section(ui, "Texture import settings");
@@ -4177,8 +4188,7 @@ impl SceneEditor {
             return false;
         }
         self.notice.push_str(&format!(
-            " Undo history trimmed: {removed} older step(s) removed.",
-            count
+            " Undo history trimmed: {removed} older step(s) removed."
         ));
         true
     }
@@ -5214,6 +5224,8 @@ impl SceneEditor {
                     self.new_project_form = Some(form);
                 }
                 if let Some(session) = session {
+                    self.notice =
+                        crate::strings::tr(&ctx, crate::strings::Text::OpeningProject).into();
                     self.open_saved_session(session);
                 }
             }
@@ -7262,7 +7274,7 @@ mod tests {
         let text = draw(&mut editor, egui::vec2(640.0, 480.0), vec![]);
         let button = text
             .iter()
-            .find(|(label, _)| label == "Edit authored transform")
+            .find(|(label, _)| label == "Edit Saved Transform")
             .expect("Runtime Inspector needs an explicit authored-edit route")
             .1
             .center();
@@ -8220,7 +8232,7 @@ mod tests {
         assert!(e
             .accept_asset_drop("right", &obsolete)
             .unwrap_err()
-            .contains("catalog changed"));
+            .contains("assets changed"));
         e.draft.as_mut().unwrap().scale[0] = "-".into();
         assert!(e.accept_asset_drop("right", &fresh).is_err());
         assert_eq!(e.draft.as_ref().unwrap().scale[0], "-");

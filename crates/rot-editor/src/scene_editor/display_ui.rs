@@ -121,12 +121,7 @@ impl SceneEditor {
                 self.draft_generation = self.draft_generation.wrapping_add(1);
                 self.sync_draft();
                 self.error.clear();
-                self.notice = if self.runtime.visible {
-                    "Scene display updated. Reset preview to use the changes."
-                } else {
-                    "Scene display updated."
-                }
-                .into();
+                self.notice = "Scene display updated.".into();
                 true
             }
             Err(error) => {
@@ -146,7 +141,7 @@ impl SceneEditor {
         self.display_draft = None;
         self.draft_generation = self.draft_generation.wrapping_add(1);
         self.error.clear();
-        self.notice = "Display draft cancelled; authored state unchanged.".into();
+        self.notice = "Display change cancelled.".into();
     }
     pub(super) fn display_inspector_ui(&mut self, ui: &mut egui::Ui) {
         let own = self.display_draft.is_some();

@@ -34,7 +34,7 @@ impl Worker {
     /// Refuse BEFORE consent consumption or any executable launch. An absolute
     /// launcher and a post-write receipt cannot establish pre-mutation provenance.
     pub(super) fn start(_consent: RegistrationConsent) -> Result<Self, String> {
-        Err("Registration unavailable: Hermes lacks a qualified strict profile/raw inspection and context-bound apply contract. No process launched.".into())
+        Err("Couldn't register Hermes. It isn't supported yet.".into())
     }
 
     /// Historical worker mechanics only; not a supported registration path.

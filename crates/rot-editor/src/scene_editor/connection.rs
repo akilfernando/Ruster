@@ -147,7 +147,7 @@ impl Host {
             || self.editor.recovery_transition.is_some()
             || self.editor.close_in_progress()
         {
-            return Err("Wait for the old connection/publication owner to retire.".into());
+            return Err("Wait for the old connection to close.".into());
         }
         let grant = self.enrolled_grant()?;
         let (incarnation, generation) = (

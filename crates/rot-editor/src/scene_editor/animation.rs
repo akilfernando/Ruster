@@ -239,7 +239,9 @@ impl SceneEditor {
                             .show_ui(ui, |ui| {
                                 for row in rows {
                                     let text = format!("{} ({:.2} s)", row.name, row.duration);
-                                    if ui.selectable_value(&mut clip, row.id.clone(), text).clicked()
+                                    if ui
+                                        .selectable_value(&mut clip, row.id.clone(), text)
+                                        .clicked()
                                     {
                                         selected = true;
                                         ui.close();

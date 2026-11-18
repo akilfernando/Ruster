@@ -1218,10 +1218,7 @@ impl BehaviorUi {
         }
         if self.state_add_dirty {
             if let Some(draft) = &self.state_add {
-                ui.label(format!(
-                    "Unapplied state field for binding {}",
-                    draft.binding
-                ));
+                ui.label(format!("Unsaved state field for script {}", draft.binding));
             }
             if ui.button("Cancel pending state field").clicked() {
                 action = Some(Action::CancelStateAdd);
@@ -1325,7 +1322,7 @@ impl BehaviorUi {
                 if !assembly {
                 ui.separator();
                 ui.strong("State defaults");
-                ui.label("Authored defaults become committed runtime fields on Reset. Stateful APIs return own-state patches.");
+                ui.label("Reset restores these defaults.");
                 for (name, value) in &binding.state_defaults {
                     ui.push_id(("state", id, name), |ui| {
                         ui.horizontal_wrapped(|ui| {
@@ -1349,7 +1346,7 @@ impl BehaviorUi {
                                 .default_open(self.state_add_dirty)
                                 .show(ui, |ui| {
                                     if self.state_add_dirty && self.state_add.as_ref().is_some_and(|draft| draft.binding != *id) {
-                                        ui.label("A state field is pending for another binding. Return to it or Cancel the pending field above.");
+                                        ui.label("Finish or cancel the other script’s state field first.");
                                         return;
                                     }
                                     if !self.state_add_dirty && self.state_add.as_ref().is_none_or(|draft|
@@ -1411,7 +1408,7 @@ impl BehaviorUi {
                 egui::CollapsingHeader::new("Script details").id_salt(("behavior_details",id)).show(ui,|ui| {
                     ui.label(format!("Attachment: {id}"));ui.label(format!("Source: {}",binding.source_id));
                     if let Some(source)=session.source(&binding.source_id) {ui.label(format!("Language {} · host API {}",source.language_id,source.host_api_version));
-                        if source.host_api_version==rot_behavior::KINEMATIC_HOST_API_VERSION {ui.label("Kinematic mover: enabled Blocker Sphere, uniform scale, flat scene. Other blockers stay stationary. Set axis_x / axis_z to saved Axis action IDs; blank means no movement on that axis.");}
+                        if source.host_api_version==rot_behavior::KINEMATIC_HOST_API_VERSION {ui.label("Kinematic Mover").on_hover_text("Requires an enabled Blocker Sphere, uniform scale, and a flat scene. Other blockers stay stationary. Set axis_x and axis_z to Axis action IDs. Leave an axis blank to disable movement on it.");}
                     }
                     ui.label(format!("{} / {} properties",binding.properties.len(),rot_scene::MAX_PROPERTIES));
                 });
@@ -2163,7 +2160,7 @@ impl RuntimeUi {
                 self.stale = false;
                 self.visible = true;
                 self.reset_succeeded = Some(key);
-                self.status = "Runtime reset successfully; authored data unchanged.".into();
+                self.status = "Play state reset.".into();
                 if let Some((after, operation)) = self.after_reset.take() {
                     if after == key && self.pending.is_none() {
                         self.pending = Some(if operation == Operation::Step {
@@ -2240,10 +2237,7 @@ impl RuntimeUi {
                         }
                         VmEvent::Step { run, .. } => {
                             self.playing = false;
-                            self.status = format!(
-                                "Committed runtime tick {}; authored data unchanged.",
-                                run.tick
-                            )
+                            self.status = format!("Advanced to tick {}.", run.tick)
                         }
                         VmEvent::State {
                             state, last_good, ..
@@ -2255,7 +2249,7 @@ impl RuntimeUi {
                             State::Paused => {
                                 self.playing = false;
                                 self.status = format!(
-                                    "Paused at committed tick {}",
+                                    "Paused at tick {}",
                                     last_good
                                         .map(|run| run.tick.to_string())
                                         .as_deref()
@@ -2274,7 +2268,7 @@ impl RuntimeUi {
                                 self.visible = false;
                                 self.stale = self.frame.is_some();
                                 self.status = format!(
-                                    "Stopped · viewing authored scene. Last committed tick {}",
+                                    "Stopped at tick {}.",
                                     last_good
                                         .map(|run| run.tick.to_string())
                                         .as_deref()

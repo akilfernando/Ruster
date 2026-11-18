@@ -175,7 +175,7 @@ impl Host {
                         draft.identity = identity;
                     }
                 }
-                self.message="Current saved scene identity captured. Expected values were not changed; Save check to keep this identity.".into();
+                self.message = "Captured the saved scene. Save the check to keep it.".into();
             }
             Ok(Completion::Loaded(case, bytes)) | Ok(Completion::Saved(case, bytes)) => {
                 receipt["case_name"] = json!(case.name);
@@ -263,7 +263,10 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
             .snapshot_bytes()
             .map_err(|e| e.to_string())?
     {
-        return Ok(Completion::Refused{status:"stale",diagnostic:"Saved scene changed externally. Reopen it before capturing or running a play check.".into()});
+        return Ok(Completion::Refused {
+            status: "stale",
+            diagnostic: "The saved scene changed outside the editor. Reopen it.".into(),
+        });
     }
     let resources = match snapshot.assets {
         Some(ref assets) => assets.resource_identity().map_err(|e| e.to_string())?,
@@ -305,7 +308,7 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
         }
         Work::Save(case, baseline) => {
             if case.identity != identity {
-                return Err("Check identity is stale. Capture current identity explicitly, review expectations, then save.".into());
+                return Err("The check is out of date. Capture the scene again, then save.".into());
             }
             let bytes = case.encode()?;
             let current = match std::fs::symlink_metadata(&sidecar) {
@@ -324,7 +327,7 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
             temporary.write_all(&bytes).map_err(|e| e.to_string())?;
             temporary.as_file().sync_all().map_err(|e| e.to_string())?;
             if cancel.load(Ordering::Acquire) {
-                return Err("Check save cancelled before publication.".into());
+                return Err("Check save cancelled.".into());
             }
             // Recheck after fsync, immediately before publication. This detects
             // cooperating/editor and observed external changes; it is not an
@@ -349,7 +352,7 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
                 return Err("Saved scene changed during check preparation; reopen before saving this check.".into());
             }
             if cancel.load(Ordering::Acquire) {
-                return Err("Check save cancelled before publication.".into());
+                return Err("Check save cancelled.".into());
             }
             if baseline.is_none() {
                 temporary
@@ -374,10 +377,10 @@ impl SceneEditor {
             return Err("Wait for content/save/open/close operations before a play check.".into());
         }
         if self.session.loaded_format_version() < 11 {
-            return Err("Save this legacy scene in the current format before play checks; exported checks require the same fixed tick as the editor.".into());
+            return Err("Couldn't run the check. Save this scene again first.".into());
         }
         if self.session.is_dirty() {
-            return Err("Save the authored scene before using its play check. Unapplied human drafts are preserved.".into());
+            return Err("Save the scene before using its play check.".into());
         }
         let path = self
             .session
@@ -406,7 +409,7 @@ impl SceneEditor {
         if let Some(store) = &self.assets {
             for id in &sound {
                 if store.sound(id).is_none() {
-                    return Err(format!("Sound {id} has no accepted WAV content."));
+                    return Err(format!("Sound {id} has no usable audio."));
                 }
             }
         }
@@ -582,7 +585,8 @@ impl SceneEditor {
         });
         self.play_checks.baseline = None;
         self.play_checks.draft_path = self.session.path().map(std::path::Path::to_owned);
-        self.play_checks.message="New check. Add ordered input and expected values, capture the saved scene identity, then Save check. Existing sidecars require Reopen before replacement.".into();
+        self.play_checks.message =
+            "New check. Add input and expected values, then Save Check.".into();
     }
     pub(super) fn play_checks_ui(&mut self, ctx: &egui::Context) {
         if !self.play_checks.open {
@@ -598,50 +602,118 @@ impl SceneEditor {
             return;
         }
         let busy = self.play_checks.active.is_some();
-        egui::Modal::new(egui::Id::unique("play_checks_dialog")).show(ctx,|ui|{
-            ui.set_width((ctx.content_rect().width()-48.).clamp(280.,620.));
+        egui::Modal::new(egui::Id::unique("play_checks_dialog")).show(ctx, |ui| {
+            ui.set_width((ctx.content_rect().width() - 48.).clamp(280., 620.));
             ui.heading("Play checks");
-            ui.label("Run saved input and expectations in an isolated preview. Your scene, edits and current Play session stay unchanged.");
-            ui.horizontal_wrapped(|ui|{
-                if ui.add_enabled(!busy,egui::Button::new("New check")).clicked(){action=Some("new");}
-                if ui.add_enabled(!busy,egui::Button::new("Reopen check")).clicked(){action=Some("load");}
-                if ui.add_enabled(!busy,egui::Button::new("Run saved check")).clicked(){action=Some("run");}
-                if ui.add_enabled(busy,egui::Button::new("Cancel operation")).clicked(){action=Some("cancel");}
+            ui.label("Runs the check in an isolated preview. Your scene is unchanged.");
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .add_enabled(!busy, egui::Button::new("New check"))
+                    .clicked()
+                {
+                    action = Some("new");
+                }
+                if ui
+                    .add_enabled(!busy, egui::Button::new("Reopen check"))
+                    .clicked()
+                {
+                    action = Some("load");
+                }
+                if ui
+                    .add_enabled(!busy, egui::Button::new("Run saved check"))
+                    .clicked()
+                {
+                    action = Some("run");
+                }
+                if ui
+                    .add_enabled(busy, egui::Button::new("Cancel operation"))
+                    .clicked()
+                {
+                    action = Some("cancel");
+                }
             });
             // Results keep their own bounded viewport above the potentially long
             // case form. Scrolling 120 frames cannot hide completion or failure.
-            egui::ScrollArea::vertical().id_salt("play_check_results")
-                .max_height((ctx.content_rect().height()*0.24).clamp(60.,180.)).show(ui,|ui|{
-                ui.add(egui::Label::new(self.play_checks.message.chars().take(160).collect::<String>()).wrap()).on_hover_text(&self.play_checks.message);
-                if let Some(receipt)=self.play_checks.receipts.iter().rev().find(|receipt|receipt.get("report").is_some()) {
-                    let report=&receipt["report"];
-                    ui.label(format!("Result: {} · completed tick {}",report["status"].as_str().unwrap_or("unknown"),report["completed_tick"]));
-                    if let Some(rows)=report["results"].as_array(){
-                        for row in rows.iter().filter(|row|row["passed"]!=true).chain(rows.iter().filter(|row|row["passed"]==true)) {
-                            ui.add(egui::Label::new(assertion_label(row)).wrap());
+            egui::ScrollArea::vertical()
+                .id_salt("play_check_results")
+                .max_height((ctx.content_rect().height() * 0.24).clamp(60., 180.))
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            self.play_checks
+                                .message
+                                .chars()
+                                .take(160)
+                                .collect::<String>(),
+                        )
+                        .wrap(),
+                    )
+                    .on_hover_text(&self.play_checks.message);
+                    if let Some(receipt) = self
+                        .play_checks
+                        .receipts
+                        .iter()
+                        .rev()
+                        .find(|receipt| receipt.get("report").is_some())
+                    {
+                        let report = &receipt["report"];
+                        ui.label(format!(
+                            "Result: {} · completed tick {}",
+                            report["status"].as_str().unwrap_or("unknown"),
+                            report["completed_tick"]
+                        ));
+                        if let Some(rows) = report["results"].as_array() {
+                            for row in rows
+                                .iter()
+                                .filter(|row| row["passed"] != true)
+                                .chain(rows.iter().filter(|row| row["passed"] == true))
+                            {
+                                ui.add(egui::Label::new(assertion_label(row)).wrap());
+                            }
+                        }
+                        if let Some(text) = report["diagnostic"].as_str() {
+                            ui.add(egui::Label::new(text).wrap());
                         }
                     }
-                    if let Some(text)=report["diagnostic"].as_str(){ui.add(egui::Label::new(text).wrap());}
-                }
-            });
-            ui.separator();
-            egui::ScrollArea::vertical().id_salt("play_check_body")
-                .max_height((ctx.content_rect().height()-ui.min_rect().height()-110.).max(80.)).show(ui,|ui|{
-                ui.add_enabled_ui(!busy,|ui|{
-                    if let Some(case)=&mut self.play_checks.draft {
-                        ui.label("Check name");
-                        ui.add(egui::TextEdit::singleline(&mut case.name).char_limit(128).id(egui::Id::unique("play_check_name")));
-                        edit_frames(ui,&mut case.frames,&self.session.authoring().actions);
-                        edit_expectations(ui,&mut case.expectations);
-                        ui.label(if case.identity.scene_sha256.is_empty(){"Identity not captured"}else{"Saved scene identity captured (does not update expectations)"});
-                        ui.horizontal_wrapped(|ui|{
-                            if ui.button("Capture current identity").clicked(){action=Some("capture");}
-                            if ui.button("Save check").clicked(){action=Some("save");}
-                        });
-                    } else {ui.label("Create a check or reopen this scene's .play-check.json file.");}
                 });
-            });
-            if ui.button("Close play checks").clicked(){close=true;}
+            ui.separator();
+            egui::ScrollArea::vertical()
+                .id_salt("play_check_body")
+                .max_height((ctx.content_rect().height() - ui.min_rect().height() - 110.).max(80.))
+                .show(ui, |ui| {
+                    ui.add_enabled_ui(!busy, |ui| {
+                        if let Some(case) = &mut self.play_checks.draft {
+                            ui.label("Check name");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut case.name)
+                                    .char_limit(128)
+                                    .id(egui::Id::unique("play_check_name")),
+                            );
+                            edit_frames(ui, &mut case.frames, &self.session.authoring().actions);
+                            edit_expectations(ui, &mut case.expectations);
+                            ui.label(if case.identity.scene_sha256.is_empty() {
+                                "Identity not captured"
+                            } else {
+                                "Saved scene identity captured (does not update expectations)"
+                            });
+                            ui.horizontal_wrapped(|ui| {
+                                if ui.button("Capture current identity").clicked() {
+                                    action = Some("capture");
+                                }
+                                if ui.button("Save check").clicked() {
+                                    action = Some("save");
+                                }
+                            });
+                        } else {
+                            ui.label(
+                                "Create a check or reopen this scene's .play-check.json file.",
+                            );
+                        }
+                    });
+                });
+            if ui.button("Close play checks").clicked() {
+                close = true;
+            }
         });
         if close {
             self.play_checks.open = false;
@@ -694,7 +766,7 @@ fn edit_frames(
     actions: &rot_scene::input::ActionMap,
 ) {
     ui.heading("Ordered input frames");
-    ui.small("Each row advances one fixed tick. Empty frames are neutral; action IDs come from the saved scene.");
+    ui.small("Each row is one tick.");
     let mut remove = None;
     for (index, frame) in frames.iter_mut().enumerate() {
         ui.push_id(("check_frame", index), |ui| {

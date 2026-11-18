@@ -88,7 +88,7 @@ impl SceneEditor {
         }
         if self.hierarchy_search.visible.is_empty() {
             ui.label(if self.hierarchy_query.is_empty() {
-                "Create a cube or light to populate this scene."
+                crate::strings::tr(ui.ctx(), crate::strings::Text::EmptyHierarchy)
             } else {
                 "No objects or lights match."
             });

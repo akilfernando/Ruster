@@ -108,7 +108,7 @@ impl Host {
                 if new_key {
                     ui.strong(format!("{app} presents a new key"));
                     ui.label(format!(
-                        "{app} was allowed before with a different key. Allow it only if you just set it up again."
+                        "{app} was allowed before with a different key. Allow it only if you set it up again."
                     ));
                 } else {
                     ui.strong(format!("Allow {app} to edit this project?"));

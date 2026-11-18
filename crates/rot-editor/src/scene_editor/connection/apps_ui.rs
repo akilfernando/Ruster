@@ -89,7 +89,7 @@ impl SceneEditor {
             .show(ctx, |ui| {
                 let busy = dialog.running.is_some();
                 if dialog.apps.is_empty() {
-                    ui.label("No AI apps found on this computer. Copy the configuration into your AI app's MCP settings.");
+                    ui.label("No AI apps found. Copy the setup into your AI app.");
                 }
                 for (app, connected) in dialog.apps.clone() {
                     ui.horizontal(|ui| {
@@ -101,14 +101,23 @@ impl SceneEditor {
                             let label = if connected { "Reconnect" } else { "Connect" };
                             if ui
                                 .add_enabled(!busy, egui::Button::new(label))
-                                .on_hover_text(format!("Add Rot Engine to {}'s MCP servers", app.name))
+                                .on_hover_text(format!(
+                                    "Add Rot Engine to {}'s MCP servers",
+                                    app.name
+                                ))
                                 .clicked()
                             {
                                 let (machine, adapter) = (machine.clone(), adapter.clone());
                                 dialog.notice = format!("Connecting {}…", app.name);
                                 dialog.start(move || {
                                     let result = ai_apps::connect(&app, &machine, &adapter);
-                                    (format!("Connected {}. Restart it to load Rot Engine.", app.name), result.map(Some))
+                                    (
+                                        format!(
+                                            "Connected {}. Restart it to load Rot Engine.",
+                                            app.name
+                                        ),
+                                        result.map(Some),
+                                    )
                                 });
                             }
                         });
@@ -125,8 +134,11 @@ impl SceneEditor {
                         dialog.notice = "Configuration copied.".into();
                     }
                     if ui
-                        .add_enabled(!busy && project.is_some(), egui::Button::new("Add AI Configuration to This Project"))
-                        .on_hover_text("Write .mcp.json (and .codex/config.toml for Codex) in the project folder, for AI apps opened there")
+                        .add_enabled(
+                            !busy && project.is_some(),
+                            egui::Button::new("Add AI Configuration to This Project"),
+                        )
+                        .on_hover_text("Write setup files in the project folder.")
                         .clicked()
                     {
                         let project = project.clone().unwrap();
@@ -134,7 +146,15 @@ impl SceneEditor {
                             Ok(files) => {
                                 dialog.notice = format!(
                                     "Added Rot Engine to {}.",
-                                    files.iter().map(|f| f.strip_prefix(&project).unwrap_or(f).display().to_string()).collect::<Vec<_>>().join(" and ")
+                                    files
+                                        .iter()
+                                        .map(|f| f
+                                            .strip_prefix(&project)
+                                            .unwrap_or(f)
+                                            .display()
+                                            .to_string())
+                                        .collect::<Vec<_>>()
+                                        .join(" and ")
                                 )
                             }
                             Err(error) => dialog.notice = error,
@@ -146,19 +166,28 @@ impl SceneEditor {
                     ui.horizontal_wrapped(|ui| {
                         let notice = ui.label(&dialog.notice);
                         if let Some(backup) = dialog.last.as_ref().and_then(|c| c.backup.as_ref()) {
-                            notice.on_hover_text(format!("The previous file is kept as {}", backup.display()));
+                            notice.on_hover_text(format!(
+                                "The previous file is kept as {}",
+                                backup.display()
+                            ));
                         }
                         if let Some(change) = dialog.last.clone().filter(|_| !busy) {
                             if ui
                                 .button("Undo")
-                                .on_hover_text(format!("Remove Rot Engine from {} again", change.app.name))
+                                .on_hover_text(format!(
+                                    "Remove Rot Engine from {} again",
+                                    change.app.name
+                                ))
                                 .clicked()
                             {
                                 dialog.last = None;
                                 dialog.notice = format!("Removing from {}…", change.app.name);
                                 dialog.start(move || {
                                     let result = ai_apps::undo(&change).map(|()| None);
-                                    (format!("Removed Rot Engine from {}.", change.app.name), result)
+                                    (
+                                        format!("Removed Rot Engine from {}.", change.app.name),
+                                        result,
+                                    )
                                 });
                             }
                         }

@@ -288,7 +288,7 @@ impl Editor {
                 field(ui, "Transport capacity", "transfer", &mut self.fields.transfer, "Maximum whole items delivered per tick. Must be greater than zero.");
             }
             if self.selection == Selection::Destination {
-                ui.label("The destination collects deliveries. There are no authored destination properties in v1.");
+                ui.label("This destination collects deliveries.");
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -428,41 +428,81 @@ impl Editor {
         } else if let Some(duplicate) = self.identity_mode {
             egui::Modal::new(egui::Id::unique("identity-dialog")).show(ctx, |ui| {
                 ui.set_width(440.0);
-                ui.heading(if duplicate { "Duplicate scenario" } else { "New scenario" });
-                ui.label("One scenario with a source, transport and destination. Choose a fresh stable identity.");
+                ui.heading(if duplicate {
+                    "Duplicate scenario"
+                } else {
+                    "New scenario"
+                });
+                ui.label("Choose a unique ID for the new scenario.");
                 let label = ui.label("Scenario ID");
-                let response = ui.add(egui::TextEdit::singleline(&mut self.identity_text).id(egui::Id::unique("scenario-id")).desired_width(f32::INFINITY));
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut self.identity_text)
+                        .id(egui::Id::unique("scenario-id"))
+                        .desired_width(f32::INFINITY),
+                );
                 let response = response.labelled_by(label.id);
-                if self.dialog_focus { response.request_focus(); self.dialog_focus = false; }
-                ui.label(RichText::new("1–128 ASCII letters, digits, hyphens, underscores or dots.").small().color(MUTED));
+                if self.dialog_focus {
+                    response.request_focus();
+                    self.dialog_focus = false;
+                }
+                ui.label(
+                    RichText::new("1–128 ASCII letters, digits, hyphens, underscores or dots.")
+                        .small()
+                        .color(MUTED),
+                );
                 ui.horizontal(|ui| {
-                    if ui.button(if duplicate { "Duplicate" } else { "Create" }).clicked() {
+                    if ui
+                        .button(if duplicate { "Duplicate" } else { "Create" })
+                        .clicked()
+                    {
                         // Validate identity before an unsaved recovery prompt can discard fields.
-                        let valid = rot_core::Scenario::new(self.identity_text.clone(), self.project.scenario().config());
-                        if let Err(error) = valid { self.error = Some(error.to_string()); }
-                        else if duplicate && self.identity_text == self.project.scenario().id() { self.error = Some("A duplicate must have a different scenario ID.".into()); }
-                        else {
-                            let action = if duplicate { Action::Duplicate(self.identity_text.clone()) } else { Action::New(self.identity_text.clone()) };
+                        let valid = rot_core::Scenario::new(
+                            self.identity_text.clone(),
+                            self.project.scenario().config(),
+                        );
+                        if let Err(error) = valid {
+                            self.error = Some(error.to_string());
+                        } else if duplicate && self.identity_text == self.project.scenario().id() {
+                            self.error =
+                                Some("A duplicate must have a different scenario ID.".into());
+                        } else {
+                            let action = if duplicate {
+                                Action::Duplicate(self.identity_text.clone())
+                            } else {
+                                Action::New(self.identity_text.clone())
+                            };
                             self.identity_mode = None;
                             self.request(action);
                         }
                     }
-                    if ui.button("Cancel").clicked() { self.identity_mode = None; }
+                    if ui.button("Cancel").clicked() {
+                        self.identity_mode = None;
+                    }
                 });
-                if let Some(error) = self.diagnostic() { ui.colored_label(Color32::from_rgb(255, 143, 137), error); }
+                if let Some(error) = self.diagnostic() {
+                    ui.colored_label(Color32::from_rgb(255, 143, 137), error);
+                }
             });
         } else if self.pending.is_some() {
             egui::Modal::new(egui::Id::unique("unsaved-dialog")).show(ctx, |ui| {
                 ui.set_width(460.0);
                 ui.heading("Keep your changes?");
-                ui.label("This project has unsaved changes or unapplied inspector fields. Save validates the fields before continuing.");
-                if let Some(error) = self.diagnostic() { ui.colored_label(Color32::from_rgb(255, 143, 137), error); }
+                ui.label("Save your changes before continuing?");
+                if let Some(error) = self.diagnostic() {
+                    ui.colored_label(Color32::from_rgb(255, 143, 137), error);
+                }
                 ui.horizontal(|ui| {
-                    if ui.button("Save and continue").clicked() { self.save(false); }
-                    if ui.button("Discard and continue").clicked() {
-                        if let Some(action) = self.pending.take() { self.execute(action); }
+                    if ui.button("Save and continue").clicked() {
+                        self.save(false);
                     }
-                    if ui.button("Cancel").clicked() { self.pending = None; }
+                    if ui.button("Discard and continue").clicked() {
+                        if let Some(action) = self.pending.take() {
+                            self.execute(action);
+                        }
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.pending = None;
+                    }
                 });
             });
         }

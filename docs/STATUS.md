@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-11-18. This file stays under 100 lines. Older entries are in
+Updated 2026-11-19. This file stays under 100 lines. Older entries are in
 [the archive](archive/STATUS-2026-11-17.md) and are history, not instructions.
 
 ## Where to work
@@ -16,11 +16,11 @@ Updated 2026-11-18. This file stays under 100 lines. Older entries are in
 
 ## What to do next
 
-Phase 1 resumed 2026-11-18 with one package left; everything
-else in **Now** is done. Resume in this order:
-1. **S-08 part 2:** the wording sweep (see its BACKLOG status).
-Then run Phase 1's exit test in the [parity plan](PARITY-PLAN.md) and start
-Phase 2 (C-01 first).
+The T-02 motif and the S-08 wording sweep are integrated. Review remaining
+indirect editor messages and tooltips against the writing rules. The Phase 1
+exit test still needs the six-task human walkthrough, the simultaneous AI
+authoring exercise and the full UI checklist. See the
+[parity plan](PARITY-PLAN.md).
 
 ## What a creator can do today
 
@@ -53,6 +53,12 @@ entry `org.rot.editor.desktop`. Reinstall with
   build from this branch until their files are renamed.
 
 ## Recently finished
+
+- 2026-11-19 · T-02 and S-08 wording sweep: Rot-only motifs and activity
+  pulse, shorter editor messages, and shared wording for Hierarchy, project
+  opening and build states. Captured the hub and populated editor in Rot
+  and Plain, including wide editor views. The active AI pulse was not
+  exercised in those captures.
 
 - 2026-11-18 · T-02: the Rot style has a quiet motif (sprout line art in
   empty states, three-spore loading dots, mycelium in the hub and About,

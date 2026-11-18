@@ -27,13 +27,13 @@ fn quality(size: u32) -> &'static str {
 
 fn detail_advice(o: ShadowObservation) -> Option<&'static str> {
     if o.precision_limited {
-        Some("Geometry may lose shadow precision at this scale. Move it nearer the origin or use larger features.")
+        Some("Shadows may lose precision at this scale. Move objects nearer the origin.")
     } else if !o.detail_limited {
         None
     } else if o.applied_map_size == 2048 {
-        Some("Shadow detail is limited across this scene. Move distant geometry closer or use larger features.")
+        Some("Shadow detail is limited in this scene. Move distant objects closer.")
     } else {
-        Some("Shadows lose small details across this scene. Try High quality or move distant geometry closer.")
+        Some("Small shadow details are lost. Try High quality.")
     }
 }
 
@@ -46,7 +46,7 @@ impl SceneEditor {
         {
             if let Some(message) = o.status.warning() {
                 ui.colored_label(ui.visuals().warn_fg_color, message)
-                    .on_hover_text("Status from the last viewport update; runtime preview changes take effect after Reset.");
+                    .on_hover_text("Status from the last viewport update.");
             }
             if o.resolution_limited {
                 ui.colored_label(
@@ -126,9 +126,7 @@ impl SceneEditor {
         };
         if let Some(message) = message {
             ui.colored_label(ui.visuals().warn_fg_color, message)
-                .on_hover_text(
-                "Status from the last viewport update; runtime preview changes take effect after Reset.",
-            );
+                .on_hover_text("Status from the last viewport update.");
         }
     }
 }

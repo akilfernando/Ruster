@@ -483,9 +483,7 @@ impl SceneEditor {
         let changed = result != revision;
         if changed {
             self.sync_draft();
-            self.notice = format!(
-                "Agent {op}: revision{result}; authored material changed. Preview unchanged."
-            );
+            self.notice = format!("AI {op}: material changed.");
         }
         let id = (!material_id.is_empty()).then_some(material_id.as_str());
         let assigned_count = id.map_or(0, |id| {

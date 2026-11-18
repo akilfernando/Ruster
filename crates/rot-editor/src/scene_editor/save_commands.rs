@@ -104,7 +104,10 @@ impl SceneEditor {
     }
     pub(super) fn validate_save_pin(&self, pin: &Pin) -> Result<(), (String, String)> {
         let stale = || {
-            ("stale_persistence".into(), "Document, content, drafts or save form changed while Save prepared; accepted work was preserved.".into())
+            (
+                "stale_persistence".into(),
+                "Couldn't save. The scene changed while saving. Try again.".into(),
+            )
         };
         if self.generation != pin.generation
             || self.session.scene().revision != pin.revision

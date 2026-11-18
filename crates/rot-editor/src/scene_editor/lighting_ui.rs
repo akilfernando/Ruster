@@ -325,12 +325,7 @@ impl SceneEditor {
                 self.draft_generation = self.draft_generation.wrapping_add(1);
                 self.sync_draft();
                 self.error.clear();
-                self.notice = if self.runtime.visible {
-                    "Lighting updated. Reset preview to use the changes."
-                } else {
-                    "Lighting updated."
-                }
-                .into();
+                self.notice = "Lighting updated.".into();
                 if !created.is_empty() {
                     self.notice
                         .push_str(" Added Sun to preserve the previous illumination.");
@@ -356,7 +351,7 @@ impl SceneEditor {
         self.lighting_draft = None;
         self.draft_generation = self.draft_generation.wrapping_add(1);
         self.error.clear();
-        self.notice = "Lighting draft cancelled; authored state unchanged.".into();
+        self.notice = "Lighting change cancelled.".into();
     }
     pub(super) fn create_light_ui(&mut self, kind: LightKind) -> bool {
         #[cfg(feature = "inspection")]
@@ -401,7 +396,7 @@ impl SceneEditor {
                         .push_str(" Added Sun to preserve the previous illumination.");
                 }
                 if self.runtime.visible {
-                    self.notice.push_str(" Reset preview to use the changes.");
+                    self.notice.push_str("");
                 }
                 true
             }
@@ -539,7 +534,7 @@ impl SceneEditor {
                 }
             });
             ui.horizontal(|ui| {
-                ui.label("Intensity").on_hover_text(if ambient { "Relative artistic fill, 0 to 1. Linear RGB channels are 0 to 1." } else { "Relative artistic diffuse intensity, 0 to 16. Linear RGB channels are 0 to 1; not lux/lumens." });
+                ui.label("Intensity").on_hover_text(if ambient { "Relative artistic fill, 0 to 1. Linear RGB channels are 0 to 1." } else { "Diffuse intensity, 0 to 16." });
                 let response = ui.add(egui::TextEdit::singleline(intensity).id(egui::Id::unique(("lighting_intensity", prefix))).char_limit(64).desired_width(82.0));
                 changed |= response.changed(); raw_changed |= response.changed(); fields.push(response);
             });
@@ -553,7 +548,7 @@ impl SceneEditor {
             if let LightingDraft::Light { shadow: Some(shadow), .. } = &mut draft {
                 ui.separator();
                 let response = ui.checkbox(&mut shadow.enabled, "Shadows")
-                    .on_hover_text("This Sun casts shadows from opaque scene geometry. Ambient and point lights remain independent.");
+                    .on_hover_text("The Sun casts shadows from opaque objects.");
                 changed |= response.changed();
                 discrete_changed |= response.changed();
                 fields.push(response);
@@ -575,7 +570,7 @@ impl SceneEditor {
                         });
                     changed |= before != shadow.quality;
                     discrete_changed |= before != shadow.quality;
-                    fields.push(response.response.on_hover_text("One shadow map covering the scene. High resolves finer details and uses more GPU memory."));
+                    fields.push(response.response.on_hover_text("Higher quality shows finer shadow detail and uses more GPU memory."));
                 });
                 // Expose an unfinished recovered bias instead of hiding its
                 // repair field. Valid settings remain behind the foldout.
@@ -584,14 +579,14 @@ impl SceneEditor {
                     .open((own && shadow.value().is_err()).then_some(true))
                     .show(ui, |ui| {
                         for (text, label, id, hint) in [
-                            (&mut shadow.depth_bias_texels, "Depth bias", "lighting_shadow_depth_bias", "Depth offset in world shadow texels, 0 to 4. More bias reduces self-shadowing but can detach shadows from surfaces."),
-                            (&mut shadow.normal_bias_texels, "Normal offset", "lighting_shadow_normal_bias", "Surface-normal offset in world shadow texels, 0 to 4. More offset can reduce self-shadowing but lose thin details."),
+                            (&mut shadow.depth_bias_texels, "Depth bias", "lighting_shadow_depth_bias", "Depth offset, 0 to 4. More reduces self-shadowing but can detach shadows."),
+                            (&mut shadow.normal_bias_texels, "Normal offset", "lighting_shadow_normal_bias", "Normal offset, 0 to 4. More reduces self-shadowing but loses thin details."),
                         ] {
                             ui.horizontal(|ui| {
                                 ui.label(label).on_hover_text(hint);
                                 let response = ui.add(egui::TextEdit::singleline(text)
                                     .id(egui::Id::unique(id)).char_limit(64).desired_width(82.0))
-                                    .on_hover_text("One world shadow texel is the scene coverage width divided by the map resolution.");
+                                    .on_hover_text("Measured in shadow map pixels.");
                                 changed |= response.changed();
                                 raw_changed |= response.changed();
                                 fields.push(response);

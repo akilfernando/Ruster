@@ -420,47 +420,107 @@ impl RecoveryUi {
         let mut intent = None;
         egui::Modal::new(egui::Id::unique("recovery_picker")).show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 48.0).clamp(220.0, 600.0));
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).ok().map(|time| time.as_secs());
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .ok()
+                .map(|time| time.as_secs());
             ui.heading("Recover unfinished work");
-            ui.label("Restore opens an unsaved copy and retains its checkpoint. Discard removes the selected checkpoint.");
-            egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-170.0).max(64.0)).show(ui, |ui| {
-                for candidate in &self.candidates {
-                    ui.separator();
-                    let filename = candidate.origin.as_ref().and_then(|path| path.file_name()).map(|name| name.to_string_lossy());
-                    ui.strong(filename.as_deref().or(candidate.scene_id.as_deref()).unwrap_or("Unreadable checkpoint"));
-                    let age = now.and_then(|now| now.checked_sub(candidate.timestamp));
-                    let saved = match age {
-                        Some(seconds @ 0..=59) => format!("Saved {seconds}s ago"),
-                        Some(seconds @ 60..=3599) => format!("Saved {} min ago", seconds / 60),
-                        Some(seconds @ 3600..=86399) => format!("Saved {}h ago", seconds / 3600),
-                        Some(seconds) => format!("Saved {} days ago", seconds / 86400),
-                        None => "Recorded time is later than the system clock".into(),
-                    };
-                    ui.weak(saved);
-                    egui::CollapsingHeader::new("Checkpoint details").id_salt(&candidate.id).show(ui, |ui| {
-                        if let Some(path) = &candidate.origin { ui.add(egui::Label::new(path.display().to_string()).wrap()); }
-                        if let Some(scene_id) = &candidate.scene_id { ui.label(format!("Scene ID {scene_id}")); }
-                        ui.label(format!("ID {}", candidate.id));
-                        ui.label(format!("Recorded Unix time {}", candidate.timestamp));
-                        if let Some(sequence) = candidate.sequence { ui.label(format!("Sequence {sequence} within this checkpoint journal")); }
-                        if let Some(revision) = candidate.revision { ui.label(format!("Scene revision {revision}")); }
-                    });
-                    if let Some(error) = &candidate.error { ui.colored_label(ui.visuals().error_fg_color, error); }
-                    ui.horizontal_wrapped(|ui| {
-                        let restore=ui.add_enabled(candidate.error.is_none(), egui::Button::new("Restore as unsaved copy"));
-                        if !self.focused && candidate.error.is_none() { restore.request_focus(); self.focused=true; }
-                        if restore.clicked() { intent = Some(Intent::Restore(candidate.id.clone())); }
-                        if ui.button("Discard checkpoint").clicked() { intent = Some(Intent::Discard(candidate.id.clone())); }
-                    });
-                }
-                if self.candidates.is_empty() { ui.label("No unowned checkpoints found. Other open windows keep their own checkpoints private."); }
-            });
-            if !self.warning.is_empty() { ui.add(egui::Label::new(egui::RichText::new(&self.warning).color(ui.visuals().warn_fg_color)).truncate()).on_hover_text(&self.warning); }
+            ui.label("Restore opens an unsaved copy. Discard deletes the recovery copy.");
+            egui::ScrollArea::vertical()
+                .max_height((ctx.content_rect().height() - 170.0).max(64.0))
+                .show(ui, |ui| {
+                    for candidate in &self.candidates {
+                        ui.separator();
+                        let filename = candidate
+                            .origin
+                            .as_ref()
+                            .and_then(|path| path.file_name())
+                            .map(|name| name.to_string_lossy());
+                        ui.strong(
+                            filename
+                                .as_deref()
+                                .or(candidate.scene_id.as_deref())
+                                .unwrap_or("Unreadable checkpoint"),
+                        );
+                        let age = now.and_then(|now| now.checked_sub(candidate.timestamp));
+                        let saved = match age {
+                            Some(seconds @ 0..=59) => format!("Saved {seconds}s ago"),
+                            Some(seconds @ 60..=3599) => format!("Saved {} min ago", seconds / 60),
+                            Some(seconds @ 3600..=86399) => {
+                                format!("Saved {}h ago", seconds / 3600)
+                            }
+                            Some(seconds) => format!("Saved {} days ago", seconds / 86400),
+                            None => "Recorded time is later than the system clock".into(),
+                        };
+                        ui.weak(saved);
+                        egui::CollapsingHeader::new("Checkpoint details")
+                            .id_salt(&candidate.id)
+                            .show(ui, |ui| {
+                                if let Some(path) = &candidate.origin {
+                                    ui.add(egui::Label::new(path.display().to_string()).wrap());
+                                }
+                                if let Some(scene_id) = &candidate.scene_id {
+                                    ui.label(format!("Scene ID {scene_id}"));
+                                }
+                                ui.label(format!("ID {}", candidate.id));
+                                ui.label(format!("Recorded Unix time {}", candidate.timestamp));
+                                if let Some(sequence) = candidate.sequence {
+                                    ui.label(format!(
+                                        "Sequence {sequence} within this checkpoint journal"
+                                    ));
+                                }
+                                if let Some(revision) = candidate.revision {
+                                    ui.label(format!("Scene revision {revision}"));
+                                }
+                            });
+                        if let Some(error) = &candidate.error {
+                            ui.colored_label(ui.visuals().error_fg_color, error);
+                        }
+                        ui.horizontal_wrapped(|ui| {
+                            let restore = ui.add_enabled(
+                                candidate.error.is_none(),
+                                egui::Button::new("Restore as unsaved copy"),
+                            );
+                            if !self.focused && candidate.error.is_none() {
+                                restore.request_focus();
+                                self.focused = true;
+                            }
+                            if restore.clicked() {
+                                intent = Some(Intent::Restore(candidate.id.clone()));
+                            }
+                            if ui.button("Discard checkpoint").clicked() {
+                                intent = Some(Intent::Discard(candidate.id.clone()));
+                            }
+                        });
+                    }
+                    if self.candidates.is_empty() {
+                        ui.label("No recovery copies available.");
+                    }
+                });
+            if !self.warning.is_empty() {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(&self.warning).color(ui.visuals().warn_fg_color),
+                    )
+                    .truncate(),
+                )
+                .on_hover_text(&self.warning);
+            }
             ui.horizontal_wrapped(|ui| {
-                if ui.button("Refresh recovery list").clicked() { self.refresh(); }
-                let keep=ui.button("Keep for later");
-                if !self.focused { keep.request_focus(); self.focused=true; }
-                if keep.clicked() || ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) { self.open = false; self.focused=false; }
+                if ui.button("Refresh recovery list").clicked() {
+                    self.refresh();
+                }
+                let keep = ui.button("Keep for later");
+                if !self.focused {
+                    keep.request_focus();
+                    self.focused = true;
+                }
+                if keep.clicked()
+                    || ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+                {
+                    self.open = false;
+                    self.focused = false;
+                }
             });
         });
         intent

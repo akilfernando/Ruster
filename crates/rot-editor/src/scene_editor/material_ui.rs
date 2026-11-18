@@ -303,7 +303,7 @@ impl SceneEditor {
         self.material_draft = None;
         self.draft_generation = self.draft_generation.wrapping_add(1);
         self.error.clear();
-        self.notice = "Material draft cancelled; authored state unchanged.".into();
+        self.notice = "Material change cancelled.".into();
     }
     fn assign_material_ui(&mut self, object_id: &str, material: Option<String>) {
         if !self.material_editable() || self.material_draft.is_some() {
@@ -612,7 +612,7 @@ impl SceneEditor {
                 }
             });
             ui.horizontal(|ui| {
-                ui.label("Shading").on_hover_text("Diffuse preserves the legacy material response. Nonmetallic adds a neutral dielectric highlight controlled by roughness.");
+                ui.label("Shading").on_hover_text("Diffuse is matte. Nonmetallic adds a highlight set by roughness.");
                 let before = draft.response_mode;
                 let focus = ComboFocus::capture(ui, "material_response_mode");
                 let mut selected = false;
@@ -635,7 +635,7 @@ impl SceneEditor {
                 fields.push(response.response);
             });
             if draft.response_mode == MaterialResponseMode::Dielectric {
-                ui.label(if draft.roughness_texture.is_some() { "Roughness multiplier" } else { "Roughness" }).on_hover_text("Perceptual roughness, 0.08 to 1: lower values give a tighter highlight; higher values spread it. This is a nonmetallic surface response, without environment reflections.");
+                ui.label(if draft.roughness_texture.is_some() { "Roughness multiplier" } else { "Roughness" }).on_hover_text("Roughness, 0.08 to 1. Lower gives a tighter highlight.");
                 ui.horizontal(|ui| {
                     let response = ui.add(egui::TextEdit::singleline(&mut draft.roughness)
                         .id(egui::Id::unique("material_roughness"))
@@ -648,7 +648,7 @@ impl SceneEditor {
                     ui.label("Surface shading needs Surface HDR in Scene display.");
                 }
                 if !self.shader_builtin {
-                    ui.label("Custom shader controls appearance; surface shading is unsupported. Settings are retained.");
+                    ui.label("A custom shader controls appearance. These settings are kept.");
                 }
             }
             let uv_ready = if draft.intent == MaterialIntent::EditShared {
@@ -1022,7 +1022,7 @@ mod tests {
         assert!(shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == "Surface shading needs Surface HDR in Scene display.")));
         editor.shader_builtin = false;
         let shapes = frame(&mut editor, vec![]);
-        assert!(shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text.contains("Custom shader controls appearance; surface shading is unsupported"))));
+        assert!(shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == "A custom shader controls appearance. These settings are kept.")));
         editor.shader_builtin = true;
         let roughness = egui::Id::unique("material_roughness");
         let point = ctx.read_response(roughness).unwrap().rect.center();

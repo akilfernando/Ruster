@@ -226,7 +226,7 @@ impl SceneEditor {
         self.collider_draft = None;
         self.draft_generation = self.draft_generation.wrapping_add(1);
         self.error.clear();
-        self.notice = "Collider draft cancelled; authored state unchanged.".into();
+        self.notice = "Collider change cancelled.".into();
     }
     pub(super) fn collider_inspector_ui(&mut self, ui: &mut egui::Ui) {
         let Some(id) = self.selected.clone() else {

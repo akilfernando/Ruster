@@ -49,24 +49,17 @@ impl Host {
     }
 
     fn scene_observation_ui(ui: &mut egui::Ui, observation: &SceneObservation, prefix: &str) {
+        ui.label(format!("{prefix}Session: {}", observation.session_token));
+        ui.label(format!("{prefix}Scene version: {}", observation.revision));
         ui.label(format!(
-            "{prefix}Scene guard session_token: {}",
-            observation.session_token
-        ));
-        ui.label(format!(
-            "{prefix}Scene guard revision: {}",
-            observation.revision
-        ));
-        ui.label(format!(
-            "{prefix}Observation owner: {} · {}",
+            "{prefix}Seen from: {} · {}",
             observation.connection_state,
             observation.owner.as_ref().map_or_else(
-                || "No adapter owner observed; prelaunch observation does not bind a future owner"
-                    .into(),
-                |(owner, pid)| format!("{owner} · local PID {pid}")
+                || "No AI app seen yet".into(),
+                |(owner, pid)| format!("{owner} · process {pid}")
             )
         ));
-        ui.label("Scene guards are read-only concurrency identifiers, not connection session labels or approval capabilities.");
+        ui.label("Read-only scene identifiers.");
     }
 
     fn binding_preview(&self) -> Preview {
@@ -165,9 +158,13 @@ impl Host {
             ui.label(format!("Browser verification code: {}", &request.id[..12]));
             ui.label(&request.context);
             if request.binding.is_some() {
-                ui.label("Compare the code with your browser. This is not verified application provenance. Approval permits a native project preview with non-authored camera navigation and shared selection only, for at most 30 minutes. Browser transforms, properties, Undo, Save and export are not granted. Direct MCP authoring retains its separate adapter approval. Reload is automatic; Disconnect AI revokes this browser. Pending requests expire after 2 minutes. Denial requires a fresh native connection.");
+                ui.label("Compare this code with your browser.");
+                ui.label("Approval lets this browser view and select for 30 minutes.");
+                ui.label("Pending requests expire after 2 minutes.");
             } else {
-                ui.label("Compare the code with your browser. This is not verified application provenance. Approval permits reading and editing this exact native project/session for at most 30 minutes. Reload is automatic; Disconnect AI revokes it. Pending requests expire after 2 minutes. Denial requires a fresh native connection.");
+                ui.label("Compare this code with your browser.");
+                ui.label("Approval lets this browser view and edit this project for 30 minutes.");
+                ui.label("Pending requests expire after 2 minutes.");
             }
             if ui.button("Approve this browser/project once").clicked()
                 && bridge.approve_browser(&request)
@@ -182,7 +179,7 @@ impl Host {
         ui.add_space(4.0);
         let enrolled = std::env::var_os("ROT_CONNECTOR_ENROLLMENT").is_some();
         if enrolled {
-            ui.label("Use project_connect in the enrolled connector. No native approval is needed; browser access is optional and separate. Disconnect retains enrollment; Revoke removes persistent access.");
+            ui.label("Connect from your AI app. Revoke removes saved access.");
         }
         let action = match self.connection_state() {
             "retired" => Some("Start Listening"),
@@ -198,14 +195,23 @@ impl Host {
         }
         if let Some((grant, registered_project)) = self.enrolled_policy().ok().flatten() {
             ui.label(registered_project);
-            ui.label("Local enrollment administration only; revoked or replacement documents receive no project work authority. Save, export and execution keep their separate grants.");
+            ui.label("Manages saved access only.");
             for (label, all) in [
                 ("Revoke persistent access to this project", false),
                 ("Revoke access to all registered projects", true),
             ] {
                 if ui.button(label).clicked() {
                     self.disconnect_adapter();
-                    match grant.revoke(all) { Ok(())=>state.notice="Persistent access revoked. Deliberate re-enrollment required.".into(),Err(_)=>state.notice="Revocation not persisted: a publication may be finishing or enrollment changed. Disconnected locally; retry Revoke after it settles.".into() }
+                    match grant.revoke(all) {
+                        Ok(()) => {
+                            state.notice = "Access revoked. Connect again to allow it.".into()
+                        }
+                        Err(_) => {
+                            state.notice =
+                                "Couldn't revoke access. Disconnected for now. Try Revoke again."
+                                    .into()
+                        }
+                    }
                 }
             }
         }
@@ -556,11 +562,12 @@ mod tests {
         click(&mut host, &ctx, &mut state, "Diagnostics");
         click(&mut host, &ctx, &mut state, "Start Listening");
         let painted = paint(&mut host, &ctx, &mut state, vec![]);
-        assert!(painted.iter().any(|(text, _)| text
-            == &format!("Scene guard session_token: {}", observation.session_token)));
         assert!(painted
             .iter()
-            .any(|(text, _)| text == &format!("Scene guard revision: {}", observation.revision)));
+            .any(|(text, _)| text == &format!("Session: {}", observation.session_token)));
+        assert!(painted
+            .iter()
+            .any(|(text, _)| text == &format!("Scene version: {}", observation.revision)));
         assert!(host.bridge.is_none());
         assert!(host.editor.connection_authority.is_none());
         assert_eq!(before, host.editor.session.snapshot_bytes().unwrap());

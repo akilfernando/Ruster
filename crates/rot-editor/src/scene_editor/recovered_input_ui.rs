@@ -30,7 +30,7 @@ impl SceneEditor {
 
     pub(super) fn resume_recovered_input(&mut self, ctx: &egui::Context) -> Result<(), String> {
         if !self.recovered_input_ready() {
-            return Err("Apply or cancel the recovered visual draft and resolve dialogs before reviewing the action.".into());
+            return Err("Finish the recovered draft first.".into());
         }
         let draft = self
             .recovered_input
@@ -44,7 +44,7 @@ impl SceneEditor {
         self.input_actions_open = true;
         self.draft_generation = self.draft_generation.wrapping_add(1);
         self.error.clear();
-        self.notice = "Recovered action resumed against the reviewed scene. Repair its fields and Apply or Cancel in Input actions.".into();
+        self.notice = "Action restored. Edit its fields, then Apply or Cancel.".into();
         Ok(())
     }
 
@@ -54,7 +54,7 @@ impl SceneEditor {
         }
         self.recovered_input_open = false;
         self.error.clear();
-        self.notice = "Recovered action draft discarded. The original checkpoint remains preserved in Recovery.".into();
+        self.notice = "Recovered action discarded.".into();
     }
 
     pub(super) fn recovered_input_notice(&mut self, ui: &mut egui::Ui) {
@@ -108,7 +108,7 @@ impl SceneEditor {
                         ui.separator();
                         if !ready {
                             if let Some(name) = visual {
-                                ui.label(format!("Finish the recovered {name} edit in the Inspector first. Keep for later returns to that work."));
+                                ui.label(format!("Finish the recovered {name} edit in the Inspector first."));
                             } else {
                                 ui.label("Finish the current operation first. Keep for later preserves this action draft.");
                             }
@@ -116,12 +116,12 @@ impl SceneEditor {
                         match &review {
                             Ok(()) => {
                                 ui.label(if original_revision == self.session.scene().revision {
-                                    "The saved action still matches this scene. Resume keeps your recovered values and opens the action editor."
+                                    "The action still matches. Resume to keep your values."
                                 } else {
-                                    "The scene changed after this draft, but its action definition still matches. Resume keeps your recovered values and opens them against the current scene."
+                                    "The scene changed, but the action still matches. Resume to keep your values."
                                 });
                             }
-                            Err(_) => { ui.colored_label(ui.visuals().error_fg_color, "The saved action no longer matches this scene. Your recovered values are preserved. Keep them for later or discard this draft."); }
+                            Err(_) => { ui.colored_label(ui.visuals().error_fg_color, "The action no longer matches this scene. Keep the draft or discard it."); }
                         }
                         ui.label("The original checkpoint stays preserved.");
                         egui::CollapsingHeader::new("Technical details")
@@ -130,7 +130,7 @@ impl SceneEditor {
                                 if let Some(origin) = &self.recovered_origin {
                                     ui.add(egui::Label::new(origin.display().to_string()).wrap());
                                 }
-                                ui.label(format!("Original revision {original_revision} · current revision {}", self.session.scene().revision));
+                                ui.label(format!("Draft from version {original_revision} · scene is at version {}", self.session.scene().revision));
                                 if let Err(error) = &review { ui.label(error); }
                                 ui.add(egui::TextEdit::multiline(&mut raw).font(egui::TextStyle::Monospace).desired_width(f32::INFINITY).interactive(false));
                             });

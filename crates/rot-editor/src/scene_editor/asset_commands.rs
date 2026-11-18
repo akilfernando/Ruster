@@ -417,7 +417,10 @@ impl Controller {
     }
     fn ensure_worker(&mut self, ctx: &egui::Context) -> Result<(), Error> {
         if self.disconnected {
-            return Err(error("asset_error","Asset worker failed; reopen the scene before retrying. Publication status may be unknown."));
+            return Err(error(
+                "asset_error",
+                "Couldn't finish the asset work. Reopen the scene and try again.",
+            ));
         }
         if self.shutting_down {
             if self.worker.as_ref().is_some_and(Worker::is_finished) {
@@ -575,7 +578,13 @@ impl Controller {
             own_dialog,
         } = admission;
         if self.busy() || editor.pending_asset_open.is_some() {
-            return Err((error("asset_busy","Another asset operation is preparing, publishing or retiring. Wait or cancel preparation."),reply));
+            return Err((
+                error(
+                    "asset_busy",
+                    "Another asset task is running. Wait for it or cancel it.",
+                ),
+                reply,
+            ));
         }
         if let Err(failure) = self.ensure_worker(ctx) {
             return Err((failure, reply));
@@ -623,10 +632,7 @@ impl Controller {
         }
         if let Some(active) = &mut self.active {
             if !matches!(active.phase, Phase::CommitQueued | Phase::Publishing) {
-                active.cancel = Some(error(
-                    "asset_cancelled",
-                    "Asset preparation cancelled; accepted content was preserved.",
-                ));
+                active.cancel = Some(error("asset_cancelled", "Asset import cancelled."));
             }
         }
     }
@@ -732,9 +738,9 @@ impl Controller {
                 save.phase,
                 Phase::CommitQueued | Phase::Publishing | Phase::FollowingUp
             ) {
-                "Save worker disconnected after authorization; publication may have committed. Inspect or reopen before retrying."
+                "Couldn't confirm the save. Reopen the scene to check."
             } else {
-                "Save worker disconnected before publication; the current document was preserved."
+                "Couldn't save. Your scene is unchanged."
             };
             if let Some(reply) = save.reply.take() {
                 reply.finish_save(editor, Err(error("save_error", message)));
@@ -746,14 +752,14 @@ impl Controller {
             self.retire_unsent_save(request);
         }
         if self.active.is_none() && !handled_save {
-            self.status="Asset retirement worker disconnected; resources are retained until cleanup handoff completes.".into();
+            self.status = "Asset cleanup was interrupted. It will finish later.".into();
             editor.error = self.status.clone();
         }
         if let Some(mut active) = (!held_asset).then(|| self.active.take()).flatten() {
             let message = if matches!(active.phase, Phase::CommitQueued | Phase::Publishing) {
-                "Asset worker disconnected after authorization. Publication status may be unknown; inspect/reopen before retrying."
+                "Couldn't confirm the asset change. Reopen the scene to check."
             } else {
-                "Asset worker disconnected before publication; accepted content was preserved."
+                "Couldn't finish the asset change. Your assets are unchanged."
             };
             self.status = message.into();
             editor.error = message.into();
@@ -862,7 +868,7 @@ impl Controller {
                             ..Default::default()
                         });
                     }
-                    editor.error = "Unexpected Save completion retained for worker cleanup; inspect the destination before retrying.".into();
+                    editor.error = "The save finished unexpectedly. Check the destination.".into();
                 } else {
                     let mut save = self.saving.take().unwrap();
                     match result {
@@ -889,7 +895,13 @@ impl Controller {
                                 ..Default::default()
                             });
                             if let Some(reply) = save.reply.take() {
-                                reply.finish_save(editor, Err(error("save_error", "Save committed but its document identity could not be adopted; inspect or reopen before retrying.")));
+                                reply.finish_save(
+                                    editor,
+                                    Err(error(
+                                        "save_error",
+                                        "Saved, but the scene didn't update. Reopen the scene.",
+                                    )),
+                                );
                             }
                         }
                         Ok(saved) => {
@@ -958,7 +970,7 @@ impl Controller {
                     if let Some(active) = active {
                         self.active = Some(active);
                     }
-                    editor.error="Unexpected asset completion retained for worker retirement; inspect the catalog before retrying.".into();
+                    editor.error = "An asset task finished unexpectedly. Check your Assets.".into();
                     return;
                 }
                 let mut active = active.unwrap();
@@ -984,7 +996,14 @@ impl Controller {
                         let retired = self.immediate.get_or_insert_with(RetiredAssets::default);
                         assert!(retired.completion.is_none());
                         retired.completion = Some(completion);
-                        Err(error("asset_error",format!("Asset publication could not be adopted (catalog_published={published}); inspect/reopen before retrying.")))
+                        Err(error(
+                            "asset_error",
+                            if published {
+                                "The asset change was saved. Reopen the scene to see it."
+                            } else {
+                                "Couldn't apply the asset change. Reopen the scene and try again."
+                            },
+                        ))
                     }
                 };
                 #[cfg(feature = "inspection")]
@@ -1084,15 +1103,16 @@ impl Controller {
                         retired.store = Some(*store);
                         self.status = "Finishing content loading…".into();
                         if opening.as_ref().is_some_and(|open| !open.cancelled) {
-                            editor.error = "Content load no longer matches this document; retained content was preserved. Retry explicitly.".into();
+                            editor.error =
+                                "The project content changed. Try loading it again.".into();
                         }
                     }
                     Err(message) if matches => {
                         let open = opening.unwrap();
                         editor.error = if open.recovered {
-                            format!("Recovery catalog {} is unavailable: {}. Restore the original catalog at that path, then Retry recovered content. References were preserved.", open.root.display(), persistence_commands::bounded(&message))
+                            format!("Couldn't load recovered assets from {}: {}. Restore them, then Retry.", open.root.display(), persistence_commands::bounded(&message))
                         } else {
-                            format!("Cannot load project content: {}. Repair the catalog, then Retry content.", persistence_commands::bounded(&message))
+                            format!("Couldn't load project content: {}. Repair the project, then Retry.", persistence_commands::bounded(&message))
                         };
                         self.status = "Project content could not be loaded.".into();
                     }
@@ -1328,27 +1348,24 @@ impl Controller {
                 save.phase,
                 Phase::CommitQueued | Phase::Publishing | Phase::FollowingUp | Phase::Cancelling
             ) {
-                let failure = save
-                    .cancel
-                    .clone()
-                    .or_else(|| {
-                        save.reply.as_ref().is_some_and(Reply::expired).then(|| {
-                            error(
-                                "save_expired",
-                                "Save request expired before publication; no scene was saved.",
-                            )
+                let failure =
+                    save.cancel
+                        .clone()
+                        .or_else(|| {
+                            save.reply.as_ref().is_some_and(Reply::expired).then(|| {
+                                error("save_expired", "Couldn't save. The request expired.")
+                            })
                         })
-                    })
-                    .or_else(|| {
-                        (!save.pin.permits_continuation(save.continuation)).then(|| {
-                            error(
-                                "stale_persistence",
-                                "Save continuation changed during preparation",
-                            )
+                        .or_else(|| {
+                            (!save.pin.permits_continuation(save.continuation)).then(|| {
+                                error(
+                                    "stale_persistence",
+                                    "Save continuation changed during preparation",
+                                )
+                            })
                         })
-                    })
-                    .or_else(|| editor.validate_save_pin(&save.pin).err())
-                    .or_else(|| editor.save_owner_guard().err());
+                        .or_else(|| editor.validate_save_pin(&save.pin).err())
+                        .or_else(|| editor.save_owner_guard().err());
                 if let Some(failure) = failure {
                     self.reject_save(editor, failure);
                 }
@@ -1370,10 +1387,7 @@ impl Controller {
             } else {
                 self.reject_save(
                     editor,
-                    error(
-                        "save_expired",
-                        "Save request expired before publication; no scene was saved.",
-                    ),
+                    error("save_expired", "Couldn't save. The request expired."),
                 );
             }
         }
@@ -1501,8 +1515,18 @@ impl Controller {
                 active.phase,
                 Phase::CommitQueued | Phase::Publishing | Phase::Cancelling
             ) {
-                let failure=active.cancel.clone().or_else(||active.reply.as_ref().is_some_and(Reply::expired).then(||error("asset_expired","Asset request expired before publication; accepted content was preserved.")))
-                    .or_else(||editor.validate_asset_stamp(&active.stamp).err());
+                let failure = active
+                    .cancel
+                    .clone()
+                    .or_else(|| {
+                        active.reply.as_ref().is_some_and(Reply::expired).then(|| {
+                            error(
+                                "asset_expired",
+                                "Couldn't finish the asset change. The request expired.",
+                            )
+                        })
+                    })
+                    .or_else(|| editor.validate_asset_stamp(&active.stamp).err());
                 if let Some(failure) = failure {
                     self.reject(editor, failure);
                 }
@@ -1526,7 +1550,7 @@ impl Controller {
                     editor,
                     error(
                         "asset_expired",
-                        "Asset request expired before publication; accepted content was preserved.",
+                        "Couldn't finish the asset change. The request expired.",
                     ),
                 );
             }
@@ -1999,11 +2023,11 @@ impl SceneEditor {
                 let mut result = json!({"asset_revision":revision.to_string(),"scene_revision":self.session.scene().revision.to_string()});
                 match outcome {
                     rot_assets::AssetOutcome::Asset(info) => {
-                        self.notice = "Content updated; preview unchanged until Reset.".into();
+                        self.notice = "Assets updated.".into();
                         result["asset"] = json!(info);
                     }
                     rot_assets::AssetOutcome::Model(model) => {
-                        self.notice = format!("Model {} accepted. Use Place in Content to create a scene copy; Refresh preserves existing placements. Preview updates on Reset.", model.id);
+                        self.notice = format!("Imported {}", model.id);
                         result["model"] = super::asset_inspection::model_summary(&model);
                     }
                 }
@@ -2308,8 +2332,7 @@ impl SceneEditor {
             self.asset_ops.cancel();
             self.asset_dialog = false;
             self.asset_focused = false;
-            self.notice =
-                "Asset work is finishing before Close; accepted content remains visible.".into();
+            self.notice = "Assets are still saving. The scene will close after.".into();
             false
         } else {
             true
@@ -2331,11 +2354,11 @@ impl SceneEditor {
     }
     pub(super) fn asset_root_guard(&mut self) -> Result<(), String> {
         if self.asset_loading() {
-            return Err("Project content is loading; wait or cancel loading before changing or saving the document.".into());
+            return Err("Assets are loading. Wait, or cancel loading.".into());
         }
         if self.asset_ops.busy() {
             self.asset_ops.cancel();
-            Err("Asset work is finishing; cancel preparation or wait for publication before changing or saving the document.".into())
+            Err("Assets are still saving. Wait, or cancel the import.".into())
         } else {
             Ok(())
         }
@@ -2353,7 +2376,7 @@ impl SceneEditor {
                     && (self.pending_asset_open.is_some() || self.asset_ops.cancellable())
                     && ui
                         .button("Cancel")
-                        .on_hover_text("Cancel content work before publication.")
+                        .on_hover_text("Cancel the asset work first.")
                         .clicked()
                 {
                     self.cancel_asset_work();
@@ -3046,7 +3069,7 @@ mod tests {
             until(editor, ctx, |e| {
                 !e.asset_busy() && !e.asset_paint_cleanup_pending()
             });
-            assert!(editor.error.contains("Save As across asset roots"));
+            assert!(editor.error.contains("Save inside the current project"));
             let rejected_message = editor.error.clone();
             assert!(editor.save_receipt.is_none());
             assert!(!rejected.exists());
@@ -3312,10 +3335,10 @@ mod tests {
             }
             fault.unwrap().wait();
             until(editor, ctx, |e| e.asset_ops.disconnected);
-            assert!(editor.error.starts_with("Save worker disconnected"));
+            assert!(editor.error.starts_with("Couldn't "));
             assert_eq!(editor.asset_ops.status, editor.error);
             assert_eq!(
-                editor.error.contains("publication may have committed"),
+                editor.error.contains("Reopen the scene to check"),
                 case == "save_terminal_publishing"
             );
             assert_eq!(std::fs::read(&associated).unwrap(), before);
@@ -4590,7 +4613,7 @@ mod tests {
                 assert!(controller.disconnected);
                 assert!(controller.retired.as_ref().unwrap().request.is_some());
                 assert!(!controller.retiring);
-                assert!(editor.error.contains("disconnected"));
+                assert!(editor.error.contains("cleanup was interrupted"));
                 // The deliberately closed transport cannot receive this payload;
                 // the controller retains it, and this test retires the owner on a
                 // worker rather than dropping a rejected payload on the UI.

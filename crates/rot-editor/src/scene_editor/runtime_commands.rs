@@ -176,7 +176,7 @@ impl SceneEditor {
                 if op == "behavior_runtime_reset" && self.asset_busy() {
                     return Err((
                         "asset_busy".into(),
-                        "Content work is finishing; wait before Reset.".into(),
+                        "Assets are still saving. Wait a moment.".into(),
                     ));
                 }
                 self.guard().map_err(|message| {

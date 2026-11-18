@@ -113,9 +113,7 @@ impl SceneEditor {
                 self.color_draft = None;
                 self.draft_generation = self.draft_generation.wrapping_add(1);
                 self.error.clear();
-                self.notice =
-                    "Authored color applied. Reset preview to use it; Undo restores the color."
-                        .into();
+                self.notice = "Color applied.".into();
                 true
             }
             Err(error) => {
@@ -218,7 +216,7 @@ impl SceneEditor {
                     self.color_draft = None;
                     self.draft_generation = self.draft_generation.wrapping_add(1);
                     self.error.clear();
-                    self.notice = "Color draft cancelled; authored state unchanged.".into();
+                    self.notice = "Color change cancelled.".into();
                 }
             });
         }
@@ -309,9 +307,7 @@ impl SceneEditor {
             })?;
         let changed = before != Some(color);
         self.sync_draft();
-        self.notice = format!(
-            "Agent scene_color: revision {revision}; authored color applied. Preview unchanged."
-        );
+        self.notice = "AI changed a color.".into();
         Ok(
             json!({"session_token":token,"revision":revision.to_string(),"changed":changed,"object_id":id,"before":before,"after":color,"dirty":self.session.is_dirty()}),
         )

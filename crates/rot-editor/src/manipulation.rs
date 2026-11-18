@@ -735,7 +735,8 @@ impl Manipulation {
         let mut focused_field = None;
         let mut field_has_focus = false;
         if mixed.iter().any(|mixed| *mixed) {
-            ui.label("— = mixed values").on_hover_text("Applies to this component on every selected object.");
+            ui.label("— = mixed values")
+                .on_hover_text("Applies to this component on every selected object.");
         }
         let mut scrub_released = false;
         for (row, label) in ["Position", unit.label(), "Scale"].into_iter().enumerate() {
@@ -865,7 +866,9 @@ impl Manipulation {
         root: Option<&Path>,
         document_generation: u64,
     ) -> Result<(), String> {
-        session.scene().require_flat().map_err(|_|"Couldn't copy. Groups with nested objects aren't supported yet.".to_string())?;
+        session.scene().require_flat().map_err(|_| {
+            "Couldn't copy. Groups with nested objects aren't supported yet.".to_string()
+        })?;
         selected_transforms(session.scene(), &self.ids)?;
         let mut objects = Vec::new();
         let mut lights = BTreeMap::new();

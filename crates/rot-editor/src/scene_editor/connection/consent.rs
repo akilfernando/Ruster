@@ -243,13 +243,9 @@ impl RegistrationConsent {
             State::Preview => "Awaiting registration consent",
             State::Cancelled => "Registration cancelled; no request dispatched",
             State::Dispatched => "Registration authorized; execution/result pending",
-            State::Created => "Registered; client restart required; editor binding separate",
-            State::Reused => {
-                "Registration reused; client restart required; editor binding separate"
-            }
-            State::Removed => {
-                "Registration removed; client restart required; editor binding separate"
-            }
+            State::Created => "Registered. Restart your AI app.",
+            State::Reused => "Already registered. Restart your AI app.",
+            State::Removed => "Registration removed. Restart your AI app.",
             State::Conflict => "Registration conflict; no refresh or retry",
             State::Failed => "Registration failed or indeterminate; inspect before a new preview",
         }
@@ -268,12 +264,12 @@ mod tests {
             (
                 0,
                 json!({"ok":true,"changed":true,"tools":84}),
-                "Registered; client restart required; editor binding separate",
+                "Registered. Restart your AI app.",
             ),
             (
                 0,
                 json!({"ok":true,"changed":false,"tools":84}),
-                "Registration reused; client restart required; editor binding separate",
+                "Already registered. Restart your AI app.",
             ),
             (
                 3,
@@ -363,7 +359,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             remove.status(),
-            "Registration removed; client restart required; editor binding separate"
+            "Registration removed. Restart your AI app."
         );
     }
 
