@@ -323,8 +323,9 @@ impl SceneEditor {
 
     /// The Assets pane.
     pub(super) fn browser_contents(&mut self, ui: &mut egui::Ui) {
+        let search_width = (ui.available_width() * 0.3).clamp(120.0, 240.0);
         let search = ui
-            .horizontal(|ui| {
+            .horizontal_wrapped(|ui| {
                 if crate::editor_theme::primary_button(ui, "Import…")
                     .on_hover_text("Import .glb, .obj, .png or .wav files, or drop them here")
                     .clicked()
@@ -353,7 +354,7 @@ impl SceneEditor {
                     egui::TextEdit::singleline(&mut self.content_query)
                         .hint_text("Search")
                         .char_limit(128)
-                        .desired_width(ui.available_width().clamp(80.0, 240.0)),
+                        .desired_width(search_width),
                 )
             })
             .inner;

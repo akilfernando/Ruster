@@ -611,11 +611,11 @@ run, because it replaces the installed pre-rename build.
 
 ## Next — Phase 2: Core
 
-Start when Phase 1's exit test passes. C-01 comes first and gates the rest.
+The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1 checks. The human walkthrough and shared editing exercise remain open. C-01 comes first and gates the rest.
 
 | Package | Outcome | Brief |
 | --- | --- | --- |
-| C-01 Object and component model | A written design for [A1 and A2](PARITY-PLAN.md#4-architecture-decisions): types, file format, Undo outside files, upgrade of the repository's example scenes, and the order of the port. | brief needed |
+| C-01 Object and component model | A written design for [A1 and A2](PARITY-PLAN.md#4-architecture-decisions): types, file format, Undo outside files, upgrade of the repository's example scenes, and the order of the port. | design drafted 2026-11-19 · [C-01 brief](plans/C-01-OBJECT-COMPONENT-MODEL.md) |
 | C-02 Scene crate on the new model | `rot-scene` implements it. No object, depth or file-size caps. | after C-01 |
 | C-03 Renderer, runtime and scripts on the new model | Everything that reads a scene uses objects and components. | after C-01 |
 | C-04 Assets as files | `Assets/` folder, sidecar ids and import settings, rebuildable cache, file watcher, automatic import and reimport, folder tree in the browser. | brief needed |

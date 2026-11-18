@@ -109,7 +109,7 @@ attempts, and record whether evidence is human operation or injected input.
 | Rename it and change a transform numerically, then cancel a second edit | Enter commits, Tab traverses, Escape cancels the intended draft, and the viewport, inspector and Undo agree. |
 | Move a group with a gizmo and assign an existing material | Tool, snap and pivot are legible, live fields match the edit, references survive save/reopen, and Undo/Redo affect the expected transactions. |
 | Run, observe a deliberate error, fix it and run again | Participant distinguishes Play state and input capture, finds a useful error, resumes editing and reruns successfully. Mark unsupported fixture behaviors explicitly. |
-| Switch to the AI workspace and verify a guarded MCP edit | The edited object is identified in native view and Inspector. Native Undo restores the exact prior value. Switching layout preserves selection and authoring state. |
+| Connect an AI app and verify an edit while arranging the scene | Ask the AI app to add three cubes in a row with different colors while you move a different object. Identify the AI edits in Scene and Inspector. Check that Undo follows the order of your edits and the AI edits. |
 | Save, close and reopen, then locate the export result or resolve a deliberate missing asset | Participant can recover without assistance, saved data is exact and the chosen build path identifies what shipped or why it refused. |
 
 Use the same task definitions for a baseline and any candidate. This is a

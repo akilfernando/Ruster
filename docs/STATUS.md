@@ -16,14 +16,21 @@ Updated 2026-11-19. This file stays under 100 lines. Older entries are in
 
 ## What to do next
 
-The T-02 motif and the S-08 wording sweep are integrated. Review remaining
-indirect editor messages and tooltips against the writing rules. The latest
-pass improved recovery, Play Checks and script/runtime wording. The editor
-gate passed (245 tests, 13 ignored), and a native smoke opened Recovery
-Checkpoints and verified its empty state. The Phase 1
-exit test still needs the six-task human walkthrough, the simultaneous AI
-authoring exercise and the full UI checklist. See the
-[parity plan](PARITY-PLAN.md).
+The 2026-11-19 independent Phase 1 pass reviewed the Scene, Inspector,
+Assets and Recovery surfaces at 1280×800, 1920×1080 and 960×1080 in Rot
+and Plain, combining light and dark modes with scales 1 and 1.5. The
+MCP smoke read back an exact transform and verified both undos restored
+the original objects. Its private pre-authorized client exercised STDIO,
+with 94 tools and a 36,330-byte tool list. The full workspace gate passed
+(499 tests, 21 ignored). Assets search now wraps at narrow widths. At
+960×1080 and scale 1.5, the Inspector still clips the right edge of some
+Transform controls. Indirect message wording remains to review.
+
+The [human walkthrough](research/EDITOR-WORKFLOW-COMPARISON.md#proposed-editor-baseline-walkthrough),
+simultaneous real-client editing, and full UI checklist remain open.
+The 5,000-object checklist case depends on Phase 2. The user authorized
+starting Phase 2 before the human pass. [C-01](plans/C-01-OBJECT-COMPONENT-MODEL.md)
+specifies the proposed model and migration. C-02 implementation is next.
 
 ## What a creator can do today
 

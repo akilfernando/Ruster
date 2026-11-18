@@ -71,6 +71,18 @@ def step(label, ok, detail=""):
         raise SystemExit(1)
 
 
+def inspected_objects(adapter, first_page):
+    objects = list(first_page["objects"])
+    page = first_page
+    while page["next_offset"] is not None:
+        reply = adapter.call("scene_inspect", {"offset": page["next_offset"]})["structuredContent"]
+        step("read more objects", reply.get("ok") is True, str(reply.get("error", "")))
+        page = reply["result"]
+        objects.extend(page["objects"])
+    step("read complete object list", len(objects) == first_page["object_count"])
+    return objects
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--profile", default="debug", help="target/<profile> holding both binaries")
@@ -104,13 +116,19 @@ def main():
             scene = adapter.call("scene_inspect")["structuredContent"]
             step("read the scene", scene.get("ok") is True,
                  f"{scene.get('result', {}).get('object_count')} objects" if scene.get("ok") else str(scene.get("error")))
-            before = scene["result"]["object_count"]
+            before = inspected_objects(adapter, scene["result"])
 
             created = adapter.call("scene_create", {"object_id": "smoke_cube", "name": "Smoke Cube"})["structuredContent"]
             step("create a cube", created.get("ok") is True, str(created.get("error", "")))
-            moved = adapter.call("scene_transform", {"object_id": "smoke_cube", "transform": {
-                "translation": [0, 1.5, 0], "rotation": [0, 0.5, 0], "scale": [1, 1, 1]}})["structuredContent"]
+            transform = {"translation": [0, 1.5, 0], "rotation": [0, 0.5, 0], "scale": [1, 1, 1]}
+            moved = adapter.call("scene_transform", {"object_id": "smoke_cube", "transform": transform})["structuredContent"]
             step("move it", moved.get("ok") is True, str(moved.get("error", "")))
+
+            changed = adapter.call("scene_inspect")["structuredContent"]
+            step("read the edited scene", changed.get("ok") is True, str(changed.get("error", "")))
+            cube = next((obj for obj in inspected_objects(adapter, changed["result"])
+                         if obj["id"] == "smoke_cube"), None)
+            step("read back the cube transform", cube is not None and cube["transform"] == transform)
 
             shot = adapter.call("viewport_screenshot")
             images = [c for c in shot.get("content", []) if c.get("type") == "image"]
@@ -121,8 +139,10 @@ def main():
             for _ in range(2):  # the move, then the create
                 undone = adapter.call("scene_undo")["structuredContent"]
                 step("undo", undone.get("ok") is True, str(undone.get("error", "")))
-            after = adapter.call("scene_inspect")["structuredContent"]["result"]["object_count"]
-            step("back to the original scene", after == before, f"{after} objects")
+            restored = adapter.call("scene_inspect")["structuredContent"]
+            step("read the restored scene", restored.get("ok") is True, str(restored.get("error", "")))
+            after = inspected_objects(adapter, restored["result"])
+            step("original objects restored exactly", after == before, f"{len(after)} objects")
         finally:
             adapter.close()
     print("AI route works end to end.")
