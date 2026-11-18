@@ -130,18 +130,18 @@ impl RuntimeUi {
             self.maintain_control_focus(ui.ctx());
         }
         egui::CollapsingHeader::new("Application commands").id_salt("runtime_application_commands").show(ui, |ui| {
-            ui.weak(format!("Paused run · commit revision {}", identity.1));
+            ui.weak(format!("Paused · Run version {}", identity.1));
             if let Some(receipt)=self.last_command_receipt() {
-                ui.collapsing("Last command receipt",|ui| {
-                    ui.label(format!("{} / {} · commit {} → {} · tick {}",receipt.binding_id,receipt.command_id,receipt.previous_commit_revision,receipt.commit_revision,receipt.tick));
-                    ui.weak(format!("Catalog {}",receipt.schema_hash));
-                    ui.weak(format!("Normalized input {}",receipt.input_sha256));
+                ui.collapsing("Last Command Details",|ui| {
+                    ui.label(format!("{} / {} · run version {} → {} · tick {}",receipt.binding_id,receipt.command_id,receipt.previous_commit_revision,receipt.commit_revision,receipt.tick));
+                    ui.weak(format!("Command definitions {}",receipt.schema_hash));
+                    ui.weak(format!("Input fingerprint {}",receipt.input_sha256));
                 });
             }
             if !supported {
                 ui.colored_label(
                     ui.visuals().warn_fg_color,
-                    "Invocation requires an enabled API5 Application source.",
+                    "Enable a compatible application script to run commands.",
                 );
             }
             if !ready { ui.weak("Pause the current initialized run and finish other edits to invoke a command."); }

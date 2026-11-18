@@ -17,7 +17,10 @@ Updated 2026-11-19. This file stays under 100 lines. Older entries are in
 ## What to do next
 
 The T-02 motif and the S-08 wording sweep are integrated. Review remaining
-indirect editor messages and tooltips against the writing rules. The Phase 1
+indirect editor messages and tooltips against the writing rules. The latest
+pass improved recovery, Play Checks and script/runtime wording. The editor
+gate passed (245 tests, 13 ignored), and a native smoke opened Recovery
+Checkpoints and verified its empty state. The Phase 1
 exit test still needs the six-task human walkthrough, the simultaneous AI
 authoring exercise and the full UI checklist. See the
 [parity plan](PARITY-PLAN.md).

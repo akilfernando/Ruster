@@ -357,7 +357,9 @@ impl SceneEditor {
         let next = result.map_err(|e| ("invalid_arguments".into(), e.to_string()))?;
         self.sync_draft();
         self.observe_runtime();
-        self.notice = format!("Agent {op}: authored revision{next}; unsaved, shared Undo.");
+        if next != revision {
+            self.notice = "AI updated script settings. Save to keep the change.".into();
+        }
         Ok(
             json!({"session_token":token,"revision":next.to_string(),"changed":next!=revision,"dirty":self.session.is_dirty()}),
         )

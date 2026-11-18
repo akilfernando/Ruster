@@ -398,7 +398,7 @@ impl RuntimeUi {
         let mut resume = None;
         egui::Window::new("Behavior debugger").open(&mut opened).default_width(600.0)
             .max_width((ctx.content_rect().width()-48.0).max(240.0)).show(ctx, |ui| {
-            ui.small("Source lines are 1-based. Breakpoints use the exact saved source hash. First activation requires Reset.");
+            ui.small("Reset to activate breakpoints for the current script.");
             ui.add_enabled_ui(!blocked, |ui| {
                 egui::ComboBox::from_label("Breakpoint source").selected_text(if self.debug.source.is_empty() { "Choose source" } else { &self.debug.source }).show_ui(ui, |ui| {
                     for id in session.authoring().sources.keys() { ui.selectable_value(&mut self.debug.source, id.clone(), id); }

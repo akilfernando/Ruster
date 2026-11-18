@@ -470,7 +470,7 @@ impl RecoveryUi {
                                     ));
                                 }
                                 if let Some(revision) = candidate.revision {
-                                    ui.label(format!("Scene revision {revision}"));
+                                    ui.label(format!("Scene version {revision}"));
                                 }
                             });
                         if let Some(error) = &candidate.error {

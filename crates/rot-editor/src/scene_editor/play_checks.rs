@@ -928,7 +928,7 @@ fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
                     ui.add(egui::TextEdit::singleline(object_id).char_limit(64));
                 }
                 Selection::State { binding_id, field } => {
-                    ui.label("Binding ID");
+                    ui.label("Script Attachment ID");
                     ui.add(egui::TextEdit::singleline(binding_id).char_limit(64));
                     ui.label("State field");
                     ui.add(egui::TextEdit::singleline(field).char_limit(64));

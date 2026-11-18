@@ -177,7 +177,7 @@ impl Editor {
                     ui.label(RichText::new("SAVED").color(ACCENT));
                 }
                 ui.label(
-                    RichText::new(format!("revision {}", self.project.scenario().revision()))
+                    RichText::new(format!("Version {}", self.project.scenario().revision()))
                         .color(MUTED),
                 );
                 ui.label(
@@ -252,7 +252,7 @@ impl Editor {
                 }
                 ui.add_space(15.0);
                 ui.separator();
-                ui.label(RichText::new("One authored scenario").strong());
+                ui.label(RichText::new("Scenario").strong());
                 ui.label(
                     RichText::new(
                         "Source, transport and destination are views of this logistics scenario.",
@@ -308,7 +308,7 @@ impl Editor {
                 }
             });
             ui.add_space(10.0);
-            ui.label(RichText::new("Runtime is temporary. Apply, undo and save never change the running state. Reset explicitly starts from authored values.").small().color(MUTED));
+            ui.label(RichText::new("Reset restarts the simulation from the scene settings.").small().color(MUTED));
             });
         });
     }
@@ -321,7 +321,7 @@ impl Editor {
                     ui.label(RichText::new(if self.running { "RUNNING" } else { "PAUSED" }).color(if self.running { ACCENT } else { MUTED }));
                 });
             });
-            ui.label(RichText::new("Inspect supply, capacity and delivery without changing authored data.").color(MUTED));
+            ui.label(RichText::new("Supply, capacity and deliveries from the current run.").color(MUTED));
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 if ui.button(if self.running { "Pause" } else { "Run" }).clicked() { self.running = !self.running; self.last_tick = Instant::now(); }
@@ -330,9 +330,9 @@ impl Editor {
                 ui.label(RichText::new("4 ticks / second").small().color(MUTED));
             });
             if self.runtime_stale() {
-                ui.label(RichText::new("Authored properties changed. Reset runtime to inspect the new configuration.").color(Color32::from_rgb(244, 192, 109)));
+                ui.label(RichText::new("Scene settings changed. Reset to use them.").color(Color32::from_rgb(244, 192, 109)));
             } else {
-                ui.label(RichText::new("Runtime uses the current authored properties.").small().color(MUTED));
+                ui.label(RichText::new("The simulation uses the current scene settings.").small().color(MUTED));
             }
             ui.add_space(8.0);
             let available = ui.available_size();

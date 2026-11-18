@@ -1521,7 +1521,7 @@ impl BehaviorUi {
                 let Some(source)=&mut self.source else {ui.label("No embedded source selected.");return;};
                 ui.add(egui::Label::new(format!("{} · base {}",source.id,&source.base_hash[..12])).truncate()).on_hover_text(&source.id);
                 if let Some(line)=self.source_line {ui.weak(format!("Diagnostic line {line}"));}
-                ui.small("Apply stores unfinished code without compiling. Ctrl+Enter Apply · Ctrl+S Apply and Save · Escape hide/keep draft.");
+                ui.small("Ctrl+Enter Apply · Ctrl+S Apply and Save · Esc Close");
                 egui::ScrollArea::vertical().id_salt("embedded_source_scroll").max_height((ctx.content_rect().height()-250.0).max(48.0)).show(ui,|ui| {
                     ui.add_enabled_ui(editable,|ui| {
                         ui.label("Display label");let mut rejected=false;

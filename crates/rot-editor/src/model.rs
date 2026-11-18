@@ -189,12 +189,12 @@ impl Editor {
     pub fn revert_fields(&mut self) {
         self.fields = self.project.scenario().config().into();
         self.field_validation_error = None;
-        self.notice = "Unapplied fields reverted to authored values.".into();
+        self.notice = "Restored the previous field values.".into();
     }
 
     pub fn undo(&mut self, redo: bool) {
         if self.fields_changed() {
-            self.error = Some("Apply or revert inspector fields before authored undo/redo.".into());
+            self.error = Some("Apply or discard Inspector edits before using Undo or Redo.".into());
             return;
         }
         let result = if redo {
@@ -244,7 +244,7 @@ impl Editor {
                 let adapter = self.adapter.clone();
                 *self = Self::new(project);
                 self.adapter = adapter;
-                self.notice = "Project ready. Runtime starts from authored values.".into();
+                self.notice = "Project ready.".into();
             }
             Err(error) => {
                 self.error = Some(format!(

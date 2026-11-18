@@ -332,7 +332,7 @@ holds no panel body; one `ui_drive.py` screenshot is unchanged; the gate
 passes.
 
 #### S-08 · String table and wording pass — M — ready
-Status: wording sweep landed 2026-11-19. Empty Hierarchy, project opening and build states use the shared table. Full acceptance still needs an audit of indirect messages, tooltips and remaining inline copy.
+Status: wording sweep landed 2026-11-19. Empty Hierarchy, project opening and build states use the shared table. Follow-up on 2026-11-19 simplified recovery, Play Checks, script editing and runtime copy. A direct widget-label scan found no single-line literals over 80 characters. Indirect and generated messages still need coverage before full acceptance.
 **Outcome.** All text follows the [writing rules](UX-STANDARDS.md#8-writing)
 and comes from one table with Plain and Rot wording.
 **Facts.** Strings are inline. About 337 literals are longer than 80

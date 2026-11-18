@@ -76,7 +76,7 @@ impl RuntimeUi {
     pub fn state_inspector(&mut self, ui: &mut egui::Ui) {
         egui::CollapsingHeader::new("Committed runtime state").show(ui, |ui| {
             let Some(frame) = self.frame.as_ref() else {
-                ui.label("Reset preview to inspect committed state.");
+                ui.label("Reset the preview to see script values.");
                 return;
             };
             let key = (frame.key, frame.tick, frame.commit_revision);
@@ -92,13 +92,13 @@ impl RuntimeUi {
                 frame.tick
             ));
             ui.label(format!(
-                "Commit revision {} · last Step {:?}",
+                "Run version {} · last Step {:?}",
                 frame.commit_revision, frame.last_step_commit_revision
             ));
             if self.stale || !self.ready || Some(frame.key) != self.current_run() {
                 ui.colored_label(
                     ui.visuals().warn_fg_color,
-                    "Historical snapshot. Reset to inspect current authored defaults.",
+                    "Showing a previous run. Reset to see current defaults.",
                 );
             }
             if frame.state.binding(&self.state_binding).is_none() {
@@ -106,11 +106,11 @@ impl RuntimeUi {
                 self.state_offset = 0;
             }
             if self.state_binding.is_empty() {
-                ui.label("This run has no state-capable owners.");
+                ui.label("No scripts store values in this run.");
                 return;
             }
             let previous = self.state_binding.clone();
-            egui::ComboBox::from_label("State owner")
+            egui::ComboBox::from_label("Script")
                 .selected_text(&self.state_binding)
                 .show_ui(ui, |ui| {
                     for id in frame.state.binding_ids() {
