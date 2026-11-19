@@ -84,7 +84,7 @@ pub(crate) fn scene_dependencies(
     Ok((meshes, textures))
 }
 
-fn scene_texture_roles(
+pub(crate) fn scene_texture_roles(
     scene: &rot_scene::Scene,
 ) -> Result<BTreeMap<String, rot_assets::TextureRole>, String> {
     let mut roles = BTreeMap::new();

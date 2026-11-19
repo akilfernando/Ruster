@@ -44,6 +44,8 @@ pub(super) struct ComponentWorkspace {
     open_focused: bool,
     #[cfg(target_os = "linux")]
     browser: project_picker::FileBrowser,
+    #[cfg(target_os = "linux")]
+    build: super::component_build::BuildUi,
     close_pending: bool,
     close_approved: bool,
 }
@@ -95,6 +97,8 @@ impl ComponentWorkspace {
             open_focused: false,
             #[cfg(target_os = "linux")]
             browser: Default::default(),
+            #[cfg(target_os = "linux")]
+            build: Default::default(),
             close_pending: false,
             close_approved: false,
         };
@@ -364,6 +368,11 @@ impl ComponentWorkspace {
                 });
                 return;
             }
+            #[cfg(target_os = "linux")]
+            Action::Export => {
+                self.build.open(&self.path, &self.session.scene().id);
+                return;
+            }
             Action::Save => {
                 self.save();
                 return;
@@ -540,7 +549,17 @@ impl ComponentWorkspace {
 
     pub(super) fn show(&mut self, ui: &mut egui::Ui) -> Option<OpenedScene> {
         let ctx = ui.ctx().clone();
-        if !self.close_approved
+        #[cfg(target_os = "linux")]
+        self.build.poll();
+        #[cfg(target_os = "linux")]
+        let build_open = self.build.is_open();
+        #[cfg(not(target_os = "linux"))]
+        let build_open = false;
+        if build_open && ctx.input(|input| input.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
+        if !build_open
+            && !self.close_approved
             && (self.session.is_dirty() || self.draft_dirty())
             && ctx.input(|input| input.viewport().close_requested())
         {
@@ -556,7 +575,7 @@ impl ComponentWorkspace {
             0,
         );
         self.runtime.poll(&ctx);
-        let blocked = self.close_pending || self.open_path.is_some();
+        let blocked = self.close_pending || self.open_path.is_some() || build_open;
         self.runtime.input_begin(&ctx, blocked);
         if let Some(action) = self
             .workspace
@@ -569,6 +588,8 @@ impl ComponentWorkspace {
                 editor_theme::text_menu(ui, Text::ComponentFileMenu.plain(), |ui| {
                     self.menu_action(ui, Action::Open);
                     self.menu_action(ui, Action::Save);
+                    #[cfg(target_os = "linux")]
+                    self.menu_action(ui, Action::Export);
                 });
                 editor_theme::text_menu(ui, Text::ComponentEditMenu.plain(), |ui| {
                     self.menu_action(ui, Action::Undo);
@@ -598,9 +619,17 @@ impl ComponentWorkspace {
                 self.assets.as_ref(),
             );
         });
-        if let Some(error) = &self.error {
+        #[cfg(target_os = "linux")]
+        let build_status = self.build.status();
+        #[cfg(not(target_os = "linux"))]
+        let build_status = None::<&str>;
+        if self.error.is_some() || build_status.is_some() {
             egui::Panel::bottom("component_status").show(ui, |ui| {
-                ui.colored_label(editor_theme::colors(ui).error, error);
+                if let Some(error) = &self.error {
+                    ui.colored_label(editor_theme::colors(ui).error, error);
+                } else if let Some(status) = build_status {
+                    ui.add(egui::Label::new(status).truncate());
+                }
             });
         }
         let panel_limit = ui.available_width() * 0.3;
@@ -709,7 +738,8 @@ impl ComponentWorkspace {
                         self.apply();
                     }
                 }
-                if !self.close_pending
+                if !build_open
+                    && !self.close_pending
                     && self.open_path.is_none()
                     && ui.input_mut(|input| {
                         input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
@@ -719,6 +749,12 @@ impl ComponentWorkspace {
                 }
             });
         egui::CentralPanel::default().show(ui, |ui| self.viewport(ui, blocked));
+        #[cfg(target_os = "linux")]
+        {
+            let draft_dirty = self.draft_dirty();
+            self.build
+                .show(&ctx, &self.session, self.assets.as_ref(), draft_dirty);
+        }
         if let Some(mut path) = self.open_path.take() {
             let mut cancel = false;
             let mut opened = None;

@@ -127,6 +127,30 @@ impl ComponentSession {
         self.saved_state != Some(self.state)
     }
 
+    /// Capture the exact saved document for a bounded consumer such as the player.
+    /// Refuse a stale file or an unsaved edit before handing bytes to the consumer.
+    pub fn saved_bytes(&self, limit: u64) -> Result<Vec<u8>, SceneError> {
+        let (path, hash) = self
+            .saved
+            .as_ref()
+            .filter(|_| !self.is_dirty())
+            .ok_or_else(|| SceneError::Invalid("Save the scene before building.".into()))?;
+        let lock = SceneLock::acquire(path)?;
+        let mut bytes = Vec::new();
+        File::open(&lock.path)?
+            .take(limit.saturating_add(1))
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > limit {
+            return Err(SceneError::Invalid(
+                "The saved scene exceeds the current player file limit.".into(),
+            ));
+        }
+        if <[u8; 32]>::from(Sha256::digest(&bytes)) != *hash {
+            return Err(SceneError::Conflict);
+        }
+        Ok(bytes)
+    }
+
     /// Insert a new object or replace the authored data for an existing ID.
     /// Relationships are local. Supply an updated local transform if preserving
     /// a world pose during reparenting.

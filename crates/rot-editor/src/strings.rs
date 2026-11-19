@@ -43,6 +43,12 @@ pub enum Text {
     ComponentSaveClose,
     ComponentDiscardClose,
     ComponentCancel,
+    ComponentBuildApplication,
+    ComponentBuildFolder,
+    ComponentBuild,
+    ComponentBuildRun,
+    ComponentSaveBeforeBuild,
+
     ComponentObjectMenu,
     ComponentCreate,
     Component3dObject,
@@ -61,7 +67,7 @@ pub enum Text {
 
 impl Text {
     #[cfg(test)]
-    pub const ALL: [Self; 47] = [
+    pub const ALL: [Self; 52] = [
         Self::Welcome,
         Self::NoRecentProjects,
         Self::EmptyHierarchy,
@@ -97,6 +103,11 @@ impl Text {
         Self::ComponentSaveClose,
         Self::ComponentDiscardClose,
         Self::ComponentCancel,
+        Self::ComponentBuildApplication,
+        Self::ComponentBuildFolder,
+        Self::ComponentBuild,
+        Self::ComponentBuildRun,
+        Self::ComponentSaveBeforeBuild,
         Self::ComponentObjectMenu,
         Self::ComponentCreate,
         Self::Component3dObject,
@@ -148,6 +159,12 @@ impl Text {
             Self::ComponentSaveClose => "Save and Close",
             Self::ComponentDiscardClose => "Discard and Close",
             Self::ComponentCancel => "Cancel",
+            Self::ComponentBuildApplication => "Build Application",
+            Self::ComponentBuildFolder => "Build Folder",
+            Self::ComponentBuild => "Build",
+            Self::ComponentBuildRun => "Build and Run",
+            Self::ComponentSaveBeforeBuild => "Save the scene before building.",
+
             Self::ComponentObjectMenu => "Object",
             Self::ComponentCreate => "Create",
             Self::Component3dObject => "3D Object",

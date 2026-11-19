@@ -44,7 +44,8 @@ editor tools are open.
 
 The v23 editor uses the shared Play, Pause, Step and Stop controls. The editor,
 standalone viewer and packaged Motion Lab use temporary v23 projections.
-General component execution, Build and MCP remain open.
+The v23 Build dialog writes and can launch a Linux player folder without
+Python. General component execution and MCP remain open.
 
 ## What a creator can do today
 
@@ -92,8 +93,7 @@ entry `org.rot.editor.desktop`. Reinstall with
   Appearance, Viewport, Shortcuts (every command, search, conflicts),
   External Tools and AI pages; changes apply at once, no Save button. Edit
   → Project Settings… has Project, Input Actions and Build pages.
-- The [backlog](BACKLOG.md) records the completed dock, command palette,
-  project hub and asset browser packages.
+- The [backlog](BACKLOG.md) records the other completed editor packages.
 
 ## Not verified
 

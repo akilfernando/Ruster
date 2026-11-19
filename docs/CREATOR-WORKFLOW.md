@@ -32,8 +32,15 @@ the scene.
 scene, **Save and Open** saves pending changes. **Discard and Open** leaves
 the original file as saved, and **Cancel** keeps the current edits. Use
 **Play**, **Pause**, **Step**, and **Stop** for supported scenes. Stopping
-returns to your editable scene. Build and AI editing still need the legacy
-scene during the cutover.
+returns to your editable scene.
+
+On Linux, save the v23 scene, then use **File → Build…**. Choose a new
+folder and select **Build** or **Build and Run**. The folder contains an
+`application` executable, the saved v23 scene, and its project assets.
+Run `application --headless --ticks 16` to check it without opening a window.
+The editor finds the `rot-motion-lab` player alongside `rot-editor`. Local
+installs include both. When building from source, build both Cargo packages.
+AI editing still uses the legacy scene during the cutover.
 
 ## Create and export in the editor
 
