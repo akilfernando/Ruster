@@ -36,7 +36,10 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Box<dyn E
     Ok(serde_json::from_slice(&bytes)?)
 }
 
-use rot_scene::{component_scene::ComponentScene, Object, Preview, Scene, Session, FORMAT_VERSION};
+use rot_scene::{
+    component_scene::{self, ComponentScene},
+    Object, Preview, Scene, SceneError, Session, FORMAT_VERSION,
+};
 
 fn report_revision(session: &Session, revision: u64) {
     println!("revision {revision}");
@@ -149,6 +152,17 @@ fn run() -> Result<(), Box<dyn Error>> {
             report_revision(&session, revision);
         }
         ("inspect", 2) => {
+            match ComponentScene::open(&args[1]) {
+                Ok(scene) => {
+                    println!("{}", serde_json::to_string_pretty(&scene)?);
+                    println!("undo=0 redo=0");
+                    println!("loaded_format_version={}", component_scene::FORMAT_VERSION);
+                    return Ok(());
+                }
+                Err(SceneError::UnsupportedVersion(version))
+                    if version < u64::from(component_scene::FORMAT_VERSION) => {}
+                Err(error) => return Err(error.into()),
+            }
             let session = Session::open(&args[1])?;
             println!("{}", serde_json::to_string_pretty(session.scene())?);
             println!("undo={} redo={}", session.undo_len(), session.redo_len());

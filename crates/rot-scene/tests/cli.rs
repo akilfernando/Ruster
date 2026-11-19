@@ -205,6 +205,11 @@ fn component_migration_validates_output_and_never_overwrites() {
     assert!(!cli(&["migrate", source, source]).status.success());
     assert!(cli(&["migrate", source, destination]).status.success());
     assert!(cli(&["validate-components", destination]).status.success());
+    let inspected = cli(&["inspect", destination]);
+    assert!(inspected.status.success());
+    let inspection = String::from_utf8(inspected.stdout).unwrap();
+    assert!(inspection.contains("loaded_format_version=23"));
+    assert!(inspection.contains("\"type\": \"mesh_renderer\""));
     let published = std::fs::read(&output).unwrap();
     assert!(!cli(&["migrate", source, destination]).status.success());
     assert_eq!(std::fs::read(&output).unwrap(), published);
