@@ -16,6 +16,8 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("scene_primitive", "Change an object's built-in shape to sphere, capsule or cube (null)."),
     ("scene_rename", "Rename an object. Its ID stays the same."),
     ("scene_duplicate", "Duplicate an object under a new ID and name."),
+    ("scene_components_inspect", "List component IDs and types on a v23 object. Follow next_offset, or supply component_id for its authored definition."),
+    ("scene_components_edit", "Apply up to 64 ordered v23 component edits in one Undo. Add or replace with a full typed definition, or remove or set_enabled by component ID."),
     ("scene_delete", "Delete an object. In v23, also delete its descendants."),
     ("scene_transform_many", "Set the position, rotation (radians) and scale of up to 256 objects as one Undo step."),
     ("scene_duplicate_many", "Duplicate up to 256 objects under new IDs as one Undo step."),

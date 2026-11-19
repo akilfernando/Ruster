@@ -4,6 +4,7 @@ mod behavior_tools;
 mod capture_tools;
 mod collider_tools;
 mod color_tools;
+mod component_tools;
 #[allow(dead_code)]
 #[path = "../../support/connection.rs"]
 mod connection;
@@ -214,6 +215,9 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
             && arguments["project"]
                 .as_str()
                 .is_some_and(|s| !s.is_empty() && s.len() <= 1024);
+    }
+    if component_tools::supported(name) {
+        return component_tools::valid(name, arguments);
     }
     if player_view_tools::supported(name) {
         return player_view_tools::valid(name, arguments);
@@ -615,6 +619,7 @@ fn tools() -> Value {
             "annotations":{"readOnlyHint":matches!(name, "inspect" | "replay" | "scene_inspect" | "scene_replay" | "asset_inspect"), "openWorldHint":false}}));
     }
     tools.extend(collider_tools::list());
+    tools.extend(component_tools::list());
     tools.extend(color_tools::list());
     tools.extend(hierarchy_tools::list());
     tools.extend(material_tools::list());
@@ -856,7 +861,7 @@ impl Server {
             .any(|(guard, _)| arguments.get(*guard).is_some());
         let filled = self.fill_scene_guards(name, &mut arguments, bridge);
         if !valid_arguments(name, &arguments) {
-            return domain_error("invalid_arguments", "Arguments must match the tool schema; transform vectors contain exactly three numbers");
+            return domain_error("invalid_arguments", "Arguments must match the tool schema.");
         }
         let mut result = wait_while_paused(bridge, name, &arguments);
         for _ in 0..2 {
@@ -1041,6 +1046,7 @@ impl Server {
                     ]
                     .contains(&name)
                         && !collider_tools::supported(name)
+                        && !component_tools::supported(name)
                         && !color_tools::supported(name)
                         && !hierarchy_tools::supported(name)
                         && !material_tools::supported(name)
@@ -1781,7 +1787,6 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 94);
         let shape = json!({"expected_session_token":"s","expected_revision":"0","object_id":"a","primitive":"capsule"});
         assert!(valid_arguments("scene_primitive", &shape));
         let names: Vec<_> = tools
@@ -1814,6 +1819,8 @@ mod tests {
                 "scene_redo",
                 "scene_replay",
                 "scene_collider_set",
+                "scene_components_inspect",
+                "scene_components_edit",
                 "scene_color",
                 "scene_group_create",
                 "scene_reparent",

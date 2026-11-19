@@ -1,5 +1,6 @@
 //! Guarded v23 commands dispatched only under the existing Host request lease.
 use super::ComponentWorkspace;
+use rot_scene::component_scene::{Component, ComponentInstance, ObjectNode};
 use rot_scene::{SceneError, Transform, TransformRequest};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -63,9 +64,13 @@ impl ComponentWorkspace {
                 "dirty":self.session.is_dirty(), "drafts_pending":self.draft_dirty(),
             }));
         }
+        if op == "scene_components_inspect" {
+            return self.inspect_components(args);
+        }
         let expected_len = match op {
             "scene_transform" | "scene_rename" | "scene_reparent" => 4,
             "scene_transform_many" | "scene_delete" | "scene_delete_many" => 3,
+            "scene_components_edit" => 3,
             "scene_undo" | "scene_redo" => 2,
             _ => {
                 return Err((
@@ -187,6 +192,10 @@ impl ComponentWorkspace {
                     .collect::<Result<Vec<_>, _>>()?;
                 self.session.remove_subtrees(revision, &ids)
             }
+            "scene_components_edit" => {
+                let edits = self.component_edits(&args["edits"])?;
+                self.session.put_objects(revision, edits)
+            }
             "scene_undo" => self.session.undo(revision),
             "scene_redo" => self.session.redo(revision),
             _ => unreachable!("checked command"),
@@ -207,6 +216,217 @@ impl ComponentWorkspace {
         payload["changed"] = json!(next != revision);
         payload["dirty"] = json!(self.session.is_dirty());
         Ok(payload)
+    }
+
+    fn inspect_components(&self, args: &Value) -> Result<Value, CommandError> {
+        let map = args.as_object().ok_or_else(invalid_component_arguments)?;
+        if map
+            .keys()
+            .any(|key| !matches!(key.as_str(), "object_id" | "component_id" | "offset"))
+            || map.contains_key("component_id") && map.contains_key("offset")
+        {
+            return Err(invalid_component_arguments());
+        }
+        let id = args["object_id"]
+            .as_str()
+            .ok_or_else(invalid_component_arguments)?;
+        let object = self
+            .session
+            .scene()
+            .objects
+            .iter()
+            .find(|object| object.id == id)
+            .ok_or_else(object_not_found)?;
+        if let Some(component_id) = args.get("component_id") {
+            let component_id = component_id
+                .as_str()
+                .ok_or_else(invalid_component_arguments)?;
+            let component = object
+                .components
+                .iter()
+                .find(|component| component.id == component_id)
+                .ok_or_else(component_not_found)?;
+            let detail =
+                serde_json::to_vec(component).map_err(|_| invalid_component_arguments())?;
+            if detail.len() > 48 * 1024 {
+                return Err((
+                    "reply_too_large",
+                    "This component exceeds the detail response limit.".into(),
+                ));
+            }
+            return Ok(json!({"object_id":id,"component":component}));
+        }
+        let offset = args
+            .get("offset")
+            .map_or(Some(0), decimal)
+            .and_then(|offset| usize::try_from(offset).ok())
+            .ok_or_else(invalid_component_arguments)?;
+        let rest = object
+            .components
+            .get(offset..)
+            .ok_or_else(invalid_component_arguments)?;
+        let components: Vec<_> = rest.iter().take(16).map(|component| json!({
+            "id":component.id, "type":component_type(&component.kind), "enabled":component.enabled
+        })).collect();
+        Ok(json!({
+            "object_id":id, "components":components, "component_count":object.components.len(),
+            "next_offset":(rest.len() > components.len()).then(|| (offset + components.len()).to_string())
+        }))
+    }
+
+    fn component_edits(&self, value: &Value) -> Result<Vec<ObjectNode>, CommandError> {
+        let edits = value
+            .as_array()
+            .filter(|edits| (1..=64).contains(&edits.len()))
+            .ok_or_else(invalid_component_arguments)?;
+        let originals: HashMap<_, _> = self
+            .session
+            .scene()
+            .objects
+            .iter()
+            .map(|object| (object.id.as_str(), object))
+            .collect();
+        let mut changed = Vec::new();
+        let mut indices = HashMap::new();
+        for edit in edits {
+            let id = edit["object_id"]
+                .as_str()
+                .ok_or_else(invalid_component_arguments)?;
+            if let Some(tint) = edit["component"].get("tint") {
+                if !tint.as_array().is_some_and(|values| {
+                    values.len() == 4
+                        && values.iter().all(|value| {
+                            value
+                                .as_f64()
+                                .is_some_and(|value| (0.0..=1.0).contains(&value))
+                        })
+                }) {
+                    return Err(invalid_component_arguments());
+                }
+            }
+            let action: ComponentEdit =
+                serde_json::from_value(edit.clone()).map_err(|_| invalid_component_arguments())?;
+            let index = match indices.entry(id) {
+                std::collections::hash_map::Entry::Occupied(index) => *index.get(),
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    let original = originals.get(id).copied().ok_or_else(object_not_found)?;
+                    let index = changed.len();
+                    changed.push(original.clone());
+                    *entry.insert(index)
+                }
+            };
+            action.apply(&mut changed[index])?;
+        }
+        Ok(changed)
+    }
+}
+
+type CommandError = (&'static str, String);
+
+fn invalid_component_arguments() -> CommandError {
+    (
+        "invalid_arguments",
+        "Check the component operation and fields.".into(),
+    )
+}
+
+fn component_not_found() -> CommandError {
+    (
+        "component_not_found",
+        "Inspect this object for its component IDs.".into(),
+    )
+}
+
+fn component_type(component: &Component) -> &'static str {
+    match component {
+        Component::MeshRenderer { .. } => "mesh_renderer",
+        Component::Collider { .. } => "collider",
+        Component::Camera { .. } => "camera",
+        Component::Light { .. } => "light",
+        Component::Animator { .. } => "animator",
+        Component::Script { .. } => "script",
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
+enum ComponentEdit {
+    Add {
+        object_id: String,
+        component: ComponentInstance,
+    },
+    Replace {
+        object_id: String,
+        component: ComponentInstance,
+    },
+    SetEnabled {
+        object_id: String,
+        component_id: String,
+        enabled: bool,
+    },
+    Remove {
+        object_id: String,
+        component_id: String,
+    },
+}
+
+impl ComponentEdit {
+    fn apply(self, object: &mut ObjectNode) -> Result<(), CommandError> {
+        let object_id = match &self {
+            Self::Add { object_id, .. }
+            | Self::Replace { object_id, .. }
+            | Self::SetEnabled { object_id, .. }
+            | Self::Remove { object_id, .. } => object_id,
+        };
+        debug_assert_eq!(*object_id, object.id);
+        let find = |object: &ObjectNode, id: &str| {
+            object
+                .components
+                .iter()
+                .position(|component| component.id == id)
+                .ok_or_else(component_not_found)
+        };
+        match self {
+            Self::Add { component, .. } => {
+                if object
+                    .components
+                    .iter()
+                    .any(|existing| existing.id == component.id)
+                {
+                    return Err((
+                        "duplicate_component_id",
+                        "Choose a new component ID.".into(),
+                    ));
+                }
+                object.components.push(component);
+            }
+            Self::Replace { component, .. } => {
+                let index = find(object, &component.id)?;
+                if std::mem::discriminant(&object.components[index].kind)
+                    != std::mem::discriminant(&component.kind)
+                {
+                    return Err(invalid_component_arguments());
+                }
+                object.components[index] = component;
+            }
+            Self::SetEnabled {
+                component_id,
+                enabled,
+                ..
+            } => {
+                let index = find(object, &component_id)?;
+                let component = &mut object.components[index];
+                component.enabled = enabled;
+                if let Component::Script { binding } = &mut component.kind {
+                    binding.enabled = enabled;
+                }
+            }
+            Self::Remove { component_id, .. } => {
+                let index = find(object, &component_id)?;
+                object.components.remove(index);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -267,6 +487,43 @@ mod tests {
         component_scene::{ComponentScene, ComponentSession},
         Scene, Session,
     };
+
+    #[test]
+    fn component_batch_validates_global_ids_without_leaving_partial_edits() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        let scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let first = &scene.objects[0];
+        let second = &scene.objects[1];
+        let mut request = json!({
+            "expected_session_token":"session","expected_revision":"0","edits":[
+                {"operation":"set_enabled","object_id":first.id,"component_id":first.components[0].id,"enabled":false},
+                {"operation":"add","object_id":second.id,"component":first.components[0]},
+            ]
+        });
+        let refused = editor.ai_command("session", "scene_components_edit", &request);
+        assert_eq!(refused["ok"], false);
+        assert_eq!(editor.session.revision(), 0);
+        assert_eq!(editor.session.scene(), &scene);
+
+        request["edits"][1]["component"]["id"] = json!("new-component");
+        let accepted = editor.ai_command("session", "scene_components_edit", &request);
+        assert_eq!(accepted["result"]["revision"], "1");
+        assert!(!editor.session.scene().objects[0].components[0].enabled);
+        assert_eq!(
+            editor.session.scene().objects[1]
+                .components
+                .last()
+                .unwrap()
+                .id,
+            "new-component"
+        );
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene(), &scene);
+    }
 
     #[test]
     fn object_batches_validate_every_target_and_share_one_undo() {

@@ -56,6 +56,8 @@ scene. **Stop** returns Inspector to the authored values.
 
 On Unix, an approved AI app can inspect, rename, reparent, move or delete
 objects in the open v23 scene. Batched moves or deletes take one Undo each.
+The AI can inspect components by ID and add, replace, enable, disable or
+remove them in one batch. Undo restores the entire batch.
 Use **Window → AI Connection…** to pause edits or disconnect.
 Editor and AI Undo and Redo share the same history. Save from the editor.
 
