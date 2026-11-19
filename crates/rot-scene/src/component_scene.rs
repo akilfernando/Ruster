@@ -7,8 +7,9 @@ use std::io::{Read, Write};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    strict_json, validate_id, validate_name, Collider, ColliderRole, ColliderShape, OpaqueMaterial,
-    Primitive, SceneError, Transform,
+    strict_json, validate_id, validate_name, BehaviorBinding, BehaviorSource, BindingTarget,
+    Collider, ColliderRole, ColliderShape, DisplayProfile, OpaqueMaterial, Primitive, SceneError,
+    Session, Transform,
 };
 
 pub const FORMAT_VERSION: u32 = 23;
@@ -20,6 +21,10 @@ pub struct ComponentScene {
     pub objects: Vec<ObjectNode>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub materials: BTreeMap<String, OpaqueMaterial>,
+    #[serde(default, skip_serializing_if = "DisplayProfile::is_legacy")]
+    pub display: DisplayProfile,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sources: BTreeMap<String, BehaviorSource>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -37,6 +42,11 @@ impl ComponentScene {
         for (id, material) in &self.materials {
             validate_id(id)?;
             material.validate()?;
+        }
+        self.display.validate()?;
+        for (id, source) in &self.sources {
+            validate_id(id)?;
+            source.validate()?;
         }
         let mut ids = HashSet::new();
         for object in &self.objects {
@@ -72,6 +82,20 @@ impl ComponentScene {
                             }
                         }
                     }
+                    Component::Script { binding } => {
+                        binding.validate()?;
+                        if binding.enabled != component.enabled
+                            || binding
+                                .scene_owner_id()
+                                .is_some_and(|owner| owner != object.id)
+                            || !self.sources.contains_key(&binding.source_id)
+                        {
+                            return Err(SceneError::Invalid(format!(
+                                "invalid owner, enabled state or source on script {}",
+                                component.id
+                            )));
+                        }
+                    }
                     Component::Collider {
                         role,
                         offset,
@@ -87,6 +111,146 @@ impl ComponentScene {
             }
         }
         Ok(hierarchy)
+    }
+
+    /// Convert a supported legacy session in memory. The caller retains the
+    /// original document and decides where to publish the converted scene.
+    pub fn from_legacy(session: &Session) -> Result<Self, SceneError> {
+        let scene = session.scene();
+        let authoring = session.authoring();
+        if !scene.lighting.is_legacy()
+            || scene.player_view.is_some()
+            || !scene.animations.is_empty()
+            || !authoring.actions.is_empty()
+            || !authoring.hud.is_default()
+        {
+            return Err(SceneError::Invalid(
+                "v23 migration does not yet support authored lighting, cameras, animation, input actions or HUD".into(),
+            ));
+        }
+        let parent = |id: &str| scene.hierarchy.parents.get(id).cloned();
+        let mut objects = Vec::with_capacity(scene.objects.len() + scene.hierarchy.groups.len());
+        let mut ids: HashSet<String> = authoring.bindings.keys().cloned().collect();
+        let mut component_id = |owner: &str, role: &str| {
+            // Legacy IDs may already occupy the whole ID budget.
+            let stem = &owner[..owner.len().min(100)];
+            let base = format!("{stem}_{role}");
+            if ids.insert(base.clone()) {
+                return base;
+            }
+            for suffix in 1.. {
+                let id = format!("{base}_{suffix}");
+                if ids.insert(id.clone()) {
+                    return id;
+                }
+            }
+            unreachable!()
+        };
+        for object in &scene.objects {
+            let geometry = match (&object.mesh, object.primitive) {
+                (Some(asset), _) => Geometry::Imported {
+                    asset: asset.clone(),
+                },
+                (None, Some(shape)) => Geometry::Primitive { shape },
+                (None, None) => Geometry::Cube,
+            };
+            let mut components = vec![ComponentInstance {
+                id: component_id(&object.id, "mesh"),
+                enabled: true,
+                kind: Component::MeshRenderer {
+                    geometry,
+                    tint: object.color,
+                    material: object.material.clone(),
+                },
+            }];
+            if let Some(collider) = object.collider {
+                components.push(ComponentInstance {
+                    id: component_id(&object.id, "collider"),
+                    enabled: collider.enabled,
+                    kind: Component::Collider {
+                        role: collider.role,
+                        offset: collider.offset,
+                        shape: collider.shape,
+                    },
+                });
+            }
+            objects.push(ObjectNode {
+                id: object.id.clone(),
+                name: object.name.clone().unwrap_or_else(|| object.id.clone()),
+                enabled: true,
+                parent: parent(&object.id),
+                transform: object.transform.clone(),
+                components,
+            });
+        }
+        for (id, group) in &scene.hierarchy.groups {
+            objects.push(ObjectNode {
+                id: id.clone(),
+                name: group.name.clone().unwrap_or_else(|| id.clone()),
+                enabled: true,
+                parent: parent(id),
+                transform: group.transform.clone(),
+                components: Vec::new(),
+            });
+        }
+        let application = if authoring
+            .bindings
+            .values()
+            .any(|binding| binding.target == BindingTarget::Application)
+        {
+            let id = (0..)
+                .map(|suffix| {
+                    if suffix == 0 {
+                        "application".into()
+                    } else {
+                        format!("application_{suffix}")
+                    }
+                })
+                .find(|id| !objects.iter().any(|object| &object.id == id))
+                .expect("finite object list");
+            let index = objects.len();
+            objects.push(ObjectNode {
+                id,
+                name: "Application".into(),
+                enabled: true,
+                parent: None,
+                transform: Transform::default(),
+                components: Vec::new(),
+            });
+            Some(index)
+        } else {
+            None
+        };
+        let indices: HashMap<_, _> = objects
+            .iter()
+            .enumerate()
+            .map(|(index, object)| (object.id.clone(), index))
+            .collect();
+        for (id, binding) in &authoring.bindings {
+            let index = match binding.scene_owner_id() {
+                Some(owner) => *indices.get(owner).ok_or_else(|| {
+                    SceneError::Invalid(format!("script {id} has missing owner {owner}"))
+                })?,
+                None => application
+                    .ok_or_else(|| SceneError::Invalid("missing Application object".into()))?,
+            };
+            objects[index].components.push(ComponentInstance {
+                id: id.clone(),
+                enabled: binding.enabled,
+                kind: Component::Script {
+                    binding: binding.clone(),
+                },
+            });
+        }
+        let converted = Self {
+            id: scene.id.clone(),
+            objects,
+            materials: scene.materials.clone(),
+            display: scene.display,
+            sources: authoring.sources.clone(),
+        };
+        converted.validate()?;
+        Ok(converted)
     }
 
     pub fn read_json(reader: impl Read) -> Result<Self, SceneError> {
@@ -135,6 +299,9 @@ pub struct ComponentInstance {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Component {
+    Script {
+        binding: BehaviorBinding,
+    },
     MeshRenderer {
         geometry: Geometry,
         tint: [f32; 4],
@@ -245,6 +412,47 @@ mod tests {
     }
 
     #[test]
+    fn tracked_examples_migrate_without_losing_objects_or_scripts() {
+        for bytes in [
+            include_bytes!("../../../examples/arrangement.scene.json").as_slice(),
+            include_bytes!("../../../examples/content/scene.json").as_slice(),
+            include_bytes!("../../../examples/motion-lab/resources/generic.scene.json").as_slice(),
+        ] {
+            let legacy = Session::from_snapshot_bytes(bytes).unwrap();
+            let migrated = ComponentScene::from_legacy(&legacy).unwrap();
+            assert_eq!(migrated.sources, legacy.authoring().sources);
+            assert_eq!(migrated.objects.len(), legacy.scene().objects.len());
+            for (old, new) in legacy.scene().objects.iter().zip(&migrated.objects) {
+                assert_eq!(old.id, new.id);
+                assert_eq!(old.transform, new.transform);
+                assert!(
+                    matches!(&new.components[0].kind, Component::MeshRenderer { tint, .. } if *tint == old.color)
+                );
+            }
+            for (id, old) in &legacy.authoring().bindings {
+                assert!(migrated.objects.iter().flat_map(|object| &object.components).any(|component|
+                    component.id == *id && matches!(&component.kind, Component::Script { binding } if binding == old)));
+            }
+            let mut json = Vec::new();
+            migrated.write_json(&mut json).unwrap();
+            assert_eq!(
+                ComponentScene::read_json(json.as_slice()).unwrap(),
+                migrated
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_legacy_features_leave_the_original_session_intact() {
+        let mut scene = crate::Scene::empty("lit");
+        scene.lighting = crate::Lighting::authored_default("sun");
+        let legacy = Session::new(scene).unwrap();
+        let original = legacy.snapshot_bytes().unwrap();
+        assert!(ComponentScene::from_legacy(&legacy).is_err());
+        assert_eq!(legacy.snapshot_bytes().unwrap(), original);
+    }
+
+    #[test]
     fn version_23_round_trip_and_rejects_invalid_documents() {
         let mut cube = object("cube".into(), Some("root".into()), true);
         cube.components.push(ComponentInstance {
@@ -269,6 +477,8 @@ mod tests {
             id: "demo".into(),
             objects: vec![cube, object("root".into(), None, true)],
             materials: BTreeMap::new(),
+            display: DisplayProfile::default(),
+            sources: BTreeMap::new(),
         };
         let mut bytes = Vec::new();
         scene.write_json(&mut bytes).unwrap();
@@ -322,6 +532,8 @@ mod tests {
             id: "deep".into(),
             objects,
             materials: BTreeMap::new(),
+            display: DisplayProfile::default(),
+            sources: BTreeMap::new(),
         };
         let mut bytes = Vec::new();
         scene.write_json(&mut bytes).unwrap();

@@ -44,11 +44,13 @@ specifies the proposed model and migration. C-02 has an indexed object
 hierarchy that rejects cycles, missing parents and duplicate IDs, and
 resolves inherited enabled state without recursion. A 5,000-object chain
 passed its focused check. The affected gate passed (452 tests, 17 ignored).
-The v23 reader/writer now handles hierarchy, Mesh Renderer, Collider and
-materials in the scene crate. A 5,000-object document over 1 MiB
-round-trips, and the full workspace gate passed (502 Rust tests, 21
-ignored, and 36 Python tests). Additional components, migration, session
-transactions and editor/runtime loading are pending.
+The v23 reader/writer handles hierarchy, Mesh Renderer, Collider, Script,
+materials, display settings and script sources. The in-memory converter
+round-trips all three tracked examples, preserving object and script IDs.
+It rejects authored lighting, cameras, animation, input actions and HUD
+until their migration is implemented. The editor still opens legacy
+scenes through its existing loader. Publishing migration, session
+transactions and editor/runtime integration remain open.
 
 ## What a creator can do today
 

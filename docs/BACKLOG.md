@@ -627,7 +627,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | Package | Outcome | Brief |
 | --- | --- | --- |
 | C-01 Object and component model | A written design for [A1 and A2](PARITY-PLAN.md#4-architecture-decisions): types, file format, Undo outside files, upgrade of the repository's example scenes, and the order of the port. | design drafted 2026-11-19 · [C-01 brief](plans/C-01-OBJECT-COMPONENT-MODEL.md) |
-| C-02 Scene crate on the new model | `rot-scene` implements it. No object, depth or file-size caps. | in progress · indexed hierarchy and Mesh Renderer/Collider v23 I/O landed; remaining components, migration and session integration remain |
+| C-02 Scene crate on the new model | `rot-scene` implements it. No object, depth or file-size caps. | in progress · v23 hierarchy, mesh, collider and script support; three examples convert in memory. Remaining payloads, file upgrade and session integration are open |
 | C-03 Renderer, runtime and scripts on the new model | Everything that reads a scene uses objects and components. | after C-01 |
 | C-04 Assets as files | `Assets/` folder, sidecar ids and import settings, rebuildable cache, file watcher, automatic import and reimport, folder tree in the browser. | brief needed |
 | C-05 Hierarchy and Inspector | Rebuilt on components: Add Component, drag to reparent, multi-edit, enable toggles, visibility and lock, live values during Play. | brief needed |
