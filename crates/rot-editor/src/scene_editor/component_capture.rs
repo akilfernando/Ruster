@@ -20,15 +20,29 @@ fn fail(code: &str) -> (String, String) {
 #[derive(Clone, Copy, PartialEq)]
 struct View {
     rect: egui::Rect,
+    viewport_rect: egui::Rect,
     screen: egui::Rect,
     dpi: f32,
     matrices: rot_render::CameraMatrices,
     camera: Option<rot_render::CameraState>,
     scene_revision: u64,
+    asset_revision: Option<u64>,
     epoch: u64,
     runtime_frame: Option<(RunKey, u64, u64)>,
     runtime_stale: bool,
     player_view: bool,
+}
+
+impl View {
+    fn grounding_refusal(self) -> Option<&'static str> {
+        if self.player_view {
+            Some("player_view_grounding_unsupported")
+        } else if self.runtime_frame.is_some() {
+            Some("runtime_grounding_unsupported")
+        } else {
+            None
+        }
+    }
 }
 
 fn runtime_identity(frame: Option<&Frame>) -> Option<(RunKey, u64, u64)> {
@@ -95,6 +109,7 @@ impl ComponentWorkspace {
         PaintedViewport {
             view: View {
                 rect: viewport.rect.intersect(ui.clip_rect()),
+                viewport_rect: viewport.rect,
                 screen: ui.ctx().viewport_rect(),
                 dpi: ui.ctx().pixels_per_point(),
                 matrices: (viewport.view, viewport.projection),
@@ -103,6 +118,7 @@ impl ComponentWorkspace {
                     .camera
                     .filter(|_| !self.navigation.player_view),
                 scene_revision: self.session.revision(),
+                asset_revision: self.assets.as_ref().map(rot_assets::AssetStore::revision),
                 epoch: self.capture.epoch,
                 runtime_frame: runtime_identity(frame),
                 runtime_stale: self.runtime.stale,
@@ -208,6 +224,7 @@ impl ComponentWorkspace {
         }
         let view = self.capture_view()?;
         if view.scene_revision != self.session.revision()
+            || view.asset_revision != self.assets.as_ref().map(rot_assets::AssetStore::revision)
             || view.epoch != self.capture.epoch
             || view.runtime_frame != runtime_identity(self.runtime.displayed_frame())
             || view.runtime_stale != self.runtime.stale
@@ -305,10 +322,23 @@ impl ComponentWorkspace {
                 });
                 Ok(json!({"capture_id":id.to_string(),"status":"pending"}))
             }
-            _ => {
+            "viewport_capture_inspect" | "viewport_capture_pick" => {
+                let picking = op == "viewport_capture_pick";
                 let id = number(&args["capture_id"])
-                    .filter(|_| map.len() == 1)
+                    .filter(|_| map.len() == if picking { 3 } else { 1 })
                     .ok_or_else(|| fail("invalid_arguments"))?;
+                let coordinates = if picking {
+                    let coordinate = |key: &str| {
+                        args[key]
+                            .as_f64()
+                            .filter(|value| (0.0..1.0).contains(value))
+                            .ok_or_else(|| fail("invalid_coordinates"))
+                    };
+                    let (u, v) = (coordinate("u")?, coordinate("v")?);
+                    Some((u, v))
+                } else {
+                    None
+                };
                 let request = self
                     .capture
                     .request
@@ -324,26 +354,55 @@ impl ComponentWorkspace {
                     self.clear_ai_capture();
                     return Err(fail("capture_expired"));
                 }
-                if !matches!(request.state, State::Finished(Err(_))) {
+                if picking || !matches!(request.state, State::Finished(Err(_))) {
                     self.check_capture(request).map_err(fail)?;
                 }
                 match &request.state {
                     State::Finished(Ok(image)) => {
-                        let mut image = image.clone();
                         let view = self.capture.view.expect("checked capture view");
+                        let mut image = image.clone();
                         image
                             .as_object_mut()
                             .expect("thumbnail object")
                             .extend(self.capture_metadata(view));
                         image["capture_id"] = json!(id.to_string());
+                        if let Some((u, v)) = coordinates {
+                            if let Some(reason) = view.grounding_refusal() {
+                                return Err(fail(reason));
+                            }
+                            let position = capture_commands::sample_position(&image, u, v)?;
+                            if !view.viewport_rect.contains(position) {
+                                return Err(fail("invalid_geometry"));
+                            }
+                            let preview = self
+                                .preview
+                                .as_ref()
+                                .map_err(|_| fail("invalid_geometry"))?;
+                            let object_id = preview.pick_at(
+                                &self.meshes,
+                                view.matrices,
+                                view.viewport_rect,
+                                position,
+                            );
+                            image
+                                .as_object_mut()
+                                .expect("thumbnail object")
+                                .remove("image_base64");
+                            image["status"] =
+                                json!(if object_id.is_some() { "hit" } else { "miss" });
+                            image["object_id"] = json!(object_id);
+                            image["domain"] = json!("scene_geometry");
+                        }
                         Ok(image)
                     }
+                    _ if picking => Err(fail("capture_unavailable")),
                     State::Finished(Err(reason)) => {
                         Ok(json!({"capture_id":id.to_string(),"status":"failed","reason":reason}))
                     }
                     _ => Ok(json!({"capture_id":id.to_string(),"status":"pending"})),
                 }
             }
+            _ => Err(fail("unsupported_operation")),
         }
     }
 
@@ -354,6 +413,7 @@ impl ComponentWorkspace {
                 "distance":state.distance,"orthographic":state.orthographic
             })
         });
+        let reason = view.grounding_refusal();
         let Value::Object(fields) = json!({
             "view_revision":self.capture.view_revision.to_string(),
             "camera":camera,
@@ -366,8 +426,12 @@ impl ComponentWorkspace {
             "runtime_authored_revision":view.runtime_frame.map(|(key, _, _)| key.authored_revision.to_string()),
             "runtime_tick":view.runtime_frame.map(|(_, tick, _)| tick.to_string()),
             "runtime_stale":view.runtime_stale,
+            "asset_revision":view.asset_revision.map(|revision| revision.to_string()),
             "view_mode":if view.player_view {"player"} else {"scene"},
-            "grounding":{"status":"unsupported","pixel_provenance_guaranteed":false}
+            "grounding":{"status":if reason.is_some() {"unsupported"} else {"available"},
+                "reason":reason, "domain":"scene_geometry",
+                "excluded":["gizmos","HUD","outlines","light_icons","grid"],
+                "pixel_provenance_guaranteed":false}
         }) else {
             unreachable!()
         };
@@ -395,11 +459,16 @@ mod tests {
         let rect = egui::Rect::from_min_size(egui::pos2(20., 30.), egui::vec2(320., 200.));
         workspace.capture.view = Some(View {
             rect,
+            viewport_rect: rect,
             screen: rect,
             dpi: 1.,
             matrices: Default::default(),
             camera: None,
             scene_revision: workspace.session.revision(),
+            asset_revision: workspace
+                .assets
+                .as_ref()
+                .map(rot_assets::AssetStore::revision),
             epoch: workspace.capture.epoch,
             runtime_frame: None,
             runtime_stale: false,

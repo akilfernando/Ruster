@@ -54,7 +54,9 @@ connected project.
   the Edit menu as "Undo AI: Move Cube".
 - `viewport_screenshot` returns a PNG of the viewport, at most 512 pixels, in
   one call. `viewport_capture_start` and `viewport_capture_inspect` do the
-  same in two steps.
+  same in two steps. Use `viewport_capture_pick` with the capture ID and
+  normalized coordinates to find the nearest pickable geometry in the
+  authored scene. The query uses the captured viewport and its picking locks.
 - `scene_undo` and `scene_redo` use the shared Undo history.
 - Changes stay unsaved until `scene_save` (read its token with
   `scene_persistence_inspect`). Asset imports are saved to the project at

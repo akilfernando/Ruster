@@ -627,15 +627,40 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-01 Object and component model | A written design for [A1 and A2](PARITY-PLAN.md#4-architecture-decisions): types, file format, Undo outside files, upgrade of the repository's example scenes, and the order of the port. | design drafted 2026-11-19 · [C-01 brief](plans/C-01-OBJECT-COMPONENT-MODEL.md) |
 | C-02 Scene crate on the new model | `rot-scene` implements it. No object, depth or file-size caps. | in progress · the hub, File → Open and native `--scene` open v23 for basic Inspector edits, object creation, parenting, deletion, Undo/Redo and Save. Scene switching protects v23 drafts. Automatic upgrade and tracked example conversion are open |
 | C-03 Renderer, runtime and scripts on the new model | Everything that reads a scene uses objects and components. | in progress · editor Play, standalone viewer, headless behavior and packaged Motion Lab support v23 through previews and runtime projections. Native editor and viewer use world matrices for draw, fit and hit testing. General component execution remains open; v23 can build a Linux player folder |
-| C-04 Assets as files | `Assets/` folder, sidecar ids and import settings, rebuildable cache, file watcher, automatic import and reimport, folder tree in the browser. | brief needed |
+| C-04 Assets as files | `Assets/` folder, sidecar ids and import settings, rebuildable cache, file watcher, automatic import and reimport, folder tree in the browser. | ready · [C-04 implementation brief](#c-04-implementation-brief) |
 | C-05 Hierarchy and Inspector | Rebuilt on components: Add Component, drag to reparent, multi-edit, enable toggles, visibility and lock, live values during Play. | in progress · component authoring, grouped hierarchy edits, mixed fields, local viewport controls, and live Transform and script state. Native edit and save worked at 5,000 objects. The in-process panel timings passed and MCP component edits shared Undo. Desktop frame-rate checks remain open |
-| C-06 General MCP tools | A small set of object, component, asset, play and screenshot tools that call the command layer. Tool list under 15 KB. | in progress · v23 discovery and registered native connections, object and group creation, object and component batches, shared history, Play controls, viewport screenshots, asset inspection and OBJ mesh assignment, and an 11.67 KB MCP tool list |
+| C-06 General MCP tools | A small set of object, component, asset, play and screenshot tools that call the command layer. Tool list under 15 KB. | in progress · v23 discovery and registered native connections, object and group creation, object and component batches, shared history, Play controls, viewport screenshots and authored geometry picking, asset inspection and OBJ mesh assignment, and an 11.67 KB MCP tool list |
 | C-07 Prefabs | Prefab assets, instances, per-property overrides, apply and revert. | brief needed |
 | C-08 General glTF import | Multi-primitive meshes, full PBR material mapping, cameras and lights; warnings instead of refusals. | ready after C-04 |
 | C-09 Build and Run | The editor ships a player binary; Build writes a runnable folder; no Python. | in progress · v23 editor builds and launches a Linux player folder. Legacy Build still uses the runtime kit |
 | C-10 Scripts as files | Lua files in `Assets/`, one growing API (lifecycle, find, spawn, destroy, components, input, time), reload on save, open in the creator's code editor. | brief needed |
 | C-11 Scenes and projects | Several scenes per project, a project settings file, a startup scene. | ready after C-02 |
 | C-12 Benchmark scenes | 5,000- and 50,000-object scenes and a one-command frame-time report. | done · 2026-11-19 · deterministic v23 scene export and [release timings](../crates/rot-render/README.md#large-scene-benchmark) |
+
+### C-04 implementation brief
+
+- **File-first OBJ.** Discover OBJ files under the project's `Assets/` folder.
+  Give each source a stable ID and import settings in an adjacent sidecar.
+  Reuse OBJ preparation and accepted asset publication. Done when a dropped
+  OBJ appears without a typed ID, survives assignment and reopen, rebuilds
+  with the same ID from source and sidecar, and displays in a built player.
+- **Existing projects and formats.** Bring PNG, WAV and supported GLB onto
+  the same path. Preserve accepted asset IDs, import settings, GLB subresource
+  IDs and clips. Preserve multiple catalog interpretations of one source.
+  Done when migration can resume safely and moving a source with its sidecar
+  keeps references. Report duplicate or invalid sidecars.
+- **Live reimport and browser.** Use a project-scoped worker for initial scan
+  and coalesced file changes. Show folders, search, import settings, and
+  missing or invalid files. Keep accepted content when reimport fails and
+  discard stale work on scene switch. Done when an external edit becomes
+  visible within one second on a measured fixture, repair recovers, and a
+  project with more than 64 assets remains usable.
+- **MCP and Build.** Use the same asset publication for native and approved
+  client writes. Check project, document, asset revision and the existing
+  lease at publication. Keep mesh assignment in shared scene Undo. Build
+  from the accepted dependency closure. Done when an approved client can
+  import and assign, stale or revoked writes leave the project intact, and
+  the built player loads independently of the source project and cache.
 
 ### C-05 implementation brief
 
@@ -665,6 +690,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 - Group object, component, asset, Play and capture operations around existing
   transactions. Retain callable legacy names. Done when the full serialized
   tool list is under 15 KB and the legacy and v23 client checks both pass.
+  v23 asset writes depend on the live asset owner in C-04.
 
 ## Later
 

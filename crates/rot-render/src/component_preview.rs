@@ -1,6 +1,6 @@
 //! Disposable render input for native viewports while the shared viewport
 //! consumes legacy draw objects. This projection is never written to disk.
-use super::{DrawScene, NavigationOptions, ViewportInteraction, ViewportSurface};
+use super::{CameraMatrices, DrawScene, NavigationOptions, ViewportInteraction, ViewportSurface};
 use eframe::egui;
 use glam::{EulerRot, Mat3, Mat4, Quat, Vec3};
 use rot_scene::component_scene::{self, Component, ComponentScene, Geometry};
@@ -22,6 +22,36 @@ impl ComponentPreview {
         &self.scene
     }
 
+    fn draw_scene(&self) -> DrawScene<'_> {
+        DrawScene {
+            scene: &self.scene,
+            matrices: Some(&self.matrices),
+            unpickable: (!self.unpickable.is_empty()).then_some(&self.unpickable),
+        }
+    }
+
+    /// Query the same draw objects, world matrices and picking locks as the
+    /// editor, using the projection from the captured viewport frame.
+    pub fn pick_at(
+        &self,
+        meshes: &BTreeMap<String, Arc<rot_assets::Mesh>>,
+        matrices: CameraMatrices,
+        rect: egui::Rect,
+        position: egui::Pos2,
+    ) -> Option<String> {
+        if !rect.is_finite() || !rect.is_positive() || !rect.contains(position) {
+            return None;
+        }
+        let (view, projection) = matrices;
+        super::pick(
+            self.draw_scene(),
+            meshes,
+            Mat4::from_cols_array_2d(&projection) * Mat4::from_cols_array_2d(&view),
+            (position.x - rect.left()) / rect.width() * 2. - 1.,
+            1. - (position.y - rect.top()) / rect.height() * 2.,
+        )
+    }
+
     pub fn render(
         &self,
         ui: &mut egui::Ui,
@@ -33,11 +63,7 @@ impl ComponentPreview {
     ) -> ViewportInteraction {
         super::render_draw_scene(
             ui,
-            DrawScene {
-                scene: &self.scene,
-                matrices: Some(&self.matrices),
-                unpickable: (!self.unpickable.is_empty()).then_some(&self.unpickable),
-            },
+            self.draw_scene(),
             selected,
             meshes,
             textures,
@@ -236,6 +262,12 @@ mod tests {
             Some("left")
         );
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0));
+        let sample = egui::pos2((ndc.x + 1.) * 50., (1. - ndc.y) * 50.);
+        let matrices = (view.to_cols_array_2d(), projection.to_cols_array_2d());
+        assert_eq!(
+            preview.pick_at(&meshes, matrices, rect, sample).as_deref(),
+            Some("left")
+        );
         let select = egui::Rect::from_center_size(rect.center(), egui::vec2(5.0, 5.0));
         assert_eq!(
             super::super::objects_in_rect(draw, &meshes, vp, rect, select),
@@ -249,6 +281,11 @@ mod tests {
             unpickable: Some(&locked),
             ..draw
         };
+        let locked_preview = project_editor(&components, &BTreeSet::new(), locked.clone()).unwrap();
+        assert_eq!(
+            locked_preview.pick_at(&meshes, matrices, rect, sample),
+            None
+        );
         assert_eq!(draw.objects().count(), 1);
         assert_eq!(super::super::pick(draw, &meshes, vp, ndc.x, ndc.y), None);
         assert!(super::super::objects_in_rect(draw, &meshes, vp, rect, select).is_empty());

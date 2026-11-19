@@ -668,7 +668,7 @@ fn grounding_metadata(pin: &Pin) -> Value {
     })
 }
 
-fn sample_position(value: &Value, u: f64, v: f64) -> Result<egui::Pos2> {
+pub(super) fn sample_position(value: &Value, u: f64, v: f64) -> Result<egui::Pos2> {
     if [u, v]
         .iter()
         .any(|n| !n.is_finite() || !(0.0..1.0).contains(n))

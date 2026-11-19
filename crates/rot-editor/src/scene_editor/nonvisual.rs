@@ -395,7 +395,7 @@ impl Host {
                 let token = self.editor.scene_guard_token(nonce);
                 if let Some(component) = &mut self.editor.component {
                     lease.run_immediate(|| {
-                        if matches!(op, "viewport_inspect" | "viewport_capture_start" | "viewport_capture_inspect") {
+                        if matches!(op, "viewport_inspect" | "viewport_capture_start" | "viewport_capture_inspect" | "viewport_capture_pick") {
                             component.ai_capture_command(&authority, &token, op, &args)
                         } else {
                             component.ai_command(&token, op, &args)
