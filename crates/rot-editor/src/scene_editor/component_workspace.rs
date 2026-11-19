@@ -32,13 +32,6 @@ mod mcp;
 
 const RUNTIME_GENERATION: u64 = 1;
 
-pub(super) fn check_launch() -> Result<(), String> {
-    if std::env::var_os("ROT_PROJECT_STARTUP").is_some() {
-        return Err(Text::ComponentConnectionUnavailable.plain().into());
-    }
-    Ok(())
-}
-
 struct HierarchyDrag {
     revision: u64,
     object_id: String,

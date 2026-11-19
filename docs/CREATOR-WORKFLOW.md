@@ -59,7 +59,10 @@ groups to the open v23 scene. It can inspect, rename, reparent, move or
 delete objects. Batched moves or deletes take one Undo each.
 The AI can inspect components by ID and add, replace, enable, disable or
 remove them in one batch. Undo restores the entire batch.
-Use **Window → AI Connection…** to pause edits or disconnect.
+Use **Window → AI Connection…** to pause edits or disconnect. When using a
+private project registry, an unenrolled client needs **Review Request…**
+and **Allow** in that panel. The project registration is tied to the saved
+scene file and scene ID.
 Editor and AI Undo and Redo share the same history. Save from the editor.
 An approved client can also control Play and inspect its last committed
 frame or script state in supported scenes. It uses the editor's Play session.

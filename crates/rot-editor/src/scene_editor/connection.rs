@@ -86,15 +86,15 @@ impl Host {
         let startup: crate::project_startup::Startup =
             serde_json::from_str(&std::env::var("ROT_PROJECT_STARTUP").map_err(|e| e.to_string())?)
                 .map_err(|e| e.to_string())?;
-        if self.editor.session.path() != Some(startup.scene_path.as_path())
-            || std::env::var("ROT_PROJECT_SCENE_ID").ok().as_deref()
-                != Some(self.editor.session.scene().id.as_str())
-        {
-            return Err(
-                "Registered project changed; no enrolled authority for the replacement document"
-                    .into(),
-            );
-        }
+        super::validate_registered_scene(
+            &startup,
+            self.editor.ai_scene_path(),
+            self.editor.ai_scene_id(),
+        )
+        .map_err(|_| {
+            "Registered project changed; no enrolled authority for the replacement document"
+                .to_owned()
+        })?;
         crate::enrollment::Grant::load(
             std::path::Path::new(&path),
             &std::env::var("ROT_PROJECT_ID").map_err(|e| e.to_string())?,
@@ -167,6 +167,19 @@ impl Host {
         {
             return Err("Wait for the old connection to close.".into());
         }
+        let registered = std::env::var_os("ROT_PROJECT_STARTUP")
+            .map(|raw| {
+                let startup: crate::project_startup::Startup =
+                    serde_json::from_str(&raw.to_string_lossy()).map_err(std::io::Error::other)?;
+                super::validate_registered_scene(
+                    &startup,
+                    self.editor.ai_scene_path(),
+                    self.editor.ai_scene_id(),
+                )?;
+                Ok::<_, std::io::Error>(startup)
+            })
+            .transpose()
+            .map_err(|error| error.to_string())?;
         let grant = self.enrolled_grant()?;
         let (incarnation, generation) = (
             self.editor.connection_incarnation.clone(),
@@ -203,19 +216,11 @@ impl Host {
             None
         };
         self.bridge = Some(bridge);
-        if let Some(raw) = std::env::var_os("ROT_PROJECT_STARTUP") {
+        if let Some(startup) = registered {
             let publication = (|| -> std::io::Result<()> {
-                let startup: crate::project_startup::Startup =
-                    serde_json::from_str(&raw.to_string_lossy())?;
-                if self.editor.session.path() != Some(startup.scene_path.as_path())
-                    || std::env::var("ROT_PROJECT_SCENE_ID").ok().as_deref()
-                        != Some(self.editor.session.scene().id.as_str())
-                {
-                    return Err(std::io::Error::other("registered project identity changed"));
-                }
                 startup.publish(
                     &std::env::var("ROT_PROJECT_ID").map_err(std::io::Error::other)?,
-                    self.editor.session.scene().id.as_str(),
+                    self.editor.ai_scene_id(),
                     path.clone(),
                 )
             })();

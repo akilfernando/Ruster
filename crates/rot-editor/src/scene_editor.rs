@@ -2681,6 +2681,13 @@ impl SceneEditor {
             .map(|component| component.ai_document().0)
             .or_else(|| self.session.path())
     }
+    #[cfg(unix)]
+    fn ai_scene_id(&self) -> &str {
+        self.component.as_deref().map_or_else(
+            || self.session.scene().id.as_str(),
+            |document| document.ai_document().1,
+        )
+    }
     fn remember_camera(&mut self) {
         if let (Some(path), Some(camera)) = (self.session.path(), self.navigation.camera) {
             self.workspace.remember_camera(path, camera);
@@ -4293,10 +4300,6 @@ impl SceneEditor {
         match document {
             OpenedScene::Legacy(session) => self.open_saved_session(*session),
             OpenedScene::Components(path, session) => {
-                if let Err(error) = component_workspace::check_launch() {
-                    self.error = error;
-                    return;
-                }
                 let render = self.render.clone();
                 if self.shader_revision > 0 {
                     if let Some(render) = &render {
@@ -5643,16 +5646,9 @@ pub fn run(path: PathBuf) -> Result<(), String> {
     match OpenedScene::open(&path).map_err(|error| error.to_string())? {
         OpenedScene::Legacy(session) => run_session(*session, false, None),
         OpenedScene::Components(path, session) => {
-            component_workspace::check_launch()?;
             let empty = Session::new(Scene::authored_empty("untitled"))
                 .map_err(|error| error.to_string())?;
-            run_session(
-                empty,
-                false,
-                Some(Box::new(component_workspace::ComponentWorkspace::new(
-                    path, *session,
-                ))),
-            )
+            run_session(empty, false, Some((path, session)))
         }
     }
 }
@@ -5694,10 +5690,26 @@ fn scene_native_options() -> eframe::NativeOptions {
     }
 }
 
+#[cfg(unix)]
+fn validate_registered_scene(
+    startup: &crate::project_startup::Startup,
+    path: Option<&std::path::Path>,
+    scene_id: &str,
+) -> std::io::Result<()> {
+    if path != Some(startup.scene_path.as_path())
+        || std::env::var("ROT_PROJECT_SCENE_ID").ok().as_deref() != Some(scene_id)
+    {
+        return Err(std::io::Error::other(
+            "Registered saved project identity changed; no connection opened",
+        ));
+    }
+    Ok(())
+}
+
 fn run_session(
     session: Session,
     startup_projects: bool,
-    component: Option<Box<component_workspace::ComponentWorkspace>>,
+    component: Option<(PathBuf, Box<rot_scene::component_scene::ComponentSession>)>,
 ) -> Result<(), String> {
     #[cfg(unix)]
     let bootstrap = if std::env::var_os("ROT_PROJECT_STARTUP").is_some() {
@@ -5713,12 +5725,11 @@ fn run_session(
     let _registered_owner = if let Some(raw) = std::env::var_os("ROT_PROJECT_STARTUP") {
         let startup: crate::project_startup::Startup =
             serde_json::from_str(&raw.to_string_lossy()).map_err(|e| e.to_string())?;
-        if session.path() != Some(startup.scene_path.as_path())
-            || std::env::var("ROT_PROJECT_SCENE_ID").ok().as_deref()
-                != Some(session.scene().id.as_str())
-        {
-            return Err("Registered saved project identity changed; no connection opened".into());
-        }
+        let (path, scene_id) = component.as_ref().map_or_else(
+            || (session.path(), session.scene().id.as_str()),
+            |(path, session)| (Some(path.as_path()), session.scene().id.as_str()),
+        );
+        validate_registered_scene(&startup, path, scene_id).map_err(|error| error.to_string())?;
         Some(startup.lock("owner.lock").map_err(|e| e.to_string())?)
     } else {
         None
@@ -5769,7 +5780,9 @@ fn run_session(
                     editor.render = cc.wgpu_render_state.clone();
                     // Paint the saved theme from the first frame.
                     editor.apply_theme(&cc.egui_ctx);
-                    if let Some(mut component) = component {
+                    if let Some((path, session)) = component {
+                        let mut component =
+                            Box::new(component_workspace::ComponentWorkspace::new(path, *session));
                         cc.egui_ctx.set_zoom_factor(editor.workspace.prefs.scale);
                         component.set_metrics(editor.navigation.metrics.clone());
                         component.adopt_workspace(std::mem::replace(
@@ -5791,6 +5804,9 @@ fn run_session(
             // never approves an adapter or bypasses the explicit owner API.
             #[cfg(unix)]
             if mcp_enabled {
+                if let Some(bootstrap) = &bootstrap {
+                    bootstrap.validate()?;
+                }
                 host.connect_adapter(&cc.egui_ctx)
                     .map_err(std::io::Error::other)?;
             }

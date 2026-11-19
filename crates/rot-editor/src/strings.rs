@@ -97,13 +97,11 @@ pub enum Text {
     ComponentOpen,
     ComponentSaveOpen,
     ComponentDiscardOpen,
-
-    ComponentConnectionUnavailable,
 }
 
 impl Text {
     #[cfg(test)]
-    pub const ALL: [Self; 87] = [
+    pub const ALL: [Self; 86] = [
         Self::Welcome,
         Self::NoRecentProjects,
         Self::EmptyHierarchy,
@@ -190,7 +188,6 @@ impl Text {
         Self::ComponentOpen,
         Self::ComponentSaveOpen,
         Self::ComponentDiscardOpen,
-        Self::ComponentConnectionUnavailable,
     ];
 
     pub fn plain(self) -> &'static str {
@@ -284,10 +281,6 @@ impl Text {
             Self::ComponentOpen => "Open",
             Self::ComponentSaveOpen => "Save and Open",
             Self::ComponentDiscardOpen => "Discard and Open",
-
-            Self::ComponentConnectionUnavailable => {
-                "AI connection is unavailable for this scene format."
-            }
         }
     }
 
