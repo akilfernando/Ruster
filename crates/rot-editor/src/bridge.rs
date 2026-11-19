@@ -93,7 +93,7 @@ impl Authority {
             s.live && s.endpoint_valid() && s.grant.as_ref().is_none_or(|g| g.live())
         })
     }
-    fn authorized(&self) -> bool {
+    pub(crate) fn authorized(&self) -> bool {
         self.0.lock().is_ok_and(|s| s.admitted())
     }
     /// Identity is the authenticated native connection, never caller JSON.

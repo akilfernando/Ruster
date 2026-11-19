@@ -5520,6 +5520,8 @@ impl eframe::App for Host {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Some(component) = &mut self.editor.component {
             component.poll_runtime(ctx);
+            #[cfg(unix)]
+            component.retire_ai_capture();
             if !self.input.human_pending {
                 self.service_bridge(ctx);
             }

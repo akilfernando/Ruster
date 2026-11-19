@@ -62,6 +62,8 @@ Use **Window → AI Connection…** to pause edits or disconnect.
 Editor and AI Undo and Redo share the same history. Save from the editor.
 An approved client can also control Play and inspect its last committed
 frame or script state in supported scenes. It uses the editor's Play session.
+Ask the AI for a viewport screenshot in Edit mode or after pausing Play.
+Close open menus and dialogs first so the scene view is clear.
 
 On Linux, save the v23 scene, then use **File → Build…**. Choose a new
 folder and select **Build** or **Build and Run**. The folder contains an
@@ -69,7 +71,6 @@ folder and select **Build** or **Build and Run**. The folder contains an
 Run `application --headless --ticks 16` to check it without opening a window.
 The editor finds the `rot-motion-lab` player alongside `rot-editor`. Local
 installs include both. When building from source, build both Cargo packages.
-AI editing still uses the legacy scene during the cutover.
 
 ## Create and export in the editor
 

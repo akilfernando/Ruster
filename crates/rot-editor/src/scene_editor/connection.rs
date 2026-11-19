@@ -30,6 +30,10 @@ impl SceneEditor {
     pub(super) fn revoke_connection(&mut self) {
         self.captures.invalidate();
         #[cfg(unix)]
+        if let Some(component) = &mut self.component {
+            component.clear_ai_capture();
+        }
+        #[cfg(unix)]
         if let Some(authority) = &self.connection_authority {
             authority.revoke();
         }

@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use std::{
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc, Arc,
+        mpsc, Arc, OnceLock,
     },
     time::{Duration, Instant},
 };
@@ -17,9 +17,9 @@ const MAX_PNG: usize = 40_000;
 pub(super) const WORKSPACE_REPLY_LIMIT: usize = 8 * 1024 * 1024;
 static NEXT_CAPTURE: AtomicU64 = AtomicU64::new(1);
 static READBACK_BUSY: AtomicBool = AtomicBool::new(false);
-struct ReadbackPermit;
+pub(super) struct ReadbackPermit;
 impl ReadbackPermit {
-    fn acquire() -> Option<Self> {
+    pub(super) fn acquire() -> Option<Self> {
         READBACK_BUSY
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .ok()
@@ -30,6 +30,17 @@ impl Drop for ReadbackPermit {
     fn drop(&mut self) {
         READBACK_BUSY.store(false, Ordering::Release);
     }
+}
+
+pub(super) type ThumbnailResult = std::result::Result<Value, String>;
+// eframe handles the Screenshot command after painting. Only a receipt from
+// the next real UI pass can identify the frame captured by that command.
+pub(super) type ReadbackFrame = Arc<OnceLock<rot_render::FrameReceipt>>;
+
+pub(super) fn next_capture_id() -> Result<u64> {
+    NEXT_CAPTURE
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |id| id.checked_add(1))
+        .map_err(|_| fail("capture_limit"))
 }
 
 type Failure = (String, String);
@@ -77,7 +88,7 @@ struct Owner {
     #[cfg(unix)]
     authority: Option<crate::bridge::Authority>,
 }
-struct CancelOnDrop(Arc<AtomicBool>);
+pub(super) struct CancelOnDrop(pub(super) Arc<AtomicBool>);
 impl Drop for CancelOnDrop {
     fn drop(&mut self) {
         self.0.store(true, Ordering::Release);
@@ -87,7 +98,8 @@ struct Pending {
     id: u64,
     pin: Pin,
     started: Instant,
-    receiver: Option<mpsc::Receiver<std::result::Result<Value, String>>>,
+    receiver: Option<mpsc::Receiver<ThumbnailResult>>,
+    frame: ReadbackFrame,
     permit: Option<ReadbackPermit>,
     token: String,
     full_resolution: bool,
@@ -374,9 +386,7 @@ impl SceneEditor {
             return Err(fail("capture_busy"));
         }
         let permit = ReadbackPermit::acquire().ok_or_else(|| fail("capture_busy"))?;
-        let id = NEXT_CAPTURE
-            .try_update(Ordering::AcqRel, Ordering::Acquire, |id| id.checked_add(1))
-            .map_err(|_| fail("capture_limit"))?;
+        let id = next_capture_id()?;
         self.captures.timing.finish(3);
         self.captures.timing =
             super::capture_timing::Probe::begin([id, pin.generation, pin.revision, pin.view]);
@@ -392,6 +402,7 @@ impl SceneEditor {
             pin,
             started: Instant::now(),
             receiver: None,
+            frame: Default::default(),
             permit: Some(permit),
             token: token.to_owned(),
             full_resolution: workspace,
@@ -532,6 +543,9 @@ impl SceneEditor {
     }
     /// Called after the current UI has produced its actual camera and viewport rectangle.
     pub(super) fn poll_capture(&mut self, ctx: &egui::Context) {
+        if ctx.will_discard() {
+            return;
+        }
         let pin = self.capture_pin();
         self.progress_capture_result(ctx, pin);
         let Some(mut pending) = self.captures.pending.take() else {
@@ -543,56 +557,74 @@ impl SceneEditor {
             .or(self.captures.rect)
             .filter(|_| pending.receiver.is_none())
         {
-            let receipt = self.captures.receipt.clone();
-            let full_resolution = pending.full_resolution;
-            let (sender, receiver) = mpsc::sync_channel(1);
-            let ppp = ctx.pixels_per_point();
-            let wake = ctx.clone();
             let permit = pending.permit.take().expect("readback lease before issue");
-            let cancel = pending.cancel.0.clone();
-            let timing = self.captures.timing.clone();
-            timing.mark(1);
-            ctx.request_screenshot(move |image| {
-                timing.mark(2);
-                if cancel.load(Ordering::Acquire) {
-                    return;
-                }
-                // Readback completion alone cannot identify the scene: a backpressured
-                // callback may have composited an older complete target this frame.
-                if !receipt
-                    .as_ref()
-                    .is_some_and(|receipt| receipt.is_fresh_painted())
-                {
-                    let _ = sender.send(Err("render_pending".into()));
-                    drop(permit);
-                    wake.request_repaint();
-                    return;
-                }
-                // At most one on-demand encoder; compression never blocks editor layout.
-                let _ = std::thread::Builder::new()
-                    .name("viewport-thumbnail".into())
-                    .spawn(move || {
-                        timing.mark(3);
-                        let _permit = permit;
-                        if cancel.load(Ordering::Acquire) {
-                            return;
-                        }
-                        let result = capture_image(&image, rect, ppp, full_resolution);
-                        timing.mark(4);
-                        let _ = sender.send(result);
-                        wake.request_repaint();
-                    });
-            });
-            pending.receiver = Some(receiver);
+            pending.receiver = Some(permit.request(
+                ctx,
+                rect,
+                pending.frame.clone(),
+                pending.full_resolution,
+                &pending.cancel,
+                self.captures.timing.clone(),
+            ));
+        } else if let Some(receipt) = &self.captures.receipt {
+            let _ = pending.frame.set(receipt.clone());
         }
         self.captures.pending = Some(pending);
         ctx.request_repaint_after(Duration::from_millis(50));
     }
 }
+impl ReadbackPermit {
+    pub(super) fn request(
+        self,
+        ctx: &egui::Context,
+        rect: egui::Rect,
+        frame: ReadbackFrame,
+        full_resolution: bool,
+        cancel: &CancelOnDrop,
+        timing: super::capture_timing::Probe,
+    ) -> mpsc::Receiver<ThumbnailResult> {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let ppp = ctx.pixels_per_point();
+        let wake = ctx.clone();
+        let cancel = cancel.0.clone();
+        timing.mark(1);
+        ctx.request_screenshot(move |image| {
+            timing.mark(2);
+            if cancel.load(Ordering::Acquire) {
+                return;
+            }
+            // A backpressured callback may composite an earlier target.
+            if !frame
+                .get()
+                .is_some_and(rot_render::FrameReceipt::is_fresh_painted)
+            {
+                let _ = sender.send(Err("render_pending".into()));
+                drop(self);
+                wake.request_repaint();
+                return;
+            }
+            let _ = std::thread::Builder::new()
+                .name("viewport-thumbnail".into())
+                .spawn(move || {
+                    timing.mark(3);
+                    let _permit = self;
+                    if cancel.load(Ordering::Acquire) {
+                        return;
+                    }
+                    let result = capture_image(&image, rect, ppp, full_resolution);
+                    timing.mark(4);
+                    let _ = sender.send(result);
+                    wake.request_repaint();
+                });
+        });
+        receiver
+    }
+}
+
 // Screen readback is cropped only after rendering all UI. Conservatively reject
 // every visible floating/window/popup/tooltip layer, including the preceding
 // pass retained by egui, so private editor text can never enter the crop.
-fn readback_size_ok(ctx: &egui::Context) -> bool {
+pub(super) fn readback_size_ok(ctx: &egui::Context) -> bool {
     let size = ctx.viewport_rect().size() * ctx.pixels_per_point();
     size.x.is_finite()
         && size.y.is_finite()
@@ -602,6 +634,10 @@ fn readback_size_ok(ctx: &egui::Context) -> bool {
 }
 
 fn clear_layers(ctx: &egui::Context) -> bool {
+    layers_allow_capture(ctx, Some(super::ai_indicator::toast_id()))
+}
+
+pub(super) fn layers_allow_capture(ctx: &egui::Context, allowed: Option<egui::Id>) -> bool {
     ctx.memory(|memory| {
         memory
             .areas()
@@ -609,10 +645,7 @@ fn clear_layers(ctx: &egui::Context) -> bool {
             .iter()
             // The AI toast is a one-line notice, never over the rendered
             // viewport image itself, so it does not block a capture.
-            .all(|layer| {
-                layer.order == egui::Order::Background
-                    || layer.id == super::ai_indicator::toast_id()
-            })
+            .all(|layer| layer.order == egui::Order::Background || Some(layer.id) == allowed)
     })
 }
 
@@ -1234,6 +1267,7 @@ mod tests {
                 pin,
                 started: Instant::now(),
                 receiver: Some(receiver),
+                frame: Default::default(),
                 permit: None,
                 token: "owner".into(),
                 full_resolution: true,

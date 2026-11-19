@@ -385,6 +385,7 @@ impl Host {
         let before = self.editor.session.scene().revision;
         let mut step = None;
         if let Some(bridge) = &mut self.bridge {
+            let authority = bridge.authority();
             bridge.dispatch_request(|nonce, op, args, lease| {
                 if self.editor.ai_status.paused && !ai_indicator::read_only(op) {
                     // rot-mcp holds the call and asks again until resumed.
@@ -393,7 +394,13 @@ impl Host {
                 }
                 let token = self.editor.scene_guard_token(nonce);
                 if let Some(component) = &mut self.editor.component {
-                    lease.run_immediate(|| component.ai_command(&token, op, &args));
+                    lease.run_immediate(|| {
+                        if matches!(op, "viewport_inspect" | "viewport_capture_start" | "viewport_capture_inspect") {
+                            component.ai_capture_command(&authority, &token, op, &args)
+                        } else {
+                            component.ai_command(&token, op, &args)
+                        }
+                    });
                     return;
                 }
                 step = ai_steps::label(op, &args, self.editor.session.scene());

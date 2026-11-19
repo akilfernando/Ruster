@@ -29,6 +29,14 @@ impl ComponentWorkspace {
             self.execute_ai_command(token, op, args)
                 .map_err(|(code, message)| (code.to_owned(), message))
         };
+        self.ai_response(token, result)
+    }
+
+    pub(super) fn ai_response(
+        &self,
+        token: &str,
+        result: Result<Value, (String, String)>,
+    ) -> Value {
         let revision = self.session.revision().to_string();
         match result {
             Ok(mut payload) => {

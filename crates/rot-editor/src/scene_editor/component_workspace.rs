@@ -18,6 +18,15 @@ use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
 
 #[cfg(unix)]
+#[path = "component_capture.rs"]
+mod capture;
+
+#[cfg(not(unix))]
+type PaintedViewport = ();
+#[cfg(unix)]
+use capture::PaintedViewport;
+
+#[cfg(unix)]
 #[path = "component_mcp.rs"]
 mod mcp;
 
@@ -169,6 +178,8 @@ pub(super) struct ComponentWorkspace {
     close_pending: bool,
     close_approved: bool,
     #[cfg(unix)]
+    capture: capture::ComponentCapture,
+    #[cfg(unix)]
     pub(super) request_connection: bool,
     #[cfg(unix)]
     pub(super) revoke_ai_connection: bool,
@@ -232,6 +243,8 @@ impl ComponentWorkspace {
             build: Default::default(),
             close_pending: false,
             close_approved: false,
+            #[cfg(unix)]
+            capture: Default::default(),
             #[cfg(unix)]
             request_connection: false,
             #[cfg(unix)]
@@ -333,6 +346,10 @@ impl ComponentWorkspace {
     }
 
     fn rebuild_draft(&mut self) {
+        #[cfg(unix)]
+        {
+            self.capture.epoch += 1;
+        }
         let objects = &self.session.scene().objects;
         self.selected_index = if self.selection.len() == 1 {
             objects
@@ -434,6 +451,10 @@ impl ComponentWorkspace {
     }
 
     fn refresh_view(&mut self) {
+        #[cfg(unix)]
+        {
+            self.capture.epoch += 1;
+        }
         let scene = self.session.scene();
         self.view_flags.clear();
         if self.scene_view.hidden.is_empty() && self.scene_view.locked.is_empty() {
@@ -898,7 +919,7 @@ fn hierarchy_rows(objects: &[ObjectNode]) -> (Vec<(usize, usize)>, Vec<Option<us
 }
 
 impl ComponentWorkspace {
-    fn viewport(&mut self, ui: &mut egui::Ui, blocked: bool) {
+    fn viewport(&mut self, ui: &mut egui::Ui, blocked: bool) -> Option<PaintedViewport> {
         let ctx = ui.ctx().clone();
         let frame = self.runtime.displayed_frame().cloned();
         let scene = if let Some(frame) = &frame {
@@ -908,7 +929,7 @@ impl ComponentWorkspace {
                 Ok(preview) => preview.scene(),
                 Err(error) => {
                     ui.colored_label(editor_theme::colors(ui).error, error.to_string());
-                    return;
+                    return None;
                 }
             }
         };
@@ -966,6 +987,10 @@ impl ComponentWorkspace {
                 surface,
             )
         };
+        #[cfg(unix)]
+        let painted = self.capture_viewport(ui, frame.as_ref(), &interaction);
+        #[cfg(not(unix))]
+        let painted = ();
         self.runtime.input_control_click(
             &ctx,
             blocked || hud_owns,
@@ -1001,6 +1026,7 @@ impl ComponentWorkspace {
             }
         }
         self.runtime.paint_play_border(ui, rect);
+        Some(painted)
     }
 
     pub(super) fn show(&mut self, ui: &mut egui::Ui) -> Option<OpenedScene> {
@@ -1338,11 +1364,11 @@ impl ComponentWorkspace {
                     self.rebuild_draft();
                 }
             });
-        egui::CentralPanel::default().show(ui, |ui| {
-            if draw_viewport {
-                self.viewport(ui, blocked);
-            }
-        });
+        let viewport = egui::CentralPanel::default()
+            .show(ui, |ui| {
+                draw_viewport.then(|| self.viewport(ui, blocked)).flatten()
+            })
+            .inner;
         #[cfg(target_os = "linux")]
         {
             let draft_dirty = self.draft_dirty();
@@ -1423,6 +1449,8 @@ impl ComponentWorkspace {
                 }
                 self.error = None;
             }
+            #[cfg(unix)]
+            self.finish_capture_frame(&ctx, None);
             return opened;
         }
         if self.close_pending {
@@ -1446,6 +1474,10 @@ impl ComponentWorkspace {
                     }
                 });
         }
+        #[cfg(unix)]
+        self.finish_capture_frame(&ctx, viewport);
+        #[cfg(not(unix))]
+        let _ = viewport;
         None
     }
 }

@@ -1,7 +1,6 @@
 # Status
 
-Updated 2026-11-19. This file stays under 100 lines. Older entries are in
-[the archive](archive/STATUS-2026-11-17.md) and are history, not instructions.
+Updated 2026-11-19. See the [archive](archive/STATUS-2026-11-17.md) for earlier status.
 
 ## Where to work
 
@@ -44,7 +43,8 @@ and component values. Viewport settings stay local. Automatic upgrades remain op
 The v23 Inspector shows live Transform and script state during Play and Step.
 Editor and viewer draw, fit and pick from cached world matrices, including shear.
 v23 Build writes and launches a Linux player folder without Python. Approved
-MCP clients can edit objects and components and control Play. [C-12 benchmark timings](PARITY-PLAN.md#5-performance-budgets)
+MCP clients can edit objects and components, control Play, and capture the
+scene viewport. [C-12 benchmark timings](PARITY-PLAN.md#5-performance-budgets)
 cover 5,000 and 50,000 objects. Desktop frame rates remain unverified.
 
 ## What a creator can do today
@@ -84,7 +84,6 @@ entry `org.rot.editor.desktop`. Reinstall with
   opening and build states. Captured the hub and populated editor in Rot
   and Plain, including wide editor views. The active AI pulse was not
   exercised in those captures.
-
 - 2026-11-18 · T-02: the Rot style has a quiet motif (sprout line art in
   empty states, three-spore loading dots, mycelium in the hub and About,
   the About tagline); at most one themed line shows per screen; Plain
