@@ -579,8 +579,21 @@ impl ComponentWorkspace {
         if !self.apply() {
             return;
         }
-        let scene = self.session.scene();
-        let used: HashSet<_> = scene
+        match self.create_object(None, name, geometry) {
+            Ok(_) => self.error = None,
+            Err(error) => self.error = Some(error.to_string()),
+        }
+    }
+
+    fn create_object(
+        &mut self,
+        requested_id: Option<&str>,
+        name: &str,
+        geometry: Option<Geometry>,
+    ) -> Result<String, rot_scene::SceneError> {
+        let used: HashSet<_> = self
+            .session
+            .scene()
             .objects
             .iter()
             .flat_map(|object| {
@@ -592,18 +605,29 @@ impl ComponentWorkspace {
                 )
             })
             .collect();
+        if let Some(id) = requested_id.filter(|id| used.contains(id)) {
+            return Err(rot_scene::SceneError::Invalid(format!(
+                "Object or component ID {id} already exists."
+            )));
+        }
+        let revision = self.session.revision();
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let (id, mesh_id) = (self.session.revision()..)
+        let (generated_id, mesh_id) = (revision..)
             .map(|suffix| {
                 let id = format!("object-{stamp:x}-{suffix:x}");
                 let mesh = format!("{id}-mesh");
                 (id, mesh)
             })
-            .find(|(object, mesh)| !used.contains(object.as_str()) && !used.contains(mesh.as_str()))
+            .find(|(object, mesh)| {
+                !used.contains(object.as_str())
+                    && !used.contains(mesh.as_str())
+                    && requested_id != Some(mesh.as_str())
+            })
             .expect("finite scene IDs");
+        let id = requested_id.map_or(generated_id, str::to_owned);
         let components = geometry
             .map(|geometry| ComponentInstance {
                 id: mesh_id,
@@ -624,14 +648,10 @@ impl ComponentWorkspace {
             transform: Transform::default(),
             components,
         };
-        match self.session.put_object(self.session.revision(), node) {
-            Ok(_) => {
-                self.error = None;
-                self.select(Some(id));
-                self.refresh();
-            }
-            Err(error) => self.error = Some(error.to_string()),
-        }
+        self.session.put_object(revision, node)?;
+        self.select(Some(id.clone()));
+        self.refresh();
+        Ok(id)
     }
 
     fn delete(&mut self, hit: Option<&str>) {

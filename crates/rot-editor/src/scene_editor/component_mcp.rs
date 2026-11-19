@@ -2,8 +2,8 @@
 use super::{ComponentWorkspace, RUNTIME_GENERATION};
 use crate::behavior_ui::RuntimeSource;
 use crate::scene_editor::runtime_commands;
-use rot_scene::component_scene::{Component, ComponentInstance, ObjectNode};
-use rot_scene::{SceneError, Transform, TransformRequest};
+use rot_scene::component_scene::{Component, ComponentInstance, Geometry, ObjectNode};
+use rot_scene::{Primitive, SceneError, Transform, TransformRequest};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
@@ -136,7 +136,9 @@ impl ComponentWorkspace {
             return self.inspect_components(args);
         }
         let expected_len = match op {
-            "scene_transform" | "scene_rename" | "scene_reparent" => 4,
+            "scene_create" if map.contains_key("primitive") => 5,
+            "scene_create" | "scene_group_create" | "scene_transform" | "scene_rename"
+            | "scene_reparent" => 4,
             "scene_transform_many" | "scene_delete" | "scene_delete_many" => 3,
             "scene_components_edit" => 3,
             "scene_undo" | "scene_redo" => 2,
@@ -164,6 +166,27 @@ impl ComponentWorkspace {
                 "drafts_pending",
                 "Finish the pending editor change first.".into(),
             ));
+        }
+
+        if matches!(op, "scene_create" | "scene_group_create") {
+            let id = args["object_id"].as_str().ok_or_else(invalid)?;
+            let name = args["name"].as_str().ok_or_else(invalid)?;
+            let geometry = match (op, args.get("primitive")) {
+                ("scene_group_create", None) => None,
+                ("scene_create", None | Some(Value::Null)) => Some(Geometry::Cube),
+                ("scene_create", Some(Value::String(shape))) => Some(Geometry::Primitive {
+                    shape: match shape.as_str() {
+                        "sphere" => Primitive::Sphere,
+                        "capsule" => Primitive::Capsule,
+                        _ => return Err(invalid()),
+                    },
+                }),
+                _ => return Err(invalid()),
+            };
+            let id = self
+                .create_object(Some(id), name, geometry)
+                .map_err(|error| ("invalid_arguments", error.to_string()))?;
+            return Ok(json!({"object_id":id, "changed":true, "dirty":self.session.is_dirty()}));
         }
 
         let mut payload = json!({});
@@ -555,6 +578,41 @@ mod tests {
         component_scene::{ComponentScene, ComponentSession},
         Scene, Session,
     };
+
+    #[test]
+    fn create_rejects_an_existing_id_and_uses_editor_undo() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        let scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let mut args = json!({
+            "expected_session_token":"session","expected_revision":"0",
+            "object_id":scene.objects[0].id,"name":"Sphere","primitive":"sphere",
+        });
+        let rejected = editor.ai_command("session", "scene_create", &args);
+        assert_eq!(rejected["error"]["code"], "invalid_arguments");
+        assert_eq!(editor.session.scene(), &scene);
+        assert_eq!(editor.session.revision(), 0);
+
+        args["object_id"] = json!("agent-sphere");
+        let created = editor.ai_command("session", "scene_create", &args);
+        assert_eq!(created["result"]["revision"], "1");
+        let node = editor.session.scene().objects.last().unwrap();
+        assert_eq!(node.id, "agent-sphere");
+        assert!(matches!(
+            node.components[0].kind,
+            Component::MeshRenderer {
+                geometry: Geometry::Primitive {
+                    shape: Primitive::Sphere
+                },
+                ..
+            }
+        ));
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene(), &scene);
+    }
 
     #[test]
     fn component_batch_validates_global_ids_without_leaving_partial_edits() {
