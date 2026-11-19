@@ -121,6 +121,15 @@ impl Default for Browser {
 }
 
 impl Browser {
+    #[cfg(target_os = "linux")]
+    pub(super) fn import_folder(&self) -> PathBuf {
+        if self.folder.starts_with("Assets") {
+            self.folder.clone()
+        } else {
+            "Assets".into()
+        }
+    }
+
     pub(super) fn refresh(
         &mut self,
         assets: &rot_assets::AssetStore,

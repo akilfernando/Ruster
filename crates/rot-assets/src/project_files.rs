@@ -1,8 +1,8 @@
 //! Project sources and their adjacent metadata are the inputs to the catalog.
 use super::{
-    atomic_write, confined_path, digest, error, read_bounded, validate_id, validate_registry,
-    AssetError, AssetKind, AssetMutation, AssetStatus, AssetStore, MeshNormalPolicy, TextureRole,
-    REGISTRY,
+    atomic_write, confined_path, digest, error, read_bounded, validate_id,
+    validate_project_relative, validate_registry, AssetError, AssetKind, AssetMutation,
+    AssetStatus, AssetStore, MeshNormalPolicy, TextureRole, REGISTRY,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -86,6 +86,16 @@ impl Importer {
 }
 
 impl AssetStore {
+    /// Size limit for a project source accepted by the automatic importer.
+    pub fn project_source_limit(source: &str) -> Result<usize, AssetError> {
+        validate_project_relative(source)?;
+        match Importer::from_path(source) {
+            Some(Importer::Asset(kind)) => Ok(kind.source_limit()),
+            Some(Importer::Model) => Ok(super::MAX_GLB_SOURCE_BYTES),
+            None => Err(error("Rot imports OBJ, PNG, WAV and GLB files.")),
+        }
+    }
+
     /// Open a v23 project and reconcile supported sources from its Assets tree.
     /// Callers must run this as file I/O. Diagnostics name only failed sources.
     pub fn open_project(root: impl AsRef<Path>) -> Result<(Self, Vec<String>), AssetError> {

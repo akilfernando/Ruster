@@ -22,8 +22,10 @@ Choose a fresh archive path. Preparation verifies the Linux executable/profile a
 
 Put OBJ meshes, PNG textures, WAV sounds or supported GLB models in the
 project's `Assets/` folder. Opening the scene imports supported files in
-that folder and its subfolders. On Linux the open editor also picks up file
-additions, edits, and moves. Move the generated `.rotmeta` file with its
+that folder and its subfolders. On Linux, drop files from your file manager
+onto the Assets panel or choose **Assets → Import…**. The editor copies them
+into the current Assets folder and adds a number if the name is taken. It also
+picks up additions, edits, and moves made on disk while the scene is open. Move the generated `.rotmeta` file with its
 source to keep existing references. Put both files in version control so the
 asset ID survives a cache rebuild. Existing registered sources receive
 sidecars with all their accepted import settings. Move older source files

@@ -150,6 +150,14 @@ pub(super) struct ComponentWorkspace {
     asset_browser: asset_panel::Browser,
     #[cfg(target_os = "linux")]
     asset_watcher: Option<super::project_assets::ProjectAssets>,
+    #[cfg(target_os = "linux")]
+    asset_picker: Option<(PathBuf, std::sync::mpsc::Receiver<Vec<PathBuf>>)>,
+    #[cfg(target_os = "linux")]
+    asset_import: Option<std::sync::mpsc::Receiver<Vec<String>>>,
+    #[cfg(target_os = "linux")]
+    asset_import_error: Option<String>,
+    #[cfg(all(target_os = "linux", feature = "inspection"))]
+    inspection_asset_drop: bool,
     runtime: RuntimeUi,
     hud_cache: rot_scene::hud::HudCache,
     hud_controls: hud_interaction::HudControls,
@@ -224,6 +232,14 @@ impl ComponentWorkspace {
             asset_browser: Default::default(),
             #[cfg(target_os = "linux")]
             asset_watcher: None,
+            #[cfg(target_os = "linux")]
+            asset_picker: None,
+            #[cfg(target_os = "linux")]
+            asset_import: None,
+            #[cfg(target_os = "linux")]
+            asset_import_error: None,
+            #[cfg(all(target_os = "linux", feature = "inspection"))]
+            inspection_asset_drop: false,
             runtime: RuntimeUi::default(),
             hud_cache: Default::default(),
             hud_controls: Default::default(),
@@ -326,6 +342,89 @@ impl ComponentWorkspace {
                 }
                 Err(error) => self.asset_error = Some(error),
             }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn asset_import_frame(&mut self, ctx: &egui::Context, blocked: bool) {
+        use std::sync::mpsc::TryRecvError;
+
+        if let Some(import) = &self.asset_import {
+            match import.try_recv() {
+                Ok(errors) => {
+                    self.asset_import = None;
+                    self.asset_import_error = match errors.as_slice() {
+                        [] => None,
+                        [first] => Some(first.clone()),
+                        [first, rest @ ..] => {
+                            Some(format!("{first} ({} more import errors)", rest.len()))
+                        }
+                    };
+                }
+                Err(TryRecvError::Disconnected) => {
+                    self.asset_import = None;
+                    self.asset_import_error = Some("The project asset worker stopped.".into());
+                }
+                Err(TryRecvError::Empty) => {}
+            }
+        }
+        if blocked {
+            return;
+        }
+        if let Some((folder, picked)) = &self.asset_picker {
+            match picked.try_recv() {
+                Ok(files) => {
+                    let folder = folder.clone();
+                    self.asset_picker = None;
+                    self.queue_asset_import(folder, files);
+                }
+                Err(TryRecvError::Disconnected) => self.asset_picker = None,
+                Err(TryRecvError::Empty) => {}
+            }
+        }
+
+        let dropped: Vec<_> = ctx.input(|input| {
+            input
+                .raw
+                .dropped_files
+                .iter()
+                .map(|file| file.path().to_path_buf())
+                .collect()
+        });
+        self.queue_asset_import(self.asset_browser.import_folder(), dropped);
+        #[cfg(feature = "inspection")]
+        if self.asset_watcher.is_some() && !self.inspection_asset_drop {
+            if let Some(paths) = std::env::var_os("ROT_INSPECTION_DROP") {
+                self.inspection_asset_drop = true;
+                self.queue_asset_import(
+                    self.asset_browser.import_folder(),
+                    std::env::split_paths(&paths).collect(),
+                );
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn queue_asset_import(&mut self, folder: PathBuf, files: Vec<PathBuf>) {
+        if files.is_empty() {
+            return;
+        }
+        self.asset_browser.open = true;
+        if self.asset_import.is_some() {
+            self.asset_import_error = Some("Another import is running.".into());
+            return;
+        }
+        match self
+            .asset_watcher
+            .as_ref()
+            .ok_or_else(|| "The project asset worker is unavailable.".into())
+            .and_then(|watcher| watcher.import_files(folder, files))
+        {
+            Ok(reply) => {
+                self.asset_import = Some(reply);
+                self.asset_import_error = None;
+            }
+            Err(error) => self.asset_import_error = Some(error),
         }
     }
 
@@ -887,6 +986,22 @@ impl ComponentWorkspace {
         self.apply();
     }
 
+    fn command_from_ui(&mut self, ctx: &egui::Context, action: Action) {
+        #[cfg(not(target_os = "linux"))]
+        let _ = ctx;
+        #[cfg(target_os = "linux")]
+        if action == Action::ImportAsset {
+            if self.asset_picker.is_none() && self.asset_import.is_none() {
+                self.asset_picker = Some((
+                    self.asset_browser.import_folder(),
+                    super::assets_browser::pick_asset_files(ctx.clone()),
+                ));
+            }
+            return;
+        }
+        self.command(action);
+    }
+
     fn command(&mut self, action: Action) {
         let revision = self.session.revision();
         let result = match action {
@@ -980,7 +1095,7 @@ impl ComponentWorkspace {
             )
             .clicked()
         {
-            self.command(action);
+            self.command_from_ui(ui.ctx(), action);
             ui.close();
         }
     }
@@ -1145,12 +1260,14 @@ impl ComponentWorkspace {
         }
         self.poll_runtime(&ctx);
         let blocked = self.close_pending || self.open_path.is_some() || build_open;
+        #[cfg(target_os = "linux")]
+        self.asset_import_frame(&ctx, blocked);
         self.runtime.input_begin(&ctx, blocked);
         if let Some(action) = self
             .workspace
             .shortcuts(&ctx, blocked || self.runtime.input_owned())
         {
-            self.command(action);
+            self.command_from_ui(&ctx, action);
         }
         egui::Panel::top("component_menu").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
@@ -1185,6 +1302,13 @@ impl ComponentWorkspace {
                     self.view_menu(ui);
                 });
                 editor_theme::text_menu(ui, "Assets", |ui| {
+                    #[cfg(target_os = "linux")]
+                    ui.add_enabled_ui(
+                        !blocked && self.asset_picker.is_none() && self.asset_import.is_none(),
+                        |ui| {
+                            self.menu_action(ui, Action::ImportAsset);
+                        },
+                    );
                     self.menu_action(ui, Action::FindContent);
                 });
                 editor_theme::text_menu(ui, "Window", |ui| {
@@ -1218,6 +1342,14 @@ impl ComponentWorkspace {
         #[cfg(not(target_os = "linux"))]
         let build_status = None::<&str>;
         let scene_error = self.error.as_ref().or(self.asset_error.as_ref());
+        #[cfg(target_os = "linux")]
+        let scene_error = self.asset_import_error.as_ref().or(scene_error);
+        #[cfg(target_os = "linux")]
+        let build_status = if self.asset_import.is_some() {
+            Some("Importing assets…")
+        } else {
+            build_status
+        };
         if scene_error.is_some() || build_status.is_some() {
             egui::Panel::bottom("component_status").show(ui, |ui| {
                 if let Some(error) = scene_error {
@@ -1679,6 +1811,71 @@ mod tests {
         };
         assert_eq!(reopened.scene().objects[0].name, "Changed");
         assert!(!reopened.is_dirty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dropped_file_event_imports_into_the_open_workspace() {
+        #[derive(Debug)]
+        struct DroppedPath(PathBuf);
+
+        impl egui::DroppedFile for DroppedPath {
+            fn path(&self) -> &std::path::Path {
+                &self.0
+            }
+
+            fn bytes(&self) -> Result<Vec<u8>, String> {
+                panic!("A file drop provides its path; the UI should not read its bytes");
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        ComponentScene::from_legacy(&Session::new(Scene::empty("drop")).unwrap())
+            .unwrap()
+            .save_new(&path)
+            .unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let source = outside.path().join("Triangle.obj");
+        std::fs::write(&source, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap();
+
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let context = egui::Context::default();
+        context
+            .run_ui(
+                egui::RawInput {
+                    dropped_files: vec![std::sync::Arc::new(DroppedPath(source))],
+                    ..Default::default()
+                },
+                |ui| {
+                    editor.show_workspace(ui, false);
+                },
+            )
+            .textures_delta
+            .clear();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while (editor.asset_import.is_some() || editor.meshes.is_empty())
+            && std::time::Instant::now() < deadline
+        {
+            context
+                .run_ui(egui::RawInput::default(), |ui| {
+                    editor.show_workspace(ui, false);
+                })
+                .textures_delta
+                .clear();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            editor.asset_import_error.is_none(),
+            "{:?}",
+            editor.asset_import_error
+        );
+        let asset = editor.assets.as_ref().unwrap().infos().next().unwrap();
+        assert_eq!(asset.source, "Assets/Triangle.obj");
+        assert!(editor.meshes.contains_key(&asset.id));
+        assert!(dir.path().join("Assets/Triangle.obj.rotmeta").is_file());
+        assert!(!editor.session.is_dirty());
     }
 
     #[test]

@@ -58,6 +58,20 @@ pub(super) fn asset_glyph(kind: &str) -> &'static str {
     }
 }
 
+pub(super) fn pick_asset_files(ctx: egui::Context) -> mpsc::Receiver<Vec<PathBuf>> {
+    let (send, receive) = mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let picked = rfd::FileDialog::new()
+            .set_title("Import Assets")
+            .add_filter("Assets", &IMPORTABLE)
+            .pick_files()
+            .unwrap_or_default();
+        let _ = send.send(picked);
+        ctx.request_repaint();
+    });
+    receive
+}
+
 /// A placed model dragged from Assets onto the Scene view.
 #[derive(Clone)]
 pub(super) struct ModelDrag {
@@ -268,18 +282,8 @@ impl SceneEditor {
 
     /// Import… opens the system file dialog.
     pub(super) fn pick_imports(&mut self) {
-        let (send, receive) = mpsc::sync_channel(1);
         let ctx = self.export_context.clone().unwrap_or_default();
-        std::thread::spawn(move || {
-            let picked = rfd::FileDialog::new()
-                .set_title("Import Assets")
-                .add_filter("Assets", &IMPORTABLE)
-                .pick_files()
-                .unwrap_or_default();
-            let _ = send.send(picked);
-            ctx.request_repaint();
-        });
-        self.assets_view.picking = Some(receive);
+        self.assets_view.picking = Some(pick_asset_files(ctx));
     }
 
     fn thumbnail(&mut self, ctx: &egui::Context, id: &str) -> Option<egui::TextureId> {

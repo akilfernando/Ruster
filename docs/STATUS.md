@@ -46,8 +46,8 @@ v23 Build writes and launches a Linux player folder without Python. Approved
 MCP clients can create objects and groups, edit components, control Play,
 browse assets, assign meshes and capture the viewport. On Linux, v23 watches
 `Assets/` for imports and changes. The Assets panel shows live folders,
-texture previews and import diagnostics, and places meshes with Undo.
-Panel file drops and v23 MCP import writes remain open. A relocated build
+texture previews and import diagnostics, accepts file drops, and places
+meshes with Undo. v23 MCP import writes remain open. A relocated build
 loaded 80 meshes. [C-12 benchmark timings](PARITY-PLAN.md#5-performance-budgets)
 cover 5,000 and 50,000 objects. Desktop frame rates remain unverified.
 
