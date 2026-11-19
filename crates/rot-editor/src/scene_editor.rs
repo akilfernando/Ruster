@@ -4783,7 +4783,10 @@ impl SceneEditor {
                         )
                         .wrap(),
                     );
-                    if ui.button("Open location").clicked() {
+                    if diagnostic.source_id.is_some()
+                        && diagnostic.source_hash.is_some()
+                        && ui.button("Open Script").clicked()
+                    {
                         if let Err(error) = self.behavior.navigate_diagnostic(
                             &self.session,
                             diagnostic,
@@ -5937,7 +5940,7 @@ mod tests {
                     && shape.clip_rect.contains_rect(egui::Rect::from_min_size(text.pos, text.galley.size())))));
                 runtime_location_present.set(output.shapes.iter().any(|shape| {
                     matches!(&shape.shape,
-                    egui::epaint::Shape::Text(text) if text.galley.job.text == "Open location")
+                    egui::epaint::Shape::Text(text) if text.galley.job.text == "Open Script")
                 }));
                 if editor.error.contains('\n') && editor.error == editor.shader_notice {
                     let summary = editor.error.lines().next().unwrap();

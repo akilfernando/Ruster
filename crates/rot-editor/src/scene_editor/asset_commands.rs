@@ -2443,9 +2443,9 @@ impl SceneEditor {
                 if busy {
                     crate::ui_kit::motif::spinner(ui, ui.spacing().interact_size.y);
                 }
-                let (message, color) = if busy {
+                let (message, color, is_error) = if busy {
                     if self.pending_asset_open.is_some() {
-                        ("Loading project content…", ui.visuals().text_color())
+                        ("Loading project content…", ui.visuals().text_color(), false)
                     } else {
                         (
                             if self.asset_ops.status.is_empty() {
@@ -2454,11 +2454,12 @@ impl SceneEditor {
                                 &self.asset_ops.status
                             },
                             ui.visuals().text_color(),
+                            false,
                         )
                     }
                 } else if !self.error.is_empty() {
                     // A current error stays visible until it is resolved.
-                    (self.error.as_str(), ui.visuals().error_fg_color)
+                    (self.error.as_str(), ui.visuals().error_fg_color, true)
                 } else if let Some(latest) = self.console.latest() {
                     // Otherwise the newest Console message, on one quiet line.
                     let color = match latest.level {
@@ -2466,18 +2467,41 @@ impl SceneEditor {
                         crate::console::Level::Warning => ui.visuals().warn_fg_color,
                         crate::console::Level::Info => ui.visuals().weak_text_color(),
                     };
-                    (latest.text.as_str(), color)
+                    (
+                        latest.text.as_str(),
+                        color,
+                        latest.level == crate::console::Level::Error,
+                    )
                 } else {
-                    ("", ui.visuals().text_color())
+                    ("", ui.visuals().text_color(), false)
                 };
+                let message = message.to_owned();
                 let summary = message
                     .lines()
                     .find(|line| !line.trim().is_empty())
                     .unwrap_or("")
                     .trim();
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.add(egui::Label::new(egui::RichText::new(summary).color(color)).truncate())
-                        .on_hover_text(message);
+                    if is_error {
+                        let text = egui::RichText::new(summary.to_owned()).color(color);
+                        egui::containers::menu::MenuButton::from_button(
+                            egui::Button::new(text)
+                                .frame_when_inactive(false)
+                                .truncate(),
+                        )
+                        .config(
+                            egui::containers::menu::MenuConfig::new()
+                                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
+                        )
+                        .ui(ui, |ui| self.status_details_ui(ui))
+                        .0
+                        .on_hover_text("Open error details");
+                    } else {
+                        ui.add(
+                            egui::Label::new(egui::RichText::new(summary).color(color)).truncate(),
+                        )
+                        .on_hover_text(&message);
+                    }
                 });
             },
         );

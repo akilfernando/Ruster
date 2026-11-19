@@ -2540,76 +2540,86 @@ impl RuntimeUi {
             }
             // Play options: game-view toggle, controls help and run status.
             // The Script Debugger lives under Window, Game Controls also under Help.
-            let runtime_menu = ui.menu_button("…", |ui| {
-                if ui.button("Game Controls…").clicked() {
-                    self.open_input_help(ui.ctx());
-                    ui.close();
-                }
-                ui.add_enabled(
-                    self.frame.is_some(),
-                    egui::Checkbox::new(
-                        &mut self.visible,
-                        if self.stale {
-                            "Show Last Game Frame"
-                        } else {
-                            "Show Game"
-                        },
-                    ),
-                );
-                self.spatial_feedback_menu(ui);
-                if let Some(report) = self
-                    .worker
-                    .as_ref()
-                    .and_then(|worker| worker.audio_report(worker.current_key()))
-                {
-                    use rot_app::audio::OutputStatus;
-                    ui.label(match report.status {
-                        OutputStatus::Idle => "Audio: ready for first cue",
-                        OutputStatus::Ready => "Audio: output ready",
-                        OutputStatus::Paused => "Audio: paused (Step is silent)",
-                        OutputStatus::Unavailable => "Audio unavailable: no usable output device",
-                        OutputStatus::MissingAsset => "Audio: referenced sound is missing",
-                        OutputStatus::VoiceLimit => "Audio: voice limit reached",
-                    });
-                    if let Some(batch) = &report.last_batch {
-                        ui.label(format!(
-                            "Last committed audio batch: {} cue{}",
-                            batch.cues.len(),
-                            if batch.cues.len() == 1 { "" } else { "s" }
-                        ));
+            let (runtime_menu, _) = egui::containers::menu::MenuButton::new("…")
+                .config(
+                    egui::containers::menu::MenuConfig::new()
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
+                )
+                .ui(ui, |ui| {
+                    if ui.button("Game Controls…").clicked() {
+                        self.open_input_help(ui.ctx());
+                        ui.close();
                     }
-                }
-                if let Some(frame) = &self.frame {
-                    ui.label(format!("Committed tick {}", frame.tick));
-                }
-                if !self.status.is_empty() {
-                    ui.label(&self.status);
-                }
-                if let Some(diagnostic) = &self.diagnostic {
-                    ui.collapsing("Last failure details", |ui| {
-                        ui.set_max_width(360.0);
-                        egui::ScrollArea::vertical()
-                            .id_salt("runtime_diagnostic_details")
-                            .max_height(160.0)
-                            .show(ui, |ui| {
-                                ui.colored_label(ui.visuals().error_fg_color, &diagnostic.message);
-                                ui.label(format!(
-                                    "Source {} · hash {} · line {} · object {} · binding {}",
-                                    diagnostic.source_id.as_deref().unwrap_or("—"),
-                                    diagnostic.source_hash.as_deref().unwrap_or("—"),
-                                    diagnostic
-                                        .line
-                                        .map(|line| line.to_string())
-                                        .as_deref()
-                                        .unwrap_or("—"),
-                                    diagnostic.object_id.as_deref().unwrap_or("—"),
-                                    diagnostic.binding_id.as_deref().unwrap_or("—")
-                                ));
-                            });
-                    });
-                }
-            });
-            self.input_help_menu_response(&runtime_menu.response);
+                    ui.add_enabled(
+                        self.frame.is_some(),
+                        egui::Checkbox::new(
+                            &mut self.visible,
+                            if self.stale {
+                                "Show Last Game Frame"
+                            } else {
+                                "Show Game"
+                            },
+                        ),
+                    );
+                    self.spatial_feedback_menu(ui);
+                    if let Some(report) = self
+                        .worker
+                        .as_ref()
+                        .and_then(|worker| worker.audio_report(worker.current_key()))
+                    {
+                        use rot_app::audio::OutputStatus;
+                        ui.label(match report.status {
+                            OutputStatus::Idle => "Audio: ready for first cue",
+                            OutputStatus::Ready => "Audio: output ready",
+                            OutputStatus::Paused => "Audio: paused (Step is silent)",
+                            OutputStatus::Unavailable => {
+                                "Audio unavailable: no usable output device"
+                            }
+                            OutputStatus::MissingAsset => "Audio: referenced sound is missing",
+                            OutputStatus::VoiceLimit => "Audio: voice limit reached",
+                        });
+                        if let Some(batch) = &report.last_batch {
+                            ui.label(format!(
+                                "Last committed audio batch: {} cue{}",
+                                batch.cues.len(),
+                                if batch.cues.len() == 1 { "" } else { "s" }
+                            ));
+                        }
+                    }
+                    if let Some(frame) = &self.frame {
+                        ui.label(format!("Committed tick {}", frame.tick));
+                    }
+                    if !self.status.is_empty() {
+                        ui.label(&self.status);
+                    }
+                    if let Some(diagnostic) = &self.diagnostic {
+                        ui.collapsing("Last failure details", |ui| {
+                            ui.set_max_width(360.0);
+                            egui::ScrollArea::vertical()
+                                .id_salt("runtime_diagnostic_details")
+                                .max_height(160.0)
+                                .show(ui, |ui| {
+                                    ui.colored_label(
+                                        ui.visuals().error_fg_color,
+                                        &diagnostic.message,
+                                    );
+                                    ui.label(format!(
+                                        "Source {} · hash {} · line {} · object {} · binding {}",
+                                        diagnostic.source_id.as_deref().unwrap_or("—"),
+                                        diagnostic.source_hash.as_deref().unwrap_or("—"),
+                                        diagnostic
+                                            .line
+                                            .map(|line| line.to_string())
+                                            .as_deref()
+                                            .unwrap_or("—"),
+                                        diagnostic.object_id.as_deref().unwrap_or("—"),
+                                        diagnostic.binding_id.as_deref().unwrap_or("—")
+                                    ));
+                                });
+                        });
+                    }
+                });
+            self.input_help_menu_response(&runtime_menu);
             if inline_feedback {
                 ui.separator();
                 let width = (ui.available_size_before_wrap().x - 12.0).clamp(150.0, 410.0);

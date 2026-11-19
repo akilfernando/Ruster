@@ -115,3 +115,18 @@ attempts, and record whether evidence is human operation or injected input.
 Use the same task definitions for a baseline and any candidate. This is a
 proposed research follow-through and can accompany the next selected engine
 slice. No UI redesign, shortcuts preset or docking library is selected here.
+
+### Human walkthrough — 2026-11-19
+
+The user operated the local editor from the 5cc7181 test session with
+disposable copies of the arrangement and Motion Lab scenes. Results are
+participant reports.
+
+| Task | Observed result |
+| --- | --- |
+| Find and frame | Found the object, switched to Top and returned to Perspective without help. |
+| Keyboard editing | Rename, typed transform commit, cancellation and Undo worked. The user asked whether typing should preview before Enter. |
+| Groups and materials | Required help. New Group created an empty group and dragging rows did not reparent them. The Inspector parent dropdown worked. Material assignment succeeded but the user expected later material edits to take effect before Apply Material. |
+| Play and recover | Play and Stop were clear from the red border. Pause was easy to miss because only the window header changed. The scripted failure was corrected and the scene ran again. The user asked for clickable error details and source navigation and reported that expanding or collapsing Last failure details dismissed Game Controls. |
+| Shared editing | ChatGPT and Rot both asked to connect, and ChatGPT requested several approvals during edits. Undo reversed later AI operations, then the user's move, then earlier AI operations. |
+| Save and reopen | Group, position and material survived reopening. Export and missing-asset recovery were outside this run. |

@@ -28,8 +28,13 @@ the axis fields. A native screenshot confirms all nine fields are visible.
 Runtime and recovery status messages now use shorter wording. Remaining
 indirect copy is still open in the checklist.
 
-The [human walkthrough](research/EDITOR-WORKFLOW-COMPARISON.md#proposed-editor-baseline-walkthrough),
-simultaneous real-client editing, and full UI checklist remain open.
+The [human walkthrough](research/EDITOR-WORKFLOW-COMPARISON.md#proposed-editor-baseline-walkthrough)
+and concurrent ChatGPT editing were exercised on 2026-11-19. Clicking a
+footer error now opens details with Open Script for source diagnostics.
+Game Controls stays open when Last failure details expands or collapses.
+Both paths passed a native inspection run using a disposable Lua failure.
+The editor gate passed (245 tests, 13 ignored). Grouping, material draft and
+Pause feedback are in the backlog. The full UI checklist remains open.
 The 5,000-object checklist case depends on Phase 2. The user authorized
 starting Phase 2 before the human pass. [C-01](plans/C-01-OBJECT-COMPONENT-MODEL.md)
 specifies the proposed model and migration. C-02 has an indexed object
@@ -88,6 +93,4 @@ entry `org.rot.editor.desktop`. Reinstall with
 
 ## Not verified
 
-- No person has walked through this branch's editor. All UI checks used
-  injected events on a hidden workspace.
 - Gizmo drag latency is not measured (injected drags do not engage the gizmo).
