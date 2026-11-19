@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 const METADATA_EXTENSION: &str = ".rotmeta";
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Metadata {
     id: String,
@@ -21,6 +21,19 @@ struct Metadata {
     mesh_normal_policy: Option<MeshNormalPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     texture_role: Option<TextureRole>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImportList {
+    imports: Vec<Metadata>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum Sidecar {
+    Single(Metadata),
+    Multiple(ImportList),
 }
 
 #[derive(Clone, Copy)]
@@ -72,6 +85,7 @@ impl AssetStore {
         let mut diagnostics = Vec::new();
         let mut pending = vec![String::from("Assets")];
         let mut sources = Vec::new();
+        let mut sidecars = Vec::new();
         while let Some(relative) = pending.pop() {
             if !active() {
                 return diagnostics;
@@ -112,12 +126,55 @@ impl AssetStore {
                 } else if kind.is_file() {
                     if let Some(importer) = Importer::from_path(&source) {
                         sources.push((source, importer));
+                    } else if source
+                        .strip_suffix(METADATA_EXTENSION)
+                        .is_some_and(|path| Importer::from_path(path).is_some())
+                    {
+                        sidecars.push(source);
                     }
                 }
             }
         }
+        // Legacy sources can live elsewhere in the project. Give their
+        // registered paths a sidecar so the creator can move the pair into
+        // Assets without changing scene references.
+        let legacy_sources = self
+            .registry
+            .assets
+            .values()
+            .map(|record| &record.source)
+            .chain(self.registry.models.values().map(|record| &record.source));
+        for source in legacy_sources.filter(|source| !source.starts_with("Assets/")) {
+            if let Some(importer) = Importer::from_path(source) {
+                if self.root.join(source).is_file() {
+                    sources.push((source.clone(), importer));
+                }
+            }
+        }
         sources.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        sources.dedup_by(|a, b| a.0 == b.0);
         let mut sidecar_ids = BTreeMap::<String, usize>::new();
+        // A sidecar can arrive before its source during a directory move.
+        // Reserve its IDs so the old source does not regenerate the sidecar.
+        for sidecar in sidecars {
+            let source = sidecar
+                .strip_suffix(METADATA_EXTENSION)
+                .expect("sidecar extension");
+            if sources
+                .binary_search_by(|entry| entry.0.as_str().cmp(source))
+                .is_ok()
+            {
+                continue;
+            }
+            match confined_path(&self.root, &sidecar, false).and_then(|path| load_metadata(&path)) {
+                Ok(entries) => {
+                    for entry in entries {
+                        *sidecar_ids.entry(entry.id).or_default() += 1;
+                    }
+                }
+                Err(error) => diagnostics.push(format!("{sidecar}: {error}")),
+            }
+        }
         let mut candidates = Vec::with_capacity(sources.len());
         for (source, importer) in sources {
             let metadata = confined_path(&self.root, &source, false)
@@ -125,7 +182,9 @@ impl AssetStore {
             match metadata {
                 Ok(metadata) => {
                     if let Some(metadata) = &metadata {
-                        *sidecar_ids.entry(metadata.id.clone()).or_default() += 1;
+                        for interpretation in metadata {
+                            *sidecar_ids.entry(interpretation.id.clone()).or_default() += 1;
+                        }
                     }
                     candidates.push((source, importer, metadata));
                 }
@@ -176,40 +235,26 @@ impl AssetStore {
         &mut self,
         source: &str,
         importer: Importer,
-        metadata: Option<Metadata>,
+        metadata: Option<Vec<Metadata>>,
         sidecar_ids: &BTreeMap<String, usize>,
         refresh: bool,
         active: &impl Fn() -> bool,
     ) -> Result<(), AssetError> {
-        let metadata = if let Some(metadata) = metadata {
-            if sidecar_ids[&metadata.id] > 1 {
-                return Err(error(format!(
-                    "Duplicate sidecar asset ID {}.",
-                    metadata.id
-                )));
+        let registered = self.registered_interpretations(source);
+        let old_metadata = metadata;
+        let mut metadata = old_metadata.clone().unwrap_or_default();
+        for entry in registered {
+            if !metadata.iter().any(|old| old.id == entry.id) {
+                if sidecar_ids.contains_key(&entry.id) {
+                    return Err(error(format!("Duplicate sidecar asset ID {}.", entry.id)));
+                }
+                metadata.push(entry);
             }
-            metadata
-        } else {
-            // An existing manual interpretation remains authoritative until
-            // migrated, including multiple IDs for the same source.
-            if self
-                .registry
-                .assets
-                .values()
-                .any(|asset| asset.source == source)
-                || self
-                    .registry
-                    .models
-                    .values()
-                    .any(|model| model.source == source)
-            {
-                return Ok(());
-            }
+        }
+        if metadata.is_empty() {
             if self.awaiting_moved_sidecar(source, importer)? {
                 return Err(error("Move the asset's sidecar next to the source."));
             }
-            let path = confined_path(&self.root, source, false)?;
-            let sidecar = sidecar_path(&path);
             let hash = digest(source.as_bytes());
             let base = format!("asset-{}", &hash[..24]);
             let mut id = base.clone();
@@ -222,37 +267,157 @@ impl AssetStore {
                 }
                 id = format!("{base}-{suffix}");
             }
+            metadata.push(importer.metadata(id));
+        }
+        let previous = self.verify_sidecar(source, importer, &metadata, sidecar_ids)?;
+        let path = confined_path(&self.root, source, false)?;
+        let sidecar = sidecar_path(&path);
+        if old_metadata.as_ref() != Some(&metadata) {
+            if previous.is_some() {
+                return Err(error(
+                    "The destination has other registered imports. Move to a new source path.",
+                ));
+            }
             self.with_current_catalog(|| {
                 if !active() {
                     return Err(error("Project closed during import."));
                 }
-                write_metadata(&sidecar, &importer.metadata(id))
+                write_metadata(&sidecar, old_metadata.as_deref(), &metadata)
             })?;
-            load_metadata(&sidecar)?
-        };
+        }
+        let refresh = refresh || previous.is_some();
+        if let Some(previous) = previous {
+            self.relocate_source(&previous, source, importer, &metadata, active)?;
+        }
+
+        let mut failures = Vec::new();
+        for interpretation in metadata {
+            if !active() {
+                break;
+            }
+            if let Err(error) =
+                self.reconcile_interpretation(source, importer, interpretation, refresh, active)
+            {
+                failures.push(error.to_string());
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(error(failures.join(", ")))
+        }
+    }
+
+    fn registered_interpretations(&self, source: &str) -> Vec<Metadata> {
+        self.registry
+            .assets
+            .iter()
+            .filter(|(_, record)| record.source == source)
+            .map(|(id, record)| Metadata {
+                id: id.clone(),
+                mesh_normal_policy: record.mesh_normal_policy,
+                texture_role: record.texture_role,
+            })
+            .chain(
+                self.registry
+                    .models
+                    .values()
+                    .filter(|record| record.source == source)
+                    .map(|record| Importer::Model.metadata(record.id.clone())),
+            )
+            .collect()
+    }
+
+    fn verify_sidecar(
+        &self,
+        source: &str,
+        importer: Importer,
+        metadata: &[Metadata],
+        sidecar_ids: &BTreeMap<String, usize>,
+    ) -> Result<Option<String>, AssetError> {
+        let mut settings_seen = BTreeSet::new();
+        let mut previous = None;
+        for entry in metadata {
+            if sidecar_ids.get(&entry.id).is_some_and(|count| *count > 1) {
+                return Err(error(format!("Duplicate sidecar asset ID {}.", entry.id)));
+            }
+            let registered_source = match importer {
+                Importer::Asset(kind) => {
+                    let mode = settings(kind, entry)?;
+                    if !settings_seen.insert(mode) {
+                        return Err(error("Multiple asset IDs use the same import settings."));
+                    }
+                    if self.registry.models.contains_key(&entry.id) {
+                        return Err(existing_asset_id(&entry.id));
+                    }
+                    if let Some(record) = self.registry.assets.get(&entry.id) {
+                        if record.kind != kind {
+                            return Err(existing_asset_id(&entry.id));
+                        }
+                        if (record.mesh_normal_policy, record.texture_role) != mode {
+                            return Err(error(
+                                "Sidecar import settings differ from the accepted catalog.",
+                            ));
+                        }
+                        Some(record.source.as_str())
+                    } else {
+                        None
+                    }
+                }
+                Importer::Model => {
+                    if metadata.len() != 1
+                        || entry.mesh_normal_policy.is_some()
+                        || entry.texture_role.is_some()
+                    {
+                        return Err(error("GLB requires one ID without OBJ or PNG settings."));
+                    }
+                    if self.registry.assets.contains_key(&entry.id) {
+                        return Err(existing_asset_id(&entry.id));
+                    }
+                    self.registry
+                        .models
+                        .get(&entry.id)
+                        .map(|model| model.source.as_str())
+                }
+            };
+            if let Some(registered_source) = registered_source.filter(|path| *path != source) {
+                if previous.is_some_and(|previous| previous != registered_source) {
+                    return Err(error(
+                        "One sidecar cannot move IDs from different source files.",
+                    ));
+                }
+                previous = Some(registered_source);
+            }
+        }
+        if let Some(previous) = previous {
+            let all_registered = self.registered_interpretations(previous);
+            if all_registered
+                .iter()
+                .any(|registered| !metadata.iter().any(|entry| entry.id == registered.id))
+            {
+                return Err(error(
+                    "The moved sidecar must contain every registered import of its source.",
+                ));
+            }
+        }
+        Ok(previous.map(str::to_owned))
+    }
+
+    fn reconcile_interpretation(
+        &mut self,
+        source: &str,
+        importer: Importer,
+        metadata: Metadata,
+        refresh: bool,
+        active: &impl Fn() -> bool,
+    ) -> Result<(), AssetError> {
         let mutation = match importer {
             Importer::Asset(kind) => {
                 let (policy, role) = settings(kind, &metadata)?;
-                if self.registry.models.contains_key(&metadata.id) {
-                    return Err(existing_asset_id(&metadata.id));
-                }
                 if let Some(record) = self.registry.assets.get(&metadata.id) {
-                    if record.kind != kind {
-                        return Err(existing_asset_id(&metadata.id));
-                    }
-                    if record.mesh_normal_policy != policy || record.texture_role != role {
-                        return Err(error(
-                            "Sidecar import settings differ from the accepted catalog.",
-                        ));
-                    }
-                    let moved = record.source != source;
-                    if moved {
-                        self.relocate_source(&metadata.id, source, importer, active)?;
-                    }
-                    let record = &self.registry.assets[&metadata.id];
                     let ready = self.infos[&metadata.id].status == AssetStatus::Ready;
                     if ready
-                        && (!(refresh || moved)
+                        && (!refresh
                             || record.hash.as_ref().is_some_and(|hash| {
                                 super::read_source_bytes(&self.root, source, kind)
                                     .is_ok_and(|bytes| digest(&bytes) == *hash)
@@ -281,17 +446,9 @@ impl AssetStore {
                 }
             }
             Importer::Model => {
-                if metadata.mesh_normal_policy.is_some() || metadata.texture_role.is_some() {
-                    return Err(error("OBJ and PNG settings do not apply to GLB."));
-                }
                 if let Some(model) = self.registry.models.get(&metadata.id) {
-                    if model.source != source {
-                        self.relocate_source(&metadata.id, source, importer, active)?;
-                    }
                     let path = confined_path(&self.root, source, false)?;
-                    if digest(&read_bounded(&path, super::MAX_GLB_SOURCE_BYTES)?)
-                        == self.registry.models[&metadata.id].hash
-                    {
+                    if digest(&read_bounded(&path, super::MAX_GLB_SOURCE_BYTES)?) == model.hash {
                         return Ok(());
                     }
                     AssetMutation::RefreshGlb { id: metadata.id }
@@ -308,15 +465,12 @@ impl AssetStore {
 
     fn awaiting_moved_sidecar(&self, source: &str, importer: Importer) -> Result<bool, AssetError> {
         let orphaned_sidecar = |id: &str, previous: &str| -> Result<bool, AssetError> {
-            if !previous.starts_with("Assets/") {
-                return Ok(false);
-            }
             let old = self.root.join(previous);
             Ok(is_missing(&old)?
                 && existing_metadata(&sidecar_path(&old))
                     .ok()
                     .flatten()
-                    .is_some_and(|metadata| metadata.id == id))
+                    .is_some_and(|entries| entries.iter().any(|metadata| metadata.id == id)))
         };
         let mut orphaned = Vec::new();
         match importer {
@@ -350,34 +504,35 @@ impl AssetStore {
 
     fn relocate_source(
         &mut self,
-        id: &str,
+        previous: &str,
         destination: &str,
         importer: Importer,
+        metadata: &[Metadata],
         active: &impl Fn() -> bool,
     ) -> Result<(), AssetError> {
         let _lock = self.guard(self.revision())?;
-        let previous = match importer {
-            Importer::Asset(_) => &self.registry.assets[id].source,
-            Importer::Model => &self.registry.models[id].source,
-        };
-        if !previous.starts_with("Assets/") {
-            return Err(existing_asset_id(id));
-        }
         let old = self.root.join(previous);
         if !is_missing(&old)? || !is_missing(&sidecar_path(&old))? {
-            return Err(existing_asset_id(id));
+            return Err(existing_asset_id(&metadata[0].id));
         }
         let new = confined_path(&self.root, destination, false)?;
-        if load_metadata(&sidecar_path(&new))?.id != id || !active() {
+        if load_metadata(&sidecar_path(&new))? != metadata || !active() {
             return Err(error("The asset or project changed during the move."));
         }
         let mut registry = self.registry.clone();
-        match importer {
-            Importer::Asset(_) => {
-                registry.assets.get_mut(id).expect("existing asset").source = destination.into();
-            }
-            Importer::Model => {
-                registry.models.get_mut(id).expect("existing model").source = destination.into();
+        for entry in metadata {
+            let path = match importer {
+                Importer::Asset(_) => registry
+                    .assets
+                    .get_mut(&entry.id)
+                    .map(|asset| &mut asset.source),
+                Importer::Model => registry
+                    .models
+                    .get_mut(&entry.id)
+                    .map(|model| &mut model.source),
+            };
+            if let Some(path) = path.filter(|path| path.as_str() == previous) {
+                *path = destination.into();
             }
         }
         validate_registry(&registry)?;
@@ -387,8 +542,10 @@ impl AssetStore {
         }
         atomic_write(&self.root, &self.root.join(REGISTRY), &prepared.bytes)?;
         self.install_registry(prepared);
-        if let Some(info) = self.infos.get_mut(id) {
-            Arc::make_mut(info).source = destination.into();
+        for entry in metadata {
+            if let Some(info) = self.infos.get_mut(&entry.id) {
+                Arc::make_mut(info).source = destination.into();
+            }
         }
         Ok(())
     }
@@ -458,7 +615,7 @@ fn sidecar_path(source: &Path) -> PathBuf {
     path.into()
 }
 
-fn existing_metadata(path: &Path) -> Result<Option<Metadata>, AssetError> {
+fn existing_metadata(path: &Path) -> Result<Option<Vec<Metadata>>, AssetError> {
     match fs::symlink_metadata(path) {
         Ok(_) => load_metadata(path).map(Some),
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
@@ -466,25 +623,55 @@ fn existing_metadata(path: &Path) -> Result<Option<Metadata>, AssetError> {
     }
 }
 
-fn load_metadata(path: &Path) -> Result<Metadata, AssetError> {
-    let metadata: Metadata = serde_json::from_slice(&read_bounded(path, 4096)?)?;
-    validate_id(&metadata.id)?;
-    Ok(metadata)
+fn load_metadata(path: &Path) -> Result<Vec<Metadata>, AssetError> {
+    let imports = match serde_json::from_slice(&read_bounded(path, 4096)?)? {
+        Sidecar::Single(metadata) => vec![metadata],
+        Sidecar::Multiple(list) => list.imports,
+    };
+    if imports.is_empty() {
+        return Err(error("A sidecar needs at least one import."));
+    }
+    let mut ids = BTreeSet::new();
+    for metadata in &imports {
+        validate_id(&metadata.id)?;
+        if !ids.insert(metadata.id.as_str()) {
+            return Err(error(format!(
+                "Duplicate sidecar asset ID {}.",
+                metadata.id
+            )));
+        }
+    }
+    Ok(imports)
 }
 
-fn write_metadata(path: &Path, metadata: &Metadata) -> Result<(), AssetError> {
+fn write_metadata(
+    path: &Path,
+    previous: Option<&[Metadata]>,
+    metadata: &[Metadata],
+) -> Result<(), AssetError> {
     let parent = path
         .parent()
         .ok_or_else(|| error("Missing asset directory."))?;
+    let mut bytes = match metadata {
+        [entry] => serde_json::to_vec_pretty(entry)?,
+        entries => serde_json::to_vec_pretty(&ImportList {
+            imports: entries.to_vec(),
+        })?,
+    };
+    bytes.push(b'\n');
     let mut file = tempfile::NamedTempFile::new_in(parent)?;
-    serde_json::to_writer_pretty(&mut file, metadata)?;
-    file.write_all(b"\n")?;
+    file.write_all(&bytes)?;
     file.as_file().sync_all()?;
-    match file.persist_noclobber(path) {
-        Ok(_) => Ok(()),
-        Err(failure) if failure.error.kind() == ErrorKind::AlreadyExists => Ok(()),
-        Err(failure) => Err(failure.error.into()),
+    if existing_metadata(path)?.as_deref() != previous {
+        return Err(error("Asset sidecar changed; retry on the next scan."));
     }
+    if previous.is_some() {
+        file.persist(path).map_err(|failure| failure.error)?;
+    } else {
+        file.persist_noclobber(path)
+            .map_err(|failure| failure.error)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -555,7 +742,7 @@ mod tests {
         assert!(
             collision
                 .iter()
-                .any(|message| message.contains("already belongs")),
+                .any(|message| message.contains("Duplicate sidecar asset ID")),
             "{collision:?}"
         );
         assert_eq!(store.asset_info(&record.id).unwrap().source, record.source);
@@ -576,6 +763,128 @@ mod tests {
                 .source,
             "Assets/After.obj"
         );
+    }
+
+    #[test]
+    fn migration_does_not_copy_an_id_claimed_by_another_sidecar() {
+        let root = tempfile::tempdir().unwrap();
+        let assets = root.path().join("Assets");
+        fs::create_dir(&assets).unwrap();
+        fs::write(assets.join("Original.obj"), OBJ).unwrap();
+        fs::write(assets.join("Duplicate.obj"), OBJ).unwrap();
+        let mut store = AssetStore::open(root.path()).unwrap();
+        let accepted = store.import("original", "Assets/Original.obj").unwrap();
+        let duplicate = assets.join("Duplicate.obj.rotmeta");
+        let metadata = Metadata {
+            id: accepted.id.clone(),
+            mesh_normal_policy: Some(MeshNormalPolicy::Flat),
+            texture_role: None,
+        };
+        write_metadata(&duplicate, None, &[metadata]).unwrap();
+        let before = fs::read(root.path().join(REGISTRY)).unwrap();
+
+        let (migrated, diagnostics) = AssetStore::open_project(root.path()).unwrap();
+        assert!(!assets.join("Original.obj.rotmeta").exists());
+        assert_eq!(migrated.asset_info(&accepted.id), Some(&accepted));
+        assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), before);
+        assert!(diagnostics
+            .iter()
+            .any(|line| line.contains("Duplicate sidecar asset ID")));
+
+        fs::remove_file(duplicate).unwrap();
+        fs::remove_file(assets.join("Duplicate.obj")).unwrap();
+        let (migrated, diagnostics) = AssetStore::open_project(root.path()).unwrap();
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(
+            load_metadata(&assets.join("Original.obj.rotmeta")).unwrap()[0].id,
+            accepted.id
+        );
+        assert_eq!(migrated.asset_info(&accepted.id), Some(&accepted));
+    }
+
+    #[test]
+    fn legacy_imports_keep_all_ids_when_migrated_moved_and_rebuilt() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        let folder = root.join("Assets");
+        fs::create_dir(&folder).unwrap();
+        let obj = folder.join("Legacy.obj");
+        fs::write(&obj, OBJ).unwrap();
+        let model = root.join("Legacy.glb");
+        fs::write(&model, crate::fixtures::animated_glb(Default::default())).unwrap();
+        let mut old = AssetStore::open(root).unwrap();
+        old.import_mesh("flat-id", "Assets/Legacy.obj", MeshNormalPolicy::Flat)
+            .unwrap();
+        old.import_mesh(
+            "normals-id",
+            "Assets/Legacy.obj",
+            MeshNormalPolicy::AuthoredWhenComplete,
+        )
+        .unwrap();
+        let accepted_model = old
+            .import_glb_at(old.revision(), "animated-id", "Legacy.glb")
+            .unwrap();
+        drop(old);
+        // A project that already has metadata for one interpretation can
+        // acquire the remaining catalog IDs without replacing the first.
+        let first = Metadata {
+            id: "flat-id".into(),
+            mesh_normal_policy: Some(MeshNormalPolicy::Flat),
+            texture_role: None,
+        };
+        write_metadata(&sidecar_path(&obj), None, std::slice::from_ref(&first)).unwrap();
+        let before = fs::read(root.join(REGISTRY)).unwrap();
+        let (mut migrated, diagnostics) = AssetStore::open_project(root).unwrap();
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(fs::read(root.join(REGISTRY)).unwrap(), before);
+        let migrated_imports = load_metadata(&sidecar_path(&obj)).unwrap();
+        assert_eq!(migrated_imports[0], first);
+        assert_eq!(migrated_imports.len(), 2);
+        assert_eq!(migrated_imports[1].id, "normals-id");
+        assert_eq!(
+            load_metadata(&sidecar_path(&model)).unwrap()[0].id,
+            "animated-id"
+        );
+
+        let destination = folder.join("Moved.obj");
+        let changed = [PathBuf::from("Assets")].into_iter().collect();
+        fs::rename(sidecar_path(&obj), sidecar_path(&destination)).unwrap();
+        let between = migrated.update_project_files(&changed, || true);
+        assert!(between
+            .iter()
+            .any(|message| message.contains("Duplicate sidecar asset ID")));
+        assert!(is_missing(&sidecar_path(&obj)).unwrap());
+        fs::rename(&obj, &destination).unwrap();
+        let moved_model = folder.join("Moved.glb");
+        fs::rename(&model, &moved_model).unwrap();
+        fs::rename(sidecar_path(&model), sidecar_path(&moved_model)).unwrap();
+        let diagnostics = migrated.update_project_files(&changed, || true);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        for id in ["flat-id", "normals-id"] {
+            assert_eq!(migrated.asset_info(id).unwrap().source, "Assets/Moved.obj");
+        }
+        let mut expected_model = accepted_model;
+        expected_model.source = "Assets/Moved.glb".into();
+        assert_eq!(migrated.model("animated-id"), Some(&expected_model));
+        drop(migrated);
+
+        fs::remove_file(root.join(REGISTRY)).unwrap();
+        fs::remove_dir_all(root.join(".rot-cache")).unwrap();
+        fs::remove_dir_all(root.join(".rot-models")).unwrap();
+        let (rebuilt, diagnostics) = AssetStore::open_project(root).unwrap();
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(
+            rebuilt.asset_info("flat-id").unwrap().mesh_normal_policy,
+            Some(MeshNormalPolicy::Flat)
+        );
+        assert_eq!(
+            rebuilt.asset_info("normals-id").unwrap().mesh_normal_policy,
+            Some(MeshNormalPolicy::AuthoredWhenComplete)
+        );
+        assert_eq!(rebuilt.model("animated-id"), Some(&expected_model));
+        for clip in expected_model.clips.values() {
+            assert!(rebuilt.clip(&clip.id).is_some());
+        }
     }
 
     #[test]
@@ -611,7 +920,12 @@ mod tests {
 
         let (store, diagnostics) = AssetStore::open_project(root.path()).unwrap();
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-        let id = |name: &str| load_metadata(&sidecar_path(&folder.join(name))).unwrap().id;
+        let id = |name: &str| {
+            load_metadata(&sidecar_path(&folder.join(name)))
+                .unwrap()
+                .remove(0)
+                .id
+        };
         assert!(store.texture(&id("pixel.png")).is_some());
         assert!(store.sound(&id("tone.wav")).is_some());
         assert_eq!(store.model(&id("animated.glb")).unwrap().clips.len(), 1);

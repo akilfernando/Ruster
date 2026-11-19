@@ -25,7 +25,10 @@ project's `Assets/` folder. Opening the scene imports supported files in
 that folder and its subfolders. On Linux the open editor also picks up file
 additions, edits, and moves. Move the generated `.rotmeta` file with its
 source to keep existing references. Put both files in version control so the
-asset ID survives a cache rebuild.
+asset ID survives a cache rebuild. Existing registered sources receive
+sidecars with all their accepted import settings. Move older source files
+and their sidecars into `Assets/` so the editor can discover them when
+rebuilding the catalog.
 
 To assign a mesh, select an object and choose its file in **Mesh Renderer →
 Geometry**. Click **Apply**, then save the scene.
