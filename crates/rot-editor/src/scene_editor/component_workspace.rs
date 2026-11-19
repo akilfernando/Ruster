@@ -1,5 +1,6 @@
 //! The editor owns v23 scenes through ComponentSession. The viewport receives
 //! a disposable projection and cannot change the authored document.
+use super::{project_picker, OpenedScene};
 use crate::editor_theme;
 use crate::strings::Text;
 use crate::ui_kit::tokens::{ROW_HEIGHT, SPACE_XS};
@@ -18,31 +19,6 @@ pub(super) fn check_launch() -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn run(path: PathBuf, session: ComponentSession) -> Result<(), String> {
-    check_launch()?;
-    let mut editor = ComponentWorkspace::new(path, session);
-    editor.adopt_workspace(Workspace::load());
-    eframe::run_native(
-        "Rot Engine Editor",
-        super::scene_native_options(),
-        Box::new(move |context| {
-            editor_theme::configure(&context.egui_ctx);
-            let prefs = &editor.workspace.prefs;
-            editor_theme::apply(
-                &context.egui_ctx,
-                prefs.theme,
-                prefs.style.unwrap_or_default(),
-            );
-            context.egui_ctx.set_zoom_factor(prefs.scale);
-            if let Some(render) = &context.wgpu_render_state {
-                editor.set_metrics(Some(rot_render::install(render)));
-            }
-            Ok(Box::new(editor))
-        }),
-    )
-    .map_err(|error| error.to_string())
-}
-
 pub(super) struct ComponentWorkspace {
     session: ComponentSession,
     path: PathBuf,
@@ -55,6 +31,10 @@ pub(super) struct ComponentWorkspace {
     selected_index: Option<usize>,
     draft: Option<ObjectNode>,
     error: Option<String>,
+    open_path: Option<String>,
+    open_focused: bool,
+    #[cfg(target_os = "linux")]
+    browser: project_picker::FileBrowser,
     close_pending: bool,
     close_approved: bool,
 }
@@ -96,6 +76,10 @@ impl ComponentWorkspace {
             selected_index: None,
             draft: None,
             error,
+            open_path: None,
+            open_focused: false,
+            #[cfg(target_os = "linux")]
+            browser: Default::default(),
             close_pending: false,
             close_approved: false,
         };
@@ -118,6 +102,23 @@ impl ComponentWorkspace {
         workspace.remember(&self.path);
         workspace.flush();
         self.workspace = workspace;
+    }
+
+    pub(super) fn take_workspace(&mut self) -> Workspace {
+        std::mem::replace(&mut self.workspace, Workspace::detached())
+    }
+
+    fn open_document(&mut self, path: &std::path::Path, save: bool) -> Option<OpenedScene> {
+        if save && !self.save() {
+            return None;
+        }
+        match OpenedScene::open(path) {
+            Ok(document) => Some(document),
+            Err(error) => {
+                self.error = Some(error.to_string());
+                None
+            }
+        }
     }
 
     fn select(&mut self, id: Option<String>) {
@@ -177,6 +178,12 @@ impl ComponentWorkspace {
     fn command(&mut self, action: Action) {
         let revision = self.session.revision();
         let result = match action {
+            Action::Open => {
+                self.open_path = Some(String::new());
+                self.open_focused = false;
+                self.error = None;
+                return;
+            }
             Action::Save => {
                 self.save();
                 return;
@@ -234,23 +241,28 @@ fn hierarchy_rows(objects: &[ObjectNode]) -> Vec<(usize, usize)> {
     rows
 }
 
-impl eframe::App for ComponentWorkspace {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+impl ComponentWorkspace {
+    pub(super) fn show(&mut self, ui: &mut egui::Ui) -> Option<OpenedScene> {
         let ctx = ui.ctx().clone();
         if !self.close_approved
             && (self.session.is_dirty() || self.draft_dirty())
             && ctx.input(|input| input.viewport().close_requested())
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.open_path = None;
             self.close_pending = true;
         }
-        if let Some(action) = self.workspace.shortcuts(&ctx, self.close_pending) {
+        if let Some(action) = self
+            .workspace
+            .shortcuts(&ctx, self.close_pending || self.open_path.is_some())
+        {
             self.command(action);
         }
         egui::Panel::top("component_menu").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 editor_theme::text_menu(ui, Text::ComponentFileMenu.plain(), |ui| {
-                    self.menu_action(ui, Action::Save)
+                    self.menu_action(ui, Action::Open);
+                    self.menu_action(ui, Action::Save);
                 });
                 editor_theme::text_menu(ui, Text::ComponentEditMenu.plain(), |ui| {
                     self.menu_action(ui, Action::Undo);
@@ -338,6 +350,7 @@ impl eframe::App for ComponentWorkspace {
                 self.apply();
             }
             if !self.close_pending
+                && self.open_path.is_none()
                 && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
             {
                 self.select(self.draft.as_ref().map(|object| object.id.clone()));
@@ -362,6 +375,82 @@ impl eframe::App for ComponentWorkspace {
                 ui.colored_label(editor_theme::colors(ui).error, error.to_string());
             }
         });
+        if let Some(mut path) = self.open_path.take() {
+            let mut cancel = false;
+            let mut opened = None;
+            egui::Modal::new(egui::Id::unique("component_open"))
+                .frame(editor_theme::dialog_frame(&ctx))
+                .show(&ctx, |ui| {
+                    ui.heading(Text::ComponentOpenScene.plain());
+                    let label = ui.label(Text::ComponentSceneFile.plain());
+                    let edit = ui.text_edit_singleline(&mut path).labelled_by(label.id);
+                    if !self.open_focused {
+                        edit.request_focus();
+                        self.open_focused = true;
+                    }
+                    #[cfg(target_os = "linux")]
+                    {
+                        let mut error = self.error.take().unwrap_or_default();
+                        self.browser.show(
+                            ui,
+                            &mut path,
+                            &mut error,
+                            project_picker::BrowseKind::OpenScene,
+                        );
+                        self.error = (!error.is_empty()).then_some(error);
+                    }
+                    cancel = ui.input_mut(|input| {
+                        input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                    });
+                    let submit = (edit.has_focus() || edit.lost_focus())
+                        && ui.input_mut(|input| {
+                            input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                        });
+                    let dirty = self.session.is_dirty() || self.draft_dirty();
+                    let target = std::path::Path::new(path.trim());
+                    let mut action = None;
+                    ui.horizontal_wrapped(|ui| {
+                        if dirty {
+                            ui.label(Text::ComponentUnsaved.plain());
+                        }
+                        ui.add_enabled_ui(!path.trim().is_empty(), |ui| {
+                            let primary = if dirty {
+                                Text::ComponentSaveOpen
+                            } else {
+                                Text::ComponentOpen
+                            };
+                            if editor_theme::primary_button(ui, primary.plain()).clicked() || submit
+                            {
+                                action = Some(dirty);
+                            }
+                            if dirty && ui.button(Text::ComponentDiscardOpen.plain()).clicked() {
+                                action = Some(false);
+                            }
+                        });
+                        cancel |= ui.button(Text::ComponentCancel.plain()).clicked();
+                    });
+                    if !cancel {
+                        if let Some(save) = action {
+                            if !path.trim().is_empty() {
+                                opened = self.open_document(target, save);
+                            }
+                        }
+                    }
+                    if let Some(error) = &self.error {
+                        ui.colored_label(editor_theme::colors(ui).error, error);
+                    }
+                });
+            if !cancel && opened.is_none() {
+                self.open_path = Some(path);
+            } else {
+                #[cfg(target_os = "linux")]
+                {
+                    self.browser = Default::default();
+                }
+                self.error = None;
+            }
+            return opened;
+        }
         if self.close_pending {
             egui::Modal::new(egui::Id::unique("component_close"))
                 .frame(editor_theme::dialog_frame(&ctx))
@@ -383,6 +472,7 @@ impl eframe::App for ComponentWorkspace {
                     }
                 });
         }
+        None
     }
 }
 
@@ -390,6 +480,43 @@ impl eframe::App for ComponentWorkspace {
 mod tests {
     use super::*;
     use rot_scene::{component_scene::ComponentScene, Session};
+
+    #[test]
+    fn switching_documents_preserves_edits_until_save_or_discard() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source.json");
+        let destination = directory.path().join("destination.json");
+        let mut legacy = Session::new(Scene::demo()).unwrap();
+        legacy.save(&destination).unwrap();
+        ComponentScene::from_legacy(&legacy)
+            .unwrap()
+            .save_new(&source)
+            .unwrap();
+        let original = std::fs::read(&source).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(source.clone(), ComponentSession::open(&source).unwrap());
+
+        editor.draft.as_mut().unwrap().name.clear();
+        assert!(editor.open_document(&destination, true).is_none());
+        assert!(editor.draft_dirty());
+        assert_eq!(std::fs::read(&source).unwrap(), original);
+
+        let missing = directory.path().join("missing.json");
+        assert!(editor.open_document(&missing, false).is_none());
+        assert!(editor.draft_dirty());
+        assert!(matches!(
+            editor.open_document(&destination, false),
+            Some(OpenedScene::Legacy(_))
+        ));
+        assert_eq!(std::fs::read(&source).unwrap(), original);
+
+        editor.draft.as_mut().unwrap().name = "Changed".into();
+        let Some(OpenedScene::Components(_, reopened)) = editor.open_document(&source, true) else {
+            panic!("v23 document");
+        };
+        assert_eq!(reopened.scene().objects[0].name, "Changed");
+        assert!(!reopened.is_dirty());
+    }
 
     #[test]
     fn native_v23_commands_apply_undo_redo_and_reopen() {

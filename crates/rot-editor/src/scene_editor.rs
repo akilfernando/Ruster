@@ -1847,6 +1847,7 @@ impl SceneEditor {
                 self.retire_root_assets();
                 next.asset_ops = std::mem::take(&mut self.asset_ops);
                 next.asset_ops.fresh_root_adopted();
+                next.navigation.metrics = self.navigation.metrics.clone();
                 if let Some(component) = &mut next.component {
                     component.adopt_workspace(std::mem::replace(
                         &mut next.workspace,
@@ -5514,7 +5515,13 @@ impl eframe::App for Host {
     }
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         if let Some(component) = &mut self.editor.component {
-            eframe::App::ui(component.as_mut(), ui, frame);
+            if let Some(document) = component.show(ui) {
+                self.editor.workspace = component.take_workspace();
+                self.editor.component = None;
+                self.input = Default::default();
+                self.editor.open_document(document);
+                ui.ctx().request_repaint();
+            }
             return;
         }
         self.editor.navigation.frame_cpu_seconds = frame.info().cpu_usage;
@@ -5576,12 +5583,24 @@ pub fn run_empty() -> Result<(), String> {
     run_session(
         Session::new(Scene::authored_empty("untitled")).map_err(|e| e.to_string())?,
         true,
+        None,
     )
 }
 pub fn run(path: PathBuf) -> Result<(), String> {
     match OpenedScene::open(&path).map_err(|error| error.to_string())? {
-        OpenedScene::Legacy(session) => run_session(*session, false),
-        OpenedScene::Components(path, session) => component_workspace::run(path, *session),
+        OpenedScene::Legacy(session) => run_session(*session, false, None),
+        OpenedScene::Components(path, session) => {
+            component_workspace::check_launch()?;
+            let empty = Session::new(Scene::authored_empty("untitled"))
+                .map_err(|error| error.to_string())?;
+            run_session(
+                empty,
+                false,
+                Some(Box::new(component_workspace::ComponentWorkspace::new(
+                    path, *session,
+                ))),
+            )
+        }
     }
 }
 
@@ -5622,7 +5641,11 @@ fn scene_native_options() -> eframe::NativeOptions {
     }
 }
 
-fn run_session(session: Session, startup_projects: bool) -> Result<(), String> {
+fn run_session(
+    session: Session,
+    startup_projects: bool,
+    component: Option<Box<component_workspace::ComponentWorkspace>>,
+) -> Result<(), String> {
     #[cfg(unix)]
     let bootstrap = if std::env::var_os("ROT_PROJECT_STARTUP").is_some() {
         let raw = std::env::var("ROT_PROJECT_BOOTSTRAP").map_err(|e| e.to_string())?;
@@ -5691,6 +5714,15 @@ fn run_session(session: Session, startup_projects: bool) -> Result<(), String> {
                     editor.render = cc.wgpu_render_state.clone();
                     // Paint the saved theme from the first frame.
                     editor.apply_theme(&cc.egui_ctx);
+                    if let Some(mut component) = component {
+                        cc.egui_ctx.set_zoom_factor(editor.workspace.prefs.scale);
+                        component.set_metrics(editor.navigation.metrics.clone());
+                        component.adopt_workspace(std::mem::replace(
+                            &mut editor.workspace,
+                            Workspace::detached(),
+                        ));
+                        editor.component = Some(component);
+                    }
                     editor
                 },
                 #[cfg(unix)]

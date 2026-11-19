@@ -43,12 +43,18 @@ pub enum Text {
     ComponentSaveClose,
     ComponentDiscardClose,
     ComponentCancel,
+    ComponentOpenScene,
+    ComponentSceneFile,
+    ComponentOpen,
+    ComponentSaveOpen,
+    ComponentDiscardOpen,
+
     ComponentConnectionUnavailable,
 }
 
 impl Text {
     #[cfg(test)]
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 41] = [
         Self::Welcome,
         Self::NoRecentProjects,
         Self::EmptyHierarchy,
@@ -84,6 +90,11 @@ impl Text {
         Self::ComponentSaveClose,
         Self::ComponentDiscardClose,
         Self::ComponentCancel,
+        Self::ComponentOpenScene,
+        Self::ComponentSceneFile,
+        Self::ComponentOpen,
+        Self::ComponentSaveOpen,
+        Self::ComponentDiscardOpen,
         Self::ComponentConnectionUnavailable,
     ];
 
@@ -124,6 +135,12 @@ impl Text {
             Self::ComponentSaveClose => "Save and Close",
             Self::ComponentDiscardClose => "Discard and Close",
             Self::ComponentCancel => "Cancel",
+            Self::ComponentOpenScene => "Open Scene",
+            Self::ComponentSceneFile => "Scene File",
+            Self::ComponentOpen => "Open",
+            Self::ComponentSaveOpen => "Save and Open",
+            Self::ComponentDiscardOpen => "Discard and Open",
+
             Self::ComponentConnectionUnavailable => {
                 "AI connection is unavailable for this scene format."
             }

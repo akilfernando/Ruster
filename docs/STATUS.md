@@ -38,8 +38,9 @@ C-02 preserves authored content during migration, supports grouped object
 edits and Undo/Redo, and resolves a 5,000-object chain over 1 MiB. The native
 `rot-editor --scene` route opens v23 and can inspect objects, edit name,
 enabled state and position, undo, redo, and save in v23. The Project Hub
-and legacy editor’s File → Open also open v23 directly. Switching from the
-v23 workspace, automatic upgrades and remaining editor tools are open.
+and File → Open can open both formats. Switching away from a modified v23
+scene offers Save, Discard and Cancel. Automatic upgrades and remaining
+editor tools are open.
 
 The standalone viewer, headless behavior CLI and packaged Motion Lab
 read supported v23 scenes through temporary projections. General component
