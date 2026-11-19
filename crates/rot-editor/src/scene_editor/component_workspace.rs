@@ -38,6 +38,9 @@ use asset_panel::AssetDrag;
 #[path = "component_asset_writes.rs"]
 pub(super) mod asset_writes;
 
+#[path = "component_model_placement.rs"]
+mod model_placement;
+
 const RUNTIME_GENERATION: u64 = 1;
 
 struct HierarchyDrag {
@@ -1527,10 +1530,9 @@ impl ComponentWorkspace {
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 ui.heading(Text::ComponentInspector.plain());
-                if let Some(id) = &self.asset_browser.selected {
-                    let can_place =
-                        !blocked && !self.runtime.in_play_mode() && self.meshes.contains_key(id);
-                    if let Some(asset) = self.asset_browser.inspect(ui, can_place) {
+                if self.asset_browser.selected.is_some() {
+                    let can_place = !blocked && !self.runtime.in_play_mode();
+                    if let Some(asset) = self.asset_browser.inspect(ui, &self.meshes, can_place) {
                         self.place_asset(&asset, None);
                     }
                     return;

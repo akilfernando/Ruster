@@ -49,6 +49,13 @@ recover the asset and its existing references.
 To assign a mesh to an existing object, select the object and choose its file
 in **Mesh Renderer → Geometry**. Click **Apply**, then save the scene.
 
+Double-click an imported GLB or choose **Place in Scene** to create an
+editable hierarchy. Placement copies the node names, local transforms, and
+materials into the scene. Any supported transform animation starts with the
+first imported clip. Place, Undo, and Redo operate on the hierarchy and its
+materials together. An approved MCP client can use `scene_model_place` with
+the model ID and current asset revision.
+
 An approved MCP client can inspect the current catalog with `asset_inspect`,
 then call `asset_import` or `asset_refresh` with its current asset revision.
 Use project-relative paths. Sources in `Assets/` already picked up by the

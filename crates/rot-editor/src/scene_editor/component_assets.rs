@@ -38,6 +38,7 @@ struct AssetRow {
     folder: PathBuf,
     kind: &'static str,
     settings: Option<&'static str>,
+    model: bool,
     status: AssetStatus,
     diagnostic: Option<String>,
 }
@@ -57,9 +58,14 @@ impl AssetRow {
             folder: path.parent().unwrap_or(Path::new("")).to_owned(),
             kind,
             settings: None,
+            model: false,
             status,
             diagnostic: None,
         }
+    }
+
+    fn can_place(&self, meshes: &rot_app::MeshMap) -> bool {
+        self.model || self.kind == "Mesh" && meshes.contains_key(&self.id)
     }
 
     fn status_label(&self) -> &'static str {
@@ -284,11 +290,11 @@ impl Browser {
             };
             self.rows.push(row);
         }
-        self.rows.extend(
-            assets
-                .models()
-                .map(|model| AssetRow::new(&model.id, &model.source, "Model", AssetStatus::Ready)),
-        );
+        self.rows.extend(assets.models().map(|model| {
+            let mut row = AssetRow::new(&model.id, &model.source, "Model", AssetStatus::Ready);
+            row.model = true;
+            row
+        }));
         let mut issue_by_path: HashMap<_, _> = issues
             .iter()
             .map(|issue| (issue.path.as_str(), issue))
@@ -529,8 +535,7 @@ impl Browser {
                                     texture,
                                     self.selected.as_ref() == Some(&row.id),
                                 );
-                                let placeable =
-                                    can_place && row.kind == "Mesh" && meshes.contains_key(&row.id);
+                                let placeable = can_place && row.can_place(meshes);
                                 let drag = || {
                                     self.catalog.clone().map(|catalog| AssetDrag {
                                         catalog,
@@ -567,7 +572,12 @@ impl Browser {
         (selected, place)
     }
 
-    pub(super) fn inspect(&mut self, ui: &mut egui::Ui, can_place: bool) -> Option<AssetDrag> {
+    pub(super) fn inspect(
+        &mut self,
+        ui: &mut egui::Ui,
+        meshes: &rot_app::MeshMap,
+        can_place: bool,
+    ) -> Option<AssetDrag> {
         let row = &self.rows[*self.by_id.get(self.selected.as_ref()?)?];
         ui.strong(&row.label);
         ui.label(&row.source);
@@ -586,9 +596,12 @@ impl Browser {
                 self.context_action = Some(action);
             }
         });
-        if row.kind == "Mesh"
+        if (row.kind == "Mesh" || row.model)
             && ui
-                .add_enabled(can_place, egui::Button::new("Place in Scene"))
+                .add_enabled(
+                    can_place && row.can_place(meshes),
+                    egui::Button::new("Place in Scene"),
+                )
                 .clicked()
         {
             return Some(AssetDrag {
@@ -845,20 +858,29 @@ impl ComponentWorkspace {
         if self.runtime.in_play_mode() || !self.apply() {
             return;
         }
-        let Some(geometry) = drag.geometry(self.assets.as_ref(), &self.meshes) else {
+        let Some(store) = self
+            .assets
+            .as_ref()
+            .filter(|store| store.matches_identity(&drag.catalog))
+        else {
             self.error = Some("The asset changed. Select it and try again.".into());
             return;
         };
-        let row = &self.asset_browser.rows[self.asset_browser.by_id[&drag.id]];
-        let name = Path::new(&row.source)
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .unwrap_or(&row.id)
-            .to_owned();
-        match self.create_object(None, &name, Some(geometry), parent) {
-            Ok(_) => self.error = None,
-            Err(error) => self.error = Some(error.to_string()),
-        }
+        let result = if store.model(&drag.id).is_some() {
+            self.place_model(&drag.id, None, parent)
+        } else if let Some(geometry) = drag.geometry(Some(store), &self.meshes) {
+            let row = &self.asset_browser.rows[self.asset_browser.by_id[&drag.id]];
+            let name = Path::new(&row.source)
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or(&row.id)
+                .to_owned();
+            self.create_object(None, &name, Some(geometry), parent)
+        } else {
+            self.error = Some("The asset has no accepted mesh.".into());
+            return;
+        };
+        self.error = result.err().map(|error| error.to_string());
     }
 }
 

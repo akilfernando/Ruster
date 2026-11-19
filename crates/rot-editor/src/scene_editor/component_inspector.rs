@@ -230,9 +230,11 @@ fn mesh_fields(
                 }
             })
             .response;
-        if let Some(choice) =
-            super::component_workspace::asset_panel::AssetDrag::released(ui, &field)
-                .and_then(|drag| drag.geometry(assets, meshes))
+        use super::component_workspace::asset_panel::AssetDrag;
+        if let Some(choice) = field
+            .dnd_hover_payload::<AssetDrag>()
+            .and_then(|drag| drag.geometry(assets, meshes))
+            .filter(|_| AssetDrag::released(ui, &field).is_some())
         {
             *geometry = choice;
         }

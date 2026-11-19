@@ -1,7 +1,7 @@
 use super::{ComponentScene, ObjectHierarchy, ObjectNode};
-use crate::{SceneError, SceneLock, Transform};
+use crate::{OpaqueMaterial, SceneError, SceneLock, Transform};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
@@ -18,18 +18,31 @@ pub struct ComponentSession {
 }
 
 struct HistoryEntry {
-    changes: Vec<ObjectChange>,
+    changes: Vec<SceneChange>,
     state: u64,
 }
 
-enum ObjectChange {
-    Insert { index: usize, object: ObjectNode },
-    Remove { index: usize },
-    Replace { index: usize, object: ObjectNode },
+enum SceneChange {
+    Insert {
+        index: usize,
+        object: ObjectNode,
+    },
+    Remove {
+        index: usize,
+    },
+    Replace {
+        index: usize,
+        object: ObjectNode,
+    },
+    Material {
+        id: String,
+        value: Option<OpaqueMaterial>,
+    },
 }
 
-impl ObjectChange {
-    fn apply(self, objects: &mut Vec<ObjectNode>) -> Self {
+impl SceneChange {
+    fn apply(self, scene: &mut ComponentScene) -> Self {
+        let objects = &mut scene.objects;
         match self {
             Self::Insert { index, object } => {
                 objects.insert(index, object);
@@ -43,17 +56,27 @@ impl ObjectChange {
                 index,
                 object: std::mem::replace(&mut objects[index], object),
             },
+            Self::Material { id, value } => {
+                let previous = match value {
+                    Some(material) => scene.materials.insert(id.clone(), material),
+                    None => scene.materials.remove(&id),
+                };
+                Self::Material {
+                    id,
+                    value: previous,
+                }
+            }
         }
     }
 }
 
 fn apply_changes(
-    changes: impl IntoIterator<Item = ObjectChange>,
-    objects: &mut Vec<ObjectNode>,
-) -> Vec<ObjectChange> {
+    changes: impl IntoIterator<Item = SceneChange>,
+    scene: &mut ComponentScene,
+) -> Vec<SceneChange> {
     let mut inverse: Vec<_> = changes
         .into_iter()
-        .map(|change| change.apply(objects))
+        .map(|change| change.apply(scene))
         .collect();
     inverse.reverse();
     inverse
@@ -163,8 +186,8 @@ impl ComponentSession {
             .position(|node| node.id == object.id);
         let change = match index {
             Some(index) if self.scene.objects[index] == object => return Ok(self.revision),
-            Some(index) => ObjectChange::Replace { index, object },
-            None => ObjectChange::Insert {
+            Some(index) => SceneChange::Replace { index, object },
+            None => SceneChange::Insert {
                 index: self.scene.objects.len(),
                 object,
             },
@@ -179,6 +202,16 @@ impl ComponentSession {
         &mut self,
         expected: u64,
         objects: Vec<ObjectNode>,
+    ) -> Result<u64, SceneError> {
+        self.put_objects_with_materials(expected, objects, BTreeMap::new())
+    }
+
+    /// Commit a hierarchy and its new material copies together.
+    pub fn put_objects_with_materials(
+        &mut self,
+        expected: u64,
+        objects: Vec<ObjectNode>,
+        materials: BTreeMap<String, OpaqueMaterial>,
     ) -> Result<u64, SceneError> {
         self.check_revision(expected)?;
         let existing: HashMap<_, _> = self
@@ -199,12 +232,21 @@ impl ComponentSession {
         }
         let mut end = self.scene.objects.len();
         let mut changes = Vec::new();
+        for (id, material) in materials {
+            if self.scene.materials.contains_key(&id) {
+                return Err(SceneError::Invalid(format!("material {id} already exists")));
+            }
+            changes.push(SceneChange::Material {
+                id,
+                value: Some(material),
+            });
+        }
         for object in objects {
             match existing.get(object.id.as_str()).copied() {
                 Some(index) if self.scene.objects[index] == object => {}
-                Some(index) => changes.push(ObjectChange::Replace { index, object }),
+                Some(index) => changes.push(SceneChange::Replace { index, object }),
                 None => {
-                    changes.push(ObjectChange::Insert { index: end, object });
+                    changes.push(SceneChange::Insert { index: end, object });
                     end += 1;
                 }
             }
@@ -243,7 +285,7 @@ impl ComponentSession {
         let changes = indices
             .into_iter()
             .zip(moved)
-            .map(|(index, object)| ObjectChange::Replace { index, object });
+            .map(|(index, object)| SceneChange::Replace { index, object });
         self.commit(changes)
     }
 
@@ -301,11 +343,11 @@ impl ComponentSession {
         let remove = from_indices
             .into_iter()
             .rev()
-            .map(|index| ObjectChange::Remove { index });
+            .map(|index| SceneChange::Remove { index });
         let insert = moved
             .into_iter()
             .enumerate()
-            .map(|(offset, object)| ObjectChange::Insert {
+            .map(|(offset, object)| SceneChange::Insert {
                 index: destination + offset,
                 object,
             });
@@ -393,7 +435,7 @@ impl ComponentSession {
     pub fn remove_object(&mut self, expected: u64, id: &str) -> Result<u64, SceneError> {
         self.check_revision(expected)?;
         let index = self.object_index(id)?;
-        self.commit([ObjectChange::Remove { index }])
+        self.commit([SceneChange::Remove { index }])
     }
 
     /// Remove the object and its descendants in one edit. References from
@@ -421,7 +463,7 @@ impl ComponentSession {
             .into_iter()
             .enumerate()
             .rev()
-            .filter_map(|(index, remove)| remove.then_some(ObjectChange::Remove { index }));
+            .filter_map(|(index, remove)| remove.then_some(SceneChange::Remove { index }));
         self.commit(changes)
     }
 
@@ -438,16 +480,16 @@ impl ComponentSession {
 
     fn commit(
         &mut self,
-        changes: impl IntoIterator<Item = ObjectChange>,
+        changes: impl IntoIterator<Item = SceneChange>,
     ) -> Result<u64, SceneError> {
         let next = self
             .revision
             .checked_add(1)
             .ok_or(SceneError::RevisionOverflow)?;
-        let inverse = apply_changes(changes, &mut self.scene.objects);
+        let inverse = apply_changes(changes, &mut self.scene);
         if let Err(error) = self.scene.validate() {
             for change in inverse {
-                change.apply(&mut self.scene.objects);
+                change.apply(&mut self.scene);
             }
             return Err(error);
         }
@@ -482,7 +524,7 @@ impl ComponentSession {
         };
         let entry = from.pop().ok_or(empty)?;
         to.push(HistoryEntry {
-            changes: apply_changes(entry.changes, &mut self.scene.objects),
+            changes: apply_changes(entry.changes, &mut self.scene),
             state: std::mem::replace(&mut self.state, entry.state),
         });
         self.revision = next;

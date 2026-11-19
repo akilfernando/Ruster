@@ -150,6 +150,8 @@ impl ComponentWorkspace {
             return self.inspect_assets(args);
         }
         let expected_len = match op {
+            "scene_model_place" if map.contains_key("name") => 5,
+            "scene_model_place" => 4,
             "scene_mesh" => 5,
             "scene_create" if map.contains_key("primitive") => 5,
             "scene_create" | "scene_group_create" | "scene_transform" | "scene_rename"
@@ -181,6 +183,29 @@ impl ComponentWorkspace {
                 "drafts_pending",
                 "Finish the pending editor change first.".into(),
             ));
+        }
+
+        if op == "scene_model_place" {
+            let id = args["asset_id"].as_str().ok_or_else(invalid)?;
+            let name = args
+                .get("name")
+                .map(|name| name.as_str().ok_or_else(invalid))
+                .transpose()?;
+            let asset_revision = decimal(&args["expected_asset_revision"]).ok_or_else(invalid)?;
+            let store = self.assets.as_ref().ok_or_else(assets_unavailable)?;
+            if store.revision() != asset_revision {
+                return Err((
+                    "stale_asset_revision",
+                    "Inspect the project assets again.".into(),
+                ));
+            }
+            let root = self
+                .place_model(id, name, None)
+                .map_err(|error| ("model_placement_failed", error.to_string()))?;
+            return Ok(json!({
+                "root_id":root, "asset_id":id,
+                "asset_revision":asset_revision.to_string(), "changed":true, "dirty":self.session.is_dirty()
+            }));
         }
 
         if matches!(op, "scene_create" | "scene_group_create") {

@@ -5,6 +5,28 @@ use rot_scene::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+pub(super) fn imported_material(name: &str, source: &rot_assets::ModelMaterial) -> OpaqueMaterial {
+    OpaqueMaterial {
+        name: Some(name.to_owned()),
+        tint: source.base_color_factor,
+        base_color_texture: source.base_color_texture.clone(),
+        roughness_texture: None,
+        filter: if source.linear {
+            TextureFilter::Linear
+        } else {
+            TextureFilter::Nearest
+        },
+        address: if source.repeat {
+            TextureAddress::Repeat
+        } else {
+            TextureAddress::Clamp
+        },
+        response: MaterialResponse::Dielectric {
+            roughness: source.roughness,
+        },
+    }
+}
+
 /// Map the admitted source template to a scene-owned copy. Scene IDs are fresh
 /// for each placement and resource IDs remain shared across copies and refreshes.
 pub(super) fn model_placement(
@@ -49,26 +71,10 @@ pub(super) fn model_placement(
         .materials
         .iter()
         .map(|(name, source)| {
-            let material = OpaqueMaterial {
-                name: Some(name.clone()),
-                tint: source.base_color_factor,
-                base_color_texture: source.base_color_texture.clone(),
-                roughness_texture: None,
-                filter: if source.linear {
-                    TextureFilter::Linear
-                } else {
-                    TextureFilter::Nearest
-                },
-                address: if source.repeat {
-                    TextureAddress::Repeat
-                } else {
-                    TextureAddress::Clamp
-                },
-                response: MaterialResponse::Dielectric {
-                    roughness: source.roughness,
-                },
-            };
-            (material_ids[name.as_str()].clone(), material)
+            (
+                material_ids[name.as_str()].clone(),
+                imported_material(name, source),
+            )
         })
         .collect();
 
