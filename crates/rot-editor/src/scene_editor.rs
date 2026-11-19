@@ -20,6 +20,7 @@ mod combo_focus;
 #[cfg(target_os = "linux")]
 mod component_build;
 mod component_inspector;
+mod component_live;
 mod component_multi;
 mod component_view;
 mod component_workspace;

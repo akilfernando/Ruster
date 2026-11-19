@@ -1,8 +1,8 @@
 //! The editor owns v23 scenes through ComponentSession. The viewport receives
 //! a disposable projection and cannot change the authored document.
 use super::{
-    component_inspector, component_multi::MultiInspector, component_view::Flag, hud_interaction,
-    project_picker, OpenedScene,
+    component_inspector, component_live, component_multi::MultiInspector, component_view::Flag,
+    hud_interaction, project_picker, OpenedScene,
 };
 use crate::behavior_ui::{PlayShortcut, RuntimeSource, RuntimeUi};
 use crate::editor_theme;
@@ -153,6 +153,7 @@ pub(super) struct ComponentWorkspace {
     selected_index: Option<usize>,
     draft: Option<ObjectNode>,
     multi_draft: Option<MultiInspector>,
+    edit_scene_during_play: bool,
     component_picker: component_inspector::ComponentPicker,
     error: Option<String>,
     open_path: Option<String>,
@@ -212,6 +213,7 @@ impl ComponentWorkspace {
             selection_anchor: None,
             draft: None,
             multi_draft: None,
+            edit_scene_during_play: false,
             component_picker: Default::default(),
             error,
             open_path: None,
@@ -689,6 +691,12 @@ impl ComponentWorkspace {
         }
     }
 
+    fn live_inspector_frame(&self) -> Option<&crate::behavior_worker::Frame> {
+        self.runtime.displayed_frame().filter(|frame| {
+            !self.runtime.stale && frame.key.authored_revision == self.session.revision()
+        })
+    }
+
     fn create_menu(&mut self, ui: &mut egui::Ui) {
         self.menu_action(ui, Action::CreateEmpty);
         ui.menu_button(Text::Component3dObject.plain(), |ui| {
@@ -1163,6 +1171,38 @@ impl ComponentWorkspace {
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 ui.heading(Text::ComponentInspector.plain());
+                if self.runtime.in_play_mode() {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.selectable_value(
+                            &mut self.edit_scene_during_play,
+                            false,
+                            Text::ComponentPlayValues.plain(),
+                        );
+                        ui.selectable_value(
+                            &mut self.edit_scene_during_play,
+                            true,
+                            Text::ComponentSceneValues.plain(),
+                        );
+                    });
+                    if !self.edit_scene_during_play {
+                        egui::ScrollArea::both()
+                            .id_salt("play_values")
+                            .show(ui, |ui| {
+                                let selected = self
+                                    .selected_index
+                                    .map(|index| &self.session.scene().objects[index]);
+                                component_live::show(
+                                    ui,
+                                    self.live_inspector_frame(),
+                                    &self.selection,
+                                    selected,
+                                );
+                            });
+                        return;
+                    }
+                } else {
+                    self.edit_scene_during_play = false;
+                }
                 if self.multi_draft.is_some() {
                     let body_height = ui.available_height()
                         - crate::ui_kit::tokens::CONTROL_HEIGHT
@@ -1593,12 +1633,15 @@ mod tests {
             });
             output.textures_delta.clear();
             if let Some(frame) = editor
-                .runtime
-                .displayed_frame()
+                .live_inspector_frame()
                 .filter(|frame| frame.tick == 1)
             {
                 assert_eq!(frame.key.authored_revision, revision);
                 assert_ne!(frame.scene.objects[0].transform, initial_transform);
+                assert_eq!(
+                    component_live::transform_values(&frame.scene, &editor.selection).unwrap()[0],
+                    frame.scene.objects[0].transform.translation.map(Some),
+                );
                 break;
             }
             assert!(
@@ -1613,6 +1656,11 @@ mod tests {
             initial_transform
         );
         assert_eq!(std::fs::read(&path).unwrap(), authored);
+        assert!(editor.runtime.in_play_mode());
+        editor.runtime.stop(1, revision);
+        assert!(!editor.runtime.in_play_mode());
+        assert!(editor.live_inspector_frame().is_none());
+        assert_eq!(editor.draft.as_ref().unwrap().transform, initial_transform);
     }
 
     #[test]

@@ -86,6 +86,11 @@ pub enum Text {
     ComponentUnlockPicking,
     ComponentParentHidden,
     ComponentParentLocked,
+    ComponentPlayValues,
+    ComponentSceneValues,
+    ComponentPlayTick,
+    ComponentWaitingForPlayFrame,
+    ComponentNoPlayTransform,
 
     ComponentOpenScene,
     ComponentSceneFile,
@@ -98,7 +103,7 @@ pub enum Text {
 
 impl Text {
     #[cfg(test)]
-    pub const ALL: [Self; 82] = [
+    pub const ALL: [Self; 87] = [
         Self::Welcome,
         Self::NoRecentProjects,
         Self::EmptyHierarchy,
@@ -175,6 +180,11 @@ impl Text {
         Self::ComponentUnlockPicking,
         Self::ComponentParentHidden,
         Self::ComponentParentLocked,
+        Self::ComponentPlayValues,
+        Self::ComponentSceneValues,
+        Self::ComponentPlayTick,
+        Self::ComponentWaitingForPlayFrame,
+        Self::ComponentNoPlayTransform,
         Self::ComponentOpenScene,
         Self::ComponentSceneFile,
         Self::ComponentOpen,
@@ -263,6 +273,11 @@ impl Text {
             Self::ComponentUnlockPicking => "Unlock Viewport Picking",
             Self::ComponentParentHidden => "Hidden by Parent",
             Self::ComponentParentLocked => "Picking Locked by Parent",
+            Self::ComponentPlayValues => "Play Values",
+            Self::ComponentSceneValues => "Scene Values",
+            Self::ComponentPlayTick => "Tick",
+            Self::ComponentWaitingForPlayFrame => "Waiting for the first frame…",
+            Self::ComponentNoPlayTransform => "Transform unavailable in this run.",
 
             Self::ComponentOpenScene => "Open Scene",
             Self::ComponentSceneFile => "Scene File",

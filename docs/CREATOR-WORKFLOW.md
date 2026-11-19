@@ -49,8 +49,10 @@ machine for the scene. Play and exported games use the scene's authored state.
 **File → Save** writes the edits to the v23 file. When opening another
 scene, **Save and Open** saves pending changes. **Discard and Open** leaves
 the original file as saved, and **Cancel** keeps the current edits. Use
-**Play**, **Pause**, **Step**, and **Stop** for supported scenes. Stopping
-returns to your editable scene.
+**Play**, **Pause**, **Step**, and **Stop** for supported scenes. During Play
+or while paused, Inspector shows the latest committed Transform and script
+state under **Play Values**. Select **Scene Values** to edit the authored
+scene. **Stop** returns Inspector to the authored values.
 
 On Linux, save the v23 scene, then use **File → Build…**. Choose a new
 folder and select **Build** or **Build and Run**. The folder contains an

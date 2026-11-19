@@ -41,8 +41,8 @@ enabled state and Transform, add Mesh Renderers and Colliders, create,
 move or delete objects together, and save. Inspector edits shared Transform
 and component values. Viewport settings stay local. Automatic upgrades remain open.
 
-The v23 editor uses the shared Play, Pause, Step and Stop controls. The editor,
-standalone viewer and packaged Motion Lab use temporary v23 projections.
+The v23 Inspector shows live Transform and script state during Play and Step.
+The editor, viewer and packaged Motion Lab use temporary v23 projections.
 Editor and viewer draw, fit and pick from cached world matrices, including shear.
 v23 Build writes and launches a Linux player folder without Python.
 General component execution and MCP remain open.
