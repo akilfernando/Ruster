@@ -630,7 +630,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-02 Scene crate on the new model | `rot-scene` implements it. No object, depth or file-size caps. | in progress · the hub, File → Open and native `--scene` open v23 for basic Inspector edits, object creation, parenting, deletion, Undo/Redo and Save. Scene switching protects v23 drafts. Automatic upgrade and tracked example conversion are open |
 | C-03 Renderer, runtime and scripts on the new model | Everything that reads a scene uses objects and components. | in progress · editor Play, standalone viewer, headless behavior and packaged Motion Lab support v23 through previews and runtime projections. Native editor and viewer use world matrices for draw, fit and hit testing. General component execution remains open; v23 can build a Linux player folder |
 | C-04 Assets as files | `Assets/` folder, sidecar ids and import settings, rebuildable cache, file watcher, automatic import and reimport, folder tree in the browser. | brief needed |
-| C-05 Hierarchy and Inspector | Rebuilt on components: Add Component, drag to reparent, multi-edit, enable toggles, visibility and lock, live values during Play. | brief needed |
+| C-05 Hierarchy and Inspector | Rebuilt on components: Add Component, drag to reparent, multi-edit, enable toggles, visibility and lock, live values during Play. | in progress · native Transform and initial Mesh Renderer and Collider authoring |
 | C-06 General MCP tools | A small set of object, component, asset, play and screenshot tools that call the command layer. Tool list under 15 KB. | brief needed |
 | C-07 Prefabs | Prefab assets, instances, per-property overrides, apply and revert. | brief needed |
 | C-08 General glTF import | Multi-primitive meshes, full PBR material mapping, cameras and lights; warnings instead of refusals. | ready after C-04 |
@@ -638,6 +638,23 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-10 Scripts as files | Lua files in `Assets/`, one growing API (lifecycle, find, spawn, destroy, components, input, time), reload on save, open in the creator's code editor. | brief needed |
 | C-11 Scenes and projects | Several scenes per project, a project settings file, a startup scene. | ready after C-02 |
 | C-12 Benchmark scenes | 5,000- and 50,000-object scenes and a one-command frame-time report. | ready after C-02 |
+
+### C-05 implementation brief
+
+- **Inspector.** Keep Transform first and use stable component IDs for sections.
+  Add a searchable component picker and edit each component through the same
+  scene transaction as its enabled state. Done when Add, edit, remove and
+  enable preserve unrelated fields, undo cleanly, reopen correctly and support
+  keyboard entry. Start with Mesh Renderer and Collider, then cover remaining
+  component types as their runtime and reference pickers become available.
+- **Hierarchy.** Add drag-to-reparent and sibling ordering, contiguous and
+  additive selection, and editor-only visibility and locking. Done when cycles
+  leave the scene intact, grouped moves undo together, and picking and
+  keyboard alternatives respect visibility and locking.
+- **Multi-edit and Play.** Edit shared fields in one transaction and show
+  mixed values where selections differ. Show live values while playing.
+  Done when Stop restores authored values, 5,000-object interactions are
+  measured, and C-06 can drive the same editor commands and Undo history.
 
 ## Later
 

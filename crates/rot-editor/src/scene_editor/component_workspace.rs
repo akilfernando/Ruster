@@ -1,6 +1,6 @@
 //! The editor owns v23 scenes through ComponentSession. The viewport receives
 //! a disposable projection and cannot change the authored document.
-use super::{hud_interaction, project_picker, OpenedScene};
+use super::{component_inspector, hud_interaction, project_picker, OpenedScene};
 use crate::behavior_ui::{PlayShortcut, RuntimeSource, RuntimeUi};
 use crate::editor_theme;
 use crate::strings::Text;
@@ -39,6 +39,7 @@ pub(super) struct ComponentWorkspace {
     parents: Vec<Option<usize>>,
     selected_index: Option<usize>,
     draft: Option<ObjectNode>,
+    component_picker: component_inspector::ComponentPicker,
     error: Option<String>,
     open_path: Option<String>,
     open_focused: bool,
@@ -92,6 +93,7 @@ impl ComponentWorkspace {
             },
             selected_index: None,
             draft: None,
+            component_picker: Default::default(),
             error,
             open_path: None,
             open_focused: false,
@@ -294,6 +296,8 @@ impl ComponentWorkspace {
         });
         let mut change = None;
         egui::ComboBox::from_id_salt("component_parent")
+            .width(ui.available_width())
+            .truncate()
             .selected_text(parent_name)
             .show_ui(ui, |ui| {
                 if ui
@@ -349,6 +353,30 @@ impl ComponentWorkspace {
                 self.menu_action(ui, action);
             }
         });
+    }
+
+    fn add_component(&mut self, kind: component_inspector::AddComponent) {
+        let Some(draft) = &mut self.draft else {
+            return;
+        };
+        let used: HashSet<_> = self
+            .session
+            .scene()
+            .objects
+            .iter()
+            .flat_map(|node| node.components.iter().map(|item| item.id.as_str()))
+            .chain(draft.components.iter().map(|item| item.id.as_str()))
+            .collect();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let id = (self.session.revision()..)
+            .map(|suffix| format!("component-{stamp:x}-{suffix:x}"))
+            .find(|id| !used.contains(id.as_str()))
+            .expect("finite component IDs");
+        draft.components.push(kind.instance(id));
+        self.apply();
     }
 
     fn command(&mut self, action: Action) {
@@ -643,10 +671,11 @@ impl ComponentWorkspace {
                 }
             });
         }
-        let panel_limit = ui.available_width() * 0.3;
+        let hierarchy_limit = ui.available_width() * 0.26;
+        let inspector_limit = ui.available_width() * 0.34;
         egui::Panel::left("component_hierarchy")
-            .default_size(self.workspace.prefs.hierarchy_width.min(panel_limit))
-            .max_size(panel_limit)
+            .default_size(self.workspace.prefs.hierarchy_width.min(hierarchy_limit))
+            .max_size(hierarchy_limit)
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 ui.heading(Text::ComponentHierarchy.plain());
@@ -697,61 +726,59 @@ impl ComponentWorkspace {
                 }
             });
         egui::Panel::right("component_inspector")
-            .default_size(self.workspace.prefs.inspector_width.min(panel_limit))
-            .max_size(panel_limit)
+            .default_size(self.workspace.prefs.inspector_width.min(inspector_limit))
+            .max_size(inspector_limit)
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 ui.heading(Text::ComponentInspector.plain());
-                let mut submit = false;
-                if let Some(draft) = &mut self.draft {
-                    ui.label(Text::ComponentName.plain());
-                    let response = ui.text_edit_singleline(&mut draft.name);
-                    submit |= response.lost_focus()
-                        && ui.input(|input| input.key_pressed(egui::Key::Enter));
-                    ui.checkbox(&mut draft.enabled, Text::ComponentEnabled.plain());
-                    ui.separator();
-                    ui.label(Text::ComponentPosition.plain());
-                    for (axis, value) in [
-                        Text::ComponentAxisX,
-                        Text::ComponentAxisY,
-                        Text::ComponentAxisZ,
-                    ]
-                    .into_iter()
-                    .zip(&mut draft.transform.translation)
-                    {
-                        let response =
-                            ui.add(egui::DragValue::new(value).speed(0.1).prefix(axis.plain()));
-                        submit |= response.lost_focus()
-                            && ui.input(|input| input.key_pressed(egui::Key::Enter));
-                    }
-                    for component in &draft.components {
-                        let label = match component.kind {
-                            Component::Camera { .. } => Text::ComponentCamera,
-                            Component::Animator { .. } => Text::ComponentAnimator,
-                            Component::Script { .. } => Text::ComponentScript,
-                            Component::MeshRenderer { .. } => Text::ComponentMeshRenderer,
-                            Component::Light { .. } => Text::ComponentLight,
-                            Component::Collider { .. } => Text::ComponentCollider,
-                        };
-                        ui.label(label.plain());
-                    }
-                }
-                if self.selected_index.is_some() {
-                    self.parent_ui(ui);
-                    if ui
-                        .add_enabled(
-                            self.draft_dirty(),
-                            egui::Button::new(Text::ComponentApply.plain()),
-                        )
-                        .clicked()
-                        || submit
-                    {
-                        self.apply();
-                    }
-                }
+                // Exceptionally wide fields should scroll within the Inspector,
+                // rather than expanding its frame into the viewport.
+                egui::ScrollArea::both()
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        let mut submit = false;
+                        if let Some(draft) = &mut self.draft {
+                            ui.label(Text::ComponentName.plain());
+                            let response = ui.add(
+                                egui::TextEdit::singleline(&mut draft.name)
+                                    .desired_width(ui.available_width()),
+                            );
+                            submit |= response.lost_focus()
+                                && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                            ui.checkbox(&mut draft.enabled, Text::ComponentEnabled.plain());
+                            ui.separator();
+                            submit |= component_inspector::transform(ui, draft);
+                        }
+                        if self.selected_index.is_some() {
+                            self.parent_ui(ui);
+                            ui.separator();
+                            if let Some(draft) = &mut self.draft {
+                                submit |= component_inspector::components(
+                                    ui,
+                                    draft,
+                                    &self.meshes,
+                                    &self.session.scene().materials,
+                                );
+                            }
+                            if ui
+                                .add_enabled(
+                                    self.draft_dirty(),
+                                    egui::Button::new(Text::ComponentApply.plain()),
+                                )
+                                .clicked()
+                                || submit
+                            {
+                                self.apply();
+                            }
+                            if let Some(kind) = self.component_picker.show(ui) {
+                                self.add_component(kind);
+                            }
+                        }
+                    });
                 if !build_open
                     && !self.close_pending
                     && self.open_path.is_none()
+                    && !egui::Popup::is_any_open(&ctx)
                     && ui.input_mut(|input| {
                         input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
                     })
@@ -988,6 +1015,57 @@ mod tests {
             initial_transform
         );
         assert_eq!(std::fs::read(&path).unwrap(), authored);
+    }
+
+    #[test]
+    fn adding_and_editing_components_uses_editor_undo_and_v23_persistence() {
+        use component_inspector::AddComponent;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        let scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("scene")).unwrap()).unwrap();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.command(Action::CreateEmpty);
+        editor.add_component(AddComponent::MeshRenderer);
+        editor.add_component(AddComponent::Collider);
+        let mesh_id = editor.session.scene().objects[0].components[0].id.clone();
+        let collider = editor.session.scene().objects[0].components[1].clone();
+
+        let before_invalid_edit = editor.session.revision();
+        if let Component::Collider { shape, .. } =
+            &mut editor.draft.as_mut().unwrap().components[1].kind
+        {
+            *shape = rot_scene::ColliderShape::Sphere { radius: 0.0 };
+        }
+        assert!(!editor.apply());
+        assert_eq!(editor.session.revision(), before_invalid_edit);
+        assert_eq!(editor.session.scene().objects[0].components[1], collider);
+        editor.select(Some(editor.session.scene().objects[0].id.clone()));
+
+        let draft = editor.draft.as_mut().unwrap();
+        draft.transform.scale = [2.0, 3.0, 4.0];
+        draft.components[1].enabled = false;
+        let Component::Collider { shape, .. } = &mut draft.components[1].kind else {
+            panic!("added collider");
+        };
+        *shape = rot_scene::ColliderShape::Box {
+            half_extents: [1.0, 1.5, 2.0],
+        };
+        assert!(editor.apply());
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene().objects[0].components[1], collider);
+        editor.command(Action::Redo);
+        assert!(editor.save());
+
+        let reopened = ComponentSession::open(&path).unwrap();
+        assert_eq!(reopened.scene(), editor.session.scene());
+        let object = &reopened.scene().objects[0];
+        assert_eq!(object.components[0].id, mesh_id);
+        assert!(!object.components[1].enabled);
+        let (play_scene, _) = reopened.scene().behavior_input().unwrap();
+        assert!(!play_scene.objects[0].collider.unwrap().enabled);
     }
 
     #[test]

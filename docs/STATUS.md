@@ -37,9 +37,9 @@ The [C-01 design](plans/C-01-OBJECT-COMPONENT-MODEL.md) guides the v23 cutover.
 C-02 preserves authored content during migration, supports grouped object
 edits and Undo/Redo, and resolves a 5,000-object chain over 1 MiB. The native
 `rot-editor --scene` route opens v23 and can inspect objects, edit name,
-enabled state and position, create and parent objects, delete subtrees,
-undo, redo, and save in v23. The Project Hub and File → Open support both
-formats, with Save, Discard and Cancel. Automatic upgrades remain open.
+enabled state and Transform, add Mesh Renderers and Colliders, create,
+parent and delete objects, undo, redo, and save in v23. The hub and File →
+Open support both formats. Automatic upgrades remain open.
 
 The v23 editor uses the shared Play, Pause, Step and Stop controls. The editor,
 standalone viewer and packaged Motion Lab use temporary v23 projections.

@@ -19,6 +19,7 @@ mod color_commands;
 mod combo_focus;
 #[cfg(target_os = "linux")]
 mod component_build;
+mod component_inspector;
 mod component_workspace;
 mod connection;
 mod display_ui;
