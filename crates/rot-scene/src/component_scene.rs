@@ -7,9 +7,9 @@ use std::io::{Read, Write};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    strict_json, validate_id, validate_name, BehaviorBinding, BehaviorSource, BindingTarget,
-    Collider, ColliderRole, ColliderShape, DisplayProfile, OpaqueMaterial, Primitive, SceneError,
-    Session, Transform,
+    strict_json, validate_id, validate_name, Ambient, BehaviorBinding, BehaviorSource,
+    BindingTarget, Collider, ColliderRole, ColliderShape, DisplayProfile, Light, LightKind,
+    Lighting, OpaqueMaterial, Primitive, SceneError, Session, Transform,
 };
 
 pub const FORMAT_VERSION: u32 = 23;
@@ -23,6 +23,9 @@ pub struct ComponentScene {
     pub materials: BTreeMap<String, OpaqueMaterial>,
     #[serde(default, skip_serializing_if = "DisplayProfile::is_legacy")]
     pub display: DisplayProfile,
+    /// None preserves the implicit lighting used by legacy scenes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ambient: Option<Ambient>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub sources: BTreeMap<String, BehaviorSource>,
 }
@@ -44,6 +47,9 @@ impl ComponentScene {
             material.validate()?;
         }
         self.display.validate()?;
+        if let Some(ambient) = &self.ambient {
+            ambient.validate()?;
+        }
         for (id, source) in &self.sources {
             validate_id(id)?;
             source.validate()?;
@@ -96,6 +102,19 @@ impl ComponentScene {
                             )));
                         }
                     }
+                    Component::Light {
+                        color,
+                        intensity,
+                        kind,
+                    } => Light {
+                        name: None,
+                        transform: Transform::default(),
+                        enabled: component.enabled,
+                        color: *color,
+                        intensity: *intensity,
+                        kind: kind.clone(),
+                    }
+                    .validate()?,
                     Component::Collider {
                         role,
                         offset,
@@ -118,18 +137,20 @@ impl ComponentScene {
     pub fn from_legacy(session: &Session) -> Result<Self, SceneError> {
         let scene = session.scene();
         let authoring = session.authoring();
-        if !scene.lighting.is_legacy()
-            || scene.player_view.is_some()
+        if scene.player_view.is_some()
             || !scene.animations.is_empty()
             || !authoring.actions.is_empty()
             || !authoring.hud.is_default()
         {
             return Err(SceneError::Invalid(
-                "v23 migration does not yet support authored lighting, cameras, animation, input actions or HUD".into(),
+                "v23 migration does not yet support cameras, animation, input actions or HUD"
+                    .into(),
             ));
         }
         let parent = |id: &str| scene.hierarchy.parents.get(id).cloned();
-        let mut objects = Vec::with_capacity(scene.objects.len() + scene.hierarchy.groups.len());
+        let mut objects = Vec::with_capacity(
+            scene.objects.len() + scene.hierarchy.groups.len() + scene.lighting.light_count(),
+        );
         let mut ids: HashSet<String> = authoring.bindings.keys().cloned().collect();
         let mut component_id = |owner: &str, role: &str| {
             // Legacy IDs may already occupy the whole ID budget.
@@ -193,6 +214,28 @@ impl ComponentScene {
                 components: Vec::new(),
             });
         }
+        let ambient = match &scene.lighting {
+            Lighting::Legacy => None,
+            Lighting::Authored { ambient, lights } => {
+                objects.extend(lights.iter().map(|(id, light)| ObjectNode {
+                    id: id.clone(),
+                    name: light.display_name(id).into(),
+                    enabled: true,
+                    parent: parent(id),
+                    transform: light.transform.clone(),
+                    components: vec![ComponentInstance {
+                        id: component_id(id, "light"),
+                        enabled: light.enabled,
+                        kind: Component::Light {
+                            color: light.color,
+                            intensity: light.intensity,
+                            kind: light.kind.clone(),
+                        },
+                    }],
+                }));
+                Some(ambient.clone())
+            }
+        };
         let application = if authoring
             .bindings
             .values()
@@ -247,6 +290,7 @@ impl ComponentScene {
             objects,
             materials: scene.materials.clone(),
             display: scene.display,
+            ambient,
             sources: authoring.sources.clone(),
         };
         converted.validate()?;
@@ -307,6 +351,11 @@ pub enum Component {
         tint: [f32; 4],
         #[serde(default, skip_serializing_if = "Option::is_none")]
         material: Option<String>,
+    },
+    Light {
+        color: [f32; 3],
+        intensity: f32,
+        kind: LightKind,
     },
     Collider {
         role: ColliderRole,
@@ -443,13 +492,49 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_legacy_features_leave_the_original_session_intact() {
+    fn authored_lighting_migrates_and_round_trips() {
         let mut scene = crate::Scene::empty("lit");
-        scene.lighting = crate::Lighting::authored_default("sun");
+        let mut sun = Light::directional(Some("Sun".into()));
+        sun.enabled = false;
+        sun.transform.rotation = [30.0, 20.0, 0.0];
+        let point = Light::point(None);
+        let ambient = Ambient {
+            color: [0.2, 0.4, 0.8],
+            intensity: 0.3,
+        };
+        scene.lighting = Lighting::Authored {
+            ambient: ambient.clone(),
+            lights: BTreeMap::from([("sun".into(), sun.clone()), ("point".into(), point.clone())]),
+        };
         let legacy = Session::new(scene).unwrap();
-        let original = legacy.snapshot_bytes().unwrap();
-        assert!(ComponentScene::from_legacy(&legacy).is_err());
-        assert_eq!(legacy.snapshot_bytes().unwrap(), original);
+        let migrated = ComponentScene::from_legacy(&legacy).unwrap();
+        assert_eq!(migrated.ambient, Some(ambient));
+        assert_eq!(migrated.objects.len(), 2);
+        for (object, (id, light)) in migrated
+            .objects
+            .iter()
+            .zip([("point", point), ("sun", sun)])
+        {
+            assert_eq!(object.id, id);
+            assert_eq!(object.name, light.display_name(id));
+            assert_eq!(object.transform, light.transform);
+            let component = &object.components[0];
+            assert_eq!(component.enabled, light.enabled);
+            assert_eq!(
+                component.kind,
+                Component::Light {
+                    color: light.color,
+                    intensity: light.intensity,
+                    kind: light.kind,
+                }
+            );
+        }
+        let mut json = Vec::new();
+        migrated.write_json(&mut json).unwrap();
+        assert_eq!(
+            ComponentScene::read_json(json.as_slice()).unwrap(),
+            migrated
+        );
     }
 
     #[test]
@@ -478,6 +563,7 @@ mod tests {
             objects: vec![cube, object("root".into(), None, true)],
             materials: BTreeMap::new(),
             display: DisplayProfile::default(),
+            ambient: None,
             sources: BTreeMap::new(),
         };
         let mut bytes = Vec::new();
@@ -533,6 +619,7 @@ mod tests {
             objects,
             materials: BTreeMap::new(),
             display: DisplayProfile::default(),
+            ambient: None,
             sources: BTreeMap::new(),
         };
         let mut bytes = Vec::new();

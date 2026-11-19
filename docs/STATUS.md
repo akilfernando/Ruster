@@ -45,9 +45,10 @@ hierarchy that rejects cycles, missing parents and duplicate IDs, and
 resolves inherited enabled state without recursion. A 5,000-object chain
 passed its focused check. The affected gate passed (452 tests, 17 ignored).
 The v23 reader/writer handles hierarchy, Mesh Renderer, Collider, Script,
-materials, display settings and script sources. The in-memory converter
+materials, display settings and script sources, plus authored lights and
+ambient settings. The in-memory converter
 round-trips all three tracked examples, preserving object and script IDs.
-It rejects authored lighting, cameras, animation, input actions and HUD
+It rejects cameras, animation, input actions and HUD
 until their migration is implemented. The editor still opens legacy
 scenes through its existing loader. Publishing migration, session
 transactions and editor/runtime integration remain open.
