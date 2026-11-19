@@ -46,16 +46,18 @@ impl<T: PartialEq> Field<T> {
         &mut self,
         ui: &mut egui::Ui,
         label: Text,
-        name: impl Fn(&T) -> &str,
+        name: impl Fn(&T) -> String,
         choices: impl IntoIterator<Item = T>,
     ) {
         ui_kit::property_row(ui, label.plain(), |ui| {
             let mut change = None;
-            let value = self.current().map_or(Text::ComponentMixed.plain(), &name);
+            let value = self
+                .current()
+                .map_or_else(|| Text::ComponentMixed.plain().to_owned(), &name);
             let response = egui::ComboBox::from_id_salt(label.plain())
                 .width(ui.available_width())
                 .truncate()
-                .selected_text(value)
+                .selected_text(&value)
                 .show_ui(ui, |ui| {
                     for choice in choices {
                         if ui
@@ -74,7 +76,7 @@ impl<T: PartialEq> Field<T> {
                     response.enabled(),
                     label.plain(),
                 );
-                info.current_text_value = Some(value.to_owned());
+                info.current_text_value = Some(value.clone());
                 info
             });
             if let Some(value) = change {
@@ -327,6 +329,7 @@ impl SharedComponent {
         &mut self,
         ui: &mut egui::Ui,
         meshes: &rot_app::MeshMap,
+        assets: Option<&rot_assets::AssetStore>,
         materials: &BTreeMap<String, OpaqueMaterial>,
     ) -> bool {
         let mut submit = false;
@@ -342,7 +345,7 @@ impl SharedComponent {
                         fields.geometry.combo(
                             ui,
                             Text::ComponentGeometry,
-                            geometry_name,
+                            |geometry| geometry_name(geometry, assets).to_owned(),
                             geometry_choices(meshes),
                         );
                         fields.material.combo(
@@ -352,6 +355,7 @@ impl SharedComponent {
                                 material
                                     .as_deref()
                                     .unwrap_or(Text::ComponentNoMaterial.plain())
+                                    .to_owned()
                             },
                             std::iter::once(None).chain(materials.keys().cloned().map(Some)),
                         );
@@ -375,6 +379,7 @@ impl SharedComponent {
                                     ColliderRole::Sensor => Text::ComponentSensor,
                                 }
                                 .plain()
+                                .to_owned()
                             },
                             [ColliderRole::Blocker, ColliderRole::Sensor],
                         );
@@ -388,6 +393,7 @@ impl SharedComponent {
                                     Text::ComponentBox
                                 }
                                 .plain()
+                                .to_owned()
                             },
                             [false, true],
                         );
@@ -537,11 +543,12 @@ impl MultiInspector {
         &mut self,
         ui: &mut egui::Ui,
         meshes: &rot_app::MeshMap,
+        assets: Option<&rot_assets::AssetStore>,
         materials: &BTreeMap<String, OpaqueMaterial>,
     ) -> bool {
         let mut submit = false;
         for component in &mut self.components {
-            submit |= component.show(ui, meshes, materials);
+            submit |= component.show(ui, meshes, assets, materials);
         }
         submit
     }

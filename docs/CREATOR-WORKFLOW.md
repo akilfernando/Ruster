@@ -18,6 +18,16 @@ ROT_RUNTIME_KIT=/tmp/rot-template/rot-runtime target/debug/rot-editor
 
 Choose a fresh archive path. Preparation verifies the Linux executable/profile and includes dependency/license notices, requirements, fixed helpers and hashed inventory. The template contains trusted executable code; use a template you prepared or trust. It is specific to its recorded Linux requirements, not a universal Linux binary. Each later scene export uses this template without Cargo or recompiling. Changing the runtime/helpers requires a new template. Editor export requires Python3 and the current Linux process-cleanup utility `/usr/bin/kill`; standalone application execution does not require Python or Rust.
 
+## Import assets into a v23 project
+
+Put OBJ meshes, PNG textures, WAV sounds or supported GLB models in the
+project's `Assets/` folder. Opening the scene imports supported files in
+that folder and its subfolders. Keep each generated `.rotmeta` file with
+its source in version control so the asset ID can be rebuilt with the cache.
+
+To assign a mesh, select an object and choose its file in **Mesh Renderer →
+Geometry**. Click **Apply**, then save the scene.
+
 ## Open a v23 scene
 
 Use `rot-scene migrate OLD.json NEW.json` to create a v23 copy, then

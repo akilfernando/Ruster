@@ -21,6 +21,7 @@ use audio::SOUND_CACHE_VERSION;
 mod glb;
 mod glb_catalog;
 mod mutations;
+mod project_files;
 pub use audio::{
     decode_wav, AudioClip, MAX_SOUND_RESOLVED_BYTES, MAX_SOUND_SECONDS, MAX_SOUND_SOURCE_BYTES,
 };
@@ -849,6 +850,9 @@ impl AssetStore {
             models,
             clips,
         })
+    }
+    pub fn asset_info(&self, id: &str) -> Option<&AssetInfo> {
+        self.infos.get(id).map(Arc::as_ref)
     }
     /// Borrow metadata in stable asset-ID order without cloning diagnostics.
     /// Callers can page and bound individual fields before creating owned output.

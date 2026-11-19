@@ -44,7 +44,7 @@ The v23 Inspector shows live Transform and script state during Play and Step.
 Editor and viewer draw, fit and pick from cached world matrices, including shear.
 v23 Build writes and launches a Linux player folder without Python. Approved
 MCP clients can create objects and groups, edit components, control Play,
-browse assets, assign meshes and capture the viewport. [C-12 benchmark timings](PARITY-PLAN.md#5-performance-budgets)
+browse assets, assign meshes and capture the viewport. v23 imports supported files from Assets/ on open. [C-12 benchmark timings](PARITY-PLAN.md#5-performance-budgets)
 cover 5,000 and 50,000 objects. Desktop frame rates remain unverified.
 
 ## What a creator can do today

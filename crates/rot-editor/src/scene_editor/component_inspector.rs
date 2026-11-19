@@ -124,6 +124,7 @@ pub(super) fn components(
     ui: &mut egui::Ui,
     draft: &mut ObjectNode,
     meshes: &rot_app::MeshMap,
+    assets: Option<&rot_assets::AssetStore>,
     materials: &BTreeMap<String, OpaqueMaterial>,
 ) -> bool {
     let mut submit = false;
@@ -147,7 +148,7 @@ pub(super) fn components(
                         tint,
                         material,
                     } => {
-                        mesh_fields(ui, geometry, tint, material, meshes, materials);
+                        mesh_fields(ui, geometry, tint, material, meshes, assets, materials);
                     }
                     Component::Collider {
                         role,
@@ -179,11 +180,18 @@ pub(super) fn components(
     submit
 }
 
-pub(super) fn geometry_name(geometry: &Geometry) -> &str {
+pub(super) fn geometry_name<'a>(
+    geometry: &'a Geometry,
+    assets: Option<&'a rot_assets::AssetStore>,
+) -> &'a str {
     match geometry {
         Geometry::Cube => Action::CreateCube.label(),
         Geometry::Primitive { shape } => shape.label(),
-        Geometry::Imported { asset } => asset,
+        Geometry::Imported { asset } => assets
+            .and_then(|store| store.asset_info(asset))
+            .map(|info| info.source.as_str())
+            .filter(|source| asset.starts_with("asset-") && source.starts_with("Assets/"))
+            .unwrap_or(asset),
     }
 }
 
@@ -207,16 +215,17 @@ fn mesh_fields(
     tint: &mut [f32; 4],
     material: &mut Option<String>,
     meshes: &rot_app::MeshMap,
+    assets: Option<&rot_assets::AssetStore>,
     materials: &BTreeMap<String, OpaqueMaterial>,
 ) {
     ui_kit::property_row(ui, Text::ComponentGeometry.plain(), |ui| {
         egui::ComboBox::from_id_salt("geometry")
             .width(ui.available_width())
             .truncate()
-            .selected_text(geometry_name(geometry))
+            .selected_text(geometry_name(geometry, assets))
             .show_ui(ui, |ui| {
                 for choice in geometry_choices(meshes) {
-                    let label = geometry_name(&choice).to_owned();
+                    let label = geometry_name(&choice, assets).to_owned();
                     ui.selectable_value(geometry, choice, label);
                 }
             });

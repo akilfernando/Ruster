@@ -180,15 +180,12 @@ pub(super) struct ComponentWorkspace {
 
 impl ComponentWorkspace {
     pub(super) fn new(path: PathBuf, session: ComponentSession) -> Self {
-        let assets = path
+        let root = path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
-            .map_or_else(
-                || rot_assets::AssetStore::open("."),
-                rot_assets::AssetStore::open,
-            );
-        let (assets, error) = match assets {
-            Ok(assets) => (Some(assets), None),
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let (assets, error) = match rot_assets::AssetStore::open_project(root) {
+            Ok((assets, diagnostics)) => (Some(assets), diagnostics.into_iter().next()),
             Err(error) => (None, Some(error.to_string())),
         };
         let meshes = assets
@@ -772,7 +769,12 @@ impl ComponentWorkspace {
         self.parent_ui(ui);
         ui.separator();
         if let Some(draft) = &mut self.multi_draft {
-            submit |= draft.components(ui, &self.meshes, &self.session.scene().materials);
+            submit |= draft.components(
+                ui,
+                &self.meshes,
+                self.assets.as_ref(),
+                &self.session.scene().materials,
+            );
         }
         if submit {
             self.apply();
@@ -1347,6 +1349,7 @@ impl ComponentWorkspace {
                                         ui,
                                         draft,
                                         &self.meshes,
+                                        self.assets.as_ref(),
                                         &self.session.scene().materials,
                                     );
                                 }
