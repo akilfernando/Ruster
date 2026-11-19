@@ -29,7 +29,9 @@ Right-click the section header to remove it. Use **Object** or
 **Hierarchy → Create** to add an empty object, cube, sphere, or capsule.
 Drag an object onto another row to parent it, or onto **Scene Root** to
 unparent it. You can also change **Parent** in Inspector. Both preserve the
-object’s world transform. **Object → Delete** removes the selected
+object’s world transform. Drag to the top or bottom edge of a row to place
+the object before or after it. **Object → Move Up** and **Move Down** reorder
+the selection among its siblings. **Object → Delete** removes the selected
 object and its children. **Edit → Undo** and **Redo** work until you close
 the scene.
 **File → Save** writes the edits to the v23 file. When opening another

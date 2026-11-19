@@ -225,9 +225,53 @@ impl ComponentSession {
     ) -> Result<u64, SceneError> {
         self.check_revision(expected)?;
         let index = self.object_index(id)?;
+        if self.scene.objects[index].parent.as_deref() == parent {
+            return Ok(self.revision);
+        }
+        let object = self.with_parent(index, parent)?;
+        self.commit([ObjectChange::Replace { index, object }])
+    }
+
+    /// Place an object immediately before or after a sibling in file order.
+    /// If needed, adopt the sibling's parent while preserving the world pose.
+    pub fn place_next_to(
+        &mut self,
+        expected: u64,
+        id: &str,
+        sibling: &str,
+        before: bool,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected)?;
+        let index = self.object_index(id)?;
+        let anchor = self.object_index(sibling)?;
+        if index == anchor {
+            return Ok(self.revision);
+        }
+        let objects = &self.scene.objects;
+        let parent = objects[anchor].parent.as_deref();
+        if objects[index].parent.as_deref() == parent
+            && (index < anchor) == before
+            && objects[index.min(anchor) + 1..index.max(anchor)]
+                .iter()
+                .all(|object| object.parent.as_deref() != parent)
+        {
+            return Ok(self.revision);
+        }
+        let object = self.with_parent(index, parent)?;
+        let destination = anchor + usize::from(!before) - usize::from(index < anchor);
+        self.commit([
+            ObjectChange::Remove { index },
+            ObjectChange::Insert {
+                index: destination,
+                object,
+            },
+        ])
+    }
+
+    fn with_parent(&self, index: usize, parent: Option<&str>) -> Result<ObjectNode, SceneError> {
         let mut object = self.scene.objects[index].clone();
         if object.parent.as_deref() == parent {
-            return Ok(self.revision);
+            return Ok(object);
         }
         let world = self.scene.world_matrices()?;
         let local = match parent {
@@ -240,7 +284,7 @@ impl ComponentSession {
             ))
         })?;
         object.parent = parent.map(str::to_owned);
-        self.commit([ObjectChange::Replace { index, object }])
+        Ok(object)
     }
 
     fn object_index(&self, id: &str) -> Result<usize, SceneError> {
@@ -407,6 +451,61 @@ fn digest(mut input: impl Read) -> io::Result<[u8; 32]> {
 mod tests {
     use super::*;
     use crate::{hierarchy::close, Scene, Session};
+
+    #[test]
+    fn placing_beside_a_sibling_reorders_and_reparents_in_one_edit() {
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("order")).unwrap()).unwrap();
+        scene.objects = [
+            ("stage", None),
+            ("red", Some("stage")),
+            ("blue", None),
+            ("green", Some("stage")),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (id, parent))| ObjectNode {
+            id: id.into(),
+            name: id.into(),
+            enabled: true,
+            parent: parent.map(str::to_owned),
+            transform: Transform {
+                translation: [index as f32 + 1.0, 0.0, 0.0],
+                ..Transform::default()
+            },
+            components: Vec::new(),
+        })
+        .collect();
+        let mut session = ComponentSession::new(scene.clone()).unwrap();
+        let original_world = scene.world_matrices().unwrap();
+        assert_eq!(session.place_next_to(0, "red", "green", true).unwrap(), 0);
+        assert_eq!(session.place_next_to(0, "blue", "green", false).unwrap(), 1);
+        let ordered = session.scene().clone();
+        assert_eq!(
+            ordered
+                .objects
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
+            ["stage", "red", "green", "blue"]
+        );
+        assert_eq!(ordered.objects[3].parent.as_deref(), Some("stage"));
+        assert!(close(
+            ordered.world_matrices().unwrap()[3],
+            original_world[2]
+        ));
+
+        assert!(session.place_next_to(1, "stage", "red", true).is_err());
+        assert_eq!(session.revision(), 1);
+        assert_eq!(session.scene(), &ordered);
+        session.undo(1).unwrap();
+        assert_eq!(session.scene(), &scene);
+        session.redo(2).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        session.save(&path).unwrap();
+        assert_eq!(ComponentSession::open(path).unwrap().scene(), &ordered);
+    }
 
     #[test]
     fn guarded_session_saves_reopens_and_restores_savepoint() {

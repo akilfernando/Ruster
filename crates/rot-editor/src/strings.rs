@@ -76,6 +76,8 @@ pub enum Text {
     ComponentEmptyObject,
     ComponentParent,
     ComponentSceneRoot,
+    ComponentMoveUp,
+    ComponentMoveDown,
 
     ComponentOpenScene,
     ComponentSceneFile,
@@ -88,7 +90,7 @@ pub enum Text {
 
 impl Text {
     #[cfg(test)]
-    pub const ALL: [Self; 72] = [
+    pub const ALL: [Self; 74] = [
         Self::Welcome,
         Self::NoRecentProjects,
         Self::EmptyHierarchy,
@@ -155,6 +157,8 @@ impl Text {
         Self::ComponentEmptyObject,
         Self::ComponentParent,
         Self::ComponentSceneRoot,
+        Self::ComponentMoveUp,
+        Self::ComponentMoveDown,
         Self::ComponentOpenScene,
         Self::ComponentSceneFile,
         Self::ComponentOpen,
@@ -233,6 +237,8 @@ impl Text {
             Self::ComponentEmptyObject => "Empty Object",
             Self::ComponentParent => "Parent",
             Self::ComponentSceneRoot => "Scene Root",
+            Self::ComponentMoveUp => "Move Up",
+            Self::ComponentMoveDown => "Move Down",
 
             Self::ComponentOpenScene => "Open Scene",
             Self::ComponentSceneFile => "Scene File",

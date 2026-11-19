@@ -28,24 +28,78 @@ struct HierarchyDrag {
     object_id: String,
 }
 
+enum HierarchyDestination {
+    Parent(Option<String>),
+    Sibling { id: String, before: bool },
+}
+
 fn hierarchy_drop(
     ui: &egui::Ui,
     row: &egui::Response,
     target: Option<&str>,
     revision: u64,
-) -> Option<String> {
+) -> Option<(String, HierarchyDestination)> {
     let drag = row.dnd_hover_payload::<HierarchyDrag>()?;
     if drag.revision != revision || Some(drag.object_id.as_str()) == target {
         return None;
     }
-    ui.painter().rect_stroke(
-        row.rect,
-        3.0,
-        egui::Stroke::new(1.0, editor_theme::colors(ui).accent),
-        egui::StrokeKind::Inside,
-    );
-    row.dnd_release_payload::<HierarchyDrag>()
-        .map(|drag| drag.object_id.clone())
+    let rect = row.rect;
+    let pointer_y = ui
+        .input(|input| input.pointer.interact_pos())
+        .map_or(rect.center().y, |pos| pos.y);
+    let edge = rect.height() * 0.25;
+    let before = match target {
+        Some(_) if pointer_y < rect.top() + edge => Some(true),
+        Some(_) if pointer_y > rect.bottom() - edge => Some(false),
+        _ => None,
+    };
+    let stroke = egui::Stroke::new(1.0, editor_theme::colors(ui).accent);
+    if let Some(before) = before {
+        let y = if before { rect.top() } else { rect.bottom() };
+        ui.painter().hline(rect.x_range(), y, stroke);
+    } else {
+        ui.painter()
+            .rect_stroke(rect, 3.0, stroke, egui::StrokeKind::Inside);
+    }
+    let drag = row.dnd_release_payload::<HierarchyDrag>()?;
+    let destination = match (target, before) {
+        (Some(id), Some(before)) => HierarchyDestination::Sibling {
+            id: id.into(),
+            before,
+        },
+        _ => HierarchyDestination::Parent(target.map(str::to_owned)),
+    };
+    Some((drag.object_id.clone(), destination))
+}
+
+fn sibling_move_items(
+    ui: &mut egui::Ui,
+    objects: &[ObjectNode],
+    index: usize,
+) -> Option<HierarchyDestination> {
+    let parent = &objects[index].parent;
+    let previous = objects[..index]
+        .iter()
+        .rfind(|object| &object.parent == parent);
+    let next = objects[index + 1..]
+        .iter()
+        .find(|object| &object.parent == parent);
+    for (target, before, label) in [
+        (previous, true, Text::ComponentMoveUp),
+        (next, false, Text::ComponentMoveDown),
+    ] {
+        let clicked = ui
+            .add_enabled(target.is_some(), egui::Button::new(label.plain()))
+            .clicked();
+        if let Some(target) = target.filter(|_| clicked) {
+            ui.close();
+            return Some(HierarchyDestination::Sibling {
+                id: target.id.clone(),
+                before,
+            });
+        }
+    }
+    None
 }
 
 pub(super) struct ComponentWorkspace {
@@ -294,8 +348,21 @@ impl ComponentWorkspace {
     }
 
     fn reparent(&mut self, id: &str, parent: Option<&str>) {
+        self.move_in_hierarchy(id, HierarchyDestination::Parent(parent.map(str::to_owned)));
+    }
+
+    fn move_in_hierarchy(&mut self, id: &str, destination: HierarchyDestination) {
         if self.apply() {
-            match self.session.reparent(self.session.revision(), id, parent) {
+            let revision = self.session.revision();
+            let result = match destination {
+                HierarchyDestination::Parent(parent) => {
+                    self.session.reparent(revision, id, parent.as_deref())
+                }
+                HierarchyDestination::Sibling { id: anchor, before } => {
+                    self.session.place_next_to(revision, id, &anchor, before)
+                }
+            };
+            match result {
                 Ok(_) => {
                     self.error = None;
                     self.refresh();
@@ -665,6 +732,13 @@ impl ComponentWorkspace {
                     ui.add_enabled_ui(self.selected_index.is_some(), |ui| {
                         self.menu_action(ui, Action::Delete)
                     });
+                    if let Some(index) = self.selected_index {
+                        let objects = &self.session.scene().objects;
+                        if let Some(destination) = sibling_move_items(ui, objects, index) {
+                            let id = objects[index].id.clone();
+                            self.move_in_hierarchy(&id, destination);
+                        }
+                    }
                 });
                 let marker = if self.session.is_dirty() || self.draft_dirty() {
                     "*"
@@ -712,7 +786,7 @@ impl ComponentWorkspace {
                 let mut selected = root.clicked().then_some(None);
                 let mut deleted = None;
                 let revision = self.session.revision();
-                let mut moved = hierarchy_drop(ui, &root, None, revision).map(|id| (id, None));
+                let mut moved = hierarchy_drop(ui, &root, None, revision);
                 egui::ScrollArea::vertical().show_rows(
                     ui,
                     ROW_HEIGHT,
@@ -737,10 +811,10 @@ impl ComponentWorkspace {
                                         object_id: object.id.clone(),
                                     });
                                 }
-                                if let Some(id) =
+                                if let Some(drop) =
                                     hierarchy_drop(ui, &response, Some(&object.id), revision)
                                 {
-                                    moved = Some((id, Some(object.id.clone())));
+                                    moved = Some(drop);
                                 }
                                 if response.clicked() {
                                     selected = Some(Some(object.id.clone()));
@@ -758,13 +832,18 @@ impl ComponentWorkspace {
                                         deleted = Some(object.id.clone());
                                         ui.close();
                                     }
+                                    if let Some(destination) =
+                                        sibling_move_items(ui, &self.session.scene().objects, index)
+                                    {
+                                        moved = Some((object.id.clone(), destination));
+                                    }
                                 });
                             });
                         }
                     },
                 );
-                if let Some((id, parent)) = moved {
-                    self.reparent(&id, parent.as_deref());
+                if let Some((id, destination)) = moved {
+                    self.move_in_hierarchy(&id, destination);
                 } else if let Some(id) = deleted {
                     self.delete(&id);
                 } else if let Some(selected) = selected.filter(|_| self.apply()) {
