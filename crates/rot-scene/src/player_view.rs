@@ -45,11 +45,7 @@ impl PlayerView {
         }
     }
 
-    fn resolve(
-        &self,
-        scene: &Scene,
-        poses: Option<&ResolvedPoses>,
-    ) -> Result<ResolvedPlayerView, SceneError> {
+    pub(crate) fn validate_settings(&self) -> Result<(), SceneError> {
         if !self.yaw.is_finite()
             || self.yaw.abs() > 10_000.0
             || !self.pitch.is_finite()
@@ -59,8 +55,12 @@ impl PlayerView {
         {
             return Err(SceneError::Invalid("Player view requires yaw within ±10000 radians, pitch within ±89°, distance 0.1..1000 and vertical FOV 10..120°".into()));
         }
-        let anchor = match &self.anchor {
-            PlayerAnchor::Fixed { position } => *position,
+        match &self.anchor {
+            PlayerAnchor::Fixed { position } if !coordinate(*position) => {
+                return Err(SceneError::Invalid(
+                    "Player view anchor must be finite and within ±10000 world units".into(),
+                ));
+            }
             PlayerAnchor::Follow { target_id, offset } => {
                 validate_id(target_id)?;
                 if !coordinate(*offset) {
@@ -68,6 +68,21 @@ impl PlayerView {
                         "Player view offset must be finite and within ±10000 world units".into(),
                     ));
                 }
+            }
+            PlayerAnchor::Fixed { .. } => {}
+        }
+        Ok(())
+    }
+
+    fn resolve(
+        &self,
+        scene: &Scene,
+        poses: Option<&ResolvedPoses>,
+    ) -> Result<ResolvedPlayerView, SceneError> {
+        self.validate_settings()?;
+        let anchor = match &self.anchor {
+            PlayerAnchor::Fixed { position } => *position,
+            PlayerAnchor::Follow { target_id, offset } => {
                 let object = scene.objects.iter().find(|object| object.id == *target_id);
                 let group = scene.hierarchy.groups.get(target_id);
                 let target = object.map(|object| &object.transform)

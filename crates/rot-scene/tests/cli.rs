@@ -191,3 +191,22 @@ fn headless_workflow_and_failed_command_preserve_disk() {
     assert!(restored.source("source-new").is_none() && restored.binding("binding-new").is_none());
     assert!(restored.source("source-k").is_some() && restored.binding("binding-k").is_some());
 }
+
+#[test]
+fn component_migration_validates_output_and_never_overwrites() {
+    let dir = tempfile::tempdir().unwrap();
+    let legacy = dir.path().join("legacy.json");
+    let output = dir.path().join("components.json");
+    let source = legacy.to_str().unwrap();
+    let destination = output.to_str().unwrap();
+    assert!(cli(&["demo", source]).status.success());
+    let before = std::fs::read(&legacy).unwrap();
+
+    assert!(!cli(&["migrate", source, source]).status.success());
+    assert!(cli(&["migrate", source, destination]).status.success());
+    assert!(cli(&["validate-components", destination]).status.success());
+    let published = std::fs::read(&output).unwrap();
+    assert!(!cli(&["migrate", source, destination]).status.success());
+    assert_eq!(std::fs::read(&output).unwrap(), published);
+    assert_eq!(std::fs::read(&legacy).unwrap(), before);
+}

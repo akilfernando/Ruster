@@ -1649,31 +1649,42 @@ impl Document {
         Ok(bytes)
     }
     fn write(&self, path: &Path, create_new: bool) -> Result<(), SceneError> {
-        reject_nonregular(path)?;
         let bytes = self.encode()?;
-        let parent = path
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or_else(|| Path::new("."));
-        let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-        temporary.write_all(&bytes)?;
-        temporary.flush()?;
-        temporary.as_file().sync_all()?;
-        if create_new {
-            temporary.persist_noclobber(path).map_err(|e| {
-                if e.error.kind() == std::io::ErrorKind::AlreadyExists {
-                    SceneError::Conflict
-                } else {
-                    SceneError::Io(e.error)
-                }
-            })?;
-        } else {
-            temporary
-                .persist(path)
-                .map_err(|e| SceneError::Io(e.error))?;
-        }
-        Ok(())
+        write_scene_atomically(path, create_new, |writer| {
+            writer.write_all(&bytes)?;
+            Ok(())
+        })
     }
+}
+
+fn write_scene_atomically(
+    path: &Path,
+    create_new: bool,
+    write: impl FnOnce(&mut File) -> Result<(), SceneError>,
+) -> Result<(), SceneError> {
+    reject_nonregular(path)?;
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    write(temporary.as_file_mut())?;
+    temporary.flush()?;
+    temporary.as_file().sync_all()?;
+    if create_new {
+        temporary.persist_noclobber(path).map_err(|e| {
+            if e.error.kind() == std::io::ErrorKind::AlreadyExists {
+                SceneError::Conflict
+            } else {
+                SceneError::Io(e.error)
+            }
+        })?;
+    } else {
+        temporary
+            .persist(path)
+            .map_err(|e| SceneError::Io(e.error))?;
+    }
+    Ok(())
 }
 
 fn reject_pre_v17_hud_panels(value: &serde_json::Value) -> Result<(), SceneError> {

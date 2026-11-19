@@ -2,14 +2,18 @@
 //! remains the entry point until migration and consumer integration land.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fs::File;
 use std::io::{Read, Write};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    strict_json, validate_id, validate_name, Ambient, BehaviorBinding, BehaviorSource,
-    BindingTarget, Collider, ColliderRole, ColliderShape, DisplayProfile, Light, LightKind,
-    Lighting, OpaqueMaterial, Primitive, SceneError, Session, Transform,
+    hud::Hud,
+    input::{validate_action_map, ActionMap},
+    strict_json, validate_id, validate_name, Ambient, AnimationBinding, BehaviorBinding,
+    BehaviorSource, BindingTarget, Collider, ColliderRole, ColliderShape, DisplayProfile, Light,
+    LightKind, Lighting, OpaqueMaterial, PlayerView, Primitive, SceneError, Session, Transform,
 };
 
 pub const FORMAT_VERSION: u32 = 23;
@@ -28,6 +32,12 @@ pub struct ComponentScene {
     pub ambient: Option<Ambient>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub sources: BTreeMap<String, BehaviorSource>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub actions: ActionMap,
+    #[serde(default, skip_serializing_if = "Hud::is_default")]
+    pub hud: Hud,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gameplay_camera: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -54,8 +64,18 @@ impl ComponentScene {
             validate_id(id)?;
             source.validate()?;
         }
+        validate_action_map(&self.actions)?;
+        self.hud.validate()?;
+        let object_indices: HashMap<_, _> = self
+            .objects
+            .iter()
+            .enumerate()
+            .map(|(index, object)| (object.id.as_str(), index))
+            .collect();
         let mut ids = HashSet::new();
-        for object in &self.objects {
+        let mut driven = HashSet::new();
+        let mut gameplay_camera_found = self.gameplay_camera.is_none();
+        for (owner, object) in self.objects.iter().enumerate() {
             for component in &object.components {
                 validate_id(&component.id)?;
                 if !ids.insert(component.id.as_str()) {
@@ -94,12 +114,44 @@ impl ComponentScene {
                             || binding
                                 .scene_owner_id()
                                 .is_some_and(|owner| owner != object.id)
-                            || !self.sources.contains_key(&binding.source_id)
                         {
                             return Err(SceneError::Invalid(format!(
-                                "invalid owner, enabled state or source on script {}",
+                                "invalid owner or enabled state on script {}",
                                 component.id
                             )));
+                        }
+                    }
+                    Component::Camera { view } => {
+                        view.validate_settings()?;
+                        if view
+                            .followed_target()
+                            .is_some_and(|id| !object_indices.contains_key(id))
+                        {
+                            return Err(SceneError::Invalid(format!(
+                                "camera {} references a missing follow target",
+                                component.id
+                            )));
+                        }
+                        gameplay_camera_found |=
+                            self.gameplay_camera.as_deref() == Some(&component.id);
+                    }
+                    Component::Animator { binding } => {
+                        binding.validate_settings()?;
+                        for id in binding.targets.values() {
+                            let mut ancestor = object_indices
+                                .get(id.as_str())
+                                .and_then(|&index| hierarchy.parents[index]);
+                            while let Some(index) = ancestor {
+                                if index == owner {
+                                    break;
+                                }
+                                ancestor = hierarchy.parents[index];
+                            }
+                            if ancestor.is_none() || !driven.insert(id.as_str()) {
+                                return Err(SceneError::Invalid(format!(
+                                    "animation target {id} must be a descendant driven by only one animation"
+                                )));
+                            }
                         }
                     }
                     Component::Light {
@@ -129,6 +181,11 @@ impl ComponentScene {
                 }
             }
         }
+        if !gameplay_camera_found {
+            return Err(SceneError::Invalid(
+                "gameplay camera must reference a Camera component".into(),
+            ));
+        }
         Ok(hierarchy)
     }
 
@@ -137,16 +194,6 @@ impl ComponentScene {
     pub fn from_legacy(session: &Session) -> Result<Self, SceneError> {
         let scene = session.scene();
         let authoring = session.authoring();
-        if scene.player_view.is_some()
-            || !scene.animations.is_empty()
-            || !authoring.actions.is_empty()
-            || !authoring.hud.is_default()
-        {
-            return Err(SceneError::Invalid(
-                "v23 migration does not yet support cameras, animation, input actions or HUD"
-                    .into(),
-            ));
-        }
         let parent = |id: &str| scene.hierarchy.parents.get(id).cloned();
         let mut objects = Vec::with_capacity(
             scene.objects.len() + scene.hierarchy.groups.len() + scene.lighting.light_count(),
@@ -241,16 +288,7 @@ impl ComponentScene {
             .values()
             .any(|binding| binding.target == BindingTarget::Application)
         {
-            let id = (0..)
-                .map(|suffix| {
-                    if suffix == 0 {
-                        "application".into()
-                    } else {
-                        format!("application_{suffix}")
-                    }
-                })
-                .find(|id| !objects.iter().any(|object| &object.id == id))
-                .expect("finite object list");
+            let id = available_object_id(&objects, "application");
             let index = objects.len();
             objects.push(ObjectNode {
                 id,
@@ -285,6 +323,35 @@ impl ComponentScene {
                 },
             });
         }
+        for (owner, binding) in &scene.animations {
+            let index = *indices.get(owner).ok_or_else(|| {
+                SceneError::Invalid(format!("animation has missing owner {owner}"))
+            })?;
+            objects[index].components.push(ComponentInstance {
+                id: component_id(owner, "animator"),
+                enabled: true,
+                kind: Component::Animator {
+                    binding: binding.clone(),
+                },
+            });
+        }
+        let gameplay_camera = scene.player_view.as_ref().map(|view| {
+            let id = available_object_id(&objects, "gameplay_camera");
+            let camera = component_id(&id, "camera");
+            objects.push(ObjectNode {
+                id,
+                name: "Gameplay Camera".into(),
+                enabled: true,
+                parent: None,
+                transform: Transform::default(),
+                components: vec![ComponentInstance {
+                    id: camera.clone(),
+                    enabled: true,
+                    kind: Component::Camera { view: view.clone() },
+                }],
+            });
+            camera
+        });
         let converted = Self {
             id: scene.id.clone(),
             objects,
@@ -292,9 +359,24 @@ impl ComponentScene {
             display: scene.display,
             ambient,
             sources: authoring.sources.clone(),
+            actions: authoring.actions.clone(),
+            hud: authoring.hud.clone(),
+            gameplay_camera,
         };
         converted.validate()?;
         Ok(converted)
+    }
+
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, SceneError> {
+        let path = path.as_ref();
+        crate::reject_nonregular(path)?;
+        Self::read_json(File::open(path)?)
+    }
+
+    /// Export to a new path. The legacy editor can continue opening its original file.
+    pub fn save_new(&self, path: impl AsRef<Path>) -> Result<(), SceneError> {
+        let lock = crate::SceneLock::acquire(path.as_ref())?;
+        crate::write_scene_atomically(&lock.path, true, |writer| self.write_json(writer))
     }
 
     pub fn read_json(reader: impl Read) -> Result<Self, SceneError> {
@@ -332,6 +414,17 @@ impl ComponentScene {
     }
 }
 
+fn available_object_id(objects: &[ObjectNode], stem: &str) -> String {
+    let used: HashSet<_> = objects.iter().map(|object| object.id.as_str()).collect();
+    if !used.contains(stem) {
+        return stem.into();
+    }
+    (1..)
+        .map(|suffix| format!("{stem}_{suffix}"))
+        .find(|id| !used.contains(id.as_str()))
+        .expect("finite object list")
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ComponentInstance {
     pub id: String,
@@ -343,6 +436,12 @@ pub struct ComponentInstance {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Component {
+    Camera {
+        view: PlayerView,
+    },
+    Animator {
+        binding: AnimationBinding,
+    },
     Script {
         binding: BehaviorBinding,
     },
@@ -492,6 +591,88 @@ mod tests {
     }
 
     #[test]
+    fn camera_and_animation_preserve_legacy_hierarchy_and_targets() {
+        let mut scene = crate::Scene::demo();
+        scene.hierarchy.groups.insert(
+            "rig".into(),
+            crate::Group {
+                name: None,
+                transform: Transform::default(),
+            },
+        );
+        scene.hierarchy.parents.insert("left".into(), "rig".into());
+        let animation = AnimationBinding {
+            clip: "walk".into(),
+            looping: true,
+            targets: BTreeMap::from([("track".into(), "left".into())]),
+        };
+        scene.animations.insert("rig".into(), animation.clone());
+        let view = PlayerView {
+            anchor: crate::PlayerAnchor::Follow {
+                target_id: "left".into(),
+                offset: [0., 1., 0.],
+            },
+            yaw: 1.,
+            pitch: 0.2,
+            distance: 6.,
+            vertical_fov_degrees: 60.,
+        };
+        scene.player_view = Some(view.clone());
+
+        let migrated = ComponentScene::from_legacy(&Session::new(scene).unwrap()).unwrap();
+        let rig = migrated
+            .objects
+            .iter()
+            .find(|object| object.id == "rig")
+            .unwrap();
+        assert_eq!(
+            rig.components[0].kind,
+            Component::Animator { binding: animation }
+        );
+        let camera = &migrated.objects.last().unwrap().components[0];
+        assert_eq!(migrated.gameplay_camera.as_ref(), Some(&camera.id));
+        assert_eq!(camera.kind, Component::Camera { view });
+        let mut json = Vec::new();
+        migrated.write_json(&mut json).unwrap();
+        assert_eq!(
+            ComponentScene::read_json(json.as_slice()).unwrap(),
+            migrated
+        );
+
+        let mut invalid = migrated;
+        invalid.objects.retain(|object| object.id != "left");
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn actions_and_hud_survive_migration() {
+        use crate::input::{ActionDefinition, ActionKind, InputKey};
+
+        let mut session = Session::new(crate::Scene::empty("controls")).unwrap();
+        let action = ActionDefinition {
+            label: Some("Jump".into()),
+            kind: ActionKind::Button {
+                keys: vec![InputKey::Space],
+            },
+        };
+        let revision = session.set_action(0, "jump", Some(action.clone())).unwrap();
+        let hud = Hud {
+            enabled: true,
+            panels: Vec::new(),
+        };
+        session.set_hud(revision, hud.clone()).unwrap();
+        let migrated = ComponentScene::from_legacy(&session).unwrap();
+        assert_eq!(migrated.actions.get("jump"), Some(&action));
+        assert_eq!(migrated.hud, hud);
+        let mut json = Vec::new();
+        migrated.write_json(&mut json).unwrap();
+        assert_eq!(
+            ComponentScene::read_json(json.as_slice()).unwrap(),
+            migrated
+        );
+    }
+
+    #[test]
     fn authored_lighting_migrates_and_round_trips() {
         let mut scene = crate::Scene::empty("lit");
         let mut sun = Light::directional(Some("Sun".into()));
@@ -565,6 +746,9 @@ mod tests {
             display: DisplayProfile::default(),
             ambient: None,
             sources: BTreeMap::new(),
+            actions: ActionMap::new(),
+            hud: Hud::default(),
+            gameplay_camera: None,
         };
         let mut bytes = Vec::new();
         scene.write_json(&mut bytes).unwrap();
@@ -621,6 +805,9 @@ mod tests {
             display: DisplayProfile::default(),
             ambient: None,
             sources: BTreeMap::new(),
+            actions: ActionMap::new(),
+            hud: Hud::default(),
+            gameplay_camera: None,
         };
         let mut bytes = Vec::new();
         scene.write_json(&mut bytes).unwrap();

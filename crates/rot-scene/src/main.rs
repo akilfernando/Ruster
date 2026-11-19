@@ -36,7 +36,7 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Box<dyn E
     Ok(serde_json::from_slice(&bytes)?)
 }
 
-use rot_scene::{Object, Preview, Scene, Session, FORMAT_VERSION};
+use rot_scene::{component_scene::ComponentScene, Object, Preview, Scene, Session, FORMAT_VERSION};
 
 fn report_revision(session: &Session, revision: u64) {
     println!("revision {revision}");
@@ -55,7 +55,7 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let usage = "usage: rot-scene demo FILE | new FILE SCENE_ID | create FILE REV ID [NAME] | rename FILE REV ID [NAME] | duplicate FILE REV SOURCE NEW_ID [NAME] | delete FILE REV ID | inspect FILE | transform FILE EXPECTED_REV OBJECT X Y Z [RX RY RZ SX SY SZ] | mesh FILE EXPECTED_REV OBJECT ASSET_ID|none | transforms|duplicates|deletes FILE EXPECTED_REV BATCH.json | undo FILE EXPECTED_REV | redo FILE EXPECTED_REV | run FILE TICKS (0..10000)\nAuthoring: behavior-create FILE REV SOURCE_ID BINDING_ID JSON_FILE | sources|bindings|diagnostics FILE [OFFSET] | source|binding FILE ID | source-set|binding-set FILE REV ID JSON_FILE | source-remove|binding-remove FILE REV ID\nSources are embedded text. JSON files describe BehaviorSource/BehaviorBinding; unfinished code and unknown languages remain saveable. List commands page16 summaries; source/binding returns the complete requested value.";
+    let usage = "usage: rot-scene migrate LEGACY_FILE NEW_FILE | validate-components FILE | demo FILE | new FILE SCENE_ID | create FILE REV ID [NAME] | rename FILE REV ID [NAME] | duplicate FILE REV SOURCE NEW_ID [NAME] | delete FILE REV ID | inspect FILE | transform FILE EXPECTED_REV OBJECT X Y Z [RX RY RZ SX SY SZ] | mesh FILE EXPECTED_REV OBJECT ASSET_ID|none | transforms|duplicates|deletes FILE EXPECTED_REV BATCH.json | undo FILE EXPECTED_REV | redo FILE EXPECTED_REV | run FILE TICKS (0..10000)\nAuthoring: behavior-create FILE REV SOURCE_ID BINDING_ID JSON_FILE | sources|bindings|diagnostics FILE [OFFSET] | source|binding FILE ID | source-set|binding-set FILE REV ID JSON_FILE | source-remove|binding-remove FILE REV ID\nSources are embedded text. JSON files describe BehaviorSource/BehaviorBinding; unfinished code and unknown languages remain saveable. List commands page16 summaries; source/binding returns the complete requested value.";
     let Some(command) = args.first() else {
         return Err(usage.into());
     };
@@ -112,6 +112,13 @@ fn run() -> Result<(), Box<dyn Error>> {
             };
             session.save(path)?;
             report_revision(&session, revision);
+        }
+        ("migrate", 3) => {
+            let legacy = Session::open(&args[1])?;
+            ComponentScene::from_legacy(&legacy)?.save_new(&args[2])?;
+        }
+        ("validate-components", 2) => {
+            ComponentScene::open(&args[1])?;
         }
         ("demo", 2) => {
             let mut session = Session::new(Scene::demo())?;

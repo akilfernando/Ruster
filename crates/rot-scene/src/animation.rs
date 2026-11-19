@@ -71,6 +71,27 @@ fn invalid(message: impl Into<String>) -> SceneError {
     SceneError::Invalid(message.into())
 }
 
+impl AnimationBinding {
+    pub(crate) fn validate_settings(&self) -> Result<(), SceneError> {
+        validate_id(&self.clip)?;
+        if self.targets.is_empty() || self.targets.len() > MAX_ANIMATION_TARGETS {
+            return Err(invalid(format!(
+                "animation binding requires 1..{MAX_ANIMATION_TARGETS} targets"
+            )));
+        }
+        for (path, id) in &self.targets {
+            validate_id(id)?;
+            if path.is_empty()
+                || path.len() > MAX_NODE_PATH_BYTES
+                || path.chars().any(char::is_control)
+            {
+                return Err(invalid("animation target node path is malformed"));
+            }
+        }
+        Ok(())
+    }
+}
+
 impl ClipTrack {
     fn validate(&self) -> Result<(), SceneError> {
         let width = if self.property == ClipProperty::Rotation {
@@ -257,25 +278,13 @@ impl Scene {
         let mut driven = BTreeSet::new();
         for (owner, binding) in &self.animations {
             validate_id(owner)?;
-            validate_id(&binding.clip)?;
             if !self.hierarchy.groups.contains_key(owner) {
                 return Err(invalid(format!(
                     "animation owner {owner} must be an existing Group; remove the animation first"
                 )));
             }
-            if binding.targets.is_empty() || binding.targets.len() > MAX_ANIMATION_TARGETS {
-                return Err(invalid(format!(
-                    "animation binding requires 1..{MAX_ANIMATION_TARGETS} targets"
-                )));
-            }
-            for (path, id) in &binding.targets {
-                validate_id(id)?;
-                if path.is_empty()
-                    || path.len() > MAX_NODE_PATH_BYTES
-                    || path.chars().any(char::is_control)
-                {
-                    return Err(invalid("animation target node path is malformed"));
-                }
+            binding.validate_settings()?;
+            for id in binding.targets.values() {
                 let exists = self.hierarchy.groups.contains_key(id)
                     || self.objects.iter().any(|object| object.id == *id);
                 let mut cursor = Some(id);

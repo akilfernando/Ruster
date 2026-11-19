@@ -44,14 +44,13 @@ specifies the proposed model and migration. C-02 has an indexed object
 hierarchy that rejects cycles, missing parents and duplicate IDs, and
 resolves inherited enabled state without recursion. A 5,000-object chain
 passed its focused check. The affected gate passed (452 tests, 17 ignored).
-The v23 reader/writer handles hierarchy, Mesh Renderer, Collider, Script,
-materials, display settings and script sources, plus authored lights and
-ambient settings. The in-memory converter
-round-trips all three tracked examples, preserving object and script IDs.
-It rejects cameras, animation, input actions and HUD
-until their migration is implemented. The editor still opens legacy
-scenes through its existing loader. Publishing migration, session
-transactions and editor/runtime integration remain open.
+The v23 reader/writer and in-memory converter preserve hierarchy, mesh,
+collider, script, lighting, camera and animation data, plus actions and HUD.
+`rot-scene migrate LEGACY_FILE NEW_FILE` exports a v23 copy without replacing
+either an existing destination or the source. `rot-scene validate-components
+FILE` checks the exported copy. The editor still opens legacy scenes.
+Automatic upgrades, session transactions and editor/runtime integration
+remain open.
 
 ## What a creator can do today
 
