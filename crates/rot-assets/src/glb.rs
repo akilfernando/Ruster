@@ -547,7 +547,7 @@ impl Decoder<'_> {
         }
         if self.mesh_bytes > MAX_RESOLVED_BYTES
             || self.texture_bytes > MAX_TEXTURE_RESOLVED_BYTES
-            || self.model.resources.len() >= MAX_ASSETS
+            || self.model.resources.len() >= MAX_MODEL_ITEMS
         {
             return Err(error(
                 "GLB decoded resources exceed the project payload or asset count limit",
@@ -1099,9 +1099,9 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
         || doc.scenes.len() != 1
         || doc.scene.unwrap_or(0) != 0
         || doc.nodes.is_empty()
-        || doc.nodes.len() > MAX_ASSETS
-        || doc.accessors.len() > MAX_ASSETS * 4
-        || doc.buffer_views.len() > MAX_ASSETS * 5
+        || doc.nodes.len() > MAX_MODEL_ITEMS
+        || doc.accessors.len() > MAX_MODEL_ITEMS * 4
+        || doc.buffer_views.len() > MAX_MODEL_ITEMS * 5
         || [
             doc.meshes.len(),
             doc.materials.len(),
@@ -1110,8 +1110,8 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
             doc.samplers.len(),
         ]
         .into_iter()
-        .any(|n| n > MAX_ASSETS)
-        || doc.animations.len() > MAX_ASSETS
+        .any(|n| n > MAX_MODEL_ITEMS)
+        || doc.animations.len() > MAX_MODEL_ITEMS
         || buffer.byte_length > bin.len()
         || bin.len() - buffer.byte_length > 3
         || bin[buffer.byte_length..].iter().any(|b| *b != 0)

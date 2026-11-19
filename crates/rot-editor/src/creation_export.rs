@@ -75,9 +75,6 @@ pub(crate) fn scene_dependencies(
         .filter_map(|o| o.mesh.clone())
         .collect();
     let textures: BTreeSet<_> = scene_texture_roles(scene)?.into_keys().collect();
-    if meshes.len() + textures.len() > rot_assets::MAX_ASSETS {
-        return Err("Export exceeds 64 combined mesh/texture assets.".into());
-    }
     if !meshes.is_disjoint(&textures) {
         return Err("Mesh and texture asset IDs must be distinct before export.".into());
     }

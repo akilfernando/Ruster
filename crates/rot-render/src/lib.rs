@@ -37,7 +37,6 @@ const COLOR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const HDR_COLOR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const MAX_SAMPLES: usize = 4096;
-const MAX_MESHES: usize = rot_assets::MAX_ASSETS;
 // Retained attachment payload only, excluding driver allocations and resize overlap.
 const MAX_TARGET_BYTES: u64 = 256 * 1024 * 1024;
 pub const MAX_SHADER_BYTES: usize = 64 * 1024;
@@ -2991,9 +2990,6 @@ fn prepare_mesh(
         return None;
     }
     // Defense at the public renderer boundary; registered AssetStore meshes already satisfy these limits.
-    if meshes.len() >= MAX_MESHES && !meshes.contains_key(id) {
-        return None;
-    }
     if rot_assets::validate_mesh(mesh).is_err() {
         eprintln!("Rot Engine mesh {id} invalid or over renderer limits; cube fallback");
         meshes.remove(id);

@@ -451,19 +451,30 @@ fn obj_index_and_format_boundaries() {
     assert!(parse_obj(authored.replace("vn 0 2 0", "vn 0 0 0").as_bytes()).is_ok());
 }
 
-// Both per-project asset count and aggregate resolved geometry are enforced
-// before committing another accepted entry, including on process reopen.
+// Small sources can share a large catalog while decoded geometry remains
+// subject to its aggregate payload budget.
 #[test]
 fn catalog_and_resolved_payload_limits_preserve_previous_state() {
     let root = project();
     let mut small = AssetStore::open(root.path()).unwrap();
-    for i in 0..rot_assets::MAX_ASSETS {
+    for i in 0..96 {
         let source = format!("small-{i}.obj");
         fs::copy(root.path().join("mesh.obj"), root.path().join(&source)).unwrap();
         small.import(&format!("small-{i}"), &source).unwrap();
     }
-    assert!(small.import("overflow", "mesh.obj").is_err());
-    assert_eq!(small.revision(), rot_assets::MAX_ASSETS as u64);
+    assert_eq!(small.revision(), 96);
+    let reopened = AssetStore::open(root.path()).unwrap();
+    assert_eq!(reopened.infos().len(), 96);
+    let ids = reopened.infos().map(|asset| asset.id.clone()).collect();
+    assert_eq!(
+        reopened
+            .export_snapshot(&ids)
+            .unwrap()
+            .read_sources()
+            .unwrap()
+            .len(),
+        96
+    );
     let root = project();
     let mut source = String::from("v 0 0 0\nv 1 0 0\nv 0 1 0\n");
     source.push_str(&"f 1 2 3\n".repeat(32_768));

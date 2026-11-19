@@ -44,7 +44,7 @@ The v23 Inspector shows live Transform and script state during Play and Step.
 Editor and viewer draw, fit and pick from cached world matrices, including shear.
 v23 Build writes and launches a Linux player folder without Python. Approved
 MCP clients can create objects and groups, edit components, control Play,
-browse assets, assign meshes and capture the viewport. On Linux, v23 watches Assets/ for imports and changes. [C-12 benchmark timings](PARITY-PLAN.md#5-performance-budgets)
+browse assets, assign meshes and capture the viewport. On Linux, v23 watches Assets/ for imports and changes. A relocated build loaded 80 meshes. [C-12 benchmark timings](PARITY-PLAN.md#5-performance-budgets)
 cover 5,000 and 50,000 objects. Desktop frame rates remain unverified.
 
 ## What a creator can do today
@@ -54,9 +54,9 @@ move, rotate and scale with gizmos; assign textures and materials; import OBJ,
 PNG, WAV and simple GLB models, including one transform animation clip;
 attach small Lua scripts; press Play to run the scene; build a Linux
 application through a prepared runtime kit; and let an AI app edit the scene
-through MCP after a scripted setup. The limits are tight (256 objects, 64
-assets, opaque materials only). The honest inventory is in the
-[plan](PARITY-PLAN.md#2-where-we-are).
+through MCP after a scripted setup. Legacy scenes retain a 256-object limit.
+Materials are opaque. The [historical inventory](PARITY-PLAN.md#2-where-we-are)
+records the starting point for the parity plan.
 
 ## Installed on this machine
 

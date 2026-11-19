@@ -82,16 +82,6 @@ impl Registry {
         })
     }
 
-    pub(super) fn asset_count(&self) -> usize {
-        self.assets.len()
-            + self.models.len()
-            + self
-                .models
-                .values()
-                .map(|model| model.resources().count() + model.clips.len())
-                .sum::<usize>()
-    }
-
     pub(super) fn model_resource(&self, id: &str) -> Option<(&ModelInfo, AssetKind)> {
         self.models.values().find_map(|model| {
             model
@@ -112,7 +102,7 @@ impl Registry {
                 || !ids.insert(id)
                 || !sources.insert(&model.source)
                 || model.nodes.is_empty()
-                || model.nodes.len() > MAX_ASSETS
+                || model.nodes.len() > MAX_MODEL_ITEMS
             {
                 return Err(error("invalid or duplicate static model catalog identity"));
             }
@@ -224,9 +214,6 @@ impl AssetStore {
             {
                 return Err(error("GLB model ID or source already registered; use the existing model ID to Refresh"));
             }
-            if self.registry.asset_count() >= MAX_ASSETS {
-                return Err(error("asset catalog limit (64) reached"));
-            }
         } else if !self.registry.models.contains_key(id) {
             return Err(error(format!("unknown GLB model ID {id:?}")));
         }
@@ -251,11 +238,6 @@ impl AssetStore {
         }
         let mut next = self.registry.clone();
         next.models.insert(id.into(), decoded.info.clone());
-        if next.asset_count() > MAX_ASSETS {
-            return Err(error(
-                "asset catalog exceeds 64 assets including model subresources",
-            ));
-        }
         next.validate_models()?;
         self.check_model_budget(&decoded)?;
         let changed = prior.is_none_or(|prior| prior.hash != decoded.info.hash);

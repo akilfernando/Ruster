@@ -320,10 +320,6 @@ impl MaterialGpu {
         self.validation
             .retain(|id, _| sources.contains_key(id.as_str()));
         let mut invalid = BTreeSet::new();
-        if sources.len() > rot_assets::MAX_ASSETS {
-            invalid.extend(sources.keys().copied());
-            sources.clear();
-        }
         sources.retain(|id, source| {
             let identity = Arc::downgrade(source);
             let valid = if self.matches(id, source) {
@@ -349,9 +345,7 @@ impl MaterialGpu {
         let bytes = sources.values().try_fold(0u64, |sum, source| {
             sum.checked_add(source.payload_bytes() as u64)
         });
-        if sources.len() > rot_assets::MAX_ASSETS
-            || bytes.is_none_or(|bytes| bytes > rot_assets::MAX_TEXTURE_RESOLVED_BYTES as u64)
-        {
+        if bytes.is_none_or(|bytes| bytes > rot_assets::MAX_TEXTURE_RESOLVED_BYTES as u64) {
             invalid.extend(sources.keys().copied());
             sources.clear();
         }

@@ -10,7 +10,7 @@ pub const NO_AUDIO_VERSION: u32 = 5;
 /// The audio-capable descriptor without imported transform animation.
 pub const NO_ANIMATION_VERSION: u32 = 6;
 pub const VERSION: u32 = 7;
-pub const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
+pub const MAX_DESCRIPTOR_BYTES: usize = 8 * 1024 * 1024;
 
 /// Explicit launch framing. Navigation remains interactive after initialization.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -145,7 +145,7 @@ where
     impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for Unique<T> {
         type Value = BTreeMap<String, T>;
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-            formatter.write_str("at most 64 unique resource IDs")
+            formatter.write_str("unique resource IDs")
         }
         fn visit_map<M: serde::de::MapAccess<'de>>(
             self,
@@ -153,10 +153,8 @@ where
         ) -> Result<Self::Value, M::Error> {
             let mut values = BTreeMap::new();
             while let Some((id, source)) = map.next_entry::<String, T>()? {
-                if values.len() >= rot_assets::MAX_ASSETS || values.insert(id, source).is_some() {
-                    return Err(serde::de::Error::custom(
-                        "too many or duplicate resource IDs",
-                    ));
+                if values.insert(id, source).is_some() {
+                    return Err(serde::de::Error::custom("duplicate resource ID"));
                 }
             }
             Ok(values)
@@ -239,13 +237,6 @@ impl CreationManifest {
             camera.camera_state()?;
         }
         resource_path(&self.scene)?;
-        let sound_count = self.sounds.as_ref().map_or(0, BTreeMap::len);
-        let animation_count = self.animations.as_ref().map_or(0, BTreeMap::len);
-        if self.meshes.len() + self.textures.len() + sound_count + animation_count
-            > rot_assets::MAX_ASSETS
-        {
-            return Err("Application resource mappings exceed 64".into());
-        }
         for (id, path) in self
             .meshes
             .iter()

@@ -513,9 +513,6 @@ fn validate_mutation(store: &AssetStore, mutation: &AssetMutation) -> Result<(),
                     "source {source:?} is already registered with this import interpretation; use its existing asset ID"
                 )));
             }
-            if store.registry.asset_count() >= MAX_ASSETS {
-                return Err(error("asset catalog limit (64) reached"));
-            }
         }
         AssetMutation::ImportGlb { source, .. } => {
             store.validate_model_request(id, Some(source))?;

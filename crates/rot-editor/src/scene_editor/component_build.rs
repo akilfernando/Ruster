@@ -192,11 +192,11 @@ impl BuildRequest {
         )?;
         manifest.load_sounds(&resources)?;
         manifest.load_animations(&resources)?;
-        fs::write(
-            stage.join(DESCRIPTOR_NAME),
-            serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?,
-        )
-        .map_err(|error| error.to_string())?;
+        let descriptor = serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
+        if descriptor.len() > rot_app::creation::MAX_DESCRIPTOR_BYTES {
+            return Err("Build asset mappings exceed the player descriptor size limit.".into());
+        }
+        fs::write(stage.join(DESCRIPTOR_NAME), descriptor).map_err(|error| error.to_string())?;
         cancelled()?;
         fs::copy(player, stage.join(APPLICATION)).map_err(|error| error.to_string())?;
         cancelled()?;

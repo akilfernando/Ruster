@@ -55,9 +55,6 @@ impl Content {
         meshes: MeshMap,
         textures: TextureMap,
     ) -> Result<Self, String> {
-        if meshes.len() + textures.len() > rot_assets::MAX_ASSETS {
-            return Err("application asset count exceeds 64".into());
-        }
         if meshes.keys().any(|id| textures.contains_key(id)) {
             return Err("application mesh/texture asset IDs must be distinct".into());
         }

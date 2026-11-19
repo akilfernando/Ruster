@@ -14,7 +14,7 @@ use std::{
 pub const MAX_SOURCE_BYTES: usize = 1024 * 1024;
 pub const MAX_TRIANGLES: usize = 32_768;
 pub const MAX_VERTICES: usize = MAX_TRIANGLES * 3;
-pub const MAX_ASSETS: usize = 64;
+const MAX_MODEL_ITEMS: usize = 64;
 pub const MAX_RESOLVED_BYTES: usize = 48 * 1024 * 1024;
 mod audio;
 use audio::SOUND_CACHE_VERSION;
@@ -41,7 +41,7 @@ pub use texture::{
     MAX_TEXTURE_BYTES, MAX_TEXTURE_EDGE, MAX_TEXTURE_RESOLVED_BYTES, MAX_TEXTURE_SOURCE_BYTES,
 };
 const MAX_CACHE_BYTES: usize = 16 * 1024 * 1024;
-const MAX_REGISTRY_BYTES: usize = 64 * 1024;
+const MAX_REGISTRY_BYTES: usize = 8 * 1024 * 1024;
 const REGISTRY: &str = ".rot-assets.json";
 const CACHE_MAGIC: &[u8; 8] = b"RUSTMESH";
 // magic, version, vertex/index counts, ASCII source SHA-256, binary SHA-256.
@@ -556,7 +556,7 @@ impl ExportSnapshot {
         Ok(resource_identity(&resources))
     }
 
-    /// Read at most MAX_ASSETS sources, using the per-kind source-byte bounds. Catalog
+    /// Read accepted sources using the per-kind source-byte bounds. Catalog
     /// equality is checked before and after reading against the editor's exact
     /// accepted baseline. Source hashes preserve that same accepted-content
     /// boundary without parsing the already validated content again. Like the shared
@@ -777,9 +777,6 @@ impl AssetStore {
     /// catalog/history assets. No files are inspected or changed here, so this
     /// bounded metadata capture may run on the editor thread.
     pub fn export_snapshot(&self, ids: &BTreeSet<String>) -> Result<ExportSnapshot, AssetError> {
-        if ids.len() > MAX_ASSETS {
-            return Err(error("export exceeds 64 assets"));
-        }
         let mut sources = BTreeMap::new();
         let mut models = BTreeMap::new();
         let mut clips = BTreeMap::new();
@@ -1441,9 +1438,6 @@ fn validate_registry(registry: &Registry) -> Result<(), AssetError> {
     if !has_clips && (registry.version == 6) != has_sound {
         return Err(error("asset catalog version 6 requires sound assets"));
     }
-    if registry.asset_count() > MAX_ASSETS {
-        return Err(error("asset catalog exceeds 64 assets"));
-    }
     let mut sources = BTreeSet::new();
     for (id, record) in &registry.assets {
         validate_id(id)?;
@@ -1793,9 +1787,6 @@ mod tests {
         fs::write(&catalog, &baseline).unwrap();
         assert!(store
             .export_snapshot(&BTreeSet::from(["unknown".into()]))
-            .is_err());
-        assert!(store
-            .export_snapshot(&(0..=MAX_ASSETS).map(|i| format!("asset{i}")).collect())
             .is_err());
 
         let before = files(root.path());

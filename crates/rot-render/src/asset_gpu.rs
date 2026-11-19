@@ -26,12 +26,7 @@ impl<'a> MeshPlan<'a> {
         validation
             .stamps
             .retain(|id, _| sources.contains_key(id.as_str()));
-        let mut rejection = (sources.len() > MAX_MESHES).then_some(
-            "Rot Engine GPU mesh closure exceeds 64 unique IDs; meshes use cube fallback",
-        );
-        if rejection.is_some() {
-            sources.clear();
-        }
+        let mut rejection = None;
         sources.retain(|id, mesh| {
             let identity = Arc::downgrade(mesh);
             let valid = if current.get(*id).is_some_and(|gpu| gpu.matches(mesh)) {
@@ -59,9 +54,7 @@ impl<'a> MeshPlan<'a> {
         let bytes = sources
             .values()
             .try_fold(0u64, |sum, mesh| sum.checked_add(mesh_bytes(mesh)));
-        if sources.len() > MAX_MESHES
-            || bytes.is_none_or(|bytes| bytes > rot_assets::MAX_RESOLVED_BYTES as u64)
-        {
+        if bytes.is_none_or(|bytes| bytes > rot_assets::MAX_RESOLVED_BYTES as u64) {
             // A stable fallback closure owns no rejected buffers. In particular,
             // invalid source identity changes cannot create repeated epochs.
             rejection = Some("Rot Engine requested mesh vertex/UV/index payload exceeds 48 MiB; meshes use cube fallback");
