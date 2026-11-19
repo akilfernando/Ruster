@@ -12,6 +12,39 @@ cargo run --locked --release -p rot-render -- --objects 256 --frames 180
 
 Use a new filename for `demo`; existing destinations are protected. Use a valid saved scene path for `--scene`. `--objects 256` generates a 16×16 grid of unit-cube instances; `--objects 3` uses the default three-object scene. These options cannot be combined with `--scene`. `--ticks 0..10000` advances the shared static `Preview` lifecycle before rendering: it counts explicit ticks, without application-specific animation. The shutdown summary includes scene fingerprint, revision and tick for comparison with CLI/editor. `--frames 1..10000` repaints and exits after at least that many rendered scene frames. Without it the window sleeps when no redraw is requested.
 
+## Large-scene benchmark
+
+```sh
+cargo run --locked --release -p rot-render -- --benchmark
+```
+
+The command runs two deterministic v23 workloads at 1920×1080 through the
+production Vulkan viewport on an offscreen target. The 5,000-object scene
+has 1,008,000 triangles. The 50,000-object scene has 600,000 triangles and
+uses one instanced scene draw. The report gives p50 and p95 CPU preparation,
+GPU scene pass and complete offscreen frame times with sample counts. It
+excludes compositor presentation and authoring UI. The default is 10 warmup
+frames followed by 120 samples per scene. Use `--objects 5000` or
+`--objects 50000` to run one workload and `--frames N` to sample 1–4096
+frames.
+
+To open the same scene in the editor, generate a v23 file at a new path.
+
+```sh
+cargo run --locked --release -p rot-render -- --write-scene /tmp/rot-5000.scene.json --objects 5000
+```
+
+Measure the editor's 5,000-object panel budget separately.
+
+```sh
+cargo test --locked --release -p rot-editor benchmark_component_hierarchy -- --ignored --nocapture
+```
+
+This runs the native Hierarchy and Inspector code in-process at 1920×1080.
+It measures panel layout and tessellation with one selected object, then
+while selecting all 5,000 objects with a range selection. It excludes Vulkan
+rendering and desktop presentation.
+
 Left-click selects the nearest visible transformed surface, using inverse-model ray/triangle intersection for imported meshes and ray/box intersection for procedural cubes, including perspective and depth order. Navigation follows Unity (Alt+left-drag orbit, middle-drag pan, right-drag look, wheel zoom, right button plus WASD/QE flight); a left-drag on the surface returns a box selection; Fit frames the scene bounds. Camera navigation is frontend session state, separate from saved authored object transforms. Selection lightens each selected object's material. The opaque material currently uses RGB only; stored alpha is reserved and does not enable transparency.
 
 ## Built-in sphere/capsule geometry — E1

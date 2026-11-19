@@ -630,14 +630,14 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-02 Scene crate on the new model | `rot-scene` implements it. No object, depth or file-size caps. | in progress · the hub, File → Open and native `--scene` open v23 for basic Inspector edits, object creation, parenting, deletion, Undo/Redo and Save. Scene switching protects v23 drafts. Automatic upgrade and tracked example conversion are open |
 | C-03 Renderer, runtime and scripts on the new model | Everything that reads a scene uses objects and components. | in progress · editor Play, standalone viewer, headless behavior and packaged Motion Lab support v23 through previews and runtime projections. Native editor and viewer use world matrices for draw, fit and hit testing. General component execution remains open; v23 can build a Linux player folder |
 | C-04 Assets as files | `Assets/` folder, sidecar ids and import settings, rebuildable cache, file watcher, automatic import and reimport, folder tree in the browser. | brief needed |
-| C-05 Hierarchy and Inspector | Rebuilt on components: Add Component, drag to reparent, multi-edit, enable toggles, visibility and lock, live values during Play. | in progress · component authoring, grouped hierarchy edits, mixed fields, local viewport controls, and live Transform and script state. Native edit and save worked at 5,000 objects. Performance and shared MCP checks remain open |
+| C-05 Hierarchy and Inspector | Rebuilt on components: Add Component, drag to reparent, multi-edit, enable toggles, visibility and lock, live values during Play. | in progress · component authoring, grouped hierarchy edits, mixed fields, local viewport controls, and live Transform and script state. Native edit and save worked at 5,000 objects. The in-process panel timings passed. Shared MCP and desktop frame-rate checks remain open |
 | C-06 General MCP tools | A small set of object, component, asset, play and screenshot tools that call the command layer. Tool list under 15 KB. | brief needed |
 | C-07 Prefabs | Prefab assets, instances, per-property overrides, apply and revert. | brief needed |
 | C-08 General glTF import | Multi-primitive meshes, full PBR material mapping, cameras and lights; warnings instead of refusals. | ready after C-04 |
 | C-09 Build and Run | The editor ships a player binary; Build writes a runnable folder; no Python. | in progress · v23 editor builds and launches a Linux player folder. Legacy Build still uses the runtime kit |
 | C-10 Scripts as files | Lua files in `Assets/`, one growing API (lifecycle, find, spawn, destroy, components, input, time), reload on save, open in the creator's code editor. | brief needed |
 | C-11 Scenes and projects | Several scenes per project, a project settings file, a startup scene. | ready after C-02 |
-| C-12 Benchmark scenes | 5,000- and 50,000-object scenes and a one-command frame-time report. | ready after C-02 |
+| C-12 Benchmark scenes | 5,000- and 50,000-object scenes and a one-command frame-time report. | done · 2026-11-19 · deterministic v23 scene export and [release timings](../crates/rot-render/README.md#large-scene-benchmark) |
 
 ### C-05 implementation brief
 

@@ -203,7 +203,13 @@ window, warm disk cache. Re-run with `python3 scripts/measure_budgets.py
 throttled and do not count). Renderer numbers come from `rot-render
 --objects 256 --frames 1000`.
 
-| What | Budget | From phase | Measured 2026-11-17 |
+C-12, 2026-11-19. Two release runs per workload on the laptop RTX 4060,
+each with 10 warmup frames and 120 samples at 1920×1080. Panel timings
+include layout and tessellation. Vulkan timings use a fitted offscreen
+viewport with 4× MSAA. The desktop 60 fps exit tests are still open.
+See [benchmark commands](../crates/rot-render/README.md#large-scene-benchmark).
+
+| What | Budget | From phase | Measured |
 | --- | --- | --- | --- |
 | Editor idle with nothing changing | No frames drawn, under 1% of one core | 1 | Hub: 0 frames, 0.0% over 10 s. Open scene: 3 frames, 0.2% over 10 s (small periodic repaint) |
 | Cold start to the project hub | 1.5 s | 1 | 306 ms median, 584 ms worst of 5 (exec to hub drawn) |
@@ -214,13 +220,13 @@ throttled and do not count). Renderer numbers come from `rot-render
 | AI screenshot | 250 ms | 1 | 58 ms median, 70 ms worst of 10 (`viewport_capture_start` until `viewport_capture_inspect` is ready) |
 | MCP tool list | 40 KB in Phase 1, 15 KB after Phase 2 | 1 | 39 KB, 94 tools (A-06, 2026-11-17; was 145 KB) |
 | Editor memory, empty project | 300 MB | 1 | Hub 284 MB RSS (207 MB PSS); 3-object scene 293 MB RSS (214 MB PSS) |
-| Editor UI frame, 5,000 objects, excluding 3D | 4 ms at the 95th percentile | 2 | |
-| Scene view, 5,000 objects, about 1 M triangles, 1080p | 60 fps | 2 | 256 cubes today (scene cap): CPU prepare 0.13 ms p95, GPU scene pass 0.10 ms p95 |
+| Editor UI frame, 5,000 objects, excluding 3D | 4 ms at the 95th percentile | 2 | Panels p95 0.43–0.45 ms with one selected object, 1.21–1.32 ms including a 5,000-object range selection. |
+| Scene view, 5,000 objects, about 1 M triangles, 1080p | 60 fps | 2 | Offscreen p95 0.97–1.20 ms through GPU completion, including CPU preparation and composite. |
 | Changed asset file to visible in the editor | 1 s | 2 | |
 | Import a 50 MB model | 3 s, editor stays responsive | 2 | |
 | Build a small project | 10 s | 2 | |
 | Built game, empty scene | Starts in 1 s, under 150 MB | 2 | |
-| Scene view, 50,000 instanced objects | 60 fps | 3 | |
+| Scene view, 50,000 instanced objects | 60 fps | 3 | Offscreen p95 4.46–5.54 ms at 1080p through GPU completion, including CPU preparation and composite. |
 | 10,000 script updates per frame | 2 ms | 4 | |
 | 1,000 active rigid bodies | 4 ms per step | 4 | |
 

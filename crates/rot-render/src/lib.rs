@@ -1,5 +1,6 @@
 //! Shared bounded 3D viewport. No application behavior or editor state lives here.
 mod asset_gpu;
+pub mod benchmark;
 pub mod component_preview;
 mod editor_grid;
 #[cfg(test)]

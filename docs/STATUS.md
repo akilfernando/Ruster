@@ -42,10 +42,10 @@ move or delete objects together, and save. Inspector edits shared Transform
 and component values. Viewport settings stay local. Automatic upgrades remain open.
 
 The v23 Inspector shows live Transform and script state during Play and Step.
-The editor, viewer and packaged Motion Lab use temporary v23 projections.
 Editor and viewer draw, fit and pick from cached world matrices, including shear.
-v23 Build writes and launches a Linux player folder without Python.
-General component execution and MCP remain open.
+v23 Build writes and launches a Linux player folder without Python. General
+component execution and MCP remain open. [C-12 benchmark scenes and timings](PARITY-PLAN.md#5-performance-budgets)
+cover 5,000 and 50,000 objects. Desktop frame rates remain unverified.
 
 ## What a creator can do today
 

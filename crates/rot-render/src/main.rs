@@ -32,6 +32,8 @@ struct Options {
     frames: Option<u64>,
     ticks: u64,
     objects: Option<usize>,
+    benchmark: bool,
+    write_scene: Option<PathBuf>,
 }
 fn arguments() -> Result<Option<Options>, String> {
     let mut options = Options {
@@ -40,12 +42,18 @@ fn arguments() -> Result<Option<Options>, String> {
         frames: None,
         ticks: 0,
         objects: None,
+        benchmark: false,
+        write_scene: None,
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--help" {
-            println!("Rot Engine shared 3D runtime\nUsage: rot-render [--scene PATH] [--shader PATH] [--frames N] [--ticks N] [--objects 3|256]\nRight-drag: orbit; wheel: zoom; left click: select. Ticks advance a static scene preview.");
+            println!("Rot Engine shared 3D runtime\nUsage: rot-render [--scene PATH | --objects 3|256|5000|50000] [--shader PATH] [--frames N] [--ticks N]\n       rot-render --benchmark [--objects 5000|50000] [--frames N]\n       rot-render --write-scene PATH --objects 5000|50000\nRight-drag to orbit, wheel to zoom, and left click to select.");
             return Ok(None);
+        }
+        if arg == "--benchmark" {
+            options.benchmark = true;
+            continue;
         }
         let value = args
             .next()
@@ -53,6 +61,7 @@ fn arguments() -> Result<Option<Options>, String> {
         match arg.as_str() {
             "--scene" => options.path = Some(value),
             "--shader" => options.shader = Some(value.into()),
+            "--write-scene" => options.write_scene = Some(value.into()),
             "--frames" => {
                 options.frames = Some(
                     value
@@ -74,8 +83,8 @@ fn arguments() -> Result<Option<Options>, String> {
                     value
                         .parse::<usize>()
                         .ok()
-                        .filter(|n| matches!(n, 3 | 256))
-                        .ok_or("--objects must be 3 or 256")?,
+                        .filter(|n| matches!(n, 3 | 256 | 5000 | 50000))
+                        .ok_or("--objects must be 3, 256, 5000 or 50000")?,
                 )
             }
             _ => return Err(format!("unknown option {arg}")),
@@ -83,6 +92,22 @@ fn arguments() -> Result<Option<Options>, String> {
     }
     if options.path.is_some() && options.objects.is_some() {
         return Err("--scene and --objects are mutually exclusive".into());
+    }
+    if options.benchmark || options.write_scene.is_some() {
+        if options.path.is_some() || options.shader.is_some() || options.ticks != 0 {
+            return Err("Benchmark scenes use the built-in shader and scene.".into());
+        }
+        if options
+            .objects
+            .is_some_and(|count| !rot_render::benchmark::OBJECT_COUNTS.contains(&count))
+        {
+            return Err("Choose 5000 or 50000 objects for the benchmark.".into());
+        }
+        if options.write_scene.is_some()
+            && (options.benchmark || options.frames.is_some() || options.objects.is_none())
+        {
+            return Err("Use --write-scene PATH with --objects 5000 or 50000.".into());
+        }
     }
     Ok(Some(options))
 }
@@ -222,6 +247,19 @@ fn run() -> Result<(), String> {
     let Some(options) = arguments()? else {
         return Ok(());
     };
+    if let Some(path) = &options.write_scene {
+        let scene = rot_render::benchmark::scene(options.objects.expect("checked workload size"))?;
+        return scene.save_new(path).map_err(|error| error.to_string());
+    }
+    if options.benchmark {
+        let counts = options.objects.as_slice();
+        let counts = if counts.is_empty() {
+            &rot_render::benchmark::OBJECT_COUNTS
+        } else {
+            counts
+        };
+        return rot_render::benchmark::run(counts, options.frames.unwrap_or(120));
+    }
     let shader_path = options.shader.clone().or_else(|| {
         options.path.as_ref().map(|path| {
             std::path::Path::new(path)
@@ -270,6 +308,16 @@ fn run() -> Result<(), String> {
     let mut preview = match options.path {
         Some(path) => component_preview::open(std::path::Path::new(&path))
             .map_err(|error| error.to_string())?,
+        None if options
+            .objects
+            .is_some_and(|count| rot_render::benchmark::OBJECT_COUNTS.contains(&count)) =>
+        {
+            let scene =
+                rot_render::benchmark::scene(options.objects.expect("checked workload size"))?;
+            LoadedPreview::Components(
+                component_preview::project(&scene).map_err(|error| error.to_string())?,
+            )
+        }
         None => LoadedPreview::Legacy(Scene::demo()),
     };
     if options.objects == Some(256) {

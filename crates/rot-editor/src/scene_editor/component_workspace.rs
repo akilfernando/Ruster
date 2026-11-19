@@ -946,6 +946,10 @@ impl ComponentWorkspace {
     }
 
     pub(super) fn show(&mut self, ui: &mut egui::Ui) -> Option<OpenedScene> {
+        self.show_workspace(ui, true)
+    }
+
+    fn show_workspace(&mut self, ui: &mut egui::Ui, draw_viewport: bool) -> Option<OpenedScene> {
         let ctx = ui.ctx().clone();
         #[cfg(target_os = "linux")]
         self.build.poll();
@@ -1276,7 +1280,11 @@ impl ComponentWorkspace {
                     self.rebuild_draft();
                 }
             });
-        egui::CentralPanel::default().show(ui, |ui| self.viewport(ui, blocked));
+        egui::CentralPanel::default().show(ui, |ui| {
+            if draw_viewport {
+                self.viewport(ui, blocked);
+            }
+        });
         #[cfg(target_os = "linux")]
         {
             let draft_dirty = self.draft_dirty();
@@ -1388,6 +1396,51 @@ impl ComponentWorkspace {
 mod tests {
     use super::*;
     use rot_scene::{component_scene::ComponentScene, Scene, Session};
+
+    #[test]
+    #[ignore = "explicit release benchmark; runs editor panels without a window or 3D rendering"]
+    fn benchmark_component_hierarchy() {
+        use std::time::Instant;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("5000.scene.json");
+        let scene = rot_render::benchmark::scene(5_000).unwrap();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let context = egui::Context::default();
+        let mut samples = Vec::with_capacity(120);
+        for workload in ["selected object", "range selection"] {
+            samples.clear();
+            for frame in 0..130 {
+                let start = Instant::now();
+                if workload == "range selection" {
+                    editor.select_row(0, egui::Modifiers::NONE);
+                    editor.select_row(4_999, egui::Modifiers::SHIFT);
+                    assert_eq!(editor.selection.len(), 5_000);
+                }
+                let mut output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1920.0, 1080.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        editor.show_workspace(ui, false);
+                    },
+                );
+                std::hint::black_box(context.tessellate(output.shapes, output.pixels_per_point));
+                output.textures_delta.clear();
+                if frame >= 10 {
+                    samples.push(start.elapsed().as_secs_f64() * 1_000.0);
+                }
+            }
+            samples.sort_by(f64::total_cmp);
+            println!("5000 objects · {workload} · editor panels through tessellation · p50 {:.3} ms · p95 {:.3} ms · n={}", samples[60], samples[113], samples.len());
+        }
+    }
 
     #[test]
     fn switching_documents_preserves_edits_until_save_or_discard() {
