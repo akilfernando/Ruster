@@ -611,10 +611,10 @@ impl Camera {
         meshes: &BTreeMap<String, Arc<rot_assets::Mesh>>,
         aspect: f32,
     ) -> Option<Self> {
-        Self::fit_objects(scene.objects.iter(), meshes, aspect)
+        Self::fit_objects(DrawScene::from(scene).objects(), meshes, aspect)
     }
     fn fit_objects<'a>(
-        objects: impl Iterator<Item = &'a Object>,
+        objects: impl Iterator<Item = (&'a Object, Mat4)>,
         meshes: &BTreeMap<String, Arc<rot_assets::Mesh>>,
         aspect: f32,
     ) -> Option<Self> {
@@ -624,9 +624,9 @@ impl Camera {
         let mut count = 0;
         let mut low = DVec3::splat(f64::INFINITY);
         let mut high = DVec3::splat(f64::NEG_INFINITY);
-        for object in objects {
+        for (object, matrix) in objects {
             count += 1;
-            let matrix = model(object).as_dmat4();
+            let matrix = matrix.as_dmat4();
             if let Some(mesh) = object_mesh(object, meshes) {
                 for vertex in &mesh.vertices {
                     let p = matrix.transform_point3(Vec3::from(vertex.position).as_dvec3());
@@ -809,8 +809,37 @@ impl Camera {
 #[cfg(test)]
 mod assembly_gate_tests;
 
-fn instance_matrices(object: &Object) -> (Mat4, Mat3) {
-    let matrix = model(object);
+#[derive(Clone, Copy)]
+struct DrawScene<'a> {
+    scene: &'a Scene,
+    matrices: Option<&'a [Mat4]>,
+}
+
+impl<'a> From<&'a Scene> for DrawScene<'a> {
+    fn from(scene: &'a Scene) -> Self {
+        Self {
+            scene,
+            matrices: None,
+        }
+    }
+}
+
+impl<'a> DrawScene<'a> {
+    fn objects(self) -> impl Iterator<Item = (&'a Object, Mat4)> {
+        self.scene
+            .objects
+            .iter()
+            .enumerate()
+            .map(move |(index, object)| {
+                let matrix = self
+                    .matrices
+                    .map_or_else(|| model(object), |matrices| matrices[index]);
+                (object, matrix)
+            })
+    }
+}
+
+fn instance_matrices(matrix: Mat4) -> (Mat4, Mat3) {
     (matrix, Mat3::from_mat4(matrix).inverse().transpose())
 }
 
@@ -1388,7 +1417,7 @@ fn format_count(count: u64) -> String {
 /// Stable IDs of objects with any vertex (or their center) inside `selection`,
 /// projected through the same matrices the frame was drawn with.
 fn objects_in_rect(
-    scene: &Scene,
+    draw: DrawScene<'_>,
     meshes: &BTreeMap<String, Arc<rot_assets::Mesh>>,
     view_projection: Mat4,
     rect: egui::Rect,
@@ -1419,11 +1448,9 @@ fn objects_in_rect(
         Vec3::new(-0.5, 0.5, 0.5),
         Vec3::new(0.5, 0.5, 0.5),
     ];
-    scene
-        .objects
-        .iter()
-        .filter(|object| {
-            let matrix = model(object);
+    draw.objects()
+        .filter(|(object, matrix)| {
+            let matrix = *matrix;
             match object_mesh(object, meshes) {
                 Some(mesh) => {
                     inside(matrix, Vec3::ZERO)
@@ -1435,7 +1462,7 @@ fn objects_in_rect(
                 None => CUBE.iter().any(|point| inside(matrix, *point)),
             }
         })
-        .map(|object| object.id.clone())
+        .map(|(object, _)| object.id.clone())
         .collect()
 }
 
@@ -1449,6 +1476,27 @@ pub fn render_viewport_with_materials(
     navigation: &mut NavigationOptions,
     surface: ViewportSurface,
 ) -> ViewportInteraction {
+    render_draw_scene(
+        ui,
+        scene.into(),
+        selected,
+        meshes,
+        textures,
+        navigation,
+        surface,
+    )
+}
+
+fn render_draw_scene(
+    ui: &mut egui::Ui,
+    draw: DrawScene<'_>,
+    selected: &[&str],
+    meshes: &BTreeMap<String, Arc<rot_assets::Mesh>>,
+    textures: &BTreeMap<String, Arc<rot_assets::Texture>>,
+    navigation: &mut NavigationOptions,
+    surface: ViewportSurface,
+) -> ViewportInteraction {
+    let scene = draw.scene;
     let player_view = if navigation.player_view {
         match scene.resolve_player_view().ok().flatten().and_then(|view| {
             player_matrices(view, surface.rect.aspect_ratio()).map(|matrices| (view, matrices))
@@ -1536,6 +1584,10 @@ pub fn render_viewport_with_materials(
         }
         &resolved_input
     };
+    let draw = DrawScene {
+        scene,
+        matrices: draw.matrices,
+    };
     let selected = if expanded_selection.is_empty() {
         selected
     } else {
@@ -1558,18 +1610,12 @@ pub fn render_viewport_with_materials(
         stats_anchor,
     } = surface;
     if fitted {
-        let fit = if selected_fit {
-            Camera::fit_objects(
-                scene
-                    .objects
-                    .iter()
-                    .filter(|object| selected.contains(&object.id.as_str())),
-                meshes,
-                rect.aspect_ratio(),
-            )
-        } else {
-            Camera::fit(scene, meshes, rect.aspect_ratio())
-        };
+        let fit = Camera::fit_objects(
+            draw.objects()
+                .filter(|(object, _)| !selected_fit || selected.contains(&object.id.as_str())),
+            meshes,
+            rect.aspect_ratio(),
+        );
         let candidate = fit
             .map(|fit| {
                 let mut candidate = camera;
@@ -1689,7 +1735,7 @@ pub fn render_viewport_with_materials(
     let picked = if !navigation.player_view && !input_owned && response.clicked() {
         response.interact_pointer_pos().and_then(|p| {
             pick(
-                scene,
+                draw,
                 meshes,
                 view_projection,
                 (p.x - rect.left()) / rect.width() * 2.0 - 1.0,
@@ -1725,7 +1771,7 @@ pub fn render_viewport_with_materials(
             );
         } else {
             box_selection = Some(objects_in_rect(
-                scene,
+                draw,
                 meshes,
                 view_projection,
                 rect,
@@ -1748,7 +1794,7 @@ pub fn render_viewport_with_materials(
     let mut grouped =
         BTreeMap::<(Option<String>, Option<rot_scene::Primitive>, BindingKey), DrawGroup>::new();
     let mut triangles = 0u64;
-    for object in &scene.objects {
+    for (object, matrix) in draw.objects() {
         let mesh = object_mesh(object, meshes);
         triangles += mesh.map_or(12, |mesh| mesh.indices.len() as u64 / 3);
         let key = mesh.and_then(|_| object.mesh.clone());
@@ -1807,7 +1853,7 @@ pub fn render_viewport_with_materials(
                 instances: Vec::new(),
                 range: 0..0,
             });
-        let (matrix, normal) = instance_matrices(object);
+        let (matrix, normal) = instance_matrices(matrix);
         let mut color = object.color;
         if selected.contains(&object.id.as_str()) {
             for channel in &mut color[..3] {
@@ -2009,8 +2055,8 @@ pub fn frame_scene(
     Some(camera.state())
 }
 
-fn pick(
-    scene: &Scene,
+fn pick<'a>(
+    draw: impl Into<DrawScene<'a>>,
     meshes: &BTreeMap<String, Arc<rot_assets::Mesh>>,
     view_projection: Mat4,
     x: f32,
@@ -2030,11 +2076,10 @@ fn pick(
         return None;
     }
     let direction = (far - near) / length;
-    scene
-        .objects
-        .iter()
-        .filter_map(|object| {
-            let matrix = model(object).as_dmat4();
+    draw.into()
+        .objects()
+        .filter_map(|(object, matrix)| {
+            let matrix = matrix.as_dmat4();
             if !matrix.is_finite() || matrix.determinant() == 0.0 {
                 return None;
             }
@@ -4015,7 +4060,9 @@ mod tests {
         let scene = Scene::demo();
         let meshes = BTreeMap::new();
         let selected = Camera::fit_objects(
-            scene.objects.iter().filter(|o| o.id == "right"),
+            DrawScene::from(&scene)
+                .objects()
+                .filter(|(o, _)| o.id == "right"),
             &meshes,
             1.0,
         )

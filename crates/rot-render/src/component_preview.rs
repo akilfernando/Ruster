@@ -1,29 +1,84 @@
 //! Disposable render input for native viewports while the shared viewport
 //! consumes legacy draw objects. This projection is never written to disk.
+use super::{DrawScene, NavigationOptions, ViewportInteraction, ViewportSurface};
+use eframe::egui;
+use glam::{EulerRot, Mat3, Mat4, Quat, Vec3};
 use rot_scene::component_scene::{self, Component, ComponentScene, Geometry};
-use rot_scene::{Light, Lighting, Object, Scene, SceneError, Transform};
+use rot_scene::{Light, LightKind, Lighting, Object, Scene, SceneError, Transform};
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::Arc;
 
-pub fn open(path: &Path) -> Result<Scene, SceneError> {
+/// Render-only draw data. The matrices stay aligned with the draw rows even
+/// when several mesh components belong to one object.
+pub struct ComponentPreview {
+    scene: Scene,
+    matrices: Vec<Mat4>,
+}
+
+impl ComponentPreview {
+    pub fn scene(&self) -> &Scene {
+        &self.scene
+    }
+
+    pub fn render(
+        &self,
+        ui: &mut egui::Ui,
+        selected: &[&str],
+        meshes: &BTreeMap<String, Arc<rot_assets::Mesh>>,
+        textures: &BTreeMap<String, Arc<rot_assets::Texture>>,
+        navigation: &mut NavigationOptions,
+        surface: ViewportSurface,
+    ) -> ViewportInteraction {
+        super::render_draw_scene(
+            ui,
+            DrawScene {
+                scene: &self.scene,
+                matrices: Some(&self.matrices),
+            },
+            selected,
+            meshes,
+            textures,
+            navigation,
+            surface,
+        )
+    }
+}
+
+pub enum LoadedPreview {
+    Legacy(Scene),
+    Components(ComponentPreview),
+}
+
+impl LoadedPreview {
+    pub fn scene(&self) -> &Scene {
+        match self {
+            Self::Legacy(scene) => scene,
+            Self::Components(preview) => preview.scene(),
+        }
+    }
+}
+
+pub fn open(path: &Path) -> Result<LoadedPreview, SceneError> {
     match ComponentScene::open(path) {
-        Ok(scene) => project(&scene),
+        Ok(scene) => project(&scene).map(LoadedPreview::Components),
         Err(SceneError::UnsupportedVersion(version))
             if version < u64::from(component_scene::FORMAT_VERSION) =>
         {
-            Scene::load(path)
+            Scene::load(path).map(LoadedPreview::Legacy)
         }
         Err(error) => Err(error),
     }
 }
 
-pub fn project(component_scene: &ComponentScene) -> Result<Scene, SceneError> {
+pub fn project(component_scene: &ComponentScene) -> Result<ComponentPreview, SceneError> {
     let hierarchy = component_scene.validate()?;
     let world = component_scene.world_matrices()?;
     let mut scene = Scene::empty(component_scene.id.clone());
     scene.materials.clone_from(&component_scene.materials);
     scene.display = component_scene.display;
     let mut lights = BTreeMap::new();
+    let mut matrices = Vec::new();
     let mut authored_lighting = component_scene.ambient.is_some();
     for (index, object) in component_scene.objects.iter().enumerate() {
         authored_lighting |= object
@@ -34,15 +89,6 @@ pub fn project(component_scene: &ComponentScene) -> Result<Scene, SceneError> {
             continue;
         }
         for component in object.components.iter().filter(|item| item.enabled) {
-            let world_transform = || {
-                if object.parent.is_none() {
-                    Ok(object.transform.clone())
-                } else {
-                    Transform::try_from_affine(world[index]).map_err(|error| {
-                        SceneError::Invalid(format!("cannot preview {}: {error}", object.id))
-                    })
-                }
-            };
             match &component.kind {
                 Component::MeshRenderer {
                     geometry,
@@ -50,7 +96,21 @@ pub fn project(component_scene: &ComponentScene) -> Result<Scene, SceneError> {
                     material,
                 } => {
                     let mut draw = Object::cube(object.id.clone(), Some(object.name.clone()));
-                    draw.transform = world_transform()?;
+                    draw.transform = object.transform.clone();
+                    let matrix = world[index].as_mat4();
+                    let linear = Mat3::from_mat4(matrix);
+                    let determinant = linear.determinant();
+                    if !matrix.is_finite()
+                        || !determinant.is_finite()
+                        || determinant <= 0.0
+                        || !linear.inverse().is_finite()
+                    {
+                        return Err(SceneError::Invalid(format!(
+                            "world transform on {} exceeds renderer precision",
+                            object.id
+                        )));
+                    }
+                    matrices.push(matrix);
                     draw.color = *tint;
                     draw.material.clone_from(material);
                     match geometry {
@@ -65,8 +125,24 @@ pub fn project(component_scene: &ComponentScene) -> Result<Scene, SceneError> {
                     intensity,
                     kind,
                 } => {
-                    let mut transform = world_transform()?;
-                    transform.scale = [1.0; 3];
+                    let mut transform = Transform {
+                        translation: world[index].w_axis.truncate().as_vec3().to_array(),
+                        ..Transform::default()
+                    };
+                    if matches!(kind, LightKind::Directional { .. }) {
+                        let direction = world[index].z_axis.truncate();
+                        let magnitude = direction.abs().max_element();
+                        if magnitude == 0.0 {
+                            return Err(SceneError::Invalid(format!(
+                                "world direction on {} exceeds renderer precision",
+                                object.id
+                            )));
+                        }
+                        let axis = (direction / magnitude).normalize().as_vec3();
+                        let (z, y, x) =
+                            Quat::from_rotation_arc(Vec3::Z, axis).to_euler(EulerRot::ZYX);
+                        transform.rotation = [x, y, z];
+                    }
                     lights.insert(
                         component.id.clone(),
                         Light {
@@ -93,7 +169,7 @@ pub fn project(component_scene: &ComponentScene) -> Result<Scene, SceneError> {
         };
     }
     scene.lighting.validate()?;
-    Ok(scene)
+    Ok(ComponentPreview { scene, matrices })
 }
 
 #[cfg(test)]
@@ -101,6 +177,53 @@ mod tests {
     use super::*;
     use rot_scene::{Group, Session};
     use std::fs;
+
+    #[test]
+    fn sheared_mesh_draw_transform_is_shared_by_fit_and_hit_testing() {
+        use rot_scene::component_scene::ObjectNode;
+        let mut legacy = Scene::demo();
+        legacy.objects.truncate(1);
+        legacy.objects[0].transform.rotation = [0.0, 0.0, 0.6];
+        let mut components = ComponentScene::from_legacy(&Session::new(legacy).unwrap()).unwrap();
+        components.objects[0].parent = Some("parent".into());
+        components.objects.push(ObjectNode {
+            id: "parent".into(),
+            name: "Parent".into(),
+            enabled: true,
+            parent: None,
+            transform: Transform {
+                translation: [8.0, 5.0, 2.0],
+                rotation: [0.0, 0.4, 0.0],
+                scale: [2.0, 0.5, 3.0],
+            },
+            components: Vec::new(),
+        });
+        let world = components.world_matrices().unwrap()[0];
+        assert!(Transform::try_from_affine(world).is_err());
+        let preview = project(&components).unwrap();
+        assert_eq!(preview.matrices, [world.as_mat4()]);
+        let draw = DrawScene {
+            scene: preview.scene(),
+            matrices: Some(&preview.matrices),
+        };
+        let meshes = BTreeMap::new();
+        let camera = super::super::Camera::fit_objects(draw.objects(), &meshes, 1.0).unwrap();
+        let target = world.w_axis.truncate().as_vec3();
+        assert!(camera.target.abs_diff_eq(target, 1e-5));
+        let (view, projection, _) = camera.checked_matrices(1.0).unwrap();
+        let vp = projection * view;
+        let ndc = vp.project_point3(target);
+        assert_eq!(
+            super::super::pick(draw, &meshes, vp, ndc.x, ndc.y).as_deref(),
+            Some("left")
+        );
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0));
+        let select = egui::Rect::from_center_size(rect.center(), egui::vec2(5.0, 5.0));
+        assert_eq!(
+            super::super::objects_in_rect(draw, &meshes, vp, rect, select),
+            ["left"]
+        );
+    }
 
     #[test]
     fn viewer_loads_both_formats_and_preserves_projected_geometry() {
@@ -126,18 +249,26 @@ mod tests {
         let poses = legacy.resolve_poses().unwrap();
         let mut session = Session::new(legacy.clone()).unwrap();
         session.save(&legacy_file).unwrap();
-        assert_eq!(open(&legacy_file).unwrap(), legacy);
+        assert_eq!(open(&legacy_file).unwrap().scene(), &legacy);
         let mut converted = ComponentScene::from_legacy(&session).unwrap();
         converted.objects[1].enabled = false;
         converted.save_new(&component_file).unwrap();
         let original = fs::read(&component_file).unwrap();
 
-        let preview = open(&component_file).unwrap();
-        assert_eq!(preview.objects.len(), legacy.objects.len() - 1);
-        assert_eq!(preview.objects[0].id, "left");
-        assert_eq!(preview.objects[0].transform, poses.transforms["left"]);
-        assert_eq!(preview.objects[0].color, legacy.objects[0].color);
-        assert!(preview.hierarchy.is_empty());
+        let LoadedPreview::Components(preview) = open(&component_file).unwrap() else {
+            panic!("component preview")
+        };
+        assert_eq!(preview.scene().objects.len(), legacy.objects.len() - 1);
+        assert_eq!(preview.scene().objects[0].id, "left");
+        assert!(preview.matrices[0].abs_diff_eq(
+            super::super::model(&Object {
+                transform: poses.transforms["left"].clone(),
+                ..legacy.objects[0].clone()
+            }),
+            1e-6
+        ));
+        assert_eq!(preview.scene().objects[0].color, legacy.objects[0].color);
+        assert!(preview.scene().hierarchy.is_empty());
         assert_eq!(fs::read(&component_file).unwrap(), original);
     }
 }

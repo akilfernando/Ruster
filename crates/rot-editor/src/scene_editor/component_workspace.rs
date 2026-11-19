@@ -10,7 +10,7 @@ use eframe::egui;
 use rot_scene::component_scene::{
     Component, ComponentInstance, ComponentSession, Geometry, ObjectHierarchy, ObjectNode,
 };
-use rot_scene::{Primitive, Scene, Transform};
+use rot_scene::{Primitive, Transform};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -34,7 +34,7 @@ pub(super) struct ComponentWorkspace {
     meshes: rot_app::MeshMap,
     textures: rot_app::TextureMap,
     navigation: rot_render::NavigationOptions,
-    preview: Result<Scene, rot_scene::SceneError>,
+    preview: Result<rot_render::component_preview::ComponentPreview, rot_scene::SceneError>,
     rows: Vec<(usize, usize)>,
     parents: Vec<Option<usize>>,
     selected_index: Option<usize>,
@@ -466,7 +466,7 @@ impl ComponentWorkspace {
             frame.scene.as_ref()
         } else {
             match &self.preview {
-                Ok(scene) => scene,
+                Ok(preview) => preview.scene(),
                 Err(error) => {
                     ui.colored_label(editor_theme::colors(ui).error, error.to_string());
                     return;
@@ -507,15 +507,26 @@ impl ComponentWorkspace {
             }
         }
         surface.input_owned = hud_owns;
-        let interaction = rot_render::render_viewport_with_materials(
-            ui,
-            scene,
-            selection.as_slice(),
-            &self.meshes,
-            &self.textures,
-            &mut self.navigation,
-            surface,
-        );
+        let interaction = if let (None, Ok(preview)) = (&frame, &self.preview) {
+            preview.render(
+                ui,
+                selection.as_slice(),
+                &self.meshes,
+                &self.textures,
+                &mut self.navigation,
+                surface,
+            )
+        } else {
+            rot_render::render_viewport_with_materials(
+                ui,
+                scene,
+                selection.as_slice(),
+                &self.meshes,
+                &self.textures,
+                &mut self.navigation,
+                surface,
+            )
+        };
         self.runtime.input_control_click(
             &ctx,
             blocked || hud_owns,
@@ -859,7 +870,7 @@ impl ComponentWorkspace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rot_scene::{component_scene::ComponentScene, Session};
+    use rot_scene::{component_scene::ComponentScene, Scene, Session};
 
     #[test]
     fn switching_documents_preserves_edits_until_save_or_discard() {
@@ -993,7 +1004,7 @@ mod tests {
         editor.draft.as_mut().unwrap().transform.translation[0] = 4.0;
         assert!(editor.apply());
         assert_eq!(
-            editor.preview.as_ref().unwrap().objects.len(),
+            editor.preview.as_ref().unwrap().scene().objects.len(),
             scene.objects.len() - 1
         );
         editor.command(Action::Undo);

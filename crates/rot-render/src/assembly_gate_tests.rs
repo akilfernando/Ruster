@@ -74,7 +74,7 @@ fn assembly_gate_render_consumers_share_the_flattened_world() {
         flat.hierarchy = Default::default();
         let object = &flat.objects[0];
         // Exact f32 model and inverse-transpose used by production Instance.
-        let (actual_model, actual_normal) = instance_matrices(object);
+        let (actual_model, actual_normal) = instance_matrices(model(object));
         let actual = actual_model.as_dmat4();
         let expected = support::matrix(&assembly.groups[0].local)
             * support::matrix(&assembly.groups[1].local)

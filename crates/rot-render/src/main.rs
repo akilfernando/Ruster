@@ -3,11 +3,12 @@ use eframe::{
     egui,
     egui_wgpu::{WgpuSetup, WgpuSetupCreateNew},
 };
+use rot_render::component_preview::LoadedPreview;
 use rot_render::{
     component_preview, configure_setup, install, refresh_shader, viewport_with_assets,
     MetricsHandle, MAX_SHADER_BYTES,
 };
-use rot_scene::{Preview, Scene};
+use rot_scene::Scene;
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
 // Preserve driver/validation diagnostics even without an external logger.
@@ -86,7 +87,9 @@ fn arguments() -> Result<Option<Options>, String> {
     Ok(Some(options))
 }
 struct Runtime {
-    preview: Preview,
+    preview: LoadedPreview,
+    tick: u64,
+    navigation: rot_render::NavigationOptions,
     selected: Option<String>,
     frames: Option<u64>,
     metrics: MetricsHandle,
@@ -133,7 +136,7 @@ impl eframe::App for Runtime {
                         .into_iter()
                         .map(|(id, mesh)| (id, Arc::new(mesh)))
                         .collect();
-                    self.preview = Preview::new(&self.preview.scene);
+                    self.tick = 0;
                     self.asset_status = if messages.is_empty() {
                         "Assets refreshed".into()
                     } else {
@@ -147,19 +150,38 @@ impl eframe::App for Runtime {
             }
             ui.label(format!(
                 "Rot Engine standalone · Scene {} · revision {} · {} objects · tick {}",
-                self.preview.scene.id,
-                self.preview.scene.revision,
-                self.preview.scene.objects.len(),
-                self.preview.tick
+                self.preview.scene().id,
+                self.preview.scene().revision,
+                self.preview.scene().objects.len(),
+                self.tick
             ));
         });
         egui::CentralPanel::default().show(root, |ui| {
-            if let Some(id) = viewport_with_assets(
-                ui,
-                &self.preview.scene,
-                self.selected.as_deref(),
-                &self.meshes,
-            ) {
+            let picked = match &self.preview {
+                LoadedPreview::Legacy(scene) => {
+                    viewport_with_assets(ui, scene, self.selected.as_deref(), &self.meshes)
+                }
+                LoadedPreview::Components(preview) => {
+                    let selection = self.selected.as_deref();
+                    let surface = rot_render::allocate_viewport(
+                        ui,
+                        preview.scene(),
+                        selection.as_slice(),
+                        &mut self.navigation,
+                    );
+                    preview
+                        .render(
+                            ui,
+                            selection.as_slice(),
+                            &self.meshes,
+                            &BTreeMap::new(),
+                            &mut self.navigation,
+                            surface,
+                        )
+                        .picked
+                }
+            };
+            if let Some(id) = picked {
                 self.selected = Some(id);
             }
         });
@@ -184,7 +206,7 @@ impl Drop for Runtime {
     fn drop(&mut self) {
         let metrics = self.metrics.lock().expect("metrics lock");
         eprintln!("Rot Engine shared 3D summary: scene={} fingerprint={} revision={} tick={} frames={} objects={} warmup=10 samples_cpu={} cpu_prepare_us_p50={:?} cpu_prepare_us_p95={:?} samples_gpu={} gpu_scene_us_p50={:?} gpu_scene_us_p95={:?} timestamps_enabled={} mesh_bytes={} mesh_uploads={} mesh_upload_bytes={} scene_draw_calls={} instance_capacity_bytes={} color_depth_bytes={} target_width={} target_height={} msaa_effective={}",
-            self.preview.scene.id, self.preview.scene.fingerprint(), self.preview.scene.revision, self.preview.tick, metrics.frames, metrics.objects,
+            self.preview.scene().id, self.preview.scene().fingerprint(), self.preview.scene().revision, self.tick, metrics.frames, metrics.objects,
             metrics.cpu_prepare_us.len(), percentile(&metrics.cpu_prepare_us, 0.5), percentile(&metrics.cpu_prepare_us, 0.95),
             metrics.gpu_scene_us.len(), percentile(&metrics.gpu_scene_us, 0.5), percentile(&metrics.gpu_scene_us, 0.95),
             metrics.timestamp_enabled, metrics.mesh_bytes, metrics.mesh_uploads, metrics.mesh_upload_bytes, metrics.draw_calls, metrics.instance_capacity_bytes, metrics.target_bytes, metrics.target_size[0], metrics.target_size[1], metrics.sample_count);
@@ -245,12 +267,15 @@ fn run() -> Result<(), String> {
                 .join("; ")
         })
         .unwrap_or_default();
-    let mut scene = match options.path {
+    let mut preview = match options.path {
         Some(path) => component_preview::open(std::path::Path::new(&path))
             .map_err(|error| error.to_string())?,
-        None => Scene::demo(),
+        None => LoadedPreview::Legacy(Scene::demo()),
     };
     if options.objects == Some(256) {
+        let LoadedPreview::Legacy(scene) = &mut preview else {
+            unreachable!("--objects and --scene are mutually exclusive");
+        };
         let template = scene
             .objects
             .first()
@@ -269,11 +294,9 @@ fn run() -> Result<(), String> {
                 object
             })
             .collect();
-    }
-    if options.objects.is_some() {
         scene.validate().map_err(|error| error.to_string())?;
     }
-    for object in &scene.objects {
+    for object in &preview.scene().objects {
         if let Some(id) = &object.mesh {
             if !meshes.contains_key(id) {
                 if !asset_status.is_empty() {
@@ -288,10 +311,6 @@ fn run() -> Result<(), String> {
     }
     if !asset_status.is_empty() {
         eprintln!("Rot Engine assets: {asset_status}");
-    }
-    let mut preview = Preview::new(&scene);
-    for _ in 0..options.ticks {
-        preview.step().map_err(|error| error.to_string())?;
     }
     let mut setup = WgpuSetupCreateNew::without_display_handle();
     setup.instance_descriptor.backends = wgpu::Backends::VULKAN;
@@ -332,6 +351,8 @@ fn run() -> Result<(), String> {
             }
             Ok(Box::new(Runtime {
                 preview,
+                tick: options.ticks,
+                navigation: Default::default(),
                 selected: None,
                 frames: options.frames,
                 metrics,
