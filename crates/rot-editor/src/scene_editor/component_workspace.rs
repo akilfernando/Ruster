@@ -21,6 +21,8 @@ use std::path::PathBuf;
 #[path = "component_mcp.rs"]
 mod mcp;
 
+const RUNTIME_GENERATION: u64 = 1;
+
 pub(super) fn check_launch() -> Result<(), String> {
     if std::env::var_os("ROT_PROJECT_STARTUP").is_some() {
         return Err(Text::ComponentConnectionUnavailable.plain().into());
@@ -248,6 +250,20 @@ impl ComponentWorkspace {
 
     pub(super) fn set_metrics(&mut self, metrics: Option<rot_render::MetricsHandle>) {
         self.navigation.metrics = metrics;
+    }
+
+    fn observe_runtime(&mut self) {
+        self.runtime.observe(
+            RUNTIME_GENERATION,
+            self.session.revision(),
+            self.assets.as_ref().map(rot_assets::AssetStore::revision),
+            0,
+        );
+    }
+
+    pub(super) fn poll_runtime(&mut self, ctx: &egui::Context) {
+        self.observe_runtime();
+        self.runtime.poll(ctx);
     }
 
     #[cfg(unix)]
@@ -1011,14 +1027,7 @@ impl ComponentWorkspace {
             self.open_path = None;
             self.close_pending = true;
         }
-        const RUNTIME_GENERATION: u64 = 1;
-        self.runtime.observe(
-            RUNTIME_GENERATION,
-            self.session.revision(),
-            self.assets.as_ref().map(rot_assets::AssetStore::revision),
-            0,
-        );
-        self.runtime.poll(&ctx);
+        self.poll_runtime(&ctx);
         let blocked = self.close_pending || self.open_path.is_some() || build_open;
         self.runtime.input_begin(&ctx, blocked);
         if let Some(action) = self

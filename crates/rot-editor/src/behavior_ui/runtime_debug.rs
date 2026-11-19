@@ -505,6 +505,17 @@ impl RuntimeUi {
         generation: u64,
         assets: Option<&rot_assets::AssetStore>,
     ) -> Result<Value, String> {
+        self.runtime_api_for_source(op, args, RuntimeSource::Legacy(session), generation, assets)
+    }
+
+    pub(crate) fn runtime_api_for_source(
+        &mut self,
+        op: &str,
+        args: &Value,
+        source: RuntimeSource<'_>,
+        generation: u64,
+        assets: Option<&rot_assets::AssetStore>,
+    ) -> Result<Value, String> {
         let current = self.worker.as_ref().map(VmWorker::current_key);
         let supplied = if op == "behavior_runtime_step" {
             let present = [
@@ -638,6 +649,9 @@ impl RuntimeUi {
             );
         }
         if op == "behavior_breakpoint_set" {
+            let RuntimeSource::Legacy(session) = source else {
+                return Err("Unsupported runtime operation".into());
+            };
             self.breakpoint(
                 session,
                 Breakpoint {
@@ -737,10 +751,10 @@ impl RuntimeUi {
                     .context
                     .clone()
                     .ok_or("Native UI context unavailable")?;
-                self.reset_with_resources(&ctx, session, generation, assets)?
+                self.reset_source(&ctx, source, generation, assets)?
             }
             Operation::Stop => {
-                self.stop(generation, session.scene().revision);
+                self.stop(generation, source.revision());
                 self.worker.as_ref().ok_or("No runtime")?.current_key()
             }
             Operation::Command => self.queue_command(args)?,

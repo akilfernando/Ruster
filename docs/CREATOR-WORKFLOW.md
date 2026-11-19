@@ -60,6 +60,8 @@ The AI can inspect components by ID and add, replace, enable, disable or
 remove them in one batch. Undo restores the entire batch.
 Use **Window → AI Connection…** to pause edits or disconnect.
 Editor and AI Undo and Redo share the same history. Save from the editor.
+An approved client can also control Play and inspect its last committed
+frame or script state in supported scenes. It uses the editor's Play session.
 
 On Linux, save the v23 scene, then use **File → Build…**. Choose a new
 folder and select **Build** or **Build and Run**. The folder contains an

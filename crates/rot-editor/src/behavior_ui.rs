@@ -2129,20 +2129,10 @@ impl RuntimeUi {
         session: &Session,
         generation: u64,
     ) -> Result<RunKey, String> {
-        self.reset_with_resources(ctx, session, generation, None)
-    }
-    /// Reset with the project's accepted sounds and animation clips. A clip
-    /// payload that fails to decode refuses the Reset before any worker effect.
-    pub fn reset_with_resources(
-        &mut self,
-        ctx: &egui::Context,
-        session: &Session,
-        generation: u64,
-        assets: Option<&rot_assets::AssetStore>,
-    ) -> Result<RunKey, String> {
-        self.reset_source(ctx, RuntimeSource::Legacy(session), generation, assets)
+        self.reset_source(ctx, RuntimeSource::Legacy(session), generation, None)
     }
 
+    /// Reset from accepted sounds and clips. Decode failures leave the worker unchanged.
     fn reset_source(
         &mut self,
         ctx: &egui::Context,

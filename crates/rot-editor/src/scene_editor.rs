@@ -5518,7 +5518,8 @@ impl eframe::App for Host {
         }
     }
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if self.editor.component.is_some() {
+        if let Some(component) = &mut self.editor.component {
+            component.poll_runtime(ctx);
             if !self.input.human_pending {
                 self.service_bridge(ctx);
             }

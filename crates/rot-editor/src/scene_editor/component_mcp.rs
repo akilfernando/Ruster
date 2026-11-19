@@ -1,5 +1,7 @@
 //! Guarded v23 commands dispatched only under the existing Host request lease.
-use super::ComponentWorkspace;
+use super::{ComponentWorkspace, RUNTIME_GENERATION};
+use crate::behavior_ui::RuntimeSource;
+use crate::scene_editor::runtime_commands;
 use rot_scene::component_scene::{Component, ComponentInstance, ObjectNode};
 use rot_scene::{SceneError, Transform, TransformRequest};
 use serde_json::{json, Value};
@@ -12,7 +14,21 @@ impl ComponentWorkspace {
         op: &str,
         args: &Value,
     ) -> Value {
-        let result = self.execute_ai_command(token, op, args);
+        let result = if matches!(
+            op,
+            "behavior_runtime_inspect"
+                | "behavior_runtime_state"
+                | "behavior_runtime_reset"
+                | "behavior_runtime_play"
+                | "behavior_runtime_pause"
+                | "behavior_runtime_step"
+                | "behavior_runtime_stop"
+        ) {
+            self.execute_ai_runtime(token, op, args)
+        } else {
+            self.execute_ai_command(token, op, args)
+                .map_err(|(code, message)| (code.to_owned(), message))
+        };
         let revision = self.session.revision().to_string();
         match result {
             Ok(mut payload) => {
@@ -24,6 +40,50 @@ impl ComponentWorkspace {
                 "code":code,"message":message,"session_token":token,"revision":revision
             }}),
         }
+    }
+
+    fn execute_ai_runtime(
+        &mut self,
+        token: &str,
+        op: &str,
+        args: &Value,
+    ) -> Result<Value, (String, String)> {
+        runtime_commands::validate_runtime_args(op, args)?;
+        let fail = |code: &str, message: &str| (code.to_owned(), message.to_owned());
+        if op != "behavior_runtime_inspect" {
+            if args["expected_session_token"].as_str() != Some(token) {
+                return Err(fail("stale_session", "Inspect the open scene again."));
+            }
+            if decimal(&args["expected_revision"]) != Some(self.session.revision()) {
+                return Err(fail(
+                    "stale_revision",
+                    "Inspect the current revision again.",
+                ));
+            }
+            if !matches!(op, "behavior_runtime_stop" | "behavior_runtime_state")
+                && (self.ai_transition_pending() || self.draft_dirty())
+            {
+                return Err(fail(
+                    "drafts_pending",
+                    "Finish the pending editor change first.",
+                ));
+            }
+        }
+        self.observe_runtime();
+        let value = self
+            .runtime
+            .runtime_api_for_source(
+                op,
+                args,
+                RuntimeSource::Components(&self.session),
+                RUNTIME_GENERATION,
+                self.assets.as_ref(),
+            )
+            .map_err(runtime_commands::runtime_failure)?;
+        if serde_json::to_vec(&value).map_or(true, |bytes| bytes.len() > 60000) {
+            return Err(fail("output_limit", "The runtime response is too large."));
+        }
+        Ok(value)
     }
 
     fn execute_ai_command(

@@ -47,6 +47,7 @@ pub(super) fn read_only(op: &str) -> bool {
         || matches!(
             op,
             "behavior_source"
+                | "behavior_runtime_state"
                 | "behavior_binding"
                 | "behavior_property"
                 | "behavior_state_default"
