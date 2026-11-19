@@ -60,8 +60,8 @@ assets, opaque materials only). The honest inventory is in the
 
 ## Installed on this machine
 
-`rot-editor` and `rot-mcp` built from `main` at 607b908 (installed by the
-user, 2026-11-17) are in `~/.local/bin`, with the **Rot Engine** launcher
+`rot-editor` and `rot-mcp` built from `main` at b85d44c (installed 2026-11-19)
+are in `~/.local/bin`, with the **Rot Engine** launcher
 entry `org.rot.editor.desktop`. Reinstall with
 `python3 scripts/install_local.py`; the build it replaced is kept in
 `~/.local/share/rot-engine/previous` for `--rollback`.
