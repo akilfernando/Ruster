@@ -31,7 +31,9 @@ the scene.
 **File → Save** writes the edits to the v23 file. When opening another
 scene, **Save and Open** saves pending changes. **Discard and Open** leaves
 the original file as saved, and **Cancel** keeps the current edits. Use
-the legacy scene for Play, Build and AI editing during the cutover.
+**Play**, **Pause**, **Step**, and **Stop** for supported scenes. Stopping
+returns to your editable scene. Build and AI editing still need the legacy
+scene during the cutover.
 
 ## Create and export in the editor
 

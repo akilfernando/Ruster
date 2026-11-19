@@ -328,35 +328,6 @@ impl SceneEditor {
         }
         self.paint_hud_overlay(ui, hud_rect, shown_frame.as_ref());
         sidebars::round_viewport(ui, hud_rect);
-        if self.runtime.in_play_mode() {
-            let painter = ui.painter().with_clip_rect(hud_rect);
-            let paused = shown_frame.is_some() && !self.runtime.is_playing();
-            let border = if paused {
-                ui.visuals().warn_fg_color
-            } else {
-                crate::editor_theme::ROT_RED
-            };
-            painter.rect_stroke(
-                hud_rect,
-                0.0,
-                egui::Stroke::new(2.0, border),
-                egui::StrokeKind::Inside,
-            );
-            if paused {
-                let badge = painter.layout_no_wrap(
-                    "Paused".into(),
-                    egui::TextStyle::Body.resolve(ui.style()),
-                    ui.visuals().text_color(),
-                );
-                let padding = egui::vec2(8.0, 4.0);
-                let size = badge.size() + padding * 2.0;
-                let rect = egui::Rect::from_min_size(
-                    hud_rect.right_bottom() - size - egui::vec2(8.0, 8.0),
-                    size,
-                );
-                painter.rect_filled(rect, 4, ui.visuals().extreme_bg_color);
-                painter.galley(rect.min + padding, badge, ui.visuals().text_color());
-            }
-        }
+        self.runtime.paint_play_border(ui, hud_rect);
     }
 }

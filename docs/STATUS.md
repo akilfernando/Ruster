@@ -42,9 +42,9 @@ undo, redo, and save in v23. The Project Hub and File → Open support both
 formats, with Save, Discard and Cancel when switching away from v23 edits. Automatic upgrades and remaining
 editor tools are open.
 
-The standalone viewer, headless behavior CLI and packaged Motion Lab
-read supported v23 scenes through temporary projections. General component
-execution remains open.
+The v23 editor uses the shared Play, Pause, Step and Stop controls. The editor,
+standalone viewer and packaged Motion Lab use temporary v23 projections.
+General component execution, Build and MCP remain open.
 
 ## What a creator can do today
 

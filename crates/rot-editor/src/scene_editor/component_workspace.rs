@@ -1,6 +1,7 @@
 //! The editor owns v23 scenes through ComponentSession. The viewport receives
 //! a disposable projection and cannot change the authored document.
-use super::{project_picker, OpenedScene};
+use super::{hud_interaction, project_picker, OpenedScene};
+use crate::behavior_ui::{PlayShortcut, RuntimeSource, RuntimeUi};
 use crate::editor_theme;
 use crate::strings::Text;
 use crate::ui_kit::tokens::{ROW_HEIGHT, SPACE_XS};
@@ -25,6 +26,10 @@ pub(super) fn check_launch() -> Result<(), String> {
 pub(super) struct ComponentWorkspace {
     session: ComponentSession,
     path: PathBuf,
+    assets: Option<rot_assets::AssetStore>,
+    runtime: RuntimeUi,
+    hud_cache: rot_scene::hud::HudCache,
+    hud_controls: hud_interaction::HudControls,
     workspace: Workspace,
     meshes: rot_app::MeshMap,
     textures: rot_app::TextureMap,
@@ -70,6 +75,10 @@ impl ComponentWorkspace {
             parents,
             session,
             path,
+            assets,
+            runtime: RuntimeUi::default(),
+            hud_cache: Default::default(),
+            hud_controls: Default::default(),
             workspace: Workspace::detached(),
             meshes,
             textures,
@@ -347,6 +356,14 @@ impl ComponentWorkspace {
                 self.error = None;
                 return;
             }
+            Action::Play | Action::Pause | Action::Step => {
+                self.runtime.queue_shortcut(match action {
+                    Action::Play => PlayShortcut::Play,
+                    Action::Pause => PlayShortcut::Pause,
+                    _ => PlayShortcut::Step,
+                });
+                return;
+            }
             Action::Save => {
                 self.save();
                 return;
@@ -433,6 +450,94 @@ fn hierarchy_rows(objects: &[ObjectNode]) -> (Vec<(usize, usize)>, Vec<Option<us
 }
 
 impl ComponentWorkspace {
+    fn viewport(&mut self, ui: &mut egui::Ui, blocked: bool) {
+        let ctx = ui.ctx().clone();
+        let frame = self.runtime.displayed_frame().cloned();
+        let scene = if let Some(frame) = &frame {
+            frame.scene.as_ref()
+        } else {
+            match &self.preview {
+                Ok(scene) => scene,
+                Err(error) => {
+                    ui.colored_label(editor_theme::colors(ui).error, error.to_string());
+                    return;
+                }
+            }
+        };
+        let selection = self
+            .draft
+            .as_ref()
+            .map(|object| object.id.as_str())
+            .filter(|_| frame.is_none());
+        let playing = frame.is_some() && self.runtime.is_playing();
+        self.navigation.player_view = frame.is_some() && scene.player_view.is_some();
+        self.navigation.focusable = playing && !self.session.scene().actions.is_empty();
+        self.navigation.enabled = !blocked && !self.runtime.input_owned();
+        self.navigation.show_editor_grid = frame.is_none();
+        let mut surface =
+            rot_render::allocate_viewport(ui, scene, selection.as_slice(), &mut self.navigation);
+        let rect = surface.rect;
+        let mut hud_owns = false;
+        if let Some(frame) = &frame {
+            let (owned, error) = hud_interaction::interact(
+                ui,
+                hud_interaction::HudViewport {
+                    rect,
+                    frame: Some(frame),
+                    authoring: &frame.authoring,
+                    scope: egui::Id::unique(("component_game_hud", frame.key.reset_epoch)),
+                },
+                &mut self.hud_cache,
+                &mut self.hud_controls,
+                &mut self.runtime,
+                blocked,
+            );
+            hud_owns = owned;
+            if let Some(error) = error {
+                self.error = Some(error);
+            }
+        }
+        surface.input_owned = hud_owns;
+        let interaction = rot_render::render_viewport_with_materials(
+            ui,
+            scene,
+            selection.as_slice(),
+            &self.meshes,
+            &self.textures,
+            &mut self.navigation,
+            surface,
+        );
+        self.runtime.input_control_click(
+            &ctx,
+            blocked || hud_owns,
+            !self.session.scene().actions.is_empty(),
+            playing && interaction.response.clicked(),
+        );
+        self.runtime
+            .input_finish(&ctx, &interaction.response, blocked || hud_owns);
+        if let Some(frame) = &frame {
+            let hud = &frame.authoring.hud;
+            if let Some(prepared) = self.hud_controls.prepared.take() {
+                rot_app::hud::paint_prepared_hud(ui.painter(), &prepared);
+            } else if hud.enabled {
+                let rows = self
+                    .hud_cache
+                    .prepare(hud, &frame.authoring, |binding, field| {
+                        frame.state.binding(binding)?.get(field)
+                    });
+                let mode = if self.runtime.stale {
+                    rot_app::hud::HudPresentationMode::Stale
+                } else {
+                    rot_app::hud::HudPresentationMode::Committed
+                };
+                rot_app::hud::paint_hud(ui.painter(), rect, hud, rows, mode);
+            }
+        } else if interaction.picked.is_some() && self.apply() {
+            self.select(interaction.picked);
+        }
+        self.runtime.paint_play_border(ui, rect);
+    }
+
     pub(super) fn show(&mut self, ui: &mut egui::Ui) -> Option<OpenedScene> {
         let ctx = ui.ctx().clone();
         if !self.close_approved
@@ -443,9 +548,19 @@ impl ComponentWorkspace {
             self.open_path = None;
             self.close_pending = true;
         }
+        const RUNTIME_GENERATION: u64 = 1;
+        self.runtime.observe(
+            RUNTIME_GENERATION,
+            self.session.revision(),
+            self.assets.as_ref().map(rot_assets::AssetStore::revision),
+            0,
+        );
+        self.runtime.poll(&ctx);
+        let blocked = self.close_pending || self.open_path.is_some();
+        self.runtime.input_begin(&ctx, blocked);
         if let Some(action) = self
             .workspace
-            .shortcuts(&ctx, self.close_pending || self.open_path.is_some())
+            .shortcuts(&ctx, blocked || self.runtime.input_owned())
         {
             self.command(action);
         }
@@ -473,6 +588,15 @@ impl ComponentWorkspace {
                 };
                 ui.label(format!("{}{marker}", self.session.scene().id));
             });
+        });
+        egui::Panel::top("component_play").show(ui, |ui| {
+            self.runtime.controls_for_source(
+                ui,
+                RuntimeSource::Components(&self.session),
+                RUNTIME_GENERATION,
+                blocked || self.draft_dirty(),
+                self.assets.as_ref(),
+            );
         });
         if let Some(error) = &self.error {
             egui::Panel::bottom("component_status").show(ui, |ui| {
@@ -594,25 +718,7 @@ impl ComponentWorkspace {
                     self.select(self.draft.as_ref().map(|object| object.id.clone()));
                 }
             });
-        egui::CentralPanel::default().show(ui, |ui| match &self.preview {
-            Ok(scene) => {
-                let selection = self.draft.as_ref().map(|object| object.id.as_str());
-                let interaction = rot_render::viewport_with_materials(
-                    ui,
-                    scene,
-                    selection.as_slice(),
-                    &self.meshes,
-                    &self.textures,
-                    &mut self.navigation,
-                );
-                if interaction.picked.is_some() && self.apply() {
-                    self.select(interaction.picked);
-                }
-            }
-            Err(error) => {
-                ui.colored_label(editor_theme::colors(ui).error, error.to_string());
-            }
-        });
+        egui::CentralPanel::default().show(ui, |ui| self.viewport(ui, blocked));
         if let Some(mut path) = self.open_path.take() {
             let mut cancel = false;
             let mut opened = None;
@@ -785,6 +891,56 @@ mod tests {
         assert_eq!(editor.session.scene(), &subtree);
         editor.command(Action::Save);
         assert_eq!(ComponentSession::open(&path).unwrap().scene(), &subtree);
+    }
+
+    #[test]
+    fn v23_step_runs_the_edited_revision_without_saving_runtime_state() {
+        let legacy = Session::from_snapshot_bytes(include_bytes!(
+            "../../../../examples/motion-lab/resources/generic.scene.json"
+        ))
+        .unwrap();
+        let scene = ComponentScene::from_legacy(&legacy).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.draft.as_mut().unwrap().name = "Renamed".into();
+        assert!(editor.save());
+        let authored = std::fs::read(&path).unwrap();
+        let revision = editor.session.revision();
+        assert!(revision > 0);
+        let initial_transform = editor.session.scene().objects[0].transform.clone();
+        editor.command(Action::Step);
+
+        let context = egui::Context::default();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+                editor.show(ui);
+            });
+            output.textures_delta.clear();
+            if let Some(frame) = editor
+                .runtime
+                .displayed_frame()
+                .filter(|frame| frame.tick == 1)
+            {
+                assert_eq!(frame.key.authored_revision, revision);
+                assert_ne!(frame.scene.objects[0].transform, initial_transform);
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "v23 step did not publish: {}",
+                editor.runtime.status,
+            );
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert_eq!(
+            editor.session.scene().objects[0].transform,
+            initial_transform
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), authored);
     }
 
     #[test]

@@ -169,7 +169,7 @@ impl RuntimeUi {
         }
     }
 
-    fn input_help_snapshot_current(&self, session: &Session, generation: u64) -> bool {
+    fn input_help_snapshot_current(&self, source: RuntimeSource<'_>, generation: u64) -> bool {
         let (Some(frame), Some(captured)) = (&self.frame, &self.captured) else {
             return false;
         };
@@ -178,21 +178,21 @@ impl RuntimeUi {
             && !self.shutdown
             && self.current_run() == Some(frame.key)
             && frame.key.generation == generation
-            && frame.key.authored_revision == session.scene().revision
-            && captured.actions == session.authoring().actions
-            && captured.bindings == session.authoring().bindings
+            && frame.key.authored_revision == source.revision()
+            && captured.actions == *source.actions()
+            && source.bindings_match(captured)
     }
 
     pub(super) fn input_help_window(
         &mut self,
         ctx: &egui::Context,
-        session: &Session,
+        source: RuntimeSource<'_>,
         generation: u64,
     ) {
         if !self.input_control.help_open {
             return;
         }
-        let current = self.input_help_snapshot_current(session, generation);
+        let current = self.input_help_snapshot_current(source, generation);
         let popup_at_start = egui::Popup::is_any_open(ctx);
         let activation =
             self.input_control.help_activation_frame == Some(ctx.cumulative_frame_nr());
@@ -264,11 +264,11 @@ impl RuntimeUi {
                             _ => {}
                         }
                         ui.heading("Scene controls");
-                        if session.authoring().actions.is_empty() {
+                        if source.actions().is_empty() {
                             ui.label("No actions defined. Add actions in Input actions.");
                         }
                         ui.label("Shared keys drive every matching action. Escape releases scene control.");
-                        for (id, definition) in &session.authoring().actions {
+                        for (id, definition) in source.actions() {
                             ui.separator();
                             ui.strong(format!("{} · {id}", definition.label.as_deref().unwrap_or(id)));
                             ui.weak(action_hint(&definition.kind));
@@ -296,7 +296,7 @@ impl RuntimeUi {
                         ui.label(format!("Committed preview tick {}", frame.tick));
                         if let Some(input) = frame.input.as_deref().filter(|input| {
                             input.receipt.tick == frame.tick
-                                && input.frame.0.keys().eq(session.authoring().actions.keys())
+                                && input.frame.0.keys().eq(source.actions().keys())
                         }) {
                             let origin = match input.receipt.origin {
                                 InputOrigin::Neutral => "neutral",
@@ -321,7 +321,7 @@ impl RuntimeUi {
                         } else {
                             "Group transforms"
                         });
-                        let bindings = &session.authoring().bindings;
+                        let bindings = &frame.authoring.bindings;
                         let count = bindings.values().filter(|binding| binding.enabled).count();
                         if count == 0 { ui.label("No enabled behavior bindings."); }
                         if count > 16 { ui.label(format!("Showing the first 16 of {count} enabled bindings.")); }

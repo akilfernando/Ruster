@@ -1891,6 +1891,36 @@ pub enum PlayShortcut {
     Pause,
     Step,
 }
+#[derive(Clone, Copy)]
+pub(super) enum RuntimeSource<'a> {
+    Legacy(&'a Session),
+    Components(&'a rot_scene::component_scene::ComponentSession),
+}
+
+impl<'a> RuntimeSource<'a> {
+    fn revision(self) -> u64 {
+        match self {
+            Self::Legacy(session) => session.scene().revision,
+            Self::Components(session) => session.revision(),
+        }
+    }
+
+    fn actions(self) -> &'a rot_scene::input::ActionMap {
+        match self {
+            Self::Legacy(session) => &session.authoring().actions,
+            Self::Components(session) => &session.scene().actions,
+        }
+    }
+
+    fn bindings_match(self, captured: &rot_scene::Authoring) -> bool {
+        match self {
+            Self::Legacy(session) => session.authoring().bindings == captured.bindings,
+            // The component session advances its revision for every edit.
+            Self::Components(_) => true,
+        }
+    }
+}
+
 impl RuntimeUi {
     pub fn queue_shortcut(&mut self, shortcut: PlayShortcut) {
         self.shortcut = Some(shortcut);
@@ -1996,6 +2026,39 @@ impl RuntimeUi {
             self.cancel_control_focus();
         }
     }
+    pub(super) fn paint_play_border(&self, ui: &egui::Ui, rect: egui::Rect) {
+        if self.in_play_mode() {
+            let painter = ui.painter().with_clip_rect(rect);
+            let paused = self.displayed_frame().is_some() && !self.is_playing();
+            let border = if paused {
+                ui.visuals().warn_fg_color
+            } else {
+                crate::editor_theme::ROT_RED
+            };
+            painter.rect_stroke(
+                rect,
+                0.0,
+                egui::Stroke::new(2.0, border),
+                egui::StrokeKind::Inside,
+            );
+            if paused {
+                let badge = painter.layout_no_wrap(
+                    "Paused".into(),
+                    egui::TextStyle::Body.resolve(ui.style()),
+                    ui.visuals().text_color(),
+                );
+                let padding = egui::vec2(8.0, 4.0);
+                let size = badge.size() + padding * 2.0;
+                let rect = egui::Rect::from_min_size(
+                    rect.right_bottom() - size - egui::vec2(8.0, 8.0),
+                    size,
+                );
+                painter.rect_filled(rect, 4, ui.visuals().extreme_bg_color);
+                painter.galley(rect.min + padding, badge, ui.visuals().text_color());
+            }
+        }
+    }
+
     pub fn is_playing(&self) -> bool {
         self.playing
     }
@@ -2077,11 +2140,31 @@ impl RuntimeUi {
         generation: u64,
         assets: Option<&rot_assets::AssetStore>,
     ) -> Result<RunKey, String> {
+        self.reset_source(ctx, RuntimeSource::Legacy(session), generation, assets)
+    }
+
+    fn reset_source(
+        &mut self,
+        ctx: &egui::Context,
+        source: RuntimeSource<'_>,
+        generation: u64,
+        assets: Option<&rot_assets::AssetStore>,
+    ) -> Result<RunKey, String> {
+        let (mut scene, authoring) = match source {
+            RuntimeSource::Legacy(session) => {
+                (session.scene().clone(), session.authoring().clone())
+            }
+            RuntimeSource::Components(session) => session
+                .scene()
+                .behavior_input()
+                .map_err(|error| error.to_string())?,
+        };
+        scene.revision = source.revision();
         let sounds = assets
             .map(rot_assets::AssetStore::sound_snapshots)
             .unwrap_or_default();
         let clips = match assets {
-            Some(store) if !session.scene().animations.is_empty() => {
+            Some(store) if !scene.animations.is_empty() => {
                 let accepted = store.clip_snapshots();
                 Arc::new(rot_behavior::decode_clips(&accepted)?)
             }
@@ -2092,16 +2175,16 @@ impl RuntimeUi {
         self.supersede_operation();
         let worker = self.worker.as_mut().unwrap();
         let key = worker
-            .advance(generation, session.scene().revision)
+            .advance(generation, source.revision())
             .map_err(|e| e.to_string())?;
         worker
             .set_breakpoints(key, self.debug.points.clone())
             .map_err(|e| e.to_string())?;
-        let authoring = Arc::new(session.authoring().clone());
+        let authoring = Arc::new(authoring);
         self.captured = Some(authoring.clone());
         self.pending = Some(Request::Reset {
             key,
-            scene: Arc::new(session.scene().clone()),
+            scene: Arc::new(scene),
             authoring,
             sounds,
             clips,
@@ -2430,6 +2513,23 @@ impl RuntimeUi {
         _focus_shortcut: &str,
         assets: Option<&rot_assets::AssetStore>,
     ) -> Option<RunKey> {
+        self.controls_for_source(
+            ui,
+            RuntimeSource::Legacy(session),
+            generation,
+            blocked,
+            assets,
+        )
+    }
+
+    pub(super) fn controls_for_source(
+        &mut self,
+        ui: &mut egui::Ui,
+        source: RuntimeSource<'_>,
+        generation: u64,
+        blocked: bool,
+        assets: Option<&rot_assets::AssetStore>,
+    ) -> Option<RunKey> {
         let mut reset = None;
         let focus_controls = std::mem::take(&mut self.focus_controls);
         self.maintain_control_focus(ui.ctx());
@@ -2462,7 +2562,7 @@ impl RuntimeUi {
                     });
                     return Some(key);
                 }
-                match runtime.reset_with_resources(&ctx, session, generation, assets) {
+                match runtime.reset_source(&ctx, source, generation, assets) {
                     Ok(key) => {
                         reset = Some(key);
                         runtime.after_reset = Some((key, operation));
@@ -2498,7 +2598,7 @@ impl RuntimeUi {
             let toggle_play =
                 play_button.clicked() || (shortcut == Some(PlayShortcut::Pause) && in_play_mode);
             if shortcut == Some(PlayShortcut::Play) && in_play_mode {
-                self.stop(generation, session.scene().revision);
+                self.stop(generation, source.revision());
             } else if toggle_play || shortcut == Some(PlayShortcut::Play) {
                 if self.playing {
                     let key = self.worker.as_ref().unwrap().current_key();
@@ -2528,7 +2628,7 @@ impl RuntimeUi {
             );
             self.restore_control_focus(&stop_button);
             if stop_button.clicked() {
-                self.stop(generation, session.scene().revision);
+                self.stop(generation, source.revision());
                 let key = self
                     .awaiting
                     .filter(|(_, operation)| *operation == Operation::Stop)
@@ -2629,9 +2729,7 @@ impl RuntimeUi {
                 ui.allocate_ui_with_layout(
                     egui::vec2(width, ui.spacing().interact_size.y),
                     egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        self.control_feedback(ui, blocked, !session.authoring().actions.is_empty())
-                    },
+                    |ui| self.control_feedback(ui, blocked, !source.actions().is_empty()),
                 );
             }
         });
@@ -2639,7 +2737,7 @@ impl RuntimeUi {
             // Narrow toolbar: keep the one row; status lives in the "…" menu.
         }
         self.flush();
-        self.input_help_window(ui.ctx(), session, generation);
+        self.input_help_window(ui.ctx(), source, generation);
         reset
     }
 
