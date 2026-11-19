@@ -223,13 +223,28 @@ impl ComponentSession {
         id: &str,
         parent: Option<&str>,
     ) -> Result<u64, SceneError> {
+        self.reparent_many(expected, &[id], parent)
+    }
+
+    /// Reparent the topmost objects in a selection as one Undo entry.
+    pub fn reparent_many(
+        &mut self,
+        expected: u64,
+        ids: &[&str],
+        parent: Option<&str>,
+    ) -> Result<u64, SceneError> {
         self.check_revision(expected)?;
-        let index = self.object_index(id)?;
-        if self.scene.objects[index].parent.as_deref() == parent {
+        let mut indices = self.selection_roots(ids)?;
+        indices.retain(|&index| self.scene.objects[index].parent.as_deref() != parent);
+        if indices.is_empty() {
             return Ok(self.revision);
         }
-        let object = self.with_parent(index, parent)?;
-        self.commit([ObjectChange::Replace { index, object }])
+        let moved = self.with_parent(&indices, parent)?;
+        let changes = indices
+            .into_iter()
+            .zip(moved)
+            .map(|(index, object)| ObjectChange::Replace { index, object });
+        self.commit(changes)
     }
 
     /// Place an object immediately before or after a sibling in file order.
@@ -241,50 +256,129 @@ impl ComponentSession {
         sibling: &str,
         before: bool,
     ) -> Result<u64, SceneError> {
+        self.place_many_next_to(expected, &[id], sibling, before)
+    }
+
+    /// Place the topmost selected objects beside an anchor, in selection order.
+    pub fn place_many_next_to(
+        &mut self,
+        expected: u64,
+        ids: &[&str],
+        sibling: &str,
+        before: bool,
+    ) -> Result<u64, SceneError> {
         self.check_revision(expected)?;
-        let index = self.object_index(id)?;
         let anchor = self.object_index(sibling)?;
-        if index == anchor {
+        let indices = self.selection_roots(ids)?;
+        if indices.is_empty() || ids.contains(&sibling) {
             return Ok(self.revision);
         }
         let objects = &self.scene.objects;
         let parent = objects[anchor].parent.as_deref();
-        if objects[index].parent.as_deref() == parent
-            && (index < anchor) == before
-            && objects[index.min(anchor) + 1..index.max(anchor)]
+        // A group already beside the anchor in the requested order is a no-op.
+        let adjacent = if before {
+            let mut siblings = (0..anchor)
+                .rev()
+                .filter(|&index| objects[index].parent.as_deref() == parent);
+            indices
                 .iter()
-                .all(|object| object.parent.as_deref() != parent)
-        {
+                .rev()
+                .all(|&index| siblings.next() == Some(index))
+        } else {
+            let mut siblings = (anchor + 1..objects.len())
+                .filter(|&index| objects[index].parent.as_deref() == parent);
+            indices.iter().all(|&index| siblings.next() == Some(index))
+        };
+        if adjacent {
             return Ok(self.revision);
         }
-        let object = self.with_parent(index, parent)?;
-        let destination = anchor + usize::from(!before) - usize::from(index < anchor);
-        self.commit([
-            ObjectChange::Remove { index },
-            ObjectChange::Insert {
-                index: destination,
+
+        let moved = self.with_parent(&indices, parent)?;
+        let destination =
+            anchor + usize::from(!before) - indices.iter().filter(|&&index| index < anchor).count();
+        let mut from_indices = indices;
+        from_indices.sort_unstable();
+        let remove = from_indices
+            .into_iter()
+            .rev()
+            .map(|index| ObjectChange::Remove { index });
+        let insert = moved
+            .into_iter()
+            .enumerate()
+            .map(|(offset, object)| ObjectChange::Insert {
+                index: destination + offset,
                 object,
-            },
-        ])
+            });
+        self.commit(remove.chain(insert))
     }
 
-    fn with_parent(&self, index: usize, parent: Option<&str>) -> Result<ObjectNode, SceneError> {
-        let mut object = self.scene.objects[index].clone();
-        if object.parent.as_deref() == parent {
-            return Ok(object);
+    fn selection_roots(&self, ids: &[&str]) -> Result<Vec<usize>, SceneError> {
+        if let [id] = ids {
+            return Ok(vec![self.object_index(id)?]);
         }
-        let world = self.scene.world_matrices()?;
-        let local = match parent {
-            Some(parent) => world[self.object_index(parent)?].inverse() * world[index],
-            None => world[index],
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let objects = &self.scene.objects;
+        let indices: HashMap<_, _> = objects
+            .iter()
+            .enumerate()
+            .map(|(index, object)| (object.id.as_str(), index))
+            .collect();
+        let hierarchy = ObjectHierarchy::build(objects)?;
+        let mut covered = vec![false; objects.len()];
+        let mut ordered = Vec::with_capacity(ids.len());
+        for id in ids {
+            let index = indices
+                .get(id)
+                .copied()
+                .ok_or_else(|| SceneError::ObjectNotFound((*id).into()))?;
+            if !std::mem::replace(&mut covered[index], true) {
+                ordered.push(index);
+            }
+        }
+        let mut below_selection = vec![false; objects.len()];
+        for index in hierarchy.order {
+            below_selection[index] = hierarchy.parents[index].is_some_and(|parent| covered[parent]);
+            covered[index] |= below_selection[index];
+        }
+        ordered.retain(|&index| !below_selection[index]);
+        Ok(ordered)
+    }
+
+    fn with_parent(
+        &self,
+        indices: &[usize],
+        parent: Option<&str>,
+    ) -> Result<Vec<ObjectNode>, SceneError> {
+        let objects = &self.scene.objects;
+        let changed = indices
+            .iter()
+            .any(|&index| objects[index].parent.as_deref() != parent);
+        let world = changed.then(|| self.scene.world_matrices()).transpose()?;
+        let parent_inverse = match (&world, parent) {
+            (Some(world), Some(parent)) => world[self.object_index(parent)?].inverse(),
+            _ => glam::DMat4::IDENTITY,
         };
-        object.transform = Transform::try_from_affine(local).map_err(|error| {
-            SceneError::Invalid(format!(
-                "cannot preserve the world transform under the requested parent: {error}"
-            ))
-        })?;
-        object.parent = parent.map(str::to_owned);
-        Ok(object)
+        indices
+            .iter()
+            .map(|&index| {
+                let mut object = objects[index].clone();
+                if let Some(world) = world
+                    .as_ref()
+                    .filter(|_| object.parent.as_deref() != parent)
+                {
+                    object.transform = Transform::try_from_affine(parent_inverse * world[index])
+                        .map_err(|error| {
+                            SceneError::Invalid(format!(
+                        "cannot preserve the world transform under the requested parent: {error}"
+                    ))
+                        })?;
+                    object.parent = parent.map(str::to_owned);
+                }
+                Ok(object)
+            })
+            .collect()
     }
 
     fn object_index(&self, id: &str) -> Result<usize, SceneError> {
@@ -305,13 +399,23 @@ impl ComponentSession {
     /// Remove the object and its descendants in one edit. References from
     /// outside the subtree still have to validate after removal.
     pub fn remove_subtree(&mut self, expected: u64, id: &str) -> Result<u64, SceneError> {
+        self.remove_subtrees(expected, &[id])
+    }
+
+    /// Delete the selected subtrees as one edit, even when they overlap.
+    pub fn remove_subtrees(&mut self, expected: u64, ids: &[&str]) -> Result<u64, SceneError> {
         self.check_revision(expected)?;
-        let root = self.object_index(id)?;
+        let roots = self.selection_roots(ids)?;
+        if roots.is_empty() {
+            return Ok(self.revision);
+        }
         let hierarchy = ObjectHierarchy::build(&self.scene.objects)?;
         let mut remove = vec![false; self.scene.objects.len()];
+        for index in roots {
+            remove[index] = true;
+        }
         for index in hierarchy.order {
-            remove[index] =
-                index == root || hierarchy.parents[index].is_some_and(|parent| remove[parent]);
+            remove[index] |= hierarchy.parents[index].is_some_and(|parent| remove[parent]);
         }
         let changes = remove
             .into_iter()
@@ -505,6 +609,49 @@ mod tests {
         let path = directory.path().join("scene.json");
         session.save(&path).unwrap();
         assert_eq!(ComponentSession::open(path).unwrap().scene(), &ordered);
+    }
+
+    #[test]
+    fn grouped_hierarchy_edits_keep_selected_descendants_attached() {
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("group")).unwrap()).unwrap();
+        scene.objects = [
+            ("stage", None),
+            ("car", None),
+            ("wheel", Some("car")),
+            ("marker", None),
+        ]
+        .into_iter()
+        .map(|(id, parent)| ObjectNode {
+            id: id.into(),
+            name: id.into(),
+            enabled: true,
+            parent: parent.map(str::to_owned),
+            transform: Transform::default(),
+            components: Vec::new(),
+        })
+        .collect();
+        let mut session = ComponentSession::new(scene.clone()).unwrap();
+        let selected = ["wheel", "car", "marker"];
+        assert_eq!(
+            session.reparent_many(0, &selected, Some("stage")).unwrap(),
+            1
+        );
+        assert_eq!(session.scene().objects[2].parent.as_deref(), Some("car"));
+        assert_eq!(session.scene().objects[3].parent.as_deref(), Some("stage"));
+        let nested = session.scene().clone();
+        assert!(session
+            .reparent_many(1, &["stage", "marker"], Some("wheel"))
+            .is_err());
+        assert_eq!(session.scene(), &nested);
+        assert_eq!(session.revision(), 1);
+        session.undo(1).unwrap();
+        assert_eq!(session.scene(), &scene);
+        session.redo(2).unwrap();
+        assert_eq!(session.remove_subtrees(3, &selected).unwrap(), 4);
+        assert_eq!(session.scene().objects, [scene.objects[0].clone()]);
+        session.undo(4).unwrap();
+        assert_eq!(session.scene(), &nested);
     }
 
     #[test]

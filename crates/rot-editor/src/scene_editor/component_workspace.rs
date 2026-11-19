@@ -38,9 +38,14 @@ fn hierarchy_drop(
     row: &egui::Response,
     target: Option<&str>,
     revision: u64,
+    selection: &HashSet<String>,
 ) -> Option<(String, HierarchyDestination)> {
     let drag = row.dnd_hover_payload::<HierarchyDrag>()?;
-    if drag.revision != revision || Some(drag.object_id.as_str()) == target {
+    if drag.revision != revision
+        || target.is_some_and(|id| {
+            id == drag.object_id || selection.contains(id) && selection.contains(&drag.object_id)
+        })
+    {
         return None;
     }
     let rect = row.rect;
@@ -76,12 +81,28 @@ fn sibling_move_items(
     ui: &mut egui::Ui,
     objects: &[ObjectNode],
     index: usize,
+    selection: &HashSet<String>,
 ) -> Option<HierarchyDestination> {
     let parent = &objects[index].parent;
-    let previous = objects[..index]
+    let mut first = index;
+    let mut last = index;
+    if selection.len() > 1 && selection.contains(&objects[index].id) {
+        for (index, object) in objects
+            .iter()
+            .enumerate()
+            .filter(|(_, object)| selection.contains(&object.id))
+        {
+            if &object.parent != parent {
+                return None;
+            }
+            first = first.min(index);
+            last = last.max(index);
+        }
+    }
+    let previous = objects[..first]
         .iter()
         .rfind(|object| &object.parent == parent);
-    let next = objects[index + 1..]
+    let next = objects[last + 1..]
         .iter()
         .find(|object| &object.parent == parent);
     for (target, before, label) in [
@@ -116,6 +137,8 @@ pub(super) struct ComponentWorkspace {
     preview: Result<rot_render::component_preview::ComponentPreview, rot_scene::SceneError>,
     rows: Vec<(usize, usize)>,
     parents: Vec<Option<usize>>,
+    selection: HashSet<String>,
+    selection_anchor: Option<String>,
     selected_index: Option<usize>,
     draft: Option<ObjectNode>,
     component_picker: component_inspector::ComponentPicker,
@@ -171,6 +194,8 @@ impl ComponentWorkspace {
                 ..Default::default()
             },
             selected_index: None,
+            selection: HashSet::new(),
+            selection_anchor: None,
             draft: None,
             component_picker: Default::default(),
             error,
@@ -222,9 +247,73 @@ impl ComponentWorkspace {
     }
 
     fn select(&mut self, id: Option<String>) {
+        self.selection.clear();
+        self.selection.extend(id.iter().cloned());
+        self.selection_anchor = id;
+        self.rebuild_draft();
+    }
+
+    fn rebuild_draft(&mut self) {
         let objects = &self.session.scene().objects;
-        self.selected_index = id.and_then(|id| objects.iter().position(|object| object.id == id));
+        self.selected_index = if self.selection.len() == 1 {
+            objects
+                .iter()
+                .position(|object| self.selection.contains(&object.id))
+        } else {
+            None
+        };
         self.draft = self.selected_index.map(|index| objects[index].clone());
+    }
+
+    fn select_row(&mut self, row: usize, modifiers: egui::Modifiers) {
+        let objects = &self.session.scene().objects;
+        let id = objects[self.rows[row].0].id.clone();
+        let additive = modifiers.command || modifiers.ctrl;
+        if modifiers.shift {
+            let anchor = self
+                .selection_anchor
+                .as_deref()
+                .and_then(|id| {
+                    self.rows
+                        .iter()
+                        .position(|&(index, _)| objects[index].id == id)
+                })
+                .unwrap_or(row);
+            if !additive {
+                self.selection.clear();
+            }
+            self.selection.extend(
+                self.rows[anchor.min(row)..=anchor.max(row)]
+                    .iter()
+                    .map(|&(index, _)| objects[index].id.clone()),
+            );
+            self.selection_anchor.get_or_insert(id);
+        } else if additive {
+            if !self.selection.remove(&id) {
+                self.selection.insert(id.clone());
+            }
+            self.selection_anchor = Some(id);
+        } else {
+            self.select(Some(id));
+            return;
+        }
+        self.rebuild_draft();
+    }
+
+    fn target_ids(&self, hit: Option<&str>) -> Vec<String> {
+        if let Some(id) = hit.filter(|id| !self.selection.contains(*id)) {
+            return vec![id.to_owned()];
+        }
+        if self.selection.len() <= 1 {
+            return self.selection.iter().cloned().collect();
+        }
+        let objects = &self.session.scene().objects;
+        self.rows
+            .iter()
+            .map(|&(index, _)| &objects[index].id)
+            .filter(|id| self.selection.contains(*id))
+            .cloned()
+            .collect()
     }
 
     fn draft_dirty(&self) -> bool {
@@ -233,8 +322,24 @@ impl ComponentWorkspace {
     }
 
     fn refresh(&mut self) {
-        let selection = self.draft.as_ref().map(|object| object.id.clone());
-        self.select(selection);
+        if !self.selection.is_empty() || self.selection_anchor.is_some() {
+            let present: HashSet<_> = self
+                .session
+                .scene()
+                .objects
+                .iter()
+                .map(|object| &object.id)
+                .collect();
+            self.selection.retain(|id| present.contains(id));
+            if self
+                .selection_anchor
+                .as_ref()
+                .is_some_and(|id| !present.contains(id))
+            {
+                self.selection_anchor = None;
+            }
+        }
+        self.rebuild_draft();
         (self.rows, self.parents) = hierarchy_rows(&self.session.scene().objects);
         self.preview = rot_render::component_preview::project(self.session.scene());
     }
@@ -334,11 +439,18 @@ impl ComponentWorkspace {
         }
     }
 
-    fn delete(&mut self, id: &str) {
-        if self.draft.as_ref().is_some_and(|draft| draft.id != id) && !self.apply() {
+    fn delete(&mut self, hit: Option<&str>) {
+        let ids = self.target_ids(hit);
+        if self
+            .draft
+            .as_ref()
+            .is_some_and(|draft| !ids.contains(&draft.id))
+            && !self.apply()
+        {
             return;
         }
-        match self.session.remove_subtree(self.session.revision(), id) {
+        let ids: Vec<_> = ids.iter().map(String::as_str).collect();
+        match self.session.remove_subtrees(self.session.revision(), &ids) {
             Ok(_) => {
                 self.error = None;
                 self.refresh();
@@ -347,20 +459,19 @@ impl ComponentWorkspace {
         }
     }
 
-    fn reparent(&mut self, id: &str, parent: Option<&str>) {
-        self.move_in_hierarchy(id, HierarchyDestination::Parent(parent.map(str::to_owned)));
-    }
-
-    fn move_in_hierarchy(&mut self, id: &str, destination: HierarchyDestination) {
+    fn move_in_hierarchy(&mut self, hit: Option<&str>, destination: HierarchyDestination) {
         if self.apply() {
+            let ids = self.target_ids(hit);
+            let ids: Vec<_> = ids.iter().map(String::as_str).collect();
             let revision = self.session.revision();
             let result = match destination {
                 HierarchyDestination::Parent(parent) => {
-                    self.session.reparent(revision, id, parent.as_deref())
+                    self.session
+                        .reparent_many(revision, &ids, parent.as_deref())
                 }
-                HierarchyDestination::Sibling { id: anchor, before } => {
-                    self.session.place_next_to(revision, id, &anchor, before)
-                }
+                HierarchyDestination::Sibling { id: anchor, before } => self
+                    .session
+                    .place_many_next_to(revision, &ids, &anchor, before),
             };
             match result {
                 Ok(_) => {
@@ -373,19 +484,30 @@ impl ComponentWorkspace {
     }
 
     fn parent_ui(&mut self, ui: &mut egui::Ui) {
-        let Some(index) = self.selected_index else {
-            return;
-        };
         let scene = self.session.scene();
-        if scene.objects.len() < 2 {
+        if scene.objects.len() < 2 || self.selection.is_empty() {
             return;
         }
-        let object = &scene.objects[index];
-        let parent = object.parent.as_deref();
+        let (first, common) = if let Some(index) = self.selected_index {
+            (self.parents[index], true)
+        } else {
+            let mut parents = scene
+                .objects
+                .iter()
+                .enumerate()
+                .filter(|(_, object)| self.selection.contains(&object.id))
+                .map(|(index, _)| self.parents[index]);
+            let first = parents.next().expect("a nonempty selection");
+            (first, parents.all(|parent| parent == first))
+        };
         let label = ui.label(Text::ComponentParent.plain());
-        let parent_name = self.parents[index].map_or(Text::ComponentSceneRoot.plain(), |parent| {
-            scene.objects[parent].name.as_str()
-        });
+        let parent_name = if common {
+            first.map_or(Text::ComponentSceneRoot.plain(), |index| {
+                &scene.objects[index].name
+            })
+        } else {
+            Text::ComponentMixed.plain()
+        };
         let mut change = None;
         egui::ComboBox::from_id_salt("component_parent")
             .width(ui.available_width())
@@ -393,7 +515,7 @@ impl ComponentWorkspace {
             .selected_text(parent_name)
             .show_ui(ui, |ui| {
                 if ui
-                    .selectable_label(parent.is_none(), Text::ComponentSceneRoot.plain())
+                    .selectable_label(common && first.is_none(), Text::ComponentSceneRoot.plain())
                     .clicked()
                 {
                     change = Some(None);
@@ -410,9 +532,9 @@ impl ComponentWorkspace {
                                 ui.add_space(SPACE_XS * depth.min(12) as f32);
                                 if ui
                                     .add_enabled(
-                                        candidate.id != object.id,
+                                        !self.selection.contains(&candidate.id),
                                         egui::Button::selectable(
-                                            parent == Some(candidate.id.as_str()),
+                                            common && first == Some(index),
                                             &candidate.name,
                                         ),
                                     )
@@ -429,9 +551,48 @@ impl ComponentWorkspace {
             .response
             .labelled_by(label.id);
         if let Some(parent) = change {
-            let id = object.id.clone();
-            self.reparent(&id, parent.as_deref());
+            self.move_in_hierarchy(None, HierarchyDestination::Parent(parent));
         }
+    }
+
+    fn multi_inspector(&mut self, ui: &mut egui::Ui) {
+        ui.label(format!(
+            "{} {}",
+            self.selection.len(),
+            Text::ComponentObjectsSelected.plain()
+        ));
+        let objects = &self.session.scene().objects;
+        let mut selected = objects
+            .iter()
+            .filter(|object| self.selection.contains(&object.id));
+        let first = selected.next().expect("a nonempty selection").enabled;
+        let mixed = selected.any(|object| object.enabled != first);
+        let mut enabled = first && !mixed;
+        if ui
+            .add(
+                egui::Checkbox::new(&mut enabled, Text::ComponentEnabled.plain())
+                    .indeterminate(mixed),
+            )
+            .changed()
+        {
+            let edits = objects
+                .iter()
+                .filter(|object| self.selection.contains(&object.id))
+                .cloned()
+                .map(|mut object| {
+                    object.enabled = enabled;
+                    object
+                })
+                .collect();
+            match self.session.put_objects(self.session.revision(), edits) {
+                Ok(_) => {
+                    self.error = None;
+                    self.refresh();
+                }
+                Err(error) => self.error = Some(error.to_string()),
+            }
+        }
+        self.parent_ui(ui);
     }
 
     fn create_menu(&mut self, ui: &mut egui::Ui) {
@@ -520,9 +681,7 @@ impl ComponentWorkspace {
                 return;
             }
             Action::Delete => {
-                if let Some(id) = self.draft.as_ref().map(|draft| draft.id.clone()) {
-                    self.delete(&id);
-                }
+                self.delete(None);
                 return;
             }
             Action::Undo if self.draft_dirty() => {
@@ -593,11 +752,11 @@ impl ComponentWorkspace {
                 }
             }
         };
-        let selection = self
-            .draft
-            .as_ref()
-            .map(|object| object.id.as_str())
-            .filter(|_| frame.is_none());
+        let selection: Vec<_> = if frame.is_none() {
+            self.selection.iter().map(String::as_str).collect()
+        } else {
+            Vec::new()
+        };
         let playing = frame.is_some() && self.runtime.is_playing();
         self.navigation.player_view = frame.is_some() && scene.player_view.is_some();
         self.navigation.focusable = playing && !self.session.scene().actions.is_empty();
@@ -729,14 +888,19 @@ impl ComponentWorkspace {
                 editor_theme::text_menu(ui, Text::ComponentObjectMenu.plain(), |ui| {
                     self.create_menu(ui);
                     ui.separator();
-                    ui.add_enabled_ui(self.selected_index.is_some(), |ui| {
+                    ui.add_enabled_ui(!self.selection.is_empty(), |ui| {
                         self.menu_action(ui, Action::Delete)
                     });
-                    if let Some(index) = self.selected_index {
-                        let objects = &self.session.scene().objects;
-                        if let Some(destination) = sibling_move_items(ui, objects, index) {
+                    let objects = &self.session.scene().objects;
+                    if let Some(index) = objects
+                        .iter()
+                        .position(|object| self.selection.contains(&object.id))
+                    {
+                        if let Some(destination) =
+                            sibling_move_items(ui, objects, index, &self.selection)
+                        {
                             let id = objects[index].id.clone();
-                            self.move_in_hierarchy(&id, destination);
+                            self.move_in_hierarchy(Some(&id), destination);
                         }
                     }
                 });
@@ -781,25 +945,23 @@ impl ComponentWorkspace {
                 editor_theme::text_menu(ui, Text::ComponentCreate.plain(), |ui| {
                     self.create_menu(ui)
                 });
-                let root =
-                    ui.selectable_label(self.draft.is_none(), Text::ComponentSceneRoot.plain());
+                let root = ui
+                    .selectable_label(self.selection.is_empty(), Text::ComponentSceneRoot.plain());
                 let mut selected = root.clicked().then_some(None);
                 let mut deleted = None;
                 let revision = self.session.revision();
-                let mut moved = hierarchy_drop(ui, &root, None, revision);
+                let mut moved = hierarchy_drop(ui, &root, None, revision, &self.selection);
                 egui::ScrollArea::vertical().show_rows(
                     ui,
                     ROW_HEIGHT,
                     self.rows.len(),
                     |ui, range| {
-                        for &(index, depth) in &self.rows[range] {
+                        for row in range {
+                            let (index, depth) = self.rows[row];
                             let object = &self.session.scene().objects[index];
                             ui.horizontal(|ui| {
                                 ui.add_space(SPACE_XS * depth.min(12) as f32);
-                                let active = self
-                                    .draft
-                                    .as_ref()
-                                    .is_some_and(|draft| draft.id == object.id);
+                                let active = self.selection.contains(&object.id);
                                 let response = ui.add(
                                     egui::Button::selectable(active, &object.name)
                                         .truncate()
@@ -811,13 +973,33 @@ impl ComponentWorkspace {
                                         object_id: object.id.clone(),
                                     });
                                 }
-                                if let Some(drop) =
-                                    hierarchy_drop(ui, &response, Some(&object.id), revision)
-                                {
+                                if let Some(drop) = hierarchy_drop(
+                                    ui,
+                                    &response,
+                                    Some(&object.id),
+                                    revision,
+                                    &self.selection,
+                                ) {
                                     moved = Some(drop);
                                 }
                                 if response.clicked() {
-                                    selected = Some(Some(object.id.clone()));
+                                    let modifiers = ui.input(|input| {
+                                        input
+                                            .events
+                                            .iter()
+                                            .rev()
+                                            .find_map(|event| match event {
+                                                egui::Event::PointerButton {
+                                                    button: egui::PointerButton::Primary,
+                                                    pressed: false,
+                                                    modifiers,
+                                                    ..
+                                                } => Some(*modifiers),
+                                                _ => None,
+                                            })
+                                            .unwrap_or(input.modifiers)
+                                    });
+                                    selected = Some(Some((row, modifiers)));
                                 }
                                 response.context_menu(|ui| {
                                     if ui
@@ -832,9 +1014,12 @@ impl ComponentWorkspace {
                                         deleted = Some(object.id.clone());
                                         ui.close();
                                     }
-                                    if let Some(destination) =
-                                        sibling_move_items(ui, &self.session.scene().objects, index)
-                                    {
+                                    if let Some(destination) = sibling_move_items(
+                                        ui,
+                                        &self.session.scene().objects,
+                                        index,
+                                        &self.selection,
+                                    ) {
                                         moved = Some((object.id.clone(), destination));
                                     }
                                 });
@@ -843,11 +1028,14 @@ impl ComponentWorkspace {
                     },
                 );
                 if let Some((id, destination)) = moved {
-                    self.move_in_hierarchy(&id, destination);
+                    self.move_in_hierarchy(Some(&id), destination);
                 } else if let Some(id) = deleted {
-                    self.delete(&id);
+                    self.delete(Some(&id));
                 } else if let Some(selected) = selected.filter(|_| self.apply()) {
-                    self.select(selected);
+                    match selected {
+                        Some((row, modifiers)) => self.select_row(row, modifiers),
+                        None => self.select(None),
+                    }
                 }
             });
         egui::Panel::right("component_inspector")
@@ -861,6 +1049,10 @@ impl ComponentWorkspace {
                 egui::ScrollArea::both()
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
+                        if self.selection.len() > 1 {
+                            self.multi_inspector(ui);
+                            return;
+                        }
                         let mut submit = false;
                         if let Some(draft) = &mut self.draft {
                             ui.label(Text::ComponentName.plain());
@@ -908,7 +1100,7 @@ impl ComponentWorkspace {
                         input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
                     })
                 {
-                    self.select(self.draft.as_ref().map(|object| object.id.clone()));
+                    self.rebuild_draft();
                 }
             });
         egui::CentralPanel::default().show(ui, |ui| self.viewport(ui, blocked));
@@ -1078,7 +1270,10 @@ mod tests {
         let child = editor.draft.as_ref().unwrap().id.clone();
         assert_ne!(root, child);
         let world = editor.session.scene().world_matrices().unwrap()[1];
-        editor.reparent(&child, Some(&root));
+        editor.move_in_hierarchy(
+            Some(&child),
+            HierarchyDestination::Parent(Some(root.clone())),
+        );
         assert_eq!(editor.session.scene().world_matrices().unwrap()[1], world);
         let subtree = editor.session.scene().clone();
         assert_eq!(subtree.objects[1].parent.as_deref(), Some(root.as_str()));

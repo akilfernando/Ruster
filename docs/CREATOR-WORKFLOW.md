@@ -31,8 +31,11 @@ Drag an object onto another row to parent it, or onto **Scene Root** to
 unparent it. You can also change **Parent** in Inspector. Both preserve the
 object’s world transform. Drag to the top or bottom edge of a row to place
 the object before or after it. **Object → Move Up** and **Move Down** reorder
-the selection among its siblings. **Object → Delete** removes the selected
-object and its children. **Edit → Undo** and **Redo** work until you close
+the selection among its siblings. Ctrl-click toggles objects in the selection
+and Shift-click selects a range. Drag a selected row to move the selection
+together, or set its **Parent** in Inspector. Inspector also lets you change
+**Enabled** for the selection. **Object → Delete** removes selected objects
+and their children together. **Edit → Undo** and **Redo** work until you close
 the scene.
 **File → Save** writes the edits to the v23 file. When opening another
 scene, **Save and Open** saves pending changes. **Discard and Open** leaves
