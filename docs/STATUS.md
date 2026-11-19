@@ -29,36 +29,21 @@ Runtime and recovery status messages now use shorter wording. Remaining
 indirect copy is still open in the checklist.
 
 The [human walkthrough](research/EDITOR-WORKFLOW-COMPARISON.md#proposed-editor-baseline-walkthrough)
-and concurrent ChatGPT editing were exercised on 2026-11-19. Clicking a
-footer error now opens details with Open Script for source diagnostics.
-Game Controls stays open when Last failure details expands or collapses.
-Both paths passed a native inspection run using a disposable Lua failure.
-Grouping and material draft feedback are in the backlog. Paused runs show
-an amber viewport border and a Paused badge. The Play/Pause control stays
-highlighted while the run is active. A native Play/Pause/Stop sequence
-confirmed all three states, and the editor gate passed (245 tests, 13
-ignored). The full UI checklist remains open.
-The 5,000-object checklist case depends on Phase 2. The user authorized
-starting Phase 2 before the human pass. [C-01](plans/C-01-OBJECT-COMPONENT-MODEL.md)
-specifies the proposed model and migration. C-02 has an indexed object
-hierarchy that rejects cycles, missing parents and duplicate IDs, and
-resolves inherited enabled state without recursion. A 5,000-object chain
-passed its focused check. The affected gate passed (452 tests, 17 ignored).
-The v23 reader/writer and in-memory converter preserve hierarchy, mesh,
-collider, script, lighting, camera and animation data, plus actions and HUD.
-`rot-scene migrate LEGACY_FILE NEW_FILE` exports a v23 copy without replacing
-either an existing destination or the source. `rot-scene validate-components
-FILE` checks the exported copy. The editor still opens legacy scenes.
-The v23 session supports grouped object edits, subtree removal,
-world-preserving reparenting, Undo/Redo and conflict-checked saves. A 5,000-object chain resolves
-iteratively and round-trips a file over 1 MiB. The explicit atomic upgrade
-API checks the original bytes before publishing. Automatic upgrades and
-editor/runtime integration remain open. The standalone `rot-render --scene`
-viewer opens v23 using a read-only geometry and lighting projection. It
-reports transforms that cannot be represented as legacy draw objects.
-The headless behavior CLI and Motion Lab packaged runner open representable
-v23 scenes through a temporary runtime projection. Editor editing and
-general component execution remain open.
+and concurrent ChatGPT editing were exercised on 2026-11-19. Native tests
+covered script error details and Play/Pause/Stop. The full UI checklist
+remains open, including its Phase 2 5,000-object case.
+
+The [C-01 design](plans/C-01-OBJECT-COMPONENT-MODEL.md) guides the v23 cutover.
+C-02 preserves authored content during migration, supports grouped object
+edits and Undo/Redo, and resolves a 5,000-object chain over 1 MiB. The native
+`rot-editor --scene` route opens v23 and can inspect objects, edit name,
+enabled state and position, undo, redo, and save in v23. Project Hub and
+File → Open still use legacy sessions. Automatic upgrades and the remaining
+editor tools and MCP commands still need the component session.
+
+The standalone viewer, headless behavior CLI and packaged Motion Lab
+read supported v23 scenes through temporary projections. General component
+execution remains open.
 
 ## What a creator can do today
 

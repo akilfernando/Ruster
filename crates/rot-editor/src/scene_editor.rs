@@ -17,6 +17,7 @@ mod collider_ui;
 mod collider_viewport;
 mod color_commands;
 mod combo_focus;
+mod component_workspace;
 mod connection;
 mod display_ui;
 mod export_commands;
@@ -5503,41 +5504,24 @@ pub fn run_empty() -> Result<(), String> {
     )
 }
 pub fn run(path: PathBuf) -> Result<(), String> {
-    let session = Session::open(path).map_err(|e| e.to_string())?;
-    run_session(session, false)
-}
-fn run_session(session: Session, startup_projects: bool) -> Result<(), String> {
-    #[cfg(unix)]
-    let bootstrap = if std::env::var_os("ROT_PROJECT_STARTUP").is_some() {
-        let raw = std::env::var("ROT_PROJECT_BOOTSTRAP").map_err(|e| e.to_string())?;
-        let bootstrap: crate::project_startup::Bootstrap =
-            serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-        bootstrap.validate().map_err(|e| e.to_string())?;
-        Some(bootstrap)
-    } else {
-        None
-    };
-    #[cfg(unix)]
-    let _registered_owner = if let Some(raw) = std::env::var_os("ROT_PROJECT_STARTUP") {
-        let startup: crate::project_startup::Startup =
-            serde_json::from_str(&raw.to_string_lossy()).map_err(|e| e.to_string())?;
-        if session.path() != Some(startup.scene_path.as_path())
-            || std::env::var("ROT_PROJECT_SCENE_ID").ok().as_deref()
-                != Some(session.scene().id.as_str())
+    use rot_scene::component_scene::{ComponentSession, FORMAT_VERSION};
+    match ComponentSession::open(&path) {
+        Ok(session) => component_workspace::run(path, session),
+        Err(rot_scene::SceneError::UnsupportedVersion(version))
+            if version < u64::from(FORMAT_VERSION) =>
         {
-            return Err("Registered saved project identity changed; no connection opened".into());
+            let session = Session::open(path).map_err(|error| error.to_string())?;
+            run_session(session, false)
         }
-        Some(startup.lock("owner.lock").map_err(|e| e.to_string())?)
-    } else {
-        None
-    };
-    let mcp_enabled = std::env::var("ROT_MCP_ENABLE").as_deref() == Ok("1");
-    let save_grant = persistence_commands::SaveGrant::from_environment(mcp_enabled)?;
-    let creation_export = crate::creation_export::Controller::from_environment(mcp_enabled)?;
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn scene_native_options() -> eframe::NativeOptions {
     let mut setup = WgpuSetupCreateNew::without_display_handle();
     setup.instance_descriptor.backends = wgpu::Backends::VULKAN;
     rot_render::configure_setup(&mut setup);
-    let options = eframe::NativeOptions {
+    eframe::NativeOptions {
         viewport: {
             let viewport = egui::ViewportBuilder::default()
                 .with_inner_size([1280., 800.])
@@ -5567,7 +5551,38 @@ fn run_session(session: Session, startup_projects: bool) -> Result<(), String> {
             ..Default::default()
         },
         ..Default::default()
+    }
+}
+
+fn run_session(session: Session, startup_projects: bool) -> Result<(), String> {
+    #[cfg(unix)]
+    let bootstrap = if std::env::var_os("ROT_PROJECT_STARTUP").is_some() {
+        let raw = std::env::var("ROT_PROJECT_BOOTSTRAP").map_err(|e| e.to_string())?;
+        let bootstrap: crate::project_startup::Bootstrap =
+            serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+        bootstrap.validate().map_err(|e| e.to_string())?;
+        Some(bootstrap)
+    } else {
+        None
     };
+    #[cfg(unix)]
+    let _registered_owner = if let Some(raw) = std::env::var_os("ROT_PROJECT_STARTUP") {
+        let startup: crate::project_startup::Startup =
+            serde_json::from_str(&raw.to_string_lossy()).map_err(|e| e.to_string())?;
+        if session.path() != Some(startup.scene_path.as_path())
+            || std::env::var("ROT_PROJECT_SCENE_ID").ok().as_deref()
+                != Some(session.scene().id.as_str())
+        {
+            return Err("Registered saved project identity changed; no connection opened".into());
+        }
+        Some(startup.lock("owner.lock").map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
+    let mcp_enabled = std::env::var("ROT_MCP_ENABLE").as_deref() == Ok("1");
+    let save_grant = persistence_commands::SaveGrant::from_environment(mcp_enabled)?;
+    let creation_export = crate::creation_export::Controller::from_environment(mcp_enabled)?;
+    let options = scene_native_options();
     eframe::run_native(
         "Rot Engine Editor",
         options,

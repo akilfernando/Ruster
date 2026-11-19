@@ -18,6 +18,16 @@ ROT_RUNTIME_KIT=/tmp/rot-template/rot-runtime target/debug/rot-editor
 
 Choose a fresh archive path. Preparation verifies the Linux executable/profile and includes dependency/license notices, requirements, fixed helpers and hashed inventory. The template contains trusted executable code; use a template you prepared or trust. It is specific to its recorded Linux requirements, not a universal Linux binary. Each later scene export uses this template without Cargo or recompiling. Changing the runtime/helpers requires a new template. Editor export requires Python3 and the current Linux process-cleanup utility `/usr/bin/kill`; standalone application execution does not require Python or Rust.
 
+## Open a v23 scene
+
+Use `rot-scene migrate OLD.json NEW.json` to create a v23 copy, then
+`rot-editor --scene NEW.json` to open it. Select an object in Hierarchy,
+edit its name, enabled state, or position in Inspector, then choose
+**Apply**. **Edit → Undo** and **Redo** work until you close the scene.
+**File → Save** writes the edits to the v23 file. Continue to use the
+legacy scene for Project Hub, Play, Build and AI editing workflows during
+the cutover.
+
 ## Create and export in the editor
 
 1. Start with the empty welcome scene or **File → New scene**. Create an object, name it, save into your own project directory and import a triangle OBJ through Content. Assign it using **Edit → Assign mesh…** while the object is selected (or the Content item’s **Assign to active object** context menu). Drag-and-drop is also available; physical-focus validation remains separately recorded.

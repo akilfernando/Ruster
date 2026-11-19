@@ -1,12 +1,11 @@
 //! Standalone scene demonstration: shared renderer, no editor or MCP dependency.
-mod component_preview;
-
 use eframe::{
     egui,
     egui_wgpu::{WgpuSetup, WgpuSetupCreateNew},
 };
 use rot_render::{
-    configure_setup, install, refresh_shader, viewport_with_assets, MetricsHandle, MAX_SHADER_BYTES,
+    component_preview, configure_setup, install, refresh_shader, viewport_with_assets,
+    MetricsHandle, MAX_SHADER_BYTES,
 };
 use rot_scene::{Preview, Scene};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};

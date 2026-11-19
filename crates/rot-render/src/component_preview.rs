@@ -1,11 +1,11 @@
-//! Disposable render input for the standalone viewer while the shared viewport
+//! Disposable render input for native viewports while the shared viewport
 //! consumes legacy draw objects. This projection is never written to disk.
 use rot_scene::component_scene::{self, Component, ComponentScene, Geometry};
 use rot_scene::{Light, Lighting, Object, Scene, SceneError, Transform};
 use std::collections::BTreeMap;
 use std::path::Path;
 
-pub(super) fn open(path: &Path) -> Result<Scene, SceneError> {
+pub fn open(path: &Path) -> Result<Scene, SceneError> {
     match ComponentScene::open(path) {
         Ok(scene) => project(&scene),
         Err(SceneError::UnsupportedVersion(version))
@@ -17,7 +17,7 @@ pub(super) fn open(path: &Path) -> Result<Scene, SceneError> {
     }
 }
 
-fn project(component_scene: &ComponentScene) -> Result<Scene, SceneError> {
+pub fn project(component_scene: &ComponentScene) -> Result<Scene, SceneError> {
     let hierarchy = component_scene.validate()?;
     let world = component_scene.world_matrices()?;
     let mut scene = Scene::empty(component_scene.id.clone());
