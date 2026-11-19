@@ -34,6 +34,10 @@ mod mcp;
 pub(super) mod asset_panel;
 use asset_panel::AssetDrag;
 
+#[cfg(target_os = "linux")]
+#[path = "component_asset_writes.rs"]
+pub(super) mod asset_writes;
+
 const RUNTIME_GENERATION: u64 = 1;
 
 struct HierarchyDrag {
@@ -156,6 +160,8 @@ pub(super) struct ComponentWorkspace {
     asset_import: Option<std::sync::mpsc::Receiver<Vec<String>>>,
     #[cfg(target_os = "linux")]
     asset_import_error: Option<String>,
+    #[cfg(target_os = "linux")]
+    ai_asset_write: Option<asset_writes::PendingWrite>,
     #[cfg(all(target_os = "linux", feature = "inspection"))]
     inspection_asset_drop: bool,
     runtime: RuntimeUi,
@@ -238,6 +244,8 @@ impl ComponentWorkspace {
             asset_import: None,
             #[cfg(target_os = "linux")]
             asset_import_error: None,
+            #[cfg(target_os = "linux")]
+            ai_asset_write: None,
             #[cfg(all(target_os = "linux", feature = "inspection"))]
             inspection_asset_drop: false,
             runtime: RuntimeUi::default(),
@@ -410,7 +418,7 @@ impl ComponentWorkspace {
             return;
         }
         self.asset_browser.open = true;
-        if self.asset_import.is_some() {
+        if self.asset_import.is_some() || self.ai_asset_write.is_some() {
             self.asset_import_error = Some("Another import is running.".into());
             return;
         }
@@ -450,7 +458,7 @@ impl ComponentWorkspace {
     #[cfg(unix)]
     pub(super) fn ai_transition_pending(&self) -> bool {
         #[cfg(target_os = "linux")]
-        if self.build.is_open() {
+        if self.build.is_open() || self.asset_publish_pending() {
             return true;
         }
         self.close_pending || self.close_approved || self.open_path.is_some()
@@ -991,7 +999,10 @@ impl ComponentWorkspace {
         let _ = ctx;
         #[cfg(target_os = "linux")]
         if action == Action::ImportAsset {
-            if self.asset_picker.is_none() && self.asset_import.is_none() {
+            if self.asset_picker.is_none()
+                && self.asset_import.is_none()
+                && self.ai_asset_write.is_none()
+            {
                 self.asset_picker = Some((
                     self.asset_browser.import_folder(),
                     super::assets_browser::pick_asset_files(ctx.clone()),
@@ -1246,7 +1257,14 @@ impl ComponentWorkspace {
         let build_open = self.build.is_open();
         #[cfg(not(target_os = "linux"))]
         let build_open = false;
-        if build_open && ctx.input(|input| input.viewport().close_requested()) {
+        #[cfg(target_os = "linux")]
+        let publishing = self.asset_publish_pending();
+        #[cfg(not(target_os = "linux"))]
+        let publishing = false;
+        if publishing {
+            ui.disable();
+        }
+        if (build_open || publishing) && ctx.input(|input| input.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
         if !build_open
@@ -1259,7 +1277,7 @@ impl ComponentWorkspace {
             self.close_pending = true;
         }
         self.poll_runtime(&ctx);
-        let blocked = self.close_pending || self.open_path.is_some() || build_open;
+        let blocked = self.close_pending || self.open_path.is_some() || build_open || publishing;
         #[cfg(target_os = "linux")]
         self.asset_import_frame(&ctx, blocked);
         self.runtime.input_begin(&ctx, blocked);
@@ -1304,7 +1322,10 @@ impl ComponentWorkspace {
                 editor_theme::text_menu(ui, "Assets", |ui| {
                     #[cfg(target_os = "linux")]
                     ui.add_enabled_ui(
-                        !blocked && self.asset_picker.is_none() && self.asset_import.is_none(),
+                        !blocked
+                            && self.asset_picker.is_none()
+                            && self.asset_import.is_none()
+                            && self.ai_asset_write.is_none(),
                         |ui| {
                             self.menu_action(ui, Action::ImportAsset);
                         },

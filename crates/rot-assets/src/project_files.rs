@@ -601,20 +601,132 @@ impl AssetStore {
         Ok(())
     }
 
+    // Explicit imports must honor reserved (including as-yet unimported)
+    // sidecar IDs and preserve other interpretations of the same source.
+    // The publisher calls this with the same catalog lock it uses to commit.
+    pub(super) fn validate_project_import_sidecar(
+        &self,
+        mutation: &AssetMutation,
+    ) -> Result<(), AssetError> {
+        let (id, source) = match mutation {
+            AssetMutation::Import { id, source }
+            | AssetMutation::ImportMesh { id, source, .. }
+            | AssetMutation::ImportTexture { id, source, .. }
+            | AssetMutation::ImportGlb { id, source } => (id, source),
+            _ => return Ok(()),
+        };
+        let importer =
+            Importer::from_path(source).ok_or_else(|| error("Unsupported asset source."))?;
+        let mut requested = importer.metadata(id.clone());
+        if requested.mesh_normal_policy.is_some() {
+            requested.mesh_normal_policy = Some(match mutation {
+                AssetMutation::ImportMesh { normal_policy, .. } => *normal_policy,
+                _ => MeshNormalPolicy::Flat,
+            });
+        }
+        if let AssetMutation::ImportTexture { role, .. } = mutation {
+            requested.texture_role = Some(*role);
+        }
+        let path = confined_path(&self.root, source, false)?;
+        let sidecar = sidecar_path(&path);
+        let mut entries = existing_metadata(&sidecar)?.unwrap_or_default();
+        for registered in self.registered_interpretations(source) {
+            if !entries.iter().any(|entry| entry.id == registered.id) {
+                entries.push(registered);
+            }
+        }
+        if let Some(entry) = entries.iter().find(|entry| entry.id == *id) {
+            let agrees = match importer {
+                Importer::Asset(kind) => settings(kind, entry)? == settings(kind, &requested)?,
+                Importer::Model => entry == &requested,
+            };
+            if !agrees {
+                return Err(error("Import settings differ from the source sidecar."));
+            }
+        } else {
+            entries.push(requested);
+        }
+        if self
+            .verify_sidecar(source, importer, &entries, &BTreeMap::new())?
+            .is_some()
+        {
+            return Err(error(
+                "This sidecar belongs to a moved asset. Let the watcher adopt the move first.",
+            ));
+        }
+        // Include sidecars whose source is missing. Those IDs are still
+        // reserved for the creator's source files.
+        let mut dirs = vec![self.root.join("Assets")];
+        while let Some(dir) = dirs.pop() {
+            let children = match fs::symlink_metadata(&dir) {
+                Ok(metadata) if metadata.is_dir() => fs::read_dir(&dir)?,
+                Ok(_) => continue,
+                Err(error) if error.kind() == ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+            };
+            for child in children {
+                let child = child?;
+                let name = child.file_name();
+                let Some(name) = name.to_str().filter(|name| !name.starts_with('.')) else {
+                    continue;
+                };
+                let kind = child.file_type()?;
+                let other = child.path();
+                if kind.is_dir() {
+                    dirs.push(other);
+                } else if kind.is_file()
+                    && other != sidecar
+                    && name
+                        .strip_suffix(METADATA_EXTENSION)
+                        .is_some_and(|stem| Importer::from_path(stem).is_some())
+                    && load_metadata(&other)
+                        .is_ok_and(|other| other.iter().any(|entry| entry.id == *id))
+                {
+                    return Err(error(format!(
+                        "Asset ID {id} is reserved by another sidecar."
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn publish_project_change(
         &mut self,
         mutation: AssetMutation,
         active: &impl Fn() -> bool,
     ) -> Result<(), AssetError> {
         let prepared = self.request_at(self.revision(), mutation)?.prepare();
+        self.adopt_project_request(prepared, active, false)
+            .map(|_| ())
+    }
+
+    /// Run the same guarded publication used for file imports and reimports.
+    /// The caller owns the project worker and any editor request lease.
+    pub fn publish_project_request(
+        &mut self,
+        prepared: super::PreparedAsset,
+        active: impl Fn() -> bool,
+    ) -> Result<super::AssetOutcome, AssetError> {
+        self.adopt_project_request(prepared, active, true)
+    }
+
+    fn adopt_project_request(
+        &mut self,
+        prepared: super::PreparedAsset,
+        active: impl Fn() -> bool,
+        validate_sidecar: bool,
+    ) -> Result<super::AssetOutcome, AssetError> {
+        if !self.matches_identity(prepared.state_identity()) {
+            return Err(error("Asset state changed during import."));
+        }
         if !active() {
             return Err(error("Project closed during import."));
         }
-        let completion = prepared.publish_if(active);
+        let completion = prepared.publish_with_project_validation(active, validate_sidecar);
         self.adopt(completion)
             .map_err(|_| error("Asset state changed during import."))?
             .result
-            .map(|_| ())
     }
 
     /// Read-only editor consumers keep accepted Arc payloads while the project

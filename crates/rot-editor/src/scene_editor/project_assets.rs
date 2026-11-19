@@ -40,10 +40,36 @@ struct ImportBatch {
     result: SyncSender<Vec<String>>,
 }
 
+pub(super) struct PublishedAsset {
+    pub(super) outcome: rot_assets::AssetOutcome,
+    pub(super) warning: Option<String>,
+}
+
+type AssetResult = Result<PublishedAsset, String>;
+
+pub(super) struct AssetWrite {
+    pub(super) prepared: Receiver<()>,
+    pub(super) publish: SyncSender<()>,
+    pub(super) result: Receiver<AssetResult>,
+}
+
+struct AssetJob {
+    deadline: Instant,
+    request: rot_assets::AssetRequest,
+    prepared: SyncSender<()>,
+    publish: Receiver<()>,
+    result: SyncSender<AssetResult>,
+}
+
+enum Job {
+    ImportFiles(ImportBatch),
+    AssetWrite(Box<AssetJob>),
+}
+
 pub(super) struct ProjectAssets {
     // Both a wakeup for queued imports and a shutdown signal when dropped.
     signal: UnixStream,
-    imports: SyncSender<ImportBatch>,
+    jobs: SyncSender<Job>,
     active: Arc<AtomicBool>,
     latest: Mailbox,
 }
@@ -53,7 +79,7 @@ impl ProjectAssets {
         let (signal, wake) = UnixStream::pair()?;
         signal.set_nonblocking(true)?;
         wake.set_nonblocking(true)?;
-        let (imports, import_queue) = mpsc::sync_channel(1);
+        let (jobs, queued) = mpsc::sync_channel(1);
         let active = Arc::new(AtomicBool::new(true));
         let latest = Mailbox::default();
         let worker_active = active.clone();
@@ -68,14 +94,13 @@ impl ProjectAssets {
                         ctx.request_repaint();
                     }
                 };
-                if let Err(err) = run(&root, &wake, &worker_active, &import_queue, &ctx, &mut send)
-                {
+                if let Err(err) = run(&root, &wake, &worker_active, &queued, &ctx, &mut send) {
                     send(Err(err));
                 }
             })?;
         Ok(Self {
             signal,
-            imports,
+            jobs,
             active,
             latest,
         })
@@ -87,20 +112,48 @@ impl ProjectAssets {
         files: Vec<PathBuf>,
     ) -> Result<Receiver<Vec<String>>, String> {
         let (result, reply) = mpsc::sync_channel(1);
-        self.imports
-            .try_send(ImportBatch {
-                folder,
-                files,
-                result,
-            })
-            .map_err(|error| match error {
-                mpsc::TrySendError::Full(_) => "Another import is waiting.",
-                mpsc::TrySendError::Disconnected(_) => "The project asset worker is unavailable.",
-            })?;
-        match (&self.signal).write(&[1]) {
-            Ok(_) => Ok(reply),
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(reply),
-            Err(error) => Err(error.to_string()),
+        self.submit(Job::ImportFiles(ImportBatch {
+            folder,
+            files,
+            result,
+        }))?;
+        Ok(reply)
+    }
+
+    pub(super) fn write_asset(
+        &self,
+        request: rot_assets::AssetRequest,
+        deadline: Instant,
+    ) -> Result<AssetWrite, String> {
+        let (prepared, ready) = mpsc::sync_channel(1);
+        let (authorize, publish) = mpsc::sync_channel(1);
+        let (result, reply) = mpsc::sync_channel(1);
+        self.submit(Job::AssetWrite(Box::new(AssetJob {
+            deadline,
+            request,
+            prepared,
+            publish,
+            result,
+        })))?;
+        Ok(AssetWrite {
+            prepared: ready,
+            publish: authorize,
+            result: reply,
+        })
+    }
+
+    fn submit(&self, job: Job) -> Result<(), String> {
+        self.jobs.try_send(job).map_err(|error| match error {
+            mpsc::TrySendError::Full(_) => "Another asset operation is waiting.",
+            mpsc::TrySendError::Disconnected(_) => "The project asset worker is unavailable.",
+        })?;
+        loop {
+            match (&self.signal).write(&[1]) {
+                Ok(_) => return Ok(()),
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error.to_string()),
+            }
         }
     }
 
@@ -122,7 +175,7 @@ fn run(
     root: &Path,
     wake: &UnixStream,
     active: &AtomicBool,
-    import_queue: &Receiver<ImportBatch>,
+    queued: &Receiver<Job>,
     context: &Context,
     send: &mut impl FnMut(Update),
 ) -> Result<(), String> {
@@ -174,29 +227,73 @@ fn run(
                 }
             }
         }
-        let import = import_queue.try_recv().ok().map(|batch| {
-            let mut failures = Vec::new();
-            for file in &batch.files {
-                if !active() {
-                    break;
-                }
-                match copy_source(&root, &held_root, &batch.folder, file, active) {
-                    Ok(path) => {
-                        paths.insert(path);
+        let mut import = None;
+        let mut asset_write = None;
+        match queued.try_recv() {
+            Ok(Job::ImportFiles(batch)) => {
+                let mut failures = Vec::new();
+                for file in &batch.files {
+                    if !active() {
+                        break;
                     }
-                    Err(error) => failures.push(format!("{}: {error}", file.display())),
+                    match copy_source(&root, &held_root, &batch.folder, file, active) {
+                        Ok(path) => {
+                            paths.insert(path);
+                        }
+                        Err(error) => failures.push(format!("{}: {error}", file.display())),
+                    }
                 }
+                import = Some((batch.result, failures));
             }
-            (batch.result, failures)
-        });
-        if paths.is_empty() && delivered.is_some() && warning.is_none() && import.is_none() {
+            Ok(Job::AssetWrite(job)) => {
+                let outcome = finish_asset_write(
+                    &mut store,
+                    context,
+                    active,
+                    &job.prepared,
+                    &job.publish,
+                    job.request,
+                    job.deadline,
+                );
+                asset_write = Some((job.result, outcome));
+            }
+            Err(_) => {}
+        }
+        if paths.is_empty()
+            && delivered.is_some()
+            && warning.is_none()
+            && import.is_none()
+            && asset_write.is_none()
+        {
             let Some(changed) = watcher.wait(wake).map_err(|err| err.to_string())? else {
                 break;
             };
             paths = changed;
             continue;
         }
-        let issues = store.reconcile_project_files(&paths, active);
+        let issues: Vec<ProjectFileIssue> = if !paths.is_empty()
+            || delivered.is_none()
+            || asset_write
+                .as_ref()
+                .is_some_and(|(_, outcome)| outcome.is_ok())
+        {
+            store.reconcile_project_files(&paths, active)
+        } else {
+            delivered.as_ref().map_or_else(
+                Vec::new,
+                |(_, issues, _, _): &(_, Vec<ProjectFileIssue>, _, _)| issues.clone(),
+            )
+        };
+        let write_warning = asset_write.as_ref().and_then(|(_, result)| {
+            let source = match result.as_ref().ok()? {
+                rot_assets::AssetOutcome::Asset(info) => &info.source,
+                rot_assets::AssetOutcome::Model(model) => &model.source,
+            };
+            issues
+                .iter()
+                .find(|issue| &issue.path == source)
+                .map(ToString::to_string)
+        });
         let state = store.state_identity();
         let mut folders: Vec<_> = watcher.paths.values().cloned().collect();
         folders.sort_unstable();
@@ -220,6 +317,13 @@ fn run(
             let _ = result.try_send(failures);
             context.request_repaint();
         }
+        if let Some((result, outcome)) = asset_write {
+            let _ = result.try_send(outcome.map(|outcome| PublishedAsset {
+                outcome,
+                warning: write_warning,
+            }));
+            context.request_repaint();
+        }
         let Some(changed) = watcher.wait(wake).map_err(|err| err.to_string())? else {
             break;
         };
@@ -229,6 +333,34 @@ fn run(
         return Err("The project folder moved or was replaced.".into());
     }
     Ok(())
+}
+
+fn finish_asset_write(
+    store: &mut AssetStore,
+    context: &Context,
+    active: impl Fn() -> bool,
+    ready: &SyncSender<()>,
+    publish: &Receiver<()>,
+    request: rot_assets::AssetRequest,
+    deadline: Instant,
+) -> Result<rot_assets::AssetOutcome, String> {
+    if !store.matches_identity(request.state_identity()) {
+        return Err("Accepted catalog changed during preparation.".into());
+    }
+    let prepared = request.prepare();
+    ready
+        .try_send(())
+        .map_err(|_| "The asset request was cancelled.")?;
+    context.request_repaint();
+    if publish
+        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .is_err()
+    {
+        return Err("The asset request was cancelled.".into());
+    }
+    store
+        .publish_project_request(prepared, active)
+        .map_err(|err| err.to_string())
 }
 
 fn copy_source(

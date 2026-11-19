@@ -25,8 +25,8 @@ project's `Assets/` folder. Opening the scene imports supported files in
 that folder and its subfolders. On Linux, drop files from your file manager
 onto the Assets panel or choose **Assets → Import…**. The editor copies them
 into the current Assets folder and adds a number if the name is taken. It also
-picks up additions, edits, and moves made on disk while the scene is open. Move the generated `.rotmeta` file with its
-source to keep existing references. Put both files in version control so the
+picks up additions, edits, and moves made on disk while the scene is open.
+Move the generated `.rotmeta` file with its source to keep existing references. Put both files in version control so the
 asset ID survives a cache rebuild. Existing registered sources receive
 sidecars with all their accepted import settings. Move older source files
 and their sidecars into `Assets/` so the editor can discover them when
@@ -40,6 +40,14 @@ of that object. Both placement commands support Undo.
 
 To assign a mesh to an existing object, select the object and choose its file
 in **Mesh Renderer → Geometry**. Click **Apply**, then save the scene.
+
+An approved MCP client can inspect the current catalog with `asset_inspect`,
+then call `asset_import` or `asset_refresh` with its current asset revision.
+Use project-relative paths. Sources in `Assets/` already picked up by the
+watcher can be assigned with their existing IDs. Import a different
+interpretation only when needed, such as flat normals for an OBJ. Assign a
+mesh with `scene_mesh` using the current catalog revision. Assignment shares
+the editor's Undo history and is saved with the scene.
 
 ## Open a v23 scene
 

@@ -829,6 +829,14 @@ impl PreparedAsset {
     }
 
     pub(super) fn publish_if(self, active: impl Fn() -> bool) -> AssetCompletion {
+        self.publish_with_project_validation(active, false)
+    }
+
+    pub(super) fn publish_with_project_validation(
+        self,
+        active: impl Fn() -> bool,
+        validate_sidecar: bool,
+    ) -> AssetCompletion {
         let Self {
             mut store,
             mutation,
@@ -841,9 +849,12 @@ impl PreparedAsset {
             Ok(_lock) if !active() => Err(error("Project closed during asset preparation.")),
             Ok(_lock) => match preparation {
                 Err(failure) => publish_failure(&mut store, &mutation, failure),
-                Ok(plan) => {
+                Ok(plan) => (|| {
+                    if validate_sidecar {
+                        store.validate_project_import_sidecar(&mutation)?;
+                    }
                     publish_plan(&mut store, &mutation, plan, &mut catalog_published, active)
-                }
+                })(),
             },
         };
         AssetCompletion {

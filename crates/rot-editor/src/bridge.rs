@@ -227,6 +227,12 @@ impl RequestState {
 }
 
 impl RequestLease {
+    /// A worker waiting for a publication signal can release preparation at the deadline.
+    #[cfg(target_os = "linux")]
+    pub fn deadline(&self) -> Instant {
+        self.shared.deadline
+    }
+
     /// Advisory only; try_commit performs the authoritative locked check.
     pub fn is_expired(&self) -> bool {
         if self

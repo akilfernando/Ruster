@@ -315,6 +315,10 @@ impl Host {
             // or automatic client reconnect; a fresh explicit connect is needed.
             let _ = self.connect_adapter(ctx);
         }
+        #[cfg(target_os = "linux")]
+        if let Some(component) = &mut self.editor.component {
+            component.poll_asset_write(ctx, self.editor.ai_status.paused);
+        }
         #[cfg(unix)]
         self.dispatch_ai_requests(ctx);
         #[cfg(unix)]
@@ -394,6 +398,11 @@ impl Host {
                 }
                 let token = self.editor.scene_guard_token(nonce);
                 if let Some(component) = &mut self.editor.component {
+                    #[cfg(target_os = "linux")]
+                    if super::component_workspace::asset_writes::supported(op) {
+                        component.dispatch_asset_write(&token, op, &args, lease);
+                        return;
+                    }
                     lease.run_immediate(|| {
                         if matches!(op, "viewport_inspect" | "viewport_capture_start" | "viewport_capture_inspect" | "viewport_capture_pick") {
                             component.ai_capture_command(&authority, &token, op, &args)
