@@ -359,6 +359,59 @@ impl AssetStore {
         }
     }
 
+    /// Validate the interpretation identities before moving a registered source.
+    /// File actions call this while holding the current catalog lock.
+    pub fn validate_movable_sidecar(&self, source: &str) -> Result<(), AssetError> {
+        let accepted = self.registered_interpretations(source);
+        if accepted.is_empty() {
+            return Ok(());
+        }
+        let path = confined_path(&self.root, source, false)?;
+        let entries = load_metadata(&sidecar_path(&path))?;
+        if accepted
+            .iter()
+            .any(|entry| !entries.iter().any(|metadata| metadata.id == entry.id))
+        {
+            return Err(error("The sidecar is missing a registered asset ID."));
+        }
+        let importer =
+            Importer::from_path(source).ok_or_else(|| error("Unsupported asset source."))?;
+        if self
+            .verify_sidecar(source, importer, &entries, &BTreeMap::new())?
+            .is_some()
+        {
+            return Err(error("The sidecar belongs to another source."));
+        }
+        Ok(())
+    }
+
+    /// Give a copied source new identities while retaining its accepted import settings.
+    pub fn duplicate_import_settings(
+        &self,
+        source: &str,
+        target: &str,
+        active: impl Fn() -> bool,
+    ) -> Result<(), AssetError> {
+        let mut entries = self.registered_interpretations(source);
+        if entries.is_empty() {
+            return Ok(());
+        }
+        let hash = digest(target.as_bytes());
+        let mut candidates = (1..)
+            .map(|suffix| format!("asset-{}-{suffix}", &hash[..24]))
+            .filter(|id| !self.registry.has_asset_id(id));
+        for entry in &mut entries {
+            entry.id = candidates.next().expect("finite catalog");
+        }
+        let path = sidecar_path(&confined_path(&self.root, target, false)?);
+        self.with_current_catalog(|| {
+            if !active() {
+                return Err(error("Project closed during duplication."));
+            }
+            write_metadata(&path, None, &entries)
+        })
+    }
+
     fn registered_interpretations(&self, source: &str) -> Vec<Metadata> {
         self.registry
             .assets

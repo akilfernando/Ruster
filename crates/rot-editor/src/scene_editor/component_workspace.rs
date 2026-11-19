@@ -461,7 +461,10 @@ impl ComponentWorkspace {
         if self.build.is_open() || self.asset_publish_pending() {
             return true;
         }
-        self.close_pending || self.close_approved || self.open_path.is_some()
+        self.close_pending
+            || self.close_approved
+            || self.open_path.is_some()
+            || self.asset_browser.file_dialog_open()
     }
 
     pub(super) fn adopt_workspace(&mut self, mut workspace: Workspace) {
@@ -1280,10 +1283,11 @@ impl ComponentWorkspace {
         let blocked = self.close_pending || self.open_path.is_some() || build_open || publishing;
         #[cfg(target_os = "linux")]
         self.asset_import_frame(&ctx, blocked);
-        self.runtime.input_begin(&ctx, blocked);
+        let asset_dialog = self.asset_browser.file_dialog_open();
+        self.runtime.input_begin(&ctx, blocked || asset_dialog);
         if let Some(action) = self
             .workspace
-            .shortcuts(&ctx, blocked || self.runtime.input_owned())
+            .shortcuts(&ctx, blocked || asset_dialog || self.runtime.input_owned())
         {
             self.command_from_ui(&ctx, action);
         }
@@ -1330,6 +1334,14 @@ impl ComponentWorkspace {
                             self.menu_action(ui, Action::ImportAsset);
                         },
                     );
+                    #[cfg(target_os = "linux")]
+                    if ui
+                        .add_enabled(!blocked, egui::Button::new("New Folder…"))
+                        .clicked()
+                    {
+                        self.asset_browser.open_new_folder();
+                        ui.close();
+                    }
                     self.menu_action(ui, Action::FindContent);
                 });
                 editor_theme::text_menu(ui, "Window", |ui| {
@@ -1619,6 +1631,7 @@ impl ComponentWorkspace {
                         });
                 }
                 if !build_open
+                    && !asset_dialog
                     && !self.close_pending
                     && self.open_path.is_none()
                     && !egui::Popup::is_any_open(&ctx)
@@ -1629,9 +1642,13 @@ impl ComponentWorkspace {
                     self.rebuild_draft();
                 }
             });
+        #[cfg(target_os = "linux")]
+        self.asset_context_frame(&ctx, blocked);
         let viewport = egui::CentralPanel::default()
             .show(ui, |ui| {
-                draw_viewport.then(|| self.viewport(ui, blocked)).flatten()
+                draw_viewport
+                    .then(|| self.viewport(ui, blocked || asset_dialog))
+                    .flatten()
             })
             .inner;
         #[cfg(target_os = "linux")]

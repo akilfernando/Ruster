@@ -9,6 +9,25 @@ use rot_assets::{
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
+#[cfg(target_os = "linux")]
+use super::super::project_assets::FileAction;
+
+#[cfg(target_os = "linux")]
+enum ContextAction {
+    File(FileAction),
+    Reveal(PathBuf),
+    CreateFolder(PathBuf),
+    Rename(PathBuf),
+    Delete(PathBuf),
+}
+
+#[cfg(target_os = "linux")]
+enum FileDialog {
+    Folder { parent: PathBuf, name: String },
+    Rename { source: PathBuf, stem: String },
+    Delete(PathBuf),
+}
+
 const SEARCH: &str = "v23_asset_search";
 
 struct AssetRow {
@@ -99,6 +118,12 @@ pub(super) struct Browser {
     by_id: HashMap<String, usize>,
     visible: Vec<usize>,
     thumbnails: TextureThumbnails,
+    #[cfg(target_os = "linux")]
+    context_action: Option<ContextAction>,
+    #[cfg(target_os = "linux")]
+    file_dialog: Option<(AssetStateIdentity, FileDialog)>,
+    #[cfg(target_os = "linux")]
+    focus_file_name: bool,
 }
 
 impl Default for Browser {
@@ -116,6 +141,12 @@ impl Default for Browser {
             by_id: HashMap::new(),
             visible: Vec::new(),
             thumbnails: TextureThumbnails::new(),
+            #[cfg(target_os = "linux")]
+            context_action: None,
+            #[cfg(target_os = "linux")]
+            file_dialog: None,
+            #[cfg(target_os = "linux")]
+            focus_file_name: false,
         }
     }
 }
@@ -128,6 +159,104 @@ impl Browser {
         } else {
             "Assets".into()
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn open_new_folder(&mut self) {
+        self.open = true;
+        self.start_file_dialog(FileDialog::Folder {
+            parent: self.import_folder(),
+            name: String::new(),
+        });
+    }
+
+    #[cfg(target_os = "linux")]
+    fn start_file_dialog(&mut self, dialog: FileDialog) {
+        self.file_dialog = self.catalog.clone().map(|catalog| (catalog, dialog));
+        self.focus_file_name = true;
+    }
+
+    pub(super) fn file_dialog_open(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        return self.file_dialog.is_some();
+        #[cfg(not(target_os = "linux"))]
+        false
+    }
+
+    #[cfg(target_os = "linux")]
+    fn show_file_dialog(
+        &mut self,
+        ctx: &egui::Context,
+    ) -> Option<(AssetStateIdentity, FileAction)> {
+        let (catalog, mut dialog) = self.file_dialog.take()?;
+        let focus_name = std::mem::take(&mut self.focus_file_name);
+        let escaped =
+            ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        let mut cancel = escaped;
+        let mut submit = false;
+        egui::Modal::new(egui::Id::unique("asset_file_dialog"))
+            .frame(editor_theme::dialog_frame(ctx))
+            .show(ctx, |ui| {
+                let (heading, action, name) = match &mut dialog {
+                    FileDialog::Folder { name, .. } => ("New Folder", "Create Folder", Some(name)),
+                    FileDialog::Rename { stem, .. } => ("Rename Asset", "Rename", Some(stem)),
+                    FileDialog::Delete(_) => ("Delete Asset", "Move to Trash", None),
+                };
+                ui.heading(heading);
+                let valid = if let Some(name) = name {
+                    let label = ui.label("Name");
+                    let text = ui
+                        .add(egui::TextEdit::singleline(name).id_salt("asset_file_name"))
+                        .labelled_by(label.id);
+                    if focus_name {
+                        text.request_focus();
+                        if let Some(mut state) = egui::TextEdit::load_state(ctx, text.id) {
+                            use egui::text::{CCursor, CCursorRange};
+                            state.cursor.set_char_range(Some(CCursorRange::two(
+                                CCursor::new(0),
+                                CCursor::new(name.chars().count()),
+                            )));
+                            state.store(ctx, text.id);
+                        }
+                    }
+                    let valid = !name.trim().is_empty();
+                    submit = valid
+                        && text.lost_focus()
+                        && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                    valid
+                } else {
+                    if let FileDialog::Delete(source) = &dialog {
+                        ui.label(source.display().to_string());
+                    }
+                    ui.label(
+                        "Move the file and its import settings to the project's .rot-trash folder?",
+                    );
+                    true
+                };
+                ui.horizontal(|ui| {
+                    submit |= ui.add_enabled(valid, egui::Button::new(action)).clicked();
+                    cancel |= ui.button("Cancel").clicked();
+                });
+            });
+        if cancel {
+            return None;
+        }
+        if !submit {
+            self.file_dialog = Some((catalog, dialog));
+            return None;
+        }
+        let action = match dialog {
+            FileDialog::Folder { parent, name } => FileAction::CreateFolder {
+                parent,
+                name: name.trim().to_owned(),
+            },
+            FileDialog::Rename { source, stem } => FileAction::Rename {
+                source,
+                stem: stem.trim().to_owned(),
+            },
+            FileDialog::Delete(source) => FileAction::Trash(source),
+        };
+        Some((catalog, action))
     }
 
     pub(super) fn refresh(
@@ -303,7 +432,7 @@ impl Browser {
                         for folder in &self.folders[range] {
                             ui.horizontal(|ui| {
                                 ui.add_space(8.0 * folder.components().count().min(8) as f32);
-                                if ui
+                                let row = ui
                                     .add(
                                         egui::Button::selectable(
                                             self.query.is_empty() && *folder == self.folder,
@@ -311,11 +440,29 @@ impl Browser {
                                         )
                                         .truncate(),
                                     )
-                                    .on_hover_text(folder.display().to_string())
-                                    .clicked()
-                                {
+                                    .on_hover_text(folder.display().to_string());
+                                if row.clicked() {
                                     opened_folder = Some(folder.clone());
                                 }
+                                #[cfg(target_os = "linux")]
+                                row.context_menu(|ui| {
+                                    if ui
+                                        .add_enabled(
+                                            folder.starts_with("Assets"),
+                                            egui::Button::new("New Folder…"),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.context_action =
+                                            Some(ContextAction::CreateFolder(folder.clone()));
+                                        ui.close();
+                                    }
+                                    if ui.button("Show in File Manager").clicked() {
+                                        self.context_action =
+                                            Some(ContextAction::Reveal(folder.clone()));
+                                        ui.close();
+                                    }
+                                });
                             });
                         }
                     },
@@ -401,14 +548,16 @@ impl Browser {
                                 if response.double_clicked() && placeable {
                                     place = drag();
                                 }
-                                if placeable {
-                                    response.context_menu(|ui| {
-                                        if ui.button("Place in Scene").clicked() {
-                                            place = drag();
-                                            ui.close();
-                                        }
-                                    });
-                                }
+                                response.context_menu(|ui| {
+                                    if placeable && ui.button("Place in Scene").clicked() {
+                                        place = drag();
+                                        ui.close();
+                                    }
+                                    #[cfg(target_os = "linux")]
+                                    if let Some(action) = file_actions(ui, row) {
+                                        self.context_action = Some(action);
+                                    }
+                                });
                             });
                         }
                     });
@@ -418,7 +567,7 @@ impl Browser {
         (selected, place)
     }
 
-    pub(super) fn inspect(&self, ui: &mut egui::Ui, can_place: bool) -> Option<AssetDrag> {
+    pub(super) fn inspect(&mut self, ui: &mut egui::Ui, can_place: bool) -> Option<AssetDrag> {
         let row = &self.rows[*self.by_id.get(self.selected.as_ref()?)?];
         ui.strong(&row.label);
         ui.label(&row.source);
@@ -431,6 +580,12 @@ impl Browser {
         if let Some(diagnostic) = &row.diagnostic {
             ui.colored_label(editor_theme::colors(ui).error, diagnostic);
         }
+        #[cfg(target_os = "linux")]
+        ui.menu_button("Asset Actions", |ui| {
+            if let Some(action) = file_actions(ui, row) {
+                self.context_action = Some(action);
+            }
+        });
         if row.kind == "Mesh"
             && ui
                 .add_enabled(can_place, egui::Button::new("Place in Scene"))
@@ -443,6 +598,45 @@ impl Browser {
         }
         None
     }
+}
+
+#[cfg(target_os = "linux")]
+fn file_actions(ui: &mut egui::Ui, row: &AssetRow) -> Option<ContextAction> {
+    let source = Path::new(&row.source);
+    let supported = rot_assets::AssetStore::project_source_limit(&row.source).is_ok();
+    let duplicate = supported && row.status != AssetStatus::Missing;
+    let can_move = duplicate && source.starts_with("Assets");
+    let action = if ui
+        .add_enabled(can_move, egui::Button::new("Rename…"))
+        .clicked()
+    {
+        Some(ContextAction::Rename(source.to_owned()))
+    } else if ui
+        .add_enabled(duplicate, egui::Button::new("Duplicate"))
+        .clicked()
+    {
+        Some(ContextAction::File(FileAction::Duplicate(
+            source.to_owned(),
+        )))
+    } else if ui
+        .add_enabled(supported, egui::Button::new("Reimport"))
+        .clicked()
+    {
+        Some(ContextAction::File(FileAction::Reimport(source.to_owned())))
+    } else if ui
+        .add_enabled(can_move, egui::Button::new("Delete…"))
+        .clicked()
+    {
+        Some(ContextAction::Delete(source.to_owned()))
+    } else if ui.button("Show in File Manager").clicked() {
+        Some(ContextAction::Reveal(row.folder.clone()))
+    } else {
+        None
+    };
+    if action.is_some() {
+        ui.close();
+    }
+    action
 }
 
 fn folder_name(folder: &Path) -> &str {
@@ -562,6 +756,91 @@ impl ComponentWorkspace {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    pub(super) fn asset_context_frame(&mut self, ctx: &egui::Context, blocked: bool) {
+        if blocked {
+            self.asset_browser.context_action = None;
+            self.asset_browser.file_dialog = None;
+            return;
+        }
+        if let Some((catalog, action)) = self.asset_browser.show_file_dialog(ctx) {
+            self.submit_asset_action(catalog, action);
+        }
+        match self.asset_browser.context_action.take() {
+            Some(ContextAction::CreateFolder(parent)) => {
+                self.asset_browser.start_file_dialog(FileDialog::Folder {
+                    parent,
+                    name: String::new(),
+                });
+                ctx.request_repaint();
+            }
+            Some(ContextAction::Rename(source)) => {
+                let stem = source
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                self.asset_browser
+                    .start_file_dialog(FileDialog::Rename { source, stem });
+                ctx.request_repaint();
+            }
+            Some(ContextAction::Delete(source)) => {
+                self.asset_browser
+                    .start_file_dialog(FileDialog::Delete(source));
+                ctx.request_repaint();
+            }
+            Some(ContextAction::Reveal(folder)) => {
+                let result = (|| {
+                    let root = self
+                        .assets
+                        .as_ref()
+                        .ok_or("Project assets are unavailable.")?
+                        .root();
+                    let folder = root
+                        .join(folder)
+                        .canonicalize()
+                        .map_err(|_| "The folder is unavailable.")?;
+                    if !folder.starts_with(root) || !folder.is_dir() {
+                        return Err("The folder is outside the open project.");
+                    }
+                    std::process::Command::new("xdg-open")
+                        .arg(folder)
+                        .spawn()
+                        .map_err(|_| "Couldn't open the file manager.")?;
+                    Ok(())
+                })();
+                if let Err(error) = result {
+                    self.asset_import_error = Some(error.into());
+                }
+            }
+            Some(ContextAction::File(action)) => {
+                if let Some(catalog) = self.asset_browser.catalog.clone() {
+                    self.submit_asset_action(catalog, action);
+                }
+            }
+            None => {}
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn submit_asset_action(&mut self, catalog: AssetStateIdentity, action: FileAction) {
+        if self.asset_import.is_some() || self.ai_asset_write.is_some() {
+            self.asset_import_error = Some("An asset operation is running.".into());
+            return;
+        }
+        let result = self
+            .asset_watcher
+            .as_ref()
+            .ok_or_else(|| "Project assets are unavailable.".to_owned())
+            .and_then(|worker| worker.file_action(action, catalog));
+        match result {
+            Ok(reply) => {
+                self.asset_import = Some(reply);
+                self.asset_import_error = None;
+            }
+            Err(error) => self.asset_import_error = Some(error),
+        }
+    }
+
     pub(super) fn place_asset(&mut self, drag: &AssetDrag, parent: Option<String>) {
         if self.runtime.in_play_mode() || !self.apply() {
             return;
@@ -591,6 +870,52 @@ mod tests {
         Scene, Session,
     };
     use std::fs;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn asset_file_dialog_uses_enter_and_escape() {
+        let project = tempfile::tempdir().unwrap();
+        let store = rot_assets::AssetStore::open(project.path()).unwrap();
+        let mut browser = Browser {
+            catalog: Some(store.state_identity()),
+            ..Browser::default()
+        };
+        let ctx = egui::Context::default();
+        let frame = |browser: &mut Browser, events| {
+            let mut action = None;
+            ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    focused: true,
+                    ..Default::default()
+                },
+                |ui| action = browser.show_file_dialog(ui.ctx()),
+            )
+            .textures_delta
+            .clear();
+            action
+        };
+        let press = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+
+        browser.open_new_folder();
+        frame(&mut browser, Vec::new());
+        frame(&mut browser, vec![egui::Event::Text("Props".into())]);
+        let (_, action) = frame(&mut browser, vec![press(egui::Key::Enter)]).unwrap();
+        assert!(matches!(
+            action, FileAction::CreateFolder { parent, name } if parent == Path::new("Assets") && name == "Props"
+        ));
+
+        browser.start_file_dialog(FileDialog::Delete("Assets/Prop.obj".into()));
+        frame(&mut browser, Vec::new());
+        assert!(frame(&mut browser, vec![press(egui::Key::Escape)]).is_none());
+        assert!(!browser.file_dialog_open());
+    }
 
     #[test]
     fn catalog_navigation_and_mesh_placement_follow_asset_changes() {

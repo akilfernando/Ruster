@@ -61,8 +61,23 @@ struct AssetJob {
     result: SyncSender<AssetResult>,
 }
 
+pub(super) enum FileAction {
+    Reimport(PathBuf),
+    Duplicate(PathBuf),
+    Rename { source: PathBuf, stem: String },
+    Trash(PathBuf),
+    CreateFolder { parent: PathBuf, name: String },
+}
+
+struct FileJob {
+    action: FileAction,
+    catalog: rot_assets::AssetStateIdentity,
+    result: SyncSender<Vec<String>>,
+}
+
 enum Job {
     ImportFiles(ImportBatch),
+    FileAction(FileJob),
     AssetWrite(Box<AssetJob>),
 }
 
@@ -115,6 +130,20 @@ impl ProjectAssets {
         self.submit(Job::ImportFiles(ImportBatch {
             folder,
             files,
+            result,
+        }))?;
+        Ok(reply)
+    }
+
+    pub(super) fn file_action(
+        &self,
+        action: FileAction,
+        catalog: rot_assets::AssetStateIdentity,
+    ) -> Result<Receiver<Vec<String>>, String> {
+        let (result, reply) = mpsc::sync_channel(1);
+        self.submit(Job::FileAction(FileJob {
+            action,
+            catalog,
             result,
         }))?;
         Ok(reply)
@@ -236,7 +265,7 @@ fn run(
                     if !active() {
                         break;
                     }
-                    match copy_source(&root, &held_root, &batch.folder, file, active) {
+                    match copy_source(&root, &held_root, &batch.folder, file, false, active) {
                         Ok(path) => {
                             paths.insert(path);
                         }
@@ -244,6 +273,21 @@ fn run(
                     }
                 }
                 import = Some((batch.result, failures));
+            }
+            Ok(Job::FileAction(job)) => {
+                let outcome = if store.matches_identity(&job.catalog) && active() {
+                    file_action(&store, &held_root, &mut watcher, job.action, active)
+                } else {
+                    Err("The project or asset catalog changed. Try again.".into())
+                };
+                let failures = match outcome {
+                    Ok(path) => {
+                        paths.insert(path);
+                        Vec::new()
+                    }
+                    Err(error) => vec![error],
+                };
+                import = Some((job.result, failures));
             }
             Ok(Job::AssetWrite(job)) => {
                 let outcome = finish_asset_write(
@@ -363,11 +407,214 @@ fn finish_asset_write(
         .map_err(|err| err.to_string())
 }
 
+fn open_folder(root: &fs::File, folder: &Path) -> rustix::io::Result<OwnedFd> {
+    at::openat2(
+        root,
+        folder,
+        at::OFlags::RDONLY | at::OFlags::DIRECTORY | at::OFlags::CLOEXEC,
+        at::Mode::empty(),
+        at::ResolveFlags::BENEATH | at::ResolveFlags::NO_SYMLINKS,
+    )
+}
+
+fn ensure_assets(root: &fs::File, folder: &Path) -> Result<(), String> {
+    if folder == Path::new("Assets") {
+        match at::mkdirat(root, folder, at::Mode::from_raw_mode(0o755)) {
+            Ok(()) | Err(Errno::EXIST) => {}
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Ok(())
+}
+
+fn file_action(
+    store: &AssetStore,
+    held_root: &fs::File,
+    watcher: &mut WatchTree<'_>,
+    action: FileAction,
+    active: impl Fn() -> bool,
+) -> Result<PathBuf, String> {
+    let root = store.root();
+    match action {
+        FileAction::Reimport(source) => {
+            AssetStore::project_source_limit(source.to_str().unwrap_or_default())
+                .map_err(|error| error.to_string())?;
+            Ok(source)
+        }
+        FileAction::Duplicate(source) => {
+            AssetStore::project_source_limit(source.to_str().unwrap_or_default())
+                .map_err(|error| error.to_string())?;
+            let parent = source
+                .parent()
+                .filter(|path| path.starts_with("Assets"))
+                .unwrap_or(Path::new("Assets"));
+            let path = copy_source(root, held_root, parent, &root.join(&source), true, &active)?;
+            store
+                .duplicate_import_settings(
+                    source.to_str().unwrap_or_default(),
+                    path.to_str().unwrap_or_default(),
+                    active,
+                )
+                .map_err(|error| {
+                    format!("File copied, but import settings couldn't be duplicated: {error}")
+                })?;
+            Ok(path)
+        }
+        FileAction::Rename { source, stem } => {
+            validate_leaf(&stem)?;
+            let (folder, leaf) = open_source_folder(held_root, &source)?;
+            let extension = source
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .ok_or("Asset has no file extension.")?;
+            let name = format!("{stem}.{extension}");
+            let destination = source.with_file_name(&name);
+            AssetStore::project_source_limit(destination.to_str().unwrap_or_default())
+                .map_err(|error| error.to_string())?;
+            if name != leaf {
+                store
+                    .with_current_catalog(|| {
+                        store.validate_movable_sidecar(source.to_str().unwrap_or_default())?;
+                        move_asset_pair(&folder, leaf, &folder, &name, &active)
+                            .map_err(rot_assets::AssetError)
+                    })
+                    .map_err(|error| error.to_string())?;
+            }
+            Ok(destination)
+        }
+        FileAction::Trash(source) => {
+            let (folder, leaf) = open_source_folder(held_root, &source)?;
+            let trash = Path::new(".rot-trash");
+            match at::mkdirat(held_root, trash, at::Mode::from_raw_mode(0o700)) {
+                Ok(()) | Err(Errno::EXIST) => {}
+                Err(error) => return Err(error.to_string()),
+            }
+            let trash = open_folder(held_root, trash).map_err(|error| error.to_string())?;
+            let staging = tempfile::Builder::new()
+                .prefix("asset-")
+                .tempdir_in(format!("/proc/self/fd/{}", trash.as_raw_fd()))
+                .map_err(|error| error.to_string())?;
+            let target = staging
+                .path()
+                .file_name()
+                .ok_or("Couldn't create project trash.")?;
+            let target = at::openat2(
+                &trash,
+                target,
+                at::OFlags::RDONLY | at::OFlags::DIRECTORY | at::OFlags::CLOEXEC,
+                at::Mode::empty(),
+                at::ResolveFlags::BENEATH | at::ResolveFlags::NO_SYMLINKS,
+            )
+            .map_err(|error| error.to_string())?;
+            // Retain even if a later rollback fails so neither file is discarded.
+            let _ = staging.keep();
+            store
+                .with_current_catalog(|| {
+                    store.validate_movable_sidecar(source.to_str().unwrap_or_default())?;
+                    move_asset_pair(&folder, leaf, &target, leaf, &active)
+                        .map_err(rot_assets::AssetError)
+                })
+                .map_err(|error| error.to_string())?;
+            Ok(source)
+        }
+        FileAction::CreateFolder { parent, name } => {
+            validate_leaf(&name)?;
+            if !parent.starts_with("Assets") {
+                return Err("Choose a folder inside Assets.".into());
+            }
+            let folder = parent.join(&name);
+            if AssetStore::project_source_limit(&folder.join("a.obj").to_string_lossy()).is_err() {
+                return Err("The folder path is too long to contain assets.".into());
+            }
+            ensure_assets(held_root, &parent)?;
+            let location = open_folder(held_root, &parent).map_err(|error| error.to_string())?;
+            if !active() {
+                return Err("Project closed before the folder was created.".into());
+            }
+            at::mkdirat(&location, name.as_str(), at::Mode::from_raw_mode(0o755))
+                .map_err(|error| error.to_string())?;
+            watcher.rebuild().map_err(|error| error.to_string())?;
+            Ok(folder)
+        }
+    }
+}
+
+fn validate_leaf(name: &str) -> Result<(), String> {
+    if name.is_empty() || name.starts_with('.') || name.contains(['/', '\\', '\0']) {
+        return Err("Enter a valid name.".into());
+    }
+    Ok(())
+}
+
+fn open_source_folder<'a>(root: &fs::File, source: &'a Path) -> Result<(OwnedFd, &'a str), String> {
+    if !source.starts_with("Assets") {
+        return Err("Move the source and sidecar into Assets first.".into());
+    }
+    AssetStore::project_source_limit(source.to_str().unwrap_or_default())
+        .map_err(|error| error.to_string())?;
+    let parent = source
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let folder = open_folder(root, parent).map_err(|error| error.to_string())?;
+    let leaf = source
+        .file_name()
+        .and_then(|leaf| leaf.to_str())
+        .ok_or("Invalid source file.")?;
+    Ok((folder, leaf))
+}
+
+fn move_asset_pair(
+    origin: &OwnedFd,
+    old: &str,
+    target: &OwnedFd,
+    new: &str,
+    active: impl Fn() -> bool,
+) -> Result<(), String> {
+    let original_sidecar = format!("{old}.rotmeta");
+    let new_sidecar = format!("{new}.rotmeta");
+    for name in [old, &original_sidecar] {
+        let file = at::statat(origin, name, at::AtFlags::SYMLINK_NOFOLLOW)
+            .map_err(|error| format!("{name}: {error}"))?;
+        if at::FileType::from_raw_mode(file.st_mode) != at::FileType::RegularFile {
+            return Err("Expected a regular source file and its import sidecar.".into());
+        }
+    }
+    if !active() {
+        return Err("Project closed before the asset was moved.".into());
+    }
+    let no_replace = at::RenameFlags::NOREPLACE;
+    at::renameat_with(
+        origin,
+        original_sidecar.as_str(),
+        target,
+        new_sidecar.as_str(),
+        no_replace,
+    )
+    .map_err(|error| error.to_string())?;
+    if let Err(error) = at::renameat_with(origin, old, target, new, no_replace) {
+        if let Err(rollback) = at::renameat_with(
+            target,
+            new_sidecar.as_str(),
+            origin,
+            original_sidecar.as_str(),
+            no_replace,
+        ) {
+            return Err(format!(
+                "Asset move failed ({error}). Couldn't restore its sidecar ({rollback})."
+            ));
+        }
+        return Err(error.to_string());
+    }
+    Ok(())
+}
+
 fn copy_source(
     root: &Path,
     held_root: &fs::File,
     folder: &Path,
     path: &Path,
+    duplicate: bool,
     active: impl Fn() -> bool,
 ) -> Result<PathBuf, String> {
     if !folder.starts_with("Assets") {
@@ -383,11 +630,19 @@ fn copy_source(
     let limit = AssetStore::project_source_limit(relative.to_str().ok_or_else(bad_file)?)
         .map_err(|error| error.to_string())?;
     let source = fs::canonicalize(path).map_err(|error| error.to_string())?;
-    let input: fs::File = at::open(
-        &source,
-        at::OFlags::RDONLY | at::OFlags::NONBLOCK | at::OFlags::NOFOLLOW | at::OFlags::CLOEXEC,
-        at::Mode::empty(),
-    )
+    let flags =
+        at::OFlags::RDONLY | at::OFlags::NONBLOCK | at::OFlags::NOFOLLOW | at::OFlags::CLOEXEC;
+    let input: fs::File = if duplicate {
+        at::openat2(
+            held_root,
+            path.strip_prefix(root).map_err(|_| bad_file())?,
+            flags,
+            at::Mode::empty(),
+            at::ResolveFlags::BENEATH | at::ResolveFlags::NO_SYMLINKS,
+        )
+    } else {
+        at::open(&source, flags, at::Mode::empty())
+    }
     .map_err(|error| error.to_string())?
     .into();
     let original = input.metadata().map_err(|error| error.to_string())?;
@@ -397,7 +652,10 @@ fn copy_source(
     if original.len() > limit as u64 {
         return Err(format!("File exceeds the {limit}-byte import limit."));
     }
-    if let Ok(source) = source.strip_prefix(root) {
+    if let Some(source) = (!duplicate)
+        .then(|| source.strip_prefix(root).ok())
+        .flatten()
+    {
         if source.starts_with("Assets")
             && source.components().all(|part| {
                 part.as_os_str()
@@ -413,21 +671,8 @@ fn copy_source(
     if !active() {
         return Err("Project closed during import.".into());
     }
-    if folder == Path::new("Assets") {
-        match at::mkdirat(held_root, folder, at::Mode::from_raw_mode(0o755)) {
-            Ok(()) | Err(Errno::EXIST) => {}
-            Err(error) => return Err(error.to_string()),
-        }
-    }
-    let open_destination = || {
-        at::openat2(
-            held_root,
-            folder,
-            at::OFlags::RDONLY | at::OFlags::DIRECTORY | at::OFlags::CLOEXEC,
-            at::Mode::empty(),
-            at::ResolveFlags::BENEATH | at::ResolveFlags::NO_SYMLINKS,
-        )
-    };
+    ensure_assets(held_root, folder)?;
+    let open_destination = || open_folder(held_root, folder);
     let destination = open_destination().map_err(|error| error.to_string())?;
     let identity = at::fstat(&destination).map_err(|error| error.to_string())?;
     // Resolve both the scratch and final names through the held directory.
@@ -650,6 +895,118 @@ impl<'a> WatchTree<'a> {
 mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
+
+    #[test]
+    fn source_actions_preserve_identity_settings_and_recoverable_files() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        let assets = root.join("Assets");
+        fs::create_dir(&assets).unwrap();
+        let source = assets.join("Prop.obj");
+        let old = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+        fs::write(&source, old).unwrap();
+        let sidecar = assets.join("Prop.obj.rotmeta");
+        let settings = r#"{"imports":[{"id":"flat","mesh_normal_policy":"flat"},{"id":"smooth","mesh_normal_policy":"authored_when_complete"}]}"#;
+        fs::write(&sidecar, settings).unwrap();
+        fs::write(assets.join("Taken.obj"), old).unwrap();
+        let ctx = Context::default();
+        let worker = ProjectAssets::start(root.to_owned(), &ctx).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut snapshot = loop {
+            if let Some(update) = worker.take_update() {
+                break update.unwrap();
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        let run = |snapshot: &Snapshot, action| {
+            worker
+                .file_action(action, snapshot.store.state_identity())
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap()
+        };
+        let command = |snapshot: &mut Snapshot, action| {
+            let errors = run(snapshot, action);
+            assert!(errors.is_empty(), "{errors:?}");
+            *snapshot = worker.take_update().unwrap().unwrap();
+        };
+        command(
+            &mut snapshot,
+            FileAction::CreateFolder {
+                parent: "Assets".into(),
+                name: "Empty".into(),
+            },
+        );
+        assert!(snapshot.folders.contains(&PathBuf::from("Assets/Empty")));
+
+        let original = PathBuf::from("Assets/Prop.obj");
+        command(&mut snapshot, FileAction::Duplicate(original.clone()));
+        let copies: Vec<_> = snapshot
+            .store
+            .infos()
+            .filter(|asset| asset.source == "Assets/Prop 2.obj")
+            .collect();
+        assert_eq!(copies.len(), 2);
+        assert!(copies.iter().all(|copy| copy.id.starts_with("asset-")));
+        assert_ne!(copies[0].mesh_normal_policy, copies[1].mesh_normal_policy);
+        assert_eq!(fs::read_to_string(&sidecar).unwrap(), settings);
+
+        let failures = run(
+            &snapshot,
+            FileAction::Rename {
+                source: original.clone(),
+                stem: "Taken".into(),
+            },
+        );
+        assert_eq!(failures.len(), 1);
+        assert_eq!(fs::read(&source).unwrap(), old);
+        assert_eq!(fs::read_to_string(&sidecar).unwrap(), settings);
+
+        command(
+            &mut snapshot,
+            FileAction::Rename {
+                source: original,
+                stem: "Renamed".into(),
+            },
+        );
+        let renamed = PathBuf::from("Assets/Renamed.obj");
+        assert!(!source.exists());
+        assert!(!sidecar.exists());
+        for id in ["flat", "smooth"] {
+            assert_eq!(
+                snapshot.store.asset_info(id).unwrap().source,
+                "Assets/Renamed.obj"
+            );
+        }
+        command(&mut snapshot, FileAction::Trash(renamed.clone()));
+        assert!(!root.join(&renamed).exists());
+        assert_eq!(
+            snapshot.store.asset_info("flat").unwrap().status,
+            rot_assets::AssetStatus::Missing
+        );
+        assert!(snapshot.store.mesh("flat").is_some());
+        let trash = root
+            .join(".rot-trash")
+            .read_dir()
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let trashed_source = trash.join("Renamed.obj");
+        let trashed_sidecar = trash.join("Renamed.obj.rotmeta");
+        assert_eq!(fs::read(&trashed_source).unwrap(), old);
+        assert_eq!(fs::read_to_string(&trashed_sidecar).unwrap(), settings);
+
+        fs::rename(trashed_source, root.join(&renamed)).unwrap();
+        fs::rename(trashed_sidecar, assets.join("Renamed.obj.rotmeta")).unwrap();
+        command(&mut snapshot, FileAction::Reimport(renamed));
+        assert_eq!(
+            snapshot.store.asset_info("flat").unwrap().status,
+            rot_assets::AssetStatus::Ready
+        );
+    }
 
     #[test]
     fn dropped_sources_share_reconciliation_and_preserve_existing_files() {
