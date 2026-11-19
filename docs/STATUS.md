@@ -38,7 +38,7 @@ C-02 preserves authored content during migration, supports grouped object
 edits and Undo/Redo, and resolves a 5,000-object chain over 1 MiB. The native
 `rot-editor --scene` route opens v23 and can inspect objects, edit name,
 enabled state and Transform, add Mesh Renderers and Colliders, create,
-parent and delete objects, undo, redo, and save in v23. The hub and File →
+drag to reparent, delete, undo, redo, and save in v23. The hub and File →
 Open support both formats. Automatic upgrades remain open.
 
 The v23 editor uses the shared Play, Pause, Step and Stop controls. The editor,

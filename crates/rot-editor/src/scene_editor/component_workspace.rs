@@ -23,6 +23,31 @@ pub(super) fn check_launch() -> Result<(), String> {
     Ok(())
 }
 
+struct HierarchyDrag {
+    revision: u64,
+    object_id: String,
+}
+
+fn hierarchy_drop(
+    ui: &egui::Ui,
+    row: &egui::Response,
+    target: Option<&str>,
+    revision: u64,
+) -> Option<String> {
+    let drag = row.dnd_hover_payload::<HierarchyDrag>()?;
+    if drag.revision != revision || Some(drag.object_id.as_str()) == target {
+        return None;
+    }
+    ui.painter().rect_stroke(
+        row.rect,
+        3.0,
+        egui::Stroke::new(1.0, editor_theme::colors(ui).accent),
+        egui::StrokeKind::Inside,
+    );
+    row.dnd_release_payload::<HierarchyDrag>()
+        .map(|drag| drag.object_id.clone())
+}
+
 pub(super) struct ComponentWorkspace {
     session: ComponentSession,
     path: PathBuf,
@@ -682,8 +707,12 @@ impl ComponentWorkspace {
                 editor_theme::text_menu(ui, Text::ComponentCreate.plain(), |ui| {
                     self.create_menu(ui)
                 });
-                let mut selected = None;
+                let root =
+                    ui.selectable_label(self.draft.is_none(), Text::ComponentSceneRoot.plain());
+                let mut selected = root.clicked().then_some(None);
                 let mut deleted = None;
+                let revision = self.session.revision();
+                let mut moved = hierarchy_drop(ui, &root, None, revision).map(|id| (id, None));
                 egui::ScrollArea::vertical().show_rows(
                     ui,
                     ROW_HEIGHT,
@@ -697,9 +726,24 @@ impl ComponentWorkspace {
                                     .draft
                                     .as_ref()
                                     .is_some_and(|draft| draft.id == object.id);
-                                let response = ui.selectable_label(active, &object.name);
+                                let response = ui.add(
+                                    egui::Button::selectable(active, &object.name)
+                                        .truncate()
+                                        .sense(egui::Sense::click_and_drag()),
+                                );
+                                if response.drag_started() {
+                                    response.dnd_set_drag_payload(HierarchyDrag {
+                                        revision,
+                                        object_id: object.id.clone(),
+                                    });
+                                }
+                                if let Some(id) =
+                                    hierarchy_drop(ui, &response, Some(&object.id), revision)
+                                {
+                                    moved = Some((id, Some(object.id.clone())));
+                                }
                                 if response.clicked() {
-                                    selected = Some(object.id.clone());
+                                    selected = Some(Some(object.id.clone()));
                                 }
                                 response.context_menu(|ui| {
                                     if ui
@@ -719,9 +763,11 @@ impl ComponentWorkspace {
                         }
                     },
                 );
-                if let Some(id) = deleted {
+                if let Some((id, parent)) = moved {
+                    self.reparent(&id, parent.as_deref());
+                } else if let Some(id) = deleted {
                     self.delete(&id);
-                } else if selected.is_some() && self.apply() {
+                } else if let Some(selected) = selected.filter(|_| self.apply()) {
                     self.select(selected);
                 }
             });
@@ -965,6 +1011,100 @@ mod tests {
         assert_eq!(editor.session.scene(), &subtree);
         editor.command(Action::Save);
         assert_eq!(ComponentSession::open(&path).unwrap().scene(), &subtree);
+    }
+
+    #[test]
+    fn hierarchy_drag_reparents_and_preserves_world_pose() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        let scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("scene")).unwrap()).unwrap();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.command(Action::CreateEmpty);
+        editor.draft.as_mut().unwrap().transform.translation[0] = 3.0;
+        editor.command(Action::CreateSphere);
+        let original = editor.session.scene().clone();
+        let parent = original.objects[0].id.as_str();
+
+        let ctx = egui::Context::default();
+        let draw = |editor: &mut ComponentWorkspace, events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 800.0),
+                    )),
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    editor.show(ui);
+                },
+            );
+            output.textures_delta.clear();
+            output
+        };
+        let drag = |editor: &mut ComponentWorkspace, from: &str, to: &str| {
+            let output = draw(editor, vec![]);
+            let locate = |label| {
+                output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::epaint::Shape::Text(text) if text.galley.job.text == label => {
+                            Some(text.pos + text.galley.size() / 2.0)
+                        }
+                        _ => None,
+                    })
+                    .expect("visible Hierarchy row")
+            };
+            let start = locate(from);
+            let end = locate(to);
+            let pointer = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            draw(editor, vec![egui::Event::PointerMoved(start)]);
+            draw(editor, vec![pointer(start, true)]);
+            draw(editor, vec![egui::Event::PointerMoved(end)]);
+            draw(editor, vec![pointer(end, false)]);
+        };
+        drag(
+            &mut editor,
+            &original.objects[1].name,
+            &original.objects[0].name,
+        );
+        let reparented = editor.session.scene().clone();
+        assert_eq!(reparented.objects[1].parent.as_deref(), Some(parent));
+        assert_eq!(
+            reparented.world_matrices().unwrap(),
+            original.world_matrices().unwrap()
+        );
+
+        let revision = editor.session.revision();
+        drag(
+            &mut editor,
+            &original.objects[0].name,
+            &original.objects[1].name,
+        );
+        assert_eq!(editor.session.revision(), revision);
+        assert_eq!(editor.session.scene(), &reparented);
+
+        drag(
+            &mut editor,
+            &original.objects[1].name,
+            Text::ComponentSceneRoot.plain(),
+        );
+        assert_eq!(editor.session.scene(), &original);
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene(), &reparented);
+        assert!(editor.save());
+        assert_eq!(ComponentSession::open(&path).unwrap().scene(), &reparented);
     }
 
     #[test]
