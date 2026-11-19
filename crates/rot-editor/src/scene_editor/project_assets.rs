@@ -1,6 +1,6 @@
 //! Watch the open Linux project's Assets tree without polling the filesystem.
 use eframe::egui::Context;
-use rot_assets::AssetStore;
+use rot_assets::{AssetStore, ProjectFileIssue};
 use rustix::event::{poll, PollFd, PollFlags};
 use rustix::fd::OwnedFd;
 use rustix::fs::inotify::{self, ReadFlags, WatchFlags};
@@ -17,7 +17,14 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-pub(super) type Update = Result<(AssetStore, Vec<String>), String>;
+pub(super) struct Snapshot {
+    pub(super) store: AssetStore,
+    pub(super) issues: Vec<ProjectFileIssue>,
+    pub(super) warning: Option<String>,
+    pub(super) folders: Vec<PathBuf>,
+}
+
+type Update = Result<Snapshot, String>;
 type Mailbox = Arc<Mutex<Option<Update>>>;
 
 pub(super) struct ProjectAssets {
@@ -94,14 +101,19 @@ fn run(
     let mut watcher = match watcher {
         Ok(watcher) => watcher,
         Err(error) => {
-            let mut diagnostics = store.update_project_files(&paths, active);
-            diagnostics.insert(0, format!("Couldn't watch Assets: {error}"));
-            send(Ok((store, diagnostics)));
+            let issues = store.reconcile_project_files(&paths, active);
+            let warning = Some(format!("Couldn't watch Assets: {error}"));
+            send(Ok(Snapshot {
+                store,
+                issues,
+                warning,
+                folders: Vec::new(),
+            }));
             return Ok(());
         }
     };
     while active() {
-        let mut diagnostics = Vec::new();
+        let mut warning = None;
         if paths.remove(Path::new(".rot-assets.json"))
             && store.with_current_catalog(|| Ok(())).is_err()
         {
@@ -110,27 +122,40 @@ fn run(
                     store = current;
                     paths.insert(PathBuf::from("Assets"));
                 }
-                _ => diagnostics.push(
-                    "The asset catalog changed externally. Reopen the project to reload it.".into(),
-                ),
+                _ => {
+                    warning = Some(
+                        "The asset catalog changed externally. Reopen the project to reload it."
+                            .into(),
+                    )
+                }
             }
         }
-        if !paths.is_empty() || delivered.is_none() {
-            diagnostics.extend(store.update_project_files(&paths, active));
-        } else if diagnostics.is_empty() {
+        if paths.is_empty() && delivered.is_some() && warning.is_none() {
             let Some(changed) = watcher.wait(stop).map_err(|err| err.to_string())? else {
                 break;
             };
             paths = changed;
             continue;
         }
+        let issues = store.reconcile_project_files(&paths, active);
         let state = store.state_identity();
-        if delivered
-            .as_ref()
-            .is_none_or(|(previous, warnings)| previous != &state || warnings != &diagnostics)
-        {
-            send(Ok((store.project_snapshot(), diagnostics.clone())));
-            delivered = Some((state, diagnostics));
+        let mut folders: Vec<_> = watcher.paths.values().cloned().collect();
+        folders.sort_unstable();
+        if delivered.as_ref().is_none_or(
+            |(previous, previous_issues, previous_warning, previous_folders)| {
+                previous != &state
+                    || previous_issues != &issues
+                    || previous_warning != &warning
+                    || previous_folders != &folders
+            },
+        ) {
+            send(Ok(Snapshot {
+                store: store.project_snapshot(),
+                issues: issues.clone(),
+                warning: warning.clone(),
+                folders: folders.clone(),
+            }));
+            delivered = Some((state, issues, warning, folders));
         }
         let Some(changed) = watcher.wait(stop).map_err(|err| err.to_string())? else {
             break;

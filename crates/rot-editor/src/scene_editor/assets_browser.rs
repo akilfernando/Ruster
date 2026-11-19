@@ -10,6 +10,54 @@ use std::sync::mpsc;
 /// File types the importer reads.
 const IMPORTABLE: [&str; 4] = ["glb", "obj", "png", "wav"];
 
+pub(super) type TextureThumbnails =
+    BTreeMap<String, (std::sync::Weak<rot_assets::Texture>, egui::TextureHandle)>;
+
+pub(super) fn texture_thumbnail(
+    cache: &mut TextureThumbnails,
+    ctx: &egui::Context,
+    id: &str,
+    texture: &Arc<rot_assets::Texture>,
+) -> egui::TextureId {
+    let key = Arc::downgrade(texture);
+    if let Some((seen, handle)) = cache.get(id) {
+        if seen.ptr_eq(&key) {
+            return handle.id();
+        }
+    }
+    // Use a small accepted mip, including for tall textures.
+    let mip = texture
+        .mips
+        .iter()
+        .rev()
+        .find(|mip| mip.width.max(mip.height) >= 64)
+        .unwrap_or(&texture.mips[0]);
+    let size = [mip.width as usize, mip.height as usize];
+    let image = match texture.role {
+        rot_assets::TextureRole::BaseColor => {
+            egui::ColorImage::from_rgba_unmultiplied(size, &mip.bytes)
+        }
+        rot_assets::TextureRole::Roughness => egui::ColorImage::from_gray(size, &mip.bytes),
+    };
+    let handle = ctx.load_texture(
+        format!("asset-thumb-{id}"),
+        image,
+        egui::TextureOptions::LINEAR,
+    );
+    let texture_id = handle.id();
+    cache.insert(id.to_owned(), (key, handle));
+    texture_id
+}
+
+pub(super) fn asset_glyph(kind: &str) -> &'static str {
+    match kind {
+        "Mesh" => "▲",
+        "Sound" => "♪",
+        "Texture" => "▦",
+        _ => "◆",
+    }
+}
+
 /// A placed model dragged from Assets onto the Scene view.
 #[derive(Clone)]
 pub(super) struct ModelDrag {
@@ -21,7 +69,7 @@ pub(super) struct ModelDrag {
 pub(super) struct AssetsView {
     pub(super) list: bool,
     pub(super) size: f32,
-    thumbnails: BTreeMap<String, (usize, egui::TextureHandle)>,
+    thumbnails: TextureThumbnails,
     /// Files waiting to be imported, one at a time.
     queue: VecDeque<PathBuf>,
     picking: Option<mpsc::Receiver<Vec<PathBuf>>>,
@@ -235,37 +283,13 @@ impl SceneEditor {
     }
 
     fn thumbnail(&mut self, ctx: &egui::Context, id: &str) -> Option<egui::TextureId> {
-        let texture = self.resolved_textures.get(id)?.clone();
-        let key = Arc::as_ptr(&texture) as usize;
-        if let Some((seen, handle)) = self.assets_view.thumbnails.get(id) {
-            if *seen == key {
-                return Some(handle.id());
-            }
-        }
-        // The smallest level at least 64 pixels wide keeps uploads small.
-        let mip = texture
-            .mips
-            .iter()
-            .rev()
-            .find(|mip| mip.width >= 64)
-            .unwrap_or(&texture.mips[0]);
-        let size = [mip.width as usize, mip.height as usize];
-        let image = match texture.role {
-            rot_assets::TextureRole::BaseColor => {
-                egui::ColorImage::from_rgba_unmultiplied(size, &mip.bytes)
-            }
-            rot_assets::TextureRole::Roughness => egui::ColorImage::from_gray(size, &mip.bytes),
-        };
-        let handle = ctx.load_texture(
-            format!("asset-thumb-{id}"),
-            image,
-            egui::TextureOptions::LINEAR,
-        );
-        let texture_id = handle.id();
-        self.assets_view
-            .thumbnails
-            .insert(id.to_owned(), (key, handle));
-        Some(texture_id)
+        let texture = self.resolved_textures.get(id)?;
+        Some(texture_thumbnail(
+            &mut self.assets_view.thumbnails,
+            ctx,
+            id,
+            texture,
+        ))
     }
 
     fn items(&self) -> Vec<Item> {
@@ -309,15 +333,6 @@ impl SceneEditor {
                 rot_assets::AssetKind::Sound => "Sound",
                 rot_assets::AssetKind::Texture => "Texture",
             },
-        }
-    }
-
-    fn item_glyph(kind: &str) -> &'static str {
-        match kind {
-            "Mesh" => "▲",
-            "Sound" => "♪",
-            "Texture" => "▦",
-            _ => "◆",
         }
     }
 
@@ -549,7 +564,7 @@ impl SceneEditor {
             ui.painter().text(
                 image_rect.center(),
                 egui::Align2::CENTER_CENTER,
-                Self::item_glyph(kind),
+                asset_glyph(kind),
                 egui::FontId::proportional(size * 0.4),
                 palette.secondary,
             );

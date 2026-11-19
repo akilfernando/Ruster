@@ -30,8 +30,14 @@ sidecars with all their accepted import settings. Move older source files
 and their sidecars into `Assets/` so the editor can discover them when
 rebuilding the catalog.
 
-To assign a mesh, select an object and choose its file in **Mesh Renderer →
-Geometry**. Click **Apply**, then save the scene.
+Use the **Assets** panel to browse project folders or search by file name,
+path, asset ID, or type. Select a file to see its status and import settings
+in the Inspector. Double-click a mesh or choose **Place in Scene** to add a
+Mesh Renderer at the origin. Drop a mesh on a Hierarchy row to make it a child
+of that object. Both placement commands support Undo.
+
+To assign a mesh to an existing object, select the object and choose its file
+in **Mesh Renderer → Geometry**. Click **Apply**, then save the scene.
 
 ## Open a v23 scene
 

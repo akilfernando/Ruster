@@ -199,7 +199,7 @@ impl ComponentWorkspace {
                 _ => return Err(invalid()),
             };
             let id = self
-                .create_object(Some(id), name, geometry)
+                .create_object(Some(id), name, geometry, None)
                 .map_err(|error| ("invalid_arguments", error.to_string()))?;
             return Ok(json!({"object_id":id, "changed":true, "dirty":self.session.is_dirty()}));
         }

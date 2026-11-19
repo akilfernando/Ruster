@@ -30,6 +30,10 @@ use capture::PaintedViewport;
 #[path = "component_mcp.rs"]
 mod mcp;
 
+#[path = "component_assets.rs"]
+pub(super) mod asset_panel;
+use asset_panel::AssetDrag;
+
 const RUNTIME_GENERATION: u64 = 1;
 
 struct HierarchyDrag {
@@ -143,6 +147,7 @@ pub(super) struct ComponentWorkspace {
     path: PathBuf,
     assets: Option<rot_assets::AssetStore>,
     asset_error: Option<String>,
+    asset_browser: asset_panel::Browser,
     #[cfg(target_os = "linux")]
     asset_watcher: Option<super::project_assets::ProjectAssets>,
     runtime: RuntimeUi,
@@ -216,6 +221,7 @@ impl ComponentWorkspace {
             path,
             assets,
             asset_error,
+            asset_browser: Default::default(),
             #[cfg(target_os = "linux")]
             asset_watcher: None,
             runtime: RuntimeUi::default(),
@@ -253,6 +259,9 @@ impl ComponentWorkspace {
             #[cfg(unix)]
             revoke_ai_connection: false,
         };
+        if let Some(assets) = &editor.assets {
+            editor.asset_browser.refresh(assets, Vec::new(), &[]);
+        }
         editor.select(
             editor
                 .session
@@ -305,11 +314,15 @@ impl ComponentWorkspace {
             .and_then(|watcher| watcher.take_update())
         {
             match update {
-                Ok((assets, diagnostics)) => {
-                    self.meshes = assets.mesh_snapshots();
-                    self.textures = assets.texture_snapshots();
-                    self.assets = Some(assets);
-                    self.asset_error = diagnostics.into_iter().next();
+                Ok(snapshot) => {
+                    self.asset_browser
+                        .refresh(&snapshot.store, snapshot.folders, &snapshot.issues);
+                    self.meshes = snapshot.store.mesh_snapshots();
+                    self.textures = snapshot.store.texture_snapshots();
+                    self.assets = Some(snapshot.store);
+                    self.asset_error = snapshot
+                        .warning
+                        .or_else(|| snapshot.issues.first().map(ToString::to_string));
                 }
                 Err(error) => self.asset_error = Some(error),
             }
@@ -376,6 +389,7 @@ impl ComponentWorkspace {
     }
 
     fn select(&mut self, id: Option<String>) {
+        self.asset_browser.selected = None;
         self.selection.clear();
         self.selection.extend(id.iter().cloned());
         self.selection_anchor = id;
@@ -408,6 +422,7 @@ impl ComponentWorkspace {
     }
 
     fn select_row(&mut self, row: usize, modifiers: egui::Modifiers) {
+        self.asset_browser.selected = None;
         let objects = &self.session.scene().objects;
         let id = objects[self.rows[row].0].id.clone();
         let additive = modifiers.command || modifiers.ctrl;
@@ -616,7 +631,7 @@ impl ComponentWorkspace {
         if !self.apply() {
             return;
         }
-        match self.create_object(None, name, geometry) {
+        match self.create_object(None, name, geometry, None) {
             Ok(_) => self.error = None,
             Err(error) => self.error = Some(error.to_string()),
         }
@@ -627,6 +642,7 @@ impl ComponentWorkspace {
         requested_id: Option<&str>,
         name: &str,
         geometry: Option<Geometry>,
+        parent: Option<String>,
     ) -> Result<String, rot_scene::SceneError> {
         let used: HashSet<_> = self
             .session
@@ -681,7 +697,7 @@ impl ComponentWorkspace {
             id: id.clone(),
             name: name.into(),
             enabled: true,
-            parent: None,
+            parent,
             transform: Transform::default(),
             components,
         };
@@ -897,6 +913,15 @@ impl ComponentWorkspace {
                 self.build.open(&self.path, &self.session.scene().id);
                 return;
             }
+            Action::ToggleAssets => {
+                self.asset_browser.open = !self.asset_browser.open;
+                return;
+            }
+            Action::FindContent => {
+                self.asset_browser.open = true;
+                self.asset_browser.focus_search = true;
+                return;
+            }
             Action::Save => {
                 self.save();
                 return;
@@ -1079,7 +1104,10 @@ impl ComponentWorkspace {
                 rot_app::hud::paint_hud(ui.painter(), rect, hud, rows, mode);
             }
         } else if !blocked {
-            if let Some(ids) = interaction.box_selection.filter(|_| self.apply()) {
+            if let Some(asset) = AssetDrag::released(ui, &interaction.response) {
+                self.place_asset(&asset, None);
+            } else if let Some(ids) = interaction.box_selection.filter(|_| self.apply()) {
+                self.asset_browser.selected = None;
                 self.selection = ids.into_iter().collect();
                 self.selection_anchor = None;
                 self.rebuild_draft();
@@ -1156,8 +1184,12 @@ impl ComponentWorkspace {
                     }
                     self.view_menu(ui);
                 });
-                #[cfg(unix)]
+                editor_theme::text_menu(ui, "Assets", |ui| {
+                    self.menu_action(ui, Action::FindContent);
+                });
                 editor_theme::text_menu(ui, "Window", |ui| {
+                    self.menu_action(ui, Action::ToggleAssets);
+                    #[cfg(unix)]
                     if ui.button(Action::AiConnection.label()).clicked() {
                         self.request_connection = true;
                         ui.close();
@@ -1195,6 +1227,7 @@ impl ComponentWorkspace {
                 }
             });
         }
+        self.show_assets(ui, blocked);
         let hierarchy_limit = ui.available_width() * 0.26;
         let inspector_limit = ui.available_width() * 0.34;
         egui::Panel::left("component_hierarchy")
@@ -1209,6 +1242,7 @@ impl ComponentWorkspace {
                 let root = ui
                     .selectable_label(self.selection.is_empty(), Text::ComponentSceneRoot.plain());
                 let mut selected = root.clicked().then_some(None);
+                let mut placed = AssetDrag::released(ui, &root).map(|asset| (asset, None));
                 let mut deleted = None;
                 let mut view_change = None;
                 let revision = self.session.revision();
@@ -1249,6 +1283,9 @@ impl ComponentWorkspace {
                                         revision,
                                         object_id: object.id.clone(),
                                     });
+                                }
+                                if let Some(asset) = AssetDrag::released(ui, &response) {
+                                    placed = Some((asset, Some(object.id.clone())));
                                 }
                                 if let Some(drop) = hierarchy_drop(
                                     ui,
@@ -1304,7 +1341,9 @@ impl ComponentWorkspace {
                         }
                     },
                 );
-                if let Some((flag, set, id)) = view_change {
+                if let Some((asset, parent)) = placed.filter(|_| !blocked) {
+                    self.place_asset(&asset, parent);
+                } else if let Some((flag, set, id)) = view_change {
                     self.set_view_flag(flag, set, vec![id]);
                 } else if let Some((id, destination)) = moved {
                     self.move_in_hierarchy(Some(&id), destination);
@@ -1323,6 +1362,14 @@ impl ComponentWorkspace {
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 ui.heading(Text::ComponentInspector.plain());
+                if let Some(id) = &self.asset_browser.selected {
+                    let can_place =
+                        !blocked && !self.runtime.in_play_mode() && self.meshes.contains_key(id);
+                    if let Some(asset) = self.asset_browser.inspect(ui, can_place) {
+                        self.place_asset(&asset, None);
+                    }
+                    return;
+                }
                 if self.runtime.in_play_mode() {
                     ui.horizontal_wrapped(|ui| {
                         ui.selectable_value(
@@ -1722,6 +1769,13 @@ mod tests {
     #[test]
     fn hierarchy_drag_reparents_and_preserves_world_pose() {
         let directory = tempfile::tempdir().unwrap();
+        let assets = directory.path().join("Assets");
+        std::fs::create_dir(&assets).unwrap();
+        std::fs::write(
+            assets.join("Arrow.obj"),
+            "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+        )
+        .unwrap();
         let path = directory.path().join("scene.json");
         let scene =
             ComponentScene::from_legacy(&Session::new(Scene::empty("scene")).unwrap()).unwrap();
@@ -1807,6 +1861,18 @@ mod tests {
             Text::ComponentSceneRoot.plain(),
         );
         assert_eq!(editor.session.scene(), &original);
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene(), &reparented);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while editor.assets_loading() && std::time::Instant::now() < deadline {
+            editor.poll_runtime(&ctx);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(editor.meshes.len(), 1);
+        drag(&mut editor, "Arrow.obj", &original.objects[0].name);
+        let placed = &editor.session.scene().objects[2];
+        assert_eq!(placed.parent.as_deref(), Some(parent));
+        assert_eq!(placed.name, "Arrow");
         editor.command(Action::Undo);
         assert_eq!(editor.session.scene(), &reparented);
         assert!(editor.save());

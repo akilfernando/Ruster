@@ -36,6 +36,7 @@ pub use mutations::{
     AssetAdoption, AssetCompletion, AssetMutation, AssetOutcome, AssetRequest, AssetStateIdentity,
     PreparedAsset,
 };
+pub use project_files::ProjectFileIssue;
 pub use texture::{
     decode_png, decode_png_with_role, validate_texture, Texture, TextureMip, TextureRole,
     MAX_TEXTURE_BYTES, MAX_TEXTURE_EDGE, MAX_TEXTURE_RESOLVED_BYTES, MAX_TEXTURE_SOURCE_BYTES,

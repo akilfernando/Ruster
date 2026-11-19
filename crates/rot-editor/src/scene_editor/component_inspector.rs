@@ -219,7 +219,7 @@ fn mesh_fields(
     materials: &BTreeMap<String, OpaqueMaterial>,
 ) {
     ui_kit::property_row(ui, Text::ComponentGeometry.plain(), |ui| {
-        egui::ComboBox::from_id_salt("geometry")
+        let field = egui::ComboBox::from_id_salt("geometry")
             .width(ui.available_width())
             .truncate()
             .selected_text(geometry_name(geometry, assets))
@@ -228,7 +228,14 @@ fn mesh_fields(
                     let label = geometry_name(&choice, assets).to_owned();
                     ui.selectable_value(geometry, choice, label);
                 }
-            });
+            })
+            .response;
+        if let Some(choice) =
+            super::component_workspace::asset_panel::AssetDrag::released(ui, &field)
+                .and_then(|drag| drag.geometry(assets, meshes))
+        {
+            *geometry = choice;
+        }
     });
     ui_kit::property_row(ui, Text::ComponentMaterial.plain(), |ui| {
         egui::ComboBox::from_id_salt("material")

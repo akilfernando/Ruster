@@ -13,6 +13,29 @@ use std::sync::Arc;
 
 const METADATA_EXTENSION: &str = ".rotmeta";
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectFileIssue {
+    pub path: String,
+    pub status: AssetStatus,
+    pub message: String,
+}
+
+impl ProjectFileIssue {
+    fn invalid(path: impl Into<String>, error: impl std::fmt::Display) -> Self {
+        Self {
+            path: path.into(),
+            status: AssetStatus::Invalid,
+            message: error.to_string(),
+        }
+    }
+}
+
+impl std::fmt::Display for ProjectFileIssue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.path, self.message)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Metadata {
@@ -78,6 +101,17 @@ impl AssetStore {
         changed: &BTreeSet<PathBuf>,
         active: impl Fn() -> bool,
     ) -> Vec<String> {
+        self.reconcile_project_files(changed, active)
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    pub fn reconcile_project_files(
+        &mut self,
+        changed: &BTreeSet<PathBuf>,
+        active: impl Fn() -> bool,
+    ) -> Vec<ProjectFileIssue> {
         let changed = |source: &str| {
             let source = Path::new(source);
             changed.iter().any(|path| source.starts_with(path))
@@ -93,7 +127,7 @@ impl AssetStore {
             let path = match confined_path(&self.root, &relative, true) {
                 Ok(path) => path,
                 Err(err) => {
-                    diagnostics.push(format!("{relative}: {err}"));
+                    diagnostics.push(ProjectFileIssue::invalid(&relative, err));
                     continue;
                 }
             };
@@ -101,7 +135,7 @@ impl AssetStore {
                 Ok(entries) => entries,
                 Err(err) if err.kind() == ErrorKind::NotFound => continue,
                 Err(err) => {
-                    diagnostics.push(format!("{relative}: {err}"));
+                    diagnostics.push(ProjectFileIssue::invalid(&relative, err));
                     continue;
                 }
             };
@@ -110,7 +144,7 @@ impl AssetStore {
                 let (name, kind) = match result {
                     Ok(result) => result,
                     Err(err) => {
-                        diagnostics.push(format!("{relative}: {err}"));
+                        diagnostics.push(ProjectFileIssue::invalid(&relative, err));
                         continue;
                     }
                 };
@@ -172,7 +206,7 @@ impl AssetStore {
                         *sidecar_ids.entry(entry.id).or_default() += 1;
                     }
                 }
-                Err(error) => diagnostics.push(format!("{sidecar}: {error}")),
+                Err(error) => diagnostics.push(ProjectFileIssue::invalid(sidecar, error)),
             }
         }
         let mut candidates = Vec::with_capacity(sources.len());
@@ -188,7 +222,7 @@ impl AssetStore {
                     }
                     candidates.push((source, importer, metadata));
                 }
-                Err(err) => diagnostics.push(format!("{source}: {err}")),
+                Err(err) => diagnostics.push(ProjectFileIssue::invalid(source, err)),
             }
         }
         for (source, importer, metadata) in candidates {
@@ -199,7 +233,7 @@ impl AssetStore {
             if let Err(err) =
                 self.reconcile_source(&source, importer, metadata, &sidecar_ids, refresh, &active)
             {
-                diagnostics.push(format!("{source}: {err}"));
+                diagnostics.push(ProjectFileIssue::invalid(source, err));
             }
         }
         let missing: Vec<_> = self
@@ -220,12 +254,19 @@ impl AssetStore {
             if let Err(err) =
                 self.publish_project_change(AssetMutation::Refresh { id: id.clone() }, &active)
             {
-                diagnostics.push(format!("{}: {err}", self.registry.assets[&id].source));
+                diagnostics.push(ProjectFileIssue::invalid(
+                    &self.registry.assets[&id].source,
+                    err,
+                ));
             }
         }
         for model in self.registry.models.values() {
             if model.source.starts_with("Assets/") && !self.root.join(&model.source).is_file() {
-                diagnostics.push(format!("{}: Source file is missing.", model.source));
+                diagnostics.push(ProjectFileIssue {
+                    path: model.source.clone(),
+                    status: AssetStatus::Missing,
+                    message: "Source file is missing.".into(),
+                });
             }
         }
         diagnostics
