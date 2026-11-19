@@ -1,6 +1,7 @@
-use super::{ComponentScene, ObjectNode};
+use super::{ComponentScene, ObjectHierarchy, ObjectNode};
 use crate::{SceneError, SceneLock, Transform};
 use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
@@ -17,7 +18,7 @@ pub struct ComponentSession {
 }
 
 struct HistoryEntry {
-    change: ObjectChange,
+    changes: Vec<ObjectChange>,
     state: u64,
 }
 
@@ -44,6 +45,18 @@ impl ObjectChange {
             },
         }
     }
+}
+
+fn apply_changes(
+    changes: impl IntoIterator<Item = ObjectChange>,
+    objects: &mut Vec<ObjectNode>,
+) -> Vec<ObjectChange> {
+    let mut inverse: Vec<_> = changes
+        .into_iter()
+        .map(|change| change.apply(objects))
+        .collect();
+    inverse.reverse();
+    inverse
 }
 
 impl ComponentSession {
@@ -132,7 +145,50 @@ impl ComponentSession {
                 object,
             },
         };
-        self.commit(change)
+        self.commit([change])
+    }
+
+    /// Apply related object edits together, with one revision and Undo entry.
+    /// The input supplies local transforms and may refer to other objects in
+    /// this edit. Each object ID may appear at most once.
+    pub fn put_objects(
+        &mut self,
+        expected: u64,
+        objects: Vec<ObjectNode>,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected)?;
+        let existing: HashMap<_, _> = self
+            .scene
+            .objects
+            .iter()
+            .enumerate()
+            .map(|(index, object)| (object.id.as_str(), index))
+            .collect();
+        let mut seen = HashSet::with_capacity(objects.len());
+        for object in &objects {
+            if !seen.insert(object.id.as_str()) {
+                return Err(SceneError::Invalid(format!(
+                    "object {} occurs more than once in the edit",
+                    object.id
+                )));
+            }
+        }
+        let mut end = self.scene.objects.len();
+        let mut changes = Vec::new();
+        for object in objects {
+            match existing.get(object.id.as_str()).copied() {
+                Some(index) if self.scene.objects[index] == object => {}
+                Some(index) => changes.push(ObjectChange::Replace { index, object }),
+                None => {
+                    changes.push(ObjectChange::Insert { index: end, object });
+                    end += 1;
+                }
+            }
+        }
+        if changes.is_empty() {
+            return Ok(self.revision);
+        }
+        self.commit(changes)
     }
 
     /// Move an object while keeping its world matrix. Reject a move whose
@@ -160,7 +216,7 @@ impl ComponentSession {
             ))
         })?;
         object.parent = parent.map(str::to_owned);
-        self.commit(ObjectChange::Replace { index, object })
+        self.commit([ObjectChange::Replace { index, object }])
     }
 
     fn object_index(&self, id: &str) -> Result<usize, SceneError> {
@@ -175,7 +231,26 @@ impl ComponentSession {
     pub fn remove_object(&mut self, expected: u64, id: &str) -> Result<u64, SceneError> {
         self.check_revision(expected)?;
         let index = self.object_index(id)?;
-        self.commit(ObjectChange::Remove { index })
+        self.commit([ObjectChange::Remove { index }])
+    }
+
+    /// Remove the object and its descendants in one edit. References from
+    /// outside the subtree still have to validate after removal.
+    pub fn remove_subtree(&mut self, expected: u64, id: &str) -> Result<u64, SceneError> {
+        self.check_revision(expected)?;
+        let root = self.object_index(id)?;
+        let hierarchy = ObjectHierarchy::build(&self.scene.objects)?;
+        let mut remove = vec![false; self.scene.objects.len()];
+        for index in hierarchy.order {
+            remove[index] =
+                index == root || hierarchy.parents[index].is_some_and(|parent| remove[parent]);
+        }
+        let changes = remove
+            .into_iter()
+            .enumerate()
+            .rev()
+            .filter_map(|(index, remove)| remove.then_some(ObjectChange::Remove { index }));
+        self.commit(changes)
     }
 
     fn check_revision(&self, expected: u64) -> Result<(), SceneError> {
@@ -189,18 +264,23 @@ impl ComponentSession {
         }
     }
 
-    fn commit(&mut self, change: ObjectChange) -> Result<u64, SceneError> {
+    fn commit(
+        &mut self,
+        changes: impl IntoIterator<Item = ObjectChange>,
+    ) -> Result<u64, SceneError> {
         let next = self
             .revision
             .checked_add(1)
             .ok_or(SceneError::RevisionOverflow)?;
-        let inverse = change.apply(&mut self.scene.objects);
+        let inverse = apply_changes(changes, &mut self.scene.objects);
         if let Err(error) = self.scene.validate() {
-            inverse.apply(&mut self.scene.objects);
+            for change in inverse {
+                change.apply(&mut self.scene.objects);
+            }
             return Err(error);
         }
         self.undo.push(HistoryEntry {
-            change: inverse,
+            changes: inverse,
             state: self.state,
         });
         self.redo.clear();
@@ -230,7 +310,7 @@ impl ComponentSession {
         };
         let entry = from.pop().ok_or(empty)?;
         to.push(HistoryEntry {
-            change: entry.change.apply(&mut self.scene.objects),
+            changes: apply_changes(entry.changes, &mut self.scene.objects),
             state: std::mem::replace(&mut self.state, entry.state),
         });
         self.revision = next;
@@ -355,6 +435,44 @@ mod tests {
         std::fs::write(&path, &changed).unwrap();
         assert!(matches!(reopened.save(&path), Err(SceneError::Conflict)));
         assert_eq!(std::fs::read(&path).unwrap(), changed);
+    }
+
+    #[test]
+    fn grouped_edits_admit_the_final_hierarchy_and_restore_order() {
+        let scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let mut session = ComponentSession::new(scene.clone()).unwrap();
+        let root = ObjectNode {
+            id: "root".into(),
+            name: "Root".into(),
+            enabled: true,
+            parent: None,
+            transform: Transform::default(),
+            components: Vec::new(),
+        };
+        let mut left = scene.objects[0].clone();
+        left.parent = Some(root.id.clone());
+        let mut right = scene.objects[2].clone();
+        right.parent = Some(root.id.clone());
+        assert!(session
+            .put_objects(0, vec![left.clone(), right.clone()])
+            .is_err());
+        assert_eq!(session.scene(), &scene);
+        assert_eq!(session.revision(), 0);
+        assert!(matches!(session.undo(0), Err(SceneError::NoUndo)));
+
+        assert_eq!(session.put_objects(0, vec![left, right, root]).unwrap(), 1);
+        let grouped = session.scene().clone();
+        assert_eq!(session.undo(1).unwrap(), 2);
+        assert_eq!(session.scene(), &scene);
+        assert_eq!(session.redo(2).unwrap(), 3);
+        assert_eq!(session.scene(), &grouped);
+
+        assert_eq!(session.remove_subtree(3, "root").unwrap(), 4);
+        assert_eq!(session.scene().objects, [scene.objects[1].clone()]);
+        assert_eq!(session.undo(4).unwrap(), 5);
+        assert_eq!(session.scene(), &grouped);
+        assert_eq!(session.redo(5).unwrap(), 6);
+        assert_eq!(session.scene().objects, [scene.objects[1].clone()]);
     }
 
     #[test]
