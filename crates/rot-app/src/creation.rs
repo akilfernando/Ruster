@@ -336,7 +336,7 @@ impl CreationManifest {
         self.validate()?;
         let bytes = root.read(&self.scene, rot_scene::MAX_FILE_BYTES as usize)?;
         let session =
-            rot_scene::Session::from_snapshot_bytes(&bytes).map_err(|error| error.to_string())?;
+            rot_scene::Session::from_runtime_snapshot(&bytes).map_err(|error| error.to_string())?;
         let animated = session.loaded_format_version() >= rot_scene::ANIMATION_FORMAT_VERSION;
         if animated != (self.version >= VERSION) {
             return Err("Scene22 imported_transform_animation requires descriptor version 7, and descriptor7 requires Scene22".into());

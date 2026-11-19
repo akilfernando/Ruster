@@ -33,7 +33,7 @@ pub fn session_tick_duration(session: &Session) -> Duration {
 pub fn read_session(path: &Path) -> Result<Session, String> {
     let bytes = rot_assets::read_regular_file(path, rot_scene::MAX_FILE_BYTES as usize)
         .map_err(|e| format!("Scene resource {}: {e}", path.display()))?;
-    Session::from_snapshot_bytes(&bytes)
+    Session::from_runtime_snapshot(&bytes)
         .map_err(|e| format!("Scene resource {}: {e}", path.display()))
 }
 

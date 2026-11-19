@@ -17,6 +17,8 @@ use crate::{
     LightKind, Lighting, OpaqueMaterial, PlayerView, Primitive, SceneError, Session, Transform,
 };
 
+#[path = "component_behavior.rs"]
+mod behavior;
 #[path = "component_session.rs"]
 mod session;
 pub use session::ComponentSession;

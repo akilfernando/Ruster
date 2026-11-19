@@ -1182,6 +1182,28 @@ fn relocated_creation_plays_imported_clip_and_pins_it_for_play_checks() {
     );
     assert_eq!(fs::read(resources.join("scene.json")).unwrap(), authored);
 
+    let mut components = Vec::new();
+    rot_scene::component_scene::ComponentScene::from_legacy(&session)
+        .unwrap()
+        .write_json(&mut components)
+        .unwrap();
+    let scene_path = resources.join("scene.json");
+    fs::write(&scene_path, &components).unwrap();
+    let migrated_run = cli(&["--creation", "app.json", "--headless", "--ticks", "60"]);
+    assert!(
+        migrated_run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&migrated_run.stderr)
+    );
+    let migrated: serde_json::Value = serde_json::from_slice(&migrated_run.stdout).unwrap();
+    assert_eq!(migrated["tick"], "60");
+    assert_eq!(
+        migrated["runtime_scene"]["objects"][0]["transform"],
+        output["runtime_scene"]["objects"][0]["transform"]
+    );
+    assert_eq!(fs::read(&scene_path).unwrap(), components);
+    fs::write(&scene_path, &authored).unwrap();
+
     let pins = BTreeMap::from([(
         "glb-clip-swing".to_owned(),
         rot_assets::ResourcePin::clip(clip),

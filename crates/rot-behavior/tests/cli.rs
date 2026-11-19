@@ -67,3 +67,42 @@ fn headless_reset_run_and_contextual_failure_never_modify_authored_file() {
     assert_eq!(failed["error"]["source_hash"].as_str().unwrap().len(), 64);
     assert_eq!(std::fs::read(&path).unwrap(), before);
 }
+
+#[test]
+fn migrated_motion_lab_keeps_the_runtime_observation() {
+    use rot_scene::component_scene::ComponentScene;
+    use std::{fs, process::Command};
+
+    let temp = tempfile::tempdir().unwrap();
+    let legacy_path = temp.path().join("legacy.json");
+    let component_path = temp.path().join("components.json");
+    let legacy = include_bytes!("../../../examples/motion-lab/resources/generic.scene.json");
+    fs::write(&legacy_path, legacy).unwrap();
+    let session = rot_scene::Session::from_snapshot_bytes(legacy).unwrap();
+    ComponentScene::from_legacy(&session)
+        .unwrap()
+        .save_new(&component_path)
+        .unwrap();
+    let before = fs::read(&component_path).unwrap();
+    let run = |path: &std::path::Path| {
+        let result = Command::new(env!("CARGO_BIN_EXE_rot-behavior"))
+            .arg("run")
+            .arg(path)
+            .arg("16")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap()
+    };
+    let expected = run(&legacy_path);
+    let actual = run(&component_path);
+    assert_eq!(actual["scene"], expected["scene"]);
+    assert_eq!(actual["runtime_state"], expected["runtime_state"]);
+    assert_eq!(actual["enabled_bindings"], expected["enabled_bindings"]);
+    assert_eq!(actual["tick"], expected["tick"]);
+    assert_eq!(fs::read(&component_path).unwrap(), before);
+}

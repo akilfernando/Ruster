@@ -1,9 +1,11 @@
 //! Optional headless behavior consumer; project files are never modified.
 use rot_behavior::{Diagnostic, Engine, Limits};
-use rot_scene::Session;
+use rot_scene::component_scene::{self, ComponentScene};
+use rot_scene::{SceneError, Session};
 use serde_json::{json, Value};
+use std::path::Path;
 
-const HELP: &str = "Rot Engine behavior — provisional Lua5.4 runtime\n\nUsage:\n  rot-behavior check SCENE.json\n  rot-behavior run SCENE.json TICKS [DT]\n\nTICKS:0..10000. DT:finite seconds in(0,1], default1/60.\nCheck performs versioned initialization and dt0 update validation. Run resets,\nthen completes atomic fixed steps. Disabled bindings are skipped. Both commands\nread supported scenes through Scene14 and emit JSON; authored files are never changed.\nErrors include source version/binding/object context where available.";
+const HELP: &str = "Rot Engine behavior — provisional Lua5.4 runtime\n\nUsage:\n  rot-behavior check SCENE.json\n  rot-behavior run SCENE.json TICKS [DT]\n\nTICKS:0..10000. DT:finite seconds in(0,1], default1/60.\nCheck performs versioned initialization and dt0 update validation. Run resets,\nthen completes atomic fixed steps. Disabled bindings are skipped. Both commands\nread legacy scenes and supported v23 component scenes and emit JSON; authored files are never changed.\nErrors include source version/binding/object context where available.";
 
 enum Failure {
     Input(String),
@@ -51,15 +53,30 @@ fn run(args: &[String]) -> Result<Option<Value>, Failure> {
         ..Limits::default()
     })
     .map_err(Failure::Behavior)?;
-    let session = Session::open(path).map_err(|e| input(&e.to_string()))?;
-    let mut runtime = engine
-        .reset(session.scene(), session.authoring())
-        .map_err(Failure::Behavior)?;
+    let file = Path::new(path);
+    let component_input;
+    let legacy_session;
+    let (scene, authoring) = match ComponentScene::open(file) {
+        Ok(components) => {
+            component_input = components
+                .behavior_input()
+                .map_err(|e| input(&e.to_string()))?;
+            (&component_input.0, &component_input.1)
+        }
+        Err(SceneError::UnsupportedVersion(version))
+            if version < u64::from(component_scene::FORMAT_VERSION) =>
+        {
+            legacy_session = Session::open(file).map_err(|e| input(&e.to_string()))?;
+            (legacy_session.scene(), legacy_session.authoring())
+        }
+        Err(error) => return Err(input(&error.to_string())),
+    };
+    let mut runtime = engine.reset(scene, authoring).map_err(Failure::Behavior)?;
     for _ in 0..ticks {
         engine.step(&mut runtime).map_err(Failure::Behavior)?;
     }
     Ok(Some(
-        json!({"scene_id":session.scene().id,"authored_revision":session.scene().revision.to_string(),"tick":runtime.tick().to_string(),"commit_revision":runtime.commit_revision().to_string(),"last_step_commit_revision":runtime.last_step_commit_revision().map(|value|value.to_string()),"fixed_dt":dt,"enabled_bindings":session.authoring().bindings.values().filter(|binding|binding.enabled).count(),"fingerprint":runtime.scene().fingerprint(),"scene":runtime.scene(),"runtime_state":runtime.state_report()}),
+        json!({"scene_id":scene.id,"authored_revision":scene.revision.to_string(),"tick":runtime.tick().to_string(),"commit_revision":runtime.commit_revision().to_string(),"last_step_commit_revision":runtime.last_step_commit_revision().map(|value|value.to_string()),"fixed_dt":dt,"enabled_bindings":authoring.bindings.values().filter(|binding|binding.enabled).count(),"fingerprint":runtime.scene().fingerprint(),"scene":runtime.scene(),"runtime_state":runtime.state_report()}),
     ))
 }
 fn main() {

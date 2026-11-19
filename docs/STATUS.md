@@ -56,6 +56,9 @@ API checks the original bytes before publishing. Automatic upgrades and
 editor/runtime integration remain open. The standalone `rot-render --scene`
 viewer opens v23 using a read-only geometry and lighting projection. It
 reports transforms that cannot be represented as legacy draw objects.
+The headless behavior CLI and Motion Lab packaged runner open representable
+v23 scenes through a temporary runtime projection. Editor editing and
+general component execution remain open.
 
 ## What a creator can do today
 
