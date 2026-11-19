@@ -131,7 +131,7 @@ pub(super) fn model_placement(
             objects.push(object);
         }
     }
-    // Every node is mapped so any of the model's clips can drive this copy.
+    // Map authored nodes so any of the model's clips can drive this copy.
     // A mesh node with children animates its Group, which carries the local TRS.
     let animation = model.clips.values().next().map(|clip| {
         let mut object_ids = objects.iter().map(|object| object.id.clone());
@@ -141,14 +141,17 @@ pub(super) fn model_placement(
             targets: model
                 .nodes
                 .iter()
-                .map(|(path, node)| {
+                .filter_map(|(path, node)| {
                     let object = node.mesh_id.as_ref().and_then(|_| object_ids.next());
+                    if ModelInfo::is_primitive_path(path) {
+                        return None;
+                    }
                     let id = groups_by_path
                         .get(path.as_str())
                         .cloned()
                         .or(object)
                         .expect("each node places a Group or an Object");
-                    (path.clone(), id)
+                    Some((path.clone(), id))
                 })
                 .collect(),
         }

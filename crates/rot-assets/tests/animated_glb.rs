@@ -11,6 +11,63 @@ fn catalog_version(root: &std::path::Path) -> u64 {
 // Unique boundary: clip structure is catalog identity, key data is a refreshable
 // resource of the accepted generation, and both survive a fresh open.
 #[test]
+fn split_primitives_keep_surface_ids_when_material_slots_reorder() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("rig.glb");
+    let fixture = AnimatedFixture {
+        split_materials: true,
+        ..Default::default()
+    };
+    fs::write(&source, animated_glb(fixture)).unwrap();
+    let mut store = AssetStore::open(root.path()).unwrap();
+    let first = store.import_glb_at(0, "rig", "rig.glb").unwrap();
+
+    assert_eq!(first.nodes.len(), 7);
+    assert_eq!(first.nodes["Rig/Arm"].mesh_id, None);
+    let surfaces: Vec<_> = first
+        .nodes
+        .values()
+        .filter(|node| node.parent.as_deref() == Some("Rig/Arm"))
+        .collect();
+    assert_eq!(
+        surfaces
+            .iter()
+            .map(|node| node.material.as_deref())
+            .collect::<Vec<_>>(),
+        [Some("Accent"), Some("Paint")]
+    );
+    let ids: std::collections::BTreeSet<_> = surfaces
+        .iter()
+        .map(|node| node.mesh_id.clone().unwrap())
+        .collect();
+    assert_eq!(ids.len(), 2);
+    assert!(first.clips["Swing"]
+        .targets
+        .iter()
+        .all(|target| target.node == "Rig/Arm"));
+    let snapshots = store.mesh_snapshots();
+    let packaged = store.export_snapshot(&ids).unwrap().read_sources().unwrap();
+    assert_eq!(packaged.len(), 2);
+
+    fs::write(
+        &source,
+        animated_glb(AnimatedFixture {
+            reverse_primitives: true,
+            ..fixture
+        }),
+    )
+    .unwrap();
+    let reordered = store.refresh_glb_at(1, "rig").unwrap();
+    assert_ne!(first.hash, reordered.hash);
+    assert_eq!(first.nodes, reordered.nodes);
+    assert_eq!(first.materials, reordered.materials);
+    assert_eq!(first.clips, reordered.clips);
+    assert_eq!(snapshots, store.mesh_snapshots());
+    let reopened = AssetStore::open(root.path()).unwrap();
+    assert_eq!(reopened.model("rig"), Some(&reordered));
+}
+
+#[test]
 fn clip_import_refresh_and_reopen_keep_stable_identity() {
     let root = tempfile::tempdir().unwrap();
     let source = root.path().join("rig.glb");

@@ -13,6 +13,8 @@ pub struct AnimatedFixture {
     pub rotation_interpolation: &'static str,
     /// glTF channel path for the first channel, normally `rotation`.
     pub rotation_path: &'static str,
+    pub split_materials: bool,
+    pub reverse_primitives: bool,
 }
 
 impl Default for AnimatedFixture {
@@ -23,6 +25,8 @@ impl Default for AnimatedFixture {
             clip_name: "Swing",
             rotation_interpolation: "LINEAR",
             rotation_path: "rotation",
+            split_materials: false,
+            reverse_primitives: false,
         }
     }
 }
@@ -58,7 +62,7 @@ pub fn animated_glb(fixture: AnimatedFixture) -> Vec<u8> {
     ]
     .concat();
     let bin: Vec<u8> = floats.into_iter().flat_map(f32::to_le_bytes).collect();
-    let mut document = serde_json::to_vec(&json!({
+    let mut document = json!({
         "asset":{"version":"2.0"},
         "scenes":[{"nodes":[0]}],
         "nodes":[
@@ -94,8 +98,24 @@ pub fn animated_glb(fixture: AnimatedFixture) -> Vec<u8> {
                 {"input":3,"output":4},
             ],
         }],
-    }))
-    .expect("fixture JSON");
+    });
+    if fixture.split_materials {
+        document["meshes"][0]["primitives"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"attributes":{"POSITION":0},"material":1}));
+        document["materials"].as_array_mut().unwrap().push(json!({
+            "name":"Accent",
+            "pbrMetallicRoughness":{"baseColorFactor":[0.1,0.6,0.8,1.0],"metallicFactor":0}
+        }));
+    }
+    if fixture.reverse_primitives {
+        document["meshes"][0]["primitives"]
+            .as_array_mut()
+            .unwrap()
+            .reverse();
+    }
+    let mut document = serde_json::to_vec(&document).expect("fixture JSON");
     document.resize(document.len().next_multiple_of(4), b' ');
     let total = 28 + document.len() + bin.len();
     let mut bytes = b"glTF".to_vec();

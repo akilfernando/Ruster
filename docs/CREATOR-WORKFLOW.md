@@ -51,8 +51,10 @@ in **Mesh Renderer → Geometry**. Click **Apply**, then save the scene.
 
 Double-click an imported GLB or choose **Place in Scene** to create an
 editable hierarchy. Placement copies the node names, local transforms, and
-materials into the scene. Any supported transform animation starts with the
-first imported clip. Place, Undo, and Redo operate on the hierarchy and its
+materials into the scene. A mesh with multiple triangle primitives gets
+one child per surface. Each surface keeps its material and inherits
+animation from the original node. Placement binds the first supported
+transform clip. Place, Undo, and Redo operate on the hierarchy and its
 materials together. An approved MCP client can use `scene_model_place` with
 the model ID and current asset revision.
 

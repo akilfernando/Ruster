@@ -160,12 +160,15 @@ Blender's default export samples every frame as LINEAR keys and is
 accepted; skinned armatures and shape keys are separate future work.
 
 The subset accepts one embedded GLB 2.0 scene and BIN buffer, positive
-bounded TRS, named paths with unique siblings, one triangle primitive on
-each mesh node, and named opaque single-sided nonmetallic materials with
-roughness in 0.08..=1. Nodes that become Groups require uniform scale;
+bounded TRS, named paths with unique siblings, and triangle primitives
+with named opaque single-sided nonmetallic materials with roughness in
+0.08..=1. With multiple primitives, each surface is a mesh child of the
+original node and keeps its material. Its resource ID follows the material
+and occurrence within that material. A primitive without a material uses
+the scene's default surface. Nodes that become Groups require uniform scale;
 mesh leaves can use nonuniform scale. The hierarchy may have at most eight
 Group levels including the placement root and groups that wrap a mesh with
-children. The resolved placement must stay within scene transform bounds.
+children or multiple surfaces. The resolved placement must stay within scene transform bounds.
 Base color uses an embedded compatible PNG with TEXCOORD_0, optional repeat
 or clamp on both axes, and supported matching min/mag/mipmap filters. The
 decoder rejects external URIs, extensions, skins, morphs, unsupported

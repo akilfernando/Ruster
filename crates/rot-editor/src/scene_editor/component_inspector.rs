@@ -240,18 +240,27 @@ fn mesh_fields(
         }
     });
     ui_kit::property_row(ui, Text::ComponentMaterial.plain(), |ui| {
+        let selected = material
+            .as_deref()
+            .map_or(Text::ComponentNoMaterial.plain(), |id| {
+                materials
+                    .get(id)
+                    .and_then(|surface| surface.name.as_deref())
+                    .unwrap_or(id)
+            });
         egui::ComboBox::from_id_salt("material")
             .width(ui.available_width())
             .truncate()
-            .selected_text(
-                material
-                    .as_deref()
-                    .unwrap_or(Text::ComponentNoMaterial.plain()),
-            )
+            .selected_text(selected)
             .show_ui(ui, |ui| {
                 ui.selectable_value(material, None, Text::ComponentNoMaterial.plain());
-                for id in materials.keys() {
-                    ui.selectable_value(material, Some(id.clone()), id);
+                for (id, surface) in materials {
+                    ui.selectable_value(
+                        material,
+                        Some(id.clone()),
+                        surface.name.as_deref().unwrap_or(id),
+                    )
+                    .on_hover_text(id);
                 }
             });
     });

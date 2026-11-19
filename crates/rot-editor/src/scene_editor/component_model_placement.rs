@@ -104,6 +104,7 @@ impl ComponentWorkspace {
                             looping: true,
                             targets: node_ids
                                 .iter()
+                                .filter(|(path, _)| !rot_assets::ModelInfo::is_primitive_path(path))
                                 .map(|(path, id)| ((*path).to_owned(), id.clone()))
                                 .collect(),
                         },
@@ -201,7 +202,10 @@ mod tests {
         fs::create_dir(&assets).unwrap();
         fs::write(
             assets.join("Sample.glb"),
-            animated_glb(AnimatedFixture::default()),
+            animated_glb(AnimatedFixture {
+                split_materials: true,
+                ..Default::default()
+            }),
         )
         .unwrap();
         let (store, warnings) = AssetStore::open_project(project.path()).unwrap();
@@ -234,7 +238,22 @@ mod tests {
         };
         assert_eq!(binding.clip, clip_id);
         assert!(!binding.targets.is_empty());
-        assert_eq!(placed.materials.len(), 1);
+        assert_eq!(placed.materials.len(), 2);
+        assert_eq!(binding.targets.len(), 3);
+        let arm = placed
+            .objects
+            .iter()
+            .find(|object| object.name == "Arm")
+            .unwrap();
+        assert_eq!(binding.targets["Rig/Arm"], arm.id);
+        assert_eq!(
+            placed
+                .objects
+                .iter()
+                .filter(|object| object.parent.as_deref() == Some(arm.id.as_str()))
+                .count(),
+            2
+        );
         assert!(placed.objects.iter().any(|object| {
             object.components.iter().any(|item| matches!(&item.kind,
                 Component::MeshRenderer { geometry: Geometry::Imported { asset }, material: Some(material), .. }

@@ -97,12 +97,18 @@ impl Registry {
         for (id, model) in &self.models {
             validate_id(id)?;
             validate_glb_path(&model.source)?;
+            let source_nodes = model
+                .nodes
+                .keys()
+                .filter(|path| !ModelInfo::is_primitive_path(path))
+                .count();
             if !valid_hash(&model.hash)
                 || &model.id != id
                 || !ids.insert(id)
                 || !sources.insert(&model.source)
-                || model.nodes.is_empty()
-                || model.nodes.len() > MAX_MODEL_ITEMS
+                || source_nodes == 0
+                || source_nodes > MAX_MODEL_ITEMS
+                || model.nodes.len() - source_nodes > MAX_MODEL_ITEMS
             {
                 return Err(error("invalid or duplicate static model catalog identity"));
             }

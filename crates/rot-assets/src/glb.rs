@@ -92,6 +92,12 @@ pub struct ModelMaterial {
 }
 
 impl ModelInfo {
+    /// Split surface nodes inherit the source node's transform and are never
+    /// direct targets of glTF animation channels.
+    pub fn is_primitive_path(path: &str) -> bool {
+        path.split('/').any(|segment| segment == " ")
+    }
+
     pub(super) fn resources(&self) -> impl Iterator<Item = (&str, AssetKind)> {
         self.nodes
             .values()
@@ -260,16 +266,16 @@ struct SourceMesh {
     primitives: Vec<Primitive>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Primitive {
     attributes: Attributes,
     indices: Option<usize>,
-    material: usize,
+    material: Option<usize>,
     mode: Option<u32>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Attributes {
     #[serde(rename = "POSITION")]
@@ -431,7 +437,11 @@ pub(super) fn resource_id(model: &str, domain: &str, key: &str) -> String {
 }
 
 impl Node {
-    fn placement(&self, parent: Option<&str>) -> Result<ModelNode, AssetError> {
+    fn placement(
+        &self,
+        parent: Option<&str>,
+        becomes_group: bool,
+    ) -> Result<ModelNode, AssetError> {
         let translation = self.translation.unwrap_or([0.; 3]);
         let scale = self.scale.unwrap_or([1.; 3]);
         let orientation = DQuat::from_array(self.rotation.unwrap_or([0., 0., 0., 1.]));
@@ -450,7 +460,7 @@ impl Node {
         }
         let (z, y, x) = orientation.normalize().to_euler(EulerRot::ZYX);
         let stored_scale = scale.map(|n| n as f32);
-        if (self.mesh.is_none() || !self.children.is_empty())
+        if becomes_group
             && (stored_scale[0] != stored_scale[1] || stored_scale[0] != stored_scale[2])
         {
             return Err(error("GLB nodes placed as Groups require positive uniform scale; apply scale in Blender before export"));
@@ -642,13 +652,7 @@ impl Decoder<'_> {
             .collect()
     }
 
-    fn mesh(&self, index: usize, textured: bool) -> Result<ModelResource, AssetError> {
-        let mesh = at(&self.doc.meshes, index, "mesh")?;
-        let [primitive] = mesh.primitives.as_slice() else {
-            return Err(error(
-                "GLB mesh nodes require exactly one triangle primitive",
-            ));
-        };
+    fn mesh(&self, primitive: Primitive, textured: bool) -> Result<ModelResource, AssetError> {
         if primitive.mode.unwrap_or(4) != 4 {
             return Err(error("GLB primitive mode must be TRIANGLES"));
         }
@@ -820,6 +824,28 @@ impl Decoder<'_> {
         Ok(name)
     }
 
+    fn attach_primitive(
+        &mut self,
+        node: &mut ModelNode,
+        path: &str,
+        primitive: Primitive,
+        material: Option<String>,
+    ) -> Result<(), AssetError> {
+        let textured = material.as_ref().is_some_and(|material| {
+            self.model.info.materials[material]
+                .base_color_texture
+                .is_some()
+        });
+        let resource = self
+            .mesh(primitive, textured)
+            .map_err(|failure| error(format!("GLB primitive at {path:?}: {failure}")))?;
+        let id = resource_id(&self.model.info.id, "mesh", path);
+        self.retain(id.clone(), resource)?;
+        node.mesh_id = Some(id);
+        node.material = material;
+        Ok(())
+    }
+
     fn node(
         &mut self,
         index: usize,
@@ -835,13 +861,24 @@ impl Decoder<'_> {
         if self.model.info.nodes.contains_key(&path) {
             return Err(error(format!("duplicate GLB sibling path {path:?}")));
         }
-        let becomes_group = node.mesh.is_none() || !node.children.is_empty();
+        let primitives = node
+            .mesh
+            .map(|mesh| at(&self.doc.meshes, mesh, "mesh"))
+            .transpose()?
+            .map_or(&[][..], |mesh| &mesh.primitives);
+        if node.mesh.is_some() && primitives.is_empty() {
+            return Err(error(format!(
+                "GLB mesh on node {path:?} has no primitives"
+            )));
+        }
+        let split = primitives.len() > 1;
+        let becomes_group = split || node.mesh.is_none() || !node.children.is_empty();
         let group_levels = 1 + ancestors.len() + usize::from(becomes_group);
         if group_levels > MAX_GROUP_LEVELS {
             return Err(error(format!("GLB node {path:?} exceeds eight Group levels with the placement root; simplify the source hierarchy")));
         }
         let mut definition = node
-            .placement(parent)
+            .placement(parent, becomes_group)
             .map_err(|e| error(format!("GLB node {path:?}: {e}")))?;
         let local = PlacementPose::from_local(&definition);
         let world = ancestors
@@ -852,22 +889,35 @@ impl Decoder<'_> {
             .validate_world()
             .map_err(|e| error(format!("GLB node {path:?}: {e}")))?;
         let children = node.children.clone();
-        if let Some(i) = node.mesh {
-            let mesh = at(&self.doc.meshes, i, "mesh")?;
-            let [primitive] = mesh.primitives.as_slice() else {
-                return Err(error(
-                    "GLB mesh nodes require exactly one triangle primitive",
-                ));
-            };
-            let material = self.material(primitive.material)?;
-            let textured = self.model.info.materials[&material]
-                .base_color_texture
-                .is_some();
-            let resource = self.mesh(i, textured)?;
-            let id = resource_id(&self.model.info.id, "mesh", &path);
-            self.retain(id.clone(), resource)?;
-            definition.mesh_id = Some(id);
-            definition.material = Some(material);
+        let primitives = primitives.to_vec();
+        let mut occurrences = BTreeMap::new();
+        for primitive in primitives {
+            let material = primitive
+                .material
+                .map(|index| self.material(index))
+                .transpose()?;
+            if split {
+                let key = material.as_deref().unwrap_or(" ");
+                let number = occurrences.entry(material.clone()).or_insert(0);
+                *number += 1;
+                // No authored path can contain a whitespace-only name.
+                // Keep the original node as the target of transform animation.
+                let child_path = format!("{path}/ /{key}/{number}");
+                let child_name = material.as_deref().unwrap_or("Primitive").to_owned();
+                let mut child = ModelNode {
+                    name: child_name,
+                    parent: Some(path.clone()),
+                    translation: [0.; 3],
+                    rotation: [0.; 3],
+                    scale: [1.; 3],
+                    mesh_id: None,
+                    material: None,
+                };
+                self.attach_primitive(&mut child, &child_path, primitive, material)?;
+                self.model.info.nodes.insert(child_path, child);
+            } else {
+                self.attach_primitive(&mut definition, &path, primitive, material)?;
+            }
         }
         self.model.info.nodes.insert(path.clone(), definition);
         self.paths.insert(index, path.clone());
