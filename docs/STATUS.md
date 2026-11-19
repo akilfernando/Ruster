@@ -53,7 +53,9 @@ The v23 session supports guarded object edits, world-preserving reparenting,
 Undo/Redo and conflict-checked saves. A 5,000-object chain resolves
 iteratively and round-trips a file over 1 MiB. The explicit atomic upgrade
 API checks the original bytes before publishing. Automatic upgrades and
-editor/runtime integration remain open.
+editor/runtime integration remain open. The standalone `rot-render --scene`
+viewer opens v23 using a read-only geometry and lighting projection. It
+reports transforms that cannot be represented as legacy draw objects.
 
 ## What a creator can do today
 

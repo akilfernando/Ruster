@@ -89,6 +89,29 @@ impl Pose {
         Ok(t)
     }
 }
+impl Transform {
+    /// Convert an affine matrix to stored TRS, rejecting shear and precision loss.
+    pub fn try_from_affine(matrix: DMat4) -> Result<Self, SceneError> {
+        let failure = || invalid("matrix cannot be represented by an authored transform");
+        let determinant = matrix.determinant();
+        if !determinant.is_finite() || determinant <= 0.0 {
+            return Err(failure());
+        }
+        let (scale, rotation, translation) = matrix.to_scale_rotation_translation();
+        let (z, y, x) = rotation.to_euler(EulerRot::ZYX);
+        let transform = Self {
+            translation: translation.as_vec3().to_array(),
+            rotation: [x as f32, y as f32, z as f32],
+            scale: scale.as_vec3().to_array(),
+        };
+        transform.validate()?;
+        if !close(matrix, Pose::from_local(&transform).matrix()) {
+            return Err(failure());
+        }
+        Ok(transform)
+    }
+}
+
 // Frozen per-element bound, separately checked for high precision and stored TRS.
 pub(crate) fn close(a: DMat4, b: DMat4) -> bool {
     a.to_cols_array()

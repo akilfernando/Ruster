@@ -1,4 +1,6 @@
 //! Standalone scene demonstration: shared renderer, no editor or MCP dependency.
+mod component_preview;
+
 use eframe::{
     egui,
     egui_wgpu::{WgpuSetup, WgpuSetupCreateNew},
@@ -245,9 +247,8 @@ fn run() -> Result<(), String> {
         })
         .unwrap_or_default();
     let mut scene = match options.path {
-        Some(path) => {
-            Scene::load(std::path::Path::new(&path)).map_err(|error| error.to_string())?
-        }
+        Some(path) => component_preview::open(std::path::Path::new(&path))
+            .map_err(|error| error.to_string())?,
         None => Scene::demo(),
     };
     if options.objects == Some(256) {
@@ -270,7 +271,9 @@ fn run() -> Result<(), String> {
             })
             .collect();
     }
-    scene.validate().map_err(|error| error.to_string())?;
+    if options.objects.is_some() {
+        scene.validate().map_err(|error| error.to_string())?;
+    }
     for object in &scene.objects {
         if let Some(id) = &object.mesh {
             if !meshes.contains_key(id) {

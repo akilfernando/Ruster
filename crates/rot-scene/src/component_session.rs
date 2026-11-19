@@ -1,9 +1,5 @@
 use super::{ComponentScene, ObjectNode};
-use crate::{
-    hierarchy::{close, Pose},
-    SceneError, SceneLock, Transform,
-};
-use glam::EulerRot;
+use crate::{SceneError, SceneLock, Transform};
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{self, Read, Seek, Write};
@@ -158,27 +154,11 @@ impl ComponentSession {
             Some(parent) => world[self.object_index(parent)?].inverse() * world[index],
             None => world[index],
         };
-        let determinant = local.determinant();
-        let unrepresentable = || {
-            SceneError::Invalid(
-                "cannot preserve the world transform under the requested parent".into(),
-            )
-        };
-        if !determinant.is_finite() || determinant <= 0.0 {
-            return Err(unrepresentable());
-        }
-        let (scale, rotation, translation) = local.to_scale_rotation_translation();
-        let (z, y, x) = rotation.to_euler(EulerRot::ZYX);
-        let transform = Transform {
-            translation: translation.as_vec3().to_array(),
-            rotation: [x as f32, y as f32, z as f32],
-            scale: scale.as_vec3().to_array(),
-        };
-        transform.validate()?;
-        if !close(local, Pose::from_local(&transform).matrix()) {
-            return Err(unrepresentable());
-        }
-        object.transform = transform;
+        object.transform = Transform::try_from_affine(local).map_err(|error| {
+            SceneError::Invalid(format!(
+                "cannot preserve the world transform under the requested parent: {error}"
+            ))
+        })?;
         object.parent = parent.map(str::to_owned);
         self.commit(ObjectChange::Replace { index, object })
     }
@@ -322,7 +302,7 @@ fn digest(mut input: impl Read) -> io::Result<[u8; 32]> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Scene, Session};
+    use crate::{hierarchy::close, Scene, Session};
 
     #[test]
     fn guarded_session_saves_reopens_and_restores_savepoint() {
