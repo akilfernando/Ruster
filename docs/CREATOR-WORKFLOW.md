@@ -33,8 +33,10 @@ object’s world transform. Drag to the top or bottom edge of a row to place
 the object before or after it. **Object → Move Up** and **Move Down** reorder
 the selection among its siblings. Ctrl-click toggles objects in the selection
 and Shift-click selects a range. Drag a selected row to move the selection
-together, or set its **Parent** in Inspector. Inspector also lets you change
-**Enabled** for the selection. **Object → Delete** removes selected objects
+together, or set its **Parent** in Inspector. Edit **Enabled**, individual
+Transform axes, or properties of shared components, then choose **Apply**.
+A dash or **Mixed** marks values that differ. An expression such as `+=1`
+adds 1 to each object's own numeric value. **Object → Delete** removes selected objects
 and their children together. **Edit → Undo** and **Redo** work until you close
 the scene.
 

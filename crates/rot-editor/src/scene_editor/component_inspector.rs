@@ -109,7 +109,7 @@ fn vector(
     submit
 }
 
-fn component_label(component: &Component) -> Text {
+pub(super) fn component_label(component: &Component) -> Text {
     match component {
         Component::Camera { .. } => Text::ComponentCamera,
         Component::Animator { .. } => Text::ComponentAnimator,
@@ -179,6 +179,28 @@ pub(super) fn components(
     submit
 }
 
+pub(super) fn geometry_name(geometry: &Geometry) -> &str {
+    match geometry {
+        Geometry::Cube => Action::CreateCube.label(),
+        Geometry::Primitive { shape } => shape.label(),
+        Geometry::Imported { asset } => asset,
+    }
+}
+
+pub(super) fn geometry_choices(meshes: &rot_app::MeshMap) -> impl Iterator<Item = Geometry> + '_ {
+    std::iter::once(Geometry::Cube)
+        .chain(
+            Primitive::ALL
+                .into_iter()
+                .map(|shape| Geometry::Primitive { shape }),
+        )
+        .chain(
+            meshes
+                .keys()
+                .map(|id| Geometry::Imported { asset: id.clone() }),
+        )
+}
+
 fn mesh_fields(
     ui: &mut egui::Ui,
     geometry: &mut Geometry,
@@ -188,22 +210,14 @@ fn mesh_fields(
     materials: &BTreeMap<String, OpaqueMaterial>,
 ) {
     ui_kit::property_row(ui, Text::ComponentGeometry.plain(), |ui| {
-        let geometry_name = match geometry {
-            Geometry::Cube => Action::CreateCube.label(),
-            Geometry::Primitive { shape } => shape.label(),
-            Geometry::Imported { asset } => asset.as_str(),
-        };
         egui::ComboBox::from_id_salt("geometry")
             .width(ui.available_width())
             .truncate()
-            .selected_text(geometry_name)
+            .selected_text(geometry_name(geometry))
             .show_ui(ui, |ui| {
-                ui.selectable_value(geometry, Geometry::Cube, Action::CreateCube.label());
-                for shape in Primitive::ALL {
-                    ui.selectable_value(geometry, Geometry::Primitive { shape }, shape.label());
-                }
-                for id in meshes.keys() {
-                    ui.selectable_value(geometry, Geometry::Imported { asset: id.clone() }, id);
+                for choice in geometry_choices(meshes) {
+                    let label = geometry_name(&choice).to_owned();
+                    ui.selectable_value(geometry, choice, label);
                 }
             });
     });

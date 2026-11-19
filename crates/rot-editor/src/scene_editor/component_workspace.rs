@@ -1,7 +1,8 @@
 //! The editor owns v23 scenes through ComponentSession. The viewport receives
 //! a disposable projection and cannot change the authored document.
 use super::{
-    component_inspector, component_view::Flag, hud_interaction, project_picker, OpenedScene,
+    component_inspector, component_multi::MultiInspector, component_view::Flag, hud_interaction,
+    project_picker, OpenedScene,
 };
 use crate::behavior_ui::{PlayShortcut, RuntimeSource, RuntimeUi};
 use crate::editor_theme;
@@ -151,6 +152,7 @@ pub(super) struct ComponentWorkspace {
     selection_anchor: Option<String>,
     selected_index: Option<usize>,
     draft: Option<ObjectNode>,
+    multi_draft: Option<MultiInspector>,
     component_picker: component_inspector::ComponentPicker,
     error: Option<String>,
     open_path: Option<String>,
@@ -209,6 +211,7 @@ impl ComponentWorkspace {
             selection: HashSet::new(),
             selection_anchor: None,
             draft: None,
+            multi_draft: None,
             component_picker: Default::default(),
             error,
             open_path: None,
@@ -283,6 +286,15 @@ impl ComponentWorkspace {
             None
         };
         self.draft = self.selected_index.map(|index| objects[index].clone());
+        self.multi_draft = if self.selection.len() > 1 {
+            MultiInspector::new(
+                objects
+                    .iter()
+                    .filter(|object| self.selection.contains(&object.id)),
+            )
+        } else {
+            None
+        };
     }
 
     fn select_row(&mut self, row: usize, modifiers: egui::Modifiers) {
@@ -339,6 +351,7 @@ impl ComponentWorkspace {
     fn draft_dirty(&self) -> bool {
         self.selected_index
             .is_some_and(|index| self.draft.as_ref() != self.session.scene().objects.get(index))
+            || self.multi_draft.as_ref().is_some_and(MultiInspector::dirty)
     }
 
     fn refresh(&mut self) {
@@ -440,10 +453,23 @@ impl ComponentWorkspace {
         if !self.draft_dirty() {
             return true;
         }
-        let Some(draft) = self.draft.clone() else {
+        let revision = self.session.revision();
+        let result = if let Some(draft) = self.draft.clone() {
+            self.session.put_object(revision, draft)
+        } else if let Some(draft) = &self.multi_draft {
+            let edits = self
+                .session
+                .scene()
+                .objects
+                .iter()
+                .filter(|object| self.selection.contains(&object.id))
+                .map(|object| draft.edit(object))
+                .collect::<Result<Vec<_>, _>>();
+            edits.and_then(|edits| self.session.put_objects(revision, edits))
+        } else {
             return true;
         };
-        match self.session.put_object(self.session.revision(), draft) {
+        match result {
             Ok(_) => {
                 self.error = None;
                 self.refresh();
@@ -533,11 +559,7 @@ impl ComponentWorkspace {
 
     fn delete(&mut self, hit: Option<&str>) {
         let ids = self.target_ids(hit);
-        if self
-            .draft
-            .as_ref()
-            .is_some_and(|draft| !ids.contains(&draft.id))
-            && !self.apply()
+        if self.draft_dirty() && ids.iter().all(|id| !self.selection.contains(id)) && !self.apply()
         {
             return;
         }
@@ -653,38 +675,18 @@ impl ComponentWorkspace {
             self.selection.len(),
             Text::ComponentObjectsSelected.plain()
         ));
-        let objects = &self.session.scene().objects;
-        let mut selected = objects
-            .iter()
-            .filter(|object| self.selection.contains(&object.id));
-        let first = selected.next().expect("a nonempty selection").enabled;
-        let mixed = selected.any(|object| object.enabled != first);
-        let mut enabled = first && !mixed;
-        if ui
-            .add(
-                egui::Checkbox::new(&mut enabled, Text::ComponentEnabled.plain())
-                    .indeterminate(mixed),
-            )
-            .changed()
-        {
-            let edits = objects
-                .iter()
-                .filter(|object| self.selection.contains(&object.id))
-                .cloned()
-                .map(|mut object| {
-                    object.enabled = enabled;
-                    object
-                })
-                .collect();
-            match self.session.put_objects(self.session.revision(), edits) {
-                Ok(_) => {
-                    self.error = None;
-                    self.refresh();
-                }
-                Err(error) => self.error = Some(error.to_string()),
-            }
-        }
+        let mut submit = self
+            .multi_draft
+            .as_mut()
+            .is_some_and(|draft| draft.header(ui));
         self.parent_ui(ui);
+        ui.separator();
+        if let Some(draft) = &mut self.multi_draft {
+            submit |= draft.components(ui, &self.meshes, &self.session.scene().materials);
+        }
+        if submit {
+            self.apply();
+        }
     }
 
     fn create_menu(&mut self, ui: &mut egui::Ui) {
@@ -777,7 +779,7 @@ impl ComponentWorkspace {
                 return;
             }
             Action::Undo if self.draft_dirty() => {
-                self.select(self.draft.as_ref().map(|object| object.id.clone()));
+                self.rebuild_draft();
                 self.error = None;
                 return;
             }
@@ -1161,54 +1163,68 @@ impl ComponentWorkspace {
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 ui.heading(Text::ComponentInspector.plain());
-                // Exceptionally wide fields should scroll within the Inspector,
-                // rather than expanding its frame into the viewport.
-                egui::ScrollArea::both()
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                        if self.selection.len() > 1 {
-                            self.multi_inspector(ui);
-                            return;
-                        }
-                        let mut submit = false;
-                        if let Some(draft) = &mut self.draft {
-                            ui.label(Text::ComponentName.plain());
-                            let response = ui.add(
-                                egui::TextEdit::singleline(&mut draft.name)
-                                    .desired_width(ui.available_width()),
-                            );
-                            submit |= response.lost_focus()
-                                && ui.input(|input| input.key_pressed(egui::Key::Enter));
-                            ui.checkbox(&mut draft.enabled, Text::ComponentEnabled.plain());
-                            ui.separator();
-                            submit |= component_inspector::transform(ui, draft);
-                        }
-                        if self.selected_index.is_some() {
-                            self.parent_ui(ui);
-                            ui.separator();
+                if self.multi_draft.is_some() {
+                    let body_height = ui.available_height()
+                        - crate::ui_kit::tokens::CONTROL_HEIGHT
+                        - ui.spacing().item_spacing.y;
+                    egui::ScrollArea::both()
+                        .max_height(body_height.max(0.0))
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| self.multi_inspector(ui));
+                    if ui
+                        .add_enabled(
+                            self.draft_dirty(),
+                            egui::Button::new(Text::ComponentApply.plain()),
+                        )
+                        .clicked()
+                    {
+                        self.apply();
+                    }
+                } else {
+                    // Wide fields scroll within the Inspector.
+                    egui::ScrollArea::both()
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            let mut submit = false;
                             if let Some(draft) = &mut self.draft {
-                                submit |= component_inspector::components(
-                                    ui,
-                                    draft,
-                                    &self.meshes,
-                                    &self.session.scene().materials,
+                                ui.label(Text::ComponentName.plain());
+                                let response = ui.add(
+                                    egui::TextEdit::singleline(&mut draft.name)
+                                        .desired_width(ui.available_width()),
                                 );
+                                submit |= response.lost_focus()
+                                    && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                                ui.checkbox(&mut draft.enabled, Text::ComponentEnabled.plain());
+                                ui.separator();
+                                submit |= component_inspector::transform(ui, draft);
                             }
-                            if ui
-                                .add_enabled(
-                                    self.draft_dirty(),
-                                    egui::Button::new(Text::ComponentApply.plain()),
-                                )
-                                .clicked()
-                                || submit
-                            {
-                                self.apply();
+                            if self.selected_index.is_some() {
+                                self.parent_ui(ui);
+                                ui.separator();
+                                if let Some(draft) = &mut self.draft {
+                                    submit |= component_inspector::components(
+                                        ui,
+                                        draft,
+                                        &self.meshes,
+                                        &self.session.scene().materials,
+                                    );
+                                }
+                                if ui
+                                    .add_enabled(
+                                        self.draft_dirty(),
+                                        egui::Button::new(Text::ComponentApply.plain()),
+                                    )
+                                    .clicked()
+                                    || submit
+                                {
+                                    self.apply();
+                                }
+                                if let Some(kind) = self.component_picker.show(ui) {
+                                    self.add_component(kind);
+                                }
                             }
-                            if let Some(kind) = self.component_picker.show(ui) {
-                                self.add_component(kind);
-                            }
-                        }
-                    });
+                        });
+                }
                 if !build_open
                     && !self.close_pending
                     && self.open_path.is_none()
