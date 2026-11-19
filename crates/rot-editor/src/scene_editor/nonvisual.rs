@@ -290,13 +290,12 @@ impl Host {
     pub(super) fn service_bridge(&mut self, ctx: &egui::Context) {
         #[cfg(unix)]
         self.poll_connection(ctx);
-        if self.editor.component.is_some() {
-            return;
-        }
         #[cfg(unix)]
         self.keep_listening(ctx);
         #[cfg(unix)]
-        self.grant_trusted_app();
+        if self.editor.component.is_none() {
+            self.grant_trusted_app();
+        }
         if self.input.bridge_serviced || self.input.close_requested {
             return;
         }
@@ -358,7 +357,10 @@ impl Host {
                 break;
             };
             self.editor.ai_wait = None;
-            if !op.ends_with("_inspect") && !self.editor.manipulation.active() {
+            if self.editor.component.is_none()
+                && !op.ends_with("_inspect")
+                && !self.editor.manipulation.active()
+            {
                 for _ in 0..8 {
                     if !self.editor.drafts() || !self.editor.apply() {
                         break;
@@ -387,6 +389,11 @@ impl Host {
                 if self.editor.ai_status.paused && !ai_indicator::read_only(op) {
                     // rot-mcp holds the call and asks again until resumed.
                     lease.respond(json!({"ok":false,"error":{"code":"ai_paused","message":"The creator paused AI edits."}}));
+                    return;
+                }
+                let token = self.editor.scene_guard_token(nonce);
+                if let Some(component) = &mut self.editor.component {
+                    lease.run_immediate(|| component.ai_command(&token, op, &args));
                     return;
                 }
                 step = ai_steps::label(op, &args, self.editor.session.scene());

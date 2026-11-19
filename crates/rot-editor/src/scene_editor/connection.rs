@@ -106,12 +106,21 @@ impl Host {
         if !editor.ai_listen || std::env::var_os("ROT_PROJECT_STARTUP").is_some() {
             return;
         }
-        let allowed =
-            editor.workspace.prefs.allow_ai_connections && editor.project_picker.is_none();
+        if editor
+            .component
+            .as_ref()
+            .is_some_and(|component| component.ai_transition_pending())
+        {
+            return;
+        }
+        let allowed = editor.component.as_ref().map_or_else(
+            || editor.workspace.prefs.allow_ai_connections && editor.project_picker.is_none(),
+            |component| component.ai_listening_allowed(),
+        );
         if let Some(bridge) = &mut self.bridge {
             // Refresh the record after Save As or when AI apps are turned off,
             // but never while an adapter holds the connection.
-            let stale = editor.ai_listen_scene.as_deref() != editor.session.path();
+            let stale = editor.ai_listen_scene.as_deref() != editor.ai_scene_path();
             if (stale || !allowed)
                 && bridge.pending_owner().is_none()
                 && bridge.authority().live()
@@ -146,6 +155,11 @@ impl Host {
             || self.editor.creation_export.busy()
             || self.editor.recovery_transition.is_some()
             || self.editor.close_in_progress()
+            || self
+                .editor
+                .component
+                .as_ref()
+                .is_some_and(|component| component.ai_transition_pending())
         {
             return Err("Wait for the old connection to close.".into());
         }
@@ -164,16 +178,16 @@ impl Host {
                 generation,
                 grant,
                 &crate::discovery::directory(),
-                self.editor.session.path(),
+                self.editor.ai_scene_path(),
                 Some(crate::trust::path()),
             )
         }
         .map_err(|e| e.to_string())?;
         self.editor.ai_listen_retry = None;
-        self.editor.ai_listen_scene = self.editor.session.path().map(Into::into);
+        self.editor.ai_listen_scene = self.editor.ai_scene_path().map(Into::into);
         let path = bridge.locator_path();
         self.editor.connection_authority = Some(bridge.authority());
-        self.workspace = if workspace {
+        self.workspace = if workspace && self.editor.component.is_none() {
             match workspace_attachment::WorkspaceAttachment::start(&self.editor, &bridge, ctx) {
                 Ok(workspace) => workspace,
                 Err(error) => {
@@ -255,7 +269,11 @@ impl Host {
             ),
             "bound" => (
                 "AI app connected",
-                "Imported assets are saved to the project at once, before Save.",
+                if self.editor.component.is_some() {
+                    "Scene edits share Undo."
+                } else {
+                    "Imported assets are saved to the project at once, before Save."
+                },
             ),
             _ => ("Connection state unavailable", ""),
         };

@@ -1812,6 +1812,7 @@ impl SceneEditor {
                 // Destination grants are revoked at initiation, never inherited.
                 // Old publications/adoption have drained before this boundary.
                 next.connection_incarnation = self.connection_incarnation.clone();
+                next.ai_listen = self.ai_listen;
                 next.retired_connection_receipts =
                     std::mem::take(&mut self.retired_connection_receipts);
                 next.creation_export = std::mem::replace(
@@ -2660,11 +2661,25 @@ impl SceneEditor {
         self.retire_asset_maps(0, crate::asset_worker::AssetMaps { meshes, textures });
     }
     fn document_label(&self) -> String {
+        #[cfg(unix)]
+        if let Some(component) = &self.component {
+            let (path, id, _) = component.ai_document();
+            return path
+                .file_stem()
+                .map_or_else(|| id.to_owned(), |name| name.to_string_lossy().into_owned());
+        }
         self.session
             .path()
             .and_then(|path| path.file_stem())
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| self.session.scene().id.clone())
+    }
+    #[cfg(unix)]
+    fn ai_scene_path(&self) -> Option<&std::path::Path> {
+        self.component
+            .as_ref()
+            .map(|component| component.ai_document().0)
+            .or_else(|| self.session.path())
     }
     fn remember_camera(&mut self) {
         if let (Some(path), Some(camera)) = (self.session.path(), self.navigation.camera) {
@@ -5484,10 +5499,14 @@ impl eframe::App for Host {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
         #[cfg(feature = "inspection")]
         asset_timing::install_pass_marker(ctx);
+        self.input.observe(raw, ctx);
         if self.editor.component.is_some() {
+            #[cfg(unix)]
+            if raw.viewport().close_requested() {
+                self.disconnect_adapter();
+            }
             return;
         }
-        self.input.observe(raw, ctx);
         if !raw.focused
             || raw
                 .events
@@ -5500,7 +5519,9 @@ impl eframe::App for Host {
     }
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.editor.component.is_some() {
-            self.service_bridge(ctx);
+            if !self.input.human_pending {
+                self.service_bridge(ctx);
+            }
             return;
         }
         if self
@@ -5520,13 +5541,36 @@ impl eframe::App for Host {
         self.logic_tick(ctx);
     }
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        #[cfg(unix)]
+        if self.editor.component.is_some() {
+            self.native_connection_ui(ui);
+            self.ai_prompt_ui(ui.ctx());
+            self.editor.ai_apps_ui(ui.ctx());
+        }
         if let Some(component) = &mut self.editor.component {
-            if let Some(document) = component.show(ui) {
+            let document = component.show(ui);
+            #[cfg(unix)]
+            let revoke = std::mem::take(&mut component.revoke_ai_connection);
+            #[cfg(unix)]
+            if std::mem::take(&mut component.request_connection) {
+                self.editor.ai_connection_requested = true;
+                ui.ctx().request_repaint();
+            }
+            if document.is_some() {
                 self.editor.workspace = component.take_workspace();
+            }
+            #[cfg(unix)]
+            if revoke {
+                self.disconnect_adapter();
+            }
+            if let Some(document) = document {
                 self.editor.component = None;
                 self.input = Default::default();
                 self.editor.open_document(document);
                 ui.ctx().request_repaint();
+            } else {
+                self.input.human_pending = false;
+                self.service_bridge(ui.ctx());
             }
             return;
         }
@@ -5677,8 +5721,10 @@ fn run_session(
         None
     };
     let mcp_enabled = std::env::var("ROT_MCP_ENABLE").as_deref() == Ok("1");
-    let save_grant = persistence_commands::SaveGrant::from_environment(mcp_enabled)?;
-    let creation_export = crate::creation_export::Controller::from_environment(mcp_enabled)?;
+    let legacy_destinations = mcp_enabled && component.is_none();
+    let save_grant = persistence_commands::SaveGrant::from_environment(legacy_destinations)?;
+    let creation_export =
+        crate::creation_export::Controller::from_environment(legacy_destinations)?;
     let options = scene_native_options();
     eframe::run_native(
         "Rot Engine Editor",

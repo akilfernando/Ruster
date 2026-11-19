@@ -35,12 +35,24 @@ impl Host {
     /// Supported local observation, including when no listener/adapter exists.
     /// Does not dispatch a tool, start a listener, approve or claim an owner.
     pub(super) fn native_scene_observation(&self) -> SceneObservation {
+        let (scene_id, revision) = self.editor.component.as_ref().map_or_else(
+            || {
+                (
+                    self.editor.session.scene().id.as_str(),
+                    self.editor.session.scene().revision,
+                )
+            },
+            |component| {
+                let (_, id, revision) = component.ai_document();
+                (id, revision)
+            },
+        );
         SceneObservation {
             session_token: self
                 .editor
                 .scene_guard_token(&self.editor.connection_incarnation),
-            revision: self.editor.session.scene().revision.to_string(),
-            scene_id: self.editor.session.scene().id.clone(),
+            revision: revision.to_string(),
+            scene_id: scene_id.to_owned(),
             incarnation: self.editor.connection_incarnation.clone(),
             project_generation: self.editor.connection_generation.clone(),
             owner: self.pending_adapter(),
@@ -219,6 +231,9 @@ impl Host {
             state.preview = None;
             self.disconnect_adapter();
         }
+        if self.editor.component.is_some() && self.connection_state() == "bound" {
+            ui.checkbox(&mut self.editor.ai_status.paused, "Pause AI Edits");
+        }
         if !state.notice.is_empty() {
             ui.label(&state.notice);
         }
@@ -232,19 +247,28 @@ impl Host {
         self.trusted_apps_ui(ui);
         ui.add_space(8.0);
         ui.separator();
-        let mut allow = self.editor.workspace.prefs.allow_ai_connections;
+        let preferences = if let Some(component) = &mut self.editor.component {
+            component.ai_workspace()
+        } else {
+            &mut self.editor.workspace
+        };
+        let mut allow = preferences.prefs.allow_ai_connections;
         if ui
             .checkbox(&mut allow, "Allow AI apps to connect")
             .on_hover_text("When off, this editor does not listen for AI apps")
             .changed()
         {
-            self.editor.workspace.prefs.allow_ai_connections = allow;
-            self.editor.workspace.changed();
+            preferences.prefs.allow_ai_connections = allow;
+            preferences.changed();
+            preferences.flush();
         }
         // Details for troubleshooting a connection, kept out of the way.
         ui.collapsing("Diagnostics", |ui| {
             ui.label(format!("Scene file: {}", self.editor.document_label()));
-            ui.label(format!("Scene ID: {}", self.editor.session.scene().id));
+            ui.label(format!(
+                "Scene ID: {}",
+                self.native_scene_observation().scene_id
+            ));
             ui.label(format!(
                 "Editor session: {}",
                 self.editor.connection_incarnation

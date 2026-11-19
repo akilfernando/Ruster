@@ -112,10 +112,8 @@ impl Host {
                     ));
                 } else {
                     ui.strong(format!("Allow {app} to edit this project?"));
-                    ui.label(format!(
-                        "{app} can read and change {} and save it.",
-                        self.editor.document_label()
-                    ));
+                    let suffix = if self.editor.component.is_some() { "" } else { " and save it" };
+                    ui.label(format!("{app} can read and change {}{suffix}.", self.editor.document_label()));
                 }
                 if app != name {
                     ui.weak(format!("Reported name: {name}"));

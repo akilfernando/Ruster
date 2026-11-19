@@ -17,10 +17,12 @@ use rot_scene::{Primitive, Transform};
 use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
 
+#[cfg(unix)]
+#[path = "component_mcp.rs"]
+mod mcp;
+
 pub(super) fn check_launch() -> Result<(), String> {
-    if std::env::var_os("ROT_PROJECT_STARTUP").is_some()
-        || std::env::var("ROT_MCP_ENABLE").as_deref() == Ok("1")
-    {
+    if std::env::var_os("ROT_PROJECT_STARTUP").is_some() {
         return Err(Text::ComponentConnectionUnavailable.plain().into());
     }
     Ok(())
@@ -164,6 +166,10 @@ pub(super) struct ComponentWorkspace {
     build: super::component_build::BuildUi,
     close_pending: bool,
     close_approved: bool,
+    #[cfg(unix)]
+    pub(super) request_connection: bool,
+    #[cfg(unix)]
+    pub(super) revoke_ai_connection: bool,
 }
 
 impl ComponentWorkspace {
@@ -224,6 +230,10 @@ impl ComponentWorkspace {
             build: Default::default(),
             close_pending: false,
             close_approved: false,
+            #[cfg(unix)]
+            request_connection: false,
+            #[cfg(unix)]
+            revoke_ai_connection: false,
         };
         editor.select(
             editor
@@ -238,6 +248,34 @@ impl ComponentWorkspace {
 
     pub(super) fn set_metrics(&mut self, metrics: Option<rot_render::MetricsHandle>) {
         self.navigation.metrics = metrics;
+    }
+
+    #[cfg(unix)]
+    pub(super) fn ai_document(&self) -> (&std::path::Path, &str, u64) {
+        (
+            &self.path,
+            &self.session.scene().id,
+            self.session.revision(),
+        )
+    }
+
+    #[cfg(unix)]
+    pub(super) fn ai_workspace(&mut self) -> &mut Workspace {
+        &mut self.workspace
+    }
+
+    #[cfg(unix)]
+    pub(super) fn ai_listening_allowed(&self) -> bool {
+        self.workspace.prefs.allow_ai_connections
+    }
+
+    #[cfg(unix)]
+    pub(super) fn ai_transition_pending(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        if self.build.is_open() {
+            return true;
+        }
+        self.close_pending || self.close_approved || self.open_path.is_some()
     }
 
     pub(super) fn adopt_workspace(&mut self, mut workspace: Workspace) {
@@ -738,6 +776,10 @@ impl ComponentWorkspace {
         let revision = self.session.revision();
         let result = match action {
             Action::Open => {
+                #[cfg(unix)]
+                {
+                    self.revoke_ai_connection = true;
+                }
                 self.open_path = Some(String::new());
                 self.open_focused = false;
                 self.error = None;
@@ -1016,6 +1058,13 @@ impl ComponentWorkspace {
                         }
                     }
                     self.view_menu(ui);
+                });
+                #[cfg(unix)]
+                editor_theme::text_menu(ui, "Window", |ui| {
+                    if ui.button(Action::AiConnection.label()).clicked() {
+                        self.request_connection = true;
+                        ui.close();
+                    }
                 });
                 let marker = if self.session.is_dirty() || self.draft_dirty() {
                     "*"

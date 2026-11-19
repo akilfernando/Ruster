@@ -54,6 +54,10 @@ or while paused, Inspector shows the latest committed Transform and script
 state under **Play Values**. Select **Scene Values** to edit the authored
 scene. **Stop** returns Inspector to the authored values.
 
+On Unix, an approved AI app can inspect and move objects in the open v23
+scene. Use **Window → AI Connection…** to pause edits or disconnect.
+Editor and AI Undo and Redo share the same history. Save from the editor.
+
 On Linux, save the v23 scene, then use **File → Build…**. Choose a new
 folder and select **Build** or **Build and Run**. The folder contains an
 `application` executable, the saved v23 scene, and its project assets.

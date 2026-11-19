@@ -806,7 +806,10 @@ impl Server {
             return false;
         }
         if self.scene_guards.is_none() {
-            let current = bridge("viewport_inspect", &json!({}));
+            let mut current = bridge("viewport_inspect", &json!({}));
+            if current["error"]["code"] == "unsupported_operation" {
+                current = bridge("scene_inspect", &json!({}));
+            }
             if current["ok"] != true {
                 return false;
             }
@@ -848,6 +851,9 @@ impl Server {
         bridge: &mut impl FnMut(&str, &Value) -> Value,
     ) -> Value {
         decimals_as_strings(&full_schema(name), &mut arguments);
+        let pinned = SCENE_GUARDS
+            .iter()
+            .any(|(guard, _)| arguments.get(*guard).is_some());
         let filled = self.fill_scene_guards(name, &mut arguments, bridge);
         if !valid_arguments(name, &arguments) {
             return domain_error("invalid_arguments", "Arguments must match the tool schema; transform vectors contain exactly three numbers");
@@ -866,7 +872,7 @@ impl Server {
             } else {
                 self.observe_guards(&result["error"]);
             }
-            if !(filled && stale) {
+            if !(filled && stale && !pinned) {
                 break;
             }
             if result["error"]["revision"].is_null() {
@@ -1730,6 +1736,23 @@ mod tests {
             assert_eq!(reply["result"]["isError"], false, "{reply}");
         }
         assert_eq!(revisions, ["7", "8", "9", "10", "11", "12"]);
+    }
+
+    #[test]
+    fn an_explicit_scene_guard_prevents_retargeting_on_retry() {
+        let mut server = ready();
+        let edit = json!({"expected_session_token":"original","object_id":"cube","transform":{"translation":[1,2,3],"rotation":[0,0,0],"scale":[1,1,1]}});
+        let mut edits = 0;
+        let result = server.call_tool("scene_transform", edit, &mut |name, args| {
+            if name == "viewport_inspect" {
+                return json!({"ok":true,"result":{"session_token":"replacement","revision":"7"}});
+            }
+            edits += 1;
+            assert_eq!(args["expected_session_token"], "original");
+            json!({"ok":false,"error":{"code":"stale_session","session_token":"replacement","revision":"7"}})
+        });
+        assert_eq!(result["error"]["code"], "stale_session");
+        assert_eq!(edits, 1);
     }
 
     // While the creator has paused AI edits, an edit waits and then lands.
