@@ -1,14 +1,36 @@
 //! Window preferences are independent from scene data and runtime state.
 use eframe::egui;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{
-    collections::HashSet,
+    collections::{BTreeSet, HashSet},
     io::Write,
     path::{Path, PathBuf},
 };
 
 const MAX_SETTINGS_BYTES: usize = 64 * 1024;
 const MAX_WORKSPACE_BYTES: usize = 1024 * 1024;
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub(super) struct SceneViewState {
+    pub hidden: BTreeSet<String>,
+    pub locked: BTreeSet<String>,
+}
+
+fn read_scene_view(path: &Path) -> Result<SceneViewState, String> {
+    match path.symlink_metadata() {
+        Ok(metadata) if !metadata.is_file() => {
+            return Err("Scene view state must be a regular file.".into())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(SceneViewState::default())
+        }
+        Err(error) => return Err(error.to_string()),
+        Ok(_) => {}
+    }
+    let input = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    serde_json::from_reader(std::io::BufReader::new(input)).map_err(|error| error.to_string())
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Action {
@@ -1235,6 +1257,55 @@ impl Workspace {
                 self.error = error;
             }
         }
+    }
+
+    fn scene_view_path(&self, scene: &Path) -> Result<Option<PathBuf>, String> {
+        let Some(state) = &self.storage.path else {
+            return Ok(None);
+        };
+        let scene = scene.canonicalize().map_err(|error| error.to_string())?;
+        let id = Sha256::digest(scene.as_os_str().as_encoded_bytes());
+        Ok(Some(
+            state
+                .with_file_name("scene-views")
+                .join(format!("{id:x}.json")),
+        ))
+    }
+
+    pub fn scene_view(&self, scene: &Path) -> Result<SceneViewState, String> {
+        self.scene_view_path(scene)?.map_or_else(
+            || Ok(SceneViewState::default()),
+            |path| read_scene_view(&path),
+        )
+    }
+
+    pub fn change_scene_view(
+        &self,
+        scene: &Path,
+        state: &mut SceneViewState,
+        change: impl FnOnce(&mut SceneViewState),
+    ) -> Result<(), String> {
+        let Some(path) = self.scene_view_path(scene)? else {
+            change(state);
+            return Ok(());
+        };
+        let parent = path.parent().expect("scene view directory");
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        let lock = PreferenceLock::acquire(&path)?;
+        let mut updated = read_scene_view(&lock.path)?;
+        change(&mut updated);
+        let mut output =
+            tempfile::NamedTempFile::new_in(parent).map_err(|error| error.to_string())?;
+        serde_json::to_writer(&mut output, &updated).map_err(|error| error.to_string())?;
+        output
+            .as_file()
+            .sync_all()
+            .map_err(|error| error.to_string())?;
+        output
+            .persist(&lock.path)
+            .map_err(|error| error.to_string())?;
+        *state = updated;
+        Ok(())
     }
     /// Fly speed changed from the viewport (wheel while flying); saved on the
     /// next flush.

@@ -80,6 +80,12 @@ pub enum Text {
     ComponentMoveDown,
     ComponentObjectsSelected,
     ComponentMixed,
+    ComponentHide,
+    ComponentShow,
+    ComponentLockPicking,
+    ComponentUnlockPicking,
+    ComponentParentHidden,
+    ComponentParentLocked,
 
     ComponentOpenScene,
     ComponentSceneFile,
@@ -92,7 +98,7 @@ pub enum Text {
 
 impl Text {
     #[cfg(test)]
-    pub const ALL: [Self; 76] = [
+    pub const ALL: [Self; 82] = [
         Self::Welcome,
         Self::NoRecentProjects,
         Self::EmptyHierarchy,
@@ -163,6 +169,12 @@ impl Text {
         Self::ComponentMoveDown,
         Self::ComponentObjectsSelected,
         Self::ComponentMixed,
+        Self::ComponentHide,
+        Self::ComponentShow,
+        Self::ComponentLockPicking,
+        Self::ComponentUnlockPicking,
+        Self::ComponentParentHidden,
+        Self::ComponentParentLocked,
         Self::ComponentOpenScene,
         Self::ComponentSceneFile,
         Self::ComponentOpen,
@@ -245,6 +257,12 @@ impl Text {
             Self::ComponentMoveDown => "Move Down",
             Self::ComponentObjectsSelected => "objects selected",
             Self::ComponentMixed => "Mixed",
+            Self::ComponentHide => "Hide in Viewport",
+            Self::ComponentShow => "Show in Viewport",
+            Self::ComponentLockPicking => "Lock Viewport Picking",
+            Self::ComponentUnlockPicking => "Unlock Viewport Picking",
+            Self::ComponentParentHidden => "Hidden by Parent",
+            Self::ComponentParentLocked => "Picking Locked by Parent",
 
             Self::ComponentOpenScene => "Open Scene",
             Self::ComponentSceneFile => "Scene File",

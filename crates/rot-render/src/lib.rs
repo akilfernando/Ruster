@@ -21,7 +21,7 @@ mod shadow_lifecycle_probe;
 mod shadow_probe;
 use lighting_gpu::{LightingGpu, LightingPacket, LIGHTING_BYTES};
 use material_gpu::{BindingKey, MaterialGpu};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Instant;
@@ -813,6 +813,7 @@ mod assembly_gate_tests;
 struct DrawScene<'a> {
     scene: &'a Scene,
     matrices: Option<&'a [Mat4]>,
+    unpickable: Option<&'a BTreeSet<String>>,
 }
 
 impl<'a> From<&'a Scene> for DrawScene<'a> {
@@ -820,11 +821,17 @@ impl<'a> From<&'a Scene> for DrawScene<'a> {
         Self {
             scene,
             matrices: None,
+            unpickable: None,
         }
     }
 }
 
 impl<'a> DrawScene<'a> {
+    fn pickable_objects(self) -> impl Iterator<Item = (&'a Object, Mat4)> {
+        self.objects()
+            .filter(move |(object, _)| self.unpickable.is_none_or(|ids| !ids.contains(&object.id)))
+    }
+
     fn objects(self) -> impl Iterator<Item = (&'a Object, Mat4)> {
         self.scene
             .objects
@@ -1448,7 +1455,7 @@ fn objects_in_rect(
         Vec3::new(-0.5, 0.5, 0.5),
         Vec3::new(0.5, 0.5, 0.5),
     ];
-    draw.objects()
+    draw.pickable_objects()
         .filter(|(object, matrix)| {
             let matrix = *matrix;
             match object_mesh(object, meshes) {
@@ -1587,6 +1594,7 @@ fn render_draw_scene(
     let draw = DrawScene {
         scene,
         matrices: draw.matrices,
+        unpickable: draw.unpickable,
     };
     let selected = if expanded_selection.is_empty() {
         selected
@@ -2077,7 +2085,7 @@ fn pick<'a>(
     }
     let direction = (far - near) / length;
     draw.into()
-        .objects()
+        .pickable_objects()
         .filter_map(|(object, matrix)| {
             let matrix = matrix.as_dmat4();
             if !matrix.is_finite() || matrix.determinant() == 0.0 {

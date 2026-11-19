@@ -5,7 +5,7 @@ use eframe::egui;
 use glam::{EulerRot, Mat3, Mat4, Quat, Vec3};
 use rot_scene::component_scene::{self, Component, ComponentScene, Geometry};
 use rot_scene::{Light, LightKind, Lighting, Object, Scene, SceneError, Transform};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -14,6 +14,7 @@ use std::sync::Arc;
 pub struct ComponentPreview {
     scene: Scene,
     matrices: Vec<Mat4>,
+    unpickable: BTreeSet<String>,
 }
 
 impl ComponentPreview {
@@ -35,6 +36,7 @@ impl ComponentPreview {
             DrawScene {
                 scene: &self.scene,
                 matrices: Some(&self.matrices),
+                unpickable: (!self.unpickable.is_empty()).then_some(&self.unpickable),
             },
             selected,
             meshes,
@@ -72,6 +74,15 @@ pub fn open(path: &Path) -> Result<LoadedPreview, SceneError> {
 }
 
 pub fn project(component_scene: &ComponentScene) -> Result<ComponentPreview, SceneError> {
+    project_editor(component_scene, &BTreeSet::new(), BTreeSet::new())
+}
+
+/// Build an editor-only preview from effective visibility and picking state.
+pub fn project_editor(
+    component_scene: &ComponentScene,
+    hidden: &BTreeSet<String>,
+    unpickable: BTreeSet<String>,
+) -> Result<ComponentPreview, SceneError> {
     let hierarchy = component_scene.validate()?;
     let world = component_scene.world_matrices()?;
     let mut scene = Scene::empty(component_scene.id.clone());
@@ -85,7 +96,9 @@ pub fn project(component_scene: &ComponentScene) -> Result<ComponentPreview, Sce
             .components
             .iter()
             .any(|component| matches!(component.kind, Component::Light { .. }));
-        if !hierarchy.effectively_enabled[index] {
+        if !hierarchy.effectively_enabled[index]
+            || !hidden.is_empty() && hidden.contains(&object.id)
+        {
             continue;
         }
         for component in object.components.iter().filter(|item| item.enabled) {
@@ -169,7 +182,11 @@ pub fn project(component_scene: &ComponentScene) -> Result<ComponentPreview, Sce
         };
     }
     scene.lighting.validate()?;
-    Ok(ComponentPreview { scene, matrices })
+    Ok(ComponentPreview {
+        scene,
+        matrices,
+        unpickable,
+    })
 }
 
 #[cfg(test)]
@@ -205,6 +222,7 @@ mod tests {
         let draw = DrawScene {
             scene: preview.scene(),
             matrices: Some(&preview.matrices),
+            unpickable: None,
         };
         let meshes = BTreeMap::new();
         let camera = super::super::Camera::fit_objects(draw.objects(), &meshes, 1.0).unwrap();
@@ -223,6 +241,17 @@ mod tests {
             super::super::objects_in_rect(draw, &meshes, vp, rect, select),
             ["left"]
         );
+
+        // The locked object remains drawn and framed, but picking must use
+        // the same geometry filter for both a click and a rectangle.
+        let locked = ["left".into()].into_iter().collect();
+        let draw = DrawScene {
+            unpickable: Some(&locked),
+            ..draw
+        };
+        assert_eq!(draw.objects().count(), 1);
+        assert_eq!(super::super::pick(draw, &meshes, vp, ndc.x, ndc.y), None);
+        assert!(super::super::objects_in_rect(draw, &meshes, vp, rect, select).is_empty());
     }
 
     #[test]

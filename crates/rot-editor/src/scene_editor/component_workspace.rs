@@ -1,17 +1,19 @@
 //! The editor owns v23 scenes through ComponentSession. The viewport receives
 //! a disposable projection and cannot change the authored document.
-use super::{component_inspector, hud_interaction, project_picker, OpenedScene};
+use super::{
+    component_inspector, component_view::Flag, hud_interaction, project_picker, OpenedScene,
+};
 use crate::behavior_ui::{PlayShortcut, RuntimeSource, RuntimeUi};
 use crate::editor_theme;
 use crate::strings::Text;
 use crate::ui_kit::tokens::{ROW_HEIGHT, SPACE_XS};
-use crate::workspace::{Action, Workspace};
+use crate::workspace::{Action, SceneViewState, Workspace};
 use eframe::egui;
 use rot_scene::component_scene::{
     Component, ComponentInstance, ComponentSession, Geometry, ObjectHierarchy, ObjectNode,
 };
 use rot_scene::{Primitive, Transform};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
 
 pub(super) fn check_launch() -> Result<(), String> {
@@ -26,6 +28,12 @@ pub(super) fn check_launch() -> Result<(), String> {
 struct HierarchyDrag {
     revision: u64,
     object_id: String,
+}
+
+#[derive(Clone, Copy, Default)]
+struct ViewFlags {
+    hidden: bool,
+    locked: bool,
 }
 
 enum HierarchyDestination {
@@ -137,6 +145,8 @@ pub(super) struct ComponentWorkspace {
     preview: Result<rot_render::component_preview::ComponentPreview, rot_scene::SceneError>,
     rows: Vec<(usize, usize)>,
     parents: Vec<Option<usize>>,
+    scene_view: SceneViewState,
+    view_flags: Vec<ViewFlags>,
     selection: HashSet<String>,
     selection_anchor: Option<String>,
     selected_index: Option<usize>,
@@ -178,6 +188,8 @@ impl ComponentWorkspace {
             preview: rot_render::component_preview::project(session.scene()),
             rows,
             parents,
+            scene_view: SceneViewState::default(),
+            view_flags: Vec::new(),
             session,
             path,
             assets,
@@ -226,6 +238,14 @@ impl ComponentWorkspace {
     pub(super) fn adopt_workspace(&mut self, mut workspace: Workspace) {
         workspace.remember(&self.path);
         workspace.flush();
+        match workspace.scene_view(&self.path) {
+            Ok(state) if !state.hidden.is_empty() || !state.locked.is_empty() => {
+                self.scene_view = state;
+                self.refresh_view();
+            }
+            Ok(_) => {}
+            Err(error) => self.error = Some(error),
+        }
         self.workspace = workspace;
     }
 
@@ -341,7 +361,79 @@ impl ComponentWorkspace {
         }
         self.rebuild_draft();
         (self.rows, self.parents) = hierarchy_rows(&self.session.scene().objects);
-        self.preview = rot_render::component_preview::project(self.session.scene());
+        self.refresh_view();
+    }
+
+    fn refresh_view(&mut self) {
+        let scene = self.session.scene();
+        self.view_flags.clear();
+        if self.scene_view.hidden.is_empty() && self.scene_view.locked.is_empty() {
+            self.preview = rot_render::component_preview::project(scene);
+            return;
+        }
+        self.view_flags
+            .resize(scene.objects.len(), ViewFlags::default());
+        let mut hidden = BTreeSet::new();
+        let mut locked = BTreeSet::new();
+        for &(index, _) in &self.rows {
+            let id = &scene.objects[index].id;
+            let parent = self.parents[index].map_or(ViewFlags::default(), |i| self.view_flags[i]);
+            let flags = ViewFlags {
+                hidden: parent.hidden || self.scene_view.hidden.contains(id),
+                locked: parent.locked || self.scene_view.locked.contains(id),
+            };
+            if flags.hidden {
+                hidden.insert(id.clone());
+            }
+            if flags.locked {
+                locked.insert(id.clone());
+            }
+            self.view_flags[index] = flags;
+        }
+        self.preview = rot_render::component_preview::project_editor(scene, &hidden, locked);
+    }
+
+    fn set_view_flag(&mut self, flag: Flag, set: bool, ids: Vec<String>) {
+        let change = self
+            .workspace
+            .change_scene_view(&self.path, &mut self.scene_view, |state| {
+                let flags = match flag {
+                    Flag::Hidden => &mut state.hidden,
+                    Flag::Locked => &mut state.locked,
+                };
+                if set {
+                    flags.extend(ids);
+                } else {
+                    for id in ids {
+                        flags.remove(&id);
+                    }
+                }
+            });
+        match change {
+            Ok(()) => {
+                self.error = None;
+                self.refresh_view();
+            }
+            Err(error) => self.error = Some(error),
+        }
+    }
+
+    fn view_menu(&mut self, ui: &mut egui::Ui) {
+        if self.selection.is_empty() {
+            return;
+        }
+        ui.separator();
+        for flag in [Flag::Hidden, Flag::Locked] {
+            let existing = match flag {
+                Flag::Hidden => &self.scene_view.hidden,
+                Flag::Locked => &self.scene_view.locked,
+            };
+            let set = !self.selection.iter().all(|id| existing.contains(id));
+            if ui.button(flag.action(set).plain()).clicked() {
+                self.set_view_flag(flag, set, self.target_ids(None));
+                ui.close();
+            }
+        }
     }
 
     fn apply(&mut self) -> bool {
@@ -831,8 +923,14 @@ impl ComponentWorkspace {
                 };
                 rot_app::hud::paint_hud(ui.painter(), rect, hud, rows, mode);
             }
-        } else if interaction.picked.is_some() && self.apply() {
-            self.select(interaction.picked);
+        } else if !blocked {
+            if let Some(ids) = interaction.box_selection.filter(|_| self.apply()) {
+                self.selection = ids.into_iter().collect();
+                self.selection_anchor = None;
+                self.rebuild_draft();
+            } else if interaction.response.clicked() && self.apply() {
+                self.select(interaction.picked);
+            }
         }
         self.runtime.paint_play_border(ui, rect);
     }
@@ -903,6 +1001,7 @@ impl ComponentWorkspace {
                             self.move_in_hierarchy(Some(&id), destination);
                         }
                     }
+                    self.view_menu(ui);
                 });
                 let marker = if self.session.is_dirty() || self.draft_dirty() {
                     "*"
@@ -949,6 +1048,7 @@ impl ComponentWorkspace {
                     .selectable_label(self.selection.is_empty(), Text::ComponentSceneRoot.plain());
                 let mut selected = root.clicked().then_some(None);
                 let mut deleted = None;
+                let mut view_change = None;
                 let revision = self.session.revision();
                 let mut moved = hierarchy_drop(ui, &root, None, revision, &self.selection);
                 egui::ScrollArea::vertical().show_rows(
@@ -960,13 +1060,28 @@ impl ComponentWorkspace {
                             let (index, depth) = self.rows[row];
                             let object = &self.session.scene().objects[index];
                             ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = SPACE_XS;
+                                let value = self.view_flags.get(index).copied().unwrap_or_default();
+                                let inherited = self.parents[index]
+                                    .and_then(|parent| self.view_flags.get(parent).copied())
+                                    .unwrap_or_default();
+                                for (flag, set, inherited) in [
+                                    (Flag::Hidden, value.hidden, inherited.hidden),
+                                    (Flag::Locked, value.locked, inherited.locked),
+                                ] {
+                                    if flag.button(ui, &object.name, set, inherited) {
+                                        view_change = Some((flag, !set, object.id.clone()));
+                                    }
+                                }
                                 ui.add_space(SPACE_XS * depth.min(12) as f32);
                                 let active = self.selection.contains(&object.id);
-                                let response = ui.add(
-                                    egui::Button::selectable(active, &object.name)
-                                        .truncate()
-                                        .sense(egui::Sense::click_and_drag()),
-                                );
+                                let response = ui
+                                    .add(
+                                        egui::Button::selectable(active, &object.name)
+                                            .truncate()
+                                            .sense(egui::Sense::click_and_drag()),
+                                    )
+                                    .on_hover_text(&object.name);
                                 if response.drag_started() {
                                     response.dnd_set_drag_payload(HierarchyDrag {
                                         revision,
@@ -1027,7 +1142,9 @@ impl ComponentWorkspace {
                         }
                     },
                 );
-                if let Some((id, destination)) = moved {
+                if let Some((flag, set, id)) = view_change {
+                    self.set_view_flag(flag, set, vec![id]);
+                } else if let Some((id, destination)) = moved {
                     self.move_in_hierarchy(Some(&id), destination);
                 } else if let Some(id) = deleted {
                     self.delete(Some(&id));
@@ -1285,6 +1402,57 @@ mod tests {
         assert_eq!(editor.session.scene(), &subtree);
         editor.command(Action::Save);
         assert_eq!(ComponentSession::open(&path).unwrap().scene(), &subtree);
+    }
+
+    #[test]
+    fn scene_view_preferences_inherit_and_reopen_without_changing_scene_or_play() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        let preferences = directory.path().join("editor.json");
+        let scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("scene")).unwrap()).unwrap();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.adopt_workspace(Workspace::at_for_test(preferences.clone()));
+        editor.command(Action::CreateEmpty);
+        let parent = editor.draft.as_ref().unwrap().id.clone();
+        editor.command(Action::CreateCube);
+        let child = editor.draft.as_ref().unwrap().id.clone();
+        editor.move_in_hierarchy(
+            Some(&child),
+            HierarchyDestination::Parent(Some(parent.clone())),
+        );
+        assert!(editor.save());
+        let saved = std::fs::read(&path).unwrap();
+        let revision = editor.session.revision();
+        editor.set_view_flag(Flag::Hidden, true, vec![parent.clone()]);
+        editor.set_view_flag(Flag::Locked, true, vec![parent.clone()]);
+        assert!(editor.view_flags[1].hidden && editor.view_flags[1].locked);
+        assert!(editor.preview.as_ref().unwrap().scene().objects.is_empty());
+        assert_eq!(
+            rot_render::component_preview::project(editor.session.scene())
+                .unwrap()
+                .scene()
+                .objects[0]
+                .id,
+            child
+        );
+        assert_eq!(editor.session.revision(), revision);
+        assert!(!editor.session.is_dirty());
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+
+        let mut reopened =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        reopened.adopt_workspace(Workspace::at_for_test(preferences));
+        assert!(reopened.view_flags[1].hidden && reopened.view_flags[1].locked);
+        reopened.set_view_flag(Flag::Hidden, false, vec![parent]);
+        assert!(!reopened.view_flags[1].hidden && reopened.view_flags[1].locked);
+        assert_eq!(
+            reopened.preview.as_ref().unwrap().scene().objects[0].id,
+            child
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
     }
 
     #[test]

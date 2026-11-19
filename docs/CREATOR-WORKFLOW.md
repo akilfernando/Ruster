@@ -37,6 +37,13 @@ together, or set its **Parent** in Inspector. Inspector also lets you change
 **Enabled** for the selection. **Object → Delete** removes selected objects
 and their children together. **Edit → Undo** and **Redo** work until you close
 the scene.
+
+Use the eye and padlock beside a Hierarchy row to hide it in the viewport or
+block viewport picking. Children inherit both settings. The **Object** menu
+applies either setting to the selection. You can still select objects in the
+Hierarchy and edit them in the Inspector. These settings are saved on this
+machine for the scene. Play and exported games use the scene's authored state.
+
 **File → Save** writes the edits to the v23 file. When opening another
 scene, **Save and Open** saves pending changes. **Discard and Open** leaves
 the original file as saved, and **Cancel** keeps the current edits. Use
