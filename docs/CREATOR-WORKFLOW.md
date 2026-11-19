@@ -65,6 +65,9 @@ An approved client can also control Play and inspect its last committed
 frame or script state in supported scenes. It uses the editor's Play session.
 Ask the AI for a viewport screenshot in Edit mode or after pausing Play.
 Close open menus and dialogs first so the scene view is clear.
+An approved client can browse the project catalog and assign an imported
+mesh to an object with one Mesh Renderer. If the object has several Mesh
+Renderers, use `scene_components_edit` with the component ID.
 
 On Linux, save the v23 scene, then use **File → Build…**. Choose a new
 folder and select **Build** or **Build and Run**. The folder contains an

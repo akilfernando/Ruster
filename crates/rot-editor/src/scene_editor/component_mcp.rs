@@ -1,7 +1,7 @@
 //! Guarded v23 commands dispatched only under the existing Host request lease.
 use super::{ComponentWorkspace, RUNTIME_GENERATION};
 use crate::behavior_ui::RuntimeSource;
-use crate::scene_editor::runtime_commands;
+use crate::scene_editor::{asset_inspection, runtime_commands};
 use rot_scene::component_scene::{Component, ComponentInstance, Geometry, ObjectNode};
 use rot_scene::{Primitive, SceneError, Transform, TransformRequest};
 use serde_json::{json, Value};
@@ -135,7 +135,11 @@ impl ComponentWorkspace {
         if op == "scene_components_inspect" {
             return self.inspect_components(args);
         }
+        if op == "asset_inspect" {
+            return self.inspect_assets(args);
+        }
         let expected_len = match op {
+            "scene_mesh" => 5,
             "scene_create" if map.contains_key("primitive") => 5,
             "scene_create" | "scene_group_create" | "scene_transform" | "scene_rename"
             | "scene_reparent" => 4,
@@ -191,6 +195,11 @@ impl ComponentWorkspace {
 
         let mut payload = json!({});
         let result = match op {
+            "scene_mesh" => {
+                let (object, details) = self.mesh_assignment(args)?;
+                payload = details;
+                self.session.put_object(revision, object)
+            }
             "scene_transform" => {
                 let id = args["object_id"].as_str().ok_or_else(invalid)?;
                 let transform = transform_argument(&args["transform"])?;
@@ -309,6 +318,89 @@ impl ComponentWorkspace {
         Ok(payload)
     }
 
+    fn inspect_assets(&self, args: &Value) -> Result<Value, CommandError> {
+        let invalid = || ("invalid_arguments", "Check the asset page offsets.".into());
+        let map = args.as_object().ok_or_else(invalid)?;
+        if map
+            .keys()
+            .any(|key| !matches!(key.as_str(), "offset" | "model_offset"))
+        {
+            return Err(invalid());
+        }
+        let offset = |field: &str| {
+            args.get(field)
+                .map_or(Some(0), decimal)
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or_else(invalid)
+        };
+        let store = self.assets.as_ref().ok_or_else(assets_unavailable)?;
+        asset_inspection::page_with_models(store, offset("offset")?, offset("model_offset")?)
+            .map_err(|message| ("invalid_arguments", message.into()))
+    }
+
+    fn mesh_assignment(&self, args: &Value) -> Result<(ObjectNode, Value), CommandError> {
+        let invalid = || {
+            (
+                "invalid_arguments",
+                "Check the mesh assignment fields.".into(),
+            )
+        };
+        let id = args["object_id"].as_str().ok_or_else(invalid)?;
+        let revision = decimal(&args["expected_asset_revision"]).ok_or_else(invalid)?;
+        let store = self.assets.as_ref().ok_or_else(assets_unavailable)?;
+        if revision != store.revision() {
+            return Err((
+                "stale_asset_revision",
+                "Inspect the project assets again.".into(),
+            ));
+        }
+        let asset_id = match args.get("asset_id") {
+            Some(Value::Null) => None,
+            Some(Value::String(asset)) => {
+                if !self.meshes.contains_key(asset) {
+                    return Err((
+                        "asset_unavailable",
+                        format!("{asset} has no accepted mesh."),
+                    ));
+                }
+                Some(asset)
+            }
+            _ => return Err(invalid()),
+        };
+        let mut object = self
+            .session
+            .scene()
+            .objects
+            .iter()
+            .find(|object| object.id == id)
+            .cloned()
+            .ok_or_else(object_not_found)?;
+        let mut meshes = object.components.iter_mut().filter_map(|component| {
+            if let Component::MeshRenderer { geometry, .. } = &mut component.kind {
+                Some((&component.id, geometry))
+            } else {
+                None
+            }
+        });
+        let (component_id, geometry) = meshes.next().ok_or_else(component_not_found)?;
+        if meshes.next().is_some() {
+            return Err((
+                "ambiguous_component",
+                "Inspect the object and edit its chosen Mesh Renderer by component ID.".into(),
+            ));
+        }
+        let before = match &*geometry {
+            Geometry::Imported { asset } => Some(asset.clone()),
+            _ => None,
+        };
+        *geometry = asset_id.map_or(Geometry::Cube, |asset| Geometry::Imported {
+            asset: asset.clone(),
+        });
+        let details = json!({"asset_revision":revision.to_string(),"object_id":id,
+            "component_id":component_id,"before":before,"after":asset_id});
+        Ok((object, details))
+    }
+
     fn inspect_components(&self, args: &Value) -> Result<Value, CommandError> {
         let map = args.as_object().ok_or_else(invalid_component_arguments)?;
         if map
@@ -413,6 +505,13 @@ impl ComponentWorkspace {
 }
 
 type CommandError = (&'static str, String);
+
+fn assets_unavailable() -> CommandError {
+    (
+        "assets_unavailable",
+        "Open a project with a valid asset catalog.".into(),
+    )
+}
 
 fn invalid_component_arguments() -> CommandError {
     (
