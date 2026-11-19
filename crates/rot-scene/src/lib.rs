@@ -28,6 +28,7 @@ pub use hierarchy::{Group, Hierarchy, ResolvedPoses, TransformRequest};
 mod animation;
 mod authoring;
 mod collider;
+pub mod component_scene;
 pub mod hud;
 pub mod input;
 mod lighting;

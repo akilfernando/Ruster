@@ -1906,7 +1906,7 @@ impl SceneEditor {
             Some(RecoveryTransition::Replace { .. })
         ) {
             egui::Modal::new(egui::Id::unique("recovery_replacement_wait")).show(ctx, |ui| {
-                ui.label("Finishing recovery boundary before switching scenes…");
+                ui.label("Finishing recovery before switching scenes…");
             });
         } else if self.close_approved && !self.close_shutdown && !self.external.finished() {
             egui::Modal::new(egui::Id::unique("external_close_wait")).show(ctx, |ui| {

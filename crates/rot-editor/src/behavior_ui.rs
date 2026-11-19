@@ -2230,10 +2230,8 @@ impl RuntimeUi {
                         }
                         VmEvent::Reset { key, run } => self.acknowledge_reset(key, run.tick),
                         VmEvent::Command { receipt, .. } => {
-                            self.status = format!(
-                                "Command {} committed revision {} at tick {}",
-                                receipt.command_id, receipt.commit_revision, receipt.tick
-                            );
+                            self.status =
+                                format!("Ran {} at tick {}.", receipt.command_id, receipt.tick);
                         }
                         VmEvent::Step { run, .. } => {
                             self.playing = false;
@@ -2244,7 +2242,7 @@ impl RuntimeUi {
                         } => match state {
                             State::Playing => {
                                 self.playing = true;
-                                self.status = "Playing behavior runtime".into();
+                                self.status = "Playing".into();
                             }
                             State::Paused => {
                                 self.playing = false;
@@ -2260,7 +2258,7 @@ impl RuntimeUi {
                                 self.ready = false;
                                 self.playing = false;
                                 self.stale = self.frame.is_some();
-                                self.status=format!("Runtime invalidated; last committed tick {} retained. Reset required.",last_good.map(|run|run.tick.to_string()).as_deref().unwrap_or("none"));
+                                self.status = "Scene changed. Reset to run it again.".into();
                             }
                             State::Stopped => {
                                 self.ready = false;
@@ -2289,7 +2287,7 @@ impl RuntimeUi {
                                 self.stale = self.frame.is_some();
                             }
                             self.status = format!(
-                                "{operation:?} failed; last committed runtime tick {} retained.",
+                                "{operation:?} failed. Last successful tick: {}.",
                                 last_good
                                     .map(|run| run.tick.to_string())
                                     .as_deref()
@@ -2315,7 +2313,7 @@ impl RuntimeUi {
                                 self.stale = self.frame.is_some();
                             }
                             self.status = format!(
-                                "{operation:?} rejected: {message}. Last committed tick: {}",
+                                "{operation:?} couldn’t run: {message}. Last successful tick: {}.",
                                 last_good
                                     .map(|run| run.tick.to_string())
                                     .as_deref()

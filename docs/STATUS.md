@@ -23,14 +23,21 @@ MCP smoke read back an exact transform and verified both undos restored
 the original objects. Its private pre-authorized client exercised STDIO,
 with 94 tools and a 36,330-byte tool list. The full workspace gate passed
 (499 tests, 21 ignored). Assets search now wraps at narrow widths. At
-960×1080 and scale 1.5, the Inspector still clips the right edge of some
-Transform controls. Indirect message wording remains to review.
+960×1080 and scale 1.5, the Inspector stacks Transform labels above
+the axis fields. A native screenshot confirms all nine fields are visible.
+Runtime and recovery status messages now use shorter wording. Remaining
+indirect copy is still open in the checklist.
 
 The [human walkthrough](research/EDITOR-WORKFLOW-COMPARISON.md#proposed-editor-baseline-walkthrough),
 simultaneous real-client editing, and full UI checklist remain open.
 The 5,000-object checklist case depends on Phase 2. The user authorized
 starting Phase 2 before the human pass. [C-01](plans/C-01-OBJECT-COMPONENT-MODEL.md)
-specifies the proposed model and migration. C-02 implementation is next.
+specifies the proposed model and migration. C-02 has an indexed object
+hierarchy that rejects cycles, missing parents and duplicate IDs, and
+resolves inherited enabled state without recursion. A 5,000-object chain
+passed its focused check. The affected gate passed (452 tests, 17 ignored).
+Component payloads, v23 I/O, migration, session
+transactions and integration with editor and runtime loaders are pending.
 
 ## What a creator can do today
 
@@ -53,8 +60,6 @@ entry `org.rot.editor.desktop`. Reinstall with
 
 ## Known problems
 
-- Every new AI adapter process still needs approval in File → Advanced →
-  Rot connection…, and an editor serves one adapter at a time (A-02, A-03).
 - An editor serves one AI adapter at a time; a second waits or fails.
 - Play checks refuse scenes that use groups, so they cannot cover an animated
   model.
@@ -78,32 +83,8 @@ entry `org.rot.editor.desktop`. Reinstall with
   Appearance, Viewport, Shortcuts (every command, search, conflicts),
   External Tools and AI pages; changes apply at once, no Save button. Edit
   → Project Settings… has Project, Input Actions and Build pages.
-- 2026-11-17 · S-07d: Hierarchy, Inspector and Scene/Game panel bodies now live in
-  `panels/hierarchy.rs`, `inspector.rs`, `viewport.rs`; code motion only.
-- 2026-11-17 · S-13: the project hub lists every project (name, path,
-  Modified time, missing ones marked) with Search, Open Project… and New
-  Project…; right-click shows in file manager or removes from list. New
-  Project offers Empty or Basic 3D (Ground, Cube, Sun, Game view camera).
-  First launch: style chooser, then an optional Connect an AI App… row.
-- 2026-11-17 · S-12: Assets is a grid of thumbnails (textures show their
-  image) or a list, with search and a size slider; click shows the asset in
-  the Inspector; drag models into the Scene view, meshes and textures onto
-  objects and material slots; context menu per asset. Files dropped on the
-  editor or picked with Import… (system dialog via `rfd`) are copied into
-  `Assets/` and imported with no form. OS drop not exercised end to end.
-
-- 2026-11-17 · S-09: every menu, context-menu and toolbar action is a
-  registered command (label, remappable shortcut, enabled test, one
-  handler); Ctrl+K opens a palette that searches and runs any command;
-  Ctrl+, opens Preferences.
-- 2026-11-17 · S-07a: Hierarchy, Scene/Game, Inspector and Assets/Console
-  are docked tabs (egui_tiles); tabs drag between docks; nothing is painted
-  over the view. S-07b: Hierarchy, Inspector, Assets and Console close (×) and
-  reopen from Window into the same dock; the layout is saved to layout.json
-  beside editor.json; F6/Shift+F6 move between docks; Reset Layout. S-07c:
-  Default and Side by Side layouts, switched by window width (1100 px) or
-  Window ▸ Layouts; the separate AI workspace is gone.
-- Older entries: [archive](archive/STATUS-2026-11-17.md).
+- The [backlog](BACKLOG.md) records the completed dock, command palette,
+  project hub and asset browser packages.
 
 ## Not verified
 

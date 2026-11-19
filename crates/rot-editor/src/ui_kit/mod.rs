@@ -189,17 +189,27 @@ pub struct AxisCell {
 /// `Label  X [  ] Y [  ] Z [  ]` on one row. `cell` draws each axis with the
 /// width it is given; use [`axis_cell`] for the standard look.
 pub fn vector_row(ui: &mut egui::Ui, label: &str, mut cell: impl FnMut(&mut egui::Ui, usize, f32)) {
-    property_row(ui, label, |ui| {
-        let spacing = ui.spacing().item_spacing.x;
-        let letter = 12.0;
-        let width = ((ui.available_width() - 2.0 * spacing) / 3.0 - letter - SPACE_XS).max(1.0);
-        for axis in 0..3 {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = SPACE_XS;
-                cell(ui, axis, width);
-            });
-        }
-    });
+    let spacing = ui.spacing().item_spacing.x;
+    let axis_overhead = 12.0 + SPACE_XS;
+    let axes_min = 3.0 * (MIN_NUMBER_FIELD + axis_overhead) + 2.0 * spacing;
+    let mut axes = |ui: &mut egui::Ui| {
+        let width =
+            ((ui.available_width() - 2.0 * spacing) / 3.0 - axis_overhead).max(MIN_NUMBER_FIELD);
+        ui.horizontal_wrapped(|ui| {
+            for axis in 0..3 {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = SPACE_XS;
+                    cell(ui, axis, width);
+                });
+            }
+        });
+    };
+    if ui.available_width() < label_column(ui) + spacing + axes_min {
+        ui.label(label);
+        axes(ui);
+    } else {
+        property_row(ui, label, axes);
+    }
 }
 
 /// The standard vector-row axis: scrub letter in the axis color, then the field.
