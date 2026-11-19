@@ -51,7 +51,8 @@ either an existing destination or the source. `rot-scene validate-components
 FILE` checks the exported copy. The editor still opens legacy scenes.
 The v23 session supports guarded object edits, world-preserving reparenting,
 Undo/Redo and conflict-checked saves. A 5,000-object chain resolves
-iteratively and round-trips a file over 1 MiB. Automatic upgrades and
+iteratively and round-trips a file over 1 MiB. The explicit atomic upgrade
+API checks the original bytes before publishing. Automatic upgrades and
 editor/runtime integration remain open.
 
 ## What a creator can do today

@@ -71,15 +71,39 @@ impl ComponentSession {
             digest: Sha256::new(),
         };
         let scene = ComponentScene::read_json(&mut input)?;
-        Ok(Self {
-            saved: Some((lock.path.clone(), input.digest.finalize().into())),
-            saved_state: Some(0),
+        Ok(Self::from_saved(
+            scene,
+            lock.path.clone(),
+            input.digest.finalize().into(),
+        ))
+    }
+
+    /// Upgrade a legacy document in place once its consumers support v23.
+    /// A failed conversion, interrupted write or detected file change leaves
+    /// the source intact. Callers opening a scene for inspection use a reader.
+    pub fn upgrade_legacy(path: impl AsRef<Path>) -> Result<Self, SceneError> {
+        let lock = SceneLock::acquire(path.as_ref())?;
+        let mut bytes = Vec::new();
+        File::open(&lock.path)?
+            .take(crate::MAX_FILE_BYTES + 1)
+            .read_to_end(&mut bytes)?;
+        let legacy = crate::Session::from_snapshot_bytes(&bytes)?;
+        let scene = ComponentScene::from_legacy(&legacy)?;
+        let expected = Sha256::digest(&bytes).into();
+        let hash = Self::publish(&scene, &lock.path, Some(expected))?;
+        Ok(Self::from_saved(scene, lock.path.clone(), hash))
+    }
+
+    fn from_saved(scene: ComponentScene, path: PathBuf, digest: [u8; 32]) -> Self {
+        Self {
             scene,
             revision: 0,
             state: 0,
+            saved_state: Some(0),
             undo: Vec::new(),
             redo: Vec::new(),
-        })
+            saved: Some((path, digest)),
+        }
     }
 
     pub fn scene(&self) -> &ComponentScene {
@@ -237,29 +261,42 @@ impl ComponentSession {
     /// in-memory history. A new destination must not exist.
     pub fn save(&mut self, path: impl AsRef<Path>) -> Result<(), SceneError> {
         let lock = SceneLock::acquire(path.as_ref())?;
-        let baseline = self.saved.as_ref().filter(|(path, _)| *path == lock.path);
-        let digest = crate::write_scene_atomically(&lock.path, baseline.is_none(), |writer| {
-            self.scene.write_json(&mut *writer)?;
+        let baseline = self
+            .saved
+            .as_ref()
+            .filter(|(path, _)| *path == lock.path)
+            .map(|(_, digest)| *digest);
+        let digest = Self::publish(&self.scene, &lock.path, baseline)?;
+        self.saved = Some((lock.path.clone(), digest));
+        self.saved_state = Some(self.state);
+        Ok(())
+    }
+
+    fn publish(
+        scene: &ComponentScene,
+        path: &Path,
+        baseline: Option<[u8; 32]>,
+    ) -> Result<[u8; 32], SceneError> {
+        crate::write_scene_atomically(path, baseline.is_none(), |writer| {
+            scene.write_json(&mut *writer)?;
             writer.flush()?;
             writer.rewind()?;
             let prepared_digest = digest(writer)?;
-            if let Some((_, saved)) = baseline {
-                let current = match File::open(&lock.path) {
+            if let Some(saved) = baseline {
+                crate::reject_nonregular(path)?;
+                let current = match File::open(path) {
                     Ok(file) => file,
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {
                         return Err(SceneError::Conflict);
                     }
                     Err(error) => return Err(error.into()),
                 };
-                if digest(current)? != *saved {
+                if digest(current)? != saved {
                     return Err(SceneError::Conflict);
                 }
             }
             Ok(prepared_digest)
-        })?;
-        self.saved = Some((lock.path.clone(), digest));
-        self.saved_state = Some(self.state);
-        Ok(())
+        })
     }
 }
 
@@ -338,6 +375,29 @@ mod tests {
         std::fs::write(&path, &changed).unwrap();
         assert!(matches!(reopened.save(&path), Err(SceneError::Conflict)));
         assert_eq!(std::fs::read(&path).unwrap(), changed);
+    }
+
+    #[test]
+    fn upgrade_replaces_only_supported_unchanged_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy.json");
+        let mut legacy = Session::new(Scene::demo()).unwrap();
+        legacy.save(&path).unwrap();
+
+        let expected = ComponentScene::from_legacy(&legacy).unwrap();
+        let session = ComponentSession::upgrade_legacy(&path).unwrap();
+        assert_eq!(session.scene(), &expected);
+        assert_eq!(ComponentSession::open(&path).unwrap().scene(), &expected);
+
+        let current = std::fs::read(&path).unwrap();
+        let newer = String::from_utf8(current.clone())
+            .unwrap()
+            .replace("\"format_version\": 23", "\"format_version\": 24");
+        for unsupported in [&current[..], newer.as_bytes(), b"{"] {
+            std::fs::write(&path, unsupported).unwrap();
+            assert!(ComponentSession::upgrade_legacy(&path).is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), unsupported);
+        }
     }
 
     #[test]
