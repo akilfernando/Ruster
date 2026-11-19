@@ -62,7 +62,12 @@ impl<'de> Deserialize<'de> for UniqueValue {
     }
 }
 pub(crate) fn parse(bytes: &[u8]) -> Result<Value, serde_json::Error> {
-    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+    parse_deserializer(serde_json::Deserializer::from_slice(bytes))
+}
+
+pub(crate) fn parse_deserializer<'de>(
+    mut deserializer: serde_json::Deserializer<impl serde_json::de::Read<'de>>,
+) -> Result<Value, serde_json::Error> {
     let UniqueValue(value) = UniqueValue::deserialize(&mut deserializer)?;
     deserializer.end()?;
     Ok(value)

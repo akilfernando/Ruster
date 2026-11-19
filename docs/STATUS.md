@@ -44,8 +44,11 @@ specifies the proposed model and migration. C-02 has an indexed object
 hierarchy that rejects cycles, missing parents and duplicate IDs, and
 resolves inherited enabled state without recursion. A 5,000-object chain
 passed its focused check. The affected gate passed (452 tests, 17 ignored).
-Component payloads, v23 I/O, migration, session
-transactions and integration with editor and runtime loaders are pending.
+The v23 reader/writer now handles hierarchy, Mesh Renderer, Collider and
+materials in the scene crate. A 5,000-object document over 1 MiB
+round-trips, and the full workspace gate passed (502 Rust tests, 21
+ignored, and 36 Python tests). Additional components, migration, session
+transactions and editor/runtime loading are pending.
 
 ## What a creator can do today
 
@@ -69,6 +72,8 @@ entry `org.rot.editor.desktop`. Reinstall with
 ## Known problems
 
 - An editor serves one AI adapter at a time; a second waits or fails.
+- The legacy editor refuses grouping in scenes with ordinary scripts, input
+  actions, or a HUD. Phase 2 tracks removing this restriction.
 - Play checks refuse scenes that use groups, so they cannot cover an animated
   model.
 - Outside the repository, still using old names: two MCP entries in `~/.codex/config.toml`,

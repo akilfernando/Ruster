@@ -34,6 +34,10 @@ package in your lane under **Now**. How to work is in the
 
 One line each. Anyone may add; the user or a planning pass orders them.
 
+- Grouping is blocked scene-wide by input actions, a HUD, ordinary script
+  sources, or object/application script attachments. C-02/C-03 must preserve
+  these features alongside hierarchy during migration. Until then, explain
+  the specific blocker in the editor.
 - Human walkthrough: New Group creates an empty group with multiple objects
   selected. Add a discoverable Group Selection command and support dragging
   rows onto a group (C-05).
@@ -623,7 +627,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | Package | Outcome | Brief |
 | --- | --- | --- |
 | C-01 Object and component model | A written design for [A1 and A2](PARITY-PLAN.md#4-architecture-decisions): types, file format, Undo outside files, upgrade of the repository's example scenes, and the order of the port. | design drafted 2026-11-19 · [C-01 brief](plans/C-01-OBJECT-COMPONENT-MODEL.md) |
-| C-02 Scene crate on the new model | `rot-scene` implements it. No object, depth or file-size caps. | in progress · indexed object hierarchy landed; component payloads, v23 I/O and session integration remain |
+| C-02 Scene crate on the new model | `rot-scene` implements it. No object, depth or file-size caps. | in progress · indexed hierarchy and Mesh Renderer/Collider v23 I/O landed; remaining components, migration and session integration remain |
 | C-03 Renderer, runtime and scripts on the new model | Everything that reads a scene uses objects and components. | after C-01 |
 | C-04 Assets as files | `Assets/` folder, sidecar ids and import settings, rebuildable cache, file watcher, automatic import and reimport, folder tree in the browser. | brief needed |
 | C-05 Hierarchy and Inspector | Rebuilt on components: Add Component, drag to reparent, multi-edit, enable toggles, visibility and lock, live values during Play. | brief needed |
