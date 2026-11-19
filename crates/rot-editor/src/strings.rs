@@ -43,6 +43,13 @@ pub enum Text {
     ComponentSaveClose,
     ComponentDiscardClose,
     ComponentCancel,
+    ComponentObjectMenu,
+    ComponentCreate,
+    Component3dObject,
+    ComponentEmptyObject,
+    ComponentParent,
+    ComponentSceneRoot,
+
     ComponentOpenScene,
     ComponentSceneFile,
     ComponentOpen,
@@ -54,7 +61,7 @@ pub enum Text {
 
 impl Text {
     #[cfg(test)]
-    pub const ALL: [Self; 41] = [
+    pub const ALL: [Self; 47] = [
         Self::Welcome,
         Self::NoRecentProjects,
         Self::EmptyHierarchy,
@@ -90,6 +97,12 @@ impl Text {
         Self::ComponentSaveClose,
         Self::ComponentDiscardClose,
         Self::ComponentCancel,
+        Self::ComponentObjectMenu,
+        Self::ComponentCreate,
+        Self::Component3dObject,
+        Self::ComponentEmptyObject,
+        Self::ComponentParent,
+        Self::ComponentSceneRoot,
         Self::ComponentOpenScene,
         Self::ComponentSceneFile,
         Self::ComponentOpen,
@@ -135,6 +148,13 @@ impl Text {
             Self::ComponentSaveClose => "Save and Close",
             Self::ComponentDiscardClose => "Discard and Close",
             Self::ComponentCancel => "Cancel",
+            Self::ComponentObjectMenu => "Object",
+            Self::ComponentCreate => "Create",
+            Self::Component3dObject => "3D Object",
+            Self::ComponentEmptyObject => "Empty Object",
+            Self::ComponentParent => "Parent",
+            Self::ComponentSceneRoot => "Scene Root",
+
             Self::ComponentOpenScene => "Open Scene",
             Self::ComponentSceneFile => "Scene File",
             Self::ComponentOpen => "Open",

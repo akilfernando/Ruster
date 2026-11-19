@@ -23,7 +23,11 @@ Choose a fresh archive path. Preparation verifies the Linux executable/profile a
 Use `rot-scene migrate OLD.json NEW.json` to create a v23 copy, then
 open it through **Open Project** in the hub, **File → Open Scene**, or `rot-editor --scene NEW.json`. Select an object in Hierarchy,
 edit its name, enabled state, or position in Inspector, then choose
-**Apply**. **Edit → Undo** and **Redo** work until you close the scene.
+**Apply**. Use **Object** or **Hierarchy → Create** to add an empty object,
+cube, sphere, or capsule. Change **Parent** in Inspector to reorganize the Hierarchy and preserve
+the object’s world transform. **Object → Delete** removes the selected
+object and its children. **Edit → Undo** and **Redo** work until you close
+the scene.
 **File → Save** writes the edits to the v23 file. When opening another
 scene, **Save and Open** saves pending changes. **Discard and Open** leaves
 the original file as saved, and **Cancel** keeps the current edits. Use
