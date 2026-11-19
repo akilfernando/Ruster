@@ -22,8 +22,10 @@ Choose a fresh archive path. Preparation verifies the Linux executable/profile a
 
 Put OBJ meshes, PNG textures, WAV sounds or supported GLB models in the
 project's `Assets/` folder. Opening the scene imports supported files in
-that folder and its subfolders. Keep each generated `.rotmeta` file with
-its source in version control so the asset ID can be rebuilt with the cache.
+that folder and its subfolders. On Linux the open editor also picks up file
+additions, edits, and moves. Move the generated `.rotmeta` file with its
+source to keep existing references. Put both files in version control so the
+asset ID survives a cache rebuild.
 
 To assign a mesh, select an object and choose its file in **Mesh Renderer →
 Geometry**. Click **Apply**, then save the scene.

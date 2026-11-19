@@ -272,7 +272,7 @@ impl AssetStore {
             origin: self.identity.clone(),
         })
     }
-    fn shallow_snapshot(&self) -> Self {
+    pub(super) fn shallow_snapshot(&self) -> Self {
         Self {
             root: self.root.clone(),
             registry: self.registry.clone(),
@@ -828,6 +828,10 @@ impl PreparedAsset {
     /// Worker-only publication. The host must reserve admitted document/root and
     /// deadline authority until this completion has been acknowledged/adopted.
     pub fn publish(self) -> AssetCompletion {
+        self.publish_if(|| true)
+    }
+
+    pub(super) fn publish_if(self, active: impl Fn() -> bool) -> AssetCompletion {
         let Self {
             mut store,
             mutation,
@@ -837,9 +841,12 @@ impl PreparedAsset {
         let mut catalog_published = false;
         let result = match store.guard(store.revision()) {
             Err(failure) => Err(failure),
+            Ok(_lock) if !active() => Err(error("Project closed during asset preparation.")),
             Ok(_lock) => match preparation {
                 Err(failure) => publish_failure(&mut store, &mutation, failure),
-                Ok(plan) => publish_plan(&mut store, &mutation, plan, &mut catalog_published),
+                Ok(plan) => {
+                    publish_plan(&mut store, &mutation, plan, &mut catalog_published, active)
+                }
             },
         };
         AssetCompletion {
@@ -909,11 +916,12 @@ fn publish_plan(
     mutation: &AssetMutation,
     plan: Plan,
     catalog_published: &mut bool,
+    active: impl Fn() -> bool,
 ) -> Result<AssetOutcome, AssetError> {
     let id = mutation.id();
     match plan {
         Plan::Model(plan) => store
-            .publish_model(*plan, catalog_published)
+            .publish_model_if(*plan, catalog_published, active)
             .map(|info| AssetOutcome::Model(Box::new(info))),
         Plan::Content {
             kind,
@@ -933,6 +941,9 @@ fn publish_plan(
                 return Err(failure);
             }
             let publication = (|| {
+                if !active() {
+                    return Err(error("Project closed during asset preparation."));
+                }
                 let directory = store.kind_cache_directory(
                     match kind {
                         AssetKind::Mesh => "meshes",
@@ -956,6 +967,9 @@ fn publish_plan(
                     &cache,
                 )?;
                 if let Some(next) = &registry {
+                    if !active() {
+                        return Err(error("Project closed during asset preparation."));
+                    }
                     atomic_write(&store.root, &store.root.join(REGISTRY), &next.bytes)?;
                 }
                 Ok::<_, AssetError>(())

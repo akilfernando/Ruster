@@ -48,6 +48,8 @@ mod play_checks;
 mod player_view;
 #[cfg(all(test, feature = "inspection", unix))]
 mod preview_probe;
+#[cfg(target_os = "linux")]
+mod project_assets;
 mod project_picker;
 mod project_settings;
 mod recovered_input_ui;

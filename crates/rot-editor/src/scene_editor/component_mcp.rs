@@ -68,6 +68,17 @@ impl ComponentWorkspace {
                     "Inspect the current revision again.",
                 ));
             }
+            if self.assets_loading()
+                && matches!(
+                    op,
+                    "behavior_runtime_reset" | "behavior_runtime_play" | "behavior_runtime_step"
+                )
+            {
+                return Err(fail(
+                    "assets_loading",
+                    "Wait for the project assets to load.",
+                ));
+            }
             if !matches!(op, "behavior_runtime_stop" | "behavior_runtime_state")
                 && (self.ai_transition_pending() || self.draft_dirty())
             {
@@ -333,6 +344,12 @@ impl ComponentWorkspace {
                 .and_then(|value| usize::try_from(value).ok())
                 .ok_or_else(invalid)
         };
+        if self.assets_loading() {
+            return Err((
+                "assets_loading",
+                "Wait for the project assets to load.".into(),
+            ));
+        }
         let store = self.assets.as_ref().ok_or_else(assets_unavailable)?;
         asset_inspection::page_with_models(store, offset("offset")?, offset("model_offset")?)
             .map_err(|message| ("invalid_arguments", message.into()))

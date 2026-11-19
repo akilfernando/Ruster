@@ -222,7 +222,7 @@ See [benchmark commands](../crates/rot-render/README.md#large-scene-benchmark).
 | Editor memory, empty project | 300 MB | 1 | Hub 284 MB RSS (207 MB PSS); 3-object scene 293 MB RSS (214 MB PSS) |
 | Editor UI frame, 5,000 objects, excluding 3D | 4 ms at the 95th percentile | 2 | Panels p95 0.43–0.45 ms with one selected object, 1.21–1.32 ms including a 5,000-object range selection. |
 | Scene view, 5,000 objects, about 1 M triangles, 1080p | 60 fps | 2 | Offscreen p95 0.97–1.20 ms through GPU completion, including CPU preparation and composite. |
-| Changed asset file to visible in the editor | 1 s | 2 | |
+| Changed asset file to visible in the editor | 1 s | 2 | 507 ms from atomic replacement of an OBJ to the first inspection screenshot with changed viewport pixels (Linux release, one fixture). |
 | Import a 50 MB model | 3 s, editor stays responsive | 2 | |
 | Build a small project | 10 s | 2 | |
 | Built game, empty scene | Starts in 1 s, under 150 MB | 2 | |

@@ -142,6 +142,9 @@ pub(super) struct ComponentWorkspace {
     session: ComponentSession,
     path: PathBuf,
     assets: Option<rot_assets::AssetStore>,
+    asset_error: Option<String>,
+    #[cfg(target_os = "linux")]
+    asset_watcher: Option<super::project_assets::ProjectAssets>,
     runtime: RuntimeUi,
     hud_cache: rot_scene::hud::HudCache,
     hud_controls: hud_interaction::HudControls,
@@ -178,16 +181,23 @@ pub(super) struct ComponentWorkspace {
     pub(super) revoke_ai_connection: bool,
 }
 
+fn project_directory(scene_path: &std::path::Path) -> &std::path::Path {
+    scene_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."))
+}
+
 impl ComponentWorkspace {
     pub(super) fn new(path: PathBuf, session: ComponentSession) -> Self {
-        let root = path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .unwrap_or_else(|| std::path::Path::new("."));
-        let (assets, error) = match rot_assets::AssetStore::open_project(root) {
-            Ok((assets, diagnostics)) => (Some(assets), diagnostics.into_iter().next()),
-            Err(error) => (None, Some(error.to_string())),
-        };
+        #[cfg(not(target_os = "linux"))]
+        let (assets, asset_error) =
+            match rot_assets::AssetStore::open_project(project_directory(&path)) {
+                Ok((assets, diagnostics)) => (Some(assets), diagnostics.into_iter().next()),
+                Err(error) => (None, Some(error.to_string())),
+            };
+        #[cfg(target_os = "linux")]
+        let (assets, asset_error): (Option<rot_assets::AssetStore>, _) = (None, None);
         let meshes = assets
             .as_ref()
             .map_or_else(Default::default, rot_assets::AssetStore::mesh_snapshots);
@@ -205,6 +215,9 @@ impl ComponentWorkspace {
             session,
             path,
             assets,
+            asset_error,
+            #[cfg(target_os = "linux")]
+            asset_watcher: None,
             runtime: RuntimeUi::default(),
             hud_cache: Default::default(),
             hud_controls: Default::default(),
@@ -224,7 +237,7 @@ impl ComponentWorkspace {
             multi_draft: None,
             edit_scene_during_play: false,
             component_picker: Default::default(),
-            error,
+            error: None,
             open_path: None,
             open_focused: false,
             #[cfg(target_os = "linux")]
@@ -264,9 +277,43 @@ impl ComponentWorkspace {
         );
     }
 
+    fn assets_loading(&self) -> bool {
+        self.assets.is_none() && self.asset_error.is_none()
+    }
+
     pub(super) fn poll_runtime(&mut self, ctx: &egui::Context) {
+        #[cfg(target_os = "linux")]
+        self.poll_assets(ctx);
         self.observe_runtime();
         self.runtime.poll(ctx);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn poll_assets(&mut self, ctx: &egui::Context) {
+        if self.asset_watcher.is_none() && self.asset_error.is_none() {
+            match super::project_assets::ProjectAssets::start(
+                project_directory(&self.path).to_path_buf(),
+                ctx,
+            ) {
+                Ok(watcher) => self.asset_watcher = Some(watcher),
+                Err(error) => self.asset_error = Some(error.to_string()),
+            }
+        }
+        if let Some(update) = self
+            .asset_watcher
+            .as_ref()
+            .and_then(|watcher| watcher.take_update())
+        {
+            match update {
+                Ok((assets, diagnostics)) => {
+                    self.meshes = assets.mesh_snapshots();
+                    self.textures = assets.texture_snapshots();
+                    self.assets = Some(assets);
+                    self.asset_error = diagnostics.into_iter().next();
+                }
+                Err(error) => self.asset_error = Some(error),
+            }
+        }
     }
 
     #[cfg(unix)]
@@ -1124,12 +1171,13 @@ impl ComponentWorkspace {
                 ui.label(format!("{}{marker}", self.session.scene().id));
             });
         });
+        let assets_loading = self.assets_loading();
         egui::Panel::top("component_play").show(ui, |ui| {
             self.runtime.controls_for_source(
                 ui,
                 RuntimeSource::Components(&self.session),
                 RUNTIME_GENERATION,
-                blocked || self.draft_dirty(),
+                blocked || assets_loading || self.draft_dirty(),
                 self.assets.as_ref(),
             );
         });
@@ -1137,9 +1185,10 @@ impl ComponentWorkspace {
         let build_status = self.build.status();
         #[cfg(not(target_os = "linux"))]
         let build_status = None::<&str>;
-        if self.error.is_some() || build_status.is_some() {
+        let scene_error = self.error.as_ref().or(self.asset_error.as_ref());
+        if scene_error.is_some() || build_status.is_some() {
             egui::Panel::bottom("component_status").show(ui, |ui| {
-                if let Some(error) = &self.error {
+                if let Some(error) = scene_error {
                     ui.colored_label(editor_theme::colors(ui).error, error);
                 } else if let Some(status) = build_status {
                     ui.add(egui::Label::new(status).truncate());

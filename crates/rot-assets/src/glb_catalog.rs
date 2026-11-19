@@ -270,12 +270,22 @@ impl AssetStore {
     }
 
     /// Publication runs under the existing exact-catalog lock.
-    pub(super) fn publish_model(
+    pub(super) fn publish_model_if(
         &mut self,
         candidate: PreparedModel,
         catalog_published: &mut bool,
+        active: impl Fn() -> bool,
     ) -> Result<ModelInfo, AssetError> {
-        self.publish_model_with_registry(candidate, catalog_published, atomic_write)
+        self.publish_model_with_registry(
+            candidate,
+            catalog_published,
+            |root, destination, bytes| {
+                if !active() {
+                    return Err(error("Project closed during model preparation."));
+                }
+                atomic_write(root, destination, bytes)
+            },
+        )
     }
 
     fn publish_model_with_registry(
