@@ -2487,6 +2487,7 @@ impl RuntimeUi {
                 } else {
                     crate::editor_theme::PlaybackIcon::Play
                 },
+                self.in_play_mode(),
             );
             self.restore_control_focus(&play_button);
             if focus_controls && play_button.enabled() {
@@ -2511,6 +2512,7 @@ impl RuntimeUi {
                 ui,
                 idle && !self.playing,
                 crate::editor_theme::PlaybackIcon::Step,
+                false,
             );
             self.restore_control_focus(&step_button);
             if step_button.clicked() || (shortcut == Some(PlayShortcut::Step) && !self.playing) {
@@ -2522,6 +2524,7 @@ impl RuntimeUi {
                 ui,
                 self.worker.is_some() && !self.shutdown,
                 crate::editor_theme::PlaybackIcon::Stop,
+                false,
             );
             self.restore_control_focus(&stop_button);
             if stop_button.clicked() {

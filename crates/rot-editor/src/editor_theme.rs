@@ -301,7 +301,12 @@ pub enum PlaybackIcon {
 
 /// A normal focusable button owns all interaction; only its paint is symbolic.
 /// Names remain real accessibility metadata and tooltips, including disabled.
-pub fn playback_button(ui: &mut egui::Ui, enabled: bool, icon: PlaybackIcon) -> egui::Response {
+pub fn playback_button(
+    ui: &mut egui::Ui,
+    enabled: bool,
+    icon: PlaybackIcon,
+    active: bool,
+) -> egui::Response {
     let label = match icon {
         PlaybackIcon::Play => "Play",
         PlaybackIcon::Pause => "Pause",
@@ -310,7 +315,9 @@ pub fn playback_button(ui: &mut egui::Ui, enabled: bool, icon: PlaybackIcon) -> 
     };
     let response = ui.add_enabled(
         enabled,
-        egui::Button::new("").min_size(egui::vec2(28.0, ui.spacing().interact_size.y)),
+        egui::Button::new("")
+            .selected(active)
+            .min_size(egui::vec2(28.0, ui.spacing().interact_size.y)),
     );
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, response.enabled(), label));

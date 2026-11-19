@@ -39,8 +39,6 @@ One line each. Anyone may add; the user or a planning pass orders them.
   rows onto a group (C-05).
 - Human walkthrough: material changes are drafts until Apply Material.
   Make the pending state and commit action clearer.
-- Human walkthrough: Pause needs a viewport-local label and the Play/Pause
-  control needs an active treatment. Play and Stop were clear.
 - Human walkthrough: ChatGPT requested several write approvals after
   connecting. Consider batched undoable edits in C-06 to reduce tool calls.
 - `ui_drive.py` screenshots do not change after key-only input (Tab): the hub and the editor gave byte-identical PNGs across Tab presses while the accessibility focus moved, so focus rings cannot be checked from screenshots on the hidden workspace (S-13, 2026-11-17).

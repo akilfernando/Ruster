@@ -33,8 +33,11 @@ and concurrent ChatGPT editing were exercised on 2026-11-19. Clicking a
 footer error now opens details with Open Script for source diagnostics.
 Game Controls stays open when Last failure details expands or collapses.
 Both paths passed a native inspection run using a disposable Lua failure.
-The editor gate passed (245 tests, 13 ignored). Grouping, material draft and
-Pause feedback are in the backlog. The full UI checklist remains open.
+Grouping and material draft feedback are in the backlog. Paused runs show
+an amber viewport border and a Paused badge. The Play/Pause control stays
+highlighted while the run is active. A native Play/Pause/Stop sequence
+confirmed all three states, and the editor gate passed (245 tests, 13
+ignored). The full UI checklist remains open.
 The 5,000-object checklist case depends on Phase 2. The user authorized
 starting Phase 2 before the human pass. [C-01](plans/C-01-OBJECT-COMPONENT-MODEL.md)
 specifies the proposed model and migration. C-02 has an indexed object
