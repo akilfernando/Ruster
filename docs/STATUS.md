@@ -49,8 +49,10 @@ collider, script, lighting, camera and animation data, plus actions and HUD.
 `rot-scene migrate LEGACY_FILE NEW_FILE` exports a v23 copy without replacing
 either an existing destination or the source. `rot-scene validate-components
 FILE` checks the exported copy. The editor still opens legacy scenes.
-Automatic upgrades, session transactions and editor/runtime integration
-remain open.
+The v23 session supports guarded object edits, world-preserving reparenting,
+Undo/Redo and conflict-checked saves. A 5,000-object chain resolves
+iteratively and round-trips a file over 1 MiB. Automatic upgrades and
+editor/runtime integration remain open.
 
 ## What a creator can do today
 

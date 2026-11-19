@@ -6,6 +6,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
 
+use glam::DMat4;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -15,6 +16,10 @@ use crate::{
     BehaviorSource, BindingTarget, Collider, ColliderRole, ColliderShape, DisplayProfile, Light,
     LightKind, Lighting, OpaqueMaterial, PlayerView, Primitive, SceneError, Session, Transform,
 };
+
+#[path = "component_session.rs"]
+mod session;
+pub use session::ComponentSession;
 
 pub const FORMAT_VERSION: u32 = 23;
 
@@ -365,6 +370,24 @@ impl ComponentScene {
         };
         converted.validate()?;
         Ok(converted)
+    }
+
+    /// Resolve indexed world matrices in parent-first order without recursion.
+    pub fn world_matrices(&self) -> Result<Vec<DMat4>, SceneError> {
+        let hierarchy = ObjectHierarchy::build(&self.objects)?;
+        let mut world = vec![DMat4::IDENTITY; self.objects.len()];
+        for index in hierarchy.order {
+            let local = crate::hierarchy::Pose::from_local(&self.objects[index].transform).matrix();
+            let matrix = hierarchy.parents[index].map_or(local, |parent| world[parent] * local);
+            if !matrix.is_finite() {
+                return Err(SceneError::Invalid(format!(
+                    "world transform overflow on {}",
+                    self.objects[index].id
+                )));
+            }
+            world[index] = matrix;
+        }
+        Ok(world)
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SceneError> {
@@ -784,11 +807,13 @@ mod tests {
         let objects: Vec<_> = (0..count)
             .rev()
             .map(|i| {
-                object(
+                let mut node = object(
                     format!("node_{i}"),
                     (i > 0).then(|| format!("node_{}", i - 1)),
                     i != 1,
-                )
+                );
+                node.transform.translation[0] = 1.0;
+                node
             })
             .collect();
         let tree = ObjectHierarchy::build(&objects).unwrap();
@@ -812,6 +837,7 @@ mod tests {
         let mut bytes = Vec::new();
         scene.write_json(&mut bytes).unwrap();
         assert!(bytes.len() > crate::MAX_FILE_BYTES as usize);
+        assert_eq!(scene.world_matrices().unwrap()[0].w_axis.x, count as f64);
         assert_eq!(ComponentScene::read_json(bytes.as_slice()).unwrap(), scene);
     }
 

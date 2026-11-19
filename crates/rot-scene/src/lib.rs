@@ -1657,18 +1657,18 @@ impl Document {
     }
 }
 
-fn write_scene_atomically(
+fn write_scene_atomically<T>(
     path: &Path,
     create_new: bool,
-    write: impl FnOnce(&mut File) -> Result<(), SceneError>,
-) -> Result<(), SceneError> {
+    write: impl FnOnce(&mut File) -> Result<T, SceneError>,
+) -> Result<T, SceneError> {
     reject_nonregular(path)?;
     let parent = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-    write(temporary.as_file_mut())?;
+    let result = write(temporary.as_file_mut())?;
     temporary.flush()?;
     temporary.as_file().sync_all()?;
     if create_new {
@@ -1684,7 +1684,7 @@ fn write_scene_atomically(
             .persist(path)
             .map_err(|e| SceneError::Io(e.error))?;
     }
-    Ok(())
+    Ok(result)
 }
 
 fn reject_pre_v17_hud_panels(value: &serde_json::Value) -> Result<(), SceneError> {

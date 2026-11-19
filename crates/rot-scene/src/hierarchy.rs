@@ -37,7 +37,7 @@ pub struct ResolvedPoses {
     poses: BTreeMap<String, Pose>,
 }
 #[derive(Clone, Copy)]
-struct Pose {
+pub(crate) struct Pose {
     position: DVec3,
     rotation: DQuat,
     scale: DVec3,
@@ -46,7 +46,7 @@ fn invalid(message: &str) -> SceneError {
     SceneError::Invalid(message.into())
 }
 impl Pose {
-    fn from_local(t: &Transform) -> Self {
+    pub(crate) fn from_local(t: &Transform) -> Self {
         let [x, y, z] = t.rotation.map(f64::from);
         Self {
             position: DVec3::from_array(t.translation.map(f64::from)),
@@ -61,7 +61,7 @@ impl Pose {
             scale: self.scale * local.scale,
         }
     }
-    fn matrix(self) -> DMat4 {
+    pub(crate) fn matrix(self) -> DMat4 {
         DMat4::from_scale_rotation_translation(self.scale, self.rotation, self.position)
     }
     fn stored(self) -> Result<Transform, SceneError> {
@@ -90,7 +90,7 @@ impl Pose {
     }
 }
 // Frozen per-element bound, separately checked for high precision and stored TRS.
-fn close(a: DMat4, b: DMat4) -> bool {
+pub(crate) fn close(a: DMat4, b: DMat4) -> bool {
     a.to_cols_array()
         .into_iter()
         .zip(b.to_cols_array())
