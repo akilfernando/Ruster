@@ -9,13 +9,19 @@ use rot_scene::component_scene::{Component, ComponentSession, ObjectHierarchy, O
 use rot_scene::Scene;
 use std::path::PathBuf;
 
-pub(super) fn run(path: PathBuf, session: ComponentSession) -> Result<(), String> {
+pub(super) fn check_launch() -> Result<(), String> {
     if std::env::var_os("ROT_PROJECT_STARTUP").is_some()
         || std::env::var("ROT_MCP_ENABLE").as_deref() == Ok("1")
     {
         return Err(Text::ComponentConnectionUnavailable.plain().into());
     }
+    Ok(())
+}
+
+pub(super) fn run(path: PathBuf, session: ComponentSession) -> Result<(), String> {
+    check_launch()?;
     let mut editor = ComponentWorkspace::new(path, session);
+    editor.adopt_workspace(Workspace::load());
     eframe::run_native(
         "Rot Engine Editor",
         super::scene_native_options(),
@@ -29,7 +35,7 @@ pub(super) fn run(path: PathBuf, session: ComponentSession) -> Result<(), String
             );
             context.egui_ctx.set_zoom_factor(prefs.scale);
             if let Some(render) = &context.wgpu_render_state {
-                editor.navigation.metrics = Some(rot_render::install(render));
+                editor.set_metrics(Some(rot_render::install(render)));
             }
             Ok(Box::new(editor))
         }),
@@ -37,7 +43,7 @@ pub(super) fn run(path: PathBuf, session: ComponentSession) -> Result<(), String
     .map_err(|error| error.to_string())
 }
 
-struct ComponentWorkspace {
+pub(super) struct ComponentWorkspace {
     session: ComponentSession,
     path: PathBuf,
     workspace: Workspace,
@@ -54,7 +60,7 @@ struct ComponentWorkspace {
 }
 
 impl ComponentWorkspace {
-    fn new(path: PathBuf, session: ComponentSession) -> Self {
+    pub(super) fn new(path: PathBuf, session: ComponentSession) -> Self {
         let assets = path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
@@ -72,16 +78,18 @@ impl ComponentWorkspace {
         let textures = assets
             .as_ref()
             .map_or_else(Default::default, rot_assets::AssetStore::texture_snapshots);
+        let fit = !session.scene().objects.is_empty();
         let mut editor = Self {
             preview: rot_render::component_preview::project(session.scene()),
             rows: hierarchy_rows(session.scene().objects.as_slice()),
             session,
             path,
-            workspace: Workspace::load(),
+            workspace: Workspace::detached(),
             meshes,
             textures,
             navigation: rot_render::NavigationOptions {
                 show_editor_grid: true,
+                reset: fit,
                 selection_feedback: true,
                 ..Default::default()
             },
@@ -100,6 +108,16 @@ impl ComponentWorkspace {
                 .map(|object| object.id.clone()),
         );
         editor
+    }
+
+    pub(super) fn set_metrics(&mut self, metrics: Option<rot_render::MetricsHandle>) {
+        self.navigation.metrics = metrics;
+    }
+
+    pub(super) fn adopt_workspace(&mut self, mut workspace: Workspace) {
+        workspace.remember(&self.path);
+        workspace.flush();
+        self.workspace = workspace;
     }
 
     fn select(&mut self, id: Option<String>) {

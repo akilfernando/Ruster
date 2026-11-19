@@ -39,7 +39,7 @@ impl ProjectPicker {
         &mut self,
         ui: &mut egui::Ui,
         workspace: &Workspace,
-    ) -> (Option<Session>, bool) {
+    ) -> (Option<OpenedScene>, bool) {
         use crate::ui_kit::{self as kit, tokens::*};
         let mut chosen = None;
         let mut back = self.switching
@@ -192,7 +192,7 @@ impl ProjectPicker {
                                             }
                                         });
                                         if response.clicked() {
-                                            match Session::open(path) {
+                                            match OpenedScene::open(path) {
                                                 Ok(session) => chosen = Some(session),
                                                 Err(error) => {
                                                     self.error = format!(
@@ -460,7 +460,7 @@ impl ProjectForm {
         }
     }
 
-    pub(super) fn show(&mut self, ctx: &egui::Context) -> (Option<Session>, bool) {
+    pub(super) fn show(&mut self, ctx: &egui::Context) -> (Option<OpenedScene>, bool) {
         use crate::ui_kit::{self as kit, tokens::*};
         let creating = self.name.is_some();
         let mut session = None;
@@ -578,7 +578,9 @@ impl ProjectForm {
                     } else if submit || enter {
                         let location = Path::new(self.path.trim());
                         let result = match &self.name {
-                            Some(name) => create_project(location, name.trim(), self.template),
+                            Some(name) => create_project(location, name.trim(), self.template)
+                                .map(Box::new)
+                                .map(OpenedScene::Legacy),
                             None => open_project(location),
                         };
                         match result {
@@ -714,7 +716,7 @@ fn template_art(
     ));
 }
 
-fn open_project(path: &Path) -> Result<Session, String> {
+fn open_project(path: &Path) -> Result<OpenedScene, String> {
     if !path.is_absolute() {
         return Err("Enter an absolute path to a scene file or project folder.".into());
     }
@@ -723,7 +725,7 @@ fn open_project(path: &Path) -> Result<Session, String> {
     } else {
         path.to_path_buf()
     };
-    Session::open(&scene).map_err(|error| format!("Couldn't open {}. {error}", scene.display()))
+    OpenedScene::open(&scene).map_err(|error| format!("Couldn't open {}. {error}", scene.display()))
 }
 
 fn create_project(location: &Path, name: &str, template: Template) -> Result<Session, String> {
@@ -859,9 +861,30 @@ mod tests {
         let bytes = fs::read(created.path().unwrap()).unwrap();
         assert!(create_project(parent.path(), "My Project", Template::Empty).is_err());
         assert!(create_project(parent.path(), "../escape", Template::Empty).is_err());
-        let reopened = open_project(&root).unwrap();
+        let OpenedScene::Legacy(reopened) = open_project(&root).unwrap() else {
+            panic!("legacy template")
+        };
         assert_eq!(reopened.scene().id, "main");
         assert_eq!(fs::read(reopened.path().unwrap()).unwrap(), bytes);
+    }
+
+    #[test]
+    fn hub_opens_v23_project_without_rewriting_scene() {
+        use rot_scene::component_scene::ComponentScene;
+
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("scene.json");
+        let scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.save_new(&path).unwrap();
+        let before = fs::read(&path).unwrap();
+        let OpenedScene::Components(opened_path, session) = open_project(folder.path()).unwrap()
+        else {
+            panic!("component project");
+        };
+        assert_eq!(opened_path, path);
+        assert_eq!(session.scene(), &scene);
+        assert!(!session.is_dirty());
+        assert_eq!(fs::read(&path).unwrap(), before);
     }
 
     #[test]
@@ -871,10 +894,11 @@ mod tests {
         // The template's edits are the saved starting point, not Undo steps.
         assert_eq!(created.undo_len(), 0);
         assert!(!created.is_dirty());
-        let scene = open_project(&parent.path().join("Game"))
-            .unwrap()
-            .scene()
-            .clone();
+        let OpenedScene::Legacy(reopened) = open_project(&parent.path().join("Game")).unwrap()
+        else {
+            panic!("legacy template")
+        };
+        let scene = reopened.scene();
         let names: Vec<_> = scene.objects.iter().map(|o| o.display_name()).collect();
         assert_eq!(names, ["Ground", "Cube"]);
         let lights: Vec<_> = scene.lighting.lights().map(|(_, l)| l.clone()).collect();

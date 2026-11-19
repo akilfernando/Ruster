@@ -427,8 +427,29 @@ enum RecoveryTransition {
     },
 }
 
+enum OpenedScene {
+    Legacy(Box<Session>),
+    Components(PathBuf, Box<rot_scene::component_scene::ComponentSession>),
+}
+
+impl OpenedScene {
+    fn open(path: &std::path::Path) -> Result<Self, rot_scene::SceneError> {
+        use rot_scene::component_scene::{ComponentSession, FORMAT_VERSION};
+        match ComponentSession::open(path) {
+            Ok(session) => Ok(Self::Components(path.to_path_buf(), Box::new(session))),
+            Err(rot_scene::SceneError::UnsupportedVersion(version))
+                if version < u64::from(FORMAT_VERSION) =>
+            {
+                Session::open(path).map(Box::new).map(Self::Legacy)
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
 pub struct SceneEditor {
     session: Session,
+    component: Option<Box<component_workspace::ComponentWorkspace>>,
     #[cfg(unix)]
     connection_authority: Option<crate::bridge::Authority>,
     connection_incarnation: String,
@@ -798,6 +819,7 @@ impl SceneEditor {
             content_scroll_to: false,
             content_search: ContentSearch::default(),
             scale_applied: 0.0,
+            component: None,
             theme_applied: None,
             draft,
             preview,
@@ -1825,6 +1847,13 @@ impl SceneEditor {
                 self.retire_root_assets();
                 next.asset_ops = std::mem::take(&mut self.asset_ops);
                 next.asset_ops.fresh_root_adopted();
+                if let Some(component) = &mut next.component {
+                    component.adopt_workspace(std::mem::replace(
+                        &mut next.workspace,
+                        Workspace::detached(),
+                    ));
+                    component.set_metrics(self.navigation.metrics.clone());
+                }
                 *self = *next;
                 if self.recovery_source.is_some() && self.observe_recovery(Instant::now()) {
                     self.recovery.checkpoint_now();
@@ -4238,6 +4267,37 @@ impl SceneEditor {
             self.close_approved = true;
         }
     }
+    fn open_document(&mut self, document: OpenedScene) {
+        match document {
+            OpenedScene::Legacy(session) => self.open_saved_session(*session),
+            OpenedScene::Components(path, session) => {
+                if let Err(error) = component_workspace::check_launch() {
+                    self.error = error;
+                    return;
+                }
+                let render = self.render.clone();
+                if self.shader_revision > 0 {
+                    if let Some(render) = &render {
+                        if let Err(error) =
+                            rot_render::refresh_shader(render, rot_render::default_shader())
+                        {
+                            self.error = error;
+                            return;
+                        }
+                    }
+                }
+                let empty = Session::new(Scene::authored_empty("untitled"))
+                    .expect("empty placeholder scene");
+                let mut next = Self::with_workspace(empty, Workspace::detached());
+                next.render = render;
+                next.component = Some(Box::new(component_workspace::ComponentWorkspace::new(
+                    path, *session,
+                )));
+                self.begin_replacement(next, None, false, false);
+            }
+        }
+    }
+
     fn open_saved_session(&mut self, session: Session) {
         let render = self.render.clone();
         if self.shader_revision > 0 {
@@ -5230,7 +5290,7 @@ impl SceneEditor {
                 if let Some(session) = session {
                     self.notice =
                         crate::strings::tr(&ctx, crate::strings::Text::OpeningProject).into();
-                    self.open_saved_session(session);
+                    self.open_document(session);
                 }
             }
         }
@@ -5274,8 +5334,8 @@ impl SceneEditor {
                         if open {
                             if self.asset_loading(){self.cancel_asset_work();}
                             if let Err(error)=self.asset_root_guard(){self.error=error;return;}
-                            match Session::open(path) {
-                                Ok(session) => self.open_saved_session(session),
+                            match OpenedScene::open(&path) {
+                                Ok(document) => self.open_document(document),
                                 Err(error)=>self.error=error.to_string()
                             }
                         } else {
@@ -5417,6 +5477,9 @@ impl eframe::App for Host {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
         #[cfg(feature = "inspection")]
         asset_timing::install_pass_marker(ctx);
+        if self.editor.component.is_some() {
+            return;
+        }
         self.input.observe(raw, ctx);
         if !raw.focused
             || raw
@@ -5429,6 +5492,10 @@ impl eframe::App for Host {
         }
     }
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.editor.component.is_some() {
+            self.service_bridge(ctx);
+            return;
+        }
         if self
             .editor
             .project_picker
@@ -5446,6 +5513,10 @@ impl eframe::App for Host {
         self.logic_tick(ctx);
     }
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        if let Some(component) = &mut self.editor.component {
+            eframe::App::ui(component.as_mut(), ui, frame);
+            return;
+        }
         self.editor.navigation.frame_cpu_seconds = frame.info().cpu_usage;
         if let Some(mut picker) = self.editor.project_picker.take() {
             if !picker.switching || !ui.input(|input| input.viewport().close_requested()) {
@@ -5460,7 +5531,7 @@ impl eframe::App for Host {
                             && self.editor.guard().is_ok()
                             && !self.editor.asset_busy())
                     {
-                        self.editor.open_saved_session(session);
+                        self.editor.open_document(session);
                     } else {
                         self.editor.error =
                             "Resolve pending changes before switching projects.".into();
@@ -5489,6 +5560,10 @@ impl eframe::App for Host {
         self.editor.ai_toast_ui(ui.ctx());
         self.editor.assets_frame(ui.ctx());
         self.editor.workspace_ui(ui);
+        if self.editor.component.is_some() {
+            ui.ctx().request_repaint();
+            return;
+        }
         self.editor.poll_capture(ui.ctx());
         // Widgets, dialogs and cancellation own this frame's input first.
         self.input.human_pending = false;
@@ -5504,16 +5579,9 @@ pub fn run_empty() -> Result<(), String> {
     )
 }
 pub fn run(path: PathBuf) -> Result<(), String> {
-    use rot_scene::component_scene::{ComponentSession, FORMAT_VERSION};
-    match ComponentSession::open(&path) {
-        Ok(session) => component_workspace::run(path, session),
-        Err(rot_scene::SceneError::UnsupportedVersion(version))
-            if version < u64::from(FORMAT_VERSION) =>
-        {
-            let session = Session::open(path).map_err(|error| error.to_string())?;
-            run_session(session, false)
-        }
-        Err(error) => Err(error.to_string()),
+    match OpenedScene::open(&path).map_err(|error| error.to_string())? {
+        OpenedScene::Legacy(session) => run_session(*session, false),
+        OpenedScene::Components(path, session) => component_workspace::run(path, *session),
     }
 }
 

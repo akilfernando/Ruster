@@ -266,6 +266,9 @@ impl Host {
         self.editor.export_context = Some(ctx.clone());
         self.editor.recovery.poll(ctx);
         self.editor.process_recovery_ack();
+        if self.editor.component.is_some() {
+            return;
+        }
         // Already authorized completions must be adopted even when fresh human
         // input defers new publication. The existing pins/guards remain primary.
         self.editor.asset_nonvisual_frame(ctx, false);
@@ -287,6 +290,9 @@ impl Host {
     pub(super) fn service_bridge(&mut self, ctx: &egui::Context) {
         #[cfg(unix)]
         self.poll_connection(ctx);
+        if self.editor.component.is_some() {
+            return;
+        }
         #[cfg(unix)]
         self.keep_listening(ctx);
         #[cfg(unix)]

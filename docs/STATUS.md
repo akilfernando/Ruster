@@ -37,9 +37,9 @@ The [C-01 design](plans/C-01-OBJECT-COMPONENT-MODEL.md) guides the v23 cutover.
 C-02 preserves authored content during migration, supports grouped object
 edits and Undo/Redo, and resolves a 5,000-object chain over 1 MiB. The native
 `rot-editor --scene` route opens v23 and can inspect objects, edit name,
-enabled state and position, undo, redo, and save in v23. Project Hub and
-File → Open still use legacy sessions. Automatic upgrades and the remaining
-editor tools and MCP commands still need the component session.
+enabled state and position, undo, redo, and save in v23. The Project Hub
+and legacy editor’s File → Open also open v23 directly. Switching from the
+v23 workspace, automatic upgrades and remaining editor tools are open.
 
 The standalone viewer, headless behavior CLI and packaged Motion Lab
 read supported v23 scenes through temporary projections. General component

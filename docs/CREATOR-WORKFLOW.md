@@ -21,11 +21,12 @@ Choose a fresh archive path. Preparation verifies the Linux executable/profile a
 ## Open a v23 scene
 
 Use `rot-scene migrate OLD.json NEW.json` to create a v23 copy, then
-`rot-editor --scene NEW.json` to open it. Select an object in Hierarchy,
+open it through **Open Project** in the hub, **File → Open Scene** from
+a legacy scene, or `rot-editor --scene NEW.json`. Select an object in Hierarchy,
 edit its name, enabled state, or position in Inspector, then choose
 **Apply**. **Edit → Undo** and **Redo** work until you close the scene.
 **File → Save** writes the edits to the v23 file. Continue to use the
-legacy scene for Project Hub, Play, Build and AI editing workflows during
+legacy scene for Play, Build and AI editing workflows during
 the cutover.
 
 ## Create and export in the editor
