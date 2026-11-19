@@ -1,6 +1,7 @@
 //! What tools/list shows: one or two plain sentences per tool, in the
 //! creator vocabulary. The per-module texts are the detailed contracts.
 pub const DESCRIPTIONS: &[(&str, &str)] = &[
+    ("rot_tools", "List, describe or call additional Rot commands, including scene tools from earlier versions. Availability depends on the open scene."),
     ("project_list", "List the open Rot Engine editors with their project folder and scene."),
     ("project_connect", "Work with one open editor, chosen by project name, folder, scene file or ID from project_list. A folder or scene that is not open is opened in Rot Engine."),
     ("project_disconnect", "Disconnect from the current editor."),

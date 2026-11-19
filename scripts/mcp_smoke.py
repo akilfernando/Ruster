@@ -111,7 +111,7 @@ def main():
             listed = adapter.request("tools/list", {})
             tools = listed["result"]["tools"]
             size = len(json.dumps(listed["result"], separators=(",", ":")))
-            step("tools/list", size < 40 * 1024, f"{len(tools)} tools, {size} bytes")
+            step("tools/list", size < 15_000, f"{len(tools)} tools, {size} bytes")
 
             scene = adapter.call("scene_inspect")["structuredContent"]
             step("read the scene", scene.get("ok") is True,

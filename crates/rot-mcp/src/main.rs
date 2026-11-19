@@ -32,6 +32,7 @@ mod project_tools;
 mod runtime_tools;
 #[path = "../../support/strict_json.rs"]
 mod strict_json;
+mod tool_catalog;
 #[path = "../../support/trust.rs"]
 #[allow(dead_code)]
 mod trust;
@@ -41,7 +42,7 @@ use std::io::{self, BufRead, Write};
 
 const PROTOCOL: &str = "2025-06-18";
 /// The server instructions every client reads once. Keep them short.
-const INSTRUCTIONS: &str = "Rot Engine edits the scene open in the editor; the creator sees every change and shares Undo. Use scene_inspect to find object IDs, then the scene_* tools to change them; scene_* tools apply to the current scene unless you pass expected_session_token and expected_revision from an inspect. viewport_screenshot shows the result. Changes stay unsaved until scene_save. If several editors are open, call project_list and project_connect first.";
+const INSTRUCTIONS: &str = "Rot Engine edits the scene open in the editor; the creator sees every change and shares Undo. Use scene_inspect to find object IDs, then the scene_* tools to change them; scene_* tools apply to the current scene unless you pass expected_session_token and expected_revision from an inspect. viewport_screenshot shows the result. Save in the editor, or use scene_save with legacy scenes. Use rot_tools for additional editor commands. If several editors are open, call project_list and project_connect first.";
 const MAX_FRAME: usize = 64 * 1024;
 const MAX_OUTPUT: usize = 256 * 1024;
 
@@ -636,6 +637,7 @@ fn tools() -> Value {
     tools.extend(animation_tools::list());
     tools.push(json!({"name":"viewport_screenshot","description":"","inputSchema":object_schema(json!({}),vec![]),"annotations":{"readOnlyHint":true}}));
     tools.push(json!({"name":"project_disconnect","description":"","inputSchema":object_schema(json!({}),vec![])}));
+    tools.push(tool_catalog::definition());
     json!({"tools":tools})
 }
 
@@ -675,7 +677,9 @@ fn listed() -> Value {
             _ => {}
         }
     }
-    let mut listed = tools();
+    let mut listed = json!({"tools": tool_definitions().iter()
+        .filter(|tool| tool_catalog::advertised(tool["name"].as_str().unwrap()))
+        .collect::<Vec<_>>()});
     for tool in listed["tools"].as_array_mut().unwrap() {
         let name = tool["name"].as_str().unwrap().to_owned();
         let schema = &mut tool["inputSchema"];
@@ -694,15 +698,30 @@ fn listed() -> Value {
         if read_only {
             object.insert("annotations".into(), json!({"readOnlyHint":true}));
         }
-        object.insert(
-            "description".into(),
-            json!(descriptions::DESCRIPTIONS
-                .iter()
-                .find(|(n, _)| *n == name)
-                .map_or("", |(_, d)| *d)),
-        );
+        object.insert("description".into(), json!(tool_description(&name)));
     }
     listed
+}
+
+fn tool_description(name: &str) -> &'static str {
+    descriptions::DESCRIPTIONS
+        .iter()
+        .find(|(key, _)| *key == name)
+        .map_or("", |(_, description)| *description)
+}
+
+fn tool_definitions() -> &'static [Value] {
+    static DEFINITIONS: std::sync::OnceLock<Vec<Value>> = std::sync::OnceLock::new();
+    DEFINITIONS.get_or_init(|| {
+        tools()["tools"]
+            .as_array_mut()
+            .map(std::mem::take)
+            .expect("tool definitions")
+    })
+}
+
+fn tool_definition(name: &str) -> Option<&'static Value> {
+    tool_definitions().iter().find(|tool| tool["name"] == name)
 }
 
 /// While the creator has paused AI edits the editor refuses changes (they
@@ -725,23 +744,11 @@ fn wait_while_paused(
 
 /// Tools whose full schema requires the scene guards.
 fn guarded(name: &str) -> bool {
-    static GUARDED: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-    GUARDED
-        .get_or_init(|| {
-            tools()["tools"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter(|t| {
-                    t["inputSchema"]["required"]
-                        .as_array()
-                        .is_some_and(|r| r.iter().any(|f| f == "expected_revision"))
-                })
-                .map(|t| t["name"].as_str().unwrap().to_owned())
-                .collect()
-        })
-        .iter()
-        .any(|g| g == name)
+    tool_definition(name).is_some_and(|tool| {
+        tool["inputSchema"]["required"]
+            .as_array()
+            .is_some_and(|required| required.iter().any(|field| field == "expected_revision"))
+    })
 }
 
 /// Accept JSON integers wherever a tool takes a decimal string, by turning
@@ -766,29 +773,6 @@ fn decimals_as_strings(schema: &Value, value: &mut Value) {
         }
         _ => {}
     }
-}
-
-fn full_schema(name: &str) -> Value {
-    static SCHEMAS: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
-    SCHEMAS
-        .get_or_init(|| {
-            Value::Object(
-                tools()["tools"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|t| {
-                        (
-                            t["name"].as_str().unwrap().to_owned(),
-                            t["inputSchema"].clone(),
-                        )
-                    })
-                    .collect(),
-            )
-        })
-        .get(name)
-        .cloned()
-        .unwrap_or(Value::Null)
 }
 
 impl Server {
@@ -855,7 +839,8 @@ impl Server {
         mut arguments: Value,
         bridge: &mut impl FnMut(&str, &Value) -> Value,
     ) -> Value {
-        decimals_as_strings(&full_schema(name), &mut arguments);
+        let schema = tool_definition(name).map_or(&Value::Null, |tool| &tool["inputSchema"]);
+        decimals_as_strings(schema, &mut arguments);
         let pinned = SCENE_GUARDS
             .iter()
             .any(|(guard, _)| arguments.get(*guard).is_some());
@@ -1018,51 +1003,15 @@ impl Server {
                     .cloned()
                     .unwrap_or_else(|| json!({}));
                 if !exact_keys(params, &["name"], &["arguments", "_meta"])
-                    || ![
-                        "project_list",
-                        "project_connect",
-                        "project_disconnect",
-                        "viewport_screenshot",
-                        "scene_inspect",
-                        "scene_transform",
-                        "scene_transform_many",
-                        "scene_duplicate_many",
-                        "scene_delete_many",
-                        "scene_create",
-                        "scene_primitive",
-                        "scene_rename",
-                        "scene_duplicate",
-                        "scene_delete",
-                        "scene_undo",
-                        "scene_redo",
-                        "scene_replay",
-                        "asset_inspect",
-                        "asset_import",
-                        "asset_refresh",
-                        "asset_rename",
-                        "scene_model_place",
-                        "scene_mesh",
-                        "shader_refresh",
-                    ]
-                    .contains(&name)
-                        && !collider_tools::supported(name)
-                        && !component_tools::supported(name)
-                        && !color_tools::supported(name)
-                        && !hierarchy_tools::supported(name)
-                        && !material_tools::supported(name)
-                        && !lighting_tools::supported(name)
-                        && !view_tools::supported(name)
-                        && !capture_tools::supported(name)
-                        && !export_tools::supported(name)
-                        && !play_check_tools::supported(name)
-                        && !persistence_tools::supported(name)
-                        && !behavior_tools::supported(name)
-                        && !runtime_tools::supported(name)
-                        && !hud_tools::supported(name)
-                        && !player_view_tools::supported(name)
-                        && !animation_tools::supported(name)
+                    || tool_definition(name).is_none()
                 {
                     Err((-32602, "Unknown tool or tools/call parameters"))
+                } else if name == "rot_tools" {
+                    Ok(tool_result(tool_catalog::handle(
+                        self,
+                        &arguments,
+                        &mut bridge,
+                    )))
                 } else if name == "viewport_screenshot" {
                     if arguments.as_object().is_some_and(|m| m.is_empty()) {
                         Ok(tool_result(screenshot(&mut bridge)))
@@ -1657,7 +1606,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let bytes = listed.to_string().len();
-        assert!(bytes < 40 * 1024, "tools/list is {bytes} bytes");
+        assert!(bytes < 15_000, "tools/list is {bytes} bytes");
         for tool in listed["result"]["tools"].as_array().unwrap() {
             let description = tool["description"].as_str().unwrap();
             assert!(
@@ -1785,8 +1734,7 @@ mod tests {
     #[test]
     fn schemas_and_validation_prevent_unknown_or_rounded_arguments() {
         let mut server = ready();
-        let listed = request(&mut server, "tools/list", json!({}));
-        let tools = listed["result"]["tools"].as_array().unwrap();
+        let tools = tool_definitions();
         let shape = json!({"expected_session_token":"s","expected_revision":"0","object_id":"a","primitive":"capsule"});
         assert!(valid_arguments("scene_primitive", &shape));
         let names: Vec<_> = tools
@@ -1891,10 +1839,11 @@ mod tests {
                 "scene_player_view_set",
                 "scene_animation_set",
                 "viewport_screenshot",
-                "project_disconnect"
+                "project_disconnect",
+                "rot_tools",
             ]
         );
-        for tool in super::tools()["tools"].as_array().unwrap() {
+        for tool in tools {
             assert_eq!(tool["inputSchema"]["additionalProperties"], false);
         }
         assert_eq!(

@@ -47,8 +47,6 @@ One line each. Anyone may add; the user or a planning pass orders them.
   connecting. Consider batched undoable edits in C-06 to reduce tool calls.
 - `ui_drive.py` screenshots do not change after key-only input (Tab): the hub and the editor gave byte-identical PNGs across Tab presses while the accessibility focus moved, so focus rings cannot be checked from screenshots on the hidden workspace (S-13, 2026-11-17).
 - `third_party/egui_tiles` is egui_tiles 0.18.0 with three Sense lines patched so dock dividers and tab-bar backgrounds are not Tab stops; drop it when upstream allows that (S-07a).
-- MCP tool list is 145 KB for 98 tools against a 40 KB Phase 1 budget
-  (P-01, 2026-11-17). Shorten descriptions and merge tools.
 - An open scene repaints about 3 frames per 10 s while idle; the hub draws
   none (P-01, 2026-11-17).
 - Scrubbing an Inspector axis letter commits on release; the viewport does not follow live during the drag (S-02).
@@ -631,7 +629,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-03 Renderer, runtime and scripts on the new model | Everything that reads a scene uses objects and components. | in progress · editor Play, standalone viewer, headless behavior and packaged Motion Lab support v23 through previews and runtime projections. Native editor and viewer use world matrices for draw, fit and hit testing. General component execution remains open; v23 can build a Linux player folder |
 | C-04 Assets as files | `Assets/` folder, sidecar ids and import settings, rebuildable cache, file watcher, automatic import and reimport, folder tree in the browser. | brief needed |
 | C-05 Hierarchy and Inspector | Rebuilt on components: Add Component, drag to reparent, multi-edit, enable toggles, visibility and lock, live values during Play. | in progress · component authoring, grouped hierarchy edits, mixed fields, local viewport controls, and live Transform and script state. Native edit and save worked at 5,000 objects. The in-process panel timings passed and MCP component edits shared Undo. Desktop frame-rate checks remain open |
-| C-06 General MCP tools | A small set of object, component, asset, play and screenshot tools that call the command layer. Tool list under 15 KB. | in progress · v23 discovery, object and group creation, object and component batches, shared history, Play controls and committed state inspection, and viewport-only screenshots |
+| C-06 General MCP tools | A small set of object, component, asset, play and screenshot tools that call the command layer. Tool list under 15 KB. | in progress · v23 discovery, object and group creation, object and component batches, shared history, Play controls, viewport screenshots, and an 11.35 KB MCP tool list |
 | C-07 Prefabs | Prefab assets, instances, per-property overrides, apply and revert. | brief needed |
 | C-08 General glTF import | Multi-primitive meshes, full PBR material mapping, cameras and lights; warnings instead of refusals. | ready after C-04 |
 | C-09 Build and Run | The editor ships a player binary; Build writes a runnable folder; no Python. | in progress · v23 editor builds and launches a Linux player folder. Legacy Build still uses the runtime kit |

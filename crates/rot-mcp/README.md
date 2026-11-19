@@ -60,9 +60,15 @@ connected project.
   `scene_persistence_inspect`). Asset imports are saved to the project at
   once.
 
-`tools/list` stays under 40 KB; a test enforces it. Tool descriptions live in
-`src/descriptions.rs`. Argument shapes and bounds are checked by `rot-mcp`
-before a call reaches the editor.
+`tools/list` advertises the main project, object, component, asset, Play and
+screenshot controls in under 15 KB. To find earlier or less common commands,
+call `rot_tools` with `{"action":"list"}`. Use `action: "describe"` and a
+`name` for the command's arguments. Existing command names remain callable
+directly. Clients that only accept advertised tools can use `rot_tools` with
+`action: "call"`, `name`, and `arguments` to run the same command.
+
+Argument shapes and bounds are checked by `rot-mcp` before a call reaches
+the editor. The editor handles approval and shared Undo for either route.
 
 ## Limits today
 
