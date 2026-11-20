@@ -1,6 +1,9 @@
 //! Disposable render input for native viewports while the shared viewport
 //! consumes legacy draw objects. This projection is never written to disk.
-use super::{CameraMatrices, DrawScene, NavigationOptions, ViewportInteraction, ViewportSurface};
+use super::{
+    Camera, CameraMatrices, CameraState, DrawScene, NavigationOptions, ViewPreset,
+    ViewportInteraction, ViewportSurface,
+};
 use eframe::egui;
 use glam::{EulerRot, Mat3, Mat4, Quat, Vec3};
 use rot_scene::component_scene::{self, Component, ComponentScene, Geometry};
@@ -28,6 +31,31 @@ impl ComponentPreview {
             matrices: Some(&self.matrices),
             unpickable: (!self.unpickable.is_empty()).then_some(&self.unpickable),
         }
+    }
+
+    /// Fit only the requested visible objects, including each mesh component's
+    /// world matrix. The caller supplies the current viewport aspect and view.
+    pub fn framed_camera(
+        &self,
+        ids: &std::collections::HashSet<&str>,
+        meshes: &BTreeMap<String, Arc<rot_assets::Mesh>>,
+        aspect: f32,
+        current: Option<CameraState>,
+        direction: Option<ViewPreset>,
+    ) -> Option<CameraState> {
+        let mut matches = self
+            .draw_scene()
+            .objects()
+            .filter(|(object, _)| ids.contains(object.id.as_str()))
+            .peekable();
+        matches.peek()?;
+        let fit = Camera::fit_objects(matches, meshes, aspect)?;
+        let mut camera = current.map_or(fit, Camera::from_state);
+        camera.frame(fit);
+        if let Some(direction) = direction {
+            camera.set_preset(direction);
+        }
+        camera.checked_matrices(aspect).map(|_| camera.state())
     }
 
     /// Query the same draw objects, world matrices and picking locks as the
@@ -220,6 +248,30 @@ mod tests {
     use super::*;
     use rot_scene::{Group, Session};
     use std::fs;
+
+    #[test]
+    fn frame_uses_only_target_world_geometry_in_all_three_views() {
+        let mut setup = Scene::demo();
+        setup.objects[0].transform.translation = [120., 2., -25.];
+        let scene = ComponentScene::from_legacy(&Session::new(setup).unwrap()).unwrap();
+        let preview = project(&scene).unwrap();
+        let ids = std::collections::HashSet::from(["left"]);
+        for (preset, yaw, pitch) in [
+            (ViewPreset::Front, 0., 0.),
+            (ViewPreset::Right, std::f32::consts::FRAC_PI_2, 0.),
+            (ViewPreset::Top, 0., std::f32::consts::FRAC_PI_2),
+        ] {
+            let camera = preview
+                .framed_camera(&ids, &BTreeMap::new(), 0.6, None, Some(preset))
+                .unwrap();
+            assert_eq!(camera.target, [120., 2., -25.]);
+            assert_eq!(
+                (camera.yaw, camera.pitch, camera.orthographic),
+                (yaw, pitch, true)
+            );
+            assert!(camera.distance < 5. && camera.matrices(0.6).is_some());
+        }
+    }
 
     #[test]
     fn sheared_mesh_draw_transform_is_shared_by_fit_and_hit_testing() {

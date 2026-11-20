@@ -886,7 +886,18 @@ impl Server {
 /// viewport_capture_start, then viewport_capture_inspect until the image is
 /// ready, in one call.
 fn screenshot(bridge: &mut impl FnMut(&str, &Value) -> Value) -> Value {
-    let view = bridge("viewport_inspect", &json!({}));
+    // Framing updates the shared viewport on its next redraw. Never capture
+    // the old camera if a client immediately asks for the framed image.
+    let redraw_deadline = std::time::Instant::now() + std::time::Duration::from_millis(750);
+    let view = loop {
+        let view = bridge("viewport_inspect", &json!({}));
+        if view["error"]["code"] != "viewport_pending"
+            || std::time::Instant::now() >= redraw_deadline
+        {
+            break view;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    };
     if view["ok"] != true {
         return view;
     }
@@ -1788,6 +1799,7 @@ mod tests {
                 "scene_ambient_set",
                 "scene_display_set",
                 "viewport_inspect",
+                "viewport_frame",
                 "viewport_camera",
                 "viewport_player_view",
                 "scene_select",

@@ -37,6 +37,13 @@ shows degrees. MCP uses Euler radians about fixed X, then Y, then Z axes.
 Transforms are relative to the parent. To pitch a roof and turn the house,
 tilt the roof child about X and rotate the house parent about Y.
 
+Select the parent and press **F**, or choose **Frame Selected** from its
+Hierarchy menu, to fit its visible geometry and child parts. For an
+orthographic check, choose **Front**, **Right**, or **Top** from **View
+Presets**. An approved MCP client can call `viewport_frame` with the parent
+ID and `front`, `side`, or `top`, then call `viewport_screenshot` for each
+view. Inspect one assembly from multiple angles before copying it.
+
 ## Import assets into a v23 project
 
 Put OBJ meshes, PNG textures, WAV sounds or supported GLB models in the

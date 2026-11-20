@@ -404,7 +404,7 @@ impl Host {
                         return;
                     }
                     lease.run_immediate(|| {
-                        if matches!(op, "viewport_inspect" | "viewport_capture_start" | "viewport_capture_inspect" | "viewport_capture_pick") {
+                        if matches!(op, "viewport_inspect" | "viewport_frame" | "viewport_capture_start" | "viewport_capture_inspect" | "viewport_capture_pick") {
                             component.ai_capture_command(&authority, &token, op, &args)
                         } else {
                             component.ai_command(&token, op, &args)

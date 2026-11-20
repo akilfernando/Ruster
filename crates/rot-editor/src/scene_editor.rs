@@ -99,6 +99,7 @@ pub(crate) const SCENE_CAPABILITIES: &[&str] = &[
     "scene_color",
     "scene_collider_set",
     "viewport_inspect",
+    "viewport_frame",
     "viewport_camera",
     "viewport_player_view",
     "player_view_inspect",

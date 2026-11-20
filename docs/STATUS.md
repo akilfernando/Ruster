@@ -43,8 +43,8 @@ and component values. Viewport settings stay local. Automatic upgrades remain op
 The v23 Inspector shows live Transform and script state during Play and Step.
 Editor and viewer draw, fit and pick from cached world matrices, including shear.
 v23 Build writes and launches a Linux player folder without Python. Approved
-MCP clients can create objects with parent-local transforms, edit components,
-control Play, manage assets and capture the viewport. Hierarchy has Create Child.
+MCP clients can create parent-local objects and frame hierarchies for capture.
+Hierarchy offers Create Child and Frame Selected. MCP can also manage assets.
 On Linux, v23 watches `Assets/` for imports and changes. The Assets panel
 shows live folders, previews and diagnostics, accepts drops, and places
 meshes and multi-primitive GLB hierarchies with Undo. File actions keep stable IDs

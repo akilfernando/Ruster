@@ -28,6 +28,7 @@ pub(super) fn advertised(name: &str) -> bool {
             | "scene_components_inspect"
             | "scene_components_edit"
             | "viewport_screenshot"
+            | "viewport_frame"
             | "asset_inspect"
             | "asset_import"
             | "asset_refresh"

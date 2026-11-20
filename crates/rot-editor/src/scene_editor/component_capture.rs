@@ -60,6 +60,7 @@ pub(super) struct ComponentCapture {
     view_revision: u64,
     view: Option<View>,
     input_active: bool,
+    camera_pending: bool,
     request: Option<Request>,
 }
 
@@ -142,6 +143,9 @@ impl ComponentWorkspace {
             self.capture.view_revision += 1;
             self.capture.view = view;
         }
+        if view.is_some() {
+            self.capture.camera_pending = false;
+        }
         let Some(mut request) = self.capture.request.take() else {
             return;
         };
@@ -207,6 +211,9 @@ impl ComponentWorkspace {
     }
 
     fn capture_view(&self) -> Result<View, &'static str> {
+        if self.capture.camera_pending {
+            return Err("viewport_pending");
+        }
         self.capture
             .view
             .filter(|view| view.rect.is_positive() && view.rect.is_finite())
@@ -275,6 +282,41 @@ impl ComponentWorkspace {
                 }
                 let view = self.capture_view().map_err(fail)?;
                 Ok(Value::Object(self.capture_metadata(view)))
+            }
+            "viewport_frame" => {
+                if map.len() != 4
+                    || !map.contains_key("expected_session_token")
+                    || !map.contains_key("expected_revision")
+                {
+                    return Err(fail("invalid_arguments"));
+                }
+                if args["expected_session_token"].as_str() != Some(token) {
+                    return Err(fail("stale_session"));
+                }
+                if number(&args["expected_revision"]) != Some(self.session.revision()) {
+                    return Err(fail("stale_revision"));
+                }
+                let id = args["object_id"]
+                    .as_str()
+                    .ok_or_else(|| fail("invalid_arguments"))?;
+                let direction = match args["direction"].as_str() {
+                    Some("front") => rot_render::ViewPreset::Front,
+                    Some("side") => rot_render::ViewPreset::Right,
+                    Some("top") => rot_render::ViewPreset::Top,
+                    _ => return Err(fail("invalid_arguments")),
+                };
+                self.capture_status().map_err(fail)?;
+                let camera = self
+                    .frame_objects(Some(id), Some(direction))
+                    .map_err(|message| ("cannot_frame".into(), message.into()))?;
+                // The previous framebuffer cannot describe the new camera.
+                self.capture.view = None;
+                self.capture.view_revision += 1;
+                self.capture.camera_pending = true;
+                Ok(
+                    json!({"object_id":id,"direction":args["direction"],"target":camera.target,
+                    "distance":camera.distance,"orthographic":camera.orthographic}),
+                )
             }
             "viewport_capture_start" => {
                 if map.len() != 3

@@ -174,6 +174,7 @@ pub(super) struct ComponentWorkspace {
     meshes: rot_app::MeshMap,
     textures: rot_app::TextureMap,
     navigation: rot_render::NavigationOptions,
+    viewport_aspect: Option<f32>,
     preview: Result<rot_render::component_preview::ComponentPreview, rot_scene::SceneError>,
     rows: Vec<(usize, usize)>,
     parents: Vec<Option<usize>>,
@@ -263,6 +264,7 @@ impl ComponentWorkspace {
                 selection_feedback: true,
                 ..Default::default()
             },
+            viewport_aspect: None,
             selected_index: None,
             selection: HashSet::new(),
             selection_anchor: None,
@@ -1074,6 +1076,10 @@ impl ComponentWorkspace {
                 self.save();
                 return;
             }
+            Action::Frame => {
+                self.error = self.frame_objects(None, None).err().map(str::to_owned);
+                return;
+            }
             Action::CreateEmpty
             | Action::CreateCube
             | Action::CreateSphere
@@ -1139,6 +1145,54 @@ fn hierarchy_rows(objects: &[ObjectNode]) -> (Vec<(usize, usize)>, Vec<Option<us
 }
 
 impl ComponentWorkspace {
+    fn frame_objects(
+        &mut self,
+        target: Option<&str>,
+        direction: Option<rot_render::ViewPreset>,
+    ) -> Result<rot_render::CameraState, &'static str> {
+        if self.runtime.in_play_mode() {
+            return Err("Stop Play to frame scene objects.");
+        }
+        let aspect = self.viewport_aspect.ok_or("Open the Scene view first.")?;
+        let scene = self.session.scene();
+        let mut ids = HashSet::new();
+        let mut root_depth = None;
+        for &(index, depth) in &self.rows {
+            let id = scene.objects[index].id.as_str();
+            if root_depth.is_some_and(|root| depth <= root) {
+                root_depth = None;
+            }
+            if root_depth.is_none()
+                && target.map_or_else(|| self.selection.contains(id), |target| target == id)
+            {
+                root_depth = Some(depth);
+            }
+            if root_depth.is_some() {
+                ids.insert(id);
+            }
+        }
+        if ids.is_empty() {
+            return Err("Choose an object to frame.");
+        }
+        let camera = self
+            .preview
+            .as_ref()
+            .ok()
+            .and_then(|preview| {
+                preview.framed_camera(
+                    &ids,
+                    &self.meshes,
+                    aspect,
+                    self.navigation.camera,
+                    direction,
+                )
+            })
+            .ok_or("The selected hierarchy has no visible geometry to frame.")?;
+        self.navigation.camera = Some(camera);
+        self.navigation.clear_fit_error = true;
+        Ok(camera)
+    }
+
     fn viewport(&mut self, ui: &mut egui::Ui, blocked: bool) -> Option<PaintedViewport> {
         let ctx = ui.ctx().clone();
         let frame = self.runtime.displayed_frame().cloned();
@@ -1166,6 +1220,7 @@ impl ComponentWorkspace {
         let mut surface =
             rot_render::allocate_viewport(ui, scene, selection.as_slice(), &mut self.navigation);
         let rect = surface.rect;
+        self.viewport_aspect = rect.is_positive().then(|| rect.width() / rect.height());
         let mut hud_owns = false;
         if let Some(frame) = &frame {
             let (owned, error) = hud_interaction::interact(
@@ -1414,6 +1469,7 @@ impl ComponentWorkspace {
                 let mut placed = AssetDrag::released(ui, &root).map(|asset| (asset, None));
                 let mut deleted = None;
                 let mut child = None;
+                let mut framed = None;
                 let mut view_change = None;
                 let revision = self.session.revision();
                 let mut moved = hierarchy_drop(ui, &root, None, revision, &self.selection);
@@ -1501,6 +1557,17 @@ impl ComponentWorkspace {
                                     });
                                     if ui
                                         .add(
+                                            egui::Button::new(Action::Frame.label()).shortcut_text(
+                                                self.workspace.shortcut_hint(Action::Frame),
+                                            ),
+                                        )
+                                        .clicked()
+                                    {
+                                        framed = Some(object.id.clone());
+                                        ui.close();
+                                    }
+                                    if ui
+                                        .add(
                                             egui::Button::new(Action::Delete.label())
                                                 .shortcut_text(
                                                     self.workspace.shortcut_text(Action::Delete),
@@ -1532,6 +1599,8 @@ impl ComponentWorkspace {
                     self.move_in_hierarchy(Some(&id), destination);
                 } else if let Some((action, parent)) = child {
                     self.create(action, Some(parent));
+                } else if let Some(id) = framed {
+                    self.error = self.frame_objects(Some(&id), None).err().map(str::to_owned);
                 } else if let Some(id) = deleted {
                     self.delete(Some(&id));
                 } else if let Some(selected) = selected.filter(|_| self.apply()) {
