@@ -2,7 +2,9 @@
 use super::{ComponentWorkspace, RUNTIME_GENERATION};
 use crate::behavior_ui::RuntimeSource;
 use crate::scene_editor::{asset_inspection, runtime_commands};
-use rot_scene::component_scene::{Component, ComponentInstance, Geometry, ObjectNode};
+use rot_scene::component_scene::{
+    Component, ComponentInstance, Geometry, ObjectNode, PrefabFields, PrefabProperty,
+};
 use rot_scene::{Primitive, SceneError, Transform, TransformRequest};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -124,16 +126,30 @@ impl ComponentWorkspace {
                 .and_then(|value| usize::try_from(value).ok())
                 .ok_or_else(invalid)?;
             let scene = self.session.scene();
+            let linked: HashMap<_, _> = scene
+                .prefabs
+                .iter()
+                .flat_map(|(root, instance)| {
+                    instance
+                        .parts
+                        .values()
+                        .map(move |part| (part.object.as_str(), root))
+                })
+                .collect();
             let objects = scene.objects.get(offset..).ok_or_else(invalid)?;
             let page: Vec<_> = objects
                 .iter()
                 .take(16)
                 .map(|object| {
-                    json!({
+                    let mut result = json!({
                         "id":object.id, "name":object.name, "enabled":object.enabled,
                         "parent_id":object.parent, "transform":object.transform,
                         "component_count":object.components.len(),
-                    })
+                    });
+                    if let Some(root) = linked.get(object.id.as_str()) {
+                        result["prefab_root_id"] = json!(root);
+                    }
+                    result
                 })
                 .collect();
             return Ok(json!({
@@ -158,9 +174,21 @@ impl ComponentWorkspace {
             return self.inspect_assets(args);
         }
         let creation = matches!(op, "scene_create" | "scene_group_create");
+        let prefab_fields: &[&str] = match args["action"].as_str() {
+            Some("save") => &["object_id", "source"],
+            Some("place") => &["asset_id", "object_id", "parent_id", "transform"],
+            Some("apply" | "revert") => &["object_id", "property", "component_id"],
+            _ => &[],
+        };
         let expected_len = match op {
             "scene_model_place" if map.contains_key("name") => 5,
             "scene_model_place" => 4,
+            "scene_prefab" if !prefab_fields.is_empty() => {
+                3 + prefab_fields
+                    .iter()
+                    .filter(|key| map.contains_key(**key))
+                    .count()
+            }
             "scene_mesh" => 5,
             "scene_create" | "scene_group_create" => {
                 let optional = ["parent_id", "transform", "primitive"];
@@ -197,6 +225,60 @@ impl ComponentWorkspace {
                 "drafts_pending",
                 "Finish the pending editor change first.".into(),
             ));
+        }
+
+        if op == "scene_prefab" {
+            if self.runtime.in_play_mode() {
+                return Err(("play_active", "Stop Play to edit prefabs.".into()));
+            }
+            let string = |field: &str| args[field].as_str().ok_or_else(invalid);
+            let object = string("object_id")?;
+            let outcome = match string("action")? {
+                "save" => {
+                    let path = args.get("source").map(|_| string("source")).transpose()?;
+                    self.save_prefab(object, path)
+                        .map(|id| json!({"asset_id":id,"object_id":object}))
+                }
+                "place" => {
+                    let asset = string("asset_id")?;
+                    let parent = match args.get("parent_id") {
+                        None | Some(Value::Null) => None,
+                        Some(Value::String(id)) => Some(id.clone()),
+                        _ => return Err(invalid()),
+                    };
+                    let transform = args
+                        .get("transform")
+                        .map(transform_argument)
+                        .transpose()?
+                        .unwrap_or_default();
+                    self.place_prefab(asset, Some(object), transform, parent)
+                        .map(|id| json!({"asset_id":asset,"object_id":id}))
+                }
+                action @ ("apply" | "revert") => {
+                    let property = match string("property")? {
+                        "position" if !map.contains_key("component_id") => {
+                            PrefabProperty::Transform(PrefabFields::Position)
+                        }
+                        "rotation" if !map.contains_key("component_id") => {
+                            PrefabProperty::Transform(PrefabFields::Rotation)
+                        }
+                        "scale" if !map.contains_key("component_id") => {
+                            PrefabProperty::Transform(PrefabFields::Scale)
+                        }
+                        "tint" => PrefabProperty::Tint(string("component_id")?.into()),
+                        _ => return Err(invalid()),
+                    };
+                    self.change_prefab_override(object, &property, action == "apply")
+                        .map(|()| json!({"object_id":object,"property":args["property"]}))
+                }
+                _ => return Err(invalid()),
+            };
+            return outcome
+                .map(|mut response| {
+                    response["dirty"] = json!(self.session.is_dirty());
+                    response
+                })
+                .map_err(|error| ("prefab_edit_failed", error.to_string()));
         }
 
         if op == "scene_model_place" {
@@ -356,8 +438,8 @@ impl ComponentWorkspace {
                 let edits = self.component_edits(&args["edits"])?;
                 self.session.put_objects(revision, edits)
             }
-            "scene_undo" => self.session.undo(revision),
-            "scene_redo" => self.session.redo(revision),
+            "scene_undo" => self.prefab_history(revision, true),
+            "scene_redo" => self.prefab_history(revision, false),
             _ => unreachable!("checked command"),
         };
         let next = result.map_err(|error| {
@@ -383,7 +465,7 @@ impl ComponentWorkspace {
         let map = args.as_object().ok_or_else(invalid)?;
         if map
             .keys()
-            .any(|key| !matches!(key.as_str(), "offset" | "model_offset"))
+            .any(|key| !matches!(key.as_str(), "offset" | "model_offset" | "prefab_offset"))
         {
             return Err(invalid());
         }
@@ -400,8 +482,24 @@ impl ComponentWorkspace {
             ));
         }
         let store = self.assets.as_ref().ok_or_else(assets_unavailable)?;
-        asset_inspection::page_with_models(store, offset("offset")?, offset("model_offset")?)
-            .map_err(|message| ("invalid_arguments", message.into()))
+        let mut result =
+            asset_inspection::page_with_models(store, offset("offset")?, offset("model_offset")?)
+                .map_err(|message| ("invalid_arguments", message.into()))?;
+        let prefab_offset = offset("prefab_offset")?;
+        if prefab_offset > self.prefab_files.len() {
+            return Err(invalid());
+        }
+        result["prefabs"] = json!(self
+            .prefab_files
+            .values()
+            .skip(prefab_offset)
+            .take(16)
+            .map(|file| json!({"id":file.id,"source":file.source,"hash":file.hash}))
+            .collect::<Vec<_>>());
+        result["prefab_count"] = json!(self.prefab_files.len());
+        result["prefab_next_offset"] = json!((prefab_offset + 16 < self.prefab_files.len())
+            .then(|| (prefab_offset + 16).to_string()));
+        Ok(result)
     }
 
     fn mesh_assignment(&self, args: &Value) -> Result<(ObjectNode, Value), CommandError> {

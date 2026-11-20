@@ -14,7 +14,7 @@ use rot_scene::component_scene::{
     Component, ComponentInstance, ComponentSession, Geometry, ObjectHierarchy, ObjectNode,
 };
 use rot_scene::{Primitive, Transform};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 
 #[cfg(unix)]
@@ -40,6 +40,9 @@ pub(super) mod asset_writes;
 
 #[path = "component_model_placement.rs"]
 mod model_placement;
+
+#[path = "component_prefabs.rs"]
+mod prefabs;
 
 const RUNTIME_GENERATION: u64 = 1;
 
@@ -155,6 +158,8 @@ pub(super) struct ComponentWorkspace {
     assets: Option<rot_assets::AssetStore>,
     asset_error: Option<String>,
     asset_browser: asset_panel::Browser,
+    prefab_files: BTreeMap<String, rot_assets::PrefabFile>,
+    prefab_refresh_pending: bool,
     #[cfg(target_os = "linux")]
     asset_watcher: Option<super::project_assets::ProjectAssets>,
     #[cfg(target_os = "linux")]
@@ -240,6 +245,8 @@ impl ComponentWorkspace {
             assets,
             asset_error,
             asset_browser: Default::default(),
+            prefab_files: BTreeMap::new(),
+            prefab_refresh_pending: false,
             #[cfg(target_os = "linux")]
             asset_watcher: None,
             #[cfg(target_os = "linux")]
@@ -289,7 +296,7 @@ impl ComponentWorkspace {
             revoke_ai_connection: false,
         };
         if let Some(assets) = &editor.assets {
-            editor.asset_browser.refresh(assets, Vec::new(), &[]);
+            editor.asset_browser.refresh(assets, Vec::new(), &[], &[]);
         }
         editor.select(
             editor
@@ -343,9 +350,14 @@ impl ComponentWorkspace {
             .and_then(|watcher| watcher.take_update())
         {
             match update {
-                Ok(snapshot) => {
-                    self.asset_browser
-                        .refresh(&snapshot.store, snapshot.folders, &snapshot.issues);
+                Ok(mut snapshot) => {
+                    self.adopt_prefabs(&mut snapshot.prefabs, &mut snapshot.issues);
+                    self.asset_browser.refresh(
+                        &snapshot.store,
+                        snapshot.folders,
+                        &snapshot.issues,
+                        &snapshot.prefabs,
+                    );
                     self.meshes = snapshot.store.mesh_snapshots();
                     self.textures = snapshot.store.texture_snapshots();
                     self.assets = Some(snapshot.store);
@@ -356,6 +368,7 @@ impl ComponentWorkspace {
                 Err(error) => self.asset_error = Some(error),
             }
         }
+        self.reconcile_prefabs();
     }
 
     #[cfg(target_os = "linux")]
@@ -1097,8 +1110,8 @@ impl ComponentWorkspace {
                 return;
             }
             Action::Redo if self.draft_dirty() => return,
-            Action::Undo => self.session.undo(revision),
-            Action::Redo => self.session.redo(revision),
+            Action::Undo => self.prefab_history(revision, true),
+            Action::Redo => self.prefab_history(revision, false),
             _ => return,
         };
         match result {
@@ -1470,6 +1483,7 @@ impl ComponentWorkspace {
                 let mut deleted = None;
                 let mut child = None;
                 let mut framed = None;
+                let mut prefab = None;
                 let mut view_change = None;
                 let revision = self.session.revision();
                 let mut moved = hierarchy_drop(ui, &root, None, revision, &self.selection);
@@ -1542,6 +1556,16 @@ impl ComponentWorkspace {
                                     selected = Some(Some((row, modifiers)));
                                 }
                                 response.context_menu(|ui| {
+                                    if ui
+                                        .add_enabled(
+                                            !blocked && !self.runtime.in_play_mode(),
+                                            egui::Button::new("Save as Prefab"),
+                                        )
+                                        .clicked()
+                                    {
+                                        prefab = Some(object.id.clone());
+                                        ui.close();
+                                    }
                                     ui.menu_button(Text::ComponentCreateChild.plain(), |ui| {
                                         for action in [
                                             Action::CreateEmpty,
@@ -1601,6 +1625,11 @@ impl ComponentWorkspace {
                     self.create(action, Some(parent));
                 } else if let Some(id) = framed {
                     self.error = self.frame_objects(Some(&id), None).err().map(str::to_owned);
+                } else if let Some(id) = prefab.filter(|_| self.apply()) {
+                    self.error = self
+                        .save_prefab(&id, None)
+                        .err()
+                        .map(|error| error.to_string());
                 } else if let Some(id) = deleted {
                     self.delete(Some(&id));
                 } else if let Some(selected) = selected.filter(|_| self.apply()) {
@@ -1692,6 +1721,7 @@ impl ComponentWorkspace {
                             }
                             if self.selected_index.is_some() {
                                 self.parent_ui(ui);
+                                self.prefab_inspector(ui);
                                 ui.separator();
                                 if let Some(draft) = &mut self.draft {
                                     submit |= component_inspector::components(

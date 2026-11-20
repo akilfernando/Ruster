@@ -21,10 +21,10 @@ use crate::{
 mod behavior;
 #[path = "component_session.rs"]
 mod session;
-pub use session::ComponentSession;
+pub use session::{ComponentSession, PrefabFileEdit};
 #[path = "component_prefab.rs"]
 mod prefab;
-pub use prefab::PrefabSource;
+pub use prefab::{PrefabFields, PrefabInstance, PrefabPart, PrefabProperty, PrefabSource};
 
 pub const FORMAT_VERSION: u32 = 23;
 
@@ -33,6 +33,8 @@ pub const FORMAT_VERSION: u32 = 23;
 pub struct ComponentScene {
     pub id: String,
     pub objects: Vec<ObjectNode>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub prefabs: BTreeMap<String, PrefabInstance>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub materials: BTreeMap<String, OpaqueMaterial>,
     #[serde(default, skip_serializing_if = "DisplayProfile::is_legacy")]
@@ -82,6 +84,7 @@ impl ComponentScene {
             .enumerate()
             .map(|(index, object)| (object.id.as_str(), index))
             .collect();
+        prefab::validate_instances(self, &object_indices)?;
         let mut ids = HashSet::new();
         let mut driven = HashSet::new();
         let mut gameplay_camera_found = self.gameplay_camera.is_none();
@@ -365,6 +368,7 @@ impl ComponentScene {
         let converted = Self {
             id: scene.id.clone(),
             objects,
+            prefabs: BTreeMap::new(),
             materials: scene.materials.clone(),
             display: scene.display,
             ambient,
@@ -770,6 +774,7 @@ mod tests {
         let scene = ComponentScene {
             id: "demo".into(),
             objects: vec![cube, object("root".into(), None, true)],
+            prefabs: BTreeMap::new(),
             materials: BTreeMap::new(),
             display: DisplayProfile::default(),
             ambient: None,
@@ -831,6 +836,7 @@ mod tests {
         let scene = ComponentScene {
             id: "deep".into(),
             objects,
+            prefabs: BTreeMap::new(),
             materials: BTreeMap::new(),
             display: DisplayProfile::default(),
             ambient: None,

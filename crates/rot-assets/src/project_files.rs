@@ -13,6 +13,10 @@ use std::sync::Arc;
 
 const METADATA_EXTENSION: &str = ".rotmeta";
 
+#[path = "project_prefabs.rs"]
+mod prefabs;
+pub use prefabs::{publish_project_prefab, PrefabFile};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjectFileIssue {
     pub path: String,
@@ -89,10 +93,13 @@ impl AssetStore {
     /// Size limit for a project source accepted by the automatic importer.
     pub fn project_source_limit(source: &str) -> Result<usize, AssetError> {
         validate_project_relative(source)?;
+        if source.ends_with(".prefab") {
+            return Ok(prefabs::MAX_PREFAB_BYTES);
+        }
         match Importer::from_path(source) {
             Some(Importer::Asset(kind)) => Ok(kind.source_limit()),
             Some(Importer::Model) => Ok(super::MAX_GLB_SOURCE_BYTES),
-            None => Err(error("Rot imports OBJ, PNG, WAV and GLB files.")),
+            None => Err(error("Rot imports OBJ, PNG, WAV, GLB, and prefab files.")),
         }
     }
 

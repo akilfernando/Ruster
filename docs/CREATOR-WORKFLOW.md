@@ -99,6 +99,39 @@ interpretation only when needed, such as flat normals for an OBJ. Assign a
 mesh with `scene_mesh` using the current catalog revision. Assignment shares
 the editor's Undo history and is saved with the scene.
 
+## Reuse a hierarchy as a prefab
+
+1. In a v23 project, create an empty root and use **Create Child** to build
+   the assembly in its local coordinates. For a cottage, build one complete
+   example and use **Frame Selected** with the front, side and top view
+   presets to check the roof and gables before making copies.
+2. Right-click the root in **Hierarchy** and choose **Save as Prefab**.
+   Rot creates an editable `.prefab` file and sidecar in `Assets/` and links
+   your existing assembly as the first instance.
+3. Select the prefab in **Assets** and choose **Place in Scene**. Each
+   instance keeps its own position, heading and scale at the root. Edit a
+   child's local position, rotation or scale, or a Mesh Renderer's tint,
+   to override that property for the instance.
+4. Use the Inspector's **Apply** action for that override to change the
+   source property and update linked instances. Other overrides and each
+   root's placement stay intact. Use **Revert** for the property to restore
+   its source value on the selected instance. Ordinary scene edits and
+   prefab Apply/Revert share Undo and Redo with MCP.
+
+Keep the `.prefab` and its `.rotmeta` together when moving them. If a source
+is unavailable, the Inspector reports it and instances keep their last
+usable contents for editing, saving and building. Restore the file and
+sidecar to reconnect. When Rot incorporates an external source change into
+the scene, it clears Undo and Redo to keep the new source and scene together.
+
+Approved MCP clients can use `scene_prefab` to `save` the selected
+`object_id`, or `place` a prefab using its `asset_id` from `asset_inspect`
+and a new root `object_id`. Placement accepts an optional `parent_id` and
+local `transform`. For `apply` and `revert`, supply the target object and
+one property (`position`, `rotation`, `scale` or `tint`). Tint also needs
+the Mesh Renderer `component_id`. Use the current scene session token and
+revision for each operation.
+
 ## Open a v23 scene
 
 Use `rot-scene migrate OLD.json NEW.json` to create a v23 copy, then

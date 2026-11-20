@@ -1,6 +1,6 @@
 //! Watch the open Linux project's Assets tree without polling the filesystem.
 use eframe::egui::Context;
-use rot_assets::{AssetStore, ProjectFileIssue};
+use rot_assets::{AssetStore, PrefabFile, ProjectFileIssue};
 use rustix::event::{poll, PollFd, PollFlags};
 use rustix::fd::OwnedFd;
 use rustix::fs::{
@@ -29,6 +29,7 @@ pub(super) struct Snapshot {
     pub(super) issues: Vec<ProjectFileIssue>,
     pub(super) warning: Option<String>,
     pub(super) folders: Vec<PathBuf>,
+    pub(super) prefabs: Vec<PrefabFile>,
 }
 
 type Update = Result<Snapshot, String>;
@@ -227,13 +228,16 @@ fn run(
     let mut watcher = match watcher {
         Ok(watcher) => watcher,
         Err(error) => {
-            let issues = store.reconcile_project_files(&paths, active);
+            let mut issues = store.reconcile_project_files(&paths, active);
+            let (prefabs, prefab_issues) = store.read_project_prefabs();
+            issues.extend(prefab_issues);
             let warning = Some(format!("Couldn't watch Assets: {error}"));
             send(Ok(Snapshot {
                 store,
                 issues,
                 warning,
                 folders: Vec::new(),
+                prefabs,
             }));
             return Ok(());
         }
@@ -315,17 +319,22 @@ fn run(
             paths = changed;
             continue;
         }
-        let issues: Vec<ProjectFileIssue> = if !paths.is_empty()
+        let (issues, prefabs): (Vec<ProjectFileIssue>, Vec<PrefabFile>) = if !paths.is_empty()
             || delivered.is_none()
             || asset_write
                 .as_ref()
                 .is_some_and(|(_, outcome)| outcome.is_ok())
         {
-            store.reconcile_project_files(&paths, active)
+            let mut issues = store.reconcile_project_files(&paths, active);
+            let (prefabs, prefab_issues) = store.read_project_prefabs();
+            issues.extend(prefab_issues);
+            (issues, prefabs)
         } else {
             delivered.as_ref().map_or_else(
-                Vec::new,
-                |(_, issues, _, _): &(_, Vec<ProjectFileIssue>, _, _)| issues.clone(),
+                || (Vec::new(), Vec::new()),
+                |(_, issues, _, _, prefabs): &(_, Vec<ProjectFileIssue>, _, _, Vec<PrefabFile>)| {
+                    (issues.clone(), prefabs.clone())
+                },
             )
         };
         let write_warning = asset_write.as_ref().and_then(|(_, result)| {
@@ -342,11 +351,12 @@ fn run(
         let mut folders: Vec<_> = watcher.paths.values().cloned().collect();
         folders.sort_unstable();
         if delivered.as_ref().is_none_or(
-            |(previous, previous_issues, previous_warning, previous_folders)| {
+            |(previous, previous_issues, previous_warning, previous_folders, previous_prefabs)| {
                 previous != &state
                     || previous_issues != &issues
                     || previous_warning != &warning
                     || previous_folders != &folders
+                    || previous_prefabs != &prefabs
             },
         ) {
             send(Ok(Snapshot {
@@ -354,8 +364,9 @@ fn run(
                 issues: issues.clone(),
                 warning: warning.clone(),
                 folders: folders.clone(),
+                prefabs: prefabs.clone(),
             }));
-            delivered = Some((state, issues, warning, folders));
+            delivered = Some((state, issues, warning, folders, prefabs));
         }
         if let Some((result, failures)) = import {
             let _ = result.try_send(failures);
@@ -874,6 +885,7 @@ impl<'a> WatchTree<'a> {
                             || source.ends_with(".glb")
                             || source.ends_with(".png")
                             || source.ends_with(".wav")
+                            || source.ends_with(".prefab")
                         {
                             changed.insert(directory.join(source));
                         }

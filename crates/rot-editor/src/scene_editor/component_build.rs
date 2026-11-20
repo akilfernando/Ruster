@@ -30,9 +30,18 @@ impl BuildRequest {
         session: &ComponentSession,
         store: Option<&AssetStore>,
     ) -> Result<Self, String> {
-        let bytes = session
+        let mut bytes = session
             .saved_bytes(rot_scene::MAX_FILE_BYTES)
             .map_err(|e| e.to_string())?;
+        if !session.scene().prefabs.is_empty() {
+            let mut baked = rot_scene::component_scene::ComponentScene::read_json(bytes.as_slice())
+                .map_err(|error| error.to_string())?;
+            baked.prefabs.clear();
+            bytes.clear();
+            baked
+                .write_json(&mut bytes)
+                .map_err(|error| error.to_string())?;
+        }
         let scene = Session::from_runtime_snapshot(&bytes).map_err(|e| e.to_string())?;
         let (meshes, textures) = scene_dependencies(scene.scene())?;
         let sounds = scene.sound_asset_references();

@@ -372,9 +372,58 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
                 || matches!(args["primitive"].as_str(), Some("sphere" | "capsule")));
     }
     if name == "asset_inspect" {
-        return exact_keys(args, &[], &["offset", "model_offset"])
+        return exact_keys(args, &[], &["offset", "model_offset", "prefab_offset"])
             && args.get("offset").is_none_or(canonical_u64)
-            && args.get("model_offset").is_none_or(canonical_u64);
+            && args.get("model_offset").is_none_or(canonical_u64)
+            && args.get("prefab_offset").is_none_or(canonical_u64);
+    }
+    if name == "scene_prefab" {
+        let Some(action) = args.get("action").and_then(Value::as_str) else {
+            return false;
+        };
+        let common = [
+            "expected_session_token",
+            "expected_revision",
+            "action",
+            "object_id",
+        ];
+        let keys = |extra: &[&str], optional: &[&str]| {
+            let required = [common.as_slice(), extra].concat();
+            exact_keys(args, &required, optional)
+                && args["expected_session_token"]
+                    .as_str()
+                    .is_some_and(|value| !value.is_empty() && value.len() <= 256)
+                && canonical_u64(&args["expected_revision"])
+        };
+        let bounded = |field: &str, limit| {
+            args[field]
+                .as_str()
+                .is_some_and(|value| !value.is_empty() && value.len() <= limit)
+        };
+        return bounded("object_id", 128)
+            && match action {
+                "save" => {
+                    keys(&[], &["source"])
+                        && (!args.contains_key("source") || bounded("source", 256))
+                }
+                "place" => {
+                    keys(&["asset_id"], &["parent_id", "transform"])
+                        && bounded("asset_id", 128)
+                        && hierarchy_tools::valid_creation_options(args)
+                }
+                "apply" | "revert" => {
+                    if args["property"] == "tint" {
+                        keys(&["property", "component_id"], &[]) && bounded("component_id", 128)
+                    } else {
+                        keys(&["property"], &[])
+                            && matches!(
+                                args["property"].as_str(),
+                                Some("position" | "rotation" | "scale")
+                            )
+                    }
+                }
+                _ => false,
+            };
     }
     if matches!(
         name,
@@ -525,6 +574,7 @@ fn tools() -> Value {
         ("asset_refresh", "Reimport one registered mesh, texture or static GLB model, retaining last-good accepted content on failure. Model refresh accepts geometry/normal/UV/image changes only with the same named structure, transforms and material settings; it updates resources without rewriting placed scene copies. Catalog persists independently of scene history."),
         ("asset_rename", "Rename one registered OBJ or PNG source within the project without overwrite or changing its extension/kind, preserving stable asset ID; catalog update is independent of scene undo."),
         ("scene_model_place", "Place a registered static GLB model as ordinary editable scene hierarchy/material copies under a creator-owned root. Requires inspected session, scene and asset revisions plus clean human drafts. Optional name labels the root. One atomic unsaved Undo entry; does not reimport or save. Reimport updates shared resources, not local scene values."),
+        ("scene_prefab", "Save, place, apply or revert a v23 prefab."),
         ("scene_mesh", "Assign a registered mesh ID or null for procedural cube to one scene object; revisioned shared authored undo. A changed mesh beneath a textured material requires complete UVs; clear the material first to repair. Preview snapshot unchanged."),
         ("shader_refresh", "Refresh the fixed project-local scene.wgsl trusted shader, validating a candidate pipeline and keeping the last good pipeline on error."),
         ("scene_inspect", "Inspect one page of at most 16 authored scene objects, session/revision and mutation guards. Start without offset; use next_offset for subsequent pages."),
@@ -561,8 +611,22 @@ fn tools() -> Value {
             if matches!(name,"asset_import"|"asset_rename") {properties.insert("source".into(),json!({"type":"string","minLength":1,"maxLength":256,"description":"Relative project path; no traversal, absolute paths or escaping symlinks."}));required.push("source");}
             if name=="scene_mesh" {properties.insert("object_id".into(),json!({"type":"string","minLength":1,"maxLength":128}));required.push("object_id");}
         }
-        if name == "asset_inspect" { properties.insert("model_offset".into(), decimal.clone()); }
+        if name == "asset_inspect" {
+            properties.insert("model_offset".into(), decimal.clone());
+            properties.insert("prefab_offset".into(), decimal.clone());
+        }
         if name == "scene_model_place" { properties.insert("name".into(), json!({"type":"string","minLength":1,"maxLength":128,"description":"Optional display name for the creator-owned placement root."})); }
+        if name == "scene_prefab" {
+            let id = json!({"type":"string","minLength":1,"maxLength":128});
+            properties.insert("action".into(), json!({"enum":["save","place","apply","revert"]}));
+            properties.insert("object_id".into(), json!({"type":"string","minLength":1,"maxLength":128,"description":"Selection or override target, or the new instance root ID for place."}));
+            properties.insert("asset_id".into(), id.clone());
+            properties.insert("source".into(), json!({"type":"string","maxLength":256,"description":"Optional new Assets/*.prefab path for save."}));
+            properties.insert("property".into(), json!({"enum":["position","rotation","scale","tint"]}));
+            properties.insert("component_id".into(), id);
+            hierarchy_tools::creation_properties(&mut properties);
+            required.extend(["action","object_id"]);
+        }
         if name=="asset_import" {properties.insert("normal_policy".into(),json!({"type":"string","enum":["flat","authored_when_complete"],"description":"OBJ mesh import interpretation: flat geometric normals, or complete valid authored corner normals with flat fallback when incomplete. Omitted uses the existing flat route; PNG and GLB imports reject this field. Import another asset identity to change an accepted interpretation."}));}
         if name=="asset_import" {properties.insert("texture_role".into(),json!({"type":"string","enum":["base_color_srgb","roughness_linear"],"description":"PNG-only immutable interpretation. Base color decodes sRGB; roughness reads grayscale/red as linear byte/255 and builds arithmetic perceptual-roughness mips. Omission uses base_color_srgb. Cannot combine with normal_policy; use a distinct asset ID for another interpretation of the same source."}));}
         if name=="shader_refresh" {properties.insert("expected_shader_revision".into(),decimal.clone());properties.insert("builtin".into(),json!({"type":"boolean","description":"Explicitly select built-in appearance instead of reading scene.wgsl; preserves the source file."}));required.push("expected_shader_revision");}
@@ -1767,6 +1831,7 @@ mod tests {
                 "asset_refresh",
                 "asset_rename",
                 "scene_model_place",
+                "scene_prefab",
                 "scene_mesh",
                 "shader_refresh",
                 "scene_inspect",

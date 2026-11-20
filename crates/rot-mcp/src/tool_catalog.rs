@@ -34,6 +34,7 @@ pub(super) fn advertised(name: &str) -> bool {
             | "asset_refresh"
             | "asset_rename"
             | "scene_model_place"
+            | "scene_prefab"
             | "scene_mesh"
             | "behavior_runtime_inspect"
             | "behavior_runtime_state"

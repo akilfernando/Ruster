@@ -1,10 +1,14 @@
-use super::{ComponentScene, ObjectHierarchy, ObjectNode};
-use crate::{OpaqueMaterial, SceneError, SceneLock, Transform};
+use super::{
+    prefab::Materialization, ComponentScene, ObjectHierarchy, ObjectNode, PrefabInstance,
+    PrefabProperty, PrefabSource,
+};
+use crate::{BehaviorSource, OpaqueMaterial, SceneError, SceneLock, Transform};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// In-memory editing state for a v23 scene. History is never serialized.
 pub struct ComponentSession {
@@ -20,6 +24,34 @@ pub struct ComponentSession {
 struct HistoryEntry {
     changes: Vec<SceneChange>,
     state: u64,
+    prefab_file: Option<PrefabFileEdit>,
+}
+
+/// One guarded side effect grouped with its scene transaction. The editor
+/// resolves the project asset ID before comparing and publishing bytes.
+#[derive(Clone, Debug)]
+pub struct PrefabFileEdit {
+    pub asset: String,
+    pub path_hint: String,
+    pub before: Option<Arc<[u8]>>,
+    pub after: Option<Arc<[u8]>>,
+}
+
+fn prefab_hash(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn no_prefab_publisher<R>(_: &PrefabFileEdit) -> Result<R, SceneError> {
+    Err(SceneError::Invalid(
+        "Use prefab-aware history to edit the source file.".into(),
+    ))
+}
+
+impl PrefabFileEdit {
+    fn inverse(mut self) -> Self {
+        std::mem::swap(&mut self.before, &mut self.after);
+        self
+    }
 }
 
 enum SceneChange {
@@ -37,6 +69,14 @@ enum SceneChange {
     Material {
         id: String,
         value: Option<OpaqueMaterial>,
+    },
+    Source {
+        id: String,
+        value: Option<BehaviorSource>,
+    },
+    Prefab {
+        root: String,
+        value: Option<PrefabInstance>,
     },
 }
 
@@ -63,6 +103,26 @@ impl SceneChange {
                 };
                 Self::Material {
                     id,
+                    value: previous,
+                }
+            }
+            Self::Source { id, value } => {
+                let previous = match value {
+                    Some(source) => scene.sources.insert(id.clone(), source),
+                    None => scene.sources.remove(&id),
+                };
+                Self::Source {
+                    id,
+                    value: previous,
+                }
+            }
+            Self::Prefab { root, value } => {
+                let previous = match value {
+                    Some(instance) => scene.prefabs.insert(root.clone(), instance),
+                    None => scene.prefabs.remove(&root),
+                };
+                Self::Prefab {
+                    root,
                     value: previous,
                 }
             }
@@ -478,16 +538,383 @@ impl ComponentSession {
         }
     }
 
+    fn prefab_object_edits(&self, changes: &[SceneChange]) -> Result<Vec<SceneChange>, SceneError> {
+        let new_objects: HashMap<_, _> = changes
+            .iter()
+            .filter_map(|change| match change {
+                SceneChange::Insert { object, .. } | SceneChange::Replace { object, .. } => {
+                    Some((object.id.as_str(), object))
+                }
+                _ => None,
+            })
+            .collect();
+        let owners: HashMap<_, _> = self
+            .scene
+            .prefabs
+            .iter()
+            .flat_map(|(root, instance)| {
+                instance
+                    .parts
+                    .values()
+                    .map(move |part| (part.object.as_str(), root.as_str()))
+            })
+            .collect();
+        let mut links = BTreeMap::new();
+        for index in changes.iter().filter_map(|change| match change {
+            SceneChange::Remove { index } | SceneChange::Replace { index, .. } => Some(*index),
+            _ => None,
+        }) {
+            let old = &self.scene.objects[index];
+            let Some(&root) = owners.get(old.id.as_str()) else {
+                continue;
+            };
+            if let Some(new) = new_objects.get(old.id.as_str()) {
+                let link = links
+                    .entry(root)
+                    .or_insert_with(|| Some(self.scene.prefabs[root].clone()));
+                if let Some(instance) = link {
+                    instance.record_object_edit(old, new)?;
+                }
+            } else if old.id == root {
+                links.insert(root, None);
+            }
+        }
+        Ok(links
+            .into_iter()
+            .filter_map(|(root, value)| {
+                (value.as_ref() != self.scene.prefabs.get(root)).then(|| SceneChange::Prefab {
+                    root: root.to_owned(),
+                    value,
+                })
+            })
+            .collect())
+    }
+
+    /// Save a selection as the first instance without changing its placement.
+    /// The publisher runs after scene validation and before history is advanced.
+    pub fn link_prefab(
+        &mut self,
+        expected: u64,
+        asset: String,
+        path_hint: String,
+        source: &PrefabSource,
+        publish: impl FnOnce(&PrefabFileEdit) -> Result<(), SceneError>,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected)?;
+        let root = source.root();
+        if &PrefabSource::from_selection(&self.scene, root)? != source {
+            return Err(SceneError::Conflict);
+        }
+        let current = self.prefab_objects();
+        let bytes = source.bytes()?;
+        let instance = source.new_instance(root, asset.clone(), prefab_hash(&bytes), true);
+        let materialized = source.materialize(root, instance, &current, None)?;
+        let changes = self.prefab_changes(vec![(root, materialized)], true)?;
+        self.commit_with_file(
+            changes,
+            Some(PrefabFileEdit {
+                asset,
+                path_hint,
+                before: None,
+                after: Some(bytes.into()),
+            }),
+            publish,
+        )
+    }
+
+    /// Place another linked copy of a prefab from the accepted project source.
+    #[allow(clippy::too_many_arguments)]
+    pub fn place_prefab(
+        &mut self,
+        expected: u64,
+        asset: String,
+        hash: String,
+        source: &PrefabSource,
+        root: &str,
+        transform: Transform,
+        parent: Option<String>,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected)?;
+        let current = self.prefab_objects();
+        if current.contains_key(root) {
+            return Err(SceneError::Invalid(format!(
+                "Object ID {root} already exists."
+            )));
+        }
+        let instance = source.new_instance(root, asset, hash, false);
+        let materialized =
+            source.materialize(root, instance, &current, Some((transform, parent)))?;
+        let changes = self.prefab_changes(vec![(root, materialized)], false)?;
+        self.commit_with_file(changes, None, no_prefab_publisher)
+    }
+
+    pub fn refresh_prefab(
+        &mut self,
+        expected: u64,
+        asset: &str,
+        hash: &str,
+        source: &PrefabSource,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected)?;
+        let changes = self.prefab_refresh_changes(asset, hash, source, None)?;
+        if changes.is_empty() {
+            return Ok(self.revision);
+        }
+        let revision = self.commit_with_file(changes, None, no_prefab_publisher)?;
+        // An externally changed source is the new baseline. Historical
+        // indexed object snapshots predate that source and may refer to
+        // removed parts. Keep the accepted scene and start new history.
+        self.undo.clear();
+        self.redo.clear();
+        Ok(revision)
+    }
+
+    pub fn revert_prefab_override(
+        &mut self,
+        expected: u64,
+        root: &str,
+        object: &str,
+        property: &PrefabProperty,
+        source: &PrefabSource,
+        hash: &str,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected)?;
+        let mut instance = self.prefab_instance(root, hash)?.clone();
+        instance.take_override(object, property)?;
+        let current = self.prefab_objects();
+        let materialized = source.materialize(root, instance, &current, None)?;
+        let changes = self.prefab_changes(vec![(root, materialized)], false)?;
+        self.commit_with_file(changes, None, no_prefab_publisher)
+    }
+
+    /// Apply one property from an instance to the source and update every copy.
+    /// The publisher must compare the original bytes and replace the file
+    /// atomically. A failed publication rolls the scene change back.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_prefab_override(
+        &mut self,
+        expected: u64,
+        root: &str,
+        object: &str,
+        property: &PrefabProperty,
+        source_bytes: Arc<[u8]>,
+        path_hint: String,
+        publish: impl FnOnce(&PrefabFileEdit) -> Result<(), SceneError>,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected)?;
+        let mut instance = self
+            .prefab_instance(root, &prefab_hash(&source_bytes))?
+            .clone();
+        let source = PrefabSource::read_json(&source_bytes)?;
+        let (source_id, source_property) = instance.take_override(object, property)?;
+        let object = &self.scene.objects[self.object_index(object)?];
+        let edited = source.with_override(&source_id, source_property, object, property)?;
+        let bytes = edited.bytes()?;
+        let digest = prefab_hash(&bytes);
+        let asset = instance.asset.clone();
+        let changes =
+            self.prefab_refresh_changes(&asset, &digest, &edited, Some((root, instance)))?;
+        self.commit_with_file(
+            changes,
+            Some(PrefabFileEdit {
+                asset,
+                path_hint,
+                before: Some(source_bytes),
+                after: Some(bytes.into()),
+            }),
+            publish,
+        )
+    }
+
+    fn prefab_instance(&self, root: &str, hash: &str) -> Result<&PrefabInstance, SceneError> {
+        let instance = self
+            .scene
+            .prefabs
+            .get(root)
+            .ok_or_else(|| SceneError::Invalid("Choose a prefab instance.".into()))?;
+        if instance.source_hash != hash {
+            return Err(SceneError::Conflict);
+        }
+        Ok(instance)
+    }
+
+    fn prefab_objects(&self) -> HashMap<&str, &ObjectNode> {
+        self.scene
+            .objects
+            .iter()
+            .map(|object| (object.id.as_str(), object))
+            .collect()
+    }
+
+    fn prefab_refresh_changes(
+        &self,
+        asset: &str,
+        hash: &str,
+        source: &PrefabSource,
+        changed: Option<(&str, PrefabInstance)>,
+    ) -> Result<Vec<SceneChange>, SceneError> {
+        let current = self.prefab_objects();
+        let updates = self
+            .scene
+            .prefabs
+            .iter()
+            .filter(|(root, instance)| {
+                instance.asset == asset
+                    && (instance.source_hash != hash
+                        || changed.as_ref().is_some_and(|(other, _)| *root == other))
+            })
+            .map(|(root, instance)| {
+                let mut instance = changed
+                    .as_ref()
+                    .filter(|(other, _)| root.as_str() == *other)
+                    .map_or_else(|| instance.clone(), |(_, value)| value.clone());
+                hash.clone_into(&mut instance.source_hash);
+                Ok((
+                    root.as_str(),
+                    source.materialize(root, instance, &current, None)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, SceneError>>()?;
+        self.prefab_changes(updates, false)
+    }
+
+    fn prefab_changes(
+        &self,
+        updates: Vec<(&str, Materialization)>,
+        link_original: bool,
+    ) -> Result<Vec<SceneChange>, SceneError> {
+        if updates.is_empty() {
+            return Ok(Vec::new());
+        }
+        let indices: HashMap<_, _> = self
+            .scene
+            .objects
+            .iter()
+            .enumerate()
+            .map(|(i, object)| (object.id.as_str(), i))
+            .collect();
+        let mut changes = Vec::new();
+        let mut remove = Vec::new();
+        let mut insert = Vec::new();
+        for (root, update) in updates {
+            let old = self.scene.prefabs.get(root);
+            if link_original && old.is_some() {
+                return Err(SceneError::Invalid(
+                    "This object already belongs to a prefab.".into(),
+                ));
+            }
+            let previous_ids: HashSet<_> = old
+                .into_iter()
+                .flat_map(|instance| instance.parts.values())
+                .map(|part| part.object.as_str())
+                .collect();
+            let retained: HashSet<_> = update
+                .objects
+                .iter()
+                .map(|object| object.id.as_str())
+                .collect();
+            for id in previous_ids.difference(&retained) {
+                remove.push(indices[id]);
+            }
+            for object in update.objects {
+                if let Some(&index) = indices.get(object.id.as_str()) {
+                    if !link_original && !previous_ids.contains(object.id.as_str()) {
+                        return Err(SceneError::Invalid(format!(
+                            "Prefab object ID {} already exists.",
+                            object.id
+                        )));
+                    }
+                    if self.scene.objects[index] != object {
+                        changes.push(SceneChange::Replace { index, object });
+                    }
+                } else {
+                    insert.push(object);
+                }
+            }
+            for (id, value) in update.materials {
+                if let Some(previous) = self.scene.materials.get(&id) {
+                    if old.is_none_or(|instance| {
+                        !instance.materials.values().any(|existing| existing == &id)
+                    }) {
+                        return Err(SceneError::Invalid(format!(
+                            "Prefab material ID {id} already exists."
+                        )));
+                    }
+                    if previous == &value {
+                        continue;
+                    }
+                }
+                changes.push(SceneChange::Material {
+                    id,
+                    value: Some(value),
+                });
+            }
+            for (id, value) in update.sources {
+                if let Some(previous) = self.scene.sources.get(&id) {
+                    if old.is_none_or(|instance| {
+                        !instance.sources.values().any(|existing| existing == &id)
+                    }) {
+                        return Err(SceneError::Invalid(format!(
+                            "Prefab script source ID {id} already exists."
+                        )));
+                    }
+                    if previous == &value {
+                        continue;
+                    }
+                }
+                changes.push(SceneChange::Source {
+                    id,
+                    value: Some(value),
+                });
+            }
+            changes.push(SceneChange::Prefab {
+                root: root.to_owned(),
+                value: Some(update.instance),
+            });
+        }
+        remove.sort_unstable_by(|a, b| b.cmp(a));
+        let end = self.scene.objects.len() - remove.len();
+        changes.extend(
+            remove
+                .into_iter()
+                .map(|index| SceneChange::Remove { index }),
+        );
+        changes.extend(insert.into_iter().enumerate().map(|(offset, object)| {
+            SceneChange::Insert {
+                index: end + offset,
+                object,
+            }
+        }));
+        Ok(changes)
+    }
+
     fn commit(
         &mut self,
         changes: impl IntoIterator<Item = SceneChange>,
+    ) -> Result<u64, SceneError> {
+        let mut changes: Vec<_> = changes.into_iter().collect();
+        if !self.scene.prefabs.is_empty() {
+            changes.extend(self.prefab_object_edits(&changes)?);
+        }
+        self.commit_with_file(changes, None, no_prefab_publisher)
+    }
+
+    fn commit_with_file(
+        &mut self,
+        changes: impl IntoIterator<Item = SceneChange>,
+        file: Option<PrefabFileEdit>,
+        publish: impl FnOnce(&PrefabFileEdit) -> Result<(), SceneError>,
     ) -> Result<u64, SceneError> {
         let next = self
             .revision
             .checked_add(1)
             .ok_or(SceneError::RevisionOverflow)?;
         let inverse = apply_changes(changes, &mut self.scene);
-        if let Err(error) = self.scene.validate() {
+        if let Err(error) = self
+            .scene
+            .validate()
+            .and_then(|_| file.as_ref().map_or(Ok(()), publish))
+        {
             for change in inverse {
                 change.apply(&mut self.scene);
             }
@@ -496,6 +923,7 @@ impl ComponentSession {
         self.undo.push(HistoryEntry {
             changes: inverse,
             state: self.state,
+            prefab_file: file.map(PrefabFileEdit::inverse),
         });
         self.redo.clear();
         self.state = next;
@@ -504,14 +932,19 @@ impl ComponentSession {
     }
 
     pub fn undo(&mut self, expected: u64) -> Result<u64, SceneError> {
-        self.move_history(expected, true)
+        self.move_history(expected, true, no_prefab_publisher)
     }
 
     pub fn redo(&mut self, expected: u64) -> Result<u64, SceneError> {
-        self.move_history(expected, false)
+        self.move_history(expected, false, no_prefab_publisher)
     }
 
-    fn move_history(&mut self, expected: u64, undo: bool) -> Result<u64, SceneError> {
+    pub fn move_history(
+        &mut self,
+        expected: u64,
+        undo: bool,
+        publish: impl FnOnce(&PrefabFileEdit) -> Result<String, SceneError>,
+    ) -> Result<u64, SceneError> {
         self.check_revision(expected)?;
         let next = self
             .revision
@@ -522,10 +955,21 @@ impl ComponentSession {
         } else {
             (&mut self.redo, &mut self.undo, SceneError::NoRedo)
         };
-        let entry = from.pop().ok_or(empty)?;
+        let resolved_path = from
+            .last()
+            .ok_or(empty)?
+            .prefab_file
+            .as_ref()
+            .map(publish)
+            .transpose()?;
+        let mut entry = from.pop().expect("history entry checked");
+        if let (Some(file), Some(path)) = (&mut entry.prefab_file, resolved_path) {
+            file.path_hint = path;
+        }
         to.push(HistoryEntry {
             changes: apply_changes(entry.changes, &mut self.scene),
             state: std::mem::replace(&mut self.state, entry.state),
+            prefab_file: entry.prefab_file.map(PrefabFileEdit::inverse),
         });
         self.revision = next;
         Ok(next)

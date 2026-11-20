@@ -220,7 +220,7 @@ impl ComponentWorkspace {
             .ok_or("viewport_unavailable")
     }
 
-    fn capture_status(&self) -> Result<View, &'static str> {
+    fn check_view_idle(&self) -> Result<(), &'static str> {
         if self.ai_transition_pending()
             || self.runtime.is_playing()
             || self.runtime.input_owned()
@@ -229,6 +229,11 @@ impl ComponentWorkspace {
         {
             return Err("view_busy");
         }
+        Ok(())
+    }
+
+    fn capture_status(&self) -> Result<View, &'static str> {
+        self.check_view_idle()?;
         let view = self.capture_view()?;
         if view.scene_revision != self.session.revision()
             || view.asset_revision != self.assets.as_ref().map(rot_assets::AssetStore::revision)
@@ -305,7 +310,7 @@ impl ComponentWorkspace {
                     Some("top") => rot_render::ViewPreset::Top,
                     _ => return Err(fail("invalid_arguments")),
                 };
-                self.capture_status().map_err(fail)?;
+                self.check_view_idle().map_err(fail)?;
                 let camera = self
                     .frame_objects(Some(id), Some(direction))
                     .map_err(|message| ("cannot_frame".into(), message.into()))?;

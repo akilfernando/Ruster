@@ -4,7 +4,8 @@ use super::{ComponentWorkspace, Geometry, Transform};
 use crate::editor_theme;
 use eframe::egui;
 use rot_assets::{
-    AssetKind, AssetStateIdentity, AssetStatus, MeshNormalPolicy, ProjectFileIssue, TextureRole,
+    AssetKind, AssetStateIdentity, AssetStatus, MeshNormalPolicy, PrefabFile, ProjectFileIssue,
+    TextureRole,
 };
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -67,7 +68,9 @@ impl AssetRow {
     }
 
     fn can_place(&self, meshes: &rot_app::MeshMap) -> bool {
-        self.model || self.kind == "Mesh" && meshes.contains_key(&self.id)
+        self.model
+            || self.kind == "Prefab" && self.status == AssetStatus::Ready
+            || self.kind == "Mesh" && meshes.contains_key(&self.id)
     }
 
     fn status_label(&self) -> &'static str {
@@ -272,6 +275,7 @@ impl Browser {
         assets: &rot_assets::AssetStore,
         folders: Vec<PathBuf>,
         issues: &[ProjectFileIssue],
+        prefabs: &[PrefabFile],
     ) {
         self.catalog = Some(assets.state_identity());
         self.rows.clear();
@@ -298,6 +302,11 @@ impl Browser {
             row.warnings.clone_from(&model.warnings);
             row
         }));
+        self.rows.extend(
+            prefabs.iter().map(|prefab| {
+                AssetRow::new(&prefab.id, &prefab.source, "Prefab", AssetStatus::Ready)
+            }),
+        );
         let mut issue_by_path: HashMap<_, _> = issues
             .iter()
             .map(|issue| (issue.path.as_str(), issue))
@@ -319,6 +328,7 @@ impl Browser {
                 "png" => "Texture",
                 "wav" => "Sound",
                 "glb" => "Model",
+                "prefab" => "Prefab",
                 "rotmeta" => "Import Settings",
                 _ => return None,
             };
@@ -599,7 +609,7 @@ impl Browser {
                 self.context_action = Some(action);
             }
         });
-        if (row.kind == "Mesh" || row.model)
+        if (row.kind == "Mesh" || row.model || row.kind == "Prefab")
             && ui
                 .add_enabled(
                     can_place && row.can_place(meshes),
@@ -880,7 +890,9 @@ impl ComponentWorkspace {
             self.error = Some("The asset changed. Select it and try again.".into());
             return;
         };
-        let result = if store.model(&drag.id).is_some() {
+        let result = if self.prefab_files.contains_key(&drag.id) {
+            self.place_prefab(&drag.id, None, Transform::default(), parent)
+        } else if store.model(&drag.id).is_some() {
             self.place_model(&drag.id, None, parent)
         } else if let Some(geometry) = drag.geometry(Some(store), &self.meshes) {
             let row = &self.asset_browser.rows[self.asset_browser.by_id[&drag.id]];
@@ -976,7 +988,7 @@ mod tests {
         let mut editor =
             ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
         let browser = &mut editor.asset_browser;
-        browser.refresh(&store, vec![PathBuf::from("Assets/Empty")], &[]);
+        browser.refresh(&store, vec![PathBuf::from("Assets/Empty")], &[], &[]);
         assert!(browser.folders.contains(&PathBuf::from("Assets/Empty")));
         assert!(browser.visible.is_empty());
         browser.folder = folder;
@@ -1016,7 +1028,9 @@ mod tests {
         fs::write(project.path().join(&never_imported), "also bad").unwrap();
         let issues =
             store.reconcile_project_files(&BTreeSet::from([source, never_imported]), || true);
-        editor.asset_browser.refresh(&store, Vec::new(), &issues);
+        editor
+            .asset_browser
+            .refresh(&store, Vec::new(), &issues, &[]);
         let new = &editor.asset_browser.rows[editor.asset_browser.by_id["Assets/New.obj"]];
         assert_eq!(new.status, AssetStatus::Invalid);
         assert!(new.diagnostic.is_some());
