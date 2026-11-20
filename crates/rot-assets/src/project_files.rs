@@ -551,8 +551,9 @@ impl AssetStore {
             }
             Importer::Model => {
                 if let Some(model) = self.registry.models.get(&metadata.id) {
-                    let path = confined_path(&self.root, source, false)?;
-                    if digest(&read_bounded(&path, super::MAX_GLB_SOURCE_BYTES)?) == model.hash {
+                    if digest(&super::glb_catalog::read_candidate(&self.root, source)?)
+                        == model.hash
+                    {
                         return Ok(());
                     }
                     AssetMutation::RefreshGlb { id: metadata.id }
@@ -598,10 +599,7 @@ impl AssetStore {
         }
         let bytes = match importer {
             Importer::Asset(kind) => super::read_source_bytes(&self.root, source, kind)?,
-            Importer::Model => {
-                let path = confined_path(&self.root, source, false)?;
-                read_bounded(&path, super::MAX_GLB_SOURCE_BYTES)?
-            }
+            Importer::Model => super::glb_catalog::read_candidate(&self.root, source)?,
         };
         Ok(orphaned.contains(&digest(&bytes).as_str()))
     }

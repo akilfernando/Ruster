@@ -168,12 +168,16 @@ fn prepared_glb_publish_failure_preserves_the_active_generation() {
 }
 
 fn model_bytes(nodes: Vec<serde_json::Value>, roughness: f32) -> Vec<u8> {
+    model_with_image(nodes, roughness, None)
+}
+
+fn model_with_image(nodes: Vec<serde_json::Value>, roughness: f32, image: Option<&str>) -> Vec<u8> {
     use serde_json::json;
-    let bin = [0.0_f32, 0., 0., 1., 0., 0., 0., 1., 0.]
+    let mut bin = [0.0_f32, 0., 0., 1., 0., 0., 0., 1., 0.]
         .into_iter()
         .flat_map(f32::to_le_bytes)
         .collect::<Vec<_>>();
-    let mut document = serde_json::to_vec(&json!({
+    let mut document = json!({
         "asset":{"version":"2.0"},
         "scenes":[{"nodes":[0]}], "nodes":nodes,
         "meshes":[{"primitives":[{"attributes":{"POSITION":0},"material":0}]}],
@@ -181,7 +185,44 @@ fn model_bytes(nodes: Vec<serde_json::Value>, roughness: f32) -> Vec<u8> {
         "buffers":[{"byteLength":bin.len()}],
         "bufferViews":[{"buffer":0,"byteLength":bin.len()}],
         "accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"}],
-    })).unwrap();
+    });
+    if let Some(uri) = image {
+        document["extensionsUsed"] = json!(["KHR_texture_transform"]);
+        document["images"] = json!([{"uri":uri}]);
+        document["textures"] = json!([{"source":0}]);
+        document["materials"][0]["pbrMetallicRoughness"]["baseColorTexture"] =
+            json!({"index":0,"extensions":{"KHR_texture_transform":{"texCoord":0}}});
+        document["meshes"][0]["primitives"][0]["attributes"]["TEXCOORD_0"] = json!(1);
+        document["accessors"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"bufferView":1,"componentType":5126,"count":3,"type":"VEC2"}));
+        document["bufferViews"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"buffer":0,"byteOffset":bin.len(),"byteLength":24}));
+        bin.extend(
+            [0., 0., 1., 0., 0., 1.]
+                .into_iter()
+                .flat_map(f32::to_le_bytes),
+        );
+        document["meshes"][0]["primitives"][0]["indices"] = json!(2);
+        document["accessors"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"bufferView":2,"componentType":5123,"count":6,"type":"SCALAR"}));
+        document["bufferViews"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"buffer":0,"byteOffset":bin.len(),"byteLength":12}));
+        bin.extend(
+            [0_u16, 1, 2, 0, 0, 2]
+                .into_iter()
+                .flat_map(u16::to_le_bytes),
+        );
+        document["buffers"][0]["byteLength"] = json!(bin.len());
+    }
+    let mut document = serde_json::to_vec(&document).unwrap();
     document.resize(document.len().next_multiple_of(4), b' ');
     let total = 28 + document.len() + bin.len();
     let mut bytes = b"glTF".to_vec();
@@ -194,6 +235,92 @@ fn model_bytes(nodes: Vec<serde_json::Value>, roughness: f32) -> Vec<u8> {
     bytes.extend(b"BIN\0");
     bytes.extend(bin);
     bytes
+}
+
+#[test]
+fn external_png_is_pinned_then_refreshed_by_a_texture_only_change() {
+    use rot_assets::AssetMutation;
+    use serde_json::json;
+    let directory = tempfile::tempdir().unwrap();
+    let assets = directory.path().join("Assets");
+    let texture = assets.join("Textures/paint.png");
+    fs::create_dir_all(texture.parent().unwrap()).unwrap();
+    let png = |rgb: &[u8; 3]| {
+        let mut bytes = Vec::new();
+        let mut encoder = png::Encoder::new(&mut bytes, 1, 1);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(rgb)
+            .unwrap();
+        bytes
+    };
+    let first_png = png(&[200, 9, 32]);
+    let second_png = png(&[7, 64, 190]);
+    fs::write(&texture, &first_png).unwrap();
+    let nodes = vec![json!({"name":"Mesh","mesh":0})];
+    fs::write(
+        assets.join("model.glb"),
+        model_with_image(nodes.clone(), 0.6, Some("Textures/paint.png")),
+    )
+    .unwrap();
+    fs::write(
+        assets.join("outside.glb"),
+        model_with_image(nodes, 0.6, Some("../outside.png")),
+    )
+    .unwrap();
+    fs::write(directory.path().join("outside.png"), &first_png).unwrap();
+    let (mut store, issues) = AssetStore::open_project(directory.path()).unwrap();
+    assert_eq!(issues.len(), 1, "{issues:?}");
+    assert!(issues[0].contains("outside.glb") && issues[0].contains("parent/dot"));
+    let first = store.models().next().unwrap().clone();
+    assert_eq!(first.warnings, ["Skipped 1 degenerate triangle."]);
+    let mesh = first.nodes["Mesh"].mesh_id.as_deref().unwrap();
+    assert_eq!(store.mesh(mesh).unwrap().indices.len(), 3);
+    let id = first.materials["Paint"].base_color_texture.clone().unwrap();
+    let reads = |store: &AssetStore| {
+        store
+            .export_snapshot(&BTreeSet::from([id.clone()]))
+            .unwrap()
+            .read_sources()
+            .unwrap()
+            .remove(&id)
+            .unwrap()
+    };
+    assert_eq!(reads(&store), first_png);
+
+    fs::write(&texture, &second_png).unwrap();
+    let reopened = AssetStore::open(directory.path()).unwrap();
+    assert_eq!(reads(&reopened), first_png);
+    let prepared = store
+        .request_at(
+            store.revision(),
+            AssetMutation::RefreshGlb {
+                id: first.id.clone(),
+            },
+        )
+        .unwrap()
+        .prepare();
+    fs::write(&texture, &first_png).unwrap();
+    let completion = store.adopt(prepared.publish()).unwrap();
+    let failure = completion.result.unwrap_err();
+    assert!(failure.to_string().contains("changed during preparation"));
+    assert_eq!(reads(&store), first_png);
+    fs::write(&texture, &second_png).unwrap();
+    store.update_project_files(
+        &BTreeSet::from(["Assets/Textures/paint.png".into()]),
+        || true,
+    );
+    let second = store.model(&first.id).unwrap();
+    assert_ne!(first.hash, second.hash);
+    assert_eq!(first.materials, second.materials);
+    assert_eq!(reads(&store), second_png);
+
+    fs::remove_file(texture).unwrap();
+    let reopened = AssetStore::open(directory.path()).unwrap();
+    assert_eq!(reopened.model(&first.id), Some(second));
+    assert_eq!(reads(&reopened), second_png);
 }
 
 #[test]

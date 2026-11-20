@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-11-19. See the [archive](archive/STATUS-2026-11-17.md) for earlier status.
+Updated 2026-11-20. See the [archive](archive/STATUS-2026-11-17.md) for earlier status.
 
 ## Where to work
 
@@ -48,8 +48,9 @@ browse, import and refresh assets, assign meshes, and capture the viewport.
 On Linux, v23 watches `Assets/` for imports and changes. The Assets panel
 shows live folders, previews and diagnostics, accepts drops, and places
 meshes and multi-primitive GLB hierarchies with Undo. File actions keep stable IDs
-on rename and preserve sources in project trash. GLB material fallbacks appear
-in the Assets Inspector and MCP. A relocated build loaded 80 meshes.
+on rename and preserve sources in project trash. GLB imports support relative
+PNG textures and report material fallbacks and skipped triangles in the Assets
+Inspector and MCP. A relocated build loaded 80 meshes.
 [C-12 benchmark timings](PARITY-PLAN.md#5-performance-budgets)
 cover 5,000 and 50,000 objects. Desktop frame rates remain unverified.
 
@@ -66,11 +67,9 @@ records the starting point for the parity plan.
 
 ## Installed on this machine
 
-`rot-editor` and `rot-mcp` built from `main` at b85d44c (installed 2026-11-19)
-are in `~/.local/bin`, with the **Rot Engine** launcher
-entry `org.rot.editor.desktop`. Reinstall with
-`python3 scripts/install_local.py`; the build it replaced is kept in
-`~/.local/share/rot-engine/previous` for `--rollback`.
+The **Rot Engine** launcher uses the 2026-11-19 build with GLB material
+warnings (`6e32b7f`). Reinstall with `python3 scripts/install_local.py`.
+The previous build is in `~/.local/share/rot-engine/previous` for `--rollback`.
 
 ## Known problems
 

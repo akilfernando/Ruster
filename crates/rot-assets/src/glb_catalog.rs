@@ -31,9 +31,25 @@ fn generation_path(directory: &Path, hash: &str) -> PathBuf {
     directory.join(format!("{hash}.glb"))
 }
 
-fn read_candidate(root: &Path, source: &str) -> Result<Vec<u8>, AssetError> {
+pub(super) fn read_candidate(root: &Path, source: &str) -> Result<Vec<u8>, AssetError> {
     validate_glb_path(source)?;
-    read_bounded(&confined_path(root, source, false)?, MAX_GLB_SOURCE_BYTES)
+    let bytes = read_bounded(&confined_path(root, source, false)?, MAX_GLB_SOURCE_BYTES)?;
+    let embedded = glb::embed_external_images(&bytes, |uri| {
+        validate_project_relative(uri)?;
+        if uri.contains([':', '%', '?', '#'])
+            || Path::new(uri).extension().and_then(|ext| ext.to_str()) != Some("png")
+        {
+            return Err(error("GLB external images require a relative PNG path"));
+        }
+        let path = source
+            .rsplit_once('/')
+            .map_or_else(|| uri.to_owned(), |(folder, _)| format!("{folder}/{uri}"));
+        read_bounded(
+            &confined_path(root, &path, false)?,
+            MAX_TEXTURE_SOURCE_BYTES,
+        )
+    })?;
+    Ok(embedded.unwrap_or(bytes))
 }
 
 pub(super) fn read_accepted(root: &Path, info: &ModelInfo) -> Result<DecodedModel, AssetError> {
@@ -106,7 +122,7 @@ impl Registry {
                 || &model.id != id
                 || !ids.insert(id)
                 || !sources.insert(&model.source)
-                || model.warnings.len() > MAX_MODEL_ITEMS
+                || model.warnings.len() > MAX_MODEL_ITEMS + 1
                 || model.warnings.iter().any(|message| {
                     message.is_empty()
                         || message.len() > 512

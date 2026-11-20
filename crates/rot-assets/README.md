@@ -169,14 +169,18 @@ the scene's default surface. Nodes that become Groups require uniform scale;
 mesh leaves can use nonuniform scale. The hierarchy may have at most eight
 Group levels including the placement root and groups that wrap a mesh with
 children or multiple surfaces. The resolved placement must stay within scene transform bounds.
-Base color uses an embedded compatible PNG with TEXCOORD_0, optional repeat
-or clamp on both axes, and supported matching min/mag/mipmap filters.
+Base color uses a compatible PNG with TEXCOORD_0, optional repeat or clamp on
+both axes, and supported matching min/mag/mipmap filters. Textures may be
+embedded or referenced by a plain relative PNG path in the model's directory
+or a subfolder. Import pins the PNG bytes with the model for reopen and
+standalone builds. Editing the PNG in `Assets/` triggers a model refresh.
 Import warns when it renders alpha as opaque, double-sided materials as
 single-sided, or metallic materials as dielectric. It clamps roughness to a
 minimum of 0.08 and warns when it omits normal, emissive, occlusion, and
-metallic-roughness maps or a nonzero emissive factor. The decoder still
-rejects external URIs, extensions, skins, morphs, unsupported vertex
-channels and matrices. Derived OBJ preserves
-triangle order and the existing renderer's normal and UV convention;
-the export snapshot passes only the verified generated OBJ/PNG closure to
+metallic-roughness maps, a nonzero emissive factor, or a non-identity base
+color UV transform. Import skips degenerate triangles and reports how many
+it skipped. Tangents can be present and are unused. External buffers, skins,
+morphs and matrices are unsupported. Derived OBJ preserves the order of
+retained triangles and the existing renderer's normal and UV convention.
+The export snapshot passes only the verified generated OBJ/PNG closure to
 the existing standalone resource loader.

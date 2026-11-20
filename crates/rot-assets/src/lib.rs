@@ -1520,6 +1520,18 @@ pub fn parse_obj(bytes: &[u8]) -> Result<Mesh, AssetError> {
     parse_obj_with_normal_policy(bytes, MeshNormalPolicy::Flat)
 }
 
+fn triangle_normal([a, b, c]: [[f32; 3]; 3]) -> Option<[f32; 3]> {
+    let ab = std::array::from_fn::<_, 3, _>(|i| b[i] - a[i]);
+    let ac = std::array::from_fn::<_, 3, _>(|i| c[i] - a[i]);
+    let cross = [
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0],
+    ];
+    let length = cross.iter().map(|v| v * v).sum::<f32>().sqrt();
+    (length.is_finite() && length > 1e-12).then(|| cross.map(|v| v / length))
+}
+
 /// Authored mode accepts either no face-corner normals (flat fallback) or a complete
 /// per-corner set. Partial/mixed sets reject rather than silently faceting a surface.
 pub fn parse_obj_with_normal_policy(
@@ -1646,27 +1658,9 @@ pub fn parse_obj_with_normal_policy(
                         }
                     }
                 }
-                let a = [
-                    triangle[1][0] - triangle[0][0],
-                    triangle[1][1] - triangle[0][1],
-                    triangle[1][2] - triangle[0][2],
-                ];
-                let b = [
-                    triangle[2][0] - triangle[0][0],
-                    triangle[2][1] - triangle[0][1],
-                    triangle[2][2] - triangle[0][2],
-                ];
-                let cross = [
-                    a[1] * b[2] - a[2] * b[1],
-                    a[2] * b[0] - a[0] * b[2],
-                    a[0] * b[1] - a[1] * b[0],
-                ];
-                let length = cross.iter().map(|v| v * v).sum::<f32>().sqrt();
-                if !length.is_finite() || length <= 1e-12 {
-                    return Err(fail("degenerate triangle has no finite surface normal"));
-                }
+                let normal = triangle_normal(triangle)
+                    .ok_or_else(|| fail("degenerate triangle has no finite surface normal"))?;
                 expanded_uvs.extend(triangle_uvs);
-                let normal = cross.map(|v| v / length);
                 for position in triangle {
                     mesh.indices.push(mesh.vertices.len() as u32);
                     mesh.vertices.push(Vertex { position, normal });
