@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-11-20. See the [archive](archive/STATUS-2026-11-17.md) for earlier status.
+Updated 2026-11-21. See the [archive](archive/STATUS-2026-11-17.md) for earlier status.
 
 ## Where to work
 
@@ -54,6 +54,8 @@ Inspector and MCP. A relocated build loaded 80 meshes.
 v23 prefabs link reusable hierarchies in the editor and MCP. Child transform
 and mesh tint overrides support Apply, Revert and shared Undo. The cottage
 trial verified a roof fix across three placements and in a relocated build.
+Prefab failures offer **Error Details**, and the Inspector explains how to
+restore an unavailable source. The rest of the generated-message sweep is open.
 [C-12 benchmark timings](PARITY-PLAN.md#5-performance-budgets)
 cover 5,000 and 50,000 objects. Desktop frame rates remain unverified.
 

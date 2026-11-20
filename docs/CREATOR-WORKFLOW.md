@@ -121,7 +121,8 @@ the editor's Undo history and is saved with the scene.
 Keep the `.prefab` and its `.rotmeta` together when moving them. If a source
 is unavailable, the Inspector reports it and instances keep their last
 usable contents for editing, saving and building. Restore the file and
-sidecar to reconnect. When Rot incorporates an external source change into
+sidecar to reconnect. Select **Error Details** in the status bar if a prefab
+edit or source update fails. When Rot incorporates an external source change into
 the scene, it clears Undo and Redo to keep the new source and scene together.
 
 Approved MCP clients can use `scene_prefab` to `save` the selected

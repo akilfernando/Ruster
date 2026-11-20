@@ -1,7 +1,7 @@
 //! File-backed Assets panel for the component workspace.
 use super::super::assets_browser::{asset_glyph, texture_thumbnail, TextureThumbnails};
 use super::{ComponentWorkspace, Geometry, Transform};
-use crate::editor_theme;
+use crate::{editor_theme, strings::Text};
 use eframe::egui;
 use rot_assets::{
     AssetKind, AssetStateIdentity, AssetStatus, MeshNormalPolicy, PrefabFile, ProjectFileIssue,
@@ -85,6 +85,7 @@ impl AssetRow {
 pub(in crate::scene_editor) struct AssetDrag {
     id: String,
     catalog: AssetStateIdentity,
+    prefab: bool,
 }
 
 impl AssetDrag {
@@ -553,6 +554,7 @@ impl Browser {
                                     self.catalog.clone().map(|catalog| AssetDrag {
                                         catalog,
                                         id: row.id.clone(),
+                                        prefab: row.kind == "Prefab",
                                     })
                                 };
                                 if response.drag_started() && placeable {
@@ -601,7 +603,14 @@ impl Browser {
             ui.label(settings);
         }
         if let Some(diagnostic) = &row.diagnostic {
-            ui.colored_label(editor_theme::colors(ui).error, diagnostic);
+            if row.kind == "Prefab" {
+                ui.colored_label(editor_theme::colors(ui).error, Text::PrefabInvalid.plain());
+                ui.collapsing(Text::ErrorDetails.plain(), |ui| {
+                    ui.add(egui::Label::new(diagnostic).wrap().selectable(true));
+                });
+            } else {
+                ui.colored_label(editor_theme::colors(ui).error, diagnostic);
+            }
         }
         #[cfg(target_os = "linux")]
         ui.menu_button("Asset Actions", |ui| {
@@ -620,6 +629,7 @@ impl Browser {
             return Some(AssetDrag {
                 id: row.id.clone(),
                 catalog: self.catalog.clone()?,
+                prefab: row.kind == "Prefab",
             });
         }
         if !row.warnings.is_empty() {
@@ -887,12 +897,20 @@ impl ComponentWorkspace {
             .as_ref()
             .filter(|store| store.matches_identity(&drag.catalog))
         else {
-            self.error = Some("The asset changed. Select it and try again.".into());
+            let message = "The asset changed. Select it and try again.";
+            if drag.prefab {
+                self.report_prefab_result(Text::PrefabPlace, Err::<(), _>(message));
+            } else {
+                self.error = Some(message.into());
+            }
             return;
         };
-        let result = if self.prefab_files.contains_key(&drag.id) {
-            self.place_prefab(&drag.id, None, Transform::default(), parent)
-        } else if store.model(&drag.id).is_some() {
+        if drag.prefab {
+            let result = self.place_prefab(&drag.id, None, Transform::default(), parent);
+            self.report_prefab_result(Text::PrefabPlace, result);
+            return;
+        }
+        let result = if store.model(&drag.id).is_some() {
             self.place_model(&drag.id, None, parent)
         } else if let Some(geometry) = drag.geometry(Some(store), &self.meshes) {
             let row = &self.asset_browser.rows[self.asset_browser.by_id[&drag.id]];
@@ -1002,6 +1020,7 @@ mod tests {
         let asset = AssetDrag {
             id,
             catalog: store.state_identity(),
+            prefab: false,
         };
         editor.meshes = store.mesh_snapshots();
         editor.assets = Some(store.project_snapshot());

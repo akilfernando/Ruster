@@ -160,6 +160,8 @@ pub(super) struct ComponentWorkspace {
     asset_browser: asset_panel::Browser,
     prefab_files: BTreeMap<String, rot_assets::PrefabFile>,
     prefab_refresh_pending: bool,
+    prefab_feedback: Option<prefabs::PrefabFeedback>,
+    prefab_details_open: bool,
     #[cfg(target_os = "linux")]
     asset_watcher: Option<super::project_assets::ProjectAssets>,
     #[cfg(target_os = "linux")]
@@ -247,6 +249,8 @@ impl ComponentWorkspace {
             asset_browser: Default::default(),
             prefab_files: BTreeMap::new(),
             prefab_refresh_pending: false,
+            prefab_feedback: None,
+            prefab_details_open: false,
             #[cfg(target_os = "linux")]
             asset_watcher: None,
             #[cfg(target_os = "linux")]
@@ -1455,12 +1459,20 @@ impl ComponentWorkspace {
         } else {
             build_status
         };
-        if scene_error.is_some() || build_status.is_some() {
+        if scene_error.is_some() || build_status.is_some() || self.prefab_feedback.is_some() {
             egui::Panel::bottom("component_status").show(ui, |ui| {
                 if let Some(error) = scene_error {
                     ui.colored_label(editor_theme::colors(ui).error, error);
                 } else if let Some(status) = build_status {
                     ui.add(egui::Label::new(status).truncate());
+                }
+                if self
+                    .prefab_feedback
+                    .as_ref()
+                    .is_some_and(|feedback| feedback.show(ui, &mut self.prefab_details_open))
+                {
+                    self.prefab_feedback = None;
+                    self.prefab_details_open = false;
                 }
             });
         }
@@ -1626,10 +1638,8 @@ impl ComponentWorkspace {
                 } else if let Some(id) = framed {
                     self.error = self.frame_objects(Some(&id), None).err().map(str::to_owned);
                 } else if let Some(id) = prefab.filter(|_| self.apply()) {
-                    self.error = self
-                        .save_prefab(&id, None)
-                        .err()
-                        .map(|error| error.to_string());
+                    let result = self.save_prefab(&id, None);
+                    self.report_prefab_result(Text::PrefabSave, result);
                 } else if let Some(id) = deleted {
                     self.delete(Some(&id));
                 } else if let Some(selected) = selected.filter(|_| self.apply()) {

@@ -1,5 +1,6 @@
 //! Shared native and MCP prefab authoring against one component session.
 use super::{project_directory, ComponentWorkspace, Transform};
+use crate::{editor_theme, strings::Text};
 use eframe::egui;
 use rot_assets::{AssetStatus, PrefabFile, ProjectFileIssue};
 use rot_scene::{
@@ -42,7 +43,65 @@ fn unique_id(prefix: &str) -> String {
     format!("{prefix}-{:x}", time.as_nanos())
 }
 
+pub(super) struct PrefabFeedback {
+    action: Text,
+    detail: String,
+}
+
+impl PrefabFeedback {
+    pub(super) fn show(&self, ui: &mut egui::Ui, details_open: &mut bool) -> bool {
+        let mut dismiss = false;
+        ui.horizontal_wrapped(|ui| {
+            ui.colored_label(editor_theme::colors(ui).error, self.action.plain());
+            *details_open |= ui.button(Text::ErrorDetails.plain()).clicked();
+            dismiss = ui.button(Text::DismissError.plain()).clicked();
+        });
+        if *details_open {
+            let dialog = egui::Modal::new(egui::Id::unique("prefab_error_details"))
+                .frame(editor_theme::dialog_frame(ui.ctx()))
+                .show(ui.ctx(), |ui| {
+                    ui.set_max_width(480.0);
+                    ui.heading(Text::ErrorDetails.plain());
+                    ui.label(self.action.plain());
+                    egui::ScrollArea::vertical()
+                        .max_height(200.0)
+                        .show(ui, |ui| {
+                            ui.add(egui::Label::new(&self.detail).wrap().selectable(true));
+                        });
+                    ui.button(Text::CloseErrorDetails.plain()).clicked()
+                });
+            *details_open = !(dialog.inner || dialog.should_close());
+        }
+        dismiss
+    }
+}
+
 impl ComponentWorkspace {
+    pub(super) fn report_prefab_result<T>(
+        &mut self,
+        action: Text,
+        result: Result<T, impl std::fmt::Display>,
+    ) {
+        match result {
+            Ok(_)
+                if self
+                    .prefab_feedback
+                    .as_ref()
+                    .is_some_and(|old| old.action == action) =>
+            {
+                self.prefab_feedback = None;
+                self.prefab_details_open = false;
+            }
+            Ok(_) => {}
+            Err(error) => {
+                self.prefab_feedback = Some(PrefabFeedback {
+                    action,
+                    detail: error.to_string(),
+                });
+            }
+        }
+    }
+
     #[cfg(target_os = "linux")]
     pub(super) fn adopt_prefabs(
         &mut self,
@@ -87,6 +146,7 @@ impl ComponentWorkspace {
             .map(|instance| instance.asset.clone())
             .collect();
         let revision = self.session.revision();
+        let mut failed = false;
         for id in pending {
             let file = &self.prefab_files[&id];
             let result = PrefabSource::read_json(&file.bytes).and_then(|source| {
@@ -94,10 +154,15 @@ impl ComponentWorkspace {
                     .refresh_prefab(self.session.revision(), &id, &file.hash, &source)
             });
             if let Err(error) = result {
-                self.error = Some(format!("Couldn't update {}. {error}", file.source));
+                failed = true;
+                let detail = format!("{}\n{error}", file.source);
+                self.report_prefab_result(Text::PrefabRefresh, Err::<(), _>(detail));
             }
         }
         if revision != self.session.revision() {
+            if !failed {
+                self.report_prefab_result(Text::PrefabRefresh, Ok::<_, &str>(()));
+            }
             self.refresh();
         }
     }
@@ -277,7 +342,8 @@ impl ComponentWorkspace {
                     .unwrap_or(&file.source),
             );
         } else {
-            ui.colored_label(ui.visuals().warn_fg_color, "Prefab Source Unavailable");
+            ui.colored_label(ui.visuals().warn_fg_color, Text::PrefabUnavailable.plain());
+            ui.label(Text::PrefabRecovery.plain());
             return;
         }
         let fields = part
@@ -317,10 +383,54 @@ impl ComponentWorkspace {
         }
         if let Some((property, apply)) = action {
             let object = object.id.clone();
-            self.error = self
-                .change_prefab_override(&object, &property, apply)
-                .err()
-                .map(|error| error.to_string());
+            let result = self.change_prefab_override(&object, &property, apply);
+            let label = if apply {
+                Text::PrefabApply
+            } else {
+                Text::PrefabRevert
+            };
+            self.report_prefab_result(label, result);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rot_scene::component_scene::{ComponentScene, ComponentSession};
+    use rot_scene::{Scene, Session};
+
+    #[test]
+    fn prefab_save_collision_keeps_details_until_retry_succeeds() {
+        let project = tempfile::tempdir().unwrap();
+        let assets = project.path().join("Assets");
+        std::fs::create_dir(&assets).unwrap();
+        let path = project.path().join("scene.json");
+        ComponentScene::from_legacy(&Session::new(Scene::empty("prefab-feedback")).unwrap())
+            .unwrap()
+            .save_new(&path)
+            .unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let id = editor
+            .create_object(Some("example"), "Example", None, None, Transform::default())
+            .unwrap();
+        let asset = assets.join("Example.prefab");
+        std::fs::write(&asset, b"unrelated file").unwrap();
+
+        let result = editor.save_prefab(&id, None);
+        editor.report_prefab_result(Text::PrefabSave, result);
+        let feedback = editor.prefab_feedback.as_ref().unwrap();
+        assert_eq!(feedback.action, Text::PrefabSave);
+        assert!(feedback.detail.contains("already exists"));
+        assert!(editor.session.scene().prefabs.is_empty());
+        assert_eq!(std::fs::read(&asset).unwrap(), b"unrelated file");
+
+        std::fs::remove_file(&asset).unwrap();
+        let result = editor.save_prefab(&id, None);
+        assert!(result.is_ok());
+        editor.report_prefab_result(Text::PrefabSave, result);
+        assert!(editor.prefab_feedback.is_none());
+        assert_eq!(editor.session.scene().prefabs.len(), 1);
     }
 }
