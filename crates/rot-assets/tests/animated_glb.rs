@@ -8,8 +8,36 @@ fn catalog_version(root: &std::path::Path) -> u64 {
     catalog["version"].as_u64().unwrap()
 }
 
-// Unique boundary: clip structure is catalog identity, key data is a refreshable
-// resource of the accepted generation, and both survive a fresh open.
+#[test]
+fn unsupported_material_settings_import_with_persistent_warnings() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(
+        root.path().join("rig.glb"),
+        animated_glb(AnimatedFixture {
+            material_fallbacks: true,
+            ..Default::default()
+        }),
+    )
+    .unwrap();
+    let mut store = AssetStore::open(root.path()).unwrap();
+    let model = store.import_glb_at(0, "rig", "rig.glb").unwrap();
+
+    assert_eq!(model.materials["Material 1"].roughness, 0.08);
+    assert_eq!(
+        model.nodes["Rig/Arm"].material.as_deref(),
+        Some("Material 1")
+    );
+    assert!(model.clips.contains_key("Swing"));
+    assert_eq!(
+        model.warnings,
+        ["Material 1: alpha rendered opaque, double-sided surface rendered single-sided, metallic factor rendered as dielectric, roughness raised to 0.08, emissive factor omitted"]
+    );
+    assert_eq!(
+        AssetStore::open(root.path()).unwrap().model("rig"),
+        Some(&model)
+    );
+}
+
 #[test]
 fn split_primitives_keep_surface_ids_when_material_slots_reorder() {
     let root = tempfile::tempdir().unwrap();
@@ -21,6 +49,7 @@ fn split_primitives_keep_surface_ids_when_material_slots_reorder() {
     fs::write(&source, animated_glb(fixture)).unwrap();
     let mut store = AssetStore::open(root.path()).unwrap();
     let first = store.import_glb_at(0, "rig", "rig.glb").unwrap();
+    assert!(first.warnings.is_empty());
 
     assert_eq!(first.nodes.len(), 7);
     assert_eq!(first.nodes["Rig/Arm"].mesh_id, None);

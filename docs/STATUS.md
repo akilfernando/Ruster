@@ -48,7 +48,8 @@ browse, import and refresh assets, assign meshes, and capture the viewport.
 On Linux, v23 watches `Assets/` for imports and changes. The Assets panel
 shows live folders, previews and diagnostics, accepts drops, and places
 meshes and multi-primitive GLB hierarchies with Undo. File actions keep stable IDs
-on rename and preserve sources in project trash. A relocated build loaded 80 meshes.
+on rename and preserve sources in project trash. GLB material fallbacks appear
+in the Assets Inspector and MCP. A relocated build loaded 80 meshes.
 [C-12 benchmark timings](PARITY-PLAN.md#5-performance-budgets)
 cover 5,000 and 50,000 objects. Desktop frame rates remain unverified.
 

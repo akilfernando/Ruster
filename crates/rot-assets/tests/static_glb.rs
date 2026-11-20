@@ -214,8 +214,8 @@ fn import_refuses_unplaceable_materials_and_transforms_before_publication() {
     for (nodes, roughness, diagnostic) in [
         (
             vec![json!({"name":"Mesh","mesh":0})],
-            0.07,
-            "roughness must be in 0.08",
+            -0.07,
+            "invalid factors or alpha mode",
         ),
         (
             vec![

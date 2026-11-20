@@ -106,6 +106,12 @@ impl Registry {
                 || &model.id != id
                 || !ids.insert(id)
                 || !sources.insert(&model.source)
+                || model.warnings.len() > MAX_MODEL_ITEMS
+                || model.warnings.iter().any(|message| {
+                    message.is_empty()
+                        || message.len() > 512
+                        || message.chars().any(char::is_control)
+                })
                 || source_nodes == 0
                 || source_nodes > MAX_MODEL_ITEMS
                 || model.nodes.len() - source_nodes > MAX_MODEL_ITEMS

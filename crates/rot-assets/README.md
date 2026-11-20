@@ -161,8 +161,8 @@ accepted; skinned armatures and shape keys are separate future work.
 
 The subset accepts one embedded GLB 2.0 scene and BIN buffer, positive
 bounded TRS, named paths with unique siblings, and triangle primitives
-with named opaque single-sided nonmetallic materials with roughness in
-0.08..=1. With multiple primitives, each surface is a mesh child of the
+with base color and roughness. Unnamed materials get generated names. With
+multiple primitives, each surface is a mesh child of the
 original node and keeps its material. Its resource ID follows the material
 and occurrence within that material. A primitive without a material uses
 the scene's default surface. Nodes that become Groups require uniform scale;
@@ -170,9 +170,13 @@ mesh leaves can use nonuniform scale. The hierarchy may have at most eight
 Group levels including the placement root and groups that wrap a mesh with
 children or multiple surfaces. The resolved placement must stay within scene transform bounds.
 Base color uses an embedded compatible PNG with TEXCOORD_0, optional repeat
-or clamp on both axes, and supported matching min/mag/mipmap filters. The
-decoder rejects external URIs, extensions, skins, morphs, unsupported
-vertex/material channels and matrices. Derived OBJ preserves
+or clamp on both axes, and supported matching min/mag/mipmap filters.
+Import warns when it renders alpha as opaque, double-sided materials as
+single-sided, or metallic materials as dielectric. It clamps roughness to a
+minimum of 0.08 and warns when it omits normal, emissive, occlusion, and
+metallic-roughness maps or a nonzero emissive factor. The decoder still
+rejects external URIs, extensions, skins, morphs, unsupported vertex
+channels and matrices. Derived OBJ preserves
 triangle order and the existing renderer's normal and UV convention;
 the export snapshot passes only the verified generated OBJ/PNG closure to
 the existing standalone resource loader.

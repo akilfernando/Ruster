@@ -41,6 +41,7 @@ struct AssetRow {
     model: bool,
     status: AssetStatus,
     diagnostic: Option<String>,
+    warnings: Vec<String>,
 }
 
 impl AssetRow {
@@ -61,6 +62,7 @@ impl AssetRow {
             model: false,
             status,
             diagnostic: None,
+            warnings: Vec::new(),
         }
     }
 
@@ -293,6 +295,7 @@ impl Browser {
         self.rows.extend(assets.models().map(|model| {
             let mut row = AssetRow::new(&model.id, &model.source, "Model", AssetStatus::Ready);
             row.model = true;
+            row.warnings.clone_from(&model.warnings);
             row
         }));
         let mut issue_by_path: HashMap<_, _> = issues
@@ -608,6 +611,17 @@ impl Browser {
                 id: row.id.clone(),
                 catalog: self.catalog.clone()?,
             });
+        }
+        if !row.warnings.is_empty() {
+            ui.separator();
+            ui.heading("Import Warnings");
+            egui::ScrollArea::vertical()
+                .id_salt("model_import_warnings")
+                .show(ui, |ui| {
+                    for warning in &row.warnings {
+                        ui.colored_label(ui.visuals().warn_fg_color, warning);
+                    }
+                });
         }
         None
     }

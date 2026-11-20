@@ -15,6 +15,7 @@ pub struct AnimatedFixture {
     pub rotation_path: &'static str,
     pub split_materials: bool,
     pub reverse_primitives: bool,
+    pub material_fallbacks: bool,
 }
 
 impl Default for AnimatedFixture {
@@ -27,6 +28,7 @@ impl Default for AnimatedFixture {
             rotation_path: "rotation",
             split_materials: false,
             reverse_primitives: false,
+            material_fallbacks: false,
         }
     }
 }
@@ -99,6 +101,14 @@ pub fn animated_glb(fixture: AnimatedFixture) -> Vec<u8> {
             ],
         }],
     });
+    if fixture.material_fallbacks {
+        document["materials"][0] = json!({
+            "pbrMetallicRoughness":{"roughnessFactor":0.0},
+            "alphaMode":"BLEND",
+            "doubleSided":true,
+            "emissiveFactor":[0.2,0.1,0.0]
+        });
+    }
     if fixture.split_materials {
         document["meshes"][0]["primitives"]
             .as_array_mut()

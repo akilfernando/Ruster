@@ -23,6 +23,9 @@ pub struct ModelInfo {
     pub hash: String,
     pub nodes: BTreeMap<String, ModelNode>,
     pub materials: BTreeMap<String, ModelMaterial>,
+    /// Material features retained with a rendering fallback.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
     /// Named node-transform clips. Present only in catalog version 7.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub clips: BTreeMap<String, ModelClip>,
@@ -324,20 +327,28 @@ struct Accessor {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Material {
-    name: String,
+    name: Option<String>,
+    #[serde(default)]
     pbr_metallic_roughness: Surface,
     alpha_mode: Option<String>,
+    #[serde(default, rename = "alphaCutoff")]
+    _alpha_cutoff: Option<f32>,
     #[serde(default)]
     double_sided: bool,
+    normal_texture: Option<TextureBinding>,
+    occlusion_texture: Option<TextureBinding>,
+    emissive_texture: Option<TextureBinding>,
+    emissive_factor: Option<[f32; 3]>,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Surface {
     base_color_factor: Option<[f32; 4]>,
     base_color_texture: Option<TextureBinding>,
-    metallic_factor: f32,
+    metallic_factor: Option<f32>,
     roughness_factor: Option<f32>,
+    metallic_roughness_texture: Option<TextureBinding>,
 }
 
 #[derive(Deserialize)]
@@ -346,6 +357,10 @@ struct TextureBinding {
     index: usize,
     #[serde(default)]
     tex_coord: usize,
+    #[serde(default, rename = "scale")]
+    _scale: Option<f32>,
+    #[serde(default, rename = "strength")]
+    _strength: Option<f32>,
 }
 
 #[derive(Deserialize)]
@@ -742,7 +757,26 @@ impl Decoder<'_> {
 
     fn material(&mut self, index: usize) -> Result<String, AssetError> {
         let material = at(&self.doc.materials, index, "material")?;
-        let name = named(&material.name)?.to_owned();
+        let name = if let Some(name) = material.name.as_deref() {
+            named(name)?.to_owned()
+        } else {
+            (0..)
+                .map(|suffix| {
+                    if suffix == 0 {
+                        format!("Material {}", index + 1)
+                    } else {
+                        format!("Material {} ({suffix})", index + 1)
+                    }
+                })
+                .find(|candidate| {
+                    !self
+                        .doc
+                        .materials
+                        .iter()
+                        .any(|entry| entry.name.as_ref() == Some(candidate))
+                })
+                .expect("finite material names")
+        };
         if let Some(prior) = self.used_materials.get(&name) {
             return if *prior == index {
                 Ok(name)
@@ -755,26 +789,59 @@ impl Decoder<'_> {
         let surface = &material.pbr_metallic_roughness;
         let rgba = surface.base_color_factor.unwrap_or([1.; 4]);
         let roughness = surface.roughness_factor.unwrap_or(1.);
-        if material
-            .alpha_mode
-            .as_deref()
-            .is_some_and(|mode| mode != "OPAQUE")
-            || material.double_sided
-            || surface.metallic_factor != 0.
-            || !rgba.iter().all(|v| (0.0..=1.0).contains(v))
+        let metallic = surface.metallic_factor.unwrap_or(1.);
+        let alpha = material.alpha_mode.as_deref().unwrap_or("OPAQUE");
+        if !matches!(alpha, "OPAQUE" | "MASK" | "BLEND")
+            || !rgba
+                .into_iter()
+                .chain([roughness, metallic])
+                .all(|value| (0.0..=1.0).contains(&value))
+            || material
+                .emissive_factor
+                .is_some_and(|color| color.into_iter().any(|value| !(0.0..=1.0).contains(&value)))
         {
-            return Err(error(
-                "GLB materials require bounded opaque single-sided nonmetallic PBR",
-            ));
-        }
-        if !(MIN_DIELECTRIC_ROUGHNESS..=1.0).contains(&roughness) {
             return Err(error(format!(
-                "GLB material {name:?} roughness must be in 0.08..=1 for scene placement"
+                "GLB material {name:?} has invalid factors or alpha mode"
             )));
+        }
+        let mut fallbacks = Vec::new();
+        if alpha != "OPAQUE" {
+            fallbacks.push("alpha rendered opaque");
+        }
+        if material.double_sided {
+            fallbacks.push("double-sided surface rendered single-sided");
+        }
+        if metallic != 0. {
+            fallbacks.push("metallic factor rendered as dielectric");
+        }
+        if roughness < MIN_DIELECTRIC_ROUGHNESS {
+            fallbacks.push("roughness raised to 0.08");
+        }
+        for (texture, warning) in [
+            (&material.normal_texture, "normal map omitted"),
+            (&material.occlusion_texture, "occlusion map omitted"),
+            (&material.emissive_texture, "emissive map omitted"),
+            (
+                &surface.metallic_roughness_texture,
+                "metallic-roughness map omitted",
+            ),
+        ] {
+            if let Some(texture) = texture {
+                let binding = at(&self.doc.textures, texture.index, "material texture")?;
+                let image = at(&self.doc.images, binding.source, "material image")?;
+                self.view(image.buffer_view)?;
+                fallbacks.push(warning);
+            }
+        }
+        if material
+            .emissive_factor
+            .is_some_and(|color| color != [0.; 3])
+        {
+            fallbacks.push("emissive factor omitted");
         }
         let mut definition = ModelMaterial {
             base_color_factor: [rgba[0], rgba[1], rgba[2]],
-            roughness,
+            roughness: roughness.max(MIN_DIELECTRIC_ROUGHNESS),
             base_color_texture: None,
             linear: true,
             repeat: true,
@@ -818,6 +885,12 @@ impl Decoder<'_> {
                 },
             )?;
             definition.base_color_texture = Some(id);
+        }
+        if !fallbacks.is_empty() {
+            self.model
+                .info
+                .warnings
+                .push(format!("{name}: {}", fallbacks.join(", ")));
         }
         self.used_materials.insert(name.clone(), index);
         self.model.info.materials.insert(name.clone(), definition);
@@ -1188,6 +1261,7 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
                 hash: digest(bytes),
                 nodes: BTreeMap::new(),
                 materials: BTreeMap::new(),
+                warnings: Vec::new(),
                 clips: BTreeMap::new(),
             },
             resources: BTreeMap::new(),
@@ -1209,5 +1283,6 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
         ));
     }
     decoder.animations()?;
+    decoder.model.info.warnings.sort_unstable();
     Ok(decoder.model)
 }

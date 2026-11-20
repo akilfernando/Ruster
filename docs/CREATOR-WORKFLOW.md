@@ -58,6 +58,10 @@ transform clip. Place, Undo, and Redo operate on the hierarchy and its
 materials together. An approved MCP client can use `scene_model_place` with
 the model ID and current asset revision.
 
+Select a GLB and look under **Import Warnings** in the Inspector to see any
+material fallbacks. You can still place the model. `asset_inspect` reports
+the warning count and up to two warnings per model.
+
 An approved MCP client can inspect the current catalog with `asset_inspect`,
 then call `asset_import` or `asset_refresh` with its current asset revision.
 Use project-relative paths. Sources in `Assets/` already picked up by the

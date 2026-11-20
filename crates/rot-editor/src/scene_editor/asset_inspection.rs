@@ -59,9 +59,14 @@ pub(super) fn model_summary(model: &rot_assets::ModelInfo) -> Value {
                 "target_count":clip.targets.len(),"targets_truncated":clip.targets.len()>PAGE_SIZE})
         })
         .collect();
-    json!({"id":model.id,"source":source,"source_truncated":source.len()!=model.source.len(),
+    let mut result = json!({"id":model.id,"source":source,"source_truncated":source.len()!=model.source.len(),
         "hash":model.hash,"status":"accepted","node_count":model.nodes.len(),"material_count":model.materials.len(),
-        "clips":clips})
+        "clips":clips});
+    if !model.warnings.is_empty() {
+        result["warning_count"] = json!(model.warnings.len());
+        result["warnings"] = json!(model.warnings.iter().take(2).collect::<Vec<_>>());
+    }
+    result
 }
 
 pub(super) fn page_with_models(
