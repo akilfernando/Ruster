@@ -22,6 +22,9 @@ mod behavior;
 #[path = "component_session.rs"]
 mod session;
 pub use session::ComponentSession;
+#[path = "component_prefab.rs"]
+mod prefab;
+pub use prefab::PrefabSource;
 
 pub const FORMAT_VERSION: u32 = 23;
 
