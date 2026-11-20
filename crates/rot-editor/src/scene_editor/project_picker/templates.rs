@@ -2,6 +2,7 @@
 //! normal `Session` edits, so a template scene is saved, reopened and edited
 //! exactly like one a creator made by hand.
 use rot_scene::{Object, PlayerAnchor, PlayerView, Scene, SceneError, Session, Transform};
+use std::path::Path;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::scene_editor) enum Template {
@@ -30,13 +31,18 @@ impl Template {
     }
 
     /// The first scene of a new project made from this template.
-    pub(in crate::scene_editor) fn session(self) -> Result<Session, SceneError> {
+    pub(in crate::scene_editor) fn save_new(self, path: &Path) -> Result<(), SceneError> {
         let mut session = Session::new(Scene::authored_empty("main"))?;
-        if self == Self::Basic3d {
-            basic_3d(&mut session)?;
+        match self {
+            Self::Empty => {
+                rot_scene::component_scene::ComponentScene::from_legacy(&session)?.save_new(path)
+            }
+            Self::Basic3d => {
+                basic_3d(&mut session)?;
+                // The starter content is the first saved state, with no Undo entries.
+                Session::new(session.scene().clone())?.save(path)
+            }
         }
-        // Scene files keep their Undo history; a new project starts with none.
-        Session::new(session.scene().clone())
     }
 }
 

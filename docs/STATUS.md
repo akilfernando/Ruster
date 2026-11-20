@@ -34,8 +34,8 @@ remains open, including its Phase 2 5,000-object case.
 
 The [C-01 design](plans/C-01-OBJECT-COMPONENT-MODEL.md) guides the v23 cutover.
 C-02 preserves authored content during migration, supports grouped object
-edits and Undo/Redo, and resolves a 5,000-object chain over 1 MiB. The native
-`rot-editor --scene` route opens v23 and can inspect objects, edit name,
+edits and Undo/Redo, and resolves a 5,000-object chain over 1 MiB. The Project
+Hub's Empty template creates v23. The editor can inspect objects, edit name,
 enabled state and Transform, add Mesh Renderers and Colliders, create,
 move or delete objects together, and save. Inspector edits shared Transform
 and component values. Viewport settings stay local. Automatic upgrades remain open.

@@ -578,9 +578,7 @@ impl ProjectForm {
                     } else if submit || enter {
                         let location = Path::new(self.path.trim());
                         let result = match &self.name {
-                            Some(name) => create_project(location, name.trim(), self.template)
-                                .map(Box::new)
-                                .map(OpenedScene::Legacy),
+                            Some(name) => create_project(location, name.trim(), self.template),
                             None => open_project(location),
                         };
                         match result {
@@ -728,7 +726,7 @@ fn open_project(path: &Path) -> Result<OpenedScene, String> {
     OpenedScene::open(&scene).map_err(|error| format!("Couldn't open {}. {error}", scene.display()))
 }
 
-fn create_project(location: &Path, name: &str, template: Template) -> Result<Session, String> {
+fn create_project(location: &Path, name: &str, template: Template) -> Result<OpenedScene, String> {
     if name.is_empty()
         || name == "."
         || name == ".."
@@ -743,7 +741,6 @@ fn create_project(location: &Path, name: &str, template: Template) -> Result<Ses
         return Err("Choose an existing folder for the new project.".into());
     }
     let root = location.join(name);
-    let mut session = template.session().map_err(|e| e.to_string())?;
     fs::create_dir(&root).map_err(|error| {
         if error.kind() == std::io::ErrorKind::AlreadyExists {
             format!(
@@ -754,7 +751,20 @@ fn create_project(location: &Path, name: &str, template: Template) -> Result<Ses
             format!("Couldn't create {}. {error}", root.display())
         }
     })?;
-    if let Err(error) = session.save(root.join("scene.json")) {
+    let scene = root.join("scene.json");
+    let assets = root.join("Assets");
+    let mut created_assets = false;
+    let result = (|| -> Result<(), rot_scene::SceneError> {
+        if template == Template::Empty {
+            fs::create_dir(&assets)?;
+            created_assets = true;
+        }
+        template.save_new(&scene)
+    })();
+    if let Err(error) = result {
+        if created_assets {
+            let _ = fs::remove_dir(&assets);
+        }
         // An empty reservation can be discarded. Preserve any files in the new folder.
         let _ = fs::remove_dir(&root);
         return Err(format!(
@@ -763,7 +773,7 @@ fn create_project(location: &Path, name: &str, template: Template) -> Result<Ses
         ));
     }
     // Hand over the saved document, exactly as Open Project would.
-    Session::open(root.join("scene.json")).map_err(|error| error.to_string())
+    OpenedScene::open(&scene).map_err(|error| error.to_string())
 }
 
 #[cfg(target_os = "linux")]
@@ -855,17 +865,30 @@ mod tests {
     #[test]
     fn creates_reopenable_project_without_reusing_existing_folder() {
         let parent = tempfile::tempdir().unwrap();
-        let created = create_project(parent.path(), "My Project", Template::Empty).unwrap();
+        let OpenedScene::Components(path, created) =
+            create_project(parent.path(), "My Project", Template::Empty).unwrap()
+        else {
+            panic!("component project")
+        };
         let root = parent.path().join("My Project");
-        assert_eq!(created.path(), Some(root.join("scene.json").as_path()));
-        let bytes = fs::read(created.path().unwrap()).unwrap();
+        assert_eq!(path, root.join("scene.json"));
+        assert!(root.join("Assets").is_dir());
+        assert!(!created.is_dirty());
+        let bytes = fs::read(&path).unwrap();
         assert!(create_project(parent.path(), "My Project", Template::Empty).is_err());
         assert!(create_project(parent.path(), "../escape", Template::Empty).is_err());
-        let OpenedScene::Legacy(reopened) = open_project(&root).unwrap() else {
-            panic!("legacy template")
+        let OpenedScene::Components(reopened_path, reopened) = open_project(&root).unwrap() else {
+            panic!("component project")
         };
         assert_eq!(reopened.scene().id, "main");
-        assert_eq!(fs::read(reopened.path().unwrap()).unwrap(), bytes);
+        assert_eq!(reopened.scene(), created.scene());
+        assert_eq!(reopened.scene().objects.len(), 1, "only the default sun");
+        assert!(matches!(
+            reopened.scene().objects[0].components[0].kind,
+            rot_scene::component_scene::Component::Light { .. }
+        ));
+        assert!(reopened.scene().gameplay_camera.is_none());
+        assert_eq!(fs::read(reopened_path).unwrap(), bytes);
     }
 
     #[test]
@@ -890,7 +913,11 @@ mod tests {
     #[test]
     fn basic_3d_project_opens_with_ground_sun_cube_and_game_camera() {
         let parent = tempfile::tempdir().unwrap();
-        let created = create_project(parent.path(), "Game", Template::Basic3d).unwrap();
+        let OpenedScene::Legacy(created) =
+            create_project(parent.path(), "Game", Template::Basic3d).unwrap()
+        else {
+            panic!("legacy template")
+        };
         // The template's edits are the saved starting point, not Undo steps.
         assert_eq!(created.undo_len(), 0);
         assert!(!created.is_dirty());
@@ -909,8 +936,5 @@ mod tests {
         ));
         let view = scene.resolve_player_view().unwrap().expect("game camera");
         assert_eq!(view.anchor, [0.0, 0.5, 0.0]);
-        let empty = create_project(parent.path(), "Blank", Template::Empty).unwrap();
-        assert!(empty.scene().objects.is_empty());
-        assert!(empty.scene().player_view.is_none());
     }
 }

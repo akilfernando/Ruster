@@ -18,6 +18,14 @@ ROT_RUNTIME_KIT=/tmp/rot-template/rot-runtime target/debug/rot-editor
 
 Choose a fresh archive path. Preparation verifies the Linux executable/profile and includes dependency/license notices, requirements, fixed helpers and hashed inventory. The template contains trusted executable code; use a template you prepared or trust. It is specific to its recorded Linux requirements, not a universal Linux binary. Each later scene export uses this template without Cargo or recompiling. Changing the runtime/helpers requires a new template. Editor export requires Python3 and the current Linux process-cleanup utility `/usr/bin/kill`; standalone application execution does not require Python or Rust.
 
+## Start a project in the component editor
+
+In the Project Hub, choose **New Project**, select **Empty**, name the
+project, and choose **Create Project**. The scene starts with an editable sun
+and an `Assets/` folder. Open the project again from the hub or open its
+`scene.json` directly. **Basic 3D** still opens the legacy editor with its
+ground, cube, sun, and game camera.
+
 ## Import assets into a v23 project
 
 Put OBJ meshes, PNG textures, WAV sounds or supported GLB models in the
