@@ -330,13 +330,15 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
             args,
             &keys,
             if name == "scene_create" {
-                &["primitive"]
+                &["primitive", "parent_id", "transform"]
             } else {
                 &[]
             },
-        ) && args.get("primitive").is_none_or(|value| {
-            value.is_null() || matches!(value.as_str(), Some("sphere" | "capsule"))
-        }) && canonical_u64(&args["expected_revision"])
+        ) && (name != "scene_create" || hierarchy_tools::valid_creation_options(args))
+            && args.get("primitive").is_none_or(|value| {
+                value.is_null() || matches!(value.as_str(), Some("sphere" | "capsule"))
+            })
+            && canonical_u64(&args["expected_revision"])
             && keys.iter().filter(|k| **k != "expected_revision").all(|k| {
                 args[*k].as_str().is_some_and(|s| {
                     !s.is_empty()
@@ -582,6 +584,9 @@ fn tools() -> Value {
                 properties.insert("object_id".into(), json!({"type":"string","minLength":1,"maxLength":128}));
                 required.extend(["object_id", "primitive"]);
             }
+        }
+        if name == "scene_create" {
+            hierarchy_tools::creation_properties(&mut properties);
         }
         if matches!(name, "scene_transform_many" | "scene_duplicate_many" | "scene_delete_many") {
             let id = json!({"type":"string","minLength":1,"maxLength":128});

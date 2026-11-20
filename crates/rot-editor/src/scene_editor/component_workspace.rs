@@ -740,11 +740,26 @@ impl ComponentWorkspace {
         }
     }
 
-    fn create(&mut self, name: &str, geometry: Option<Geometry>) {
+    fn create(&mut self, action: Action, parent: Option<String>) {
         if !self.apply() {
             return;
         }
-        match self.create_object(None, name, geometry, None) {
+        let geometry = match action {
+            Action::CreateCube => Some(Geometry::Cube),
+            Action::CreateSphere => Some(Geometry::Primitive {
+                shape: Primitive::Sphere,
+            }),
+            Action::CreateCapsule => Some(Geometry::Primitive {
+                shape: Primitive::Capsule,
+            }),
+            _ => None,
+        };
+        let name = if geometry.is_some() {
+            action.label()
+        } else {
+            Text::ComponentEmptyObject.plain()
+        };
+        match self.create_object(None, name, geometry, parent, Transform::default()) {
             Ok(_) => self.error = None,
             Err(error) => self.error = Some(error.to_string()),
         }
@@ -756,6 +771,7 @@ impl ComponentWorkspace {
         name: &str,
         geometry: Option<Geometry>,
         parent: Option<String>,
+        transform: Transform,
     ) -> Result<String, rot_scene::SceneError> {
         let used: HashSet<_> = self
             .session
@@ -811,7 +827,7 @@ impl ComponentWorkspace {
             name: name.into(),
             enabled: true,
             parent,
-            transform: Transform::default(),
+            transform,
             components,
         };
         self.session.put_object(revision, node)?;
@@ -1062,22 +1078,7 @@ impl ComponentWorkspace {
             | Action::CreateCube
             | Action::CreateSphere
             | Action::CreateCapsule => {
-                let geometry = match action {
-                    Action::CreateCube => Some(Geometry::Cube),
-                    Action::CreateSphere => Some(Geometry::Primitive {
-                        shape: Primitive::Sphere,
-                    }),
-                    Action::CreateCapsule => Some(Geometry::Primitive {
-                        shape: Primitive::Capsule,
-                    }),
-                    _ => None,
-                };
-                let name = if geometry.is_some() {
-                    action.label()
-                } else {
-                    Text::ComponentEmptyObject.plain()
-                };
-                self.create(name, geometry);
+                self.create(action, None);
                 return;
             }
             Action::Delete => {
@@ -1412,6 +1413,7 @@ impl ComponentWorkspace {
                 let mut selected = root.clicked().then_some(None);
                 let mut placed = AssetDrag::released(ui, &root).map(|asset| (asset, None));
                 let mut deleted = None;
+                let mut child = None;
                 let mut view_change = None;
                 let revision = self.session.revision();
                 let mut moved = hierarchy_drop(ui, &root, None, revision, &self.selection);
@@ -1484,6 +1486,19 @@ impl ComponentWorkspace {
                                     selected = Some(Some((row, modifiers)));
                                 }
                                 response.context_menu(|ui| {
+                                    ui.menu_button(Text::ComponentCreateChild.plain(), |ui| {
+                                        for action in [
+                                            Action::CreateEmpty,
+                                            Action::CreateCube,
+                                            Action::CreateSphere,
+                                            Action::CreateCapsule,
+                                        ] {
+                                            if ui.button(action.label()).clicked() {
+                                                child = Some((action, object.id.clone()));
+                                                ui.close();
+                                            }
+                                        }
+                                    });
                                     if ui
                                         .add(
                                             egui::Button::new(Action::Delete.label())
@@ -1515,6 +1530,8 @@ impl ComponentWorkspace {
                     self.set_view_flag(flag, set, vec![id]);
                 } else if let Some((id, destination)) = moved {
                     self.move_in_hierarchy(Some(&id), destination);
+                } else if let Some((action, parent)) = child {
+                    self.create(action, Some(parent));
                 } else if let Some(id) = deleted {
                     self.delete(Some(&id));
                 } else if let Some(selected) = selected.filter(|_| self.apply()) {

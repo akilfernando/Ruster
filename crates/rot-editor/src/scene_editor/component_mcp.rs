@@ -140,6 +140,14 @@ impl ComponentWorkspace {
                 "scene_id":scene.id, "objects":page, "object_count":scene.objects.len(),
                 "next_offset": (objects.len() > page.len()).then(|| (offset + page.len()).to_string()),
                 "stored_coordinate_space":"local", "loaded_format_version":23,
+                "transform_conventions": (offset == 0).then(|| json!({
+                    "handedness":"right-handed",
+                    "up":"+Y",
+                    "translation_units":"scene units",
+                    "rotation":"[x, y, z] Euler radians about fixed X, then Y, then Z axes, in the parent's space",
+                    "composition":"world = parent_world * translation * Rz * Ry * Rx * scale",
+                    "example":"For a pitched roof on a turned house, rotate the parent about Y and tilt the roof child about its local X. Do not add the parent's heading to the roof rotation."
+                })),
                 "dirty":self.session.is_dirty(), "drafts_pending":self.draft_dirty(),
             }));
         }
@@ -149,13 +157,19 @@ impl ComponentWorkspace {
         if op == "asset_inspect" {
             return self.inspect_assets(args);
         }
+        let creation = matches!(op, "scene_create" | "scene_group_create");
         let expected_len = match op {
             "scene_model_place" if map.contains_key("name") => 5,
             "scene_model_place" => 4,
             "scene_mesh" => 5,
-            "scene_create" if map.contains_key("primitive") => 5,
-            "scene_create" | "scene_group_create" | "scene_transform" | "scene_rename"
-            | "scene_reparent" => 4,
+            "scene_create" | "scene_group_create" => {
+                let optional = ["parent_id", "transform", "primitive"];
+                4 + optional
+                    .iter()
+                    .filter(|key| map.contains_key(**key))
+                    .count()
+            }
+            "scene_transform" | "scene_rename" | "scene_reparent" => 4,
             "scene_transform_many" | "scene_delete" | "scene_delete_many" => 3,
             "scene_components_edit" => 3,
             "scene_undo" | "scene_redo" => 2,
@@ -208,7 +222,7 @@ impl ComponentWorkspace {
             }));
         }
 
-        if matches!(op, "scene_create" | "scene_group_create") {
+        if creation {
             let id = args["object_id"].as_str().ok_or_else(invalid)?;
             let name = args["name"].as_str().ok_or_else(invalid)?;
             let geometry = match (op, args.get("primitive")) {
@@ -223,8 +237,18 @@ impl ComponentWorkspace {
                 }),
                 _ => return Err(invalid()),
             };
+            let parent = match args.get("parent_id") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(id)) => Some(id.clone()),
+                Some(_) => return Err(invalid()),
+            };
+            let transform = args
+                .get("transform")
+                .map(transform_argument)
+                .transpose()?
+                .unwrap_or_default();
             let id = self
-                .create_object(Some(id), name, geometry, None)
+                .create_object(Some(id), name, geometry, parent, transform)
                 .map_err(|error| ("invalid_arguments", error.to_string()))?;
             return Ok(json!({"object_id":id, "changed":true, "dirty":self.session.is_dirty()}));
         }
@@ -719,6 +743,50 @@ mod tests {
         component_scene::{ComponentScene, ComponentSession},
         Scene, Session,
     };
+
+    #[test]
+    fn create_child_composes_local_rotation_and_shares_undo() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        let scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("trial")).unwrap()).unwrap();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let right_angle = std::f64::consts::FRAC_PI_2;
+        let group = editor.ai_command("session", "scene_group_create", &json!({
+            "expected_session_token":"session","expected_revision":"0","object_id":"cottage","name":"Cottage",
+            "transform":{"translation":[4,0,2],"rotation":[0,right_angle,0],"scale":[1,1,1]}
+        }));
+        assert_eq!(group["result"]["revision"], "1", "{group}");
+        let mut args = json!({
+            "expected_session_token":"session","expected_revision":"1","object_id":"roof","name":"Roof",
+            "parent_id":"missing","transform":{"translation":[1,2,0],"rotation":[right_angle,0,0],"scale":[1,1,1]}
+        });
+        assert_eq!(
+            editor.ai_command("session", "scene_create", &args)["error"]["code"],
+            "invalid_arguments"
+        );
+        assert_eq!(editor.session.revision(), 1);
+        args["parent_id"] = "cottage".into();
+        assert_eq!(
+            editor.ai_command("session", "scene_create", &args)["result"]["revision"],
+            "2"
+        );
+        let scene = editor.session.scene();
+        assert_eq!(scene.objects[1].parent.as_deref(), Some("cottage"));
+        let roof = scene.world_matrices().unwrap()[1];
+        let close = |values: [f64; 3], expected: [f64; 3]| {
+            values
+                .into_iter()
+                .zip(expected)
+                .all(|(a, b)| (a - b).abs() < 1e-6)
+        };
+        assert!(close(roof.w_axis.truncate().to_array(), [4., 2., 1.]));
+        assert!(close(roof.y_axis.truncate().to_array(), [1., 0., 0.]));
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene().objects.len(), 1);
+    }
 
     #[test]
     fn create_rejects_an_existing_id_and_uses_editor_undo() {

@@ -631,8 +631,8 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-03 Renderer, runtime and scripts on the new model | Everything that reads a scene uses objects and components. | in progress · editor Play, standalone viewer, headless behavior and packaged Motion Lab support v23 through previews and runtime projections. Native editor and viewer use world matrices for draw, fit and hit testing. General component execution remains open; v23 can build a Linux player folder |
 | C-04 Assets as files | `Assets/` folder, sidecar ids and import settings, rebuildable cache, file watcher, automatic import and reimport, folder tree in the browser. | done · 2026-11-19 · Linux live import, browser and file actions, stable sidecars, approved MCP import and refresh, and independent player build. Standalone Build verified with 80 meshes · [C-04 implementation brief](#c-04-implementation-brief) |
 | C-05 Hierarchy and Inspector | Rebuilt on components: Add Component, drag to reparent, multi-edit, enable toggles, visibility and lock, live values during Play. | in progress · component authoring, grouped hierarchy edits, mixed fields, local viewport controls, and live Transform and script state. Native edit and save worked at 5,000 objects. The in-process panel timings passed and MCP component edits shared Undo. Desktop frame-rate checks remain open |
-| C-06 General MCP tools | A small set of object, component, asset, play and screenshot tools that call the command layer. Tool list under 15 KB. | in progress · v23 discovery and registered native connections, object and group creation, object and component batches, shared history, Play controls, viewport screenshots and authored geometry picking, asset inspection, import, refresh and OBJ mesh assignment, and an 11.67 KB MCP tool list. v23 MCP rename remains open |
-| C-07 Prefabs | Prefab assets, instances, per-property overrides, apply and revert. | brief needed |
+| C-06 General MCP tools | A small set of object, component, asset, play and screenshot tools that call the command layer. Tool list under 15 KB. | in progress · v23 discovery and registered native connections, parent-local object and group creation, transform conventions, object and component batches, shared history, Play controls, viewport screenshots and geometry picking, asset inspection, import, refresh and OBJ mesh assignment. v23 MCP rename and object-framed screenshots remain open |
+| C-07 Prefabs | Prefab assets, instances, per-property overrides, apply and revert. | [implementation brief](#c-07-implementation-brief) |
 | C-08 General glTF import | Multi-primitive meshes, full PBR material mapping, cameras and lights; warnings instead of refusals. | in progress · Codex, 2026-11-20 · v23 places GLB hierarchies with per-surface materials, transform clips, shared Undo, and MCP. All 15 GLBs in the Kenney Starter Kit 3D Platformer import with their relative PNG textures. Import warns about common material fallbacks and skipped degenerate triangles. Broader material mapping, cameras and lights remain open |
 | C-09 Build and Run | The editor ships a player binary; Build writes a runnable folder; no Python. | in progress · v23 editor builds and launches a Linux player folder. Legacy Build still uses the runtime kit |
 | C-10 Scripts as files | Lua files in `Assets/`, one growing API (lifecycle, find, spawn, destroy, components, input, time), reload on save, open in the creator's code editor. | brief needed |
@@ -693,6 +693,27 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
   transactions. Retain callable legacy names. Done when the full serialized
   tool list is under 15 KB and the legacy and v23 client checks both pass.
   v23 import and refresh use the live asset owner in C-04.
+
+### C-07 implementation brief
+
+- Save a v23 subtree as a readable prefab in `Assets/` with stable source
+  object and component IDs and sidecar asset identity. Include referenced
+  materials and script sources. Report cross-boundary references that cannot
+  be preserved before writing. Keep the selected subtree as the first instance.
+- Store optional instance links, stable ID mappings and per-property overrides
+  beside the scene's materialized objects. Reconcile on accepted source changes
+  and open. Preserve each instance's root placement and overrides. Retain the
+  last usable objects when the source is invalid or missing, and recover when
+  the same source identity returns.
+- Editor and MCP share placement, child Transform and Mesh Renderer Tint
+  overrides, Apply, Revert and Undo. Apply changes only the chosen source
+  property. Check the source bytes before replacing them or undoing a source
+  edit. Validate scene changes before publishing. Build ships the materialized
+  scene and runtime resources.
+- Verify three linked cottages, a propagated roof fix, preserved overrides and
+  placement, paired native and real MCP Undo, source moves and recovery,
+  save and reopen, and a relocated player. Nested prefabs, variants and
+  structural overrides are separate work.
 
 ## Later
 

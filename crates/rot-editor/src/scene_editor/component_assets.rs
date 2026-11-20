@@ -1,6 +1,6 @@
 //! File-backed Assets panel for the component workspace.
 use super::super::assets_browser::{asset_glyph, texture_thumbnail, TextureThumbnails};
-use super::{ComponentWorkspace, Geometry};
+use super::{ComponentWorkspace, Geometry, Transform};
 use crate::editor_theme;
 use eframe::egui;
 use rot_assets::{
@@ -889,7 +889,7 @@ impl ComponentWorkspace {
                 .and_then(|name| name.to_str())
                 .unwrap_or(&row.id)
                 .to_owned();
-            self.create_object(None, &name, Some(geometry), parent)
+            self.create_object(None, &name, Some(geometry), parent, Transform::default())
         } else {
             self.error = Some("The asset has no accepted mesh.".into());
             return;
@@ -994,7 +994,7 @@ mod tests {
         editor.meshes = store.mesh_snapshots();
         editor.assets = Some(store.project_snapshot());
         let parent = editor
-            .create_object(Some("parent"), "Parent", None, None)
+            .create_object(Some("parent"), "Parent", None, None, Transform::default())
             .unwrap();
         editor.place_asset(&asset, Some(parent.clone()));
         let scene = editor.session.scene().clone();

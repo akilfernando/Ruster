@@ -72,6 +72,7 @@ pub enum Text {
 
     ComponentObjectMenu,
     ComponentCreate,
+    ComponentCreateChild,
     Component3dObject,
     ComponentEmptyObject,
     ComponentParent,
@@ -101,7 +102,7 @@ pub enum Text {
 
 impl Text {
     #[cfg(test)]
-    pub const ALL: [Self; 86] = [
+    pub const ALL: [Self; 87] = [
         Self::Welcome,
         Self::NoRecentProjects,
         Self::EmptyHierarchy,
@@ -164,6 +165,7 @@ impl Text {
         Self::ComponentSaveBeforeBuild,
         Self::ComponentObjectMenu,
         Self::ComponentCreate,
+        Self::ComponentCreateChild,
         Self::Component3dObject,
         Self::ComponentEmptyObject,
         Self::ComponentParent,
@@ -256,6 +258,7 @@ impl Text {
 
             Self::ComponentObjectMenu => "Object",
             Self::ComponentCreate => "Create",
+            Self::ComponentCreateChild => "Create Child",
             Self::Component3dObject => "3D Object",
             Self::ComponentEmptyObject => "Empty Object",
             Self::ComponentParent => "Parent",

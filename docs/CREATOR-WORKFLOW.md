@@ -26,6 +26,17 @@ and an `Assets/` folder. Open the project again from the hub or open its
 `scene.json` directly. **Basic 3D** still opens the legacy editor with its
 ground, cube, sun, and game camera.
 
+To assemble an object from parts, right-click the parent in the Hierarchy
+and choose **Create Child**. The new part starts at the parent's origin.
+Edit the part's position, rotation, and scale in the Inspector. An approved
+MCP client can supply `parent_id` and `transform` to `scene_create` or
+`scene_group_create` to create and place a part in one Undo step.
+
+Rot uses a right-handed coordinate system with +Y up. The v23 Inspector
+shows degrees. MCP uses Euler radians about fixed X, then Y, then Z axes.
+Transforms are relative to the parent. To pitch a roof and turn the house,
+tilt the roof child about X and rotate the house parent about Y.
+
 ## Import assets into a v23 project
 
 Put OBJ meshes, PNG textures, WAV sounds or supported GLB models in the
