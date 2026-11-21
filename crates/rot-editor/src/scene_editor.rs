@@ -3282,6 +3282,44 @@ impl SceneEditor {
         let h = &scene.hierarchy;
         json!({"groups":h.groups.iter().skip(start).take(16).collect::<BTreeMap<_,_>>(),"parents":h.parents.iter().skip(start).take(16).collect::<BTreeMap<_,_>>(),"group_count":h.groups.len(),"parent_count":h.parents.len(),"next_offset":if start+16<h.groups.len().max(h.parents.len()){Some((start+16).to_string())}else{None}})
     }
+    fn group_creation_blockers(&self) -> impl Iterator<Item = rot_scene::GroupCreationBlocker<'_>> {
+        self.session
+            .authoring()
+            .group_creation_blockers(self.session.scene())
+    }
+
+    fn group_creation_blocker_message(&self) -> Option<String> {
+        use crate::strings::Text;
+        use rot_scene::GroupCreationBlocker::*;
+        let reasons: Vec<_> = self
+            .group_creation_blockers()
+            .map(|blocker| {
+                let (label, example) = match blocker {
+                    InputActions(name) => (Text::GroupBlockerInput, Some(name)),
+                    Hud(name) => (Text::GroupBlockerHud, name),
+                    ScriptSources(name) => (Text::GroupBlockerScriptSources, Some(name)),
+                    ObjectScripts(name) => (Text::GroupBlockerObjectScripts, Some(name)),
+                    ApplicationScript => (Text::GroupBlockerApplicationScript, None),
+                };
+                let label = label.plain();
+                match example {
+                    Some(name) => {
+                        let end = name.char_indices().nth(24).map(|(offset, _)| offset);
+                        let example = end.map_or(name, |end| &name[..end]);
+                        let ellipsis = if end.is_some() { "…" } else { "" };
+                        format!("{label} (“{example}{ellipsis}”)")
+                    }
+                    None => label.to_owned(),
+                }
+            })
+            .collect();
+        (!reasons.is_empty()).then(|| {
+            Text::GroupCreateBlocked
+                .plain()
+                .replace("{}", &reasons.join(", "))
+        })
+    }
+
     fn execute(&mut self, token: &str, op: &str, args: &Value) -> Result<Value, (String, String)> {
         if player_view::supported(op) {
             return self.player_view_command(token, op, args);
@@ -3447,7 +3485,7 @@ impl SceneEditor {
             }
             let objects: Vec<_> = scene.objects.iter().skip(start).take(16).collect();
             return Ok(
-                json!({"session_token":token,"scene_id":scene.id,"document_label":self.document_label(),"revision":scene.revision.to_string(),"objects":objects,"hierarchy":Self::hierarchy_page(scene,start),"animations":scene.animations.iter().skip(start).take(16).map(|(owner,binding)|json!({"owner_id":owner,"clip_id":binding.clip,"looping":binding.looping,"target_count":binding.targets.len()})).collect::<Vec<_>>(),"animation_count":scene.animations.len(),"resolved_world_count":scene.target_count(),"resolved_world_next_offset":if start+16<scene.target_count(){Some((start+16).to_string())}else{None},"stored_coordinate_space":"local","resolved_world":scene.resolve_poses().map_err(|e| ("invalid_scene".into(),e.to_string()))?.transforms.into_iter().skip(start).take(16).collect::<BTreeMap<_,_>>(),"object_count":scene.objects.len(),"light_count":scene.lighting.light_count(),"target_count":scene.target_count(),"lighting_mode":if scene.lighting.is_legacy(){"legacy"}else{"authored"},"asset_operation":self.asset_observation(),"unresolved_assets":scene.objects.iter().filter(|_|!self.asset_loading()).filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.export_dialog||self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.asset_loading() || self.preview.scene!=*scene || !same_asset_snapshots(&self.preview_assets,&self.resolved) || !same_asset_snapshots(&self.preview_textures,&self.resolved_textures),"capabilities":SCENE_CAPABILITIES}),
+                json!({"session_token":token,"scene_id":scene.id,"document_label":self.document_label(),"revision":scene.revision.to_string(),"objects":objects,"hierarchy":Self::hierarchy_page(scene,start),"group_creation_blockers":self.group_creation_blockers().collect::<Vec<_>>(),"animations":scene.animations.iter().skip(start).take(16).map(|(owner,binding)|json!({"owner_id":owner,"clip_id":binding.clip,"looping":binding.looping,"target_count":binding.targets.len()})).collect::<Vec<_>>(),"animation_count":scene.animations.len(),"resolved_world_count":scene.target_count(),"resolved_world_next_offset":if start+16<scene.target_count(){Some((start+16).to_string())}else{None},"stored_coordinate_space":"local","resolved_world":scene.resolve_poses().map_err(|e| ("invalid_scene".into(),e.to_string()))?.transforms.into_iter().skip(start).take(16).collect::<BTreeMap<_,_>>(),"object_count":scene.objects.len(),"light_count":scene.lighting.light_count(),"target_count":scene.target_count(),"lighting_mode":if scene.lighting.is_legacy(){"legacy"}else{"authored"},"asset_operation":self.asset_observation(),"unresolved_assets":scene.objects.iter().filter(|_|!self.asset_loading()).filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.export_dialog||self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.asset_loading() || self.preview.scene!=*scene || !same_asset_snapshots(&self.preview_assets,&self.resolved) || !same_asset_snapshots(&self.preview_textures,&self.resolved_textures),"capabilities":SCENE_CAPABILITIES}),
             );
         }
         if args["expected_session_token"].as_str() != Some(token) {
@@ -3696,6 +3734,15 @@ impl SceneEditor {
             _ => unreachable!(),
         };
         let revision = result.map_err(|e| {
+            if op == "scene_group_create"
+                && matches!(e, rot_scene::SceneError::HierarchyAuthoringConflict)
+            {
+                return (
+                    "invalid_arguments".into(),
+                    self.group_creation_blocker_message()
+                        .unwrap_or_else(|| e.to_string()),
+                );
+            }
             let code = match &e {
                 rot_scene::SceneError::NoUndo => "no_undo",
                 rot_scene::SceneError::NoRedo => "no_redo",
@@ -3808,17 +3855,53 @@ impl SceneEditor {
         crate::editor_theme::text_menu(ui, "Create", |ui| self.create_entries(ui));
     }
     fn new_group_button(&mut self, ui: &mut egui::Ui) {
-        let enabled = self.guard().is_ok() && !self.manipulation.offset_pending();
-        if ui
-            .add_enabled(enabled, egui::Button::new("New group"))
-            .on_hover_text("Create an empty group.")
-            .clicked()
-        {
+        use crate::strings::Text;
+        let deferred = self.group_creation_unavailable();
+        let blocked = self.group_creation_blockers().next().is_some();
+        let enabled = deferred.is_none() && !blocked;
+        let button = ui.add_enabled_ui(enabled, |ui| {
+            crate::ui_kit::button(ui, Text::NewGroup.plain())
+        });
+        let mut hint = Text::NewGroupHint.plain().to_owned();
+        let shortcut = self.workspace.shortcut_hint(Action::CreateEmpty);
+        if !shortcut.is_empty() {
+            hint.push_str(&format!(" ({shortcut})"));
+        }
+        let response = button.inner.on_hover_text(hint).on_disabled_hover_ui(|ui| {
+            if let Some(reason) = deferred {
+                ui.label(reason.plain());
+            } else if let Some(reason) = self.group_creation_blocker_message() {
+                ui.add(egui::Label::new(reason).wrap());
+            }
+        });
+        if response.clicked() {
             self.create_empty();
         }
     }
+    fn group_creation_unavailable(&self) -> Option<crate::strings::Text> {
+        use crate::strings::Text;
+        match self.guard() {
+            Err(error) if error == "asset_busy" => Some(Text::GroupCreateWaitForAssets),
+            Err(_) => Some(Text::GroupCreateFinishEdit),
+            Ok(()) if self.manipulation.offset_pending() => Some(Text::GroupCreateFinishEdit),
+            Ok(()) if self.session.scene().target_count() >= rot_scene::MAX_OBJECTS => {
+                Some(Text::GroupCreateSceneFull)
+            }
+            Ok(()) => None,
+        }
+    }
+
     /// Object → Create Empty: an empty group, selected, one Undo step.
     fn create_empty(&mut self) {
+        use crate::strings::Text;
+        if let Some(reason) = self.group_creation_unavailable() {
+            self.error = reason.plain().into();
+            return;
+        }
+        if let Some(reason) = self.group_creation_blocker_message() {
+            self.error = reason;
+            return;
+        }
         let result = self.session.allocate_group_ids(1).and_then(|ids| {
             let id = ids[0].clone();
             self.session
@@ -3831,7 +3914,7 @@ impl SceneEditor {
                 self.manipulation.select_only(self.selected.clone());
                 self.sync_draft();
                 self.error.clear();
-                self.notice = "Created assembly group; one Undo removes it.".into();
+                self.notice = Text::GroupCreated.plain().into();
             }
             Err(e) => self.error = e.to_string(),
         }
@@ -4478,11 +4561,7 @@ impl SceneEditor {
             Action::ImportAsset => self.open_asset_import(),
             Action::CreateShaderSource => self.create_shader_source(),
             Action::RefreshShader => self.refresh_shader_command(),
-            Action::CreateEmpty => {
-                if !self.manipulation.offset_pending() {
-                    self.create_empty();
-                }
-            }
+            Action::CreateEmpty => self.create_empty(),
             Action::CreateDirectionalLight => {
                 self.create_light_ui(rot_scene::LightKind::Directional {
                     shadow: Default::default(),
@@ -9074,12 +9153,12 @@ mod tests {
             out.shapes
                 .iter()
                 .find_map(|shape| match &shape.shape {
-                    egui::epaint::Shape::Text(text) if text.galley.job.text == "New group" => {
+                    egui::epaint::Shape::Text(text) if text.galley.job.text == "New Group" => {
                         Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
                     }
                     _ => None,
                 })
-                .expect("ordinary hierarchy must expose New group")
+                .expect("ordinary hierarchy must expose New Group")
         };
         let rect = frame(&mut editor, vec![]);
         let pos = rect.center();
@@ -9107,6 +9186,194 @@ mod tests {
             .contains_key(editor.selected.as_ref().unwrap()));
         editor.history(false);
         assert!(editor.session.scene().hierarchy.groups.is_empty());
+    }
+
+    #[test]
+    fn legacy_group_creation_explains_only_present_content_and_preserves_history() {
+        use rot_scene::{
+            hud::{Hud, HudPanel},
+            input::{ActionDefinition, ActionKind, InputKey},
+            BehaviorBinding, BehaviorSource, BindingTarget,
+        };
+
+        let mut scene = Scene::demo();
+        scene.objects[0].name = Some("Left Cube".into());
+        let mut session = Session::new(scene).unwrap();
+        let jump = ActionDefinition {
+            label: Some("Jump".into()),
+            kind: ActionKind::Button {
+                keys: vec![InputKey::Space],
+            },
+        };
+        session.set_action(0, "jump", Some(jump.clone())).unwrap();
+        session.set_action(1, "other", Some(jump)).unwrap();
+        session.undo(2).unwrap();
+        let mut editor = SceneEditor::new(session);
+
+        let assert_refusal = |editor: &mut SceneEditor, reasons: Value, expected: &str| {
+            let baseline = editor.session.scene().clone();
+            let authoring = editor.session.authoring().clone();
+            let history = (editor.session.undo_len(), editor.session.redo_len());
+            let state = editor.command("owner", "scene_inspect", json!({}));
+            assert_eq!(state["result"]["group_creation_blockers"], reasons);
+            let mut args = json!({"object_id":"group","name":"New Group",
+                "expected_session_token":state["result"]["session_token"],
+                "expected_revision":"0"});
+            let stale = editor.command("owner", "scene_group_create", args.clone());
+            assert_eq!(stale["error"]["code"], "stale_revision");
+            args["expected_revision"] = state["result"]["revision"].clone();
+            let refused = editor.command("owner", "scene_group_create", args);
+            assert_eq!(refused["error"]["code"], "invalid_arguments");
+            assert_eq!(refused["error"]["message"], expected);
+            editor.queued_action = Some(Action::CreateEmpty);
+            editor.process_queued_action();
+            assert_eq!(editor.error, expected);
+            assert_eq!(editor.session.scene(), &baseline);
+            assert_eq!(editor.session.authoring(), &authoring);
+            assert_eq!(
+                (editor.session.undo_len(), editor.session.redo_len()),
+                history
+            );
+        };
+
+        editor.draft.as_mut().unwrap().scale[0] = "2".into();
+        let with_draft = editor.command("owner", "scene_inspect", json!({}));
+        assert_eq!(with_draft["result"]["drafts_pending"], true);
+        assert_eq!(
+            with_draft["result"]["group_creation_blockers"],
+            json!([
+                {"code":"input_actions","example":"Jump"}
+            ])
+        );
+        let refused = editor.command(
+            "owner",
+            "scene_group_create",
+            json!({
+                "object_id":"group", "name":"New Group",
+                "expected_session_token":with_draft["result"]["session_token"],
+                "expected_revision":with_draft["result"]["revision"]
+            }),
+        );
+        assert_eq!(refused["error"]["code"], "drafts_pending");
+        editor.sync_draft();
+        assert_refusal(
+            &mut editor,
+            json!([{"code":"input_actions","example":"Jump"}]),
+            "Couldn't create an empty group. This legacy scene uses input actions (“Jump”).",
+        );
+
+        let session = &mut editor.session;
+        let rev = session.scene().revision;
+        let rev = session
+            .set_hud(
+                rev,
+                Hud {
+                    enabled: false,
+                    panels: vec![HudPanel {
+                        id: "score".into(),
+                        name: "Score Display".into(),
+                        ..Default::default()
+                    }],
+                },
+            )
+            .unwrap();
+        let rev = session
+            .set_source(
+                rev,
+                "movement",
+                Some(BehaviorSource {
+                    label: Some("Movement".into()),
+                    language_id: "lua".into(),
+                    host_api_version: 1,
+                    text: String::new(),
+                }),
+            )
+            .unwrap();
+        let rev = session
+            .set_binding(
+                rev,
+                "left-attachment",
+                Some(BehaviorBinding {
+                    target: BindingTarget::Object("left".into()),
+                    source_id: "movement".into(),
+                    enabled: false,
+                    properties: Default::default(),
+                    state_defaults: Default::default(),
+                    commands: Default::default(),
+                }),
+            )
+            .unwrap();
+        let binding = session.binding("left-attachment").unwrap().clone();
+        session
+            .set_binding(
+                rev,
+                "app-attachment",
+                Some(BehaviorBinding {
+                    target: BindingTarget::Application,
+                    ..binding
+                }),
+            )
+            .unwrap();
+        assert_refusal(&mut editor, json!([
+            {"code":"input_actions","example":"Jump"}, {"code":"hud","example":"Score Display"},
+            {"code":"script_sources","example":"Movement"}, {"code":"object_scripts","example":"Left Cube"},
+            {"code":"application_script"}
+        ]), "Couldn't create an empty group. This legacy scene uses input actions (“Jump”), a HUD (“Score Display”), ordinary script sources (“Movement”), scripts attached to objects (“Left Cube”), a script attached to the application.");
+    }
+
+    #[test]
+    fn legacy_group_local_scripts_allow_another_group_and_share_one_undo() {
+        use rot_scene::{BehaviorBinding, BehaviorSource, BindingTarget};
+        let mut session = Session::new(Scene::demo()).unwrap();
+        session.create_group(0, "hinge", None).unwrap();
+        session
+            .create_behavior(
+                1,
+                "rotation",
+                BehaviorSource {
+                    label: None,
+                    language_id: "lua".into(),
+                    host_api_version: rot_scene::GROUP_ROTATION_HOST_API_VERSION,
+                    text: String::new(),
+                },
+                "hinge-script",
+                BehaviorBinding {
+                    target: BindingTarget::Group("hinge".into()),
+                    source_id: "rotation".into(),
+                    enabled: true,
+                    properties: Default::default(),
+                    state_defaults: Default::default(),
+                    commands: Default::default(),
+                },
+            )
+            .unwrap();
+        let mut editor = SceneEditor::new(session);
+        let before = editor.session.scene().hierarchy.clone();
+        let authoring = editor.session.authoring().clone();
+        let history = editor.session.undo_len();
+        let read = editor.command("owner", "scene_inspect", json!({}));
+        assert_eq!(read["result"]["group_creation_blockers"], json!([]));
+        let created = editor.command(
+            "owner",
+            "scene_group_create",
+            json!({
+                "object_id":"second", "name":"Second Group",
+                "expected_session_token":read["result"]["session_token"],
+                "expected_revision":read["result"]["revision"]
+            }),
+        );
+        assert_eq!(created["ok"], true, "{created}");
+        assert_eq!(editor.session.undo_len(), history + 1);
+        assert!(editor
+            .session
+            .scene()
+            .hierarchy
+            .groups
+            .contains_key("second"));
+        editor.history(false);
+        assert_eq!(editor.session.scene().hierarchy, before);
+        assert_eq!(editor.session.authoring(), &authoring);
+        assert_eq!(editor.session.undo_len(), history);
     }
 
     #[test]

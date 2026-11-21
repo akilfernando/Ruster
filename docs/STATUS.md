@@ -85,8 +85,10 @@ The previous build is in `~/.local/share/rot-engine/previous` for `--rollback`.
 ## Known problems
 
 - An editor serves one AI adapter at a time; a second waits or fails.
-- The legacy editor refuses grouping in scenes with ordinary scripts, input
-  actions, or a HUD. Phase 2 tracks removing this restriction.
+- In legacy scenes, **New Group** and **Create Empty** explain which input
+  actions, HUD settings or scripts prevent empty group creation. Approved MCP
+  clients see the same reasons in `scene_inspect`. Phase 2 tracks lifting the
+  legacy restrictions on creating groups and reparenting.
 - Play checks refuse scenes that use groups, so they cannot cover an animated
   model.
 - Outside the repository, still using old names: two MCP entries in `~/.codex/config.toml`,

@@ -59,6 +59,12 @@ connected project.
   or `source_material_id` for a copy. AI requests leave pending material edits
   in the Inspector. Material writes return `drafts_pending` until the creator
   applies or cancels the edit.
+- In legacy scenes, `scene_inspect` reports `group_creation_blockers` for
+  `scene_group_create`. Each entry includes a `code` and can include a named
+  `example`. Codes are `input_actions`, `hud`, `script_sources`,
+  `object_scripts`, and `application_script`. An empty list means the scene's
+  content allows empty group creation. Session, revision, drafts and capacity
+  checks still apply. A content refusal returns `invalid_arguments`.
 - `viewport_screenshot` returns a PNG of the viewport, at most 512 pixels, in
   one call. `viewport_capture_start` and `viewport_capture_inspect` do the
   same in two steps. Use `viewport_capture_pick` with the capture ID and

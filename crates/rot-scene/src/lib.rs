@@ -521,6 +521,7 @@ pub enum SceneError {
     Format(serde_json::Error),
     UnsupportedVersion(u64),
     Invalid(String),
+    HierarchyAuthoringConflict,
     /// The validated authored payload and required history exceed the serialized budget.
     Capacity,
     StaleRevision {
@@ -547,6 +548,7 @@ impl fmt::Display for SceneError {
                 "unsupported scene version {version}; supported versions are 1 through {ANIMATION_FORMAT_VERSION}"
             ),
             Self::Invalid(reason) => write!(f, "invalid scene: {reason}"),
+            Self::HierarchyAuthoringConflict => write!(f, "invalid scene: live hierarchy accepts only Group-local rotation authoring; Object/Application bindings, input actions and HUD are unsupported"),
             Self::Capacity => write!(f, "authored state and required reversible history exceed 1 MiB; reduce content or edit size before retrying"),
             Self::StaleRevision { expected, actual } => write!(
                 f,

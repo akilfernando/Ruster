@@ -362,6 +362,19 @@ pub struct Authoring {
     #[serde(default, skip_serializing_if = "crate::hud::Hud::is_default")]
     pub hud: crate::hud::Hud,
 }
+
+/// Content that prevents an existing legacy scene from gaining an empty group.
+/// Each category carries at most one example from the validated scene.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "code", content = "example", rename_all = "snake_case")]
+pub enum GroupCreationBlocker<'a> {
+    InputActions(&'a str),
+    Hud(Option<&'a str>),
+    ScriptSources(&'a str),
+    ObjectScripts(&'a str),
+    ApplicationScript,
+}
+
 impl Authoring {
     pub fn is_empty(&self) -> bool {
         self.sources.is_empty()
@@ -369,20 +382,52 @@ impl Authoring {
             && self.actions.is_empty()
             && self.hud.is_default()
     }
+    pub fn group_creation_blockers<'a>(
+        &'a self,
+        scene: &'a Scene,
+    ) -> impl Iterator<Item = GroupCreationBlocker<'a>> + 'a {
+        use GroupCreationBlocker::*;
+        let example_action = self.actions.first_key_value();
+        let example_source = self
+            .sources
+            .iter()
+            .find(|(_, source)| source.host_api_version != GROUP_ROTATION_HOST_API_VERSION);
+        let example_hud = self.hud.panels.first().and_then(|panel| {
+            if panel.id == crate::hud::LEGACY_HUD_PANEL_ID && panel.name == "HUD" {
+                panel.elements.first().map(|element| element.id.as_str())
+            } else {
+                Some(panel.name.as_str())
+            }
+        });
+        let mut object_script = None;
+        let mut application_script = None;
+        for binding in self.bindings.values() {
+            match &binding.target {
+                BindingTarget::Object(id) if object_script.is_none() => {
+                    object_script =
+                        Some(ObjectScripts(scene.target_display_name(id).unwrap_or(id)));
+                }
+                BindingTarget::Application => application_script = Some(ApplicationScript),
+                _ => {}
+            }
+            if object_script.is_some() && application_script.is_some() {
+                break;
+            }
+        }
+        [
+            example_action.map(|(id, action)| InputActions(action.label.as_deref().unwrap_or(id))),
+            (!self.hud.is_default()).then_some(Hud(example_hud)),
+            example_source.map(|(id, source)| ScriptSources(source.label.as_deref().unwrap_or(id))),
+            object_script,
+            application_script,
+        ]
+        .into_iter()
+        .flatten()
+    }
+
     pub fn validate(&self, scene: &Scene) -> Result<(), SceneError> {
-        if !scene.hierarchy.is_empty()
-            && (!self.actions.is_empty()
-                || !self.hud.is_default()
-                || self
-                    .sources
-                    .values()
-                    .any(|source| source.host_api_version != GROUP_ROTATION_HOST_API_VERSION)
-                || self
-                    .bindings
-                    .values()
-                    .any(|binding| !matches!(binding.target, BindingTarget::Group(_))))
-        {
-            return Err(SceneError::Invalid("live hierarchy accepts only Group-local rotation authoring; Object/Application bindings, input actions and HUD are unsupported".into()));
+        if !scene.hierarchy.is_empty() && self.group_creation_blockers(scene).next().is_some() {
+            return Err(SceneError::HierarchyAuthoringConflict);
         }
         crate::input::validate_action_map(&self.actions)?;
         self.hud.validate()?;

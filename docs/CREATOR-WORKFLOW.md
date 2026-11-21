@@ -44,6 +44,19 @@ Presets**. An approved MCP client can call `viewport_frame` with the parent
 ID and `front`, `side`, or `top`, then call `viewport_screenshot` for each
 view. Inspect one assembly from multiple angles before copying it.
 
+## Create an empty group in a legacy scene
+
+Choose **New Group** in the Hierarchy or **Create Empty** in the Create menu
+or command palette. One **Undo** removes the new group. When scene content
+blocks creation, hover over **New Group** or run **Create Empty** to see the
+reasons. They can include input actions, a HUD, ordinary script sources, and
+scripts attached to objects or the application. Groups with only group-local
+rotation scripts can still gain another empty group.
+
+An approved MCP client can check `group_creation_blockers` in `scene_inspect`
+before using `scene_group_create`. The list is empty when scene content allows
+empty group creation. Drafts, the scene limit, and other edit checks still apply.
+
 ## Import assets into a v23 project
 
 Put OBJ meshes, PNG textures, WAV sounds or supported GLB models in the

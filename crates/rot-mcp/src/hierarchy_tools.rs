@@ -85,7 +85,7 @@ pub fn list() -> Vec<Value> {
         if name == "scene_group_create" {
             creation_properties(props.as_object_mut().expect("property map"));
         }
-        json!({"name":name,"description":if name=="scene_group_create" {"Create an identity-transform assembly group. Positive uniform group scale only. Shared guarded Session/Undo; unsaved. Local stored transforms and resolved-world readback are labeled."} else {"Reparent one geometry/group/point-light target to a group, or detach with null. Preserve the complete descendant world closure within 2e-6 relative per matrix element or refuse atomically. Legacy authoring combinations reject. Shared guarded history; no implicit save."},"inputSchema":{"type":"object","properties":props,"required":["expected_session_token","expected_revision","object_id",field],"additionalProperties":false},"annotations":{"readOnlyHint":false,"destructiveHint":false,"openWorldHint":false}})
+        json!({"name":name,"description":if name=="scene_group_create" {"Create an assembly group. Legacy groups use positive uniform scale; see group_creation_blockers in scene_inspect for content restrictions. Shares Undo with the editor."} else {"Reparent one geometry/group/point-light target to a group, or detach with null. Preserve the complete descendant world closure within 2e-6 relative per matrix element or refuse atomically. Legacy authoring combinations reject. Shared guarded history; no implicit save."},"inputSchema":{"type":"object","properties":props,"required":["expected_session_token","expected_revision","object_id",field],"additionalProperties":false},"annotations":{"readOnlyHint":false,"destructiveHint":false,"openWorldHint":false}})
     }).collect()
 }
 #[cfg(test)]
