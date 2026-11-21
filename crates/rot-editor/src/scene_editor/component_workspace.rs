@@ -1421,10 +1421,13 @@ impl ComponentWorkspace {
         self.show_workspace(ui, true)
     }
 
+    #[cfg(target_os = "linux")]
+    pub(super) fn poll_build(&mut self) {
+        self.build.poll();
+    }
+
     fn show_workspace(&mut self, ui: &mut egui::Ui, draw_viewport: bool) -> Option<OpenedScene> {
         let ctx = ui.ctx().clone();
-        #[cfg(target_os = "linux")]
-        self.build.poll();
         #[cfg(target_os = "linux")]
         let build_open = self.build.is_open();
         #[cfg(not(target_os = "linux"))]

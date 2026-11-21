@@ -1,6 +1,13 @@
 //! Stage a runnable v23 creation and publish the entire directory atomically.
 use crate::creation_export::{scene_dependencies, scene_texture_roles};
-use crate::{editor_theme, strings::Text};
+use crate::{
+    editor_theme,
+    strings::Text,
+    ui_kit::{
+        self,
+        tokens::{MIN_HIT, SPACE_L},
+    },
+};
 use eframe::egui;
 use rot_app::creation::{
     CreationManifest, DESCRIPTOR_NAME, FORMAT, NO_ANIMATION_VERSION, NO_AUDIO_VERSION, VERSION,
@@ -19,20 +26,115 @@ use std::sync::{
 pub(super) const PLAYER: &str = "rot-motion-lab";
 const APPLICATION: &str = "application";
 
-pub(super) struct BuildRequest {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BuildFailureKind {
+    InvalidDestination,
+    DestinationOccupied,
+    ParentUnavailable,
+    PlayerUnavailable,
+    SceneUnavailable,
+    AssetUnavailable,
+    BuildFailed,
+    LaunchFailed,
+}
+
+impl BuildFailureKind {
+    fn feedback(self) -> (&'static str, Text, Text) {
+        match self {
+            Self::InvalidDestination => (
+                "invalid_destination",
+                Text::BuildInvalidDestination,
+                Text::BuildChooseAbsolutePath,
+            ),
+            Self::DestinationOccupied => (
+                "destination_occupied",
+                Text::BuildDestinationOccupied,
+                Text::BuildChooseNewFolder,
+            ),
+            Self::ParentUnavailable => (
+                "parent_unavailable",
+                Text::BuildParentUnavailable,
+                Text::BuildChooseWritableParent,
+            ),
+            Self::PlayerUnavailable => (
+                "player_unavailable",
+                Text::BuildPlayerUnavailable,
+                Text::BuildInstallPlayer,
+            ),
+            Self::SceneUnavailable => (
+                "scene_unavailable",
+                Text::BuildSceneUnavailable,
+                Text::ComponentSaveBeforeBuild,
+            ),
+            Self::AssetUnavailable => (
+                "asset_unavailable",
+                Text::BuildAssetUnavailable,
+                Text::BuildFixAsset,
+            ),
+            Self::BuildFailed => ("build_failed", Text::BuildFailed, Text::BuildCheckDetails),
+            Self::LaunchFailed => (
+                "launch_failed",
+                Text::BuildLaunchFailed,
+                Text::BuildRunManually,
+            ),
+        }
+    }
+
+    fn detail(self, diagnostic: impl ToString) -> BuildFailure {
+        BuildFailure {
+            kind: self,
+            diagnostic: diagnostic.to_string(),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct BuildFailure {
+    kind: BuildFailureKind,
+    diagnostic: String,
+}
+
+#[derive(Debug)]
+enum PublishError {
+    Cancelled,
+    Failed(BuildFailure),
+}
+
+impl From<BuildFailure> for PublishError {
+    fn from(failure: BuildFailure) -> Self {
+        Self::Failed(failure)
+    }
+}
+
+impl From<String> for PublishError {
+    fn from(diagnostic: String) -> Self {
+        BuildFailure::from(diagnostic).into()
+    }
+}
+
+impl From<String> for BuildFailure {
+    fn from(diagnostic: String) -> Self {
+        Self {
+            kind: BuildFailureKind::BuildFailed,
+            diagnostic,
+        }
+    }
+}
+
+struct BuildRequest {
     bytes: Vec<u8>,
     scene: Session,
     assets: Option<rot_assets::ExportSnapshot>,
 }
 
 impl BuildRequest {
-    pub(super) fn capture(
+    fn capture(
         session: &ComponentSession,
         store: Option<&AssetStore>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, BuildFailure> {
         let mut bytes = session
             .saved_bytes(rot_scene::MAX_FILE_BYTES)
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| BuildFailureKind::SceneUnavailable.detail(error))?;
         if !session.scene().prefabs.is_empty() {
             let mut baked = rot_scene::component_scene::ComponentScene::read_json(bytes.as_slice())
                 .map_err(|error| error.to_string())?;
@@ -43,7 +145,8 @@ impl BuildRequest {
                 .map_err(|error| error.to_string())?;
         }
         let scene = Session::from_runtime_snapshot(&bytes).map_err(|e| e.to_string())?;
-        let (meshes, textures) = scene_dependencies(scene.scene())?;
+        let (meshes, textures) = scene_dependencies(scene.scene())
+            .map_err(|error| BuildFailureKind::AssetUnavailable.detail(error))?;
         let sounds = scene.sound_asset_references();
         let ids = meshes
             .iter()
@@ -63,9 +166,9 @@ impl BuildRequest {
         } else {
             Some(
                 store
-                    .ok_or("Project assets are unavailable.")?
+                    .ok_or_else(|| BuildFailureKind::AssetUnavailable.detail("No asset store."))?
                     .export_snapshot(&ids)
-                    .map_err(|error| error.to_string())?,
+                    .map_err(|error| BuildFailureKind::AssetUnavailable.detail(error))?,
             )
         };
         Ok(Self {
@@ -75,50 +178,69 @@ impl BuildRequest {
         })
     }
 
-    pub(super) fn publish(
+    fn publish(
         self,
         destination: &Path,
         player: &Path,
         cancel: &AtomicBool,
-    ) -> Result<PathBuf, String> {
-        use rustix::fs::{renameat_with, RenameFlags, CWD};
+    ) -> Result<PathBuf, PublishError> {
+        use rustix::{
+            fs::{renameat_with, RenameFlags, CWD},
+            io::Errno,
+        };
         let cancelled = || {
             if cancel.load(Ordering::Relaxed) {
-                Err("Build cancelled.".to_owned())
+                Err(PublishError::Cancelled)
             } else {
                 Ok(())
             }
         };
         cancelled()?;
-        if !destination.is_absolute() {
-            return Err("Choose an absolute path for a new build folder.".into());
-        }
         let name = destination
             .file_name()
-            .ok_or("Choose a new build folder.")?;
+            .filter(|_| destination.is_absolute())
+            .ok_or_else(|| {
+                BuildFailureKind::InvalidDestination
+                    .detail(format!("Invalid build path: {}", destination.display()))
+            })?;
         let parent = destination
             .parent()
-            .ok_or("Choose a new build folder.")?
-            .canonicalize()
-            .map_err(|error| error.to_string())?;
+            .expect("an absolute path with a filename has a parent");
+        let parent = parent.canonicalize().map_err(|error| {
+            BuildFailureKind::ParentUnavailable.detail(format!("{}: {error}", parent.display()))
+        })?;
         let destination = parent.join(name);
         match destination.symlink_metadata() {
-            Ok(_) => return Err("The build folder already exists.".into()),
+            Ok(_) => {
+                return Err(BuildFailureKind::DestinationOccupied
+                    .detail(format!("Existing path: {}", destination.display()))
+                    .into())
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.to_string()),
+            Err(error) => {
+                return Err(BuildFailureKind::ParentUnavailable
+                    .detail(format!("{}: {error}", destination.display()))
+                    .into())
+            }
         }
-        let player_meta = player
-            .symlink_metadata()
-            .map_err(|_| "The player is missing. Install it alongside Rot Engine.")?;
+        let player_meta = player.symlink_metadata().map_err(|error| {
+            BuildFailureKind::PlayerUnavailable.detail(format!("{}: {error}", player.display()))
+        })?;
         if !player_meta.is_file() || player_meta.permissions().mode() & 0o111 == 0 {
-            return Err(
-                "The player must be an executable file installed alongside Rot Engine.".into(),
-            );
+            return Err(BuildFailureKind::PlayerUnavailable
+                .detail(format!(
+                    "Expected an executable file at {}",
+                    player.display()
+                ))
+                .into());
         }
+        fs::File::open(player).map_err(|error| {
+            BuildFailureKind::PlayerUnavailable.detail(format!("{}: {error}", player.display()))
+        })?;
         let staging = tempfile::Builder::new()
             .prefix(".rot-build-")
             .tempdir_in(&parent)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| BuildFailureKind::ParentUnavailable.detail(error))?;
         let stage = staging.path();
         let sound = self.scene.sound_asset_references();
         let (mesh_ids, _) = scene_dependencies(self.scene.scene())?;
@@ -149,36 +271,37 @@ impl BuildRequest {
         let resource_dir = stage.join("assets");
         if let Some(assets) = self.assets {
             fs::create_dir(&resource_dir).map_err(|error| error.to_string())?;
-            assets
-                .read_verified_sources(|id, bytes| {
-                    cancelled().map_err(rot_assets::AssetError)?;
-                    let (extension, map) = if mesh_ids.contains(id) {
-                        let policy = assets.mesh_normal_policy(id).ok_or_else(|| {
-                            rot_assets::AssetError(format!("Mesh {id} needs a valid import."))
-                        })?;
-                        manifest.mesh_normal_policies.insert(id.into(), policy);
-                        ("obj", &mut manifest.meshes)
-                    } else if let Some(role) = roles.get(id) {
-                        if assets.texture_role(id) != Some(*role) {
-                            return Err(rot_assets::AssetError(format!(
-                                "Texture {id} has the wrong import role."
-                            )));
-                        }
-                        ("png", &mut manifest.textures)
-                    } else if sound.assets.contains(id) && assets.kind(id) == Some(AssetKind::Sound)
-                    {
-                        ("wav", manifest.sounds.as_mut().expect("sound map"))
-                    } else {
+            let copied = assets.read_verified_sources(|id, bytes| {
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(rot_assets::AssetError("Cancelled".into()));
+                }
+                let (extension, map) = if mesh_ids.contains(id) {
+                    let policy = assets.mesh_normal_policy(id).ok_or_else(|| {
+                        rot_assets::AssetError(format!("Mesh {id} needs a valid import."))
+                    })?;
+                    manifest.mesh_normal_policies.insert(id.into(), policy);
+                    ("obj", &mut manifest.meshes)
+                } else if let Some(role) = roles.get(id) {
+                    if assets.texture_role(id) != Some(*role) {
                         return Err(rot_assets::AssetError(format!(
-                            "Resource {id} has the wrong type."
+                            "Texture {id} has the wrong import role."
                         )));
-                    };
-                    let path = format!("assets/{id}.{extension}");
-                    fs::write(stage.join(&path), bytes)?;
-                    map.insert(id.into(), path);
-                    Ok(())
-                })
-                .map_err(|error| error.to_string())?;
+                    }
+                    ("png", &mut manifest.textures)
+                } else if sound.assets.contains(id) && assets.kind(id) == Some(AssetKind::Sound) {
+                    ("wav", manifest.sounds.as_mut().expect("sound map"))
+                } else {
+                    return Err(rot_assets::AssetError(format!(
+                        "Resource {id} has the wrong type."
+                    )));
+                };
+                let path = format!("assets/{id}.{extension}");
+                fs::write(stage.join(&path), bytes)?;
+                map.insert(id.into(), path);
+                Ok(())
+            });
+            cancelled()?;
+            copied.map_err(|error| BuildFailureKind::AssetUnavailable.detail(error))?;
             for (id, bytes) in assets.clips() {
                 cancelled()?;
                 let path = format!("assets/{id}.json");
@@ -187,33 +310,53 @@ impl BuildRequest {
                 manifest
                     .animations
                     .as_mut()
-                    .ok_or("Unexpected animation resource.")?
+                    .ok_or_else(|| "Unexpected animation resource.".to_owned())?
                     .insert(id.clone(), path);
             }
         }
         manifest.validate()?;
         let resources = rot_app::ResourceRoot::new(stage)?;
         let scene = manifest.load_session(&resources)?;
+        let asset_error = |error| BuildFailureKind::AssetUnavailable.detail(error);
         rot_app::Content::with_textures(
             scene.scene().clone(),
-            manifest.load_meshes(&resources)?,
-            manifest.load_textures(&resources)?,
-        )?;
-        manifest.load_sounds(&resources)?;
-        manifest.load_animations(&resources)?;
+            manifest.load_meshes(&resources).map_err(asset_error)?,
+            manifest.load_textures(&resources).map_err(asset_error)?,
+        )
+        .map_err(asset_error)?;
+        manifest.load_sounds(&resources).map_err(asset_error)?;
+        manifest.load_animations(&resources).map_err(asset_error)?;
         let descriptor = serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
         if descriptor.len() > rot_app::creation::MAX_DESCRIPTOR_BYTES {
-            return Err("Build asset mappings exceed the player descriptor size limit.".into());
+            return Err(BuildFailureKind::BuildFailed
+                .detail("Build asset mappings exceed the player descriptor size limit.")
+                .into());
         }
         fs::write(stage.join(DESCRIPTOR_NAME), descriptor).map_err(|error| error.to_string())?;
         cancelled()?;
         fs::copy(player, stage.join(APPLICATION)).map_err(|error| error.to_string())?;
         cancelled()?;
-        renameat_with(CWD, stage, CWD, &destination, RenameFlags::NOREPLACE)
-            .map_err(|error| format!("Couldn't publish the build folder. {error}."))?;
+        renameat_with(CWD, stage, CWD, &destination, RenameFlags::NOREPLACE).map_err(|error| {
+            let kind = match error {
+                Errno::EXIST | Errno::NOTEMPTY => BuildFailureKind::DestinationOccupied,
+                Errno::NOENT | Errno::NOTDIR | Errno::ACCESS | Errno::PERM | Errno::ROFS => {
+                    BuildFailureKind::ParentUnavailable
+                }
+                _ => BuildFailureKind::BuildFailed,
+            };
+            kind.detail(format!("Publishing {}: {error}", destination.display()))
+        })?;
         let _ = staging.keep();
         Ok(destination.join(APPLICATION))
     }
+}
+
+enum BuildOutcome {
+    Cancelled,
+    Failed(BuildFailure),
+    Built,
+    Launched,
+    LaunchFailed(BuildFailure),
 }
 
 #[derive(Default)]
@@ -221,12 +364,13 @@ pub(super) struct BuildUi {
     path: Option<String>,
     focus: bool,
     worker: Option<BuildWorker>,
-    error: Option<String>,
-    status: Option<String>,
+    outcome: Option<BuildOutcome>,
+    show_failure: bool,
+    details_open: bool,
 }
 
 struct BuildWorker {
-    result: mpsc::Receiver<Result<PathBuf, String>>,
+    result: mpsc::Receiver<Result<PathBuf, PublishError>>,
     cancel: Arc<AtomicBool>,
     run: bool,
 }
@@ -248,16 +392,44 @@ impl BuildUi {
                 .into_owned(),
         );
         self.focus = true;
-        self.error = None;
-        self.status = None;
+        self.show_failure = false;
+        self.details_open = false;
     }
 
     pub(super) fn is_open(&self) -> bool {
         self.path.is_some()
     }
 
-    pub(super) fn status(&self) -> Option<&str> {
-        self.status.as_deref()
+    pub(super) fn status(&self) -> Option<&'static str> {
+        if self.is_open() {
+            return None;
+        }
+        match self.outcome.as_ref()? {
+            BuildOutcome::Cancelled => Some(Text::BuildCancelled.plain()),
+            BuildOutcome::Failed(_) => None,
+            BuildOutcome::Built => Some(Text::BuildFinished.plain()),
+            BuildOutcome::Launched => Some(Text::BuildLaunched.plain()),
+            BuildOutcome::LaunchFailed(_) => Some(Text::BuildLaunchFailed.plain()),
+        }
+    }
+
+    pub(super) fn inspect(&self) -> serde_json::Value {
+        use serde_json::json;
+
+        let (state, published, failure) = match &self.outcome {
+            _ if self.worker.is_some() => ("building", false, None),
+            None => ("idle", false, None),
+            Some(BuildOutcome::Cancelled) => ("cancelled", false, None),
+            Some(BuildOutcome::Failed(failure)) => ("failed", false, Some(failure)),
+            Some(BuildOutcome::Built) => ("built", true, None),
+            Some(BuildOutcome::Launched) => ("launched", true, None),
+            Some(BuildOutcome::LaunchFailed(failure)) => ("launch_failed", true, Some(failure)),
+        };
+        let failure = failure.map(|failure| {
+            let (code, message, recovery) = failure.kind.feedback();
+            json!({"code":code, "message":message.plain(), "recovery":recovery.plain()})
+        });
+        json!({"state":state, "published":published, "failure":failure})
     }
 
     pub(super) fn poll(&mut self) {
@@ -265,39 +437,45 @@ impl BuildUi {
         let result = match worker.result.try_recv() {
             Ok(result) => result,
             Err(mpsc::TryRecvError::Empty) => return,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                Err("The build worker stopped before reporting a result.".into())
-            }
+            Err(mpsc::TryRecvError::Disconnected) => Err(BuildFailureKind::BuildFailed
+                .detail("The build worker stopped before reporting a result.")
+                .into()),
         };
         let run = worker.run && !worker.cancel.load(Ordering::Relaxed);
         self.worker = None;
-        match result {
-            Ok(application) => {
-                self.path = None;
-                self.error = None;
-                let folder = application.parent().expect("published player directory");
-                self.status = Some(format!("Built {}", folder.display()));
-                if run {
-                    self.status = Some(
-                        match std::process::Command::new(&application)
-                            .current_dir(folder)
-                            .spawn()
-                        {
-                            Ok(mut child) => {
-                                std::thread::spawn(move || {
-                                    let _ = child.wait();
-                                });
-                                format!("Running {}", folder.display())
-                            }
-                            Err(error) => format!(
-                                "Built {}. Couldn't start the player. {error}",
-                                folder.display()
-                            ),
-                        },
-                    );
-                }
+        let outcome = match result {
+            Ok(application) if run => Self::launch(&application),
+            Ok(_) => BuildOutcome::Built,
+            Err(PublishError::Cancelled) => BuildOutcome::Cancelled,
+            Err(PublishError::Failed(failure)) => BuildOutcome::Failed(failure),
+        };
+        self.show_failure = matches!(
+            &outcome,
+            BuildOutcome::Failed(_) | BuildOutcome::LaunchFailed(_)
+        );
+        self.focus = self.show_failure;
+        if !self.show_failure {
+            self.path = None;
+        }
+        self.outcome = Some(outcome);
+    }
+
+    fn launch(application: &Path) -> BuildOutcome {
+        let folder = application.parent().expect("published player directory");
+        match std::process::Command::new(application)
+            .current_dir(folder)
+            .spawn()
+        {
+            Ok(mut child) => {
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+                BuildOutcome::Launched
             }
-            Err(error) => self.error = Some(error),
+            Err(error) => BuildOutcome::LaunchFailed(
+                BuildFailureKind::LaunchFailed
+                    .detail(format!("{}: {error}", application.display())),
+            ),
         }
     }
 
@@ -312,74 +490,166 @@ impl BuildUi {
             return;
         };
         let mut close = false;
+        let mut submit = None;
         egui::Modal::new(egui::Id::unique("component_build"))
             .frame(editor_theme::dialog_frame(ctx))
             .show(ctx, |ui| {
+                ui.set_width(ctx.content_rect().width().min(480.0) - 2.0 * SPACE_L);
                 ui.heading(Text::ComponentBuildApplication.plain());
+                let escape = ui
+                    .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
                 if let Some(worker) = &self.worker {
-                    ui.label(Text::Building.plain());
-                    if ui.button(Text::ComponentCancel.plain()).clicked()
-                        || ui.input_mut(|input| {
-                            input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                    let cancelling = worker.cancel.load(Ordering::Relaxed);
+                    let status = if cancelling {
+                        Text::BuildCancelling
+                    } else {
+                        Text::Building
+                    };
+                    ui.label(status.plain());
+                    let button = ui
+                        .with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
+                            ui.add_enabled_ui(!cancelling, |ui| {
+                                ui_kit::button(ui, Text::ComponentCancel.plain())
+                                    .on_hover_text(Text::BuildCancelShortcut.plain())
+                            })
+                            .inner
                         })
-                    {
+                        .inner;
+                    if std::mem::take(&mut self.focus) && !cancelling {
+                        button.request_focus();
+                    }
+                    if escape || button.clicked() {
                         worker.cancel.store(true, Ordering::Relaxed);
                     }
-                } else {
-                    let label = ui.label(Text::ComponentBuildFolder.plain());
-                    let edit = ui.text_edit_singleline(&mut path).labelled_by(label.id);
+                    return;
+                }
+                let failure = self.outcome.as_ref().filter(|_| self.show_failure);
+                if let Some(BuildOutcome::LaunchFailed(failure)) = failure {
+                    Self::show_failure(ui, failure, &mut self.details_open);
+                    let button = ui
+                        .with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
+                            editor_theme::primary_button(ui, Text::CloseErrorDetails.plain())
+                                .on_hover_text(Text::BuildCloseShortcut.plain())
+                        })
+                        .inner;
                     if std::mem::take(&mut self.focus) {
-                        edit.request_focus();
+                        button.request_focus();
                     }
-                    let saved = !draft_dirty && !session.is_dirty();
-                    if !saved {
-                        ui.label(Text::ComponentSaveBeforeBuild.plain());
-                    }
-                    let enter = (edit.has_focus() || edit.lost_focus())
-                        && ui.input_mut(|input| {
-                            input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
-                        });
-                    ui.horizontal_wrapped(|ui| {
-                        let enabled = saved && !path.trim().is_empty();
-                        ui.add_enabled_ui(enabled, |ui| {
-                            let build =
-                                editor_theme::primary_button(ui, Text::ComponentBuild.plain())
-                                    .clicked()
-                                    || enter;
-                            let run = ui.button(Text::ComponentBuildRun.plain()).clicked();
-                            if enabled && (build || run) {
-                                match Self::start(
-                                    ctx,
-                                    session,
-                                    assets,
-                                    PathBuf::from(path.trim()),
-                                    run,
-                                ) {
-                                    Ok(worker) => {
-                                        self.error = None;
-                                        self.worker = Some(worker);
-                                    }
-                                    Err(error) => self.error = Some(error),
-                                }
-                            }
-                        });
-                        close = ui.button(Text::ComponentCancel.plain()).clicked()
-                            || ui.input_mut(|input| {
-                                input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
-                            });
+                    close = escape || button.clicked();
+                    return;
+                }
+
+                let label = ui.label(Text::ComponentBuildFolder.plain());
+                let edit = ui
+                    .add(egui::TextEdit::singleline(&mut path).desired_width(f32::INFINITY))
+                    .labelled_by(label.id);
+                if std::mem::take(&mut self.focus) {
+                    edit.request_focus();
+                }
+                let saved = !draft_dirty && !session.is_dirty();
+                if !saved {
+                    ui.label(Text::ComponentSaveBeforeBuild.plain());
+                }
+                let enter = (edit.has_focus() || edit.lost_focus())
+                    && ui.input_mut(|input| {
+                        input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
                     });
+                if let Some(BuildOutcome::Failed(failure)) = failure {
+                    Self::show_failure(ui, failure, &mut self.details_open);
                 }
-                if let Some(error) = &self.error {
-                    ui.colored_label(editor_theme::colors(ui).error, error);
-                }
+                let labels = [
+                    Text::ComponentCancel,
+                    Text::ComponentBuildRun,
+                    Text::ComponentBuild,
+                ];
+                let pad = 2.0 * ui.spacing().button_padding.x;
+                let font = egui::TextStyle::Body.resolve(ui.style());
+                let gap = ui.spacing().item_spacing.x;
+                let actions_width = labels
+                    .iter()
+                    .map(|label| {
+                        (ui.painter()
+                            .layout_no_wrap(
+                                label.plain().into(),
+                                font.clone(),
+                                egui::Color32::PLACEHOLDER,
+                            )
+                            .size()
+                            .x
+                            + pad)
+                            .max(MIN_HIT)
+                            + gap
+                    })
+                    .sum::<f32>();
+                ui.horizontal_wrapped(|ui| {
+                    ui.add_space((ui.available_width() - actions_width).max(0.0));
+                    close = ui_kit::button(ui, Text::ComponentCancel.plain())
+                        .on_hover_text(Text::BuildCancelShortcut.plain())
+                        .clicked()
+                        || escape;
+                    let enabled = saved && !path.trim().is_empty();
+                    ui.add_enabled_ui(enabled, |ui| {
+                        let run = ui_kit::button(ui, Text::ComponentBuildRun.plain())
+                            .on_hover_text(Text::ComponentBuildRun.plain())
+                            .clicked();
+                        let build = editor_theme::primary_button(ui, Text::ComponentBuild.plain())
+                            .on_hover_text(Text::BuildSubmitShortcut.plain())
+                            .clicked();
+                        if enabled && (build || run || enter) {
+                            submit = Some(run);
+                        }
+                    });
+                });
             });
         if close {
-            if let Some(worker) = &self.worker {
-                worker.cancel.store(true, Ordering::Relaxed);
+            self.show_failure = false;
+            self.details_open = false;
+            return;
+        }
+        self.path = Some(path);
+        if let Some(run) = submit {
+            self.details_open = false;
+            self.show_failure = false;
+            self.outcome = None;
+            let path = self.path.as_deref().expect("open build dialog").trim();
+            match Self::start(ctx, session, assets, PathBuf::from(path), run) {
+                Ok(worker) => {
+                    self.worker = Some(worker);
+                    self.focus = true;
+                }
+                Err(failure) => {
+                    self.outcome = Some(BuildOutcome::Failed(failure));
+                    self.show_failure = true;
+                    self.focus = true;
+                }
             }
         }
-        if !close || self.worker.is_some() {
-            self.path = Some(path);
+    }
+
+    fn show_failure(ui: &mut egui::Ui, failure: &BuildFailure, details_open: &mut bool) {
+        let (_, message, recovery) = failure.kind.feedback();
+        ui.horizontal(|ui| {
+            let error = editor_theme::colors(ui).error;
+            ui.colored_label(error, "⚠");
+            ui.colored_label(error, message.plain());
+        });
+        ui.label(recovery.plain());
+        if ui_kit::button(ui, Text::ErrorDetails.plain())
+            .on_hover_text(Text::BuildDetailsTooltip.plain())
+            .clicked()
+        {
+            *details_open = !*details_open;
+        }
+        if *details_open {
+            egui::ScrollArea::vertical()
+                .max_height(144.0)
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(&failure.diagnostic).monospace())
+                            .wrap()
+                            .selectable(true),
+                    );
+                });
         }
     }
 
@@ -389,12 +659,15 @@ impl BuildUi {
         assets: Option<&AssetStore>,
         destination: PathBuf,
         run: bool,
-    ) -> Result<BuildWorker, String> {
+    ) -> Result<BuildWorker, BuildFailure> {
         let request = BuildRequest::capture(session, assets)?;
-        let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+        let executable = std::env::current_exe()
+            .map_err(|error| BuildFailureKind::PlayerUnavailable.detail(error))?;
         let player = executable
             .parent()
-            .ok_or("Couldn't find the installed player.")?
+            .ok_or_else(|| {
+                BuildFailureKind::PlayerUnavailable.detail("The editor has no parent directory.")
+            })?
             .join(PLAYER);
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = cancel.clone();
@@ -407,7 +680,7 @@ impl BuildUi {
                 let _ = sender.send(outcome);
                 ctx.request_repaint();
             })
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| BuildFailureKind::BuildFailed.detail(error))?;
         Ok(BuildWorker {
             result,
             cancel,
@@ -420,6 +693,7 @@ impl BuildUi {
 mod tests {
     use super::*;
     use rot_scene::{component_scene::ComponentScene, Scene};
+    use serde_json::json;
 
     #[test]
     fn build_preserves_v23_and_publishes_only_a_complete_new_folder() {
@@ -449,12 +723,34 @@ mod tests {
         let original = fs::read(&input).unwrap();
 
         let capture = || BuildRequest::capture(&session, Some(&assets)).unwrap();
-        assert!(capture()
-            .publish(&destination, &player, &AtomicBool::new(true))
-            .is_err());
+        assert!(matches!(
+            capture().publish(&destination, &player, &AtomicBool::new(true)),
+            Err(PublishError::Cancelled),
+        ));
         assert!(!destination.exists());
+        let assert_issue = |result, expected| {
+            assert!(matches!(
+                result,
+                Err(PublishError::Failed(BuildFailure {kind, ..})) if kind == expected,
+            ));
+        };
+        let not_cancelled = AtomicBool::new(false);
+        assert_issue(
+            capture().publish(&root.join("missing/new"), &player, &not_cancelled),
+            BuildFailureKind::ParentUnavailable,
+        );
+        assert_issue(
+            capture().publish(&destination, &root.join("missing-player"), &not_cancelled),
+            BuildFailureKind::PlayerUnavailable,
+        );
+        fs::set_permissions(&player, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_issue(
+            capture().publish(&destination, &player, &not_cancelled),
+            BuildFailureKind::PlayerUnavailable,
+        );
+        fs::set_permissions(&player, fs::Permissions::from_mode(0o755)).unwrap();
         let executable = capture()
-            .publish(&destination, &player, &AtomicBool::new(false))
+            .publish(&destination, &player, &not_cancelled)
             .unwrap();
         assert_eq!(fs::read(executable).unwrap(), b"test player bytes");
         assert_eq!(fs::read(destination.join("scene.json")).unwrap(), original);
@@ -467,13 +763,73 @@ mod tests {
             Some("triangle")
         );
         assert_eq!(manifest.load_meshes(&resources).unwrap().len(), 1);
-        assert!(capture()
-            .publish(&destination, &player, &AtomicBool::new(false))
-            .is_err());
+        fs::write(destination.join("sentinel"), b"keep this").unwrap();
+        assert_issue(
+            capture().publish(&destination, &player, &not_cancelled),
+            BuildFailureKind::DestinationOccupied,
+        );
+        assert_eq!(
+            fs::read(destination.join("sentinel")).unwrap(),
+            b"keep this"
+        );
         assert_eq!(fs::read(&input).unwrap(), original);
         let mut changed = original;
         changed.push(b' ');
         fs::write(&input, &changed).unwrap();
-        assert!(BuildRequest::capture(&session, Some(&assets)).is_err());
+        assert!(matches!(
+            BuildRequest::capture(&session, Some(&assets)),
+            Err(BuildFailure {
+                kind: BuildFailureKind::SceneUnavailable,
+                ..
+            }),
+        ));
+    }
+
+    #[test]
+    fn cancellation_and_launch_failure_have_distinct_outcomes() {
+        let root = tempfile::tempdir().unwrap();
+        let scene = root.path().join("scene.json");
+        let mut ui = BuildUi::default();
+        let deliver = |ui: &mut BuildUi, result, cancelled| {
+            let (sender, receiver) = mpsc::sync_channel(1);
+            ui.worker = Some(BuildWorker {
+                result: receiver,
+                cancel: Arc::new(AtomicBool::new(cancelled)),
+                run: true,
+            });
+            assert_eq!(ui.inspect()["state"], "building");
+            sender.send(result).unwrap();
+            ui.poll();
+        };
+
+        ui.open(&scene, "scene");
+        deliver(&mut ui, Err(PublishError::Cancelled), true);
+        assert!(!ui.is_open());
+        assert_eq!(
+            ui.inspect(),
+            json!({"state":"cancelled", "published":false, "failure":null})
+        );
+
+        ui.open(&scene, "scene");
+        assert_eq!(ui.inspect()["state"], "cancelled");
+        let application = root.path().join(APPLICATION);
+        fs::write(&application, b"#!/no-such-rot-build-interpreter\n").unwrap();
+        fs::set_permissions(&application, fs::Permissions::from_mode(0o755)).unwrap();
+        deliver(&mut ui, Ok(application.clone()), false);
+        assert!(ui.is_open());
+        assert!(application.exists());
+        assert!(matches!(
+            ui.outcome.as_ref(),
+            Some(BuildOutcome::LaunchFailed(failure))
+                if failure.diagnostic.contains(application.to_str().unwrap())
+        ));
+        assert_eq!(
+            ui.inspect(),
+            json!({"state":"launch_failed", "published":true, "failure":{
+                "code":"launch_failed",
+                "message":Text::BuildLaunchFailed.plain(),
+                "recovery":Text::BuildRunManually.plain(),
+            }})
+        );
     }
 }

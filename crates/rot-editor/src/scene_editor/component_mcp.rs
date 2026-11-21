@@ -173,6 +173,13 @@ impl ComponentWorkspace {
         if op == "asset_inspect" {
             return self.inspect_assets(args);
         }
+        #[cfg(target_os = "linux")]
+        if op == "creation_export_inspect" {
+            if !map.is_empty() {
+                return Err(invalid());
+            }
+            return Ok(json!({"build":self.build.inspect()}));
+        }
         let creation = matches!(op, "scene_create" | "scene_group_create");
         let prefab_fields: &[&str] = match args["action"].as_str() {
             Some("save") => &["object_id", "source"],

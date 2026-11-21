@@ -253,6 +253,22 @@ Run `application --headless --ticks 16` to check it without opening a window.
 The editor finds the `rot-motion-lab` player alongside `rot-editor`. Local
 installs include both. When building from source, build both Cargo packages.
 
+If the build fails, the dialog explains what happened and how to recover.
+Use **Error Details** for the technical message. Tab reaches it from
+**Build Folder**, and Enter opens it. Change the folder in the same dialog
+if the destination already exists or its parent is unavailable, then retry
+with **Build** or **Build and Run**. A cancelled build leaves the destination
+untouched. If the build finishes and the player fails to start, the dialog
+reports both results. You can still run `application` from the published
+folder.
+
+An approved MCP client can read the current or last v23 Linux build with
+`creation_export_inspect` and empty arguments. Clients that use the tool
+catalog can call it through `rot_tools`. The `build` object reports
+`state`, `published`, and a `failure` with a code, message and recovery
+when applicable. **Error Details** are available in the editor. Start,
+retry or cancel a v23 build from the editor.
+
 ## Create and export in the editor
 
 1. Start with the empty welcome scene or **File → New scene**. Create an object, name it, save into your own project directory and import a triangle OBJ through Content. Assign it using **Edit → Assign mesh…** while the object is selected (or the Content item’s **Assign to active object** context menu). Drag-and-drop is also available; physical-focus validation remains separately recorded.
@@ -334,7 +350,7 @@ structured report and exits 0 on pass or 2 on a failed check. You can still
 launch the app normally. The [MCP guide](../crates/rot-mcp/README.md)
 covers guarded start, inspect and cancel.
 
-## Perform the same export through MCP
+## Export a legacy scene through MCP
 
 Launch the editor with explicit existing directory grants:
 

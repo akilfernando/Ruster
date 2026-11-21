@@ -114,6 +114,28 @@ pub enum Text {
     ComponentBuild,
     ComponentBuildRun,
     ComponentSaveBeforeBuild,
+    BuildInvalidDestination,
+    BuildChooseAbsolutePath,
+    BuildDestinationOccupied,
+    BuildChooseNewFolder,
+    BuildParentUnavailable,
+    BuildChooseWritableParent,
+    BuildPlayerUnavailable,
+    BuildInstallPlayer,
+    BuildSceneUnavailable,
+    BuildAssetUnavailable,
+    BuildFixAsset,
+    BuildFailed,
+    BuildCheckDetails,
+    BuildLaunched,
+    BuildLaunchFailed,
+    BuildRunManually,
+    BuildCancelling,
+    BuildCancelled,
+    BuildDetailsTooltip,
+    BuildCancelShortcut,
+    BuildCloseShortcut,
+    BuildSubmitShortcut,
 
     ComponentObjectMenu,
     ComponentCreate,
@@ -165,7 +187,7 @@ pub enum Text {
 
 impl Text {
     #[cfg(test)]
-    pub const ALL: [Self; 150] = [
+    pub const ALL: [Self; 172] = [
         Self::Welcome,
         Self::NoRecentProjects,
         Self::EmptyHierarchy,
@@ -271,6 +293,28 @@ impl Text {
         Self::ComponentBuild,
         Self::ComponentBuildRun,
         Self::ComponentSaveBeforeBuild,
+        Self::BuildInvalidDestination,
+        Self::BuildChooseAbsolutePath,
+        Self::BuildDestinationOccupied,
+        Self::BuildChooseNewFolder,
+        Self::BuildParentUnavailable,
+        Self::BuildChooseWritableParent,
+        Self::BuildPlayerUnavailable,
+        Self::BuildInstallPlayer,
+        Self::BuildSceneUnavailable,
+        Self::BuildAssetUnavailable,
+        Self::BuildFixAsset,
+        Self::BuildFailed,
+        Self::BuildCheckDetails,
+        Self::BuildLaunched,
+        Self::BuildLaunchFailed,
+        Self::BuildRunManually,
+        Self::BuildCancelling,
+        Self::BuildCancelled,
+        Self::BuildDetailsTooltip,
+        Self::BuildCancelShortcut,
+        Self::BuildCloseShortcut,
+        Self::BuildSubmitShortcut,
         Self::ComponentObjectMenu,
         Self::ComponentCreate,
         Self::ComponentCreateChild,
@@ -434,6 +478,34 @@ impl Text {
             Self::ComponentBuild => "Build",
             Self::ComponentBuildRun => "Build and Run",
             Self::ComponentSaveBeforeBuild => "Save the scene before building.",
+            Self::BuildInvalidDestination => "Couldn't build. The build folder path is invalid.",
+            Self::BuildChooseAbsolutePath => "Enter an absolute path for a new folder.",
+            Self::BuildDestinationOccupied => "Couldn't build. That path already exists.",
+            Self::BuildChooseNewFolder => "Choose a new build folder.",
+            Self::BuildParentUnavailable => "Couldn't build. The parent folder is unavailable.",
+            Self::BuildChooseWritableParent => "Choose an existing folder you can write to.",
+            Self::BuildPlayerUnavailable => {
+                "Couldn't build. The Linux player is missing or unusable."
+            }
+            Self::BuildInstallPlayer => "Reinstall Rot Engine or rebuild the Linux player.",
+            Self::BuildSceneUnavailable => {
+                "Couldn't build. The saved scene is unavailable or changed."
+            }
+            Self::BuildAssetUnavailable => "Couldn't build. A required asset couldn't be packaged.",
+            Self::BuildFixAsset => "Check Error Details, then restore or reimport the asset.",
+            Self::BuildFailed => "Couldn't prepare the build.",
+            Self::BuildCheckDetails => "Open Error Details, fix the reported issue, and retry.",
+            Self::BuildLaunched => "Build finished. Player launched.",
+            Self::BuildLaunchFailed => "Build finished, but the player couldn't start.",
+            Self::BuildRunManually => {
+                "Open Error Details, then try running application from the build folder."
+            }
+            Self::BuildCancelling => "Cancelling build…",
+            Self::BuildCancelled => "Build cancelled.",
+            Self::BuildDetailsTooltip => "Show or hide the technical error",
+            Self::BuildCancelShortcut => "Cancel (Esc)",
+            Self::BuildCloseShortcut => "Close (Esc)",
+            Self::BuildSubmitShortcut => "Build (Enter)",
 
             Self::ComponentObjectMenu => "Object",
             Self::ComponentCreate => "Create",
