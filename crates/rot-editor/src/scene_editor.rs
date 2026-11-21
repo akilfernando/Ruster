@@ -934,6 +934,7 @@ impl SceneEditor {
     }
     fn behavior_action(&mut self, action: crate::behavior_ui::Action) {
         use crate::behavior_ui::Action;
+        use crate::strings::Text;
         if matches!(action, Action::ExternalStatus) {
             self.external.open = true;
             return;
@@ -943,7 +944,7 @@ impl SceneEditor {
             return;
         }
         if !self.behavior_editable() {
-            self.error = "Couldn't edit the Script. Finish your open edits first.".into();
+            self.error = Text::ScriptEditBlocked.plain().into();
             return;
         }
         if matches!(action, Action::Save) {
@@ -972,12 +973,15 @@ impl SceneEditor {
                 return;
             }
         }
+        let previous_revision = self.session.scene().revision;
         match self.behavior.execute(action, &mut self.session) {
             Ok(()) => {
                 self.sync_draft();
                 self.observe_runtime();
                 self.error.clear();
-                self.notice = "Script updated.".into();
+                if self.session.scene().revision != previous_revision {
+                    self.notice = Text::ScriptUpdated.plain().into();
+                }
             }
             Err(error) => {
                 self.behavior.error = error.clone();

@@ -82,9 +82,9 @@ impl AssetRow {
 
     fn status_label(&self) -> &'static str {
         match self.status {
-            AssetStatus::Ready => "Ready",
-            AssetStatus::Invalid => "Invalid",
-            AssetStatus::Missing => "Missing",
+            AssetStatus::Ready => Text::AssetReady.plain(),
+            AssetStatus::Invalid => Text::AssetInvalid.plain(),
+            AssetStatus::Missing => Text::AssetMissing.plain(),
         }
     }
 }
@@ -219,13 +219,25 @@ impl Browser {
             .frame(editor_theme::dialog_frame(ctx))
             .show(ctx, |ui| {
                 let (heading, action, name) = match &mut dialog {
-                    FileDialog::Folder { name, .. } => ("New Folder", "Create Folder", Some(name)),
-                    FileDialog::Rename { stem, .. } => ("Rename Asset", "Rename", Some(stem)),
-                    FileDialog::Delete(_) => ("Delete Asset", "Move to Trash", None),
+                    FileDialog::Folder { name, .. } => (
+                        Text::AssetNewFolder.plain(),
+                        Text::AssetCreateFolder.plain(),
+                        Some(name),
+                    ),
+                    FileDialog::Rename { stem, .. } => (
+                        Text::AssetRenameHeading.plain(),
+                        Text::AssetRename.plain(),
+                        Some(stem),
+                    ),
+                    FileDialog::Delete(_) => (
+                        Text::AssetDeleteHeading.plain(),
+                        Text::AssetMoveToTrash.plain(),
+                        None,
+                    ),
                 };
                 ui.heading(heading);
                 let valid = if let Some(name) = name {
-                    let label = ui.label("Name");
+                    let label = ui.label(Text::ComponentName.plain());
                     let text = ui
                         .add(egui::TextEdit::singleline(name).id_salt("asset_file_name"))
                         .labelled_by(label.id);
@@ -249,14 +261,12 @@ impl Browser {
                     if let FileDialog::Delete(source) = &dialog {
                         ui.label(source.display().to_string());
                     }
-                    ui.label(
-                        "Move the file and its import settings to the project's .rot-trash folder?",
-                    );
+                    ui.label(Text::AssetTrashQuestion.plain());
                     true
                 };
                 ui.horizontal(|ui| {
                     submit |= ui.add_enabled(valid, egui::Button::new(action)).clicked();
-                    cancel |= ui.button("Cancel").clicked();
+                    cancel |= ui.button(Text::ComponentCancel.plain()).clicked();
                 });
             });
         if cancel {
@@ -400,7 +410,7 @@ impl Browser {
                     "wav" => "Sound",
                     "glb" => "Model",
                     "prefab" => "Prefab",
-                    "rotmeta" => "Import Settings",
+                    "rotmeta" => Text::AssetImportSettings.plain(),
                     _ => return None,
                 };
                 let mut row = AssetRow::new(source, source, kind, issue.status.clone());
@@ -473,7 +483,7 @@ impl Browser {
         let mut opened_folder = None;
         let mut query_changed = false;
         ui.horizontal_wrapped(|ui| {
-            ui.strong("Assets");
+            ui.strong(Text::ComponentAssets.plain());
             ui.separator();
             for folder in self
                 .folder
@@ -493,7 +503,7 @@ impl Browser {
             let search = ui.add(
                 egui::TextEdit::singleline(&mut self.query)
                     .id_salt(SEARCH)
-                    .hint_text("Search Assets")
+                    .hint_text(Text::AssetSearch.plain())
                     .desired_width(150.0),
             );
             if std::mem::take(&mut self.focus_search) {
@@ -545,7 +555,7 @@ impl Browser {
                                     if ui
                                         .add_enabled(
                                             folder.starts_with("Assets"),
-                                            egui::Button::new("New Folder…"),
+                                            egui::Button::new(Text::AssetNewFolderCommand.plain()),
                                         )
                                         .clicked()
                                     {
@@ -553,7 +563,7 @@ impl Browser {
                                             Some(ContextAction::CreateFolder(folder.clone()));
                                         ui.close();
                                     }
-                                    if ui.button("Show in File Manager").clicked() {
+                                    if ui.button(Text::AssetShowInFileManager.plain()).clicked() {
                                         self.context_action =
                                             Some(ContextAction::Reveal(folder.clone()));
                                         ui.close();
@@ -645,7 +655,9 @@ impl Browser {
                                     place = drag();
                                 }
                                 response.context_menu(|ui| {
-                                    if placeable && ui.button("Place in Scene").clicked() {
+                                    if placeable
+                                        && ui.button(Text::AssetPlaceInScene.plain()).clicked()
+                                    {
                                         place = drag();
                                         ui.close();
                                     }
@@ -675,7 +687,7 @@ impl Browser {
         ui.label(format!("{} · {}", row.kind, row.status_label()));
         if let Some(settings) = row.settings {
             ui.separator();
-            ui.strong("Import Settings");
+            ui.strong(Text::AssetImportSettings.plain());
             ui.label(settings);
         }
         if row.status != AssetStatus::Ready {
@@ -712,7 +724,7 @@ impl Browser {
             }
         }
         #[cfg(target_os = "linux")]
-        ui.menu_button("Asset Actions", |ui| {
+        ui.menu_button(Text::AssetActions.plain(), |ui| {
             if let Some(action) = file_actions(ui, row) {
                 self.context_action = Some(action);
             }
@@ -721,7 +733,7 @@ impl Browser {
             && ui
                 .add_enabled(
                     can_place && row.can_place(meshes),
-                    egui::Button::new("Place in Scene"),
+                    egui::Button::new(Text::AssetPlaceInScene.plain()),
                 )
                 .clicked()
         {
@@ -737,7 +749,7 @@ impl Browser {
             .filter(|_| row.status == AssetStatus::Ready);
         if ready_detail.is_some() || !row.warnings.is_empty() {
             ui.separator();
-            ui.heading("Import Warnings");
+            ui.heading(Text::AssetImportWarnings.plain());
             egui::ScrollArea::vertical()
                 .id_salt("model_import_warnings")
                 .show(ui, |ui| {
@@ -760,28 +772,37 @@ fn file_actions(ui: &mut egui::Ui, row: &AssetRow) -> Option<ContextAction> {
     let duplicate = supported && row.status != AssetStatus::Missing;
     let can_move = duplicate && source.starts_with("Assets");
     let action = if ui
-        .add_enabled(can_move, egui::Button::new("Rename…"))
+        .add_enabled(
+            can_move,
+            egui::Button::new(Text::AssetRenameCommand.plain()),
+        )
         .clicked()
     {
         Some(ContextAction::Rename(source.to_owned()))
     } else if ui
-        .add_enabled(duplicate, egui::Button::new("Duplicate"))
+        .add_enabled(
+            duplicate,
+            egui::Button::new(crate::workspace::Action::Duplicate.label()),
+        )
         .clicked()
     {
         Some(ContextAction::File(FileAction::Duplicate(
             source.to_owned(),
         )))
     } else if ui
-        .add_enabled(supported, egui::Button::new("Reimport"))
+        .add_enabled(supported, egui::Button::new(Text::AssetReimport.plain()))
         .clicked()
     {
         Some(ContextAction::File(FileAction::Reimport(source.to_owned())))
     } else if ui
-        .add_enabled(can_move, egui::Button::new("Delete…"))
+        .add_enabled(
+            can_move,
+            egui::Button::new(Text::AssetDeleteCommand.plain()),
+        )
         .clicked()
     {
         Some(ContextAction::Delete(source.to_owned()))
-    } else if ui.button("Show in File Manager").clicked() {
+    } else if ui.button(Text::AssetShowInFileManager.plain()).clicked() {
         Some(ContextAction::Reveal(row.folder.clone()))
     } else {
         None
@@ -951,7 +972,7 @@ impl ComponentWorkspace {
                     let root = self
                         .assets
                         .as_ref()
-                        .ok_or("Project assets are unavailable.")?
+                        .ok_or(Text::AssetProjectUnavailable.plain())?
                         .root();
                     let folder = root
                         .join(folder)
@@ -963,7 +984,7 @@ impl ComponentWorkspace {
                     std::process::Command::new("xdg-open")
                         .arg(folder)
                         .spawn()
-                        .map_err(|_| "Couldn't open the file manager.")?;
+                        .map_err(|_| Text::AssetOpenFileManagerError.plain())?;
                     Ok(())
                 })();
                 if let Err(error) = result {
@@ -982,13 +1003,13 @@ impl ComponentWorkspace {
     #[cfg(target_os = "linux")]
     fn submit_asset_action(&mut self, catalog: AssetStateIdentity, action: FileAction) {
         if self.asset_import.is_some() || self.ai_asset_write.is_some() {
-            self.asset_import_error = Some("An asset operation is running.".into());
+            self.asset_import_error = Some(Text::AssetOperationBusy.plain().into());
             return;
         }
         let result = self
             .asset_watcher
             .as_ref()
-            .ok_or_else(|| "Project assets are unavailable.".to_owned())
+            .ok_or_else(|| Text::AssetProjectUnavailable.plain().to_owned())
             .and_then(|worker| worker.file_action(action, catalog));
         match result {
             Ok(reply) => {
@@ -1008,7 +1029,7 @@ impl ComponentWorkspace {
             .as_ref()
             .filter(|store| store.matches_identity(&drag.catalog))
         else {
-            let message = "The asset changed. Select it and try again.";
+            let message = Text::AssetChanged.plain();
             if drag.prefab {
                 self.report_prefab_result(Text::PrefabPlace, Err::<(), _>(message));
             } else {
@@ -1032,7 +1053,7 @@ impl ComponentWorkspace {
                 .to_owned();
             self.create_object(None, &name, Some(geometry), parent, Transform::default())
         } else {
-            self.error = Some("The asset has no accepted mesh.".into());
+            self.error = Some(Text::AssetMeshUnavailable.plain().into());
             return;
         };
         self.error = result.err().map(|error| error.to_string());

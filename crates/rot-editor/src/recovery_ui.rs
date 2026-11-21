@@ -1,6 +1,7 @@
 //! Window-owned discovery and bounded background checkpoint scheduling.
 use crate::recovery::{Candidate, Journal, Store};
 use crate::recovery_worker::{Capture, Command, Reply, Worker};
+use crate::strings::Text;
 use eframe::egui;
 use std::{
     path::PathBuf,
@@ -136,7 +137,7 @@ impl RecoveryUi {
     }
     fn ensure_worker(&mut self) -> Result<(), String> {
         if self.broken {
-            return Err("Recovery worker stopped; existing checkpoints preserved. Restart the editor to resume automatic recovery.".into());
+            return Err(Text::RecoveryRestart.plain().into());
         }
         if self.worker.is_none() {
             #[cfg(test)]
@@ -211,7 +212,7 @@ impl RecoveryUi {
             return Err("Recovery storage unavailable.".into());
         };
         if self.busy || self.boundary.is_some() {
-            return Err("Recovery is finishing its previous operation.".into());
+            return Err(Text::RecoveryFinishing.plain().into());
         }
         match worker.send(Command::Checkpoint {
             epoch: self.epoch,
@@ -224,16 +225,11 @@ impl RecoveryUi {
                 self.deadline.clear();
                 Ok(())
             }
-            Err(TrySendError::Full(_)) => {
-                Err("Recovery command slot is busy; latest state remains pending.".into())
-            }
+            Err(TrySendError::Full(_)) => Err(Text::RecoveryFinishing.plain().into()),
             Err(TrySendError::Disconnected(_)) => {
                 self.broken = true;
                 self.cancel_schedule();
-                Err(
-                    "Recovery worker disconnected; last checkpoint preserved. Restart the editor."
-                        .into(),
-                )
+                Err(Text::RecoveryRestart.plain().into())
             }
         }
     }
@@ -299,7 +295,7 @@ impl RecoveryUi {
                     Command::Boundary { id, adopt, .. } => {
                         self.failed_adopt = adopt;
                         self.boundary = None;
-                        self.ack=Some((id,Err("Recovery worker disconnected before cleanup; checkpoints preserved. Restart the editor.".into())));
+                        self.ack = Some((id, Err(Text::RecoveryRestart.plain().into())));
                     }
                     Command::Shutdown => {
                         self.shutdown_ack = true;
@@ -331,7 +327,10 @@ impl RecoveryUi {
                                 self.cancel_schedule();
                             }
                             if warning_matches {
-                                self.set_warning(format!("Recovery checkpoint failed: {error}. Previous checkpoint preserved; edit again or Retry."));
+                                self.set_warning(format!(
+                                    "{}\n{error}",
+                                    Text::RecoverySaveFailed.plain()
+                                ));
                             }
                         }
                     }
@@ -340,7 +339,10 @@ impl RecoveryUi {
             Reply::Boundary { id, epoch, result } => {
                 if epoch == self.epoch && self.boundary == Some(id) {
                     if let Err(error) = &result {
-                        self.set_warning(format!("Recovery cleanup failed: {error}. Preserved checkpoint remains available in Recovery."));
+                        self.set_warning(format!(
+                            "{}\n{error}",
+                            Text::RecoveryCleanupFailed.plain()
+                        ));
                     }
                     self.boundary = None;
                     self.ack = Some((id, result));
@@ -362,7 +364,7 @@ impl RecoveryUi {
                     if !self.shutdown_ack {
                         self.broken = true;
                         self.busy = false;
-                        self.set_warning("Recovery worker stopped; checkpoints preserved. Restart the editor to resume recovery.".into());
+                        self.set_warning(Text::RecoveryRestart.plain().into());
                         if let Some(id) = self.boundary.take() {
                             self.ack = Some((id, Err(self.warning.clone())));
                         }
@@ -424,8 +426,7 @@ impl RecoveryUi {
                 .duration_since(UNIX_EPOCH)
                 .ok()
                 .map(|time| time.as_secs());
-            ui.heading("Recover unfinished work");
-            ui.label("Restore opens an unsaved copy. Discard deletes the recovery copy.");
+            ui.heading(Text::RecoveryHeading.plain());
             egui::ScrollArea::vertical()
                 .max_height((ctx.content_rect().height() - 170.0).max(64.0))
                 .show(ui, |ui| {
@@ -440,7 +441,7 @@ impl RecoveryUi {
                             filename
                                 .as_deref()
                                 .or(candidate.scene_id.as_deref())
-                                .unwrap_or("Unreadable checkpoint"),
+                                .unwrap_or(Text::RecoveryUnreadable.plain()),
                         );
                         let age = now.and_then(|now| now.checked_sub(candidate.timestamp));
                         let saved = match age {
@@ -453,7 +454,7 @@ impl RecoveryUi {
                             None => "Recorded time is later than the system clock".into(),
                         };
                         ui.weak(saved);
-                        egui::CollapsingHeader::new("Checkpoint details")
+                        egui::CollapsingHeader::new(Text::RecoveryDetails.plain())
                             .id_salt(&candidate.id)
                             .show(ui, |ui| {
                                 if let Some(path) = &candidate.origin {
@@ -477,10 +478,12 @@ impl RecoveryUi {
                             ui.colored_label(ui.visuals().error_fg_color, error);
                         }
                         ui.horizontal_wrapped(|ui| {
-                            let restore = ui.add_enabled(
-                                candidate.error.is_none(),
-                                egui::Button::new("Restore as unsaved copy"),
-                            );
+                            let restore = ui
+                                .add_enabled(
+                                    candidate.error.is_none(),
+                                    egui::Button::new(Text::RecoveryRestore.plain()),
+                                )
+                                .on_hover_text(Text::RecoveryCopyHint.plain());
                             if !self.focused && candidate.error.is_none() {
                                 restore.request_focus();
                                 self.focused = true;
@@ -488,29 +491,34 @@ impl RecoveryUi {
                             if restore.clicked() {
                                 intent = Some(Intent::Restore(candidate.id.clone()));
                             }
-                            if ui.button("Discard checkpoint").clicked() {
+                            if ui
+                                .button(Text::RecoveryDiscard.plain())
+                                .on_hover_text(Text::RecoveryCopyHint.plain())
+                                .clicked()
+                            {
                                 intent = Some(Intent::Discard(candidate.id.clone()));
                             }
                         });
                     }
                     if self.candidates.is_empty() {
-                        ui.label("No recovery copies available.");
+                        ui.label(Text::RecoveryNone.plain());
                     }
                 });
             if !self.warning.is_empty() {
                 ui.add(
                     egui::Label::new(
-                        egui::RichText::new(&self.warning).color(ui.visuals().warn_fg_color),
+                        egui::RichText::new(self.warning.lines().next().unwrap_or_default())
+                            .color(ui.visuals().warn_fg_color),
                     )
                     .truncate(),
                 )
                 .on_hover_text(&self.warning);
             }
             ui.horizontal_wrapped(|ui| {
-                if ui.button("Refresh recovery list").clicked() {
+                if ui.button(Text::RecoveryRefresh.plain()).clicked() {
                     self.refresh();
                 }
-                let keep = ui.button("Keep for later");
+                let keep = ui.button(Text::RecoveryKeep.plain());
                 if !self.focused {
                     keep.request_focus();
                     self.focused = true;
@@ -529,7 +537,8 @@ impl RecoveryUi {
         if !self.warning.is_empty() {
             ui.add(
                 egui::Label::new(
-                    egui::RichText::new(&self.warning).color(ui.visuals().warn_fg_color),
+                    egui::RichText::new(self.warning.lines().next().unwrap_or_default())
+                        .color(ui.visuals().warn_fg_color),
                 )
                 .wrap(),
             )

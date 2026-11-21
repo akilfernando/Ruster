@@ -58,7 +58,8 @@ Prefab failures offer **Error Details**, and the Inspector explains how to
 restore an unavailable source. In legacy scenes, the Material Inspector shows
 unapplied edits, their scope, and **Apply Material** and **Cancel** by the
 heading. Approved MCP clients can read the pending scope alongside committed
-material values. The rest of the generated-message sweep is open.
+material values. S-08's editor-wide wording audit is in progress. It includes
+generated messages as well as labels and tooltips.
 [C-12 benchmark timings](PARITY-PLAN.md#5-performance-budgets)
 cover 5,000 and 50,000 objects. Desktop frame rates remain unverified.
 
@@ -93,7 +94,7 @@ The previous build is in `~/.local/share/rot-engine/previous` for `--rollback`.
   build from this branch until their files are renamed.
 
 The [backlog](BACKLOG.md) lists completed packages, including Rot styling,
-the wording sweep, Preferences and Project Settings.
+Preferences and Project Settings.
 
 ## Not verified
 

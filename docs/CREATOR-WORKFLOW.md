@@ -384,7 +384,7 @@ In a flat scene, add an enabled blocker sphere to the moving object at a
 uniform scale. Give the obstacles enabled sphere or box blocker colliders.
 The obstacles may be rotated and must stay stationary during the run.
 Create Axis actions with the keys you want for X and Z. Select the mover,
-then choose **Behavior** → **Add behavior…** → **Lua kinematic mover**.
+then choose **Scripts** → **Add Script…** → **Lua Kinematic Mover**.
 Set `axis_x` and `axis_z` to the saved Axis IDs, and `speed` to scene units
 per second. A blank axis is neutral. Press **Play** and click the game view to
 give it the keyboard, or pause and Step. **Spatial feedback**, in the **…**

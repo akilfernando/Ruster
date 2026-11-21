@@ -1,6 +1,7 @@
 //! Bounded embedded source/property working copies. Session owns authored data.
 mod command_catalog;
 mod hud_activation;
+use crate::strings::Text;
 use command_catalog::{command_claim, command_clicked, command_field_focus, command_key};
 mod runtime_commands;
 mod runtime_debug;
@@ -540,7 +541,7 @@ impl BehaviorUi {
             .as_ref()
             .is_some_and(|draft| !draft.matches(session))
         {
-            return Err("Recovered command definition has stale identity or unsupported raw bounds. Record preserved.".into());
+            return Err(Text::ScriptRecoveredCommandInvalid.plain().into());
         }
         if drafts.command.is_some()
             && (drafts.source.is_some() || drafts.property.is_some() || drafts.state_add.is_some())
@@ -551,14 +552,14 @@ impl BehaviorUi {
             );
         }
         if drafts.state_add.is_some() && (drafts.source.is_some() || drafts.property.is_some()) {
-            return Err("A new state field cannot share a recovered source/value edit; checkpoint preserved.".into());
+            return Err(Text::ScriptRecoveredStateConflict.plain().into());
         }
         if drafts
             .state_add
             .as_ref()
             .is_some_and(|draft| !draft.matches(session))
         {
-            return Err("Recovered state field has a stale binding, source, revision or unsupported raw bounds; record preserved.".into());
+            return Err(Text::ScriptRecoveredStateInvalid.plain().into());
         }
         if let Some(source) = &drafts.source {
             let original = session
@@ -570,13 +571,13 @@ impl BehaviorUi {
                 || source.language.len() > 128
                 || source.api.len() > 10
             {
-                return Err("Recovered source draft has stale baseline or unsupported text bounds; record preserved.".into());
+                return Err(Text::ScriptRecoveredSourceInvalid.plain().into());
             }
         }
         if let Some(property) = &drafts.property {
             let original = session
                 .binding(&property.binding)
-                .ok_or("Recovered property draft refers to an absent binding; record preserved.")?;
+                .ok_or(Text::ScriptRecoveredPropertyMissing.plain())?;
             let value = if property.state_default {
                 original
                     .state_defaults
@@ -590,7 +591,7 @@ impl BehaviorUi {
                     .as_ref()
                     .is_some_and(|value| property.value.validate_draft(value))
             {
-                return Err("Recovered property draft has stale baseline, type or unsupported bounds; record preserved.".into());
+                return Err(Text::ScriptRecoveredPropertyInvalid.plain().into());
             }
         }
         self.command = drafts.command;
@@ -690,7 +691,7 @@ impl BehaviorUi {
         }
         let draft = self.source.as_ref().ok_or("Missing source working copy.")?;
         if session.source(&draft.id).map(fingerprint).as_deref() != Some(draft.base_hash.as_str()) {
-            return Err("Embedded source changed; working copy preserved. Revert explicitly or recover its text before retrying.".into());
+            return Err(Text::ScriptChangedWithDraft.plain().into());
         }
         let source = draft.parsed()?;
         let id = draft.id.clone();
@@ -714,7 +715,7 @@ impl BehaviorUi {
             .ok_or("Behavior attachment disappeared; property draft preserved.")?
             .clone();
         if fingerprint(&binding) != draft.base_hash {
-            return Err("Attachment changed; property working copy preserved. Revert explicitly before retrying.".into());
+            return Err(Text::ScriptAttachmentChanged.plain().into());
         }
         if draft.state_default {
             session
@@ -961,13 +962,13 @@ impl BehaviorUi {
                     );
                 }
                 if self.source_dirty && self.source.as_ref().is_some_and(|source| source.id != id) {
-                    return Err("Apply or Revert the existing source draft before opening another source; its text was preserved.".into());
+                    return Err(Text::ScriptFinishBeforeOpening.plain().into());
                 }
                 if !self.source_dirty {
                     self.load_source(session, &id);
                 }
                 if self.source.is_none() {
-                    return Err("Source is missing; attach a registered source or restore it through shared authoring tools.".into());
+                    return Err(Text::ScriptMissingAttachment.plain().into());
                 }
                 self.source_open = true;
                 self.source_focus = true;
@@ -1031,7 +1032,7 @@ impl BehaviorUi {
                                 == std::mem::discriminant(&value)
                     })
                 {
-                    return Err("State field baseline changed; raw name/type preserved. Cancel explicitly before starting again.".into());
+                    return Err(Text::ScriptStateChanged.plain().into());
                 }
                 if session
                     .binding(&binding)
@@ -1115,12 +1116,16 @@ impl BehaviorUi {
         self.refresh(session);
         self.refresh_assets(assets);
         ui.separator();
-        ui.strong("Behavior");
+        ui.strong(Text::ScriptSection.plain());
         let assembly = !session.scene().hierarchy.is_empty();
         if !assembly {
             ui.horizontal_wrapped(|ui| {
-                ui.selectable_value(&mut self.application, false, "Selected object behavior");
-                ui.selectable_value(&mut self.application, true, "Application behavior");
+                ui.selectable_value(&mut self.application, false, Text::ObjectScriptTab.plain());
+                ui.selectable_value(
+                    &mut self.application,
+                    true,
+                    Text::ApplicationScriptTab.plain(),
+                );
             });
         }
         let mut action = None;
@@ -1236,9 +1241,9 @@ impl BehaviorUi {
         let Some(target) = target else {
             if !self.pending() {
                 ui.weak(if assembly {
-                    "Select a Group to add a rotation behavior."
+                    Text::ScriptSelectGroup.plain()
                 } else {
-                    "Select an object to add a behavior."
+                    Text::ScriptSelectObject.plain()
                 });
             }
             if !self.error.is_empty() {
@@ -1270,7 +1275,7 @@ impl BehaviorUi {
             }
         }
         if !editable {
-            ui.label("Finish other edits to change this behavior.");
+            ui.label(Text::ScriptFinishOtherEdits.plain());
         }
         ui.add_enabled_ui(editable,|ui| {
             if let Some((id,binding))=attached {
@@ -1278,16 +1283,16 @@ impl BehaviorUi {
                 let mut enabled=binding.enabled;
                 if ui.checkbox(&mut enabled,"Enabled").changed() {action=Some(Action::Enable(id.clone(),enabled));}
                 ui.horizontal_wrapped(|ui| {
-                    if ui.button("Edit behavior source").clicked() {action=Some(Action::OpenSource(binding.source_id.clone()));}
+                    if ui.button(Text::ScriptEditSource.plain()).clicked() {action=Some(Action::OpenSource(binding.source_id.clone()));}
                     ui.menu_button("Manage",|ui| {
-                        if ui.button("Detach behavior").clicked() {action=Some(Action::Detach(id.clone()));ui.close();}
+                        if ui.button(Text::ScriptDetach.plain()).clicked() {action=Some(Action::Detach(id.clone()));ui.close();}
                         ui.menu_button("Other sources",|ui| {for (id,label) in &self.sources {if ui.button(label).clicked(){action=Some(Action::OpenSource(id.clone()));ui.close();}}});
                     });
                 });
                 if let Some(source)=session.source(&binding.source_id) {
 
-                    if source.language_id!=rot_behavior::LANGUAGE_ID||![rot_behavior::HOST_API_VERSION,rot_behavior::INPUT_HOST_API_VERSION,rot_behavior::SPATIAL_HOST_API_VERSION,rot_behavior::STATE_HOST_API_VERSION,rot_behavior::LIFECYCLE_HOST_API_VERSION,rot_behavior::GROUP_ROTATION_HOST_API_VERSION,rot_behavior::KINEMATIC_HOST_API_VERSION].contains(&source.host_api_version) {ui.colored_label(ui.visuals().warn_fg_color,"This script version may not run here. Its data is preserved and can still be edited.");}
-                } else {ui.colored_label(ui.visuals().warn_fg_color,"Script source is missing. Repair the source or detach this behavior; its properties are preserved.");}
+                    if source.language_id!=rot_behavior::LANGUAGE_ID||![rot_behavior::HOST_API_VERSION,rot_behavior::INPUT_HOST_API_VERSION,rot_behavior::SPATIAL_HOST_API_VERSION,rot_behavior::STATE_HOST_API_VERSION,rot_behavior::LIFECYCLE_HOST_API_VERSION,rot_behavior::GROUP_ROTATION_HOST_API_VERSION,rot_behavior::KINEMATIC_HOST_API_VERSION].contains(&source.host_api_version) {ui.colored_label(ui.visuals().warn_fg_color,Text::ScriptCompatibilityWarning.plain());}
+                } else {ui.colored_label(ui.visuals().warn_fg_color,Text::ScriptMissingSource.plain());}
                 ui.label("Properties");
                 for (name,summary) in &self.property_rows {
                     ui.push_id((id,name),|ui| {
@@ -1299,12 +1304,12 @@ impl BehaviorUi {
                         });
                     });
                 }
-                egui::CollapsingHeader::new("Add property").id_salt(("add_behavior_property",id)).show(ui,|ui| {
+                egui::CollapsingHeader::new(Text::ScriptAddProperty.plain()).id_salt(("add_behavior_property",id)).show(ui,|ui| {
                 let popup_at_start = egui::Popup::is_any_open(ui.ctx());
                 ui.label("Name");
                 let name = text(ui,&mut self.new_property,128);
-                egui::ComboBox::from_label("Property type").selected_text(["Number","Bool","Text","Vec3","Object reference","Asset reference","Sound"][self.new_type]).show_ui(ui,|ui| {
-                    for (index,label) in ["Number","Bool","Text","Vec3","Object reference","Asset reference","Sound"].into_iter().enumerate() {if ui.selectable_value(&mut self.new_type,index,label).clicked() {ui.close();}}
+                egui::ComboBox::from_label("Property type").selected_text(["Number","Bool","Text","Vec3",Text::ScriptObjectReference.plain(),Text::ScriptAssetReference.plain(),"Sound"][self.new_type]).show_ui(ui,|ui| {
+                    for (index,label) in ["Number","Bool","Text","Vec3",Text::ScriptObjectReference.plain(),Text::ScriptAssetReference.plain(),"Sound"].into_iter().enumerate() {if ui.selectable_value(&mut self.new_type,index,label).clicked() {ui.close();}}
                 });
                 let enter = ui.is_enabled()
                     && !popup_at_start
@@ -1321,8 +1326,7 @@ impl BehaviorUi {
                 });
                 if !assembly {
                 ui.separator();
-                ui.strong("State defaults");
-                ui.label("Reset restores these defaults.");
+                ui.strong(Text::ScriptStateDefaults.plain());
                 for (name, value) in &binding.state_defaults {
                     ui.push_id(("state", id, name), |ui| {
                         ui.horizontal_wrapped(|ui| {
@@ -1405,7 +1409,7 @@ impl BehaviorUi {
                 }
                 if let Some(command_action)=self.command_catalog(ui,session,id,binding,generation) {action=Some(command_action);}
                 }
-                egui::CollapsingHeader::new("Script details").id_salt(("behavior_details",id)).show(ui,|ui| {
+                egui::CollapsingHeader::new(Text::ScriptDetails.plain()).id_salt(("behavior_details",id)).show(ui,|ui| {
                     ui.label(format!("Attachment: {id}"));ui.label(format!("Source: {}",binding.source_id));
                     if let Some(source)=session.source(&binding.source_id) {ui.label(format!("Language {} · host API {}",source.language_id,source.host_api_version));
                         if source.host_api_version==rot_behavior::KINEMATIC_HOST_API_VERSION {ui.label("Kinematic Mover").on_hover_text("Requires an enabled Blocker Sphere, uniform scale, and a flat scene. Other blockers stay stationary. Set axis_x and axis_z to Axis action IDs. Leave an axis blank to disable movement on it.");}
@@ -1413,11 +1417,11 @@ impl BehaviorUi {
                     ui.label(format!("{} / {} properties",binding.properties.len(),rot_scene::MAX_PROPERTIES));
                 });
             } else {
-                ui.menu_button("Add behavior…",|ui| {
+                ui.menu_button(Text::ScriptAdd.plain(),|ui| {
                     let create_label = match &target {
-                        BindingTarget::Application => "Lua application",
-                        BindingTarget::Object(_) => "Lua follower",
-                        BindingTarget::Group(_) => "Lua Group rotation",
+                        BindingTarget::Application => Text::ScriptLuaApplication.plain(),
+                        BindingTarget::Object(_) => Text::ScriptLuaFollower.plain(),
+                        BindingTarget::Group(_) => Text::ScriptLuaGroupRotation.plain(),
                     };
                     if ui.button(create_label).clicked() {
                         action = Some(match &target {
@@ -1428,11 +1432,11 @@ impl BehaviorUi {
                         ui.close();
                     }
                     if let BindingTarget::Object(id)=&target {
-                        if ui.button("Lua kinematic mover").on_hover_text("Requires one enabled Blocker Sphere in a flat scene. Other blockers stay stationary.").clicked() {
+                        if ui.button(Text::ScriptLuaKinematic.plain()).on_hover_text("Requires one enabled Blocker Sphere in a flat scene. Other blockers stay stationary.").clicked() {
                             action=Some(Action::CreateKinematic(id.clone()));ui.close();
                         }
                     }
-                    ui.menu_button("Attach existing source…",|ui| {
+                    ui.menu_button(Text::ScriptAttachExisting.plain(),|ui| {
                         let mut any = false;
                         for (id, label) in &self.sources {
                             if session.source(id).is_some_and(|source| {
@@ -1514,50 +1518,184 @@ impl BehaviorUi {
         let hide = editable
             && (owns_keyboard || owned_last_frame)
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-        egui::Window::new("Behavior source").id(egui::Id::unique("behavior_source_window")).open(&mut opened)
-            .default_width(640.0).max_width((ctx.content_rect().width()-32.0).max(240.0)).resizable(true)
-            .show(ctx,|ui| {
-                ui.set_max_height((ctx.content_rect().height()-64.0).max(160.0));
-                let Some(source)=&mut self.source else {ui.label("No embedded source selected.");return;};
-                ui.add(egui::Label::new(format!("{} · base {}",source.id,&source.base_hash[..12])).truncate()).on_hover_text(&source.id);
-                if let Some(line)=self.source_line {ui.weak(format!("Diagnostic line {line}"));}
-                ui.small("Ctrl+Enter Apply · Ctrl+S Apply and Save · Esc Close");
-                egui::ScrollArea::vertical().id_salt("embedded_source_scroll").max_height((ctx.content_rect().height()-250.0).max(48.0)).show(ui,|ui| {
-                    ui.add_enabled_ui(editable,|ui| {
-                        ui.label("Display label");let mut rejected=false;
-                        changed|=ui.add(egui::TextEdit::singleline(&mut ByteBuffer{text:&mut source.label,limit:128,rejected:&mut rejected,removed:None}).id(field_ids[1]).interactive(ui.is_enabled())).changed();
-                        ui.label("Language backend ID (unknown IDs are preserved)");
-                        changed|=ui.add(egui::TextEdit::singleline(&mut ByteBuffer{text:&mut source.language,limit:128,rejected:&mut rejected,removed:None}).id(field_ids[2]).interactive(ui.is_enabled())).changed();
-                        ui.label("Host API version");
-                        changed|=ui.add(egui::TextEdit::singleline(&mut ByteBuffer{text:&mut source.api,limit:10,rejected:&mut rejected,removed:None}).id(field_ids[3]).interactive(ui.is_enabled())).changed();
-                        ui.label(format!("Source body · {} / {} UTF-8 bytes",source.text.len(),rot_scene::MAX_SOURCE_BYTES));
-                        let mut output=egui::TextEdit::multiline(&mut ByteBuffer{text:&mut source.text,limit:rot_scene::MAX_SOURCE_BYTES,rejected:&mut rejected,removed:None}).id(field_ids[0]).interactive(ui.is_enabled()).code_editor().desired_rows(14).desired_width(f32::INFINITY).show(ui);
-                        if self.source_focus {output.response.request_focus();output.response.scroll_to_me(Some(egui::Align::Min));self.source_focus=false;}
-                        if let Some(line)=self.source_line.take() {scroll_line(ui,&mut output,&source.text,line);}
-                        if let Some(cursor)=output.cursor_range {self.source_cursor=cursor.primary.index.0;}
-                        changed|=output.response.changed();
-                        if rejected {ui.colored_label(ui.visuals().error_fg_color,"Insertion rejected: field byte limit exceeded; previous text preserved.");}
-                    });
-                });
-                if !self.error.is_empty() {ui.add(egui::Label::new(egui::RichText::new(&self.error).color(ui.visuals().error_fg_color)).truncate()).on_hover_text(&self.error);}
-                ui.horizontal_wrapped(|ui| {
-                    let apply_button=ui.add_enabled(editable,egui::Button::new("Apply source data"));self.source_footer_ids[0]=Some(apply_button.id);
-                    if apply_button.clicked()||apply {action=Some(Action::ApplySource);}
-                    let revert=ui.add_enabled(editable,egui::Button::new("Revert source draft"));self.source_footer_ids[1]=Some(revert.id);
-                    if revert.clicked() {action=Some(Action::RevertSource);}
-                    let close=ui.button("Close source (keep draft)");
-                    self.source_footer_ids[2]=Some(close.id);
-                    if close.clicked()||hide {self.source_open=false;}
-                    let _external=ui.menu_button("External editor / Zed…",|ui| {
-                        ui.add_enabled_ui(editable&&!self.source_dirty&&!self.property_dirty,|ui| {
-                            for (label,intent) in [("Export working copy",crate::behavior_external::Intent::Export),("Open in Zed",crate::behavior_external::Intent::Open{line:1+source.text.chars().take(self.source_cursor).filter(|c|*c=='\n').count() as u32}),("Refresh working copy",crate::behavior_external::Intent::Refresh)] {
-                                if ui.button(label).clicked() {action=Some(Action::External{source_id:source.id.clone(),intent});ui.close();}
+        egui::Window::new(Text::ScriptEditor.plain())
+            .id(egui::Id::unique("behavior_source_window"))
+            .open(&mut opened)
+            .default_width(640.0)
+            .max_width((ctx.content_rect().width() - 32.0).max(240.0))
+            .resizable(true)
+            .show(ctx, |ui| {
+                ui.set_max_height((ctx.content_rect().height() - 64.0).max(160.0));
+                let Some(source) = &mut self.source else {
+                    ui.label(Text::ScriptNoneSelected.plain());
+                    return;
+                };
+                ui.add(
+                    egui::Label::new(format!("{} · base {}", source.id, &source.base_hash[..12]))
+                        .truncate(),
+                )
+                .on_hover_text(&source.id);
+                if let Some(line) = self.source_line {
+                    ui.weak(format!("Diagnostic line {line}"));
+                }
+                ui.small(Text::ScriptEditorShortcuts.plain());
+                egui::ScrollArea::vertical()
+                    .id_salt("embedded_source_scroll")
+                    .max_height((ctx.content_rect().height() - 250.0).max(48.0))
+                    .show(ui, |ui| {
+                        ui.add_enabled_ui(editable, |ui| {
+                            ui.label(Text::ScriptDisplayName.plain());
+                            let mut rejected = false;
+                            changed |= ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut ByteBuffer {
+                                        text: &mut source.label,
+                                        limit: 128,
+                                        rejected: &mut rejected,
+                                        removed: None,
+                                    })
+                                    .id(field_ids[1])
+                                    .interactive(ui.is_enabled()),
+                                )
+                                .changed();
+                            ui.label(Text::ScriptLanguage.plain());
+                            changed |= ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut ByteBuffer {
+                                        text: &mut source.language,
+                                        limit: 128,
+                                        rejected: &mut rejected,
+                                        removed: None,
+                                    })
+                                    .id(field_ids[2])
+                                    .interactive(ui.is_enabled()),
+                                )
+                                .changed();
+                            ui.label(Text::ScriptApiVersion.plain());
+                            changed |= ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut ByteBuffer {
+                                        text: &mut source.api,
+                                        limit: 10,
+                                        rejected: &mut rejected,
+                                        removed: None,
+                                    })
+                                    .id(field_ids[3])
+                                    .interactive(ui.is_enabled()),
+                                )
+                                .changed();
+                            ui.label(format!(
+                                "Source body · {} / {} UTF-8 bytes",
+                                source.text.len(),
+                                rot_scene::MAX_SOURCE_BYTES
+                            ));
+                            let mut output = egui::TextEdit::multiline(&mut ByteBuffer {
+                                text: &mut source.text,
+                                limit: rot_scene::MAX_SOURCE_BYTES,
+                                rejected: &mut rejected,
+                                removed: None,
+                            })
+                            .id(field_ids[0])
+                            .interactive(ui.is_enabled())
+                            .code_editor()
+                            .desired_rows(14)
+                            .desired_width(f32::INFINITY)
+                            .show(ui);
+                            if self.source_focus {
+                                output.response.request_focus();
+                                output.response.scroll_to_me(Some(egui::Align::Min));
+                                self.source_focus = false;
+                            }
+                            if let Some(line) = self.source_line.take() {
+                                scroll_line(ui, &mut output, &source.text, line);
+                            }
+                            if let Some(cursor) = output.cursor_range {
+                                self.source_cursor = cursor.primary.index.0;
+                            }
+                            changed |= output.response.changed();
+                            if rejected {
+                                ui.colored_label(
+                                    ui.visuals().error_fg_color,
+                                    Text::ScriptTextTooLong.plain(),
+                                );
                             }
                         });
-                        if self.source_dirty||self.property_dirty {ui.label("Apply or Revert embedded drafts before external editor actions.");}
-                        if ui.button("Working-copy details").clicked() {action=Some(Action::ExternalStatus);ui.close();}
                     });
-                    #[cfg(test)] {self.source_footer=Some(close.rect.union(_external.response.rect));}
+                if !self.error.is_empty() {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(&self.error).color(ui.visuals().error_fg_color),
+                        )
+                        .truncate(),
+                    )
+                    .on_hover_text(&self.error);
+                }
+                ui.horizontal_wrapped(|ui| {
+                    let apply_button =
+                        ui.add_enabled(editable, egui::Button::new(Text::ScriptApply.plain()));
+                    self.source_footer_ids[0] = Some(apply_button.id);
+                    if apply_button.clicked() || apply {
+                        action = Some(Action::ApplySource);
+                    }
+                    let revert =
+                        ui.add_enabled(editable, egui::Button::new(Text::ScriptRevert.plain()));
+                    self.source_footer_ids[1] = Some(revert.id);
+                    if revert.clicked() {
+                        action = Some(Action::RevertSource);
+                    }
+                    let close = ui.button(Text::ScriptCloseKeepDraft.plain());
+                    self.source_footer_ids[2] = Some(close.id);
+                    if close.clicked() || hide {
+                        self.source_open = false;
+                    }
+                    let _external = ui.menu_button(Text::ScriptExternalEditor.plain(), |ui| {
+                        ui.add_enabled_ui(
+                            editable && !self.source_dirty && !self.property_dirty,
+                            |ui| {
+                                for (label, intent) in [
+                                    (
+                                        Text::ScriptExportWorkingCopy.plain(),
+                                        crate::behavior_external::Intent::Export,
+                                    ),
+                                    (
+                                        Text::ScriptOpenZed.plain(),
+                                        crate::behavior_external::Intent::Open {
+                                            line: 1 + source
+                                                .text
+                                                .chars()
+                                                .take(self.source_cursor)
+                                                .filter(|c| *c == '\n')
+                                                .count()
+                                                as u32,
+                                        },
+                                    ),
+                                    (
+                                        Text::ScriptRefreshWorkingCopy.plain(),
+                                        crate::behavior_external::Intent::Refresh,
+                                    ),
+                                ] {
+                                    if ui.button(label).clicked() {
+                                        action = Some(Action::External {
+                                            source_id: source.id.clone(),
+                                            intent,
+                                        });
+                                        ui.close();
+                                    }
+                                }
+                            },
+                        );
+                        if self.source_dirty || self.property_dirty {
+                            ui.label(Text::ScriptFinishBeforeExternal.plain());
+                        }
+                        if ui.button(Text::ScriptWorkingCopyDetails.plain()).clicked() {
+                            action = Some(Action::ExternalStatus);
+                            ui.close();
+                        }
+                    });
+                    #[cfg(test)]
+                    {
+                        self.source_footer = Some(close.rect.union(_external.response.rect));
+                    }
                 });
             });
         if changed {
@@ -1649,7 +1787,7 @@ pub(super) fn value_ui(
             }
         }
         ValueDraft::ObjectRef(value) => {
-            let response = egui::ComboBox::from_label("Object reference")
+            let response = egui::ComboBox::from_label(Text::ScriptObjectReference.plain())
                 .selected_text(value.as_deref().unwrap_or("None"))
                 .show_ui(ui, |ui| {
                     result.changed |= ui.selectable_value(value, None, "None").changed();
@@ -1679,12 +1817,15 @@ pub(super) fn value_ui(
                     } else {
                         ui.colored_label(
                             ui.visuals().error_fg_color,
-                            "Stale/foreign object drag rejected; drag again from this scene.",
+                            Text::ScriptObjectDragInvalid.plain(),
                         );
                     }
                 }
             }
-            result.field(response, focus);
+            result.field(
+                response.on_hover_text(Text::ScriptObjectDropHint.plain()),
+                focus,
+            );
             if value.as_ref().is_some_and(|id| {
                 !session
                     .scene()
@@ -1692,12 +1833,14 @@ pub(super) fn value_ui(
                     .iter()
                     .any(|object| &object.id == id)
             }) {
-                ui.colored_label(ui.visuals().warn_fg_color,"Unresolved object reference; preserved until you choose a replacement or None.");
+                ui.colored_label(
+                    ui.visuals().warn_fg_color,
+                    Text::ScriptObjectMissing.plain(),
+                );
             }
-            ui.small("Choose an object or drop its hierarchy row here.");
         }
         ValueDraft::SoundRef { asset_id, gain } => {
-            let response = egui::ComboBox::from_label("Sound asset")
+            let response = egui::ComboBox::from_label(Text::ScriptSoundAsset.plain())
                 .selected_text(asset_id.as_deref().unwrap_or("None"))
                 .show_ui(ui, |ui| {
                     if ui.selectable_value(asset_id, None, "None").clicked() {
@@ -1724,12 +1867,14 @@ pub(super) fn value_ui(
                     .iter()
                     .any(|(asset, is_sound)| asset == id && *is_sound)
             }) {
-                ui.colored_label(ui.visuals().warn_fg_color,"Sound reference is missing or is not a sound asset. Import a WAV or choose a replacement.");
+                ui.colored_label(
+                    ui.visuals().warn_fg_color,
+                    Text::ScriptSoundUnavailable.plain(),
+                );
             }
-            ui.small("Lua APIs 4, 5 and 7: host.play_sound(\"property_name\"). None is silent.");
         }
         ValueDraft::AssetRef(value) => {
-            let response = egui::ComboBox::from_label("Asset reference")
+            let response = egui::ComboBox::from_label(Text::ScriptAssetReference.plain())
                 .selected_text(value.as_deref().unwrap_or("None"))
                 .show_ui(ui, |ui| {
                     result.changed |= ui.selectable_value(value, None, "None").changed();
@@ -1744,7 +1889,10 @@ pub(super) fn value_ui(
                 .as_ref()
                 .is_some_and(|id| !assets.iter().any(|(asset, _)| asset == id))
             {
-                ui.colored_label(ui.visuals().warn_fg_color,"Unresolved catalog reference; preserved without rebasing until explicitly changed.");
+                ui.colored_label(
+                    ui.visuals().warn_fg_color,
+                    Text::ScriptAssetUnavailable.plain(),
+                );
             }
         }
     }
@@ -3357,7 +3505,7 @@ mod tests {
         editor.new_property = "indicator_floor".into();
         editor.new_type = 0;
         frame(&mut editor, &session, true, vec![]);
-        assert!(click(&mut editor, &session, visible_text("Add property")).is_none());
+        assert!(click(&mut editor, &session, visible_text("Add Property")).is_none());
         // Let the real collapsing-header animation finish before requiring a
         // fully visible click target. This bounded settle precedes the Name
         // interaction and does not repair or delay Enter admission.
@@ -3569,7 +3717,7 @@ mod tests {
         assert!(click(
             &mut state_editor,
             &application,
-            visible_text("Application behavior")
+            visible_text("Application Script")
         )
         .is_none());
         assert!(click(
@@ -3693,7 +3841,7 @@ mod tests {
         assert!(click(
             &mut state_editor,
             &application,
-            visible_text("Application behavior")
+            visible_text("Application Script")
         )
         .is_none());
         assert_ne!(ctx.memory(|memory| memory.focused()), Some(name_id));
