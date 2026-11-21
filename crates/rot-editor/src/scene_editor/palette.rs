@@ -1,6 +1,7 @@
 //! The command palette (Ctrl+K): search every registered command and run it
 //! (UX-STANDARDS §7, S-09).
 use super::SceneEditor;
+use crate::strings::Text;
 use crate::workspace::{Action, Workspace};
 use eframe::egui;
 
@@ -117,7 +118,7 @@ impl Palette {
                     ui.set_width(width);
                     let search = ui.add(
                         egui::TextEdit::singleline(&mut self.query)
-                            .hint_text("Search commands")
+                            .hint_text(Text::SearchCommands.plain())
                             .desired_width(f32::INFINITY),
                     );
                     if !self.opened {

@@ -1,4 +1,5 @@
 //! Exact-owner native binding UI; client registration remains separately fail-closed.
+use crate::strings::Text;
 #[cfg(unix)]
 mod native;
 #[cfg(unix)]
@@ -309,7 +310,7 @@ impl Host {
                 }
                 ui.add_space(4.0);
                 ui.horizontal_wrapped(|ui| {
-                    ui.weak("Project");
+                    ui.weak(Text::Project.plain());
                     ui.label(self.editor.document_label());
                 });
             });

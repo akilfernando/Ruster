@@ -1,12 +1,13 @@
 //! Read-only pose from the same retained frame used by the viewport.
 use super::SceneEditor;
+use crate::strings::Text;
 use eframe::egui;
 use rot_scene::Transform;
 
 impl SceneEditor {
     pub(super) fn runtime_transform_ui(&mut self, ui: &mut egui::Ui) {
         ui.separator();
-        ui.strong("Runtime transform");
+        ui.strong(Text::RuntimeTransform.plain());
         if let Some(frame) = self.runtime.displayed_frame() {
             let current = !self.runtime.stale && Some(frame.key) == self.runtime.current_run();
             ui.label(format!(
@@ -52,19 +53,19 @@ impl SceneEditor {
             if let Some(transform) = target {
                 transform_rows(ui, transform, group_local);
             } else {
-                ui.label("The selected target is not present in this runtime frame.");
+                ui.label(Text::RuntimeTransformUiTheSelectedTargetIs.plain());
             }
         } else {
-            ui.label("Transform unavailable. Press Play to see it.");
+            ui.label(Text::RuntimeTransformUiTransformUnavailablePressPlay.plain());
         }
-        let edit = ui.button("Edit Saved Transform");
+        let edit = ui.button(Text::EditSavedTransform.plain());
         if edit.gained_focus() {
             edit.scroll_to_me(Some(egui::Align::Center));
         }
         if edit.clicked() {
             self.runtime.release_input(ui.ctx());
             self.runtime.visible = false;
-            self.notice = "Showing the saved scene transforms.".into();
+            self.notice = Text::ShowingTheSavedSceneTransforms.plain().into();
             ui.ctx().request_repaint();
         }
     }
@@ -72,7 +73,7 @@ impl SceneEditor {
 
 fn transform_rows(ui: &mut egui::Ui, transform: &Transform, group_local: bool) {
     if group_local {
-        ui.label("Group-local pose");
+        ui.label(Text::GroupLocalPose.plain());
     }
     let rotation = if group_local {
         ("Local rotation (radians)", transform.rotation)

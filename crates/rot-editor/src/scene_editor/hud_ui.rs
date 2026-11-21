@@ -1,6 +1,7 @@
 //! Recoverable grouped HUD authoring and coherent read-only viewport presentation.
 use super::{combo_focus::ComboFocus, SceneEditor};
 use crate::behavior_ui::{state_property, value_ui, ValueDraft};
+use crate::strings::Text;
 use eframe::egui;
 use rot_app::hud::{paint_hud, HudPresentationMode};
 use rot_scene::hud::{
@@ -535,7 +536,7 @@ fn condition_ui(
         let focus = ComboFocus::capture(ui, "condition_binding");
         let mut selected = false;
         let response = egui::ComboBox::from_id_salt("condition_binding")
-            .selected_text("Choose enabled Bool")
+            .selected_text(Text::ChooseEnabledBool.plain())
             .show_ui(ui, |ui| {
                 for (id, binding) in &session.authoring().bindings {
                     if binding.enabled
@@ -574,7 +575,7 @@ fn condition_ui(
         let focus = ComboFocus::capture(ui, "condition_field");
         let mut selected = false;
         let response = egui::ComboBox::from_id_salt("condition_field")
-            .selected_text("Choose Bool field")
+            .selected_text(Text::ChooseBoolField.plain())
             .show_ui(ui, |ui| {
                 if let Some(binding) = session
                     .binding(&condition.binding_id)
@@ -596,7 +597,7 @@ fn condition_ui(
         focus.restore(ui, &response.response, selected);
         fields.push(response.response);
         ui.horizontal_wrapped(|ui| {
-            ui.label("Expected value");
+            ui.label(Text::ExpectedValue.plain());
             fields.push(selector(
                 ui,
                 "condition_expected",
@@ -609,7 +610,7 @@ fn condition_ui(
         {
             ui.colored_label(ui.visuals().warn_fg_color, diagnostic.message());
         }
-        ui.small("Clear the checkbox to remove the condition.");
+        ui.small(Text::HudUiClearTheCheckboxTo.plain());
     });
 }
 
@@ -621,7 +622,7 @@ impl SceneEditor {
         fields: &mut Vec<egui::Response>,
         keyboard_activation: bool,
     ) -> Option<egui::Id> {
-        ui.strong("Panels");
+        ui.strong(Text::Panels.plain());
         let mut selected_focus = None;
         for (index, panel) in draft.hud.panels.iter().enumerate() {
             let name = if panel.name.is_empty() {
@@ -660,7 +661,7 @@ impl SceneEditor {
                 ui.horizontal_wrapped(|ui| {
                     let add = ui.add_enabled(
                         draft.hud.panels.len() < MAX_HUD_PANELS,
-                        egui::Button::new("Add panel"),
+                        egui::Button::new(Text::AddPanel.plain()),
                     );
                     let add_id = add.id;
                     let added_keyboard = keyboard_activation && add.clicked() && add.has_focus();
@@ -677,7 +678,7 @@ impl SceneEditor {
                                     + draft.hud.panels[index].elements.len()
                                     <= MAX_HUD_LABELS
                         }),
-                        egui::Button::new("Duplicate panel"),
+                        egui::Button::new(Text::DuplicatePanel.plain()),
                     );
                     let copied_keyboard = keyboard_activation && copy.clicked() && copy.has_focus();
                     if copy.clicked() {
@@ -690,7 +691,7 @@ impl SceneEditor {
                     fields.push(copy);
                     let up = ui.add_enabled(
                         selected.is_some_and(|index| index > 0),
-                        egui::Button::new("Move panel up"),
+                        egui::Button::new(Text::MovePanelUp.plain()),
                     );
                     if up.clicked() {
                         if let Some(index) = selected {
@@ -703,7 +704,7 @@ impl SceneEditor {
                     fields.push(up);
                     let down = ui.add_enabled(
                         selected.is_some_and(|index| index + 1 < draft.hud.panels.len()),
-                        egui::Button::new("Move panel down"),
+                        egui::Button::new(Text::MovePanelDown.plain()),
                     );
                     if down.clicked() {
                         if let Some(index) = selected {
@@ -717,8 +718,10 @@ impl SceneEditor {
                         }
                     }
                     fields.push(down);
-                    let remove =
-                        ui.add_enabled(selected.is_some(), egui::Button::new("Remove panel"));
+                    let remove = ui.add_enabled(
+                        selected.is_some(),
+                        egui::Button::new(Text::RemovePanel.plain()),
+                    );
                     if remove.clicked() {
                         if let Some(index) = selected {
                             draft.remove_panel(index);
@@ -793,7 +796,7 @@ impl SceneEditor {
                 self.sync_draft();
                 self.observe_runtime();
                 self.error.clear();
-                self.notice = "HUD applied.".into();
+                self.notice = Text::HudApplied.plain().into();
                 true
             }
             Err(error) => {
@@ -814,7 +817,7 @@ impl SceneEditor {
             return;
         }
         let mut open = true;
-        egui::Window::new("HUD")
+        egui::Window::new(Text::HudUiHud.plain())
             .id(egui::Id::unique("hud_editor_window"))
             .open(&mut open)
             .default_width(560.0)
@@ -842,8 +845,8 @@ impl SceneEditor {
         let keyboard_activation = ui.input(|input| {
             input.key_pressed(egui::Key::Enter) || input.key_pressed(egui::Key::Space)
         });
-        ui.weak("Screen-space HUD · up to 4 panels and 32 total rows");
-        ui.small("Apply restarts Play with the saved values.");
+        ui.weak(Text::HudUiScreenSpaceHudUp.plain());
+        ui.small(Text::HudUiApplyRestartsPlayWith.plain());
         // Budget in current logical points after the wrapping header. Only the
         // body scrolls, keeping Apply, Cancel and validation feedback reachable.
         let spacing = ui.spacing().item_spacing.y;
@@ -887,7 +890,7 @@ impl SceneEditor {
                 .clamp(0.0, 460.0);
         let body_focus_id = ui.make_persistent_id("hud_body_focus");
         let content = |ui: &mut egui::Ui| {
-            fields.push(ui.checkbox(&mut draft.hud.enabled, "Show HUD"));
+            fields.push(ui.checkbox(&mut draft.hud.enabled, Text::ShowHud.plain()));
             focus_after_action =
                 self.hud_panel_controls(ui, &mut draft, &mut fields, keyboard_activation);
             if let Some(panel_index) = draft
@@ -913,7 +916,7 @@ impl SceneEditor {
                     &mut fields,
                 );
                 ui.horizontal_wrapped(|ui| {
-                    ui.label("Anchor");
+                    ui.label(Text::Anchor.plain());
                     fields.push(selector(
                         ui,
                         "hud_anchor",
@@ -946,7 +949,7 @@ impl SceneEditor {
                     ));
                 }
                 ui.horizontal_wrapped(|ui| {
-                    ui.label("Text color");
+                    ui.label(Text::HudTextColorLabel.plain());
                     let mut text = draft.hud.panels[panel_index]
                         .text_color
                         .map(|value| value as f32);
@@ -955,7 +958,7 @@ impl SceneEditor {
                         draft.hud.panels[panel_index].text_color = text.map(f64::from);
                     }
                     fields.push(response);
-                    ui.label("Panel background");
+                    ui.label(Text::PanelBackground.plain());
                     let mut background = draft.hud.panels[panel_index]
                         .background
                         .map(|value| value as f32);
@@ -966,7 +969,7 @@ impl SceneEditor {
                     fields.push(response);
                 });
                 ui.separator();
-                ui.strong("Labels and buttons in display order");
+                ui.strong(Text::HudUiLabelsAndButtonsIn.plain());
                 let mut selected_label_focus = None;
                 for (index, label) in draft.hud.panels[panel_index].elements.iter().enumerate() {
                     let caption = match &label.source {
@@ -1006,7 +1009,7 @@ impl SceneEditor {
                         ui.horizontal_wrapped(|ui| {
                             let add = ui.add_enabled(
                                 draft.hud.elements().count() < MAX_HUD_LABELS,
-                                egui::Button::new("Add label"),
+                                egui::Button::new(Text::AddLabel.plain()),
                             );
                             let add_id = add.id;
                             let add_keyboard =
@@ -1030,7 +1033,7 @@ impl SceneEditor {
                             let duplicate = ui.add_enabled(
                                 selected_index.is_some()
                                     && draft.hud.elements().count() < MAX_HUD_LABELS,
-                                egui::Button::new("Duplicate"),
+                                egui::Button::new(Text::LabelDuplicate.plain()),
                             );
                             let duplicate_keyboard =
                                 keyboard_activation && duplicate.clicked() && duplicate.has_focus();
@@ -1064,7 +1067,7 @@ impl SceneEditor {
                             fields.push(duplicate);
                             let up = ui.add_enabled(
                                 selected_index.is_some_and(|index| index > 0),
-                                egui::Button::new("Move up"),
+                                egui::Button::new(Text::ComponentMoveUp.plain()),
                             );
                             if up.clicked() {
                                 if let Some(index) = selected_index {
@@ -1081,7 +1084,7 @@ impl SceneEditor {
                                 selected_index.is_some_and(|index| {
                                     index + 1 < draft.hud.panels[panel_index].elements.len()
                                 }),
-                                egui::Button::new("Move down"),
+                                egui::Button::new(Text::ComponentMoveDown.plain()),
                             );
                             if down.clicked() {
                                 if let Some(index) = selected_index {
@@ -1097,8 +1100,10 @@ impl SceneEditor {
                                 }
                             }
                             fields.push(down);
-                            let remove = ui
-                                .add_enabled(selected_index.is_some(), egui::Button::new("Remove"));
+                            let remove = ui.add_enabled(
+                                selected_index.is_some(),
+                                egui::Button::new(Text::Remove.plain()),
+                            );
                             if remove.clicked() {
                                 if let Some(index) = selected_index {
                                     let removed =
@@ -1137,7 +1142,7 @@ impl SceneEditor {
                     let focus = ComboFocus::capture(ui, "hud_row_transfer");
                     let mut destination = None;
                     let choice = egui::ComboBox::from_id_salt("hud_row_transfer")
-                        .selected_text("Move row to panel…")
+                        .selected_text(Text::MoveRowToPanel.plain())
                         .show_ui(ui, |ui| {
                             for panel in &draft.hud.panels {
                                 let name = if panel.name.is_empty() {
@@ -1251,7 +1256,7 @@ impl SceneEditor {
                             let mut selected = false;
                             let mut defaults = None;
                             let choice = egui::ComboBox::from_id_salt("hud_button_binding_choice")
-                                .selected_text("Choose enabled Application")
+                                .selected_text(Text::ChooseEnabledApplication.plain())
                                 .show_ui(ui, |ui| {
                                     for (id, binding) in &self.session.authoring().bindings {
                                         let supported = binding.enabled
@@ -1320,7 +1325,7 @@ impl SceneEditor {
                             let focus = ComboFocus::capture(ui, "hud_button_command_choice");
                             let mut selected = false;
                             let choice = egui::ComboBox::from_id_salt("hud_button_command_choice")
-                                .selected_text("Choose declared command")
+                                .selected_text(Text::ChooseDeclaredCommand.plain())
                                 .show_ui(ui, |ui| {
                                     if let Some(binding) = binding {
                                         for (name, definition) in &binding.commands {
@@ -1346,7 +1351,7 @@ impl SceneEditor {
                                 .and_then(|binding| binding.commands.get(&command.command_id));
                             let reset = ui.add_enabled(
                                 definition.is_some(),
-                                egui::Button::new("Use command defaults"),
+                                egui::Button::new(Text::UseCommandDefaults.plain()),
                             );
                             if reset.clicked() {
                                 if let Some(definition) = definition {
@@ -1369,7 +1374,7 @@ impl SceneEditor {
                                 .entry(label.id.clone())
                                 .or_insert_with(|| argument_drafts(&command.arguments));
                             if raw.is_empty() {
-                                ui.small("This command has no arguments.");
+                                ui.small(Text::ThisCommandHasNoArguments.plain());
                             }
                             for (name, value) in raw {
                                 ui.label(format!("Argument {name}"));
@@ -1401,9 +1406,7 @@ impl SceneEditor {
                                     format!("Command unavailable. {diagnostic:?}"),
                                 );
                             }
-                            ui.small(
-                                "Choose a command to copy its defaults, then edit the arguments.",
-                            );
+                            ui.small(Text::HudUiChooseACommandTo.plain());
                         }
                         HudSource::State {
                             binding_id,
@@ -1423,7 +1426,7 @@ impl SceneEditor {
                             let focus = ComboFocus::capture(ui, "hud_binding_choice");
                             let mut selected = false;
                             let choice = egui::ComboBox::from_id_salt("hud_binding_choice")
-                                .selected_text("Choose enabled")
+                                .selected_text(Text::ChooseEnabled.plain())
                                 .show_ui(ui, |ui| {
                                     for (id, binding) in &self.session.authoring().bindings {
                                         if binding.enabled
@@ -1458,7 +1461,7 @@ impl SceneEditor {
                             let focus = ComboFocus::capture(ui, "hud_field_choice");
                             let mut selected = false;
                             let choice = egui::ComboBox::from_id_salt("hud_field_choice")
-                                .selected_text("Choose state field")
+                                .selected_text(Text::ChooseStateField.plain())
                                 .show_ui(ui, |ui| {
                                     if let Some(binding) = self
                                         .session
@@ -1490,7 +1493,7 @@ impl SceneEditor {
                             focus.restore(ui, &choice.response, selected);
                             fields.push(choice.response);
                             ui.horizontal_wrapped(|ui| {
-                                ui.label("Expected type");
+                                ui.label(Text::ExpectedType.plain());
                                 fields.push(selector(
                                     ui,
                                     "hud_expected_type",
@@ -1528,7 +1531,7 @@ impl SceneEditor {
                                 64,
                                 egui::Id::unique(("hud_precision", &label.id)),
                             ));
-                            ui.small("Pick an enabled state field.");
+                            ui.small(Text::PickAnEnabledStateField.plain());
                         }
                     }
                     if matches!(label.source, HudSource::Button { .. }) {
@@ -1543,7 +1546,7 @@ impl SceneEditor {
                     }
                 }
             } else {
-                ui.label("Add a panel to arrange text and controls.");
+                ui.label(Text::HudUiAddAPanelTo.plain());
             }
             let focused = fields
                 .iter()
@@ -1631,7 +1634,7 @@ impl SceneEditor {
                     crate::editor_theme::primary_button(ui, "Apply HUD")
                 })
                 .inner;
-            let cancel = ui.add_enabled(editable, egui::Button::new("Cancel"));
+            let cancel = ui.add_enabled(editable, egui::Button::new(Text::ComponentCancel.plain()));
             if keys_available && (apply.clicked() || enter) && !self.apply_hud_draft() {
                 if let Some(id) = submitting {
                     ui.memory_mut(|memory| memory.request_focus(id));
@@ -1648,7 +1651,7 @@ impl SceneEditor {
             }
         });
         if !editable {
-            ui.label("Finish other edits and dialogs to edit the HUD.");
+            ui.label(Text::HudUiFinishOtherEditsAnd.plain());
         }
         if !self.error.is_empty() {
             ui.colored_label(ui.visuals().error_fg_color, &self.error);
@@ -1959,15 +1962,21 @@ mod tests {
                     text_rect(&shape.shape, label).map(|rect| (rect, shape.clip_rect))
                 }).unwrap_or_else(|| panic!("HUD footer/error {label:?} has no visible text at scale {scale} in {screen:?}"));
                 assert!(rect.is_positive());
-                assert!(screen.expand(0.5).contains_rect(rect),
-                    "HUD footer/error {label:?} at {rect:?} outside viewport {screen:?} at scale {scale}");
-                assert!(clip.expand(0.5).contains_rect(rect),
-                    "HUD footer/error {label:?} at {rect:?} is clipped by {clip:?} at scale {scale}");
+                assert!(
+                    screen.expand(0.5).contains_rect(rect),
+                    "HUD footer/error {label:?} at {rect:?} outside viewport {screen:?} at scale {scale}"
+                );
+                assert!(
+                    clip.expand(0.5).contains_rect(rect),
+                    "HUD footer/error {label:?} at {rect:?} is clipped by {clip:?} at scale {scale}"
+                );
                 if label != error {
                     let padded =
                         rect.expand2(ctx.style_of(egui::Theme::Dark).spacing.button_padding);
-                    assert!(screen.expand(0.5).contains_rect(padded),
-                        "HUD footer button {label:?} at {padded:?} outside viewport {screen:?} at scale {scale}");
+                    assert!(
+                        screen.expand(0.5).contains_rect(padded),
+                        "HUD footer button {label:?} at {padded:?} outside viewport {screen:?} at scale {scale}"
+                    );
                 }
             }
             let width = first_style_id(&editor, "width");
@@ -2022,10 +2031,14 @@ mod tests {
                     frame(vec![], egui::Modifiers::NONE);
                 }
                 let focused = ctx.read_response(expected).unwrap();
-                assert!(focused.enabled() && focused.has_focus()
-                    && focused.interact_rect.contains_rect(focused.rect),
+                assert!(
+                    focused.enabled()
+                        && focused.has_focus()
+                        && focused.interact_rect.contains_rect(focused.rect),
                     "HUD keyboard field {expected:?} must remain fully visible after validation and Tab traversal at scale {scale}: rect={:?}, interact={:?}",
-                    focused.rect, focused.interact_rect);
+                    focused.rect,
+                    focused.interact_rect
+                );
             }
 
             // Deliberate wheel navigation keeps the text owner while allowing
@@ -2053,8 +2066,11 @@ mod tests {
                 scrolled_width.has_focus(),
                 "Wheel retains the Width owner at scale {scale}"
             );
-            assert!(scrolled_width.rect.top() < width_before_wheel.top() - 24.0,
-                "Focused Width permits persistent downward wheel scrolling at scale {scale}: before={width_before_wheel:?}, after={:?}", scrolled_width.rect);
+            assert!(
+                scrolled_width.rect.top() < width_before_wheel.top() - 24.0,
+                "Focused Width permits persistent downward wheel scrolling at scale {scale}: before={width_before_wheel:?}, after={:?}",
+                scrolled_width.rect
+            );
             for _ in 0..8 {
                 frame(vec![], egui::Modifiers::NONE);
             }
@@ -2094,8 +2110,10 @@ mod tests {
                     frame(vec![], egui::Modifiers::NONE);
                 }
                 let focused = ctx.read_response(expected).unwrap();
-                assert!(focused.has_focus() && focused.interact_rect.contains_rect(focused.rect),
-                    "Tab reentry reveals the whole HUD field after wheel scrolling at scale {scale}: {focused:?}");
+                assert!(
+                    focused.has_focus() && focused.interact_rect.contains_rect(focused.rect),
+                    "Tab reentry reveals the whole HUD field after wheel scrolling at scale {scale}: {focused:?}"
+                );
             }
             assert_eq!(
                 editor.session.snapshot_bytes().unwrap(),
@@ -2596,7 +2614,7 @@ mod tests {
             let add = output
                 .shapes
                 .iter()
-                .find_map(|shape| text_rect(&shape.shape, "Add panel"));
+                .find_map(|shape| text_rect(&shape.shape, "Add Panel"));
             let focused = context
                 .memory(|memory| memory.focused())
                 .and_then(|id| context.read_response(id));
@@ -2729,7 +2747,7 @@ mod tests {
         );
         assert_eq!(editor.session.snapshot_bytes().unwrap(), authored);
 
-        for target in ["Move up", "Add label"] {
+        for target in ["Move Up", "Add Label"] {
             let mut reached = false;
             for _ in 0..32 {
                 let mut released_tab = key(egui::Key::Tab);
@@ -2771,13 +2789,13 @@ mod tests {
                 .hud_draft
                 .as_ref()
                 .expect("Row operations stay in the HUD draft");
-            let expected_focus = if target == "Move up" {
+            let expected_focus = if target == "Move Up" {
                 assert_eq!(draft.hud.panels[0].elements[0].id, "score");
                 assert_eq!(draft.selected.as_deref(), Some("score"));
                 "1. Static text · score"
             } else {
                 assert_eq!(draft.hud.panels[0].elements.len(), 3);
-                "Add label"
+                "Add Label"
             };
             let caption = output
                 .shapes
@@ -2984,8 +3002,11 @@ mod tests {
             scrolled_number.has_focus(),
             "Wheel retains the shared Number owner"
         );
-        assert!(scrolled_number.rect.top() > number_before_wheel.top() + 24.0,
-            "Focused button Number permits persistent upward wheel scrolling: before={number_before_wheel:?}, after={:?}", scrolled_number.rect);
+        assert!(
+            scrolled_number.rect.top() > number_before_wheel.top() + 24.0,
+            "Focused button Number permits persistent upward wheel scrolling: before={number_before_wheel:?}, after={:?}",
+            scrolled_number.rect
+        );
         for _ in 0..8 {
             draw(&mut editor, vec![]);
         }
@@ -3019,9 +3040,13 @@ mod tests {
             }
         }
         let reentered_number = context.read_response(number_id.unwrap()).unwrap();
-        assert!(reentered_number.has_focus()
-            && reentered_number.interact_rect.contains_rect(reentered_number.rect),
-            "Tab reentry reveals the entire shared Number after wheel scrolling: {reentered_number:?}");
+        assert!(
+            reentered_number.has_focus()
+                && reentered_number
+                    .interact_rect
+                    .contains_rect(reentered_number.rect),
+            "Tab reentry reveals the entire shared Number after wheel scrolling: {reentered_number:?}"
+        );
         draw(&mut editor, vec![key(egui::Key::Enter)]);
         assert!(editor.hud_draft.is_some());
         assert!(!editor.error.is_empty());

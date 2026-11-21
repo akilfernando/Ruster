@@ -1,6 +1,7 @@
 //! Native ownership only. Worker leases own the map and per-tick latch.
 use super::*;
 use crate::behavior_worker::{InputLease, InputMeta, InputOrigin};
+use crate::strings::Text;
 use rot_scene::input::{ActionKind, ActionValue, InputKey};
 
 #[derive(Default)]
@@ -234,7 +235,7 @@ impl RuntimeUi {
         let mut opened = true;
         let mut close = false;
         let mut focus = self.input_control.help_focus;
-        egui::Window::new("Runtime input help")
+        egui::Window::new(Text::RuntimeInputHelp.plain())
             .id(egui::Id::unique("runtime_input_help"))
             .open(&mut opened).collapsible(false).default_width(520.0)
             .min_width(180.0).max_width((ctx.content_rect().width() - 32.0).clamp(180.0, 520.0))
@@ -263,34 +264,34 @@ impl RuntimeUi {
                             Some(egui::Key::Home) => ui.scroll_to_cursor(Some(egui::Align::TOP)),
                             _ => {}
                         }
-                        ui.heading("Scene controls");
+                        ui.heading(Text::SceneControls.plain());
                         if source.actions().is_empty() {
-                            ui.label("No actions defined. Add actions in Input actions.");
+                            ui.label(Text::RuntimeInputNoActionsDefinedAdd.plain());
                         }
-                        ui.label("Shared keys drive every matching action. Escape releases scene control.");
+                        ui.label(Text::RuntimeInputSharedKeysDriveEvery.plain());
                         for (id, definition) in source.actions() {
                             ui.separator();
                             ui.strong(format!("{} · {id}", definition.label.as_deref().unwrap_or(id)));
                             ui.weak(action_hint(&definition.kind));
                         }
                         ui.separator();
-                        ui.heading("Preview state");
+                        ui.heading(Text::PreviewState.plain());
                         if !current {
                             ui.label(if self.stale {
-                                "Runtime snapshot stale. Reset to inspect the current scene and action map."
+                                Text::GameControlsPreviousPlay.plain()
                             } else {
-                                "Runtime snapshot unavailable for the current scene, map or run. Reset preview."
+                                Text::GameControlsNoPlay.plain()
                             });
                             if let Some(frame) = &self.frame {
                                 ui.label(format!("Retained preview tick {}", frame.tick));
                             }
                         } else {
                         ui.label(if self.input_owned() {
-                            "Scene controls active. Escape releases ownership."
+                            Text::GameControlsActive.plain()
                         } else if self.playing {
-                            "Playing. Click the game view to give it the keyboard."
+                            Text::GameControlsClickGame.plain()
                         } else {
-                            "Preview paused. Ordinary Step uses a neutral input frame."
+                            Text::GameControlsPaused.plain()
                         });
                         let frame = self.frame.as_ref().expect("current snapshot checked");
                         ui.label(format!("Committed preview tick {}", frame.tick));
@@ -304,7 +305,7 @@ impl RuntimeUi {
                                 InputOrigin::Programmatic => "programmatic step",
                             };
                             ui.strong(format!("Last committed input · tick {} · {origin}", input.receipt.tick));
-                            ui.weak("These values describe input at the committed tick.");
+                            ui.weak(Text::RuntimeInputTheseValuesDescribeInput.plain());
                             for (id, value) in &input.frame.0 {
                                 ui.label(match value {
                                     ActionValue::Button(value) => format!("{id} · Held {} · Pressed {} · Released {}", value.held, value.pressed, value.released),
@@ -312,18 +313,18 @@ impl RuntimeUi {
                                 });
                             }
                         } else {
-                            ui.label(if frame.tick == 0 { "No input has been processed yet." }
-                                else { "Input is unavailable for this frame." });
+                            ui.label(if frame.tick == 0 { Text::RuntimeInputNoInputHasBeen.plain() }
+                                else { Text::RuntimeInputInputIsUnavailableFor.plain() });
                         }
                         ui.separator();
                         ui.heading(if frame.scene.hierarchy.is_empty() {
-                            "Object Transforms"
+                            Text::ObjectTransforms.plain()
                         } else {
-                            "Group Transforms"
+                            Text::GroupTransforms.plain()
                         });
                         let bindings = &frame.authoring.bindings;
                         let count = bindings.values().filter(|binding| binding.enabled).count();
-                        if count == 0 { ui.label("No scripts are enabled."); }
+                        if count == 0 { ui.label(Text::NoScriptsAreEnabled.plain()); }
                         if count > 16 { ui.label(format!("Showing 16 of {count} enabled script instances.")); }
                         for (id, binding) in bindings.iter().filter(|(_, binding)| binding.enabled).take(16) {
                             match &binding.target {
@@ -500,7 +501,7 @@ impl RuntimeUi {
         });
         if events.len() > 256 {
             self.release_input(ctx);
-            self.status = "Keyboard input overflow; click the game view again.".into();
+            self.status = Text::RuntimeInputKeyboardInputOverflowClick.plain().into();
             return;
         }
         let (Some(worker), Some(lease)) = (&self.worker, self.input_control.lease) else {

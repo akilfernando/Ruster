@@ -1,5 +1,6 @@
 //! The project hub. A project is a folder; its scene is `scene.json` inside.
 use super::*;
+use crate::strings::Text;
 use std::{fs, path::Path};
 
 mod templates;
@@ -69,15 +70,15 @@ impl ProjectPicker {
                                 ui.set_min_height(CONTROL_HEIGHT);
                                 crate::branding::mark(ui, 28.0);
                                 ui.label(
-                                    egui::RichText::new("Rot Engine")
+                                    egui::RichText::new(Text::RotEngine.plain())
                                         .font(kit::semibold(TEXT_DIALOG_TITLE)),
                                 );
                                 if self.switching {
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
-                                            if kit::button(ui, "Back to Editor")
-                                                .on_hover_text("Back to Editor (Escape)")
+                                            if kit::button(ui, Text::BackToEditor.plain())
+                                                .on_hover_text(Text::BackToEditorEscape.plain())
                                                 .clicked()
                                             {
                                                 back = true;
@@ -94,18 +95,18 @@ impl ProjectPicker {
                             ui.horizontal(|ui| {
                                 ui.set_min_height(CONTROL_HEIGHT);
                                 ui.label(
-                                    egui::RichText::new("Projects")
+                                    egui::RichText::new(Text::Projects.plain())
                                         .font(kit::semibold(TEXT_DIALOG_TITLE)),
                                 );
                                 push_right(ui, &["Open Project…", "New Project…"]);
-                                if kit::button(ui, "Open Project…")
-                                    .on_hover_text("Open Project")
+                                if kit::button(ui, Text::LabelOpenProject.plain())
+                                    .on_hover_text(Text::OpenProject.plain())
                                     .clicked()
                                 {
                                     self.form = Some(ProjectForm::open_project());
                                 }
-                                if kit::primary_button(ui, "New Project…")
-                                    .on_hover_text("New Project")
+                                if kit::primary_button(ui, Text::LabelNewProject.plain())
+                                    .on_hover_text(Text::NewProject.plain())
                                     .clicked()
                                 {
                                     self.form = Some(ProjectForm::new_project());
@@ -114,7 +115,8 @@ impl ProjectPicker {
                             ui.add_space(SPACE_M);
                             let projects = &workspace.prefs.projects;
                             if !projects.is_empty() {
-                                let search = kit::search_field(ui, &mut self.search, "Search");
+                                let search =
+                                    kit::search_field(ui, &mut self.search, Text::Search.plain());
                                 if ui.input_mut(|i| {
                                     i.consume_key(egui::Modifiers::COMMAND, egui::Key::F)
                                 }) {
@@ -173,7 +175,10 @@ impl ProjectPicker {
                                         let response = project_row(ui, path, now);
                                         response.context_menu(|ui| {
                                             #[cfg(target_os = "linux")]
-                                            if ui.button("Show in File Manager").clicked() {
+                                            if ui
+                                                .button(Text::AssetShowInFileManager.plain())
+                                                .clicked()
+                                            {
                                                 let folder = path.parent().unwrap_or(path);
                                                 if let Err(error) =
                                                     std::process::Command::new("xdg-open")
@@ -186,7 +191,7 @@ impl ProjectPicker {
                                                 }
                                                 ui.close();
                                             }
-                                            if ui.button("Remove from List").clicked() {
+                                            if ui.button(Text::RemoveFromList.plain()).clicked() {
                                                 self.remove = Some((*path).clone());
                                                 ui.close();
                                             }
@@ -235,18 +240,19 @@ impl ProjectPicker {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     ui.set_min_height(CONTROL_HEIGHT);
-                    ui.label(egui::RichText::new("AI Connection").font(kit::semibold(TEXT_TITLE)));
+                    ui.label(
+                        egui::RichText::new(Text::AiConnection.plain())
+                            .font(kit::semibold(TEXT_TITLE)),
+                    );
                     push_right(ui, &["Not Now", "Connect an AI App…"]);
-                    if kit::button(ui, "Not Now")
-                        .on_hover_text("Connect later from the AI button in the toolbar")
+                    if kit::button(ui, Text::NotNow.plain())
+                        .on_hover_text(Text::ProjectPickerConnectLaterFromThe.plain())
                         .clicked()
                     {
                         self.ai_step_done = true;
                     }
-                    if kit::button(ui, "Connect an AI App…")
-                        .on_hover_text(
-                            "Let an AI app such as Claude Code or Codex edit your projects",
-                        )
+                    if kit::button(ui, Text::ConnectAnAiApp.plain())
+                        .on_hover_text(Text::ProjectPickerLetAnAiApp.plain())
                         .clicked()
                     {
                         self.connect_ai = true;
@@ -473,9 +479,9 @@ impl ProjectForm {
                 ui.set_width(width);
                 ui.label(
                     egui::RichText::new(if creating {
-                        "New Project"
+                        Text::NewProject.plain()
                     } else {
-                        "Open Project"
+                        Text::OpenProject.plain()
                     })
                     .font(kit::semibold(TEXT_DIALOG_TITLE)),
                 );
@@ -491,7 +497,7 @@ impl ProjectForm {
                             ui.add_space(SPACE_M);
                         }
                         if let Some(name) = &mut self.name {
-                            let field = kit::property_row(ui, "Project Name", |ui| {
+                            let field = kit::property_row(ui, Text::ProjectName.plain(), |ui| {
                                 ui.add(
                                     egui::TextEdit::singleline(name)
                                         .desired_width(ui.available_width())
@@ -508,7 +514,7 @@ impl ProjectForm {
                             .as_deref()
                             .filter(|name| !name.trim().is_empty())
                             .map(|name| Path::new(self.path.trim()).join(name.trim()));
-                        let field = kit::property_row(ui, "Location", |ui| {
+                        let field = kit::property_row(ui, Text::Location.plain(), |ui| {
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = SPACE_XS;
                                 let browse_width = 72.0;
@@ -541,9 +547,11 @@ impl ProjectForm {
                                 field.on_hover_text(format!("Creates {}", folder.display()))
                             }
                             None if creating => {
-                                field.on_hover_text("The folder the project goes in")
+                                field.on_hover_text(Text::ProjectPickerTheFolderTheProject.plain())
                             }
-                            None => field.on_hover_text("A project folder or its scene file"),
+                            None => {
+                                field.on_hover_text(Text::ProjectPickerAProjectFolderOr.plain())
+                            }
                         };
                         editing |= field.has_focus() || field.lost_focus();
                         if std::mem::take(&mut self.focus) {
@@ -567,7 +575,7 @@ impl ProjectForm {
                     // Bottom right, Cancel then the primary action, in Tab order too.
                     let primary = if creating { "Create Project" } else { "Open" };
                     push_right(ui, &["Cancel", primary]);
-                    let cancel = kit::button(ui, "Cancel").clicked()
+                    let cancel = kit::button(ui, Text::ComponentCancel.plain()).clicked()
                         || ui
                             .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
                     let submit = kit::primary_button(ui, primary).clicked();
@@ -598,7 +606,7 @@ impl ProjectForm {
     /// Project Browser. Tab reaches each; Enter or Space selects.
     fn templates_ui(&mut self, ui: &mut egui::Ui) {
         use crate::ui_kit::{self as kit, tokens::*};
-        kit::section_title(ui, "Template");
+        kit::section_title(ui, Text::Template.plain());
         ui.add_space(SPACE_XS);
         let palette = kit::colors(ui);
         ui.columns(Template::ALL.len(), |columns| {
@@ -821,7 +829,10 @@ impl FileBrowser {
             }
         }
         if ui
-            .add_enabled(self.pending.is_none(), egui::Button::new("Browse…"))
+            .add_enabled(
+                self.pending.is_none(),
+                egui::Button::new(Text::Browse.plain()),
+            )
             .clicked()
         {
             self.pending = Some(browse(ui.ctx().clone(), kind));
@@ -838,17 +849,19 @@ fn browse(ctx: egui::Context, kind: BrowseKind) -> std::sync::mpsc::Receiver<Bro
     std::thread::spawn(move || {
         let dialog = rfd::FileDialog::new();
         let picked = match kind {
-            BrowseKind::Directory => dialog.set_title("Choose a project location").pick_folder(),
+            BrowseKind::Directory => dialog
+                .set_title(Text::ChooseAProjectLocation.plain())
+                .pick_folder(),
             BrowseKind::OpenScene => dialog
-                .set_title("Open Scene")
+                .set_title(Text::ComponentOpenScene.plain())
                 .add_filter("Rot scene", &["json"])
                 .pick_file(),
             BrowseKind::ImportAsset => dialog
-                .set_title("Import Asset")
+                .set_title(Text::ImportAsset.plain())
                 .add_filter("Assets", &["glb", "obj", "png", "wav"])
                 .pick_file(),
             BrowseKind::SaveScene => dialog
-                .set_title("Save Scene As")
+                .set_title(Text::SaveSceneAs.plain())
                 .set_file_name("scene.json")
                 .save_file(),
         };

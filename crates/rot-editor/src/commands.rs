@@ -91,15 +91,7 @@ fn execute(editor: &mut Editor, token: &str, op: &str, args: &Value) -> CommandR
     // Do not call human undo(), which clears unrelated action errors.
     editor.fields = after.into();
     editor.refresh_field_validation();
-    editor.notice = format!(
-        "Agent {op}, authored revision {revision}: initial_stock {} -> {}; production_per_tick {} -> {}; transfer_per_tick {} -> {}. Runtime unchanged; Reset to use authored values.",
-        before.initial_stock,
-        after.initial_stock,
-        before.production_per_tick,
-        after.production_per_tick,
-        before.transfer_per_tick,
-        after.transfer_per_tick
-    );
+    editor.notice = crate::strings::Text::ScenarioAiUpdated.plain().into();
     Ok(json!({
         "session_token": token, "scenario_id": editor.project.scenario().id(),
         "revision": revision.to_string(), "changed": before != after,
@@ -265,8 +257,10 @@ mod tests {
             ..Config::default()
         });
         assert_eq!(call(&mut editor, "edit", edit)["result"]["revision"], "2");
-        assert!(editor.notice.contains("transfer_per_tick 4 -> 5"));
-        assert!(editor.notice.contains("Agent edit"));
+        assert_eq!(
+            editor.notice,
+            "AI updated the scenario. Restart to see the changes."
+        );
         assert_eq!(editor.error.as_deref(), Some("unrelated save failure"));
         assert_eq!(editor.fields.transfer, "5");
         assert!(editor.project.is_dirty());

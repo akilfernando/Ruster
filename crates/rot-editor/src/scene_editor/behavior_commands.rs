@@ -1,5 +1,6 @@
 //! Data-only, revisioned behavior tools. No file paths, VM work or executable authority.
 use super::SceneEditor;
+use crate::strings::Text;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use rot_scene::input::ActionDefinition;
 use rot_scene::{BehaviorBinding, BehaviorSource, BindingTarget, PropertyValue, StateValue};
@@ -358,7 +359,7 @@ impl SceneEditor {
         self.sync_draft();
         self.observe_runtime();
         if next != revision {
-            self.notice = "AI updated script settings. Save to keep the change.".into();
+            self.notice = Text::BehaviorCommandsAiUpdatedScriptSettings.plain().into();
         }
         Ok(
             json!({"session_token":token,"revision":next.to_string(),"changed":next!=revision,"dirty":self.session.is_dirty()}),

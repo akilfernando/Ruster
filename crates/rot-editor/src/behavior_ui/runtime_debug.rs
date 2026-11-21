@@ -3,6 +3,7 @@ use super::*;
 use crate::behavior_worker::{
     DebugRequestError, InputError, InputMapIdentity, InputOrigin, InputReceipt,
 };
+use crate::strings::Text;
 use rot_behavior::debug::{Breakpoint, Resume, StopSnapshot, ValueNode};
 use rot_scene::input::ActionFrame;
 use serde_json::{json, Value};
@@ -367,7 +368,7 @@ impl RuntimeUi {
                 .map_err(|e| e.to_string())?;
             self.status = format!("Breakpoint configuration: {state:?}");
         } else {
-            self.status = "Breakpoint added. Start Play again to activate it.".into();
+            self.status = Text::RuntimeDebugBreakpointAddedStartPlay.plain().into();
         }
         self.debug.points = points;
         Ok(())
@@ -396,16 +397,16 @@ impl RuntimeUi {
         let mut point = None;
         let mut remove = None;
         let mut resume = None;
-        egui::Window::new("Script Debugger")
+        egui::Window::new(Text::ScriptDebugger.plain())
             .open(&mut opened)
             .default_width(600.0)
             .max_width((ctx.content_rect().width() - 48.0).max(240.0))
             .show(ctx, |ui| {
-                ui.small("Breakpoints take effect the next time you start Play.");
+                ui.small(Text::RuntimeDebugBreakpointsTakeEffectThe.plain());
                 ui.add_enabled_ui(!blocked, |ui| {
-                    egui::ComboBox::from_label("Breakpoint Script")
+                    egui::ComboBox::from_label(Text::BreakpointScript.plain())
                         .selected_text(if self.debug.source.is_empty() {
-                            "Choose Script"
+                            Text::ChooseScript.plain()
                         } else {
                             &self.debug.source
                         })
@@ -415,7 +416,7 @@ impl RuntimeUi {
                             }
                         });
                     ui.horizontal(|ui| {
-                        ui.label("Line");
+                        ui.label(Text::Line.plain());
                         let field = ui.add(
                             egui::TextEdit::singleline(&mut self.debug.line)
                                 .char_limit(5)
@@ -437,7 +438,7 @@ impl RuntimeUi {
                             self.debug.open = false;
                             field.surrender_focus();
                         }
-                        if ui.button("Add Breakpoint").clicked() || enter {
+                        if ui.button(Text::AddBreakpoint.plain()).clicked() || enter {
                             if let (Some(source), Ok(line)) = (
                                 session.source(&self.debug.source),
                                 self.debug.line.parse::<u32>(),
@@ -449,8 +450,7 @@ impl RuntimeUi {
                                     binding_id: None,
                                 });
                             } else {
-                                self.status =
-                                    "Choose a script and enter a positive line number.".into();
+                                self.status = Text::RuntimeDebugChooseAScriptAnd.plain().into();
                             }
                         }
                     });
@@ -471,7 +471,7 @@ impl RuntimeUi {
                                     if stale { " (stale)" } else { "" }
                                 ));
                                 if ui
-                                    .add_enabled(!blocked, egui::Button::new("Remove"))
+                                    .add_enabled(!blocked, egui::Button::new(Text::Remove.plain()))
                                     .clicked()
                                 {
                                     remove = Some(index);
@@ -494,18 +494,18 @@ impl RuntimeUi {
                     ));
                     ui.horizontal(|ui| {
                         if ui
-                            .add_enabled(!blocked, egui::Button::new("Step Over"))
+                            .add_enabled(!blocked, egui::Button::new(Text::StepOver.plain()))
                             .clicked()
                         {
                             resume = Some(Resume::Next);
                         }
                         if ui
-                            .add_enabled(!blocked, egui::Button::new("Continue"))
+                            .add_enabled(!blocked, egui::Button::new(Text::Continue.plain()))
                             .clicked()
                         {
                             resume = Some(Resume::Continue);
                         }
-                        if ui.button("Show Paused Script").clicked() {
+                        if ui.button(Text::ShowPausedScript.plain()).clicked() {
                             navigate = true;
                         }
                     });
@@ -533,11 +533,11 @@ impl RuntimeUi {
                                 );
                             }
                             if stop.truncated {
-                                ui.small("Some values are too large to show in full.");
+                                ui.small(Text::RuntimeDebugSomeValuesAreToo.plain());
                             }
                         });
                 } else {
-                    ui.label("Start Play or Step to reach a breakpoint.");
+                    ui.label(Text::RuntimeDebugStartPlayOrStep.plain());
                 }
             });
         self.debug.open &= opened;

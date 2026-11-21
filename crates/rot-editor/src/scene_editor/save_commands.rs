@@ -2,6 +2,7 @@
 use super::*;
 use crate::asset_save::{Request, Saved};
 use crate::asset_worker::{AssetMaps, RetiredAssets};
+use crate::strings::Text;
 use rot_assets::AssetStateIdentity;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -306,7 +307,7 @@ impl SceneEditor {
         self.notice = self
             .save_warning
             .clone()
-            .unwrap_or_else(|| "Scene saved; finishing cleanup…".into());
+            .unwrap_or_else(|| Text::SceneSavedFinishingCleanup.plain().into());
         (retired, recovery_request)
     }
     pub(super) fn finalize_saved_followup(
@@ -331,10 +332,9 @@ impl SceneEditor {
         }
         self.notice = self.save_warning.clone().unwrap_or_else(|| {
             if self.pending_recovery_drafts() {
-                "Scene saved; unapplied fields remain. Apply or reset them before New or Close."
-                    .into()
+                Text::SaveCommandsSceneSavedApplyOr.plain().into()
             } else {
-                "Scene saved.".into()
+                Text::SceneSaved.plain().into()
             }
         });
         if continuation != Continuation::SaveOnly && self.save_warning.is_some() {

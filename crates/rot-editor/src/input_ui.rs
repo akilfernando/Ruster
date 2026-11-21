@@ -1,4 +1,5 @@
 //! Recoverable action working copies. The caller owns Session/history authority.
+use crate::strings::Text;
 use eframe::egui;
 use rot_scene::input::{validate_action_map, ActionDefinition, ActionKind, InputKey};
 use rot_scene::Session;
@@ -128,11 +129,11 @@ impl Draft {
 
     pub(super) fn recovered_values_ui(&self, ui: &mut egui::Ui) {
         ui.label(match (self.intent, self.edited_id.is_some()) {
-            (Intent::Remove, _) => "Recovered request to delete this action.",
-            (Intent::Set, true) => "Recovered changes to an existing action.",
-            (Intent::Set, false) => "Recovered new action.",
+            (Intent::Remove, _) => Text::InputUiRecoveredRequestToDelete.plain(),
+            (Intent::Set, true) => Text::InputUiRecoveredChangesToAn.plain(),
+            (Intent::Set, false) => Text::RecoveredNewAction.plain(),
         });
-        ui.strong("Action ID");
+        ui.strong(Text::ActionId.plain());
         ui.add(egui::Label::new(egui::RichText::new(&self.id).monospace()).wrap());
         if let Some(original) = self
             .edited_id
@@ -141,13 +142,13 @@ impl Draft {
         {
             ui.add(egui::Label::new(format!("Originally editing {original}")).wrap());
         }
-        ui.strong("Label");
+        ui.strong(Text::Label.plain());
         if self.label.is_empty() {
-            ui.label("No label entered");
+            ui.label(Text::NoLabelEntered.plain());
         } else {
             ui.add(egui::Label::new(&self.label).wrap());
         }
-        ui.strong("Controls");
+        ui.strong(Text::Controls.plain());
         ui.add(egui::Label::new(hint(&self.kind)).wrap());
     }
 
@@ -464,7 +465,7 @@ impl InputUi {
             || key.is_none()
             || matches!(key, Some(InputKey::Escape | InputKey::Tab))
         {
-            self.message = "Choose a supported key without Ctrl, Alt, Super or Tab.".into();
+            self.message = Text::InputUiChooseASupportedKey.plain().into();
             return;
         }
         let key = key.expect("checked supported key");
@@ -476,7 +477,7 @@ impl InputUi {
         }
         .copied();
         if current != Some(key) && keys(&draft.kind).any(|existing| existing == key) {
-            self.message = "This action already uses that key; choose another key.".into();
+            self.message = Text::InputUiThisActionAlreadyUses.plain().into();
             return;
         }
         let slot = match (&mut draft.kind, capture.side) {
@@ -517,7 +518,7 @@ impl InputUi {
         let previous_focus = self.window_focus;
         let mut close_requested = false;
         let mut edit = None;
-        let window = egui::Window::new("Input actions")
+        let window = egui::Window::new(Text::InputUiInputActions.plain())
             .open(opened)
             .default_size(egui::vec2(520.0, 680.0))
             .max_width((ctx.content_rect().width() - 32.0).clamp(240.0, 520.0))
@@ -540,7 +541,7 @@ impl InputUi {
                         edit = self.show(ui, session, editable);
                     });
                 ui.add_space(ui.spacing().item_spacing.y);
-                let close = ui.button("Close Input actions");
+                let close = ui.button(Text::InputActionsClose.plain());
                 if self.focus_first && !self.pending() {
                     self.focus_first = false;
                     let focused = ctx.memory(|memory| memory.focused());
@@ -635,16 +636,18 @@ impl InputUi {
         let (capture_owned, candidate) = self.capture_event(ui, editable);
         let mut edit = None;
         let mut form_drawn = false;
-        egui::CollapsingHeader::new("Input actions")
+        egui::CollapsingHeader::new(Text::InputActions.plain())
             .id_salt("input_actions")
             .default_open(true)
             .open(self.pending().then_some(true))
             .show(ui, |ui| {
-                ui.weak("Shared keys trigger every matching action.");
+                ui.weak(Text::InputUiSharedKeysTriggerEvery.plain());
                 if !self.pending() {
                     ui.add_enabled_ui(editable, |ui| {
                         ui.horizontal_wrapped(|ui| {
-                            if ui.button("Add Button").clicked() && self.claim_frame(ui.ctx()) {
+                            if ui.button(Text::AddButton.plain()).clicked()
+                                && self.claim_frame(ui.ctx())
+                            {
                                 self.begin(
                                     session,
                                     None,
@@ -653,7 +656,9 @@ impl InputUi {
                                     false,
                                 );
                             }
-                            if ui.button("Add Axis").clicked() && self.claim_frame(ui.ctx()) {
+                            if ui.button(Text::AddAxis.plain()).clicked()
+                                && self.claim_frame(ui.ctx())
+                            {
                                 self.begin(
                                     session,
                                     None,
@@ -668,7 +673,7 @@ impl InputUi {
                         });
                         {
                             if session.authoring().actions.is_empty() {
-                                ui.weak("Add a Button or Axis to define keyboard controls.");
+                                ui.weak(Text::InputUiAddAButtonOr.plain());
                             }
                             for (id, action) in &session.authoring().actions {
                                 ui.separator();
@@ -681,7 +686,9 @@ impl InputUi {
                                     ui.colored_label(ui.visuals().warn_fg_color, conflict);
                                 }
                                 ui.horizontal_wrapped(|ui| {
-                                    if ui.button("Edit").clicked() && self.claim_frame(ui.ctx()) {
+                                    if ui.button(Text::ComponentEditMenu.plain()).clicked()
+                                        && self.claim_frame(ui.ctx())
+                                    {
                                         self.begin(
                                             session,
                                             Some(id),
@@ -690,7 +697,7 @@ impl InputUi {
                                             false,
                                         );
                                     }
-                                    if ui.button("Clear keys").clicked()
+                                    if ui.button(Text::ClearKeys.plain()).clicked()
                                         && self.claim_frame(ui.ctx())
                                     {
                                         self.begin(
@@ -701,7 +708,9 @@ impl InputUi {
                                             true,
                                         );
                                     }
-                                    if ui.button("Delete").clicked() && self.claim_frame(ui.ctx()) {
+                                    if ui.button(Text::MaterialDelete.plain()).clicked()
+                                        && self.claim_frame(ui.ctx())
+                                    {
                                         self.begin(
                                             session,
                                             Some(id),
@@ -758,21 +767,21 @@ impl InputUi {
         let admit = self.interaction_frame != Some(ui.ctx().cumulative_frame_nr());
         ui.separator();
         ui.label(if draft.intent == Intent::Remove {
-            "Delete action? Lua references remain unchanged."
+            Text::InputActionConfirmDelete.plain()
         } else {
-            "Action draft · Apply commits one Undo step."
+            Text::InputActionPending.plain()
         });
         {
             ui.spacing_mut().text_edit_width = ui.available_width().min(440.0);
             ui.add_enabled_ui(editable && !capturing, |ui| {
-                ui.label("Stable ID");
+                ui.label(Text::StableId.plain());
                 let id = ui.add(
                     egui::TextEdit::singleline(&mut draft.id)
                         .id_salt("action_id")
                         .char_limit(1024)
                         .interactive(draft.edited_id.is_none() && draft.intent == Intent::Set),
                 );
-                ui.label("Label (optional)");
+                ui.label(Text::LabelOptional.plain());
                 let label = ui.add(
                     egui::TextEdit::singleline(&mut draft.label)
                         .id_salt("action_label")
@@ -838,9 +847,9 @@ impl InputUi {
                     let closing = closing_key(ui, trigger);
                     let response = egui::ComboBox::from_id_salt("action_kind")
                         .selected_text(if axis {
-                            "Axis (−1 / 0 / +1)"
+                            Text::Axis101.plain()
                         } else {
-                            "Button"
+                            Text::Button.plain()
                         })
                         .show_ui(ui, |ui| {
                             for (value, name) in [(false, "Button"), (true, "Axis (−1 / 0 / +1)")]
@@ -872,16 +881,16 @@ impl InputUi {
                     let mut rows = Vec::new();
                     match &mut draft.kind {
                         ActionKind::Button { keys } => {
-                            ui.strong("Button keys");
+                            ui.strong(Text::ButtonKeys.plain());
                             let used = keys.clone();
                             rows.push(key_rows(ui, Side::Button, keys, &used, admit));
                         }
                         ActionKind::Axis1d { negative, positive } => {
-                            ui.strong("Negative keys (−1)");
+                            ui.strong(Text::NegativeKeys1.plain());
                             let used: Vec<_> =
                                 negative.iter().chain(positive.iter()).copied().collect();
                             rows.push(key_rows(ui, Side::Negative, negative, &used, admit));
-                            ui.strong("Positive keys (+1)");
+                            ui.strong(Text::PositiveKeys1.plain());
                             let used: Vec<_> =
                                 negative.iter().chain(positive.iter()).copied().collect();
                             rows.push(key_rows(ui, Side::Positive, positive, &used, admit));
@@ -895,7 +904,7 @@ impl InputUi {
                             next_capture = row.capture;
                         }
                     }
-                    ui.weak("Assign up to four keys.");
+                    ui.weak(Text::AssignUpToFourKeys.plain());
                     for conflict in conflicts(session, &draft.id, &draft.kind) {
                         ui.colored_label(ui.visuals().warn_fg_color, conflict);
                     }
@@ -913,11 +922,11 @@ impl InputUi {
                 }
                 ui.horizontal_wrapped(|ui| {
                     let submit = ui.button(if draft.intent == Intent::Remove {
-                        "Delete action"
+                        Text::DeleteAction.plain()
                     } else {
-                        "Apply action"
+                        Text::ApplyAction.plain()
                     });
-                    let revert = ui.button("Cancel");
+                    let revert = ui.button(Text::ComponentCancel.plain());
                     if self.focus_first && editable && !capturing && draft.intent == Intent::Remove
                     {
                         submit.request_focus();
@@ -949,8 +958,9 @@ impl InputUi {
                 }
             });
             if capturing || next_capture.is_some() {
-                ui.label("Press a logical key. Escape cancels capture; the draft stays open.");
-                let response = ui.add_enabled(editable, egui::Button::new("Cancel key capture"));
+                ui.label(Text::InputUiPressALogicalKey.plain());
+                let response =
+                    ui.add_enabled(editable, egui::Button::new(Text::CancelKeyCapture.plain()));
                 if let Some(capture) = &mut next_capture {
                     capture.owner = Some(response.id);
                     // Only a genuine activation may hand focus to capture.
@@ -1138,8 +1148,8 @@ fn key_rows(
                         result.changed = true;
                     }
                     result.selected |= selected;
-                    let capture = ui.button("Capture");
-                    let unbind = ui.button("Remove key");
+                    let capture = ui.button(Text::Capture.plain());
+                    let unbind = ui.button(Text::RemoveKey.plain());
                     for response in [&response.response, &capture, &unbind] {
                         if response.gained_focus() {
                             response.scroll_to_me(None);
@@ -1163,7 +1173,7 @@ fn key_rows(
                 })
             });
         }
-        let add = ui.add_enabled(occupied.len() < 4, egui::Button::new("Add key"));
+        let add = ui.add_enabled(occupied.len() < 4, egui::Button::new(Text::AddKey.plain()));
         result.ids.push(add.id);
         if add.gained_focus() {
             add.scroll_to_me(None);
@@ -1302,9 +1312,13 @@ mod tests {
             let edit = visible_text(&shapes, "Edit").expect("list Edit is visible");
             frame(&ctx, &mut editor, &session, size, click(edit, true));
             frame(&ctx, &mut editor, &session, size, click(edit, false));
-            assert!(editor.pending(),
+            assert!(
+                editor.pending(),
                 "visible Edit must begin the actual draft at {size:?}; clicked={edit:?}, focus={:?}, observed_window_focus={:?}, frame={}",
-                ctx.memory(|memory| memory.focused()), editor.window_focus, ctx.cumulative_frame_nr());
+                ctx.memory(|memory| memory.focused()),
+                editor.window_focus,
+                ctx.cumulative_frame_nr()
+            );
             for _ in 0..3 {
                 shapes = frame(&ctx, &mut editor, &session, size, vec![]);
             }
@@ -1351,8 +1365,10 @@ mod tests {
                     && focused.interact_rect.contains_rect(focused.rect),
                 "invalid label keeps its real editable field visibly focused at {size:?}"
             );
-            assert!(visible_text(&shapes, &editor.message).is_some(),
-                "the entire validation feedback must be visible together with the focused invalid label at {size:?}");
+            assert!(
+                visible_text(&shapes, &editor.message).is_some(),
+                "the entire validation feedback must be visible together with the focused invalid label at {size:?}"
+            );
             assert_eq!(session.snapshot_bytes().unwrap(), original);
             frame(&ctx, &mut editor, &session, size, replace_label("home"));
             assert_eq!(editor.draft.as_ref().unwrap().label, "home");
@@ -1449,8 +1465,10 @@ mod tests {
                         .interact_rect
                         .contains_rect(capture_owner.rect)
             );
-            assert!(!editor.message.is_empty() && visible_text(&shapes, &editor.message).is_some(),
-                "capture feedback must remain fully visible beside its genuine focused owner at {size:?}");
+            assert!(
+                !editor.message.is_empty() && visible_text(&shapes, &editor.message).is_some(),
+                "capture feedback must remain fully visible beside its genuine focused owner at {size:?}"
+            );
             assert_eq!(session.snapshot_bytes().unwrap(), original);
             let trigger = editor.capture.unwrap().focus;
             frame(
@@ -1522,8 +1540,12 @@ mod tests {
             assert!(editor.draft.as_ref().unwrap().edited_id.is_none());
             assert_eq!(editor.draft.as_ref().unwrap().label, " new label ");
             let label = ctx.read_response(label_focus).unwrap();
-            assert!(label.enabled() && label.has_focus() && label.interact_rect.contains_rect(label.rect),
-                "new-action invalid Label retains its actual visible field instead of returning to ID");
+            assert!(
+                label.enabled()
+                    && label.has_focus()
+                    && label.interact_rect.contains_rect(label.rect),
+                "new-action invalid Label retains its actual visible field instead of returning to ID"
+            );
             assert!(
                 !editor.message.is_empty() && visible_text(&shapes, &editor.message).is_some(),
                 "new-action feedback is fully visible beside its submitting field at {size:?}"
@@ -1600,7 +1622,7 @@ mod tests {
             for _ in 0..2 {
                 shapes = frame(&ctx, &mut editor, &session, size, vec![]);
             }
-            let close = visible_text(&shapes, "Close Input actions")
+            let close = visible_text(&shapes, "Close Input Actions")
                 .expect("Close remains outside the scrolling body");
             let focused = ctx
                 .memory(|memory| memory.focused())
@@ -1779,7 +1801,7 @@ mod tests {
         assert!(editor.pending());
         assert_eq!(editor.generation(), 1);
         let (shapes, _, _, _) = frame(&ctx, &mut editor, &session, vec![], false);
-        let add_key = point(&shapes, "Add key");
+        let add_key = point(&shapes, "Add Key");
         frame(&ctx, &mut editor, &session, pointer(add_key, true), false);
         let (_, edits, passes, _) =
             frame(&ctx, &mut editor, &session, pointer(add_key, false), true);

@@ -99,7 +99,7 @@ impl Host {
         let new_key = store.known(&name) && !store.allowed(&name, &token);
         let app = crate::trust::display_name(&name);
         let mut answer = None;
-        egui::Window::new("ai_prompt")
+        egui::Window::new(Text::AiPrompt.plain())
             .title_bar(false)
             .resizable(false)
             .collapsible(false)
@@ -128,19 +128,19 @@ impl Host {
                 ui.add_enabled_ui(settled, |ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if crate::editor_theme::primary_button(ui, "Allow Always")
-                            .on_hover_text("Trust this app from now on. Revoke in Rot connection.")
+                            .on_hover_text(Text::PromptTrustThisAppFrom.plain())
                             .clicked()
                         {
                             answer = Some(Answer::Always);
                         }
                         if ui
-                            .button("Allow Once")
-                            .on_hover_text("Trust it until it disconnects")
+                            .button(Text::AllowOnce.plain())
+                            .on_hover_text(Text::TrustItUntilItDisconnects.plain())
                             .clicked()
                         {
                             answer = Some(Answer::Once);
                         }
-                        if ui.button("Deny").clicked() {
+                        if ui.button(Text::Deny.plain()).clicked() {
                             answer = Some(Answer::Deny);
                         }
                     });
@@ -251,14 +251,14 @@ impl Host {
             return;
         }
         ui.add_space(8.0);
-        ui.strong("Trusted AI apps");
+        ui.strong(Text::TrustedAiApps.plain());
         for name in trusted {
             ui.horizontal(|ui| {
                 ui.label(crate::trust::display_name(&name))
                     .on_hover_text(format!("Reported name: {name}"));
                 if ui
-                    .button("Revoke")
-                    .on_hover_text("Ask again the next time this app connects")
+                    .button(Text::Revoke.plain())
+                    .on_hover_text(Text::PromptAskAgainTheNext.plain())
                     .clicked()
                 {
                     self.revoke_app(&name);

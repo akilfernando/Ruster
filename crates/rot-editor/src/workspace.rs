@@ -1,4 +1,5 @@
 //! Window preferences are independent from scene data and runtime state.
+use crate::strings::Text;
 use eframe::egui;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -20,10 +21,10 @@ pub(super) struct SceneViewState {
 fn read_scene_view(path: &Path) -> Result<SceneViewState, String> {
     match path.symlink_metadata() {
         Ok(metadata) if !metadata.is_file() => {
-            return Err("Scene view state must be a regular file.".into())
+            return Err("Scene view state must be a regular file.".into());
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(SceneViewState::default())
+            return Ok(SceneViewState::default());
         }
         Err(error) => return Err(error.to_string()),
         Ok(_) => {}
@@ -179,75 +180,75 @@ impl Action {
     /// Title Case menu label (UX-STANDARDS §8). `name` stays the stored id.
     pub fn label(self) -> &'static str {
         match self {
-            Self::New => "New Scene",
-            Self::Open => "Open Scene…",
-            Self::Save => "Save",
-            Self::SaveAs => "Save As…",
-            Self::Export => "Build…",
-            Self::Undo => "Undo",
-            Self::Redo => "Redo",
-            Self::Copy => "Copy",
-            Self::Paste => "Paste",
-            Self::Duplicate => "Duplicate",
-            Self::Delete => "Delete",
-            Self::Move => "Move Tool",
-            Self::Rotate => "Rotate Tool",
-            Self::Scale => "Scale Tool",
-            Self::Frame => "Frame Selected",
-            Self::Projection => "Toggle Projection",
-            Self::Front => "Front View",
-            Self::Back => "Back View",
-            Self::Left => "Left View",
-            Self::Right => "Right View",
-            Self::Top => "Top View",
-            Self::Bottom => "Bottom View",
-            Self::Isometric => "Isometric View",
-            Self::FreeView => "Free View",
-            Self::Quit => "Exit",
-            Self::FindObjects => "Search Hierarchy",
-            Self::FindContent => "Search Assets",
-            Self::Rename => "Rename",
-            Self::SelectAll => "Select All",
-            Self::FocusRuntime => "Focus Game Controls",
-            Self::CreateCube => "Cube",
-            Self::CreateSphere => "Sphere",
-            Self::CreateCapsule => "Capsule",
-            Self::CreateLight => "Point Light",
-            Self::Play => "Play",
-            Self::Pause => "Pause",
-            Self::Step => "Step",
-            Self::NextPanel => "Next Panel",
-            Self::PreviousPanel => "Previous Panel",
-            Self::NewProject => "New Project…",
-            Self::OpenProject => "Open Project…",
-            Self::InputActions => "Input Actions…",
-            Self::ProjectSettings => "Project Settings…",
-            Self::Preferences => "Preferences…",
-            Self::ImportAsset => "Import…",
-            Self::CreateShaderSource => "Shader Source",
-            Self::RefreshShader => "Refresh Scene Shader",
-            Self::CreateEmpty => "Create Empty",
-            Self::GroupSelection => "Group Selection",
-            Self::CreateDirectionalLight => "Directional Light",
-            Self::GameCamera => "Camera…",
-            Self::GameUi => "Game UI…",
-            Self::AssignCube => "Procedural Cube",
-            Self::ToggleHierarchy => "Hierarchy",
-            Self::ToggleInspector => "Inspector",
-            Self::ToggleAssets => "Assets",
-            Self::ToggleConsole => "Console",
-            Self::AiConnection => "AI Connection…",
-            Self::PlayChecks => "Play Checks…",
-            Self::ScriptDebugger => "Script Debugger…",
-            Self::RecoveryCheckpoints => "Recovery Checkpoints…",
-            Self::LayoutDefault => "Default",
-            Self::LayoutSideBySide => "Side by Side",
-            Self::ResetLayout => "Reset Layout",
-            Self::Documentation => "Documentation",
-            Self::KeyboardShortcuts => "Keyboard Shortcuts…",
-            Self::GameControls => "Game Controls…",
-            Self::About => "About Rot Engine",
-            Self::CommandPalette => "Command Palette…",
+            Self::New => Text::LabelNew.plain(),
+            Self::Open => Text::LabelOpen.plain(),
+            Self::Save => Text::LabelSave.plain(),
+            Self::SaveAs => Text::LabelSaveAs.plain(),
+            Self::Export => Text::LabelExport.plain(),
+            Self::Undo => Text::LabelUndo.plain(),
+            Self::Redo => Text::LabelRedo.plain(),
+            Self::Copy => Text::LabelCopy.plain(),
+            Self::Paste => Text::LabelPaste.plain(),
+            Self::Duplicate => Text::LabelDuplicate.plain(),
+            Self::Delete => Text::MaterialDelete.plain(),
+            Self::Move => Text::LabelMove.plain(),
+            Self::Rotate => Text::LabelRotate.plain(),
+            Self::Scale => Text::LabelScale.plain(),
+            Self::Frame => Text::LabelFrame.plain(),
+            Self::Projection => Text::LabelProjection.plain(),
+            Self::Front => Text::LabelFront.plain(),
+            Self::Back => Text::LabelBack.plain(),
+            Self::Left => Text::LabelLeft.plain(),
+            Self::Right => Text::LabelRight.plain(),
+            Self::Top => Text::LabelTop.plain(),
+            Self::Bottom => Text::LabelBottom.plain(),
+            Self::Isometric => Text::LabelIsometric.plain(),
+            Self::FreeView => Text::LabelFreeView.plain(),
+            Self::Quit => Text::LabelQuit.plain(),
+            Self::FindObjects => Text::LabelFindObjects.plain(),
+            Self::FindContent => Text::AssetSearch.plain(),
+            Self::Rename => Text::AssetRename.plain(),
+            Self::SelectAll => Text::LabelSelectAll.plain(),
+            Self::FocusRuntime => Text::LabelFocusRuntime.plain(),
+            Self::CreateCube => Text::LabelCreateCube.plain(),
+            Self::CreateSphere => Text::ComponentSphere.plain(),
+            Self::CreateCapsule => Text::LabelCreateCapsule.plain(),
+            Self::CreateLight => Text::LabelCreateLight.plain(),
+            Self::Play => Text::LabelPlay.plain(),
+            Self::Pause => Text::LabelPause.plain(),
+            Self::Step => Text::LabelStep.plain(),
+            Self::NextPanel => Text::LabelNextPanel.plain(),
+            Self::PreviousPanel => Text::LabelPreviousPanel.plain(),
+            Self::NewProject => Text::LabelNewProject.plain(),
+            Self::OpenProject => Text::LabelOpenProject.plain(),
+            Self::InputActions => Text::LabelInputActions.plain(),
+            Self::ProjectSettings => Text::LabelProjectSettings.plain(),
+            Self::Preferences => Text::LabelPreferences.plain(),
+            Self::ImportAsset => Text::LabelImportAsset.plain(),
+            Self::CreateShaderSource => Text::LabelCreateShaderSource.plain(),
+            Self::RefreshShader => Text::LabelRefreshShader.plain(),
+            Self::CreateEmpty => Text::LabelCreateEmpty.plain(),
+            Self::GroupSelection => Text::LabelGroupSelection.plain(),
+            Self::CreateDirectionalLight => Text::LabelCreateDirectionalLight.plain(),
+            Self::GameCamera => Text::LabelGameCamera.plain(),
+            Self::GameUi => Text::LabelGameUi.plain(),
+            Self::AssignCube => Text::LabelAssignCube.plain(),
+            Self::ToggleHierarchy => Text::ComponentHierarchy.plain(),
+            Self::ToggleInspector => Text::ComponentInspector.plain(),
+            Self::ToggleAssets => Text::ComponentAssets.plain(),
+            Self::ToggleConsole => Text::LabelToggleConsole.plain(),
+            Self::AiConnection => Text::LabelAiConnection.plain(),
+            Self::PlayChecks => Text::LabelPlayChecks.plain(),
+            Self::ScriptDebugger => Text::LabelScriptDebugger.plain(),
+            Self::RecoveryCheckpoints => Text::LabelRecoveryCheckpoints.plain(),
+            Self::LayoutDefault => Text::LabelLayoutDefault.plain(),
+            Self::LayoutSideBySide => Text::LabelLayoutSideBySide.plain(),
+            Self::ResetLayout => Text::LabelResetLayout.plain(),
+            Self::Documentation => Text::LabelDocumentation.plain(),
+            Self::KeyboardShortcuts => Text::LabelKeyboardShortcuts.plain(),
+            Self::GameControls => Text::LabelGameControls.plain(),
+            Self::About => Text::LabelAbout.plain(),
+            Self::CommandPalette => Text::LabelCommandPalette.plain(),
         }
     }
     pub fn name(self) -> &'static str {
@@ -901,12 +902,12 @@ impl SettingsPage {
     ];
     pub fn label(self) -> &'static str {
         match self {
-            Self::General => "General",
-            Self::Appearance => "Appearance",
-            Self::Viewport => "Viewport",
-            Self::Shortcuts => "Shortcuts",
-            Self::ExternalTools => "External Tools",
-            Self::Ai => "AI",
+            Self::General => Text::LabelGeneral.plain(),
+            Self::Appearance => Text::LabelAppearance.plain(),
+            Self::Viewport => Text::LabelViewport.plain(),
+            Self::Shortcuts => Text::LabelShortcuts.plain(),
+            Self::ExternalTools => Text::LabelExternalTools.plain(),
+            Self::Ai => Text::LabelAi.plain(),
         }
     }
 }
@@ -975,7 +976,7 @@ impl Workspace {
                 }
             }
         } else {
-            workspace.error = "Couldn't find a place to save preferences.".into();
+            workspace.error = Text::WorkspaceCouldntFindAPlace.plain().into();
         }
         workspace.reset_editor_draft();
         workspace
@@ -992,7 +993,7 @@ impl Workspace {
         let mut keep = false;
         egui::Modal::new(egui::Id::unique("rot_style_chooser")).show(ctx, |ui| {
             ui.set_width(520.0f32.min(ctx.content_rect().width() - 48.0));
-            ui.heading("Choose Your Style");
+            ui.heading(Text::ChooseYourStyle.plain());
             ui.add_space(SPACE_S);
             ui.columns(2, |columns| {
                 for (column, style) in columns.iter_mut().zip(Style::ALL) {
@@ -1051,8 +1052,8 @@ impl Workspace {
                         egui::StrokeKind::Inside,
                     );
                     let response = response.on_hover_text(match style {
-                        Style::Rot => "The Rot Engine look",
-                        Style::Plain => "A neutral look, like other engines",
+                        Style::Rot => Text::TheRotEngineLook.plain(),
+                        Style::Plain => Text::WorkspaceANeutralLookLike.plain(),
                     });
                     response.widget_info(|| {
                         egui::WidgetInfo::selected(
@@ -1069,7 +1070,7 @@ impl Workspace {
             });
             ui.add_space(SPACE_S);
             ui.horizontal(|ui| {
-                ui.label("Mode");
+                ui.label(Text::Mode.plain());
                 for choice in [ThemeChoice::Dark, ThemeChoice::Light, ThemeChoice::System] {
                     if ui
                         .selectable_value(&mut self.prefs.theme, choice, choice.label())
@@ -1080,12 +1081,12 @@ impl Workspace {
                 }
             });
             if chosen == Style::Rot {
-                ui.checkbox(&mut self.prefs.themed_wording, "Themed Wording");
+                ui.checkbox(&mut self.prefs.themed_wording, Text::ThemedWording.plain());
             }
             ui.add_space(SPACE_S);
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    keep |= crate::ui_kit::primary_button(ui, "Continue").clicked();
+                    keep |= crate::ui_kit::primary_button(ui, Text::Continue.plain()).clicked();
                 });
             });
             keep |=
@@ -1133,8 +1134,8 @@ impl Workspace {
         Ok(())
     }
     fn editor_settings_ui(&mut self, ui: &mut egui::Ui) {
-        ui.strong("Script Editor");
-        ui.weak("Runs without a shell. Placeholders: {workspace}, {file}, {line}.");
+        ui.strong(Text::ScriptEditor.plain());
+        ui.weak(Text::WorkspaceRunsWithoutAShell.plain());
         let ids = [
             egui::Id::unique("external-editor-executable"),
             egui::Id::unique("external-editor-arguments"),
@@ -1146,14 +1147,14 @@ impl Workspace {
             owns && ui.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::S));
         let enter =
             ui.input(|input| input.modifiers.is_none() && input.key_pressed(egui::Key::Enter));
-        ui.label("Editor executable");
+        ui.label(Text::EditorExecutable.plain());
         let executable = ui.add(
             egui::TextEdit::singleline(&mut self.editor_executable)
                 .id(ids[0])
                 .char_limit(4096),
         );
         self.editor_dirty |= executable.changed();
-        ui.label("Arguments (JSON string array)");
+        ui.label(Text::ArgumentsJsonStringArray.plain());
         self.editor_dirty |= ui
             .add(
                 egui::TextEdit::multiline(&mut self.editor_args)
@@ -1179,7 +1180,7 @@ impl Workspace {
             .memory_mut(|m| m.data.insert_temp(ids[1].with("had_focus"), owns));
         let apply =
             ctrl_enter || left || (enter && (executable.has_focus() || executable.lost_focus()));
-        if self.editor_dirty && ui.button("Revert").clicked() {
+        if self.editor_dirty && ui.button(Text::Revert.plain()).clicked() {
             self.reset_editor_draft();
         }
         if apply || save {
@@ -1222,7 +1223,7 @@ impl Workspace {
                 return Err(format!(
                     "Couldn't read preferences at {}: {e}.",
                     path.display()
-                ))
+                ));
             }
         };
         if current != self.storage.baseline {
@@ -1438,7 +1439,7 @@ impl Workspace {
                     .iter()
                     .any(|b| b.action != action && b.same_keys(candidate))
                 {
-                    self.error = "That shortcut is taken. Choose another, or press Escape.".into();
+                    self.error = Text::WorkspaceThatShortcutIsTaken.plain().into();
                 } else if let Some(binding) =
                     self.prefs.bindings.iter_mut().find(|b| b.action == action)
                 {
@@ -1600,12 +1601,12 @@ impl Workspace {
         }
     }
     fn general_page(&mut self, ui: &mut egui::Ui) {
-        crate::ui_kit::property_row(ui, "UI Scale", |ui| {
+        crate::ui_kit::property_row(ui, Text::UiScale.plain(), |ui| {
             ui.add(egui::Slider::new(&mut self.prefs.scale, 0.75..=2.0).fixed_decimals(2));
         });
     }
     fn appearance_page(&mut self, ui: &mut egui::Ui) {
-        crate::ui_kit::property_row(ui, "Style", |ui| {
+        crate::ui_kit::property_row(ui, Text::Style.plain(), |ui| {
             let mut style = self.prefs.style.unwrap_or_default();
             for choice in crate::editor_theme::Style::ALL {
                 ui.selectable_value(&mut style, choice, choice.label());
@@ -1616,31 +1617,32 @@ impl Workspace {
                 self.prefs.style = Some(style);
             }
         });
-        crate::ui_kit::property_row(ui, "Mode", |ui| {
+        crate::ui_kit::property_row(ui, Text::Mode.plain(), |ui| {
             ui.horizontal_wrapped(|ui| {
                 for choice in crate::editor_theme::ThemeChoice::ALL {
                     ui.selectable_value(&mut self.prefs.theme, choice, choice.label());
                 }
             });
         });
-        crate::ui_kit::property_row(ui, "Themed Wording", |ui| {
+        crate::ui_kit::property_row(ui, Text::ThemedWording.plain(), |ui| {
             ui.checkbox(&mut self.prefs.themed_wording, "")
-                .on_hover_text("Occasional Rot-flavored lines in empty states and messages");
+                .on_hover_text(Text::WorkspaceOccasionalRotFlavoredLines.plain());
         });
     }
     fn viewport_page(&mut self, ui: &mut egui::Ui) {
-        crate::ui_kit::property_row(ui, "Fly Speed", |ui| {
+        crate::ui_kit::property_row(ui, Text::FlySpeed.plain(), |ui| {
             ui.add(
                 egui::DragValue::new(&mut self.prefs.movement_speed)
                     .range(0.05..=1000.0)
                     .speed(0.1)
-                    .suffix(" units/s"),
+                    .suffix(Text::UnitsS.plain()),
             )
-            .on_hover_text("Scroll while flying with the right mouse button to change it");
+            .on_hover_text(Text::WorkspaceScrollWhileFlyingWith.plain());
         });
     }
     fn shortcuts_page(&mut self, ui: &mut egui::Ui) {
-        let search = crate::ui_kit::search_field(ui, &mut self.shortcut_query, "Search");
+        let search =
+            crate::ui_kit::search_field(ui, &mut self.shortcut_query, Text::Search.plain());
         if !self.settings_focused {
             search.request_focus();
             self.settings_focused = true;
@@ -1678,7 +1680,7 @@ impl Workspace {
                 };
                 if ui
                     .add(egui::Button::new(text).min_size(egui::vec2(140.0, 0.0)))
-                    .on_hover_text("Click, then press the new keys. Escape cancels.")
+                    .on_hover_text(Text::WorkspaceClickThenPressThe.plain())
                     .clicked()
                 {
                     self.capture = Some(action);
@@ -1686,7 +1688,7 @@ impl Workspace {
                 if binding.key.is_some()
                     && ui
                         .small_button("×")
-                        .on_hover_text("Remove this shortcut")
+                        .on_hover_text(Text::RemoveThisShortcut.plain())
                         .clicked()
                 {
                     if let Some(b) = self.prefs.bindings.iter_mut().find(|b| b.action == action) {
@@ -1702,10 +1704,10 @@ impl Workspace {
     fn ai_page(&mut self, ui: &mut egui::Ui) {
         ui.checkbox(
             &mut self.prefs.allow_ai_connections,
-            "Allow AI apps to connect",
+            Text::AllowAiAppsToConnect.plain(),
         )
-        .on_hover_text("When off, this editor does not listen for AI apps");
-        ui.weak("Trusted apps and diagnostics: Window → AI Connection…");
+        .on_hover_text(Text::NativeWhenOffThisEditor.plain());
+        ui.weak(Text::WorkspaceTrustedAppsAndDiagnostics.plain());
     }
     pub fn settings_ui(&mut self, ctx: &egui::Context) {
         let _ = self.settings_ui_with_footer(ctx, false);
@@ -1800,7 +1802,7 @@ impl Workspace {
                 ui.separator();
                 ui.horizontal_wrapped(|ui| {
                     let reset = ui
-                        .button("Reset to Defaults")
+                        .button(Text::ResetToDefaults.plain())
                         .on_hover_text(format!("Reset the {} page", self.settings_page.label()));
                     footer[0] = reset.rect;
                     if reset.clicked() {
@@ -1810,14 +1812,14 @@ impl Workspace {
                     }
                     if !shortcuts_only {
                         let all = ui
-                            .button("Reset All Preferences")
-                            .on_hover_text("Also repairs an unreadable preferences file");
+                            .button(Text::ResetAllPreferences.plain())
+                            .on_hover_text(Text::WorkspaceAlsoRepairsAnUnreadable.plain());
                         footer[1] = all.rect;
                         if all.clicked() {
                             self.reset_preferences();
                         }
                     }
-                    let close = ui.button("Close");
+                    let close = ui.button(Text::CloseErrorDetails.plain());
                     footer[2] = close.rect;
                     if close.clicked() {
                         self.close_settings();

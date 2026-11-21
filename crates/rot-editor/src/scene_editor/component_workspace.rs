@@ -1514,7 +1514,10 @@ impl ComponentWorkspace {
                     );
                     #[cfg(target_os = "linux")]
                     if ui
-                        .add_enabled(!blocked, egui::Button::new("New Folder…"))
+                        .add_enabled(
+                            !blocked,
+                            egui::Button::new(Text::AssetNewFolderCommand.plain()),
+                        )
                         .clicked()
                     {
                         self.asset_browser.open_new_folder();
@@ -1727,7 +1730,7 @@ impl ComponentWorkspace {
                                     if ui
                                         .add_enabled(
                                             !blocked && !self.runtime.in_play_mode(),
-                                            egui::Button::new("Save as Prefab"),
+                                            egui::Button::new(Text::SaveAsPrefab.plain()),
                                         )
                                         .clicked()
                                     {
@@ -2202,7 +2205,12 @@ mod tests {
                 }
             }
             samples.sort_by(f64::total_cmp);
-            println!("5000 objects · {workload} · editor panels through tessellation · p50 {:.3} ms · p95 {:.3} ms · n={}", samples[60], samples[113], samples.len());
+            println!(
+                "5000 objects · {workload} · editor panels through tessellation · p50 {:.3} ms · p95 {:.3} ms · n={}",
+                samples[60],
+                samples[113],
+                samples.len()
+            );
         }
     }
 

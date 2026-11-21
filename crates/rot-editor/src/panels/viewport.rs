@@ -1,6 +1,7 @@
 //! Viewport panel body, moved out of scene_editor.rs (S-07d).
 
 use super::super::*;
+use crate::strings::Text;
 
 impl SceneEditor {
     /// The Scene or Game view: everything inside its dock tab (S-07a).
@@ -28,7 +29,7 @@ impl SceneEditor {
                 ui.ctx(),
                 crate::strings::Text::LoadingContent,
             ));
-            ui.label("The scene and your saved edits are retained while content loads.");
+            ui.label(Text::ViewportTheSceneAndYour.plain());
             // Stop remains available for an older retained runtime while
             // Reset and playback edits wait for content authority.
             let shortcut = self.workspace.shortcut_text(Action::FocusRuntime);
@@ -127,7 +128,7 @@ impl SceneEditor {
                     mixed_fit_error = Some(rot_render::FIT_ERROR);
                 }
             } else if self.runtime.visible {
-                self.notice = "Switch to the Scene view to frame selected lights.".into();
+                self.notice = Text::ViewportSwitchToTheScene.plain().into();
             }
         }
         if let Some(error) = mixed_fit_error {
@@ -283,7 +284,7 @@ impl SceneEditor {
             );
             if before != self.session.scene().revision {
                 self.sync_draft();
-                self.notice = "Transform committed; Undo restores the whole selection.".into();
+                self.notice = Text::TransformUpdated.plain().into();
             }
             match result {
                 Ok(owns) => owns,

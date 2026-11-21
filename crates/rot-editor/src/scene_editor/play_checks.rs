@@ -1,5 +1,6 @@
 //! One isolated play-check job shared by the ordinary editor and native bridge.
 use super::SceneEditor;
+use crate::strings::Text;
 use eframe::egui;
 use rot_behavior::play_check::{
     self as check, CheckIdentity, Comparison, Expectation, PlayCheck, Report, Selection,
@@ -175,7 +176,7 @@ impl Host {
                         draft.identity = identity;
                     }
                 }
-                self.message = "Captured the saved scene. Save the check to keep it.".into();
+                self.message = Text::PlayChecksCapturedTheSavedScene.plain().into();
             }
             Ok(Completion::Loaded(case, bytes)) | Ok(Completion::Saved(case, bytes)) => {
                 receipt["case_name"] = json!(case.name);
@@ -290,7 +291,7 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
                     return Ok(Completion::Refused {
                         status: "invalid_case",
                         diagnostic,
-                    })
+                    });
                 }
             };
             let clips = match &snapshot.assets {
@@ -423,7 +424,7 @@ impl SceneEditor {
                 None
             }
             None => {
-                return Err("Project assets unavailable; reopen or repair content first.".into())
+                return Err("Project assets unavailable; reopen or repair content first.".into());
             }
         };
         Ok(Snapshot {
@@ -585,8 +586,7 @@ impl SceneEditor {
         });
         self.play_checks.baseline = None;
         self.play_checks.draft_path = self.session.path().map(std::path::Path::to_owned);
-        self.play_checks.message =
-            "New check. Add input and expected values, then Save Check.".into();
+        self.play_checks.message = Text::PlayChecksNewCheckAddInput.plain().into();
     }
     pub(super) fn play_checks_ui(&mut self, ctx: &egui::Context) {
         if !self.play_checks.open {
@@ -604,29 +604,29 @@ impl SceneEditor {
         let busy = self.play_checks.active.is_some();
         egui::Modal::new(egui::Id::unique("play_checks_dialog")).show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 48.).clamp(280., 620.));
-            ui.heading("Play checks");
-            ui.label("Runs the check in an isolated preview. Your scene is unchanged.");
+            ui.heading(Text::PlayChecks.plain());
+            ui.label(Text::PlayChecksRunsTheCheckIn.plain());
             ui.horizontal_wrapped(|ui| {
                 if ui
-                    .add_enabled(!busy, egui::Button::new("New check"))
+                    .add_enabled(!busy, egui::Button::new(Text::NewCheck.plain()))
                     .clicked()
                 {
                     action = Some("new");
                 }
                 if ui
-                    .add_enabled(!busy, egui::Button::new("Reopen check"))
+                    .add_enabled(!busy, egui::Button::new(Text::ReopenCheck.plain()))
                     .clicked()
                 {
                     action = Some("load");
                 }
                 if ui
-                    .add_enabled(!busy, egui::Button::new("Run saved check"))
+                    .add_enabled(!busy, egui::Button::new(Text::RunSavedCheck.plain()))
                     .clicked()
                 {
                     action = Some("run");
                 }
                 if ui
-                    .add_enabled(busy, egui::Button::new("Cancel operation"))
+                    .add_enabled(busy, egui::Button::new(Text::CancelOperation.plain()))
                     .clicked()
                 {
                     action = Some("cancel");
@@ -683,7 +683,7 @@ impl SceneEditor {
                 .show(ui, |ui| {
                     ui.add_enabled_ui(!busy, |ui| {
                         if let Some(case) = &mut self.play_checks.draft {
-                            ui.label("Check name");
+                            ui.label(Text::CheckName.plain());
                             ui.add(
                                 egui::TextEdit::singleline(&mut case.name)
                                     .char_limit(128)
@@ -692,26 +692,24 @@ impl SceneEditor {
                             edit_frames(ui, &mut case.frames, &self.session.authoring().actions);
                             edit_expectations(ui, &mut case.expectations);
                             ui.label(if case.identity.scene_sha256.is_empty() {
-                                "Identity not captured"
+                                Text::PlayCheckNoScene.plain()
                             } else {
-                                "Saved scene identity captured (does not update expectations)"
+                                Text::PlayCheckSceneCaptured.plain()
                             });
                             ui.horizontal_wrapped(|ui| {
-                                if ui.button("Capture current identity").clicked() {
+                                if ui.button(Text::CaptureCurrentIdentity.plain()).clicked() {
                                     action = Some("capture");
                                 }
-                                if ui.button("Save check").clicked() {
+                                if ui.button(Text::SaveCheck.plain()).clicked() {
                                     action = Some("save");
                                 }
                             });
                         } else {
-                            ui.label(
-                                "Create a check or reopen this scene's .play-check.json file.",
-                            );
+                            ui.label(Text::PlayChecksCreateACheckOr.plain());
                         }
                     });
                 });
-            if ui.button("Close play checks").clicked() {
+            if ui.button(Text::ClosePlayChecks.plain()).clicked() {
                 close = true;
             }
         });
@@ -765,8 +763,8 @@ fn edit_frames(
     frames: &mut Vec<ActionFrame>,
     actions: &rot_scene::input::ActionMap,
 ) {
-    ui.heading("Ordered input frames");
-    ui.small("Each row is one tick.");
+    ui.heading(Text::OrderedInputFrames.plain());
+    ui.small(Text::EachRowIsOneTick.plain());
     let mut remove = None;
     for (index, frame) in frames.iter_mut().enumerate() {
         ui.push_id(("check_frame", index), |ui| {
@@ -790,7 +788,7 @@ fn edit_frames(
                         }
                     }
                     if actions.is_empty() {
-                        ui.label("No saved Input Actions");
+                        ui.label(Text::NoSavedInputActions.plain());
                     }
                 });
                 if ui.button(format!("Remove frame {}", index + 1)).clicked() {
@@ -803,20 +801,20 @@ fn edit_frames(
                     ui.horizontal_wrapped(|ui| {
                         ui.label(id);
                         ui.label(match value {
-                            ActionValue::Axis1d { .. } => "Axis",
-                            ActionValue::Button(_) => "Button",
+                            ActionValue::Axis1d { .. } => Text::Axis.plain(),
+                            ActionValue::Button(_) => Text::Button.plain(),
                         });
                         match value {
                             ActionValue::Axis1d { value } => {
                                 ui.add(egui::DragValue::new(value).range(-1..=1));
                             }
                             ActionValue::Button(state) => {
-                                ui.checkbox(&mut state.held, "Held");
-                                ui.checkbox(&mut state.pressed, "Pressed");
-                                ui.checkbox(&mut state.released, "Released");
+                                ui.checkbox(&mut state.held, Text::Held.plain());
+                                ui.checkbox(&mut state.pressed, Text::Pressed.plain());
+                                ui.checkbox(&mut state.released, Text::Released.plain());
                             }
                         }
-                        if ui.button("Remove action").clicked() {
+                        if ui.button(Text::RemoveAction.plain()).clicked() {
                             remove_action = Some(id.clone());
                         }
                     });
@@ -832,7 +830,10 @@ fn edit_frames(
     }
     ui.horizontal_wrapped(|ui| {
         if ui
-            .add_enabled(frames.len() < 120, egui::Button::new("Add neutral frame"))
+            .add_enabled(
+                frames.len() < 120,
+                egui::Button::new(Text::AddNeutralFrame.plain()),
+            )
             .clicked()
         {
             frames.push(ActionFrame::default());
@@ -840,7 +841,7 @@ fn edit_frames(
         if ui
             .add_enabled(
                 !frames.is_empty() && frames.len() < 120,
-                egui::Button::new("Duplicate last frame"),
+                egui::Button::new(Text::DuplicateLastFrame.plain()),
             )
             .clicked()
         {
@@ -850,7 +851,7 @@ fn edit_frames(
     });
 }
 fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
-    ui.heading("Final expectations");
+    ui.heading(Text::FinalExpectations.plain());
     let mut remove = None;
     for (index, expectation) in expectations.iter_mut().enumerate() {
         ui.push_id(("check_expectation", index), |ui| {
@@ -859,15 +860,15 @@ fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
                 ui.label(format!("Assertion {}", index + 1));
                 egui::ComboBox::from_id_salt("selection")
                     .selected_text(match expectation.select {
-                        Selection::Tick => "Completed tick",
-                        Selection::Translation { .. } => "Object translation",
-                        Selection::State { .. } => "Creator state",
+                        Selection::Tick => Text::CompletedTick.plain(),
+                        Selection::Translation { .. } => Text::ObjectTranslation.plain(),
+                        Selection::State { .. } => Text::CreatorState.plain(),
                     })
                     .show_ui(ui, |ui| {
                         if ui
                             .selectable_label(
                                 matches!(expectation.select, Selection::Tick),
-                                "Completed tick",
+                                Text::CompletedTick.plain(),
                             )
                             .clicked()
                         {
@@ -883,7 +884,7 @@ fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
                         if ui
                             .selectable_label(
                                 matches!(expectation.select, Selection::Translation { .. }),
-                                "Object translation",
+                                Text::ObjectTranslation.plain(),
                             )
                             .clicked()
                         {
@@ -901,7 +902,7 @@ fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
                         if ui
                             .selectable_label(
                                 matches!(expectation.select, Selection::State { .. }),
-                                "Creator state",
+                                Text::CreatorState.plain(),
                             )
                             .clicked()
                         {
@@ -924,27 +925,27 @@ fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
             match &mut expectation.select {
                 Selection::Tick => {}
                 Selection::Translation { object_id } => {
-                    ui.label("Object ID");
+                    ui.label(Text::ObjectId.plain());
                     ui.add(egui::TextEdit::singleline(object_id).char_limit(64));
                 }
                 Selection::State { binding_id, field } => {
-                    ui.label("Script Attachment ID");
+                    ui.label(Text::ScriptAttachmentId.plain());
                     ui.add(egui::TextEdit::singleline(binding_id).char_limit(64));
-                    ui.label("State field");
+                    ui.label(Text::StateField.plain());
                     ui.add(egui::TextEdit::singleline(field).char_limit(64));
                 }
             }
             if matches!(expectation.select, Selection::State { .. }) {
                 egui::ComboBox::from_id_salt("comparison")
                     .selected_text(match expectation.comparison {
-                        Comparison::Equals { .. } => "Equals",
-                        Comparison::Range { .. } => "Numeric range",
+                        Comparison::Equals { .. } => Text::Equals.plain(),
+                        Comparison::Range { .. } => Text::NumericRange.plain(),
                     })
                     .show_ui(ui, |ui| {
                         if ui
                             .selectable_label(
                                 matches!(expectation.comparison, Comparison::Equals { .. }),
-                                "Equals",
+                                Text::Equals.plain(),
                             )
                             .clicked()
                         {
@@ -959,7 +960,7 @@ fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
                         if ui
                             .selectable_label(
                                 matches!(expectation.comparison, Comparison::Range { .. }),
-                                "Numeric range",
+                                Text::NumericRange.plain(),
                             )
                             .clicked()
                         {
@@ -970,14 +971,14 @@ fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
                         }
                     });
             } else {
-                ui.label("Equals");
+                ui.label(Text::Equals.plain());
             }
             match &mut expectation.comparison {
                 Comparison::Range { min, max } => {
                     ui.horizontal_wrapped(|ui| {
-                        ui.label("Minimum");
+                        ui.label(Text::Minimum.plain());
                         ui.add(egui::DragValue::new(min));
-                        ui.label("Maximum");
+                        ui.label(Text::Maximum.plain());
                         ui.add(egui::DragValue::new(max));
                     });
                 }
@@ -988,10 +989,10 @@ fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
                     if matches!(expectation.select, Selection::State { .. }) {
                         egui::ComboBox::from_id_salt("value_type")
                             .selected_text(match expected {
-                                StateValue::Number(_) => "Number",
-                                StateValue::Vec3(_) => "Vector",
-                                StateValue::Bool(_) => "Boolean",
-                                StateValue::Text(_) => "Text",
+                                StateValue::Number(_) => Text::Number.plain(),
+                                StateValue::Vec3(_) => Text::Vector.plain(),
+                                StateValue::Bool(_) => Text::Boolean.plain(),
+                                StateValue::Text(_) => Text::RuntimeStateTextLabel.plain(),
                             })
                             .show_ui(ui, |ui| {
                                 for (label, value) in [
@@ -1019,7 +1020,7 @@ fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
                             });
                     }
                     ui.horizontal_wrapped(|ui| {
-                        ui.label("Expected");
+                        ui.label(Text::Expected.plain());
                         match expected {
                             StateValue::Number(value) => {
                                 ui.add(egui::DragValue::new(value));
@@ -1031,7 +1032,7 @@ fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
                                 }
                             }
                             StateValue::Bool(value) => {
-                                ui.checkbox(value, "True");
+                                ui.checkbox(value, Text::True.plain());
                             }
                             StateValue::Text(value) => {
                                 ui.add(egui::TextEdit::singleline(value).char_limit(256));
@@ -1042,7 +1043,7 @@ fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
                         && matches!(expected, StateValue::Number(_) | StateValue::Vec3(_))
                     {
                         ui.horizontal_wrapped(|ui| {
-                            ui.label("Tolerance");
+                            ui.label(Text::Tolerance.plain());
                             ui.add(
                                 egui::DragValue::new(tolerance.get_or_insert(0.))
                                     .range(0.0..=1000.0)
@@ -1060,7 +1061,10 @@ fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
         expectations.remove(index);
     }
     if ui
-        .add_enabled(expectations.len() < 8, egui::Button::new("Add assertion"))
+        .add_enabled(
+            expectations.len() < 8,
+            egui::Button::new(Text::AddAssertion.plain()),
+        )
         .clicked()
     {
         expectations.push(Expectation {
@@ -1092,7 +1096,7 @@ fn assertion_label(row: &Value) -> String {
         return format!("Assertion {index}: {state}");
     };
     let selection = match expectation.select {
-        Selection::Tick => "Completed tick".into(),
+        Selection::Tick => Text::CompletedTick.plain().into(),
         Selection::Translation { object_id } => format!("{object_id} translation"),
         Selection::State { binding_id, field } => format!("{binding_id}.{field}"),
     };
@@ -1117,7 +1121,9 @@ fn assertion_label(row: &Value) -> String {
     } else {
         ""
     };
-    format!("Assertion {index}: {selection} — {state}\nExpected: {expected}\nActual: {actual}{truncated}")
+    format!(
+        "Assertion {index}: {selection} — {state}\nExpected: {expected}\nActual: {actual}{truncated}"
+    )
 }
 
 #[cfg(test)]
@@ -1194,9 +1200,9 @@ mod tests {
         };
         let mut shapes = frame(&ctx, vec![], |ui| edit_expectations(ui, &mut expectations));
         for (current, choice) in [
-            ("Completed tick", "Creator state"),
-            ("Equals", "Numeric range"),
-            ("Numeric range", "Equals"),
+            ("Completed Tick", "Creator State"),
+            ("Equals", "Numeric Range"),
+            ("Numeric Range", "Equals"),
             ("Number", "Boolean"),
         ] {
             let point = text_rect(&shapes, current).center();
@@ -1248,8 +1254,8 @@ mod tests {
         let result = text_rect(&shapes, "Result: assertion_failed");
         let form = text_rect(&shapes, "Check name");
         assert!(result.max.y < form.min.y);
-        text_rect(&shapes, "Run saved check");
-        text_rect(&shapes, "Close play checks");
+        text_rect(&shapes, "Run Saved Check");
+        text_rect(&shapes, "Close Play Checks");
         frame(
             &ctx,
             vec![egui::Event::Key {

@@ -2,6 +2,7 @@
 //! to this computer (Project, Input Actions, Build), in the same page layout
 //! as Preferences.
 use super::*;
+use crate::strings::Text;
 use std::path::Path;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -45,33 +46,34 @@ impl SceneEditor {
             || "Not saved yet".into(),
             |n| n.to_string_lossy().into_owned(),
         );
-        crate::ui_kit::property_row(ui, "Name", |ui| {
-            ui.label(name).on_hover_text("The project folder's name");
+        crate::ui_kit::property_row(ui, Text::ComponentName.plain(), |ui| {
+            ui.label(name)
+                .on_hover_text(Text::TheProjectFoldersName.plain());
         });
-        crate::ui_kit::property_row(ui, "Location", |ui| {
+        crate::ui_kit::property_row(ui, Text::Location.plain(), |ui| {
             ui.add(egui::Label::new(&location).truncate())
                 .on_hover_text(&location);
         });
-        crate::ui_kit::property_row(ui, "Startup Scene", |ui| {
+        crate::ui_kit::property_row(ui, Text::StartupScene.plain(), |ui| {
             ui.label(startup)
-                .on_hover_text("A project has one scene for now; it is the one that starts");
+                .on_hover_text(Text::StartupSceneHint.plain());
         });
     }
 
     fn build_page(&mut self, ui: &mut egui::Ui) {
-        crate::ui_kit::property_row(ui, "Target", |ui| {
-            ui.label("Linux (x86_64)");
+        crate::ui_kit::property_row(ui, Text::Target.plain(), |ui| {
+            ui.label(Text::LinuxX8664.plain());
         });
         let kit = self.creation_export.runtime_kit().map(Path::to_path_buf);
-        crate::ui_kit::property_row(ui, "Runtime Kit", |ui| match &kit {
+        crate::ui_kit::property_row(ui, Text::RuntimeKit.plain(), |ui| match &kit {
             Some(kit) => {
                 let text = kit.display().to_string();
                 ui.add(egui::Label::new(&text).truncate())
                     .on_hover_text(text);
             }
             None => {
-                ui.weak("Not set")
-                    .on_hover_text("Build… asks for a runtime kit the first time");
+                ui.weak(Text::NotSet.plain())
+                    .on_hover_text(Text::BuildKitHint.plain());
             }
         });
         ui.add_space(crate::ui_kit::tokens::SPACE_S);
@@ -99,7 +101,7 @@ impl SceneEditor {
         let screen = ctx.content_rect();
         let mut open = true;
         let mut edit = None;
-        egui::Window::new("Project Settings")
+        egui::Window::new(Text::ProjectSettings.plain())
             .open(&mut open)
             .collapsible(false)
             .resizable(false)

@@ -4,6 +4,7 @@
 //! diagnostics (with file and line), import and build results, and engine
 //! warnings from the `log` crate. The status bar shows the latest one; the
 //! Console lists them all; toasts confirm what the creator just did.
+use crate::strings::Text;
 use eframe::egui::{self, RichText};
 use std::collections::VecDeque;
 use std::sync::Mutex;
@@ -258,11 +259,11 @@ impl Console {
     pub fn ui(&mut self, ui: &mut egui::Ui) -> Option<Request> {
         let mut request = None;
         ui.horizontal(|ui| {
-            if crate::ui_kit::button(ui, "Clear").clicked() {
+            if crate::ui_kit::button(ui, Text::Clear.plain()).clicked() {
                 self.clear();
             }
             ui.toggle_value(&mut self.collapse, "Collapse")
-                .on_hover_text("Show identical messages once with a count");
+                .on_hover_text(Text::ConsoleShowIdenticalMessagesOnce.plain());
             ui.separator();
             for level in [Level::Info, Level::Warning, Level::Error] {
                 let mut shown = !self.hide[level.index()];
@@ -271,9 +272,9 @@ impl Console {
                 if ui
                     .toggle_value(&mut shown, label)
                     .on_hover_text(match level {
-                        Level::Info => "Show messages",
-                        Level::Warning => "Show warnings",
-                        Level::Error => "Show errors",
+                        Level::Info => Text::ShowMessages.plain(),
+                        Level::Warning => Text::ShowWarnings.plain(),
+                        Level::Error => Text::ShowErrors.plain(),
                     })
                     .changed()
                 {

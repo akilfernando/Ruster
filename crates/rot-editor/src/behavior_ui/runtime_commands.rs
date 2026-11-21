@@ -1,5 +1,6 @@
 //! Paused Application transactions on the existing worker and captured catalog.
 use super::*;
+use crate::strings::Text;
 use serde_json::{json, Value};
 
 #[derive(Default)]
@@ -129,80 +130,147 @@ impl RuntimeUi {
         {
             self.maintain_control_focus(ui.ctx());
         }
-        egui::CollapsingHeader::new("Application commands").id_salt("runtime_application_commands").show(ui, |ui| {
-            ui.weak(format!("Paused · Run version {}", identity.1));
-            if let Some(receipt)=self.last_command_receipt() {
-                ui.collapsing("Last Command Details",|ui| {
-                    ui.label(format!("{} / {} · run version {} → {} · tick {}",receipt.binding_id,receipt.command_id,receipt.previous_commit_revision,receipt.commit_revision,receipt.tick));
-                    ui.weak(format!("Command definitions {}",receipt.schema_hash));
-                    ui.weak(format!("Input fingerprint {}",receipt.input_sha256));
-                });
-            }
-            if !supported {
-                ui.colored_label(
-                    ui.visuals().warn_fg_color,
-                    "Enable a compatible application script to run commands.",
-                );
-            }
-            if !ready { ui.weak("Pause the current initialized run and finish other edits to invoke a command."); }
-            ui.add_enabled_ui(ready, |ui| {
-                if !catalog.contains_key(&self.invocation.command) {
-                    self.invocation.command = catalog.keys().next().cloned().unwrap_or_default();
-                }
-                let previous = self.invocation.command.clone();
-                let choice = egui::ComboBox::from_id_salt("runtime_command_choice").selected_text(&previous).show_ui(ui, |ui| {
-                    for id in catalog.keys() {
-                        ui.add_enabled_ui(!self.invocation.dirty, |ui| {
-                            if ui.selectable_value(&mut self.invocation.command, id.clone(), id).clicked() {
-                                ui.close();
-                            }
-                        });
-                    }
-                });
-                if choice.response.has_focus() && choice.response.gained_focus() {
-                    choice.response.scroll_to_me(None);
-                }
-                if previous != self.invocation.command || self.invocation.binding != binding_id {
-                    self.invocation.arguments.clear();
-                }
-                self.invocation.binding = binding_id.clone();
-                let definition = &catalog[&self.invocation.command];
-                if self.invocation.arguments.is_empty() {
-                    self.invocation.arguments = definition.arguments.iter().map(|(name,value)|
-                        (name.clone(),ValueDraft::from(&state_property(value)))).collect();
-                }
-                let popup = egui::Popup::is_any_open(ui.ctx());
-                let mut owns = false;
-                for (name,value) in &mut self.invocation.arguments {
-                    ui.push_id(("invoke",identity.0.reset_epoch,binding_id.as_str(),self.invocation.command.as_str(),name), |ui| {
-                        ui.label(name);
-                        let response = value_ui(ui,value,session,&[],identity.0.generation,&mut false);
-                        owns |= command_field_focus(ui, response.focus_id);
-                        self.invocation.dirty |= response.changed;
+        egui::CollapsingHeader::new(Text::ApplicationCommands.plain())
+            .id_salt("runtime_application_commands")
+            .show(ui, |ui| {
+                ui.weak(format!("Paused · Run version {}", identity.1));
+                if let Some(receipt) = self.last_command_receipt() {
+                    ui.collapsing(Text::LastCommandDetails.plain(), |ui| {
+                        ui.label(format!(
+                            "{} / {} · run version {} → {} · tick {}",
+                            receipt.binding_id,
+                            receipt.command_id,
+                            receipt.previous_commit_revision,
+                            receipt.commit_revision,
+                            receipt.tick
+                        ));
+                        ui.weak(format!("Command definitions {}", receipt.schema_hash));
+                        ui.weak(format!("Input fingerprint {}", receipt.input_sha256));
                     });
                 }
-                let enter = owns && !popup && !egui::Popup::is_any_open(ui.ctx())
-                    && command_key(ui,egui::Key::Enter);
-                let invoke_id = ui.make_persistent_id(("invoke-command", &binding_id, &self.invocation.command));
-                let invoke = ui.scope_builder(egui::UiBuilder::new().scope_id(invoke_id), |ui| ui.button("Invoke Application command")).inner;
-                if invoke.has_focus() && invoke.gained_focus() {
-                    invoke.scroll_to_me(None);
+                if !supported {
+                    ui.colored_label(
+                        ui.visuals().warn_fg_color,
+                        Text::RuntimeCommandsEnableACompatibleApplication.plain(),
+                    );
                 }
-                self.restore_control_focus(&invoke);
-                owns |= command_field_focus(ui, Some(invoke.id));
-                submit = (command_clicked(&invoke) || enter) && command_claim(ui.ctx(), &mut self.command_action_frame);
-                if submit && invoke.has_focus() { submit_control = Some(invoke.clone()); }
-                let cancel_id = ui.make_persistent_id(("cancel-command", &binding_id, &self.invocation.command));
-                let cancel_button = ui.scope_builder(egui::UiBuilder::new().scope_id(cancel_id), |ui| ui.button("Cancel command arguments")).inner;
-                if cancel_button.has_focus() && cancel_button.gained_focus() {
-                    cancel_button.scroll_to_me(None);
+                if !ready {
+                    ui.weak(Text::RuntimeCommandsPauseTheCurrentInitialized.plain());
                 }
-                owns |= command_field_focus(ui, Some(cancel_button.id));
-                cancel = (command_clicked(&cancel_button) || (owns && !popup
-                    && !egui::Popup::is_any_open(ui.ctx()) && command_key(ui,egui::Key::Escape)))
-                    && command_claim(ui.ctx(), &mut self.command_action_frame);
+                ui.add_enabled_ui(ready, |ui| {
+                    if !catalog.contains_key(&self.invocation.command) {
+                        self.invocation.command =
+                            catalog.keys().next().cloned().unwrap_or_default();
+                    }
+                    let previous = self.invocation.command.clone();
+                    let choice = egui::ComboBox::from_id_salt("runtime_command_choice")
+                        .selected_text(&previous)
+                        .show_ui(ui, |ui| {
+                            for id in catalog.keys() {
+                                ui.add_enabled_ui(!self.invocation.dirty, |ui| {
+                                    if ui
+                                        .selectable_value(
+                                            &mut self.invocation.command,
+                                            id.clone(),
+                                            id,
+                                        )
+                                        .clicked()
+                                    {
+                                        ui.close();
+                                    }
+                                });
+                            }
+                        });
+                    if choice.response.has_focus() && choice.response.gained_focus() {
+                        choice.response.scroll_to_me(None);
+                    }
+                    if previous != self.invocation.command || self.invocation.binding != binding_id
+                    {
+                        self.invocation.arguments.clear();
+                    }
+                    self.invocation.binding = binding_id.clone();
+                    let definition = &catalog[&self.invocation.command];
+                    if self.invocation.arguments.is_empty() {
+                        self.invocation.arguments = definition
+                            .arguments
+                            .iter()
+                            .map(|(name, value)| {
+                                (name.clone(), ValueDraft::from(&state_property(value)))
+                            })
+                            .collect();
+                    }
+                    let popup = egui::Popup::is_any_open(ui.ctx());
+                    let mut owns = false;
+                    for (name, value) in &mut self.invocation.arguments {
+                        ui.push_id(
+                            (
+                                "invoke",
+                                identity.0.reset_epoch,
+                                binding_id.as_str(),
+                                self.invocation.command.as_str(),
+                                name,
+                            ),
+                            |ui| {
+                                ui.label(name);
+                                let response = value_ui(
+                                    ui,
+                                    value,
+                                    session,
+                                    &[],
+                                    identity.0.generation,
+                                    &mut false,
+                                );
+                                owns |= command_field_focus(ui, response.focus_id);
+                                self.invocation.dirty |= response.changed;
+                            },
+                        );
+                    }
+                    let enter = owns
+                        && !popup
+                        && !egui::Popup::is_any_open(ui.ctx())
+                        && command_key(ui, egui::Key::Enter);
+                    let invoke_id = ui.make_persistent_id((
+                        "invoke-command",
+                        &binding_id,
+                        &self.invocation.command,
+                    ));
+                    let invoke = ui
+                        .scope_builder(egui::UiBuilder::new().scope_id(invoke_id), |ui| {
+                            ui.button(Text::InvokeApplicationCommand.plain())
+                        })
+                        .inner;
+                    if invoke.has_focus() && invoke.gained_focus() {
+                        invoke.scroll_to_me(None);
+                    }
+                    self.restore_control_focus(&invoke);
+                    owns |= command_field_focus(ui, Some(invoke.id));
+                    submit = (command_clicked(&invoke) || enter)
+                        && command_claim(ui.ctx(), &mut self.command_action_frame);
+                    if submit && invoke.has_focus() {
+                        submit_control = Some(invoke.clone());
+                    }
+                    let cancel_id = ui.make_persistent_id((
+                        "cancel-command",
+                        &binding_id,
+                        &self.invocation.command,
+                    ));
+                    let cancel_button = ui
+                        .scope_builder(egui::UiBuilder::new().scope_id(cancel_id), |ui| {
+                            ui.button(Text::CancelCommandArguments.plain())
+                        })
+                        .inner;
+                    if cancel_button.has_focus() && cancel_button.gained_focus() {
+                        cancel_button.scroll_to_me(None);
+                    }
+                    owns |= command_field_focus(ui, Some(cancel_button.id));
+                    cancel = (command_clicked(&cancel_button)
+                        || (owns
+                            && !popup
+                            && !egui::Popup::is_any_open(ui.ctx())
+                            && command_key(ui, egui::Key::Escape)))
+                        && command_claim(ui.ctx(), &mut self.command_action_frame);
+                });
             });
-        });
         if cancel {
             self.invocation.arguments.clear();
             self.invocation.dirty = false;

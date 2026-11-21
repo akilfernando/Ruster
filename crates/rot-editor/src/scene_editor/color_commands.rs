@@ -1,5 +1,6 @@
 //! One authored color transaction shared by the inspector and native MCP.
 use super::SceneEditor;
+use crate::strings::Text;
 use eframe::egui;
 use serde_json::{json, Value};
 
@@ -90,12 +91,11 @@ impl SceneEditor {
         // confirmation dialog must not deadlock that authorized transaction;
         // inspector edits still require the full dialog-free gate above.
         if !self.color_editable_for_save(true) {
-            self.error =
-                "Finish or revert other drafts and resolve dialogs before applying color.".into();
+            self.error = Text::ColorCommandsFinishOtherEditsBefore.plain().into();
             return false;
         }
         if !draft.validate_snapshot(self.session.scene(), self.selected.as_deref()) {
-            self.error = "Color target changed; cancel this color draft and inspect again.".into();
+            self.error = Text::ColorCommandsSelectionChangedCancelThe.plain().into();
             return false;
         }
         let color = match draft.parse() {
@@ -113,7 +113,7 @@ impl SceneEditor {
                 self.color_draft = None;
                 self.draft_generation = self.draft_generation.wrapping_add(1);
                 self.error.clear();
-                self.notice = "Color applied.".into();
+                self.notice = Text::ColorApplied.plain().into();
                 true
             }
             Err(error) => {
@@ -140,11 +140,11 @@ impl SceneEditor {
         let editable = self.color_editable();
         ui.separator();
         ui.strong(if object.material.is_some() {
-            "Object tint"
+            Text::ObjectTint.plain()
         } else {
-            "Color"
+            Text::Color.plain()
         })
-        .on_hover_text("Active object tint. RGB channels range from 0 to 1.");
+        .on_hover_text(Text::ColorCommandsActiveObjectTintRgb.plain());
         let mut changed = false;
         let mut enter = false;
         let mut submitting_field = None;
@@ -153,9 +153,9 @@ impl SceneEditor {
             ui.horizontal_wrapped(|ui| {
                 for (label, text) in ["R", "G", "B", "A"].into_iter().zip(&mut draft.channels) {
                     ui.label(label).on_hover_text(if label == "A" {
-                        "Stored alpha; the current viewport renders opaque surfaces."
+                        Text::ColorCommandsStoredAlphaTheCurrent.plain()
                     } else {
-                        "Channel value from 0 to 1."
+                        Text::ColorCommandsChannelValueFrom0.plain()
                     });
                     let response = ui.add(
                         egui::TextEdit::singleline(text)
@@ -190,8 +190,8 @@ impl SceneEditor {
         }
         if self.color_draft.is_some() {
             ui.horizontal(|ui| {
-                let apply = ui.add_enabled(editable, egui::Button::new("Apply color"));
-                let cancel = ui.add_enabled(editable, egui::Button::new("Cancel color"));
+                let apply = ui.add_enabled(editable, egui::Button::new(Text::ApplyColor.plain()));
+                let cancel = ui.add_enabled(editable, egui::Button::new(Text::CancelColor.plain()));
                 let action_owns_keyboard = editable
                     && [&apply, &cancel].iter().any(|response| {
                         response.has_focus()
@@ -216,7 +216,7 @@ impl SceneEditor {
                     self.color_draft = None;
                     self.draft_generation = self.draft_generation.wrapping_add(1);
                     self.error.clear();
-                    self.notice = "Color change cancelled.".into();
+                    self.notice = Text::ColorChangeCancelled.plain().into();
                 }
             });
         }
@@ -307,7 +307,7 @@ impl SceneEditor {
             })?;
         let changed = before != Some(color);
         self.sync_draft();
-        self.notice = "AI changed a color.".into();
+        self.notice = Text::AiChangedAColor.plain().into();
         Ok(
             json!({"session_token":token,"revision":revision.to_string(),"changed":changed,"object_id":id,"before":before,"after":color,"dirty":self.session.is_dirty()}),
         )

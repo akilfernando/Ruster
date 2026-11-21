@@ -1,5 +1,6 @@
 //! Human-only controls over Host authority. No CLI/configuration side effects.
 use super::*;
+use crate::strings::Text;
 
 #[derive(Clone, Default)]
 pub(super) struct NativeUi {
@@ -71,7 +72,7 @@ impl Host {
                 |(owner, pid)| format!("{owner} · process {pid}")
             )
         ));
-        ui.label("Read-only scene identifiers.");
+        ui.label(Text::ReadOnlySceneIdentifiers.plain());
     }
 
     fn binding_preview(&self) -> Preview {
@@ -135,11 +136,11 @@ impl Host {
                 .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::same(14)))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.heading("AI Connection");
+                        ui.heading(Text::AiConnection.plain());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui
-                                .button("Close")
-                                .on_hover_text("Close AI Connection")
+                                .button(Text::CloseErrorDetails.plain())
+                                .on_hover_text(Text::CloseAiConnection.plain())
                                 .clicked()
                             {
                                 state.open = false;
@@ -166,24 +167,24 @@ impl Host {
             Some((bridge, request))
         }) {
             ui.separator();
-            ui.heading("Approve pending browser for this project?");
+            ui.heading(Text::NativeApprovePendingBrowserFor.plain());
             ui.label(format!("Browser verification code: {}", &request.id[..12]));
             ui.label(&request.context);
             if request.binding.is_some() {
-                ui.label("Compare this code with your browser.");
-                ui.label("Approval lets this browser view and select for 30 minutes.");
-                ui.label("Pending requests expire after 2 minutes.");
+                ui.label(Text::NativeCompareThisCodeWith.plain());
+                ui.label(Text::NativeNativeApprovalLetsThisBrowser.plain());
+                ui.label(Text::NativePendingRequestsExpireAfter.plain());
             } else {
-                ui.label("Compare this code with your browser.");
-                ui.label("Approval lets this browser view and edit this project for 30 minutes.");
-                ui.label("Pending requests expire after 2 minutes.");
+                ui.label(Text::NativeCompareThisCodeWith.plain());
+                ui.label(Text::NativeApprovalLetsThisBrowser.plain());
+                ui.label(Text::NativePendingRequestsExpireAfter.plain());
             }
-            if ui.button("Approve this browser/project once").clicked()
+            if ui.button(Text::AllowBrowserOnce.plain()).clicked()
                 && bridge.approve_browser(&request)
             {
                 state.open = false;
             }
-            if ui.button("Deny pending browser").clicked() {
+            if ui.button(Text::DenyPendingBrowser.plain()).clicked() {
                 bridge.deny_browser();
             }
         }
@@ -191,7 +192,7 @@ impl Host {
         ui.add_space(4.0);
         let enrolled = std::env::var_os("ROT_CONNECTOR_ENROLLMENT").is_some();
         if enrolled {
-            ui.label("Connect from your AI app. Revoke removes saved access.");
+            ui.label(Text::NativeConnectFromYourAi.plain());
         }
         let action = match self.connection_state() {
             "retired" => Some("Start Listening"),
@@ -207,7 +208,7 @@ impl Host {
         }
         if let Some((grant, registered_project)) = self.enrolled_policy().ok().flatten() {
             ui.label(registered_project);
-            ui.label("Manages saved access only.");
+            ui.label(Text::ManagesSavedAccessOnly.plain());
             for (label, all) in [
                 ("Revoke persistent access to this project", false),
                 ("Revoke access to all registered projects", true),
@@ -216,30 +217,32 @@ impl Host {
                     self.disconnect_adapter();
                     match grant.revoke(all) {
                         Ok(()) => {
-                            state.notice = "Access revoked. Connect again to allow it.".into()
+                            state.notice = Text::NativeAccessRevokedConnectAgain.plain().into()
                         }
                         Err(_) => {
                             state.notice =
-                                "Couldn't revoke access. Disconnected for now. Try Revoke again."
-                                    .into()
+                                Text::NativeCouldntRevokeAccessDisconnected.plain().into()
                         }
                     }
                 }
             }
         }
-        if self.pending_adapter().is_some() && ui.button("Disconnect").clicked() {
+        if self.pending_adapter().is_some() && ui.button(Text::Disconnect.plain()).clicked() {
             state.preview = None;
             self.disconnect_adapter();
         }
         if self.editor.component.is_some() && self.connection_state() == "bound" {
-            ui.checkbox(&mut self.editor.ai_status.paused, "Pause AI Edits");
+            ui.checkbox(
+                &mut self.editor.ai_status.paused,
+                Text::PauseAiEdits.plain(),
+            );
         }
         if !state.notice.is_empty() {
             ui.label(&state.notice);
         }
         if ui
-            .button("Connect an AI App…")
-            .on_hover_text("Add Rot Engine to Claude Code, Codex or another AI app")
+            .button(Text::ConnectAnAiApp.plain())
+            .on_hover_text(Text::NativeAddRotEngineTo.plain())
             .clicked()
         {
             self.editor.ai_apps.show();
@@ -254,8 +257,8 @@ impl Host {
         };
         let mut allow = preferences.prefs.allow_ai_connections;
         if ui
-            .checkbox(&mut allow, "Allow AI apps to connect")
-            .on_hover_text("When off, this editor does not listen for AI apps")
+            .checkbox(&mut allow, Text::AllowAiAppsToConnect.plain())
+            .on_hover_text(Text::NativeWhenOffThisEditor.plain())
             .changed()
         {
             preferences.prefs.allow_ai_connections = allow;
@@ -263,7 +266,7 @@ impl Host {
             preferences.flush();
         }
         // Details for troubleshooting a connection, kept out of the way.
-        ui.collapsing("Diagnostics", |ui| {
+        ui.collapsing(Text::Diagnostics.plain(), |ui| {
             ui.label(format!("Scene file: {}", self.editor.document_label()));
             ui.label(format!(
                 "Scene ID: {}",
@@ -288,9 +291,9 @@ impl Host {
             )))
             .show(&ctx, |ui| {
                 ui.heading(if preview.owner.is_some() {
-                    "Allow this AI app?"
+                    Text::AllowThisAiApp.plain()
                 } else {
-                    "Start listening for AI apps?"
+                    Text::StartListeningForAiApps.plain()
                 });
                 ui.label(format!(
                     "It can read and change {} until it disconnects.",
@@ -301,7 +304,7 @@ impl Host {
                 }
                 let (cancel, confirm) = ui
                     .horizontal_wrapped(|ui| {
-                        let cancel = ui.button("Cancel");
+                        let cancel = ui.button(Text::ComponentCancel.plain());
                         let confirm = crate::editor_theme::primary_button(
                             ui,
                             if preview.owner.is_some() {
@@ -327,7 +330,7 @@ impl Host {
                     state.notice = if accepted {
                         ""
                     } else {
-                        "The request changed or ended. Review it again."
+                        Text::NativeTheRequestChangedOr.plain()
                     }
                     .into();
                 }
@@ -538,12 +541,7 @@ mod tests {
             "pending"
         );
         assert!(!host.bridge.as_ref().unwrap().browser_authorized(&request));
-        click(
-            &mut host,
-            &ctx,
-            &mut state,
-            "Approve this browser/project once",
-        );
+        click(&mut host, &ctx, &mut state, "Allow Browser Once");
         assert!(host.bridge.as_ref().unwrap().browser_authorized(&request));
         let wrong_project = crate::bridge::browser::BrowserRequest {
             context: "different-project".into(),

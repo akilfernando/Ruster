@@ -473,7 +473,7 @@ impl BehaviorUi {
         let mut close =
             editable && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
         let first = source.scroll;
-        egui::Window::new("Captured diagnostic source (read-only)")
+        egui::Window::new(Text::CapturedDiagnosticSourceReadOnly.plain())
             .open(&mut opened)
             .max_width((ctx.content_rect().width() - 32.0).max(240.0))
             .show(ctx, |ui| {
@@ -487,7 +487,7 @@ impl BehaviorUi {
                     .truncate(),
                 )
                 .on_hover_text(&source.hash);
-                ui.label("Captured runtime version; your current working copy is preserved.");
+                ui.label(Text::BehaviorUiCapturedRuntimeVersionYour.plain());
                 egui::ScrollArea::vertical()
                     .max_height((ctx.content_rect().height() - 190.0).max(48.0))
                     .show(ui, |ui| {
@@ -502,7 +502,7 @@ impl BehaviorUi {
                             source.scroll = false;
                         }
                     });
-                let button = ui.button("Close captured source");
+                let button = ui.button(Text::CloseCapturedSource.plain());
                 if first {
                     button.request_focus();
                 }
@@ -1097,7 +1097,7 @@ impl BehaviorUi {
             Action::External { .. } | Action::ExternalStatus => {
                 return Err(
                     "External editor actions are handled by the document controller.".into(),
-                )
+                );
             }
         }
         self.changed();
@@ -1132,7 +1132,7 @@ impl BehaviorUi {
         let mut property_changed = false;
         if self.source_dirty
             && !self.source_open
-            && ui.button("Show unapplied source draft").clicked()
+            && ui.button(Text::ShowUnappliedSourceDraft.plain()).clicked()
         {
             self.source_open = true;
             self.source_focus = true;
@@ -1205,9 +1205,9 @@ impl BehaviorUi {
                             }
                             if ui
                                 .button(if property.state_default {
-                                    "Revert state default"
+                                    Text::RevertStateDefault.plain()
                                 } else {
-                                    "Revert property value"
+                                    Text::RevertPropertyValue.plain()
                                 })
                                 .clicked()
                             {
@@ -1225,7 +1225,7 @@ impl BehaviorUi {
             if let Some(draft) = &self.state_add {
                 ui.label(format!("Unsaved state field for script {}", draft.binding));
             }
-            if ui.button("Cancel pending state field").clicked() {
+            if ui.button(Text::CancelPendingStateField.plain()).clicked() {
                 action = Some(Action::CancelStateAdd);
             }
         }
@@ -1252,8 +1252,8 @@ impl BehaviorUi {
             return action;
         };
         if assembly {
-            ui.label("Group-local rotation (radians)");
-            ui.small("Lua API6 returns X, Y and Z rotation. Position and scale stay fixed.");
+            ui.label(Text::GroupLocalRotationRadians.plain());
+            ui.small(Text::BehaviorUiLuaApi6ReturnsX.plain());
         }
         let attached = session
             .authoring()
@@ -1283,19 +1283,22 @@ impl BehaviorUi {
                     ui.label(source.label.as_deref().unwrap_or(&binding.source_id));
                 }
                 let mut enabled = binding.enabled;
-                if ui.checkbox(&mut enabled, "Enabled").changed() {
+                if ui
+                    .checkbox(&mut enabled, Text::ComponentEnabled.plain())
+                    .changed()
+                {
                     action = Some(Action::Enable(id.clone(), enabled));
                 }
                 ui.horizontal_wrapped(|ui| {
                     if ui.button(Text::ScriptEditSource.plain()).clicked() {
                         action = Some(Action::OpenSource(binding.source_id.clone()));
                     }
-                    ui.menu_button("Manage", |ui| {
+                    ui.menu_button(Text::Manage.plain(), |ui| {
                         if ui.button(Text::ScriptDetach.plain()).clicked() {
                             action = Some(Action::Detach(id.clone()));
                             ui.close();
                         }
-                        ui.menu_button("Other sources", |ui| {
+                        ui.menu_button(Text::OtherSources.plain(), |ui| {
                             for (id, label) in &self.sources {
                                 if ui.button(label).clicked() {
                                     action = Some(Action::OpenSource(id.clone()));
@@ -1329,26 +1332,29 @@ impl BehaviorUi {
                         Text::ScriptMissingSource.plain(),
                     );
                 }
-                ui.label("Properties");
+                ui.label(Text::Properties.plain());
                 for (name, summary) in &self.property_rows {
                     ui.push_id((id, name), |ui| {
                         ui.horizontal_wrapped(|ui| {
                             ui.label(name);
                             ui.label(summary);
                             if ui
-                                .add_enabled(!self.property_dirty, egui::Button::new("Edit value"))
+                                .add_enabled(
+                                    !self.property_dirty,
+                                    egui::Button::new(Text::EditValue.plain()),
+                                )
                                 .clicked()
                             {
                                 action = Some(Action::EditProperty(id.clone(), name.clone()));
                             }
                             ui.menu_button("…", |ui| {
-                                if ui.button("Remove value").clicked() {
+                                if ui.button(Text::RemoveValue.plain()).clicked() {
                                     action = Some(Action::RemoveProperty(id.clone(), name.clone()));
                                     ui.close();
                                 }
                             })
                             .response
-                            .on_hover_text("Property actions");
+                            .on_hover_text(Text::PropertyActions.plain());
                         });
                     });
                 }
@@ -1356,9 +1362,9 @@ impl BehaviorUi {
                     .id_salt(("add_behavior_property", id))
                     .show(ui, |ui| {
                         let popup_at_start = egui::Popup::is_any_open(ui.ctx());
-                        ui.label("Name");
+                        ui.label(Text::ComponentName.plain());
                         let name = text(ui, &mut self.new_property, 128);
-                        egui::ComboBox::from_label("Property type")
+                        egui::ComboBox::from_label(Text::PropertyType.plain())
                             .selected_text(
                                 [
                                     "Number",
@@ -1400,7 +1406,7 @@ impl BehaviorUi {
                             && ui.input_mut(|input| {
                                 input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
                             });
-                        if ui.button("Add typed property").clicked() || enter {
+                        if ui.button(Text::AddTypedProperty.plain()).clicked() || enter {
                             let value = match self.new_type {
                                 0 => PropertyValue::Number(0.0),
                                 1 => PropertyValue::Bool(false),
@@ -1431,20 +1437,20 @@ impl BehaviorUi {
                                 if ui
                                     .add_enabled(
                                         !self.property_dirty,
-                                        egui::Button::new("Edit default"),
+                                        egui::Button::new(Text::EditDefault.plain()),
                                     )
                                     .clicked()
                                 {
                                     action = Some(Action::EditState(id.clone(), name.clone()));
                                 }
-                                if ui.button("Remove field").clicked() {
+                                if ui.button(Text::RemoveField.plain()).clicked() {
                                     action = Some(Action::RemoveState(id.clone(), name.clone()));
                                 }
                             });
                         });
                     }
                     let mut state_add_changed = false;
-                    egui::CollapsingHeader::new("Add state field")
+                    egui::CollapsingHeader::new(Text::AddStateField.plain())
                         .id_salt(("add_state", id))
                         .default_open(self.state_add_dirty)
                         .show(ui, |ui| {
@@ -1454,7 +1460,7 @@ impl BehaviorUi {
                                     .as_ref()
                                     .is_some_and(|draft| draft.binding != *id)
                             {
-                                ui.label("Finish or cancel the other script’s state field first.");
+                                ui.label(Text::BehaviorUiFinishOrCancelThe.plain());
                                 return;
                             }
                             if !self.state_add_dirty
@@ -1478,7 +1484,7 @@ impl BehaviorUi {
                                 let draft =
                                     self.state_add.as_mut().expect("current state field form");
                                 let popup_at_start = egui::Popup::is_any_open(ui.ctx());
-                                ui.label("Field name");
+                                ui.label(Text::FieldName.plain());
                                 let name_id = egui::Id::unique((
                                     "behavior-state-add-name",
                                     generation,
@@ -1495,7 +1501,7 @@ impl BehaviorUi {
                                     self.state_add_focus = false;
                                 }
                                 state_add_changed |= name.changed();
-                                let kind = egui::ComboBox::from_label("State field type")
+                                let kind = egui::ComboBox::from_label(Text::StateFieldType.plain())
                                     .selected_text(["Number", "Bool", "Text", "Vec3"][draft.kind])
                                     .show_ui(ui, |ui| {
                                         for (index, label) in ["Number", "Bool", "Text", "Vec3"]
@@ -1517,7 +1523,7 @@ impl BehaviorUi {
                                     && ui.input_mut(|input| {
                                         input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
                                     });
-                                if ui.button("Add typed state field").clicked() || enter {
+                                if ui.button(Text::AddTypedStateField.plain()).clicked() || enter {
                                     name.surrender_focus();
                                     kind.response.surrender_focus();
                                     action = Some(Action::AddState(
@@ -1532,7 +1538,8 @@ impl BehaviorUi {
                                     && ui.input_mut(|input| {
                                         input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
                                     });
-                                if ui.button("Cancel new state field").clicked() || escape {
+                                if ui.button(Text::CancelNewStateField.plain()).clicked() || escape
+                                {
                                     name.surrender_focus();
                                     kind.response.surrender_focus();
                                     action = Some(Action::CancelStateAdd);
@@ -1560,7 +1567,7 @@ impl BehaviorUi {
                                 source.language_id, source.host_api_version
                             ));
                             if source.host_api_version == rot_behavior::KINEMATIC_HOST_API_VERSION {
-                                ui.label("Kinematic Mover")
+                                ui.label(Text::KinematicMover.plain())
                                     .on_hover_text(Text::ScriptKinematicHint.plain());
                             }
                         }
@@ -1617,10 +1624,10 @@ impl BehaviorUi {
                             }
                         }
                         if !any {
-                            ui.label("No compatible sources in this scene.");
+                            ui.label(Text::BehaviorUiNoCompatibleSourcesIn.plain());
                         }
                     });
-                    ui.menu_button("Browse embedded sources…", |ui| {
+                    ui.menu_button(Text::BrowseEmbeddedSources.plain(), |ui| {
                         for (id, label) in &self.sources {
                             if ui.button(label).clicked() {
                                 action = Some(Action::OpenSource(id.clone()));
@@ -1706,14 +1713,17 @@ impl BehaviorUi {
                     return;
                 };
                 ui.add(
-                    egui::Label::new(format!("{} · base {}", source.id, &source.base_hash[..12]))
-                        .truncate(),
+                    egui::Label::new(if source.label.is_empty() {
+                        &source.id
+                    } else {
+                        &source.label
+                    })
+                    .truncate(),
                 )
-                .on_hover_text(&source.id);
+                .on_hover_text(format!("{} · {}", source.id, source.base_hash));
                 if let Some(line) = self.source_line {
                     ui.weak(format!("Diagnostic line {line}"));
                 }
-                ui.small(Text::ScriptEditorShortcuts.plain());
                 egui::ScrollArea::vertical()
                     .id_salt("embedded_source_scroll")
                     .max_height((ctx.content_rect().height() - 250.0).max(48.0))
@@ -1759,8 +1769,8 @@ impl BehaviorUi {
                                     .interactive(ui.is_enabled()),
                                 )
                                 .changed();
-                            ui.label(format!(
-                                "Source body · {} / {} UTF-8 bytes",
+                            ui.label(Text::ScriptCode.plain()).on_hover_text(format!(
+                                "{} / {} UTF-8 bytes",
                                 source.text.len(),
                                 rot_scene::MAX_SOURCE_BYTES
                             ));
@@ -1806,8 +1816,9 @@ impl BehaviorUi {
                     .on_hover_text(&self.error);
                 }
                 ui.horizontal_wrapped(|ui| {
-                    let apply_button =
-                        ui.add_enabled(editable, egui::Button::new(Text::ScriptApply.plain()));
+                    let apply_button = ui
+                        .add_enabled(editable, egui::Button::new(Text::ScriptApply.plain()))
+                        .on_hover_text(Text::ScriptEditorShortcuts.plain());
                     self.source_footer_ids[0] = Some(apply_button.id);
                     if apply_button.clicked() || apply {
                         action = Some(Action::ApplySource);
@@ -1945,7 +1956,7 @@ pub(super) fn value_ui(
         ValueDraft::Number(value) => {
             result.field(text_with_id(ui, value, 128, id.with("number")), focus)
         }
-        ValueDraft::Bool(value) => result.field(ui.checkbox(value, "Value"), focus),
+        ValueDraft::Bool(value) => result.field(ui.checkbox(value, Text::Value.plain()), focus),
         ValueDraft::Text(value) => result.field(
             text_with_id(
                 ui,
@@ -1965,7 +1976,9 @@ pub(super) fn value_ui(
             let response = egui::ComboBox::from_label(Text::ScriptObjectReference.plain())
                 .selected_text(value.as_deref().unwrap_or("None"))
                 .show_ui(ui, |ui| {
-                    result.changed |= ui.selectable_value(value, None, "None").changed();
+                    result.changed |= ui
+                        .selectable_value(value, None, Text::ComponentNoMaterial.plain())
+                        .changed();
                     for object in &session.scene().objects {
                         result.changed |= ui
                             .selectable_value(
@@ -2018,7 +2031,10 @@ pub(super) fn value_ui(
             let response = egui::ComboBox::from_label(Text::ScriptSoundAsset.plain())
                 .selected_text(asset_id.as_deref().unwrap_or("None"))
                 .show_ui(ui, |ui| {
-                    if ui.selectable_value(asset_id, None, "None").clicked() {
+                    if ui
+                        .selectable_value(asset_id, None, Text::ComponentNoMaterial.plain())
+                        .clicked()
+                    {
                         result.changed = true;
                         ui.close();
                     }
@@ -2035,7 +2051,7 @@ pub(super) fn value_ui(
                 })
                 .response;
             result.field(response, &mut false);
-            ui.label("Gain (0–1)");
+            ui.label(Text::Gain01.plain());
             result.field(text_with_id(ui, gain, 128, id.with("gain")), focus);
             if asset_id.as_ref().is_some_and(|id| {
                 !assets
@@ -2052,7 +2068,9 @@ pub(super) fn value_ui(
             let response = egui::ComboBox::from_label(Text::ScriptAssetReference.plain())
                 .selected_text(value.as_deref().unwrap_or("None"))
                 .show_ui(ui, |ui| {
-                    result.changed |= ui.selectable_value(value, None, "None").changed();
+                    result.changed |= ui
+                        .selectable_value(value, None, Text::ComponentNoMaterial.plain())
+                        .changed();
                     for (id, _) in assets {
                         result.changed |=
                             ui.selectable_value(value, Some(id.clone()), id).changed();
@@ -2424,9 +2442,9 @@ impl RuntimeUi {
             self.playing = false;
             self.visible = was_playing;
             self.status = if was_playing {
-                "Scene changed; Play restarts with it.".into()
+                Text::SceneChangedRestartingPlay.plain().into()
             } else {
-                "Scene changed; press Play to run it.".into()
+                Text::BehaviorUiSceneChangedPressPlay.plain().into()
             };
         }
         if previous.is_some_and(|old| old.0 != generation) {
@@ -2504,7 +2522,7 @@ impl RuntimeUi {
         });
         self.begin_reset(key);
         self.diagnostic = None;
-        self.status = "Starting Play…".into();
+        self.status = Text::StartingPlay.plain().into();
         self.flush();
         Ok(key)
     }
@@ -2555,7 +2573,7 @@ impl RuntimeUi {
                 self.stale = false;
                 self.visible = true;
                 self.reset_succeeded = Some(key);
-                self.status = "Play state reset.".into();
+                self.status = Text::ReadyToPlay.plain().into();
                 if let Some((after, operation)) = self.after_reset.take() {
                     if after == key && self.pending.is_none() {
                         self.pending = Some(if operation == Operation::Step {
@@ -2637,7 +2655,7 @@ impl RuntimeUi {
                         } => match state {
                             State::Playing => {
                                 self.playing = true;
-                                self.status = "Playing".into();
+                                self.status = Text::Playing.plain().into();
                             }
                             State::Paused => {
                                 self.playing = false;
@@ -2653,7 +2671,7 @@ impl RuntimeUi {
                                 self.ready = false;
                                 self.playing = false;
                                 self.stale = self.frame.is_some();
-                                self.status = "Scene changed. Start Play again.".into();
+                                self.status = Text::SceneChangedStartPlayAgain.plain().into();
                             }
                             State::Stopped => {
                                 self.ready = false;
@@ -2721,8 +2739,7 @@ impl RuntimeUi {
                     self.fail_operation();
                     self.supersede_hud_activation("Behavior worker disconnected");
                     if !self.shutdown {
-                        self.status =
-                            "Behavior worker disconnected; authored work remains available.".into();
+                        self.status = Text::BehaviorUiPlayStoppedStartPlay.plain().into();
                         self.ready = false;
                         self.playing = false;
                     }
@@ -2961,7 +2978,7 @@ impl RuntimeUi {
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
                 )
                 .ui(ui, |ui| {
-                    if ui.button("Game Controls…").clicked() {
+                    if ui.button(Text::LabelGameControls.plain()).clicked() {
                         self.open_input_help(ui.ctx());
                         ui.close();
                     }
@@ -2984,14 +3001,16 @@ impl RuntimeUi {
                     {
                         use rot_app::audio::OutputStatus;
                         ui.label(match report.status {
-                            OutputStatus::Idle => "Audio: ready for first cue",
-                            OutputStatus::Ready => "Audio: output ready",
-                            OutputStatus::Paused => "Audio: paused (Step is silent)",
+                            OutputStatus::Idle => Text::AudioReadyForFirstCue.plain(),
+                            OutputStatus::Ready => Text::AudioOutputReady.plain(),
+                            OutputStatus::Paused => Text::AudioPausedStepIsSilent.plain(),
                             OutputStatus::Unavailable => {
-                                "Audio unavailable: no usable output device"
+                                Text::BehaviorUiAudioUnavailableNoUsable.plain()
                             }
-                            OutputStatus::MissingAsset => "Audio: referenced sound is missing",
-                            OutputStatus::VoiceLimit => "Audio: voice limit reached",
+                            OutputStatus::MissingAsset => {
+                                Text::AudioReferencedSoundIsMissing.plain()
+                            }
+                            OutputStatus::VoiceLimit => Text::AudioVoiceLimitReached.plain(),
                         });
                         if let Some(batch) = &report.last_batch {
                             ui.label(format!(
@@ -3008,7 +3027,7 @@ impl RuntimeUi {
                         ui.label(&self.status);
                     }
                     if let Some(diagnostic) = &self.diagnostic {
-                        ui.collapsing("Error Details", |ui| {
+                        ui.collapsing(Text::ErrorDetails.plain(), |ui| {
                             ui.set_max_width(360.0);
                             egui::ScrollArea::vertical()
                                 .id_salt("runtime_diagnostic_details")
@@ -3768,7 +3787,7 @@ mod tests {
         editor.new_property = "button_property".into();
         frame(&mut editor, &session, true, vec![]);
         let revision = session.scene().revision;
-        let action = click(&mut editor, &session, visible_text("Add typed property"))
+        let action = click(&mut editor, &session, visible_text("Add Typed Property"))
             .expect("The existing Add typed property button still submits");
         editor.execute(action, &mut session).unwrap();
         assert_eq!(session.scene().revision, revision + 1);

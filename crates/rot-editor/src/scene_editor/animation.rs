@@ -3,6 +3,7 @@
 //! Place owns the node-to-ID map; these edits only change `clip`/`looping`
 //! or remove the binding, each as one shared Undo step.
 use super::{combo_focus::ComboFocus, SceneEditor};
+use crate::strings::Text;
 use eframe::egui;
 use rot_scene::AnimationBinding;
 use serde_json::{json, Value};
@@ -85,9 +86,9 @@ impl SceneEditor {
         self.observe_runtime();
         self.error.clear();
         self.notice = if removed {
-            "Animation removed; one Undo restores it."
+            Text::AnimationRemoved.plain()
         } else {
-            "Animation updated."
+            Text::AnimationUpdated.plain()
         }
         .into();
         Ok(())
@@ -223,7 +224,7 @@ impl SceneEditor {
             });
         let enabled = self.guard().is_ok() && !self.manipulation.offset_pending();
         ui.separator();
-        ui.strong("Animation");
+        ui.strong(Text::Animation.plain());
         let mut clip = binding.clip.clone();
         let mut looping = binding.looping;
         let mut remove = false;
@@ -231,7 +232,7 @@ impl SceneEditor {
             match &source {
                 Some((model, name, rows)) => {
                     ui.horizontal_wrapped(|ui| {
-                        let label = ui.label("Clip");
+                        let label = ui.label(Text::Clip.plain());
                         let focus = ComboFocus::capture(ui, "animation_clip");
                         let mut selected = false;
                         let response = egui::ComboBox::from_id_salt("animation_clip")
@@ -271,10 +272,10 @@ impl SceneEditor {
                 }
             }
             ui.add_enabled(source.is_some(), egui::Checkbox::new(&mut looping, "Loop"))
-                .on_hover_text("Repeat the clip; otherwise hold its last pose.");
+                .on_hover_text(Text::AnimationRepeatTheClipOtherwise.plain());
             remove = ui
-                .button("Remove animation")
-                .on_hover_text("Stop animating this placement. One Undo restores it.")
+                .button(Text::RemoveAnimation.plain())
+                .on_hover_text(Text::AnimationStopAnimatingThisPlacement.plain())
                 .clicked();
         });
         let revision = self.session.scene().revision;

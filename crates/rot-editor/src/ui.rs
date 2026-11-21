@@ -114,33 +114,37 @@ impl Editor {
             ui.horizontal(|ui| {
                 crate::branding::mark(ui, 24.0);
                 if ui
-                    .button("Rot Engine")
-                    .on_hover_text("About Rot Engine")
+                    .button(Text::RotEngine.plain())
+                    .on_hover_text(Text::LabelAbout.plain())
                     .clicked()
                 {
                     crate::branding::open_about(ui.ctx());
                 }
-                ui.label(RichText::new("/  SCENARIO EDITOR").color(MUTED));
+                ui.label(RichText::new(Text::ScenarioEditor.plain()).color(MUTED));
                 ui.separator();
                 if ui
-                    .button("New")
-                    .on_hover_text("New scenario · Ctrl+N")
+                    .button(Text::New.plain())
+                    .on_hover_text(Text::NewScenarioCtrlN.plain())
                     .clicked()
                 {
                     self.identity_dialog(false);
                 }
-                if ui.button("Open…").on_hover_text("Ctrl+O").clicked() {
+                if ui
+                    .button(Text::Open.plain())
+                    .on_hover_text(Text::CtrlO.plain())
+                    .clicked()
+                {
                     self.open_dialog();
                 }
                 if crate::editor_theme::primary_button(ui, "Save")
-                    .on_hover_text("Apply valid fields and save · Ctrl+S")
+                    .on_hover_text(Text::SaveApplyHint.plain())
                     .clicked()
                 {
                     self.save(false);
                 }
                 if ui
-                    .button("Save As…")
-                    .on_hover_text("Create a new file · Ctrl+Shift+S")
+                    .button(Text::LabelSaveAs.plain())
+                    .on_hover_text(Text::UiCreateANewFile.plain())
                     .clicked()
                 {
                     self.save(true);
@@ -150,9 +154,9 @@ impl Editor {
                 if ui
                     .add_enabled(
                         clean_fields && self.project.scenario().undo_len() > 0,
-                        egui::Button::new("Undo"),
+                        egui::Button::new(Text::LabelUndo.plain()),
                     )
-                    .on_hover_text("Undo · Ctrl+Z outside text fields")
+                    .on_hover_text(Text::UiUndoCtrlZOutside.plain())
                     .clicked()
                 {
                     self.undo(false);
@@ -160,9 +164,9 @@ impl Editor {
                 if ui
                     .add_enabled(
                         clean_fields && self.project.scenario().redo_len() > 0,
-                        egui::Button::new("Redo"),
+                        egui::Button::new(Text::LabelRedo.plain()),
                     )
-                    .on_hover_text("Redo · Ctrl+Shift+Z outside text fields")
+                    .on_hover_text(Text::UiRedoCtrlShiftZ.plain())
                     .clicked()
                 {
                     self.undo(true);
@@ -173,9 +177,12 @@ impl Editor {
                 let name = self.project.scenario().id();
                 ui.label(RichText::new(name).strong());
                 if self.dirty() {
-                    ui.label(RichText::new("UNSAVED").color(Color32::from_rgb(244, 192, 109)));
+                    ui.label(
+                        RichText::new(Text::Unsaved.plain())
+                            .color(Color32::from_rgb(244, 192, 109)),
+                    );
                 } else {
-                    ui.label(RichText::new("SAVED").color(ACCENT));
+                    ui.label(RichText::new(Text::Saved.plain()).color(ACCENT));
                 }
                 ui.label(
                     RichText::new(format!("Version {}", self.project.scenario().revision()))
@@ -204,15 +211,16 @@ impl Editor {
                 if let Some(error) = self.diagnostic() {
                     ui.horizontal_wrapped(|ui| {
                         ui.label(
-                            RichText::new("ACTION NEEDED")
+                            RichText::new(Text::ActionNeeded.plain())
                                 .strong()
                                 .color(Color32::from_rgb(255, 143, 137)),
                         );
-                        ui.label(error);
+                        ui.label(error.lines().next().unwrap_or(error))
+                            .on_hover_text(error);
                     });
                 } else {
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(RichText::new("READY").strong().color(ACCENT));
+                        ui.label(RichText::new(Text::Ready.plain()).strong().color(ACCENT));
                         ui.label(&self.notice);
                     });
                 }
@@ -220,11 +228,9 @@ impl Editor {
                     ui.label(RichText::new(&self.adapter).small().color(MUTED));
                     ui.separator();
                     ui.label(
-                        RichText::new(
-                            "Tab: focus  ·  Space: run/pause outside fields  ·  Ctrl+S: save",
-                        )
-                        .small()
-                        .color(MUTED),
+                        RichText::new(Text::UiTabFocusSpaceRun.plain())
+                            .small()
+                            .color(MUTED),
                     );
                 });
             });
@@ -236,7 +242,7 @@ impl Editor {
             .resizable(false)
             .show(root, |ui| {
                 ui.add_space(12.0);
-                ui.label(RichText::new("PROJECT").strong().color(MUTED));
+                ui.label(RichText::new(Text::UiProject.plain()).strong().color(MUTED));
                 ui.add_space(8.0);
                 for (selection, label) in [
                     (Selection::Scenario, "Scenario"),
@@ -253,20 +259,18 @@ impl Editor {
                 }
                 ui.add_space(15.0);
                 ui.separator();
-                ui.label(RichText::new("Scenario").strong());
+                ui.label(RichText::new(Text::Scenario.plain()).strong());
                 ui.label(
-                    RichText::new(
-                        "Source, transport and destination are views of this logistics scenario.",
-                    )
-                    .small()
-                    .color(MUTED),
+                    RichText::new(Text::UiSourceTransportAndDestination.plain())
+                        .small()
+                        .color(MUTED),
                 );
                 ui.add_space(8.0);
-                if ui.button("Duplicate scenario…").clicked() {
+                if ui.button(Text::DuplicateScenario.plain()).clicked() {
                     self.identity_dialog(true);
                 }
                 ui.label(
-                    RichText::new("Creates a fresh identity and an unsaved project.")
+                    RichText::new(Text::UiCreatesAFreshIdentity.plain())
                         .small()
                         .color(MUTED),
                 );
@@ -274,103 +278,293 @@ impl Editor {
     }
 
     fn inspector(&mut self, root: &mut egui::Ui) {
-        egui::Panel::right("inspector").exact_size(288.0).resizable(false).show(root, |ui| {
-            egui::ScrollArea::vertical().id_salt("inspector-scroll").show(ui, |ui| {
-            ui.add_space(12.0);
-            ui.label(RichText::new("INSPECTOR").strong().color(MUTED));
-            ui.heading(self.selection.label());
-            ui.label(RichText::new("Properties").small().color(ACCENT));
-            ui.add_space(9.0);
-            if matches!(self.selection, Selection::Scenario | Selection::Source) {
-                field(ui, "Initial stock", "initial-stock", &mut self.fields.initial, "Items at the source before the first tick. Zero is allowed.");
-                field(ui, "Production per tick", "production", &mut self.fields.production, "Whole items produced before transport each tick. Zero is allowed.");
-            }
-            if matches!(self.selection, Selection::Scenario | Selection::Transport) {
-                field(ui, "Transport capacity", "transfer", &mut self.fields.transfer, "Maximum whole items delivered per tick. Must be greater than zero.");
-            }
-            if self.selection == Selection::Destination {
-                ui.label("This destination collects deliveries.");
-            }
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui.add_enabled(self.fields_changed(), egui::Button::new("Apply properties").fill(Color32::from_rgb(35, 93, 88))).clicked() { self.apply(); }
-                if ui.add_enabled(self.fields_changed(), egui::Button::new("Revert fields")).clicked() { self.revert_fields(); }
+        egui::Panel::right("inspector")
+            .exact_size(288.0)
+            .resizable(false)
+            .show(root, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("inspector-scroll")
+                    .show(ui, |ui| {
+                        ui.add_space(12.0);
+                        ui.label(RichText::new(Text::Inspector.plain()).strong().color(MUTED));
+                        ui.heading(self.selection.label());
+                        ui.label(
+                            RichText::new(Text::Properties.plain())
+                                .small()
+                                .color(ACCENT),
+                        );
+                        ui.add_space(9.0);
+                        if matches!(self.selection, Selection::Scenario | Selection::Source) {
+                            field(
+                                ui,
+                                Text::InitialStock.plain(),
+                                "initial-stock",
+                                &mut self.fields.initial,
+                                Text::UiItemsAtTheSource.plain(),
+                            );
+                            field(
+                                ui,
+                                Text::ProductionPerTick.plain(),
+                                "production",
+                                &mut self.fields.production,
+                                Text::UiWholeItemsProducedBefore.plain(),
+                            );
+                        }
+                        if matches!(self.selection, Selection::Scenario | Selection::Transport) {
+                            field(
+                                ui,
+                                Text::TransportCapacity.plain(),
+                                "transfer",
+                                &mut self.fields.transfer,
+                                Text::UiMaximumWholeItemsDelivered.plain(),
+                            );
+                        }
+                        if self.selection == Selection::Destination {
+                            ui.label(Text::ThisDestinationCollectsDeliveries.plain());
+                        }
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            if ui
+                                .add_enabled(
+                                    self.fields_changed(),
+                                    egui::Button::new(Text::ApplyProperties.plain())
+                                        .fill(Color32::from_rgb(35, 93, 88)),
+                                )
+                                .clicked()
+                            {
+                                self.apply();
+                            }
+                            if ui
+                                .add_enabled(
+                                    self.fields_changed(),
+                                    egui::Button::new(Text::RevertFields.plain()),
+                                )
+                                .clicked()
+                            {
+                                self.revert_fields();
+                            }
+                        });
+                        if self.fields_changed() {
+                            ui.label(
+                                RichText::new(Text::ScenarioUnapplied.plain())
+                                    .small()
+                                    .color(Color32::from_rgb(244, 192, 109)),
+                            );
+                        }
+                        ui.add_space(15.0);
+                        ui.separator();
+                        ui.label(
+                            RichText::new(Text::RuntimeObservation.plain())
+                                .small()
+                                .color(ACCENT),
+                        );
+                        let state = self.simulation.state();
+                        egui::Grid::new("runtime-table")
+                            .num_columns(2)
+                            .spacing([12.0, 10.0])
+                            .show(ui, |ui| {
+                                for (label, value) in [
+                                    ("Tick", state.tick),
+                                    ("Source inventory", state.stock),
+                                    ("Total produced", state.produced),
+                                    ("Total delivered", state.delivered),
+                                ] {
+                                    ui.label(label);
+                                    ui.label(RichText::new(value.to_string()).monospace().strong());
+                                    ui.end_row();
+                                }
+                            });
+                        ui.add_space(10.0);
+                        ui.label(
+                            RichText::new(Text::UiResetRestartsTheSimulation.plain())
+                                .small()
+                                .color(MUTED),
+                        );
+                    });
             });
-            if self.fields_changed() {
-                ui.label(RichText::new(Text::ScenarioUnapplied.plain()).small().color(Color32::from_rgb(244, 192, 109)));
-            }
-            ui.add_space(15.0);
-            ui.separator();
-            ui.label(RichText::new("RUNTIME OBSERVATION").small().color(ACCENT));
-            let state = self.simulation.state();
-            egui::Grid::new("runtime-table").num_columns(2).spacing([12.0, 10.0]).show(ui, |ui| {
-                for (label, value) in [("Tick", state.tick), ("Source inventory", state.stock), ("Total produced", state.produced), ("Total delivered", state.delivered)] {
-                    ui.label(label); ui.label(RichText::new(value.to_string()).monospace().strong()); ui.end_row();
-                }
-            });
-            ui.add_space(10.0);
-            ui.label(RichText::new("Reset restarts the simulation from the scene settings.").small().color(MUTED));
-            });
-        });
     }
 
     fn viewport(&mut self, root: &mut egui::Ui) {
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(BG).inner_margin(20.0)).show(root, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("Throughput lab");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(RichText::new(if self.running { "RUNNING" } else { "PAUSED" }).color(if self.running { ACCENT } else { MUTED }));
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(BG).inner_margin(20.0))
+            .show(root, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading(Text::ThroughputLab.plain());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(if self.running {
+                                Text::Running.plain()
+                            } else {
+                                Text::Paused.plain()
+                            })
+                            .color(if self.running {
+                                ACCENT
+                            } else {
+                                MUTED
+                            }),
+                        );
+                    });
                 });
+                ui.label(RichText::new(Text::UiSupplyCapacityAndDeliveries.plain()).color(MUTED));
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .button(if self.running {
+                            Text::LabelPause.plain()
+                        } else {
+                            Text::Run.plain()
+                        })
+                        .clicked()
+                    {
+                        self.running = !self.running;
+                        self.last_tick = Instant::now();
+                    }
+                    if ui
+                        .add_enabled(!self.running, egui::Button::new(Text::Step1Tick.plain()))
+                        .clicked()
+                    {
+                        self.step();
+                    }
+                    if ui.button(Text::Restart.plain()).clicked() {
+                        self.reset();
+                    }
+                    ui.label(
+                        RichText::new(Text::Ui4TicksSecond.plain())
+                            .small()
+                            .color(MUTED),
+                    );
+                });
+                if self.runtime_stale() {
+                    ui.label(
+                        RichText::new(Text::UiSceneSettingsChangedRestart.plain())
+                            .color(Color32::from_rgb(244, 192, 109)),
+                    );
+                } else {
+                    ui.label(
+                        RichText::new(Text::UiTheSimulationUsesThe.plain())
+                            .small()
+                            .color(MUTED),
+                    );
+                }
+                ui.add_space(8.0);
+                let available = ui.available_size();
+                let (response, painter) = ui.allocate_painter(
+                    Vec2::new(available.x, (available.y - 70.0).max(190.0)),
+                    Sense::hover(),
+                );
+                let rect = response.rect;
+                painter.rect_filled(rect, 12.0, Color32::from_rgb(20, 28, 38));
+                let width = (rect.width() - 80.0) / 3.0;
+                let card_width = width.clamp(105.0, 180.0);
+                let centers = [
+                    rect.left() + rect.width() * 0.18,
+                    rect.center().x,
+                    rect.left() + rect.width() * 0.82,
+                ];
+                let y = rect.center().y;
+                for pair in centers.windows(2) {
+                    painter.arrow(
+                        egui::pos2(pair[0] + card_width / 2.0 + 4.0, y),
+                        Vec2::new(pair[1] - pair[0] - card_width - 8.0, 0.0),
+                        Stroke::new(2.0, ACCENT),
+                    );
+                }
+                let state = self.simulation.state();
+                let config = self.runtime_config;
+                let cards = [
+                    (
+                        Selection::Source,
+                        "SOURCE",
+                        state.stock.to_string(),
+                        format!("+{} / tick", config.production_per_tick),
+                    ),
+                    (
+                        Selection::Transport,
+                        "TRANSPORT",
+                        config.transfer_per_tick.to_string(),
+                        "capacity / tick".into(),
+                    ),
+                    (
+                        Selection::Destination,
+                        "DESTINATION",
+                        state.delivered.to_string(),
+                        "items delivered".into(),
+                    ),
+                ];
+                for (index, (selection, label, value, detail)) in cards.into_iter().enumerate() {
+                    let card = egui::Rect::from_center_size(
+                        egui::pos2(centers[index], y),
+                        Vec2::new(card_width, 150.0),
+                    );
+                    let interaction =
+                        ui.interact(card, ui.scope_id().with(("node", index)), Sense::click());
+                    interaction.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::Role::Button, true, selection.label())
+                    });
+                    if interaction.clicked() {
+                        self.selection = selection;
+                    }
+                    painter.rect_filled(
+                        card,
+                        10.0,
+                        if interaction.hovered() {
+                            Color32::from_rgb(38, 54, 68)
+                        } else {
+                            CARD
+                        },
+                    );
+                    if self.selection == selection || interaction.has_focus() {
+                        painter.rect_stroke(
+                            card,
+                            10.0,
+                            Stroke::new(2.0, ACCENT),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                    painter.text(
+                        egui::pos2(card.center().x, card.top() + 27.0),
+                        Align2::CENTER_CENTER,
+                        label,
+                        FontId::proportional(12.0),
+                        ACCENT,
+                    );
+                    painter.text(
+                        card.center(),
+                        Align2::CENTER_CENTER,
+                        &value,
+                        FontId::proportional(if value.len() > 12 { 15.0 } else { 29.0 }),
+                        Color32::WHITE,
+                    );
+                    painter.text(
+                        egui::pos2(card.center().x, card.bottom() - 27.0),
+                        Align2::CENTER_CENTER,
+                        detail,
+                        FontId::proportional(12.0),
+                        MUTED,
+                    );
+                }
+                ui.add_space(10.0);
+                let capacity = config.transfer_per_tick;
+                let production = config.production_per_tick;
+                if production > capacity {
+                    ui.label(
+                        RichText::new(format!(
+                            "CAPACITY BOTTLENECK   Supply exceeds transport by {} items per tick.",
+                            production - capacity
+                        ))
+                        .color(Color32::from_rgb(244, 192, 109)),
+                    );
+                } else {
+                    ui.label(
+                        RichText::new(Text::UiSupplyLimitedTransportCan.plain()).color(ACCENT),
+                    );
+                }
+                ui.label(
+                    RichText::new(Text::UiSelectACardOr.plain())
+                        .small()
+                        .color(MUTED),
+                );
             });
-            ui.label(RichText::new("Supply, capacity and deliveries from the current run.").color(MUTED));
-            ui.add_space(12.0);
-            ui.horizontal(|ui| {
-                if ui.button(if self.running { "Pause" } else { "Run" }).clicked() { self.running = !self.running; self.last_tick = Instant::now(); }
-                if ui.add_enabled(!self.running, egui::Button::new("Step +1 tick")).clicked() { self.step(); }
-                if ui.button("Restart").clicked() { self.reset(); }
-                ui.label(RichText::new("4 ticks / second").small().color(MUTED));
-            });
-            if self.runtime_stale() {
-                ui.label(RichText::new("Scene settings changed. Restart to use them.").color(Color32::from_rgb(244, 192, 109)));
-            } else {
-                ui.label(RichText::new("The simulation uses the current scene settings.").small().color(MUTED));
-            }
-            ui.add_space(8.0);
-            let available = ui.available_size();
-            let (response, painter) = ui.allocate_painter(Vec2::new(available.x, (available.y - 70.0).max(190.0)), Sense::hover());
-            let rect = response.rect;
-            painter.rect_filled(rect, 12.0, Color32::from_rgb(20, 28, 38));
-            let width = (rect.width() - 80.0) / 3.0;
-            let card_width = width.clamp(105.0, 180.0);
-            let centers = [rect.left() + rect.width() * 0.18, rect.center().x, rect.left() + rect.width() * 0.82];
-            let y = rect.center().y;
-            for pair in centers.windows(2) {
-                painter.arrow(egui::pos2(pair[0] + card_width / 2.0 + 4.0, y), Vec2::new(pair[1] - pair[0] - card_width - 8.0, 0.0), Stroke::new(2.0, ACCENT));
-            }
-            let state = self.simulation.state();
-            let config = self.runtime_config;
-            let cards = [(Selection::Source, "SOURCE", state.stock.to_string(), format!("+{} / tick", config.production_per_tick)), (Selection::Transport, "TRANSPORT", config.transfer_per_tick.to_string(), "capacity / tick".into()), (Selection::Destination, "DESTINATION", state.delivered.to_string(), "items delivered".into())];
-            for (index, (selection, label, value, detail)) in cards.into_iter().enumerate() {
-                let card = egui::Rect::from_center_size(egui::pos2(centers[index], y), Vec2::new(card_width, 150.0));
-                let interaction = ui.interact(card, ui.scope_id().with(("node", index)), Sense::click());
-                interaction.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, selection.label()));
-                if interaction.clicked() { self.selection = selection; }
-                painter.rect_filled(card, 10.0, if interaction.hovered() { Color32::from_rgb(38, 54, 68) } else { CARD });
-                if self.selection == selection || interaction.has_focus() { painter.rect_stroke(card, 10.0, Stroke::new(2.0, ACCENT), egui::StrokeKind::Inside); }
-                painter.text(egui::pos2(card.center().x, card.top() + 27.0), Align2::CENTER_CENTER, label, FontId::proportional(12.0), ACCENT);
-                painter.text(card.center(), Align2::CENTER_CENTER, &value, FontId::proportional(if value.len() > 12 { 15.0 } else { 29.0 }), Color32::WHITE);
-                painter.text(egui::pos2(card.center().x, card.bottom() - 27.0), Align2::CENTER_CENTER, detail, FontId::proportional(12.0), MUTED);
-            }
-            ui.add_space(10.0);
-            let capacity = config.transfer_per_tick;
-            let production = config.production_per_tick;
-            if production > capacity {
-                ui.label(RichText::new(format!("CAPACITY BOTTLENECK   Supply exceeds transport by {} items per tick.", production - capacity)).color(Color32::from_rgb(244, 192, 109)));
-            } else {
-                ui.label(RichText::new("SUPPLY LIMITED   Transport can move all new production each tick.").color(ACCENT));
-            }
-            ui.label(RichText::new("Select a card or use the project list. Values above are runtime observations.").small().color(MUTED));
-        });
     }
 
     fn open_dialog(&mut self) {
@@ -410,9 +604,9 @@ impl Editor {
             egui::Modal::new(egui::Id::unique("path-dialog")).show(ctx, |ui| {
                 ui.set_width(540.0);
                 ui.heading(if mode == PathMode::Open {
-                    "Open scenario"
+                    Text::OpenScenario.plain()
                 } else {
-                    "Save scenario as"
+                    Text::SaveScenarioAs.plain()
                 });
                 let hint = if mode == PathMode::Open {
                     Text::ScenarioOpenFileHint
@@ -420,7 +614,7 @@ impl Editor {
                     Text::ScenarioSaveAsFileHint
                 };
                 ui.label(hint.plain());
-                let label = ui.label("File path");
+                let label = ui.label(Text::FilePath.plain());
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut self.path_text)
                         .id(egui::Id::unique("file-path"))
@@ -437,15 +631,15 @@ impl Editor {
                 ui.horizontal(|ui| {
                     if ui
                         .button(if mode == PathMode::Open {
-                            "Open file"
+                            Text::OpenFile.plain()
                         } else {
-                            "Save file"
+                            Text::SaveFile.plain()
                         })
                         .clicked()
                     {
                         if mode == PathMode::Open {
                             if self.path_text.trim().is_empty() {
-                                self.error = Some("Enter the scenario file path.".into());
+                                self.error = Some(Text::EnterTheScenarioFilePath.plain().into());
                             } else {
                                 let path = self.path_text.trim().into();
                                 self.path_mode = None;
@@ -455,7 +649,7 @@ impl Editor {
                             self.save_as();
                         }
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(Text::ComponentCancel.plain()).clicked() {
                         self.path_mode = None;
                         self.pending = None;
                     }
@@ -465,12 +659,12 @@ impl Editor {
             egui::Modal::new(egui::Id::unique("identity-dialog")).show(ctx, |ui| {
                 ui.set_width(440.0);
                 ui.heading(if duplicate {
-                    "Duplicate scenario"
+                    Text::UiDuplicateScenario.plain()
                 } else {
-                    "New scenario"
+                    Text::NewScenario.plain()
                 });
-                ui.label("Choose a unique ID for the new scenario.");
-                let label = ui.label("Scenario ID");
+                ui.label(Text::UiChooseAUniqueId.plain());
+                let label = ui.label(Text::ScenarioId.plain());
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut self.identity_text)
                         .id(egui::Id::unique("scenario-id"))
@@ -482,13 +676,17 @@ impl Editor {
                     self.dialog_focus = false;
                 }
                 ui.label(
-                    RichText::new("1–128 ASCII letters, digits, hyphens, underscores or dots.")
+                    RichText::new(Text::UiUi1128AsciiLetters.plain())
                         .small()
                         .color(MUTED),
                 );
                 ui.horizontal(|ui| {
                     if ui
-                        .button(if duplicate { "Duplicate" } else { "Create" })
+                        .button(if duplicate {
+                            Text::LabelDuplicate.plain()
+                        } else {
+                            Text::ComponentCreate.plain()
+                        })
                         .clicked()
                     {
                         // Validate identity before an unsaved recovery prompt can discard fields.
@@ -499,8 +697,7 @@ impl Editor {
                         if let Err(error) = valid {
                             self.error = Some(error.to_string());
                         } else if duplicate && self.identity_text == self.project.scenario().id() {
-                            self.error =
-                                Some("A duplicate must have a different scenario ID.".into());
+                            self.error = Some(Text::UiADuplicateMustHave.plain().into());
                         } else {
                             let action = if duplicate {
                                 Action::Duplicate(self.identity_text.clone())
@@ -511,7 +708,7 @@ impl Editor {
                             self.request(action);
                         }
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(Text::ComponentCancel.plain()).clicked() {
                         self.identity_mode = None;
                     }
                 });
@@ -522,21 +719,21 @@ impl Editor {
         } else if self.pending.is_some() {
             egui::Modal::new(egui::Id::unique("unsaved-dialog")).show(ctx, |ui| {
                 ui.set_width(460.0);
-                ui.heading("Keep your changes?");
-                ui.label("Save your changes before continuing?");
+                ui.heading(Text::KeepYourChanges.plain());
+                ui.label(Text::SaveYourChangesBeforeContinuing.plain());
                 if let Some(error) = self.diagnostic() {
                     ui.colored_label(Color32::from_rgb(255, 143, 137), error);
                 }
                 ui.horizontal(|ui| {
-                    if ui.button("Save and continue").clicked() {
+                    if ui.button(Text::SaveAndContinue.plain()).clicked() {
                         self.save(false);
                     }
-                    if ui.button("Discard and continue").clicked() {
+                    if ui.button(Text::DiscardAndContinue.plain()).clicked() {
                         if let Some(action) = self.pending.take() {
                             self.execute(action);
                         }
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(Text::ComponentCancel.plain()).clicked() {
                         self.pending = None;
                     }
                 });

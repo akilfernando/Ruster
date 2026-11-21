@@ -654,220 +654,374 @@ impl SceneEditor {
         let mut submitting_field = None;
         let mut dropped_texture = None;
         let fields_ui = egui::UiBuilder::new().id_salt("material_fields");
-        ui.scope_builder(if editable { fields_ui } else { fields_ui.disabled() }, |ui| {
-            ui.label("Name");
-            let name = ui.add(
-                egui::TextEdit::singleline(&mut draft.name)
-                    .id(egui::Id::unique("material_name"))
-                    .char_limit(128)
-                    .desired_width(ui.available_width()),
-            );
-            changed |= name.changed();
-            let mut fields = vec![name];
-            ui.horizontal(|ui| {
-                ui.label("Tint").on_hover_text(
-                    "Linear material tint, multiplied by the texture and Object tint.",
+        ui.scope_builder(
+            if editable {
+                fields_ui
+            } else {
+                fields_ui.disabled()
+            },
+            |ui| {
+                ui.label(Text::ComponentName.plain());
+                let name = ui.add(
+                    egui::TextEdit::singleline(&mut draft.name)
+                        .id(egui::Id::unique("material_name"))
+                        .char_limit(128)
+                        .desired_width(ui.available_width()),
                 );
-                let tint = draft.tint_value();
-                let mut rgb = tint.as_ref().copied().unwrap_or([1.0; 3]);
-                let swatch = ui
-                    .add_enabled_ui(tint.is_ok(), |ui| ui.color_edit_button_rgb(&mut rgb))
-                    .inner;
-                if swatch.changed() {
-                    draft.tint = rgb.map(|value| value.to_string());
-                    changed = true;
-                }
-                fields.push(swatch);
-            });
-            // Keep all three labelled channels together at the inspector's
-            // minimum width; wrapping a label away from its field is ambiguous.
-            ui.horizontal(|ui| {
-                for (index, label) in ["R", "G", "B"].into_iter().enumerate() {
-                    ui.label(label);
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut draft.tint[index])
-                            .id(egui::Id::unique(("material_tint", index)))
-                            .char_limit(64)
-                            .desired_width(46.0),
-                    );
-                    changed |= response.changed();
-                    fields.push(response);
-                }
-            });
-            ui.horizontal(|ui| {
-                ui.label("Shading").on_hover_text("Diffuse is matte. Nonmetallic adds a highlight set by roughness.");
-                let before = draft.response_mode;
-                let focus = ComboFocus::capture(ui, "material_response_mode");
-                let mut selected = false;
-                let response = egui::ComboBox::from_id_salt("material_response_mode")
-                    .width(120.0)
-                    .selected_text(match draft.response_mode {
-                        MaterialResponseMode::Diffuse => "Diffuse",
-                        MaterialResponseMode::Dielectric => "Nonmetallic",
+                changed |= name.changed();
+                let mut fields = vec![name];
+                ui.horizontal(|ui| {
+                    ui.label(Text::ComponentTint.plain())
+                        .on_hover_text(Text::MaterialUiLinearMaterialTintMultiplied.plain());
+                    let tint = draft.tint_value();
+                    let mut rgb = tint.as_ref().copied().unwrap_or([1.0; 3]);
+                    let swatch = ui
+                        .add_enabled_ui(tint.is_ok(), |ui| ui.color_edit_button_rgb(&mut rgb))
+                        .inner;
+                    if swatch.changed() {
+                        draft.tint = rgb.map(|value| value.to_string());
+                        changed = true;
+                    }
+                    fields.push(swatch);
+                });
+                // Keep all three labelled channels together at the inspector's
+                // minimum width; wrapping a label away from its field is ambiguous.
+                ui.horizontal(|ui| {
+                    for (index, label) in ["R", "G", "B"].into_iter().enumerate() {
+                        ui.label(label);
+                        let response = ui.add(
+                            egui::TextEdit::singleline(&mut draft.tint[index])
+                                .id(egui::Id::unique(("material_tint", index)))
+                                .char_limit(64)
+                                .desired_width(46.0),
+                        );
+                        changed |= response.changed();
+                        fields.push(response);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label(Text::Shading.plain())
+                        .on_hover_text(Text::MaterialUiDiffuseIsMatteNonmetallic.plain());
+                    let before = draft.response_mode;
+                    let focus = ComboFocus::capture(ui, "material_response_mode");
+                    let mut selected = false;
+                    let response = egui::ComboBox::from_id_salt("material_response_mode")
+                        .width(120.0)
+                        .selected_text(match draft.response_mode {
+                            MaterialResponseMode::Diffuse => Text::Diffuse.plain(),
+                            MaterialResponseMode::Dielectric => Text::Nonmetallic.plain(),
+                        })
+                        .show_ui(ui, |ui| {
+                            for (mode, label) in [
+                                (MaterialResponseMode::Diffuse, "Diffuse"),
+                                (MaterialResponseMode::Dielectric, "Nonmetallic"),
+                            ] {
+                                if ui
+                                    .selectable_value(&mut draft.response_mode, mode, label)
+                                    .clicked()
+                                {
+                                    selected = true;
+                                    ui.close();
+                                }
+                            }
+                        });
+                    changed |= before != draft.response_mode;
+                    focus.restore(ui, &response.response, selected);
+                    fields.push(response.response);
+                });
+                if draft.response_mode == MaterialResponseMode::Dielectric {
+                    ui.label(if draft.roughness_texture.is_some() {
+                        Text::RoughnessMultiplier.plain()
+                    } else {
+                        Text::Roughness.plain()
                     })
-                    .show_ui(ui, |ui| {
-                        for (mode, label) in [(MaterialResponseMode::Diffuse, "Diffuse"), (MaterialResponseMode::Dielectric, "Nonmetallic")] {
-                            if ui.selectable_value(&mut draft.response_mode, mode, label).clicked() {
+                    .on_hover_text(Text::MaterialUiRoughness008To.plain());
+                    ui.horizontal(|ui| {
+                        let response = ui.add(
+                            egui::TextEdit::singleline(&mut draft.roughness)
+                                .id(egui::Id::unique("material_roughness"))
+                                .char_limit(64)
+                                .desired_width(82.0),
+                        );
+                        ui.label(Text::MaterialUi0081.plain());
+                        changed |= response.changed();
+                        fields.push(response);
+                    });
+                    if self.session.scene().display.is_legacy() {
+                        ui.label(Text::MaterialUiSurfaceShadingNeedsSurface.plain());
+                    }
+                    if !self.shader_builtin {
+                        ui.label(Text::CustomShaderRetainsValues.plain());
+                    }
+                }
+                let uv_ready = if draft.intent == MaterialIntent::EditShared {
+                    self.session
+                        .scene()
+                        .objects
+                        .iter()
+                        .filter(|object| object.material == draft.original_assignment)
+                        .all(|object| rot_render::object_has_complete_uvs(object, &self.resolved))
+                } else {
+                    rot_render::object_has_complete_uvs(&object, &self.resolved)
+                };
+                if !uv_ready {
+                    ui.label(if draft.intent == MaterialIntent::EditShared {
+                        Text::MaterialSharedMeshNeedsUvs.plain()
+                    } else {
+                        Text::MaterialMeshNeedsUvs.plain()
+                    });
+                }
+                let roughness_active = draft.response_mode == MaterialResponseMode::Dielectric
+                    && !self.session.scene().display.is_legacy()
+                    && self.shader_builtin;
+                let infos = self
+                    .assets
+                    .as_ref()
+                    .map(|store| store.infos().collect::<Vec<_>>())
+                    .unwrap_or_default();
+                for (role, label, salt, reference) in [
+                    (
+                        TextureRole::BaseColor,
+                        "Base color texture",
+                        "material_texture",
+                        &mut draft.texture,
+                    ),
+                    (
+                        TextureRole::Roughness,
+                        "Roughness map",
+                        "material_roughness_texture",
+                        &mut draft.roughness_texture,
+                    ),
+                ] {
+                    let before = reference.clone();
+                    let selected_info = reference
+                        .as_ref()
+                        .and_then(|id| infos.iter().find(|info| &info.id == id).copied());
+                    let selected_text = match reference.as_ref() {
+                        None => "None".to_owned(),
+                        Some(id) => match selected_info {
+                            Some(info)
+                                if info.kind == AssetKind::Texture
+                                    && info.texture_role == Some(role) =>
+                            {
+                                std::path::Path::new(&info.source)
+                                    .file_name()
+                                    .unwrap_or_default()
+                                    .to_string_lossy()
+                                    .into_owned()
+                            }
+                            Some(_) => format!("Wrong role: {id}"),
+                            None => format!("Missing: {id}"),
+                        },
+                    };
+                    ui.label(label);
+                    let focus = ComboFocus::capture(ui, salt);
+                    let mut selected = false;
+                    let response = egui::ComboBox::from_id_salt(salt)
+                        .selected_text(selected_text)
+                        .show_ui(ui, |ui| {
+                            let clear = if role == TextureRole::Roughness {
+                                "None (clear)"
+                            } else {
+                                "None"
+                            };
+                            if ui.selectable_value(reference, None, clear).clicked() {
                                 selected = true;
                                 ui.close();
                             }
+                            for info in infos.iter().filter(|info| {
+                                info.kind == AssetKind::Texture && info.texture_role == Some(role)
+                            }) {
+                                let ready = uv_ready
+                                    && info.status == AssetStatus::Ready
+                                    && self.assets.as_ref().is_some_and(|store| {
+                                        store
+                                            .texture(&info.id)
+                                            .is_some_and(|texture| texture.role == role)
+                                    });
+                                ui.add_enabled_ui(ready, |ui| {
+                                    if ui
+                                        .selectable_value(
+                                            reference,
+                                            Some(info.id.clone()),
+                                            &info.source,
+                                        )
+                                        .on_hover_text(&info.id)
+                                        .clicked()
+                                    {
+                                        selected = true;
+                                        ui.close();
+                                    }
+                                });
+                            }
+                        });
+                    focus.restore(ui, &response.response, selected);
+                    let response = response.response;
+                    if response
+                        .dnd_hover_payload::<super::AssetDrag>()
+                        .is_some_and(|payload| {
+                            self.resolved_textures
+                                .get(&payload.asset_id)
+                                .is_some_and(|texture| texture.role == role)
+                        })
+                    {
+                        ui.painter().rect_stroke(
+                            response.rect,
+                            3.0,
+                            egui::Stroke::new(2.0, ui.visuals().selection.bg_fill),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                    if editable {
+                        if let Some(payload) = response.dnd_release_payload::<super::AssetDrag>() {
+                            dropped_texture = Some(((*payload).clone(), role));
                         }
-                    });
-                changed |= before != draft.response_mode;
-                focus.restore(ui, &response.response, selected);
-                fields.push(response.response);
-            });
-            if draft.response_mode == MaterialResponseMode::Dielectric {
-                ui.label(if draft.roughness_texture.is_some() { "Roughness multiplier" } else { "Roughness" }).on_hover_text("Roughness, 0.08 to 1. Lower gives a tighter highlight.");
-                ui.horizontal(|ui| {
-                    let response = ui.add(egui::TextEdit::singleline(&mut draft.roughness)
-                        .id(egui::Id::unique("material_roughness"))
-                        .char_limit(64).desired_width(82.0));
-                    ui.label("0.08–1");
-                    changed |= response.changed();
+                    }
                     fields.push(response);
+                    changed |= *reference != before;
+                    if let Some(id) = reference.as_ref() {
+                        let info = infos.iter().find(|info| &info.id == id).copied();
+                        let accepted = self.assets.as_ref().is_some_and(|store| {
+                            store
+                                .texture(id)
+                                .is_some_and(|texture| texture.role == role)
+                        });
+                        if let Some(info) = info {
+                            ui.add(egui::Label::new(format!("Source: {}", info.source)).wrap());
+                        }
+                        if !info.is_some_and(|info| {
+                            info.kind == AssetKind::Texture && info.texture_role == Some(role)
+                        }) {
+                            ui.colored_label(
+                                ui.visuals().warn_fg_color,
+                                Text::MaterialUiReferenceIsMissingOr.plain(),
+                            );
+                        } else if !info.is_some_and(|info| info.status == AssetStatus::Ready) {
+                            ui.colored_label(
+                                ui.visuals().warn_fg_color,
+                                if accepted {
+                                    Text::MaterialTextureUsingPrevious.plain()
+                                } else {
+                                    Text::MaterialTextureUnavailable.plain()
+                                },
+                            );
+                        }
+                        if role == TextureRole::Roughness && !accepted && roughness_active {
+                            ui.label(Text::MaterialUiScalarViewportFallbackIs.plain());
+                        }
+                    }
+                }
+                if draft.roughness_texture.is_some() {
+                    if draft.response_mode == MaterialResponseMode::Diffuse {
+                        ui.label(Text::MaterialUiRoughnessMapIsInactive.plain());
+                        if !self.shader_builtin {
+                            ui.label(Text::MaterialUiCustomShaderControlsAppearance.plain());
+                        }
+                    } else {
+                        ui.label(Text::MaterialUiMapMultiplierClampedTo.plain());
+                    }
+                    ui.label(Text::MaterialUiFilterAndWrapAffect.plain());
+                }
+                let filter = draft.filter;
+                let address = draft.address;
+                ui.horizontal(|ui| {
+                    ui.label(Text::Filter.plain());
+                    let focus = ComboFocus::capture(ui, "material_filter");
+                    let mut selected = false;
+                    let filter_response = egui::ComboBox::from_id_salt("material_filter")
+                        .selected_text(match draft.filter {
+                            TextureFilter::Linear => Text::Linear.plain(),
+                            TextureFilter::Nearest => Text::Nearest.plain(),
+                        })
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_value(
+                                    &mut draft.filter,
+                                    TextureFilter::Linear,
+                                    Text::Linear.plain(),
+                                )
+                                .clicked()
+                            {
+                                selected = true;
+                                ui.close();
+                            }
+                            if ui
+                                .selectable_value(
+                                    &mut draft.filter,
+                                    TextureFilter::Nearest,
+                                    Text::Nearest.plain(),
+                                )
+                                .clicked()
+                            {
+                                selected = true;
+                                ui.close();
+                            }
+                        });
+                    focus.restore(ui, &filter_response.response, selected);
+                    fields.push(filter_response.response);
                 });
-                if self.session.scene().display.is_legacy() {
-                    ui.label("Surface shading needs Surface HDR in Scene display.");
-                }
-                if !self.shader_builtin {
-                    ui.label("A custom shader controls appearance. These settings are kept.");
-                }
-            }
-            let uv_ready = if draft.intent == MaterialIntent::EditShared {
-                self.session
-                    .scene()
-                    .objects
-                    .iter()
-                    .filter(|object| object.material == draft.original_assignment)
-                    .all(|object| {
-                        rot_render::object_has_complete_uvs(object, &self.resolved)
-                    })
-            } else {
-                rot_render::object_has_complete_uvs(&object, &self.resolved)
-            };
-            if !uv_ready {
-                ui.label(if draft.intent == MaterialIntent::EditShared {
-                    "All shared users need UV-mapped meshes. Make unique to texture this object only."
-                } else { "Choose a UV-mapped mesh before adding a texture." });
-            }
-            let roughness_active = draft.response_mode == MaterialResponseMode::Dielectric
-                && !self.session.scene().display.is_legacy() && self.shader_builtin;
-            let infos = self.assets.as_ref().map(|store| store.infos().collect::<Vec<_>>()).unwrap_or_default();
-            for (role, label, salt, reference) in [
-                (TextureRole::BaseColor, "Base color texture", "material_texture", &mut draft.texture),
-                (TextureRole::Roughness, "Roughness map", "material_roughness_texture", &mut draft.roughness_texture),
-            ] {
-                let before = reference.clone();
-                let selected_info = reference.as_ref().and_then(|id| infos.iter().find(|info| &info.id == id).copied());
-                let selected_text = match reference.as_ref() {
-                    None => "None".to_owned(),
-                    Some(id) => match selected_info {
-                        Some(info) if info.kind == AssetKind::Texture && info.texture_role == Some(role) => std::path::Path::new(&info.source).file_name().unwrap_or_default().to_string_lossy().into_owned(),
-                        Some(_) => format!("Wrong role: {id}"),
-                        None => format!("Missing: {id}"),
-                    },
-                };
-                ui.label(label);
-                let focus = ComboFocus::capture(ui, salt);
-                let mut selected = false;
-                let response = egui::ComboBox::from_id_salt(salt).selected_text(selected_text).show_ui(ui, |ui| {
-                    let clear = if role == TextureRole::Roughness { "None (clear)" } else { "None" };
-                    if ui.selectable_value(reference, None, clear).clicked() { selected = true; ui.close(); }
-                    for info in infos.iter().filter(|info| info.kind == AssetKind::Texture && info.texture_role == Some(role)) {
-                        let ready = uv_ready && info.status == AssetStatus::Ready && self.assets.as_ref().is_some_and(|store| store.texture(&info.id).is_some_and(|texture| texture.role == role));
-                        ui.add_enabled_ui(ready, |ui| {
-                            if ui.selectable_value(reference, Some(info.id.clone()), &info.source).on_hover_text(&info.id).clicked() { selected = true; ui.close(); }
+                ui.horizontal(|ui| {
+                    ui.label(Text::Wrap.plain());
+                    let focus = ComboFocus::capture(ui, "material_wrap");
+                    let mut selected = false;
+                    let wrap_response = egui::ComboBox::from_id_salt("material_wrap")
+                        .selected_text(match draft.address {
+                            TextureAddress::Repeat => Text::Repeat.plain(),
+                            TextureAddress::Clamp => Text::Clamp.plain(),
+                        })
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_value(
+                                    &mut draft.address,
+                                    TextureAddress::Repeat,
+                                    Text::Repeat.plain(),
+                                )
+                                .clicked()
+                            {
+                                selected = true;
+                                ui.close();
+                            }
+                            if ui
+                                .selectable_value(
+                                    &mut draft.address,
+                                    TextureAddress::Clamp,
+                                    Text::Clamp.plain(),
+                                )
+                                .clicked()
+                            {
+                                selected = true;
+                                ui.close();
+                            }
+                        });
+                    focus.restore(ui, &wrap_response.response, selected);
+                    fields.push(wrap_response.response);
+                });
+                changed |= filter != draft.filter || address != draft.address;
+                for response in &fields {
+                    let owned = editable
+                        && (response.has_focus()
+                            || ui.memory(|memory| {
+                                memory.focused().is_none()
+                                    && memory.had_focus_last_frame(response.id)
+                            }));
+                    if owned
+                        && !started_draft
+                        && !popup_at_start
+                        && !egui::Popup::is_any_open(ui.ctx())
+                    {
+                        if ui.input_mut(|input| {
+                            input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                        }) {
+                            enter = true;
+                            submitting_field = Some(response.id);
+                        }
+                        escape |= ui.input_mut(|input| {
+                            input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
                         });
                     }
-                });
-                focus.restore(ui, &response.response, selected);
-                let response = response.response;
-                if response.dnd_hover_payload::<super::AssetDrag>().is_some_and(|payload| self.resolved_textures.get(&payload.asset_id).is_some_and(|texture| texture.role == role)) {
-                    ui.painter().rect_stroke(response.rect, 3.0, egui::Stroke::new(2.0, ui.visuals().selection.bg_fill), egui::StrokeKind::Inside);
                 }
-                if editable {
-                    if let Some(payload) = response.dnd_release_payload::<super::AssetDrag>() { dropped_texture = Some(((*payload).clone(), role)); }
-                }
-                fields.push(response);
-                changed |= *reference != before;
-                if let Some(id) = reference.as_ref() {
-                    let info = infos.iter().find(|info| &info.id == id).copied();
-                    let accepted = self.assets.as_ref().is_some_and(|store| store.texture(id).is_some_and(|texture| texture.role == role));
-                    if let Some(info) = info { ui.add(egui::Label::new(format!("Source: {}", info.source)).wrap()); }
-                    if !info.is_some_and(|info| info.kind == AssetKind::Texture && info.texture_role == Some(role)) {
-                        ui.colored_label(ui.visuals().warn_fg_color, "Reference is missing or has the wrong import role. Repair it or choose None.");
-                    } else if !info.is_some_and(|info| info.status == AssetStatus::Ready) {
-                        ui.colored_label(ui.visuals().warn_fg_color, if accepted { "Source unavailable; last-good content is retained. Repair and Refresh." } else { "Texture unavailable. Repair and Refresh before faithful export." });
-                    }
-                    if role == TextureRole::Roughness && !accepted && roughness_active {
-                        ui.label("Scalar viewport fallback is provisional; export requires this map.");
-                    }
-                }
-            }
-            if draft.roughness_texture.is_some() {
-                if draft.response_mode == MaterialResponseMode::Diffuse {
-                    ui.label("Roughness map is inactive with Diffuse shading. Settings are retained.");
-                    if !self.shader_builtin { ui.label("Custom shader controls appearance; roughness maps are unsupported."); }
-                } else {
-                    ui.label("Map × multiplier, clamped to 0.08–1. Use 1 for the full map range.");
-                }
-                ui.label("Filter and Wrap affect both texture slots.");
-            }
-            let filter = draft.filter;
-            let address = draft.address;
-            ui.horizontal(|ui| {
-                ui.label("Filter");
-                let focus = ComboFocus::capture(ui, "material_filter");
-                let mut selected = false;
-                let filter_response = egui::ComboBox::from_id_salt("material_filter")
-                    .selected_text(match draft.filter {
-                        TextureFilter::Linear => "Linear",
-                        TextureFilter::Nearest => "Nearest",
-                    })
-                    .show_ui(ui, |ui| {
-                        if ui.selectable_value(&mut draft.filter, TextureFilter::Linear, "Linear").clicked() { selected = true; ui.close(); }
-                        if ui.selectable_value(&mut draft.filter, TextureFilter::Nearest, "Nearest").clicked() { selected = true; ui.close(); }
-                    });
-                focus.restore(ui, &filter_response.response, selected);
-                fields.push(filter_response.response);
-            });
-            ui.horizontal(|ui| {
-                ui.label("Wrap");
-                let focus = ComboFocus::capture(ui, "material_wrap");
-                let mut selected = false;
-                let wrap_response = egui::ComboBox::from_id_salt("material_wrap")
-                    .selected_text(match draft.address {
-                        TextureAddress::Repeat => "Repeat",
-                        TextureAddress::Clamp => "Clamp",
-                    })
-                    .show_ui(ui, |ui| {
-                        if ui.selectable_value(&mut draft.address, TextureAddress::Repeat, "Repeat").clicked() { selected = true; ui.close(); }
-                        if ui.selectable_value(&mut draft.address, TextureAddress::Clamp, "Clamp").clicked() { selected = true; ui.close(); }
-                    });
-                focus.restore(ui, &wrap_response.response, selected);
-                fields.push(wrap_response.response);
-            });
-            changed |= filter != draft.filter || address != draft.address;
-            for response in &fields {
-                let owned = editable && (response.has_focus()
-                    || ui.memory(|memory| {
-                        memory.focused().is_none() && memory.had_focus_last_frame(response.id)
-                    }));
-                if owned && !started_draft && !popup_at_start && !egui::Popup::is_any_open(ui.ctx())
-                {
-                    if ui.input_mut(|input| {
-                        input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
-                    }) {
-                        enter = true;
-                        submitting_field = Some(response.id);
-                    }
-                    escape |= ui.input_mut(|input| {
-                        input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
-                    });
-                }
-            }
-        });
+            },
+        );
         if changed {
             self.material_draft = Some(draft);
             self.draft_generation = self.draft_generation.wrapping_add(1);
@@ -1545,7 +1699,7 @@ mod tests {
                 .shapes
                 .iter()
                 .find_map(|shape| match &shape.shape {
-                    egui::Shape::Text(text) if text.galley.job.text == "Roughness multiplier" => {
+                    egui::Shape::Text(text) if text.galley.job.text == "Roughness Multiplier" => {
                         Some((
                             shape.clip_rect,
                             egui::Rect::from_min_size(text.pos, text.galley.size()),

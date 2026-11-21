@@ -6,6 +6,7 @@
 //! section is the first user.
 // Panels adopt the remaining controls as they are rebuilt (S-04 onward).
 #![allow(dead_code)]
+use crate::strings::Text;
 pub mod motif;
 pub mod palette;
 pub mod tokens;
@@ -270,7 +271,7 @@ pub fn reference_field(
             [width, CONTROL_HEIGHT],
             egui::Button::new(text).truncate().frame(true),
         );
-        let picker = icon_button(ui, "◎", "Pick", None, false);
+        let picker = icon_button(ui, "◎", Text::Pick.plain(), None, false);
         (target, picker)
     })
     .inner
@@ -294,7 +295,9 @@ pub fn search_field(ui: &mut egui::Ui, text: &mut String, hint: &str) -> egui::R
             text.clear();
             response.request_focus();
         }
-        if !text.is_empty() && icon_button(ui, "×", "Clear Search", None, false).clicked() {
+        if !text.is_empty()
+            && icon_button(ui, "×", Text::ClearSearch.plain(), None, false).clicked()
+        {
             text.clear();
             response.request_focus();
         }

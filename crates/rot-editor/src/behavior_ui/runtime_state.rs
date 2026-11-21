@@ -1,5 +1,6 @@
 //! Read-only pages of the committed worker snapshot, without VM access.
 use super::*;
+use crate::strings::Text;
 use serde_json::{json, Value};
 
 impl RuntimeUi {
@@ -74,9 +75,9 @@ impl RuntimeUi {
     }
 
     pub fn state_inspector(&mut self, ui: &mut egui::Ui) {
-        egui::CollapsingHeader::new("Committed runtime state").show(ui, |ui| {
+        egui::CollapsingHeader::new(Text::CommittedRuntimeState.plain()).show(ui, |ui| {
             let Some(frame) = self.frame.as_ref() else {
-                ui.label("Reset the preview to see script values.");
+                ui.label(Text::RuntimeStateResetThePreviewTo.plain());
                 return;
             };
             let key = (frame.key, frame.tick, frame.commit_revision);
@@ -98,7 +99,7 @@ impl RuntimeUi {
             if self.stale || !self.ready || Some(frame.key) != self.current_run() {
                 ui.colored_label(
                     ui.visuals().warn_fg_color,
-                    "Start Play again to see the current defaults.",
+                    Text::RuntimeStateStartPlayAgainTo.plain(),
                 );
             }
             if frame.state.binding(&self.state_binding).is_none() {
@@ -106,11 +107,11 @@ impl RuntimeUi {
                 self.state_offset = 0;
             }
             if self.state_binding.is_empty() {
-                ui.label("No scripts store values in this run.");
+                ui.label(Text::RuntimeStateNoScriptsStoreValues.plain());
                 return;
             }
             let previous = self.state_binding.clone();
-            egui::ComboBox::from_label("Script")
+            egui::ComboBox::from_label(Text::ComponentScript.plain())
                 .selected_text(&self.state_binding)
                 .show_ui(ui, |ui| {
                     for id in frame.state.binding_ids() {
@@ -130,13 +131,13 @@ impl RuntimeUi {
                 frame.state.encoded_bytes()
             ));
             if self.playing && fields.len() > 16 {
-                ui.label("Pause preview to browse stable state pages.");
+                ui.label(Text::RuntimeStatePausePreviewToBrowse.plain());
             }
             for (name, value) in fields.iter().skip(self.state_offset).take(16) {
                 ui.horizontal_wrapped(|ui| {
                     ui.strong(name);
                     if let StateValue::Text(value) = value {
-                        ui.small("Text");
+                        ui.small(Text::RuntimeStateTextLabel.plain());
                         ui.label(value);
                     } else {
                         ui.label(property_summary(&state_property(value)));
@@ -147,7 +148,7 @@ impl RuntimeUi {
                 if ui
                     .add_enabled(
                         !self.playing && self.state_offset > 0,
-                        egui::Button::new("Previous state fields"),
+                        egui::Button::new(Text::PreviousStateFields.plain()),
                     )
                     .clicked()
                 {
@@ -156,14 +157,14 @@ impl RuntimeUi {
                 if ui
                     .add_enabled(
                         !self.playing && self.state_offset.saturating_add(16) < fields.len(),
-                        egui::Button::new("Next state fields"),
+                        egui::Button::new(Text::NextStateFields.plain()),
                     )
                     .clicked()
                 {
                     self.state_offset = self.state_offset.saturating_add(16);
                 }
             });
-            ui.collapsing("State snapshot identity", |ui| {
+            ui.collapsing(Text::StateSnapshotIdentity.plain(), |ui| {
                 ui.label(format!(
                     "Source {}",
                     frame
@@ -179,7 +180,7 @@ impl RuntimeUi {
                         .unwrap_or("unavailable")
                 ));
             });
-            ui.label("Live values. Reset to restore the defaults.");
+            ui.label(Text::RuntimeStateLiveValuesResetTo.plain());
         });
     }
 }
@@ -637,7 +638,7 @@ mod tests {
         assert_eq!(runtime.frame.as_ref().unwrap().tick, 1);
         assert!(runtime.pending.is_none() && runtime.awaiting.is_none());
         assert!(!runtime.command_draft_pending());
-        let invoke = point(&shapes, "Invoke Application command");
+        let invoke = point(&shapes, "Invoke Application Command");
         for _ in 0..16 {
             let owns = ctx
                 .memory(|memory| memory.focused())
@@ -700,7 +701,7 @@ mod tests {
         point(&shapes, "noop");
         assert_eq!(runtime.frame.as_ref().unwrap().commit_revision, 6);
         assert_ne!(ctx.memory(|memory| memory.focused()), Some(invoke_id));
-        let cancel = point(&shapes, "Cancel command arguments");
+        let cancel = point(&shapes, "Cancel Command Arguments");
         render(&mut runtime, click(cancel, true));
         render(&mut runtime, click(cancel, false));
         point(&render(&mut runtime, vec![]), "noop");
@@ -721,8 +722,8 @@ mod tests {
             render(&mut runtime, key(egui::Key::Tab, false));
         }
         assert_eq!(ctx.memory(|memory| memory.focused()), Some(invoke_id));
-        let revealed = reveal(&mut runtime, "Invoke Application command");
-        let visible_invoke = point(&revealed, "Invoke Application command");
+        let revealed = reveal(&mut runtime, "Invoke Application Command");
+        let visible_invoke = point(&revealed, "Invoke Application Command");
         assert!(ctx
             .read_response(invoke_id)
             .unwrap()
@@ -730,8 +731,8 @@ mod tests {
             .contains(visible_invoke));
         render(&mut runtime, key(egui::Key::Tab, true));
         render(&mut runtime, key(egui::Key::Tab, false));
-        let revealed = reveal(&mut runtime, "Cancel command arguments");
-        let visible_cancel = point(&revealed, "Cancel command arguments");
+        let revealed = reveal(&mut runtime, "Cancel Command Arguments");
+        let visible_cancel = point(&revealed, "Cancel Command Arguments");
         let focused_cancel = ctx.memory(|memory| memory.focused()).unwrap();
         assert_ne!(focused_cancel, invoke_id);
         assert!(ctx

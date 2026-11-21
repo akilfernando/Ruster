@@ -1,4 +1,5 @@
 //! Bounded per-machine checkpoints. Restoring never grants project-save authority.
+use crate::strings::Text;
 use serde::{Deserialize, Serialize};
 use serde_json::{value::RawValue, Value};
 use sha2::{Digest, Sha256};
@@ -245,9 +246,7 @@ impl Store {
                 error: None,
             };
             if !path.symlink_metadata().map_err(|e| e.to_string())?.is_dir() {
-                candidate.error = Some(
-                    "Recovery entry is not a real directory; move it aside explicitly.".into(),
-                );
+                candidate.error = Some(Text::RecoveryRecoveryEntryIsNot.plain().into());
                 candidates.push(candidate);
                 continue;
             }

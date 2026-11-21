@@ -1,5 +1,6 @@
 //! Recoverable primitive component fields using the shared Scene transaction.
 use super::{combo_focus::ComboFocus, SceneEditor};
+use crate::strings::Text;
 use eframe::egui;
 use rot_scene::{Collider, ColliderRole, ColliderShape, Scene, Transform};
 use serde::{Deserialize, Serialize};
@@ -205,8 +206,7 @@ impl SceneEditor {
                 self.draft_generation = self.draft_generation.wrapping_add(1);
                 self.sync_draft();
                 self.error.clear();
-                self.notice =
-                    "Collider applied. Undo restores the edit. Reset updates the preview.".into();
+                self.notice = Text::ColliderUpdated.plain().into();
                 true
             }
             Err(error) => {
@@ -226,7 +226,7 @@ impl SceneEditor {
         self.collider_draft = None;
         self.draft_generation = self.draft_generation.wrapping_add(1);
         self.error.clear();
-        self.notice = "Collider change cancelled.".into();
+        self.notice = Text::ColliderChangeCancelled.plain().into();
     }
     pub(super) fn collider_inspector_ui(&mut self, ui: &mut egui::Ui) {
         let Some(id) = self.selected.clone() else {
@@ -246,16 +246,15 @@ impl SceneEditor {
         };
         let editable = self.collider_editable(false) && (self.collider_draft.is_none() || own);
         ui.separator();
-        ui.strong("Collider").on_hover_text(
-            "Edits affect the active object only. Viewport guide shows the active collider.",
-        );
+        ui.strong(Text::ComponentCollider.plain())
+            .on_hover_text(Text::ColliderUiEditsAffectTheActive.plain());
         if self.manipulation.ids.len() > 1 {
-            ui.label("Editing the active object's collider.");
+            ui.label(Text::EditingTheActiveObjectsCollider.plain());
         }
-        ui.label("Primitive query shape. Scripts choose how to respond to contacts.");
         if draft.baseline.is_none() && !own {
             if ui
-                .add_enabled(editable, egui::Button::new("Add collider"))
+                .add_enabled(editable, egui::Button::new(Text::AddCollider.plain()))
+                .on_hover_text(Text::ColliderUiPrimitiveQueryShapeScripts.plain())
                 .clicked()
             {
                 draft.mode = ColliderMode::Box;
@@ -278,16 +277,16 @@ impl SceneEditor {
         let mut discrete_handled = false;
         ui.add_enabled_ui(editable, |ui| {
             ui.horizontal(|ui| {
-                ui.label("Shape");
+                ui.label(Text::ComponentColliderShape.plain());
                 let focus = ComboFocus::capture(ui, "collider_shape");
                 let mut selected = false;
                 let before = draft.mode;
                 let response = egui::ComboBox::from_id_salt("collider_shape")
                     .width(104.0)
                     .selected_text(match draft.mode {
-                        ColliderMode::None => "Remove",
-                        ColliderMode::Sphere => "Sphere",
-                        ColliderMode::Box => "Box",
+                        ColliderMode::None => Text::Remove.plain(),
+                        ColliderMode::Sphere => Text::ComponentSphere.plain(),
+                        ColliderMode::Box => Text::ComponentBox.plain(),
                     })
                     .show_ui(ui, |ui| {
                         for (mode, text) in [
@@ -313,23 +312,23 @@ impl SceneEditor {
             if draft.mode == ColliderMode::None {
                 ui.colored_label(
                     ui.visuals().warn_fg_color,
-                    "Apply removes the component. Undo restores it.",
+                    Text::ColliderUiApplyRemovesTheComponent.plain(),
                 );
             } else {
-                let response = ui.checkbox(&mut draft.enabled, "Enabled");
+                let response = ui.checkbox(&mut draft.enabled, Text::ComponentEnabled.plain());
                 discrete_handled |= response.clicked();
                 changed |= response.changed();
                 fields.push(response);
                 ui.horizontal(|ui| {
-                    ui.label("Role");
+                    ui.label(Text::ComponentColliderRole.plain());
                     let focus = ComboFocus::capture(ui, "collider_role");
                     let before = draft.role;
                     let mut selected = false;
                     let response = egui::ComboBox::from_id_salt("collider_role")
                         .width(104.0)
                         .selected_text(match draft.role {
-                            ColliderRole::Blocker => "Blocker",
-                            ColliderRole::Sensor => "Sensor",
+                            ColliderRole::Blocker => Text::ComponentBlocker.plain(),
+                            ColliderRole::Sensor => Text::ComponentSensor.plain(),
                         })
                         .show_ui(ui, |ui| {
                             for (role, text) in [
@@ -347,7 +346,7 @@ impl SceneEditor {
                     focus.restore(ui, &response.response, selected);
                     fields.push(response.response);
                 });
-                ui.label("Offset · local scene units");
+                ui.label(Text::OffsetLocalSceneUnits.plain());
                 for (index, label) in ["X", "Y", "Z"].into_iter().enumerate() {
                     error_rect = collider_field(
                         ui,
@@ -372,13 +371,11 @@ impl SceneEditor {
                             &mut fields,
                         )
                         .or(error_rect);
-                        ui.label(
-                            "0.001–1000 local units. Enabled spheres need uniform object Scale.",
-                        );
+                        ui.label(Text::ColliderUiColliderUi00011000Local.plain());
                     }
                     ColliderMode::Box => {
-                        ui.label("Size · local scene units")
-                            .on_hover_text("Full local size before object Scale.");
+                        ui.label(Text::SizeLocalSceneUnits.plain())
+                            .on_hover_text(Text::ColliderUiFullLocalSizeBefore.plain());
                         for (index, label) in ["X", "Y", "Z"].into_iter().enumerate() {
                             error_rect = collider_field(
                                 ui,
@@ -391,9 +388,7 @@ impl SceneEditor {
                             )
                             .or(error_rect);
                         }
-                        ui.weak(
-                            "Each dimension accepts 0.002–2000. Object scale and rotation apply.",
-                        );
+                        ui.weak(Text::ColliderUiEachDimensionAccepts0.plain());
                     }
                     ColliderMode::None => {}
                 }
@@ -426,8 +421,10 @@ impl SceneEditor {
         }
         if (self.collider_draft.is_some() && own) || changed {
             ui.horizontal_wrapped(|ui| {
-                let apply = ui.add_enabled(editable, egui::Button::new("Apply collider"));
-                let cancel = ui.add_enabled(editable, egui::Button::new("Cancel collider"));
+                let apply =
+                    ui.add_enabled(editable, egui::Button::new(Text::ApplyCollider.plain()));
+                let cancel =
+                    ui.add_enabled(editable, egui::Button::new(Text::CancelCollider.plain()));
                 for response in [&apply, &cancel] {
                     if response.gained_focus() {
                         response.scroll_to_me(Some(egui::Align::Center));
@@ -800,7 +797,7 @@ mod tests {
                 // Add button. Focus is obtained only by clicking that button.
                 shapes = scroll(&mut editor, 10_000.0);
                 for _ in 0..16 {
-                    if visible_text_rect(&shapes, "Add collider").is_some() {
+                    if visible_text_rect(&shapes, "Add Collider").is_some() {
                         break;
                     }
                     shapes = scroll(&mut editor, -size.y * 0.25);
@@ -810,7 +807,7 @@ mod tests {
             let mut stable = false;
             for _ in 0..24 {
                 shapes = frame(&mut editor, vec![]);
-                let current = visible_text_rect(&shapes, "Add collider");
+                let current = visible_text_rect(&shapes, "Add Collider");
                 if current.is_some()
                     && current == previous
                     && ctx.input(|input| input.smooth_scroll_delta == egui::Vec2::ZERO)
@@ -824,7 +821,7 @@ mod tests {
                 stable,
                 "Add collider must be visible and stationary before clicking"
             );
-            let point = visible_text_rect(&shapes, "Add collider").unwrap().center();
+            let point = visible_text_rect(&shapes, "Add Collider").unwrap().center();
             let pointer = |pressed| egui::Event::PointerButton {
                 pos: point,
                 button: egui::PointerButton::Primary,
@@ -850,7 +847,9 @@ mod tests {
                 .expect("Focused first Offset must be visible after Add collider");
             assert!(
                 response.interact_rect.contains_rect(response.rect),
-                "Focused first Offset must be fully inside the current inspector clip: rect={:?}, interaction={:?}", response.rect, response.interact_rect
+                "Focused first Offset must be fully inside the current inspector clip: rect={:?}, interaction={:?}",
+                response.rect,
+                response.interact_rect
             );
             frame(
                 &mut editor,

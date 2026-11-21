@@ -1,5 +1,6 @@
 //! Authored Application command drafts. Session remains the validation/history owner.
 use super::*;
+use crate::strings::Text;
 use rot_scene::{CommandDefinition, StateFields};
 
 // Semantic form actions require a fresh key press. A held key must not submit
@@ -235,15 +236,17 @@ impl BehaviorUi {
             ui.push_id(("command-definition", binding_id, id), |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(format!("{id} · {} arguments", definition.arguments.len()));
-                    if command_clicked(
-                        &ui.add_enabled(!self.pending(), egui::Button::new("Edit command")),
-                    ) && command_claim(ui.ctx(), &mut self.command_action_frame)
+                    if command_clicked(&ui.add_enabled(
+                        !self.pending(),
+                        egui::Button::new(Text::EditCommand.plain()),
+                    )) && command_claim(ui.ctx(), &mut self.command_action_frame)
                     {
                         action = Some(Action::EditCommand(binding_id.into(), Some(id.clone())));
                     }
-                    if command_clicked(
-                        &ui.add_enabled(!self.pending(), egui::Button::new("Remove command")),
-                    ) && command_claim(ui.ctx(), &mut self.command_action_frame)
+                    if command_clicked(&ui.add_enabled(
+                        !self.pending(),
+                        egui::Button::new(Text::RemoveCommand.plain()),
+                    )) && command_claim(ui.ctx(), &mut self.command_action_frame)
                     {
                         action = Some(Action::RemoveCommand(binding_id.into(), id.clone()));
                     }
@@ -252,7 +255,7 @@ impl BehaviorUi {
         }
         if command_clicked(&ui.add_enabled(
             !self.pending(),
-            egui::Button::new("Add Application command"),
+            egui::Button::new(Text::AddApplicationCommand.plain()),
         )) && command_claim(ui.ctx(), &mut self.command_action_frame)
         {
             action = Some(Action::EditCommand(binding_id.into(), None));
@@ -266,7 +269,7 @@ impl BehaviorUi {
             let mut changed = false;
             let mut owns = false;
             ui.push_id(("command-draft", generation, binding_id), |ui| {
-                ui.label("Command ID");
+                ui.label(Text::CommandId.plain());
                 let name = text_with_id(
                     ui,
                     &mut draft.command_id,
@@ -291,7 +294,7 @@ impl BehaviorUi {
                         let response = value_ui(ui, value, session, &[], generation, &mut false);
                         owns |= command_field_focus(ui, response.focus_id);
                         changed |= response.changed;
-                        if command_clicked(&ui.button("Remove argument"))
+                        if command_clicked(&ui.button(Text::RemoveArgument.plain()))
                             && command_claim(ui.ctx(), &mut self.command_action_frame)
                         {
                             remove = Some(name.clone());
@@ -302,7 +305,7 @@ impl BehaviorUi {
                     draft.arguments.remove(&name);
                     changed = true;
                 }
-                ui.label("New argument name");
+                ui.label(Text::NewArgumentName.plain());
                 let argument = text_with_id(
                     ui,
                     &mut draft.new_name,
@@ -326,7 +329,7 @@ impl BehaviorUi {
                     && !popup
                     && !egui::Popup::is_any_open(ui.ctx())
                     && command_key(ui, egui::Key::Enter);
-                let add = ui.button("Add typed command argument");
+                let add = ui.button(Text::AddTypedCommandArgument.plain());
                 owns |= add.has_focus();
                 if (command_clicked(&add) || add_enter)
                     && command_claim(ui.ctx(), &mut self.command_action_frame)
@@ -358,8 +361,7 @@ impl BehaviorUi {
                             }
                         }
                         _ => {
-                            self.error =
-                                "Repair existing values and choose a fresh argument name.".into()
+                            self.error = Text::CommandCatalogRepairExistingValuesAnd.plain().into()
                         }
                     }
                 }
@@ -372,7 +374,7 @@ impl BehaviorUi {
                 let apply_id = ui.make_persistent_id("apply-command-definition");
                 let apply = ui
                     .scope_builder(egui::UiBuilder::new().scope_id(apply_id), |ui| {
-                        ui.button("Apply command definition")
+                        ui.button(Text::ApplyCommandDefinition.plain())
                     })
                     .inner;
                 #[cfg(test)]
@@ -388,7 +390,7 @@ impl BehaviorUi {
                 let cancel_id = ui.make_persistent_id("cancel-command-definition");
                 let cancel = ui
                     .scope_builder(egui::UiBuilder::new().scope_id(cancel_id), |ui| {
-                        ui.button("Cancel command definition")
+                        ui.button(Text::CancelCommandDefinition.plain())
                     })
                     .inner;
                 owns |= command_field_focus(ui, Some(cancel.id));
@@ -407,7 +409,7 @@ impl BehaviorUi {
             }
             ui.colored_label(
                 ui.visuals().warn_fg_color,
-                "Apply or cancel the command changes first.",
+                Text::CommandCatalogApplyOrCancelThe.plain(),
             );
         }
         action

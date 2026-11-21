@@ -276,7 +276,7 @@ impl External {
     }
     fn start(&mut self, ctx: &egui::Context, input: Input) -> Result<(), String> {
         let ctx = ctx.clone();
-        self.status = "Working-copy job running…".into();
+        self.status = Text::WorkingOnTheScriptCopy.plain().into();
         #[cfg(test)]
         let gate = self.prepare_gate.take();
         #[cfg(test)]

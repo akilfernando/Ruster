@@ -1,5 +1,6 @@
 //! Scalar feedback only; this owns no meshes, textures or GPU resource bundles.
 use super::SceneEditor;
+use crate::strings::Text;
 use eframe::egui;
 use rot_render::{ShadowObservation, ShadowStatus};
 use serde_json::{json, Value};
@@ -46,12 +47,12 @@ impl SceneEditor {
         {
             if let Some(message) = o.status.warning() {
                 ui.colored_label(ui.visuals().warn_fg_color, message)
-                    .on_hover_text("Status from the last viewport update.");
+                    .on_hover_text(Text::ShadowFeedbackStatusFromTheLast.plain());
             }
             if o.resolution_limited {
                 ui.colored_label(
                     ui.visuals().warn_fg_color,
-                    "Viewport resolution is reduced to fit the render-target limit.",
+                    Text::ShadowFeedbackViewportResolutionIsReduced.plain(),
                 );
             }
         }
@@ -126,7 +127,7 @@ impl SceneEditor {
         };
         if let Some(message) = message {
             ui.colored_label(ui.visuals().warn_fg_color, message)
-                .on_hover_text("Status from the last viewport update.");
+                .on_hover_text(Text::ShadowFeedbackStatusFromTheLast.plain());
         }
     }
 }

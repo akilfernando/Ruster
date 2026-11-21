@@ -1,6 +1,7 @@
 //! Hierarchy panel body, moved out of scene_editor.rs (S-07d).
 
 use super::super::*;
+use crate::strings::Text;
 
 impl SceneEditor {
     pub(in crate::scene_editor) fn hierarchy_contents(&mut self, ui: &mut egui::Ui) {
@@ -8,7 +9,7 @@ impl SceneEditor {
         let escape = ui.input(|i| i.key_pressed(egui::Key::Escape) && i.modifiers.is_none());
         let search = ui.add(
             egui::TextEdit::singleline(&mut self.hierarchy_query)
-                .hint_text("Search objects or lights")
+                .hint_text(Text::SearchObjectsOrLights.plain())
                 .char_limit(128)
                 .desired_width(f32::INFINITY),
         );
@@ -29,7 +30,7 @@ impl SceneEditor {
                     Some((Some(self.hierarchy_search.rows[*index].id.clone()), false));
                 search.surrender_focus();
             } else {
-                self.notice = "No objects match the search.".into();
+                self.notice = Text::NoObjectsMatchTheSearch.plain().into();
             }
         }
         ui.horizontal_wrapped(|ui| {
@@ -82,7 +83,8 @@ impl SceneEditor {
         if visible > 0 || selected_count > 0 {
             ui.label(egui::RichText::new(summary).small().weak());
         }
-        if !self.hierarchy_query.is_empty() && ui.button("Clear object search").clicked() {
+        if !self.hierarchy_query.is_empty() && ui.button(Text::ClearObjectSearch.plain()).clicked()
+        {
             self.hierarchy_query.clear();
             self.hierarchy_search.update(self.session.scene(), "");
         }
@@ -90,7 +92,7 @@ impl SceneEditor {
             ui.label(if self.hierarchy_query.is_empty() {
                 crate::strings::tr(ui.ctx(), crate::strings::Text::EmptyHierarchy)
             } else {
-                "No objects or lights match."
+                Text::NoObjectsOrLightsMatch.plain()
             });
         }
         let mut clicked = None;
@@ -108,7 +110,7 @@ impl SceneEditor {
                     let row = &self.hierarchy_search.rows[*index];
                     if row.light && !lights_heading && self.session.scene().hierarchy.is_empty() {
                         ui.separator();
-                        ui.strong("Lights");
+                        ui.strong(Text::Lights.plain());
                         lights_heading = true;
                     }
                     let selected = self.manipulation.ids.contains(&row.id);
@@ -143,7 +145,7 @@ impl SceneEditor {
                         ));
                     }
                     response.context_menu(|ui| {
-                        ui.menu_button("Create", |ui| {
+                        ui.menu_button(Text::ComponentCreate.plain(), |ui| {
                             for action in [
                                 Action::CreateEmpty,
                                 Action::CreateCube,

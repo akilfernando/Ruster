@@ -584,13 +584,13 @@ impl Browser {
         }
         if self.visible.is_empty() {
             ui.label(if loading {
-                "Importing assets…"
+                Text::ImportingAssets.plain()
             } else if failed && self.catalog.is_none() {
-                "Assets unavailable"
+                Text::AssetsUnavailable.plain()
             } else if self.query.trim().is_empty() {
-                "No assets in this folder"
+                Text::NoAssetsInThisFolder.plain()
             } else {
-                "No matching assets"
+                Text::NoMatchingAssets.plain()
             });
             return (None, None);
         }

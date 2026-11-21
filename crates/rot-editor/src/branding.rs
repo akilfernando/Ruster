@@ -1,4 +1,5 @@
 //! Shared application mark and About dialog.
+use crate::strings::Text;
 use std::sync::{Arc, OnceLock};
 
 use eframe::egui::{self, ColorImage, IconData, TextureHandle, TextureOptions};
@@ -111,7 +112,7 @@ pub fn show_about(ctx: &egui::Context) {
             );
             ui.add_space(8.0);
             ui.vertical(|ui| {
-                ui.heading("Rot Engine");
+                ui.heading(Text::RotEngine.plain());
                 ui.weak(concat!("Version ", env!("CARGO_PKG_VERSION")));
                 let tagline = crate::strings::tr(ctx, crate::strings::Text::AboutTagline);
                 if !tagline.is_empty() {

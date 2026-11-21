@@ -2,6 +2,7 @@
 //! connected, Pause AI Edits, recent AI changes with Undo, Connect an AI
 //! App…, Disconnect) and the connect/disconnect toast.
 use super::*;
+use crate::strings::Text;
 use std::time::{Duration, Instant};
 
 const TOAST: Duration = Duration::from_secs(4);
@@ -102,14 +103,14 @@ impl SceneEditor {
     }
 
     fn ai_popover_ui(&mut self, ui: &mut egui::Ui) {
-        ui.strong("AI");
+        ui.strong(Text::LabelAi.plain());
         match (&self.ai_status.connected, &self.ai_status.asking) {
             (Some(app), _) => ui.label(format!("{app} is connected.")),
             (None, Some(app)) => ui.label(format!("{app} is asking to connect.")),
-            (None, None) => ui.weak("No AI app is connected."),
+            (None, None) => ui.weak(Text::NoAiAppIsConnected.plain()),
         };
-        ui.checkbox(&mut self.ai_status.paused, "Pause AI Edits")
-            .on_hover_text("AI changes wait until you resume. Reading the scene still works.");
+        ui.checkbox(&mut self.ai_status.paused, Text::PauseAiEdits.plain())
+            .on_hover_text(Text::AiIndicatorAiChangesWaitUntil.plain());
         let revision = self.session.scene().revision;
         let recent: Vec<(String, bool)> = self
             .ai_steps
@@ -124,14 +125,14 @@ impl SceneEditor {
             .collect();
         if !recent.is_empty() {
             ui.separator();
-            ui.weak("Recent AI changes");
+            ui.weak(Text::RecentAiChanges.plain());
             for (index, (label, latest)) in recent.into_iter().enumerate() {
                 ui.horizontal(|ui| {
                     ui.label(label);
                     if index == 0 && latest {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui
-                                .button("Undo")
+                                .button(Text::LabelUndo.plain())
                                 .on_hover_text(self.workspace.shortcut_text(Action::Undo))
                                 .clicked()
                             {
@@ -144,7 +145,7 @@ impl SceneEditor {
         }
         ui.separator();
         ui.horizontal(|ui| {
-            if ui.button("Connect an AI App…").clicked() {
+            if ui.button(Text::ConnectAnAiApp.plain()).clicked() {
                 #[cfg(unix)]
                 self.ai_apps.show();
                 ui.close();
@@ -152,7 +153,7 @@ impl SceneEditor {
             if ui
                 .add_enabled(
                     self.ai_status.connected.is_some(),
-                    egui::Button::new("Disconnect"),
+                    egui::Button::new(Text::Disconnect.plain()),
                 )
                 .clicked()
             {

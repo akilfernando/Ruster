@@ -1,5 +1,6 @@
 //! Scene-wide display authoring through the shared history transaction.
 use super::*;
+use crate::strings::Text;
 use rot_scene::{DisplayProfile, Scene};
 use serde::{Deserialize, Serialize};
 
@@ -121,7 +122,7 @@ impl SceneEditor {
                 self.draft_generation = self.draft_generation.wrapping_add(1);
                 self.sync_draft();
                 self.error.clear();
-                self.notice = "Scene display updated.".into();
+                self.notice = Text::SceneDisplayUpdated.plain().into();
                 true
             }
             Err(error) => {
@@ -141,13 +142,13 @@ impl SceneEditor {
         self.display_draft = None;
         self.draft_generation = self.draft_generation.wrapping_add(1);
         self.error.clear();
-        self.notice = "Display change cancelled.".into();
+        self.notice = Text::DisplayChangeCancelled.plain().into();
     }
     pub(super) fn display_inspector_ui(&mut self, ui: &mut egui::Ui) {
         let own = self.display_draft.is_some();
         let popup_at_start = egui::Popup::is_any_open(ui.ctx());
         ui.separator();
-        let header = egui::CollapsingHeader::new("Scene display")
+        let header = egui::CollapsingHeader::new(Text::SceneDisplay.plain())
             .id_salt("scene_display")
             .open(own.then_some(true))
             .show(ui, |ui| {
@@ -181,14 +182,14 @@ impl SceneEditor {
             let before = draft.profile;
             let profile = ui
                 .horizontal_wrapped(|ui| {
-                    ui.label("Profile");
+                    ui.label(Text::Profile.plain());
                     let focus = combo_focus::ComboFocus::capture(ui, "display_profile");
                     let mut selected = false;
                     let response = egui::ComboBox::from_id_salt("display_profile")
                         .width(142.0)
                         .selected_text(match draft.profile {
-                            DisplayMode::Legacy => "Legacy SDR",
-                            DisplayMode::Surface => "Surface HDR",
+                            DisplayMode::Legacy => Text::LegacySdr.plain(),
+                            DisplayMode::Surface => Text::SurfaceHdr.plain(),
                         })
                         .show_ui(ui, |ui| {
                             for (mode, label) in [
@@ -211,25 +212,23 @@ impl SceneEditor {
             discrete_changed = before != draft.profile;
             let mut fields = vec![profile];
             if draft.profile == DisplayMode::Surface {
-                ui.weak("Adjust brightness in exposure stops. The display outputs SDR.");
+                ui.weak(Text::DisplayUiAdjustBrightnessInExposure.plain());
                 let response = ui
                     .horizontal_wrapped(|ui| {
-                        ui.label("Exposure (EV)");
+                        ui.label(Text::ExposureEv.plain());
                         ui.add(
                             egui::TextEdit::singleline(&mut draft.exposure_stops)
                                 .id(egui::Id::unique("display_exposure"))
                                 .char_limit(64)
                                 .desired_width(82.0),
                         )
-                        .on_hover_text(
-                            "-8 to 8 stops. Zero is neutral; +1 doubles exposure and -1 halves it.",
-                        )
+                        .on_hover_text(Text::DisplayUiDisplayUi8To8Stops.plain())
                     })
                     .inner;
                 raw_changed = response.changed();
                 fields.push(response);
             } else {
-                ui.weak("Choose Surface HDR to preview material highlights and roughness.");
+                ui.weak(Text::DisplayUiChooseSurfaceHdrTo.plain());
             }
             for response in &fields {
                 let owned = editable
@@ -267,8 +266,9 @@ impl SceneEditor {
         }
         if own || changed {
             ui.horizontal_wrapped(|ui| {
-                let apply = ui.add_enabled(editable, egui::Button::new("Apply display"));
-                let cancel = ui.add_enabled(editable, egui::Button::new("Cancel"));
+                let apply = ui.add_enabled(editable, egui::Button::new(Text::ApplyDisplay.plain()));
+                let cancel =
+                    ui.add_enabled(editable, egui::Button::new(Text::ComponentCancel.plain()));
                 let action_owns = editable
                     && [&apply, &cancel].iter().any(|response| {
                         response.has_focus()

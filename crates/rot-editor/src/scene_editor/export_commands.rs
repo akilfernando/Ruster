@@ -1,6 +1,7 @@
 //! Manual and MCP entry points for the same guarded creator export operation.
 use super::SceneEditor;
 use crate::creation_export::{Identity, Request};
+use crate::strings::Text;
 use eframe::egui;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -421,18 +422,14 @@ impl SceneEditor {
         if self.creation_export.poll(&current_identity) {
             if let Ok(state) = self.creation_export.inspect(None) {
                 match state["operation"]["state"].as_str() {
-                    Some("committed") => self.notice =
-                        "Application exported. The archive contains the captured saved creation."
-                            .into(),
-                    Some("cancelled") => {
-                        self.notice =
-                            "Export cancelled; existing files and current work were preserved."
-                                .into()
+                    Some("committed") => {
+                        self.notice = Text::ExportCommandsBuildFinished.plain().into()
                     }
+                    Some("cancelled") => self.notice = Text::BuildCancelled.plain().into(),
                     Some("failed") => {
                         self.error = state["operation"]["error"]
                             .as_str()
-                            .unwrap_or("Export failed")
+                            .unwrap_or(Text::ExportCommandsBuildFailed.plain())
                             .chars()
                             .take(4096)
                             .collect()
@@ -481,15 +478,15 @@ impl SceneEditor {
                 crate::editor_theme::dialog_section(ui, "Starting camera");
                 let has_player_view = self.session.scene().player_view.is_some();
                 let current_view = ui.add_enabled(!has_player_view, egui::Checkbox::new(&mut self.export_use_current_view, "Use current view"))
-                    .on_hover_text("Start the game with this camera.");
+                    .on_hover_text(Text::ExportCommandsStartTheGameWith.plain());
                 if has_player_view {
-                    ui.label("The saved Player View controls application framing.");
+                    ui.label(Text::ExportCommandsTheSavedPlayerView.plain());
                 }
                 let blocked = self.export_ready(true).err();
                 if let Some(reason) = &blocked {
                     ui.label(reason);
                 }
-                if self.export_needs_save() && ui.button("Save scene").clicked()
+                if self.export_needs_save() && ui.button(Text::SaveScene.plain()).clicked()
                 {
                     self.export_dialog = false;
                     self.save();
@@ -498,7 +495,7 @@ impl SceneEditor {
                 let mut appearance_activated = false;
                 if !self.shader_builtin
                     && ui
-                        .button("Use built-in appearance for this session")
+                        .button(Text::ExportCommandsUseBuiltInAppearance.plain())
                         .clicked()
                 {
                     appearance_activated = true;
@@ -510,7 +507,7 @@ impl SceneEditor {
                 let (submit, cancel) = ui
                     .horizontal_wrapped(|ui| {
                         let submit = ui.add_enabled_ui(blocked.is_none(), |ui| crate::editor_theme::primary_button(ui, "Export application")).inner;
-                        let cancel = ui.button("Cancel");
+                        let cancel = ui.button(Text::ComponentCancel.plain());
                         (submit, cancel)
                     })
                     .inner;
@@ -563,7 +560,7 @@ impl SceneEditor {
         }
         if self.export_status_open {
             let mut open = true;
-            egui::Window::new("Application export")
+            egui::Window::new(Text::ComponentBuildApplication.plain())
                 .open(&mut open)
                 .resizable(true)
                 .show(ctx, |ui| {
@@ -576,7 +573,7 @@ impl SceneEditor {
                                 ));
                             }
                             Some("cancelling") => {
-                                ui.label("Cancelling export…");
+                                ui.label(Text::BuildCancelling.plain());
                             }
                             Some("committed") => {
                                 ui.heading(crate::strings::tr(
@@ -590,22 +587,22 @@ impl SceneEditor {
                                 );
                             }
                             Some("cancelled") => {
-                                ui.label("Export cancelled. Your work is unchanged.");
+                                ui.label(Text::BuildCancelled.plain());
                             }
                             Some("failed") => {
                                 ui.colored_label(
                                     ui.visuals().error_fg_color,
                                     state["operation"]["error"]
                                         .as_str()
-                                        .unwrap_or("Export failed"),
+                                        .unwrap_or("Build failed"),
                                 );
                             }
                             _ => {
-                                ui.label("No export is running.");
+                                ui.label(Text::NoExportIsRunning.plain());
                             }
                         }
                         if state["operation"]["cleanup_pending"] == true {
-                            ui.label("Removing private export files…");
+                            ui.label(Text::RemovingPrivateExportFiles.plain());
                         }
                         if let Some(warning) = state["operation"]["cleanup_warning"].as_str() {
                             ui.colored_label(ui.visuals().warn_fg_color, warning);
@@ -616,10 +613,10 @@ impl SceneEditor {
                                 Some("running" | "cancelling")
                             )
                         {
-                            if ui.button("Cancel export").clicked() {
+                            if ui.button(Text::BuildCancel.plain()).clicked() {
                                 self.creation_export.cancel();
                             }
-                        } else if ui.button("Close export status").clicked() {
+                        } else if ui.button(Text::BuildStatusClose.plain()).clicked() {
                             self.export_status_open = false;
                         }
                     }

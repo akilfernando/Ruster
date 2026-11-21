@@ -3,6 +3,7 @@
 //! manager, or picked with Import…, are copied into the project's `Assets`
 //! folder and imported under an ID taken from the file name, with no form.
 use super::*;
+use crate::strings::Text;
 use std::collections::{BTreeSet, VecDeque};
 use std::path::Path;
 use std::sync::mpsc;
@@ -62,7 +63,7 @@ pub(super) fn pick_asset_files(ctx: egui::Context) -> mpsc::Receiver<Vec<PathBuf
     let (send, receive) = mpsc::sync_channel(1);
     std::thread::spawn(move || {
         let picked = rfd::FileDialog::new()
-            .set_title("Import Assets")
+            .set_title(Text::ImportAssets.plain())
             .add_filter("Assets", &IMPORTABLE)
             .pick_files()
             .unwrap_or_default();
@@ -346,12 +347,12 @@ impl SceneEditor {
         let search = ui
             .horizontal_wrapped(|ui| {
                 if crate::editor_theme::primary_button(ui, "Import…")
-                    .on_hover_text("Import .glb, .obj, .png or .wav files, or drop them here")
+                    .on_hover_text(Text::AssetsBrowserImportGlbObjPng.plain())
                     .clicked()
                 {
                     self.pick_imports();
                 }
-                ui.menu_button("Tools", |ui| {
+                ui.menu_button(Text::Tools.plain(), |ui| {
                     self.command_item(ui, Action::CreateShaderSource);
                     self.command_item(ui, Action::RefreshShader);
                     if !self.shader_notice.is_empty() {
@@ -359,19 +360,19 @@ impl SceneEditor {
                     }
                 })
                 .response
-                .on_hover_text("Shader and content tools");
-                ui.selectable_value(&mut self.assets_view.list, false, "Grid");
-                ui.selectable_value(&mut self.assets_view.list, true, "List");
+                .on_hover_text(Text::ShaderAndContentTools.plain());
+                ui.selectable_value(&mut self.assets_view.list, false, Text::Grid.plain());
+                ui.selectable_value(&mut self.assets_view.list, true, Text::List.plain());
                 if !self.assets_view.list {
                     ui.add(
                         egui::Slider::new(&mut self.assets_view.size, 48.0..=160.0)
                             .show_value(false),
                     )
-                    .on_hover_text("Thumbnail size");
+                    .on_hover_text(Text::ThumbnailSize.plain());
                 }
                 ui.add(
                     egui::TextEdit::singleline(&mut self.content_query)
-                        .hint_text("Search")
+                        .hint_text(Text::Search.plain())
                         .char_limit(128)
                         .desired_width(search_width),
                 )
@@ -398,17 +399,13 @@ impl SceneEditor {
         if self.assets.is_none() {
             if let Some(root) = self.asset_origin.clone() {
                 ui.label(format!("Project content origin: {}", root.display()));
-                if ui.button("Retry").clicked() {
+                if ui.button(Text::Retry.plain()).clicked() {
                     if let Err(error) = self.retry_asset_open() {
                         self.error = error;
                     }
                 }
             }
-            crate::ui_kit::empty_state(
-                ui,
-                "Save the scene to import assets into its project.",
-                None,
-            );
+            crate::ui_kit::empty_state(ui, Text::AssetsBrowserSaveTheSceneTo.plain(), None);
             return;
         }
         let items = self.items();
@@ -495,14 +492,14 @@ impl SceneEditor {
             if !label.is_empty() && ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
                 action = Some(make(id.clone()));
             }
-            if ui.button("Reimport").clicked() {
+            if ui.button(Text::AssetReimport.plain()).clicked() {
                 action = Some(AssetAction::Refresh(id.clone()));
             }
             if matches!(item, Item::Resource(_)) {
-                if ui.button("Rename…").clicked() {
+                if ui.button(Text::AssetRenameCommand.plain()).clicked() {
                     action = Some(AssetAction::Rename(id.clone()));
                 }
-                if ui.button("Select Objects Using It").clicked() {
+                if ui.button(Text::SelectObjectsUsingIt.plain()).clicked() {
                     action = Some(AssetAction::References(id.clone()));
                 }
             }
@@ -684,9 +681,9 @@ impl SceneEditor {
         ui.heading(&id);
         if let Some((source, clips)) = model {
             ui.label(if clips.is_empty() {
-                "Model"
+                Text::Model.plain()
             } else {
-                "Animated model"
+                Text::AssetAnimatedModel.plain()
             });
             ui.weak(source);
             if !clips.is_empty() {
@@ -696,11 +693,11 @@ impl SceneEditor {
                 if crate::editor_theme::primary_button(ui, "Place in Scene").clicked() {
                     self.asset_action(AssetAction::Place(id.clone()));
                 }
-                if ui.button("Reimport").clicked() {
+                if ui.button(Text::AssetReimport.plain()).clicked() {
                     self.asset_action(AssetAction::Refresh(id.clone()));
                 }
             });
-            ui.weak("Or drag it from Assets into the Scene view.");
+            ui.weak(Text::AssetsBrowserOrDragItFrom.plain());
             return;
         }
         let Some(row) = self
@@ -709,7 +706,7 @@ impl SceneEditor {
             .iter()
             .find(|row| row.info.id == id)
         else {
-            ui.label("This asset is no longer in the project.");
+            ui.label(Text::AssetsBrowserThisAssetIsNo.plain());
             return;
         };
         let info = row.info.clone();
@@ -747,7 +744,7 @@ impl SceneEditor {
             ui.label(label);
             if ui
                 .button(button)
-                .on_hover_text("Adds a second asset that reads this file the other way")
+                .on_hover_text(Text::AssetsBrowserAddsASecondAsset.plain())
                 .clicked()
             {
                 self.asset_texture_role = other;
@@ -772,7 +769,7 @@ impl SceneEditor {
             ui.label(label);
             if ui
                 .button(button)
-                .on_hover_text("Adds a second asset that reads this file the other way")
+                .on_hover_text(Text::AssetsBrowserAddsASecondAsset.plain())
                 .clicked()
             {
                 self.asset_normal_policy = other;
@@ -798,7 +795,7 @@ impl SceneEditor {
         if let Some(error) = &info.diagnostic {
             ui.colored_label(crate::editor_theme::colors(ui).warning, error);
         }
-        if ui.button("Reimport").clicked() {
+        if ui.button(Text::AssetReimport.plain()).clicked() {
             self.asset_action(AssetAction::Refresh(id.clone()));
         }
     }
@@ -836,7 +833,7 @@ impl SceneEditor {
             if let Some(payload) = egui::DragAndDrop::take_payload::<ModelDrag>(ctx) {
                 let current = self.assets.as_ref().map_or(0, AssetStore::revision);
                 if payload.generation != self.generation || payload.catalog_revision != current {
-                    self.error = "The project changed while dragging; drag the model again.".into();
+                    self.error = Text::AssetsBrowserTheProjectChangedWhile.plain().into();
                     return;
                 }
                 if let Err(error) = self.place_model(&payload.asset_id, None) {

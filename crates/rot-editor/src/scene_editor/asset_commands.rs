@@ -1,6 +1,7 @@
 //! One bounded asset controller shared by human Content actions and deferred MCP.
 use super::*;
 use crate::asset_worker::{AssetMaps, Event, RetiredAssets, Worker};
+use crate::strings::Text;
 use rot_assets::{AssetMutation, AssetRequest, AssetStateIdentity, MeshNormalPolicy, TextureRole};
 use std::sync::mpsc::{TryRecvError, TrySendError};
 
@@ -90,7 +91,7 @@ pub(super) fn asset_mutation(
                         return Err(error(
                             "invalid_arguments",
                             "texture_role must be base_color_srgb or roughness_linear",
-                        ))
+                        ));
                     }
                 };
                 AssetMutation::ImportTexture {
@@ -112,7 +113,7 @@ pub(super) fn asset_mutation(
                         return Err(error(
                             "invalid_arguments",
                             "normal_policy must be flat or authored_when_complete",
-                        ))
+                        ));
                     }
                 };
                 AssetMutation::ImportMesh {
@@ -608,7 +609,7 @@ impl Controller {
             cancel: None,
         });
         self.save_request = Some(request);
-        self.status = "Preparing Save…".into();
+        self.status = Text::SavingPrepare.plain().into();
         Ok(())
     }
     pub(super) fn retire_unsent_save(&mut self, request: Box<crate::asset_save::Request>) {
@@ -741,7 +742,7 @@ impl Controller {
             cancel: None,
         });
         self.request = Some(request);
-        self.status = "Preparing content…".into();
+        self.status = Text::PreparingContent.plain().into();
         Ok(())
     }
     pub fn cancel(&mut self) {
@@ -862,7 +863,7 @@ impl Controller {
             .is_some_and(|save| save.followup.is_some())
         {
             editor.append_save_warning("content worker stopped after the scene committed; reopen the scene before further content work");
-            self.status = "Scene saved; finishing cleanup after content worker failure…".into();
+            self.status = Text::SceneSavedFinishingAssetCleanup.plain().into();
         } else if let Some(mut save) = (!held_save).then(|| self.saving.take()).flatten() {
             let message = if matches!(
                 save.phase,
@@ -882,7 +883,7 @@ impl Controller {
             self.retire_unsent_save(request);
         }
         if self.active.is_none() && !handled_save {
-            self.status = "Asset cleanup was interrupted. It will finish later.".into();
+            self.status = Text::AssetCommandsAssetCleanupWasInterrupted.plain().into();
             editor.error = self.status.clone();
         }
         if let Some(mut active) = (!held_asset).then(|| self.active.take()).flatten() {
@@ -981,7 +982,7 @@ impl Controller {
                             }
                             #[cfg(feature = "inspection")]
                             self.timing_result(TimingKind::Save, job, "failure");
-                            self.status = "Save could not be prepared.".into();
+                            self.status = Text::SaveCouldNotBePrepared.plain().into();
                         }
                     }
                 }
@@ -998,7 +999,9 @@ impl Controller {
                             ..Default::default()
                         });
                     }
-                    editor.error = "The save finished unexpectedly. Check the destination.".into();
+                    editor.error = Text::AssetCommandsTheSaveFinishedUnexpectedly
+                        .plain()
+                        .into();
                 } else {
                     let mut save = self.saving.take().unwrap();
                     match result {
@@ -1056,7 +1059,7 @@ impl Controller {
                             self.saving = Some(save);
                         }
                     }
-                    self.status = "Finishing Save…".into();
+                    self.status = Text::SavingFinish.plain().into();
                 }
             }
             Event::Prepared { job } => {
@@ -1100,7 +1103,7 @@ impl Controller {
                     if let Some(active) = active {
                         self.active = Some(active);
                     }
-                    editor.error = "An asset task finished unexpectedly. Check your Assets.".into();
+                    editor.error = Text::AssetCommandsAnAssetTaskFinished.plain().into();
                     return;
                 }
                 let mut active = active.unwrap();
@@ -1149,7 +1152,7 @@ impl Controller {
                 if let Some(reply) = active.reply.take() {
                     reply.finish(editor, outcome);
                 }
-                self.status = "Finishing content update…".into();
+                self.status = Text::FinishingAssetUpdate.plain().into();
             }
             Event::Opened {
                 job,
@@ -1214,7 +1217,7 @@ impl Controller {
                         self.queue_store(editor.assets.replace(*store));
                         editor.content_search.key = None;
                         editor.error.clear();
-                        self.status = "Project content loaded.".into();
+                        self.status = Text::ProjectContentLoaded.plain().into();
                         if opening.as_ref().unwrap().recovery_shader
                             && editor
                                 .assets
@@ -1231,23 +1234,30 @@ impl Controller {
                         let retired = self.immediate.get_or_insert_with(RetiredAssets::default);
                         assert!(retired.store.is_none());
                         retired.store = Some(*store);
-                        self.status = "Finishing content loading…".into();
+                        self.status = Text::FinishingAssetLoading.plain().into();
                         if opening.as_ref().is_some_and(|open| !open.cancelled) {
                             editor.error =
-                                "The project content changed. Try loading it again.".into();
+                                Text::AssetCommandsTheProjectContentChanged.plain().into();
                         }
                     }
                     Err(message) if matches => {
                         let open = opening.unwrap();
                         editor.error = if open.recovered {
-                            format!("Couldn't load recovered assets from {}: {}. Restore them, then Retry.", open.root.display(), persistence_commands::bounded(&message))
+                            format!(
+                                "Couldn't load recovered assets from {}: {}. Restore them, then Retry.",
+                                open.root.display(),
+                                persistence_commands::bounded(&message)
+                            )
                         } else {
-                            format!("Couldn't load project content: {}. Repair the project, then Retry.", persistence_commands::bounded(&message))
+                            format!(
+                                "Couldn't load project content: {}. Repair the project, then Retry.",
+                                persistence_commands::bounded(&message)
+                            )
                         };
-                        self.status = "Project content could not be loaded.".into();
+                        self.status = Text::AssetCommandsProjectContentCouldNot.plain().into();
                     }
                     Err(_) => {
-                        self.status = "Content loading cancelled.".into();
+                        self.status = Text::ContentLoadingCancelled.plain().into();
                     }
                 }
             }
@@ -1271,7 +1281,7 @@ impl Controller {
         assert!(retired.maps[slot].meshes.is_empty());
         assert!(retired.maps[slot].textures.is_empty());
         retired.maps[slot] = maps;
-        self.status = "Finishing content update…".into();
+        self.status = Text::FinishingAssetUpdate.plain().into();
     }
     pub(super) fn queue_store(&mut self, store: Option<AssetStore>) {
         let Some(store) = store else {
@@ -1335,7 +1345,7 @@ impl Controller {
             *slot = Some(retired);
             return;
         };
-        self.status = "Finishing content update…".into();
+        self.status = Text::FinishingAssetUpdate.plain().into();
         match worker.try_retire(self.next, retired) {
             Ok(()) => {
                 self.retiring = !self.disconnected;
@@ -1417,7 +1427,7 @@ impl Controller {
         if let Some(reply) = save.reply.take() {
             reply.finish(editor, Ok(editor.saved_result()));
         }
-        self.status = "Scene saved.".into();
+        self.status = Text::SceneSaved.plain().into();
         #[cfg(feature = "inspection")]
         {
             self.timing_result(TimingKind::Save, save.job, "success");
@@ -1513,7 +1523,7 @@ impl Controller {
                 .is_some_and(Reply::authorize)
             {
                 self.saving.as_mut().unwrap().phase = Phase::CommitQueued;
-                self.status = "Saving scene…".into();
+                self.status = Text::SavingScene.plain().into();
             } else {
                 self.reject_save(
                     editor,
@@ -1589,7 +1599,7 @@ impl Controller {
             }
             let intent = editor.pending_asset_open.take().unwrap();
             let Some(job) = self.next.checked_add(1) else {
-                editor.error = "Content job identity exhausted.".into();
+                editor.error = Text::AssetCommandsCouldNotStartThe.plain().into();
                 #[cfg(feature = "inspection")]
                 self.timing_admitted(open_admission);
                 return;
@@ -1619,7 +1629,7 @@ impl Controller {
                         recovery_shader: intent.recovery_shader,
                         cancelled: false,
                     });
-                    self.status = "Loading project content…".into();
+                    self.status = Text::LoadingContent.plain().into();
                 }
                 Err(TrySendError::Full(_)) => editor.pending_asset_open = Some(intent),
                 Err(TrySendError::Disconnected(_)) => {
@@ -1674,7 +1684,7 @@ impl Controller {
                 .is_some_and(Reply::authorize);
             if authorized {
                 self.active.as_mut().unwrap().phase = Phase::CommitQueued;
-                self.status = "Updating content…".into();
+                self.status = Text::UpdatingContent.plain().into();
             } else {
                 self.reject(
                     editor,
@@ -1873,7 +1883,9 @@ impl SceneEditor {
                 self.asset_ops
                     .timing_result(TimingKind::Open, job, "cancelled");
             }
-            self.asset_ops.status = "Content loading cancelled; Retry when ready.".into();
+            self.asset_ops.status = Text::AssetCommandsContentLoadingCancelledRetry
+                .plain()
+                .into();
             self.notice = self.asset_ops.status.clone();
         }
         self.asset_ops.cancel();
@@ -2040,7 +2052,7 @@ impl SceneEditor {
                 let mut result = json!({"asset_revision":revision.to_string(),"scene_revision":self.session.scene().revision.to_string()});
                 match outcome {
                     rot_assets::AssetOutcome::Asset(info) => {
-                        self.notice = "Assets updated.".into();
+                        self.notice = Text::AssetsUpdated.plain().into();
                         result["asset"] = json!(info);
                     }
                     rot_assets::AssetOutcome::Model(model) => {
@@ -2349,7 +2361,7 @@ impl SceneEditor {
             self.asset_ops.cancel();
             self.asset_dialog = false;
             self.asset_focused = false;
-            self.notice = "Assets are still saving. The scene will close after.".into();
+            self.notice = Text::AssetCommandsAssetsAreStillSaving.plain().into();
             false
         } else {
             true
@@ -2392,8 +2404,8 @@ impl SceneEditor {
                 if busy
                     && (self.pending_asset_open.is_some() || self.asset_ops.cancellable())
                     && ui
-                        .button("Cancel")
-                        .on_hover_text("Cancel the asset work first.")
+                        .button(Text::ComponentCancel.plain())
+                        .on_hover_text(Text::CancelTheAssetWorkFirst.plain())
                         .clicked()
                 {
                     self.cancel_asset_work();
@@ -2404,24 +2416,24 @@ impl SceneEditor {
                             save.continuation != save_commands::Continuation::SaveOnly
                         }))
                     && ui
-                        .button("Keep editing")
-                        .on_hover_text("Finish saving without closing or starting a new scene.")
+                        .button(Text::KeepEditing.plain())
+                        .on_hover_text(Text::AssetCommandsFinishSavingWithoutClosing.plain())
                         .clicked()
                 {
                     self.revoke_save_continuation();
                 }
                 if self.status_diagnostics() {
                     let label = if busy {
-                        egui::RichText::new("Details").color(ui.visuals().warn_fg_color)
+                        egui::RichText::new(Text::Details.plain()).color(ui.visuals().warn_fg_color)
                     } else {
-                        egui::RichText::new("Details")
+                        egui::RichText::new(Text::Details.plain())
                     };
                     ui.menu_button(label, |ui| self.status_details_ui(ui))
                         .response
                         .on_hover_text(if busy {
-                            "Retained diagnostics remain available while content work finishes."
+                            Text::AssetDetailsWhileBusy.plain()
                         } else {
-                            "Read full diagnostics and recovery actions."
+                            Text::AssetDetailsHint.plain()
                         });
                 }
                 // Warning and error counts open the Console (UX-STANDARDS §3).
@@ -2512,7 +2524,7 @@ impl SceneEditor {
                         )
                         .ui(ui, |ui| self.status_details_ui(ui))
                         .0
-                        .on_hover_text("Open error details");
+                        .on_hover_text(Text::OpenErrorDetails.plain());
                     } else {
                         ui.add(
                             egui::Label::new(egui::RichText::new(summary).color(color)).truncate(),
@@ -2903,9 +2915,18 @@ mod tests {
             done(editor),
             "controller phase timeout: active={:?}, retired={}, immediate={}, retiring={}, disconnected={}, shutdown={}, close_resources={}, finished={}, status={}",
             editor.asset_ops.active.as_ref().map(|active| active.phase),
-            editor.asset_ops.retired.is_some(), editor.asset_ops.immediate.is_some(), editor.asset_ops.retiring,
-            editor.asset_ops.disconnected, editor.asset_ops.shutting_down, editor.asset_ops.close_resources_taken,
-            editor.asset_ops.worker.as_ref().is_some_and(Worker::is_finished), editor.asset_ops.status
+            editor.asset_ops.retired.is_some(),
+            editor.asset_ops.immediate.is_some(),
+            editor.asset_ops.retiring,
+            editor.asset_ops.disconnected,
+            editor.asset_ops.shutting_down,
+            editor.asset_ops.close_resources_taken,
+            editor
+                .asset_ops
+                .worker
+                .as_ref()
+                .is_some_and(Worker::is_finished),
+            editor.asset_ops.status
         );
     }
     fn escape_save_continuation(editor: &mut SceneEditor, ctx: &egui::Context) {
@@ -2925,7 +2946,7 @@ mod tests {
                 editor.asset_frame(ctx, false);
                 editor.recovery.poll(ctx);
                 editor.process_recovery_ack();
-                ui.label("Finishing Save…");
+                ui.label("Finishing save…");
                 editor.asset_frame(ctx, true);
             },
         )
@@ -3430,7 +3451,7 @@ mod tests {
                     },
                     |ui| {
                         editor.asset_begin_root_frame(ctx);
-                        ui.label("Preparing Save…");
+                        ui.label("Preparing save…");
                         editor.asset_frame(ctx, true);
                     },
                 )
@@ -3557,10 +3578,11 @@ mod tests {
             // Held recovery keeps the committed follow-up open whichever
             // retirement state the asset worker has reached.
             assert!(!editor.asset_ops.disconnected);
-            assert!(editor.asset_ops.saving.as_ref().is_some_and(|save| save
-                .followup
-                .as_ref()
-                .is_some_and(|followup| followup.result.is_none())));
+            assert!(editor.asset_ops.saving.as_ref().is_some_and(|save| {
+                save.followup
+                    .as_ref()
+                    .is_some_and(|followup| followup.result.is_none())
+            }));
             escape_save_continuation(editor, ctx);
             release_recovery.take().unwrap().send(()).unwrap();
             assert!(editor.save_continuation.is_none());
@@ -3771,7 +3793,7 @@ mod tests {
                 },
                 |ui| {
                     editor.asset_begin_root_frame(ctx);
-                    ui.label("Loading project content…");
+                    ui.label(Text::LoadingContent.plain());
                     editor.asset_frame(ctx, true);
                 },
             )
@@ -3791,7 +3813,7 @@ mod tests {
                 editor.asset_ops.worker.is_none(),
                 "shell paints before catalog IO submission"
             );
-            ui.label("Loading project content…");
+            ui.label(Text::LoadingContent.plain());
             editor.asset_frame(ctx, true);
             assert!(editor.pending_asset_open.is_none());
             assert!(editor.asset_ops.opening.is_some());

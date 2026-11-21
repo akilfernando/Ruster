@@ -1,5 +1,6 @@
 //! Read-only presentation of the last committed spatial-query snapshot.
 use super::*;
+use crate::strings::Text;
 use rot_behavior::{
     spatial::{SlideOutcome, SweepOutcome},
     QueryObservation, QueryResult,
@@ -139,7 +140,7 @@ impl RuntimeUi {
         let selected = &mut self.spatial_feedback_index;
         *selected = (*selected).min(queries.len() - 1);
         let retained = self.stale || !self.visible;
-        egui::menu::SubMenuButton::new("Spatial Feedback")
+        egui::menu::SubMenuButton::new(Text::SpatialFeedback.plain())
             .config(
                 egui::menu::MenuConfig::default()
                     .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
@@ -150,14 +151,19 @@ impl RuntimeUi {
                 );
                 ui.label(format!("Committed tick {}", frame.tick));
                 if retained {
-                    ui.colored_label(ui.visuals().warn_fg_color, "From a previous Play session");
+                    ui.colored_label(
+                        ui.visuals().warn_fg_color,
+                        Text::FromAPreviousPlaySession.plain(),
+                    );
                 }
                 ui.horizontal(|ui| {
-                    let previous =
-                        ui.add_enabled(*selected > 0, egui::Button::new("Previous query"));
+                    let previous = ui.add_enabled(
+                        *selected > 0,
+                        egui::Button::new(Text::PreviousQuery.plain()),
+                    );
                     let next = ui.add_enabled(
                         *selected + 1 < queries.len(),
-                        egui::Button::new("Next query"),
+                        egui::Button::new(Text::NextQuery.plain()),
                     );
                     if previous.clicked() {
                         *selected -= 1;
@@ -204,7 +210,7 @@ impl RuntimeUi {
                         }
                         ui.label(format!("Clearance {} scene units", result.clearance));
                         if matches!(result.outcome, SweepOutcome::InitialOverlap) {
-                            ui.label("Move the probe away from the obstacle and start Play again.");
+                            ui.label(Text::SpatialOverlapHint.plain());
                         }
                     }
                     QueryResult::MoveAndSlide { delta, result, .. } => {
@@ -479,7 +485,7 @@ mod tests {
             "query menu opens through its button"
         );
         let shapes = draw(&ctx, &mut runtime, vec![]);
-        let next = point(&shapes, "Next query");
+        let next = point(&shapes, "Next Query");
         draw(&ctx, &mut runtime, click(next));
         assert_eq!(runtime.spatial_feedback_index, 1);
         draw(
@@ -551,7 +557,7 @@ mod tests {
             click(point(&shapes, "Spatial Feedback")),
         );
         let shapes = draw(&ctx, &mut runtime, vec![]);
-        draw(&ctx, &mut runtime, click(point(&shapes, "Previous query")));
+        draw(&ctx, &mut runtime, click(point(&shapes, "Previous Query")));
         assert_eq!(runtime.spatial_feedback_index, 0);
         // At either end the activated button becomes disabled. Keep focus on
         // the remaining navigation button, rather than dropping it to the app.

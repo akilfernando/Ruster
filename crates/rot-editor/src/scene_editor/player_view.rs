@@ -1,5 +1,6 @@
 //! Scene-owned framing authoring and committed preview observation.
 use super::SceneEditor;
+use crate::strings::Text;
 use eframe::egui;
 use rot_scene::{PlayerAnchor, PlayerView, Scene};
 use serde_json::{json, Value};
@@ -120,9 +121,9 @@ impl SceneEditor {
         self.observe_runtime();
         self.error.clear();
         self.notice = if self.session.scene().player_view.is_some() {
-            "Player view applied."
+            Text::GameCameraUpdated.plain()
         } else {
-            "Player view cleared."
+            Text::GameCameraCleared.plain()
         }
         .into();
         Ok(())
@@ -184,8 +185,8 @@ impl SceneEditor {
                         let (fixed, follow) = ui
                             .horizontal_wrapped(|ui| {
                                 (
-                                    ui.radio_value(&mut draft.follow, false, "Fixed"),
-                                    ui.radio_value(&mut draft.follow, true, "Follow"),
+                                    ui.radio_value(&mut draft.follow, false, Text::Fixed.plain()),
+                                    ui.radio_value(&mut draft.follow, true, Text::Follow.plain()),
                                 )
                             })
                             .inner;
@@ -290,9 +291,9 @@ impl SceneEditor {
                             crate::editor_theme::primary_button(ui, "Apply Player View"),
                             ui.add_enabled(
                                 scene.player_view.is_some(),
-                                egui::Button::new("Clear Player View"),
+                                egui::Button::new(Text::GameCameraClear.plain()),
                             ),
-                            ui.button("Cancel"),
+                            ui.button(Text::ComponentCancel.plain()),
                         )
                     })
                     .inner;

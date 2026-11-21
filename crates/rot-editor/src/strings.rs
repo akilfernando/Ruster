@@ -3,7 +3,7 @@
 //! wording shows only with the Rot style and Themed Wording both on, and
 //! never in menus, buttons, errors, warnings, saving or AI permissions.
 //!
-//! Command names live in `Action::label`; this table holds the rest.
+//! Commands resolve their labels here alongside the rest of the editor wording.
 use eframe::egui;
 
 // Keep each key and its Plain wording together. Tests use the same list.
@@ -223,7 +223,8 @@ editor_text! {
     ScriptNoneSelected => "No script selected.",
     ScriptEditorShortcuts => "Ctrl+Enter Apply · Ctrl+S Apply and Save · Esc Close",
     ScriptDisplayName => "Display Name",
-    ScriptLanguage => "Language ID",
+    ScriptLanguage => "Language",
+    ScriptCode => "Code",
     ScriptApiVersion => "API Version",
     ScriptTextTooLong => "That text is too long. The previous text is preserved.",
     ScriptApply => "Apply Script",
@@ -298,6 +299,7 @@ editor_text! {
     RecoveryCleanupFailed => "Couldn't clean up recovery copies.",
     ScriptApplicationCommands => "Application Commands",
     AiConnectionKeyChanged => "Only allow the app if you set it up again.",
+    ScenarioAiUpdated => "AI updated the scenario. Restart to see the changes.",
     ScenarioUnapplied => "Unapplied Changes",
     ScenarioOpenFileHint => "Choose a scenario JSON file.",
     ScenarioSaveAsFileHint => "Choose a new file path. Existing files are protected.",
@@ -335,6 +337,964 @@ editor_text! {
     WorkingCopyOpened => "Opened the working copy.",
     WorkingCopyPrepared => "The working copy is ready to open.",
     WorkingCopySaveRecorded => "Saved the working-copy comparison.",
+
+    // Commands And Settings
+    LabelAbout => "About Rot Engine",
+    LabelAi => "AI",
+    LabelAiConnection => "AI Connection…",
+    LabelAppearance => "Appearance",
+    LabelAssignCube => "Procedural Cube",
+    LabelBack => "Back View",
+    LabelBottom => "Bottom View",
+    LabelCommandPalette => "Command Palette…",
+    LabelCopy => "Copy",
+    LabelCreateCapsule => "Capsule",
+    LabelCreateCube => "Cube",
+    LabelCreateDirectionalLight => "Directional Light",
+    LabelCreateEmpty => "Create Empty",
+    LabelCreateLight => "Point Light",
+    LabelCreateShaderSource => "Shader Source",
+    LabelDocumentation => "Documentation",
+    LabelDuplicate => "Duplicate",
+    LabelExport => "Build…",
+    LabelExternalTools => "External Tools",
+    LabelFindObjects => "Search Hierarchy",
+    LabelFocusRuntime => "Focus Game Controls",
+    LabelFrame => "Frame Selected",
+    LabelFreeView => "Free View",
+    LabelFront => "Front View",
+    LabelGameCamera => "Camera…",
+    LabelGameControls => "Game Controls…",
+    LabelGameUi => "Game UI…",
+    LabelGeneral => "General",
+    LabelGroupSelection => "Group Selection",
+    LabelImportAsset => "Import…",
+    LabelInputActions => "Input Actions…",
+    LabelIsometric => "Isometric View",
+    LabelKeyboardShortcuts => "Keyboard Shortcuts…",
+    LabelLayoutDefault => "Default",
+    LabelLayoutSideBySide => "Side by Side",
+    LabelLeft => "Left View",
+    LabelMove => "Move Tool",
+    LabelNew => "New Scene",
+    LabelNewProject => "New Project…",
+    LabelNextPanel => "Next Panel",
+    LabelOpen => "Open Scene…",
+    LabelOpenProject => "Open Project…",
+    LabelPaste => "Paste",
+    LabelPause => "Pause",
+    LabelPlay => "Play",
+    LabelPlayChecks => "Play Checks…",
+    LabelPreferences => "Preferences…",
+    LabelPreviousPanel => "Previous Panel",
+    LabelProjectSettings => "Project Settings…",
+    LabelProjection => "Toggle Projection",
+    LabelQuit => "Exit",
+    LabelRecoveryCheckpoints => "Recovery Checkpoints…",
+    LabelRedo => "Redo",
+    LabelRefreshShader => "Refresh Scene Shader",
+    LabelResetLayout => "Reset Layout",
+    LabelRight => "Right View",
+    LabelRotate => "Rotate Tool",
+    LabelSave => "Save",
+    LabelSaveAs => "Save As…",
+    LabelScale => "Scale Tool",
+    LabelScriptDebugger => "Script Debugger…",
+    LabelSelectAll => "Select All",
+    LabelShortcuts => "Shortcuts",
+    LabelStep => "Step",
+    LabelToggleConsole => "Console",
+    LabelTop => "Top View",
+    LabelUndo => "Undo",
+    LabelViewport => "Viewport",
+
+    // Command Catalog
+    AddApplicationCommand => "Add Application Command",
+    AddTypedCommandArgument => "Add Typed Command Argument",
+    ApplyCommandDefinition => "Apply Command Definition",
+    CancelCommandDefinition => "Cancel Command Definition",
+    CommandCatalogApplyOrCancelThe => "Apply or cancel the command changes first.",
+    CommandId => "Command ID",
+    EditCommand => "Edit Command",
+    NewArgumentName => "New argument name",
+    RemoveArgument => "Remove Argument",
+    RemoveCommand => "Remove Command",
+
+    // Runtime Commands
+    ApplicationCommands => "Application commands",
+    CancelCommandArguments => "Cancel Command Arguments",
+    InvokeApplicationCommand => "Invoke Application Command",
+    LastCommandDetails => "Last Command Details",
+    RuntimeCommandsEnableACompatibleApplication => "Enable a compatible application script to run commands.",
+    RuntimeCommandsPauseTheCurrentInitialized => "Pause Play and finish other edits to run a command.",
+
+    // Runtime Debug
+    AddBreakpoint => "Add Breakpoint",
+    BreakpointScript => "Breakpoint Script",
+    Continue => "Continue",
+    Line => "Line",
+    Remove => "Remove",
+    RuntimeDebugBreakpointsTakeEffectThe => "Breakpoints take effect the next time you start Play.",
+    RuntimeDebugSomeValuesAreToo => "Some values are too large to show in full.",
+    RuntimeDebugStartPlayOrStep => "Start Play or Step to reach a breakpoint.",
+    ScriptDebugger => "Script Debugger",
+    ShowPausedScript => "Show Paused Script",
+    StepOver => "Step Over",
+
+    // Runtime Input
+    NoScriptsAreEnabled => "No scripts are enabled.",
+    PreviewState => "Preview state",
+    RuntimeInputHelp => "Game Controls",
+    RuntimeInputNoActionsDefinedAdd => "Add actions in Input Actions.",
+    RuntimeInputSharedKeysDriveEvery => "Shared keys drive every matching action. Escape releases scene control.",
+    RuntimeInputTheseValuesDescribeInput => "Input values for the current tick.",
+    SceneControls => "Scene controls",
+
+    // Runtime State
+    CommittedRuntimeState => "Script State",
+    NextStateFields => "Next State Fields",
+    PreviousStateFields => "Previous State Fields",
+    RuntimeStateLiveValuesResetTo => "Start Play again to restore defaults.",
+    RuntimeStateNoScriptsStoreValues => "No scripts store values in this run.",
+    RuntimeStatePausePreviewToBrowse => "Pause to browse script state.",
+    RuntimeStateResetThePreviewTo => "Start Play to see script values.",
+    RuntimeStateStartPlayAgainTo => "Start Play again to see the current defaults.",
+    RuntimeStateTextLabel => "Text",
+    StateSnapshotIdentity => "State snapshot identity",
+
+    // Spatial Feedback
+    FromAPreviousPlaySession => "From a previous Play session",
+    NextQuery => "Next Query",
+    PreviousQuery => "Previous Query",
+    SpatialFeedback => "Spatial Feedback",
+    SpatialOverlapHint => "Move the probe away from the obstacle and start Play again.",
+
+    // Behavior Ui
+    AddStateField => "Add state field",
+    AddTypedProperty => "Add Typed Property",
+    AddTypedStateField => "Add Typed State Field",
+    BehaviorUiCapturedRuntimeVersionYour => "Captured runtime version; your current working copy is preserved.",
+    BehaviorUiFinishOrCancelThe => "Finish or cancel the other script’s state field first.",
+    BehaviorUiLuaApi6ReturnsX => "Lua API6 returns X, Y and Z rotation. Position and scale stay fixed.",
+    BehaviorUiNoCompatibleSourcesIn => "No compatible scripts in this scene.",
+    BrowseEmbeddedSources => "Browse Scene Scripts…",
+    CancelNewStateField => "Cancel New State Field",
+    CancelPendingStateField => "Cancel Pending State Field",
+    CapturedDiagnosticSourceReadOnly => "Paused Script (Read-Only)",
+    CloseCapturedSource => "Close Paused Script",
+    EditDefault => "Edit Default",
+    EditValue => "Edit Value",
+    FieldName => "Field name",
+    Gain01 => "Gain (0–1)",
+    GroupLocalRotationRadians => "Group-local rotation (radians)",
+    KinematicMover => "Kinematic Mover",
+    Manage => "Manage",
+    OtherSources => "Other Scripts",
+    Properties => "Properties",
+    PropertyActions => "Property actions",
+    PropertyType => "Property Type",
+    RemoveField => "Remove Field",
+    RemoveValue => "Remove Value",
+    ShowUnappliedSourceDraft => "Show Unapplied Script Changes",
+    StateFieldType => "State Field Type",
+    Value => "Value",
+
+    // Branding
+    RotEngine => "Rot Engine",
+
+    // Console
+    ConsoleShowIdenticalMessagesOnce => "Show identical messages once with a count",
+
+    // Input Ui
+    ActionId => "Action ID",
+    AddAxis => "Add Axis",
+    AddButton => "Add Button",
+    AddKey => "Add Key",
+    AssignUpToFourKeys => "Assign up to four keys.",
+    ButtonKeys => "Button keys",
+    CancelKeyCapture => "Cancel Key Capture",
+    Capture => "Capture",
+    ClearKeys => "Clear Keys",
+    Controls => "Controls",
+    InputActions => "Input actions",
+    InputActionsClose => "Close Input Actions",
+    InputUiAddAButtonOr => "Add a Button or Axis to define keyboard controls.",
+    InputUiInputActions => "Input Actions",
+    InputUiPressALogicalKey => "Press a logical key. Escape cancels capture; the draft stays open.",
+    InputUiSharedKeysTriggerEvery => "Shared keys trigger every matching action.",
+    Label => "Label",
+    LabelOptional => "Label (optional)",
+    NegativeKeys1 => "Negative keys (−1)",
+    NoLabelEntered => "No label entered",
+    PositiveKeys1 => "Positive keys (+1)",
+    RemoveKey => "Remove Key",
+    StableId => "Stable ID",
+
+    // Manipulation
+    ApplyTransformComponents => "Apply Transform Components",
+    ManipulationAppliesToThisComponent => "Applies to this component on every selected object.",
+    ManipulationDragPreviewReleaseTo => "Drag preview · release to apply · Escape to cancel",
+    ManipulationLightsKeepUnitScale => "Lights keep unit scale; use intensity or point range.",
+    MixedValues => "— = mixed values",
+    RevertTransformComponents => "Revert Transform Components",
+
+    // Hierarchy
+    ClearObjectSearch => "Clear Object Search",
+    Lights => "Lights",
+    SearchObjectsOrLights => "Search objects or lights",
+
+    // Inspector
+    Actions => "Actions",
+    ApplyRecoveredTransformFields => "Apply Recovered Transform Fields",
+    Components => "Components",
+    Details => "Details",
+    Hud => "HUD…",
+    InspectorEditTheCreationsScreen => "Edit the creation's screen-space HUD",
+    InspectorRecoveredTransformFieldsRepair => "Apply or discard the recovered transform changes.",
+    InspectorSelectAnObjectOr => "Select an object or light to edit its properties.",
+    InspectorTheLastSelectedObject => "The last selected object is active.",
+    LocateMeshInContent => "Locate Mesh in Content",
+    Mesh => "Mesh",
+    MeshDropHint => "Drop a mesh from Assets to assign it to the active object.",
+    RenameObject => "Rename Object",
+    RevertTransformDrafts => "Revert Transform Drafts",
+    UseProceduralCube => "Use Procedural Cube",
+
+    // Viewport
+    ViewportTheSceneAndYour => "The scene and your saved edits are retained while content loads.",
+
+    // Recovery Ui
+    RetryRecoveryCheckpoint => "Retry Recovery Checkpoint",
+
+    // Ai Indicator
+    AiIndicatorAiChangesWaitUntil => "AI changes wait until you resume. Reading the scene still works.",
+    ConnectAnAiApp => "Connect an AI App…",
+    Disconnect => "Disconnect",
+    NoAiAppIsConnected => "No AI app is connected.",
+    PauseAiEdits => "Pause AI Edits",
+    RecentAiChanges => "Recent AI changes",
+
+    // Animation
+    Animation => "Animation",
+    AnimationRepeatTheClipOtherwise => "Repeat the clip; otherwise hold its last pose.",
+    AnimationStopAnimatingThisPlacement => "Stop animating this placement. One Undo restores it.",
+    Clip => "Clip",
+    RemoveAnimation => "Remove Animation",
+
+    // Asset Commands
+    AssetCommandsFinishSavingWithoutClosing => "Finish saving without closing or starting a new scene.",
+    CancelTheAssetWorkFirst => "Cancel the asset work first.",
+    KeepEditing => "Keep Editing",
+    OpenErrorDetails => "Open error details",
+
+    // Assets Browser
+    AssetsBrowserAddsASecondAsset => "Adds a second asset that reads this file the other way",
+    AssetsBrowserImportGlbObjPng => "Import .glb, .obj, .png or .wav files, or drop them here",
+    AssetsBrowserOrDragItFrom => "Or drag it from Assets into the Scene view.",
+    AssetsBrowserThisAssetIsNo => "This asset is no longer in the project.",
+    Grid => "Grid",
+    ImportAssets => "Import Assets",
+    List => "List",
+    Retry => "Retry",
+    Search => "Search",
+    SelectObjectsUsingIt => "Select Objects Using It",
+    ShaderAndContentTools => "Shader and content tools",
+    ThumbnailSize => "Thumbnail size",
+    Tools => "Tools",
+
+    // Collider Ui
+    AddCollider => "Add Collider",
+    ApplyCollider => "Apply Collider",
+    CancelCollider => "Cancel Collider",
+    ColliderUiApplyRemovesTheComponent => "Apply removes the component. Undo restores it.",
+    ColliderUiColliderUi00011000Local => "0.001–1000 local units. Enabled spheres need uniform object Scale.",
+    ColliderUiEachDimensionAccepts0 => "Each dimension accepts 0.002–2000. Object scale and rotation apply.",
+    ColliderUiEditsAffectTheActive => "Edits affect the active object only. Viewport guide shows the active collider.",
+    ColliderUiFullLocalSizeBefore => "Full local size before object Scale.",
+    ColliderUiPrimitiveQueryShapeScripts => "Primitive query shape. Scripts choose how to respond to contacts.",
+    EditingTheActiveObjectsCollider => "Editing the active object's collider.",
+    OffsetLocalSceneUnits => "Offset · local scene units",
+    SizeLocalSceneUnits => "Size · local scene units",
+
+    // Color Commands
+    ApplyColor => "Apply Color",
+    CancelColor => "Cancel Color",
+    ColorCommandsActiveObjectTintRgb => "Active object tint. RGB channels range from 0 to 1.",
+
+    // Component Prefabs
+    Prefab => "Prefab",
+
+    // Component Workspace
+    SaveAsPrefab => "Save as Prefab",
+
+    // Apps Ui
+    AppsUiAddAiConfigurationTo => "Add AI Configuration to This Project",
+    AppsUiConnectAnAiApp => "Connect an AI App",
+    AppsUiCopyTheMcpServer => "Copy the MCP server entry for any other AI app",
+    AppsUiNoAiAppsFound => "No AI apps found. Copy the setup into your AI app.",
+    AppsUiWriteSetupFilesIn => "Write setup files in the project folder.",
+    Connected => "Connected",
+    CopyConfiguration => "Copy Configuration",
+
+    // Native
+    AiConnection => "AI Connection",
+    AllowAiAppsToConnect => "Allow AI Apps to Connect",
+    AllowBrowserOnce => "Allow Browser Once",
+    CloseAiConnection => "Close AI Connection",
+    DenyPendingBrowser => "Deny Pending Browser",
+    Diagnostics => "Diagnostics",
+    ManagesSavedAccessOnly => "Manages saved access only.",
+    NativeAddRotEngineTo => "Add Rot Engine to Claude Code, Codex or another AI app",
+    NativeApprovalLetsThisBrowser => "Approval lets this browser view and edit this project for 30 minutes.",
+    NativeApprovePendingBrowserFor => "Approve pending browser for this project?",
+    NativeCompareThisCodeWith => "Compare this code with your browser.",
+    NativeConnectFromYourAi => "Connect from your AI app. Revoke removes saved access.",
+    NativeNativeApprovalLetsThisBrowser => "Approval lets this browser view and select for 30 minutes.",
+    NativePendingRequestsExpireAfter => "Pending requests expire after 2 minutes.",
+    NativeWhenOffThisEditor => "When off, this editor does not listen for AI apps",
+    ReadOnlySceneIdentifiers => "Read-only scene identifiers.",
+
+    // Prompt
+    AiPrompt => "ai_prompt",
+    AllowOnce => "Allow Once",
+    Deny => "Deny",
+    PromptAskAgainTheNext => "Ask again the next time this app connects",
+    PromptTrustThisAppFrom => "Trust this app from now on. Revoke in Rot connection.",
+    Revoke => "Revoke",
+    TrustItUntilItDisconnects => "Trust it until it disconnects",
+    TrustedAiApps => "Trusted AI apps",
+
+    // Connection
+    Project => "Project",
+
+    // Display Ui
+    ApplyDisplay => "Apply Display",
+    DisplayUiAdjustBrightnessInExposure => "Adjust brightness in exposure stops. The display outputs SDR.",
+    DisplayUiChooseSurfaceHdrTo => "Choose Surface HDR to preview material highlights and roughness.",
+    DisplayUiDisplayUi8To8Stops => "-8 to 8 stops. Zero is neutral; +1 doubles exposure and -1 halves it.",
+    ExposureEv => "Exposure (EV)",
+    Profile => "Profile",
+    SceneDisplay => "Scene display",
+
+    // Export Commands
+    BuildCancel => "Cancel Build",
+    BuildStatusClose => "Close Build Status",
+    ExportCommandsStartTheGameWith => "Start the game with this camera.",
+    ExportCommandsTheSavedPlayerView => "The saved Player View controls application framing.",
+    ExportCommandsUseBuiltInAppearance => "Use Built-in Appearance for This Session",
+    NoExportIsRunning => "No export is running.",
+    RemovingPrivateExportFiles => "Removing private export files…",
+    SaveScene => "Save Scene",
+
+    // Hud Ui
+    AddLabel => "Add Label",
+    AddPanel => "Add Panel",
+    Anchor => "Anchor",
+    ChooseBoolField => "Choose Bool field",
+    ChooseDeclaredCommand => "Choose declared command",
+    ChooseEnabled => "Choose enabled",
+    ChooseEnabledApplication => "Choose enabled Application",
+    ChooseEnabledBool => "Choose enabled Bool",
+    ChooseStateField => "Choose state field",
+    DuplicatePanel => "Duplicate Panel",
+    ExpectedType => "Expected type",
+    ExpectedValue => "Expected value",
+    HudUiAddAPanelTo => "Add a panel to arrange text and controls.",
+    HudUiApplyRestartsPlayWith => "Apply restarts Play with the saved values.",
+    HudUiChooseACommandTo => "Choose a command to copy its defaults, then edit the arguments.",
+    HudUiClearTheCheckboxTo => "Clear the checkbox to remove the condition.",
+    HudUiFinishOtherEditsAnd => "Finish other edits and dialogs to edit the HUD.",
+    HudUiHud => "HUD",
+    HudUiLabelsAndButtonsIn => "Labels and buttons in display order",
+    HudUiScreenSpaceHudUp => "Screen-space HUD · up to 4 panels and 32 total rows",
+    MovePanelDown => "Move Panel Down",
+    MovePanelUp => "Move Panel Up",
+    MoveRowToPanel => "Move row to panel…",
+    PanelBackground => "Panel background",
+    Panels => "Panels",
+    PickAnEnabledStateField => "Pick an enabled state field.",
+    RemovePanel => "Remove Panel",
+    ShowHud => "Show HUD",
+    HudTextColorLabel => "Text color",
+    ThisCommandHasNoArguments => "This command has no arguments.",
+    UseCommandDefaults => "Use Command Defaults",
+
+    // Lighting Ui
+    AdvancedShadows => "Advanced shadows",
+    AmbientLight => "Ambient light",
+    Color => "Color",
+    Intensity => "Intensity",
+    LightingUiCustomShaderControlsAppearance => "Custom shader controls appearance and may ignore lighting.",
+    LightingUiHigherQualityShowsFiner => "Higher quality shows finer shadow detail and uses more GPU memory.",
+    LightingUiSmoothInfluenceDistanceFrom => "Smooth influence distance, from 0.1 to 10000 scene units.",
+    LightingUiTheSunCastsShadows => "The Sun casts shadows from opaque objects.",
+    MeasuredInShadowMapPixels => "Measured in shadow map pixels.",
+    Quality => "Quality",
+    Range => "Range",
+    SceneLighting => "Scene lighting",
+    Shadows => "Shadows",
+
+    // Material Ui
+    Clamp => "Clamp",
+    CustomShaderRetainsValues => "A custom shader controls appearance. These settings are kept.",
+    Filter => "Filter",
+    Linear => "Linear",
+    MaterialUi0081 => "0.08–1",
+    MaterialUiCustomShaderControlsAppearance => "Custom shader controls appearance; roughness maps are unsupported.",
+    MaterialUiDiffuseIsMatteNonmetallic => "Diffuse is matte. Nonmetallic adds a highlight set by roughness.",
+    MaterialUiFilterAndWrapAffect => "Filter and Wrap affect both texture slots.",
+    MaterialUiLinearMaterialTintMultiplied => "Linear material tint, multiplied by the texture and Object tint.",
+    MaterialUiMapMultiplierClampedTo => "Map × multiplier, clamped to 0.08–1. Use 1 for the full map range.",
+    MaterialUiReferenceIsMissingOr => "Reference is missing or has the wrong import role. Repair it or choose None.",
+    MaterialUiRoughness008To => "Roughness, 0.08 to 1. Lower gives a tighter highlight.",
+    MaterialUiRoughnessMapIsInactive => "Roughness map is inactive with Diffuse shading. Settings are retained.",
+    MaterialUiScalarViewportFallbackIs => "Scalar viewport fallback is provisional; export requires this map.",
+    MaterialUiSurfaceShadingNeedsSurface => "Surface shading needs Surface HDR in Scene display.",
+    Nearest => "Nearest",
+    Repeat => "Repeat",
+    Shading => "Shading",
+    Wrap => "Wrap",
+
+    // Palette
+    SearchCommands => "Search commands",
+
+    // Play Checks
+    AddAssertion => "Add Assertion",
+    AddNeutralFrame => "Add Neutral Frame",
+    CancelOperation => "Cancel Operation",
+    CaptureCurrentIdentity => "Capture Current Identity",
+    CheckName => "Check name",
+    ClosePlayChecks => "Close Play Checks",
+    CompletedTick => "Completed Tick",
+    CreatorState => "Creator State",
+    DuplicateLastFrame => "Duplicate Last Frame",
+    EachRowIsOneTick => "Each row is one tick.",
+    Equals => "Equals",
+    Expected => "Expected",
+    FinalExpectations => "Final expectations",
+    Held => "Held",
+    Maximum => "Maximum",
+    Minimum => "Minimum",
+    NewCheck => "New Check",
+    NoSavedInputActions => "No saved Input Actions",
+    NumericRange => "Numeric Range",
+    ObjectId => "Object ID",
+    ObjectTranslation => "Object Translation",
+    OrderedInputFrames => "Ordered input frames",
+    PlayChecks => "Play checks",
+    PlayChecksCreateACheckOr => "Create a check or reopen this scene's .play-check.json file.",
+    PlayChecksRunsTheCheckIn => "Runs the check in an isolated preview. Your scene is unchanged.",
+    Pressed => "Pressed",
+    Released => "Released",
+    RemoveAction => "Remove Action",
+    ReopenCheck => "Reopen Check",
+    RunSavedCheck => "Run Saved Check",
+    SaveCheck => "Save Check",
+    ScriptAttachmentId => "Script Attachment ID",
+    StateField => "State field",
+    Tolerance => "Tolerance",
+    True => "True",
+
+    // Player View
+    Fixed => "Fixed",
+    Follow => "Follow",
+    GameCameraClear => "Clear Game Camera",
+
+    // Project Picker
+    BackToEditorEscape => "Back to Editor (Escape)",
+    Browse => "Browse…",
+    ChooseAProjectLocation => "Choose a project location",
+    ImportAsset => "Import Asset",
+    Location => "Location",
+    NewProject => "New Project",
+    OpenProject => "Open Project",
+    ProjectName => "Project Name",
+    ProjectPickerAProjectFolderOr => "A project folder or its scene file",
+    ProjectPickerConnectLaterFromThe => "Connect later from the AI button in the toolbar",
+    ProjectPickerLetAnAiApp => "Let an AI app such as Claude Code or Codex edit your projects",
+    ProjectPickerTheFolderTheProject => "The folder the project goes in",
+    Projects => "Projects",
+    RemoveFromList => "Remove from List",
+    SaveSceneAs => "Save Scene As",
+    Template => "Template",
+
+    // Project Settings
+    BuildKitHint => "Choose a build kit the first time you build.",
+    LinuxX8664 => "Linux (x86_64)",
+    NotSet => "Not set",
+    ProjectSettings => "Project Settings",
+    RuntimeKit => "Runtime Kit",
+    StartupScene => "Startup Scene",
+    StartupSceneHint => "The project’s scene opens at startup.",
+    Target => "Target",
+    TheProjectFoldersName => "The project folder's name",
+
+    // Recovered Input Ui
+    DiscardRecoveredDraft => "Discard Recovered Draft",
+    RecoveredInputUiFinishTheCurrentOperation => "Finish the current operation first. Keep for later preserves this action draft.",
+    RecoveredInputUiReviewRecoveredAction => "Review Recovered Action…",
+    RecoveredInputUiReviewYourRecoveredAction => "Review your recovered action before resuming or discarding it.",
+    RecoveredInputUiTheActionNoLonger => "The action no longer matches this scene. Keep the draft or discard it.",
+    RecoveryFinishOperation => "Finish the current operation first.",
+    ResumeEditing => "Resume Editing",
+    ReviewRecoveredAction => "Review recovered action",
+    TechnicalDetails => "Technical details",
+    TheOriginalCheckpointStaysPreserved => "The original checkpoint stays preserved.",
+
+    // Runtime Transform Ui
+    EditSavedTransform => "Edit Saved Transform",
+    GroupLocalPose => "Group-local pose",
+    RuntimeTransform => "Play Transform",
+    RuntimeTransformUiTheSelectedTargetIs => "The selected object is absent from this frame.",
+    RuntimeTransformUiTransformUnavailablePressPlay => "Transform unavailable. Press Play to see it.",
+
+    // Shadow Feedback
+    ShadowFeedbackStatusFromTheLast => "Status from the last viewport update.",
+    ShadowFeedbackViewportResolutionIsReduced => "Viewport resolution is reduced to fit the render-target limit.",
+
+    // Scene Editor
+    Active => "Active",
+    AdjustSelection => "Adjust selection",
+    ApplyTranslationOffset => "Apply Translation Offset",
+    CancelClosing => "Cancel Closing",
+    CancelClosingScene => "Cancel Closing Scene",
+    CancelNewScene => "Cancel New Scene",
+    CancelRename => "Cancel Rename",
+    CancelSceneDialog => "Cancel Scene Dialog",
+    ChooseFlatForHardFaces => "Choose Flat for hard faces.",
+    CloseAnyway => "Close Anyway",
+    DetachToSceneRoot => "Scene Root (Detach)",
+    DiscardAndCloseScene => "Discard and Close Scene",
+    DiscardAndCreateNewScene => "Discard and Create New Scene",
+    FinishingRecoveryBeforeSwitchingScenes => "Finishing recovery before switching scenes…",
+    FinishingRecoveryCleanup => "Finishing recovery cleanup…",
+    Layout => "Layout",
+    Layouts => "Layouts",
+    Local => "Local",
+    LocateMissingContent => "Locate Missing Content",
+    MoreTools => "More tools",
+    NoRecentScenes => "No recent scenes.",
+    Normals => "Normals",
+    OpenScript => "Open Script",
+    OptionalDefaultsToFilename => "Optional · defaults to filename",
+    Pivot => "Pivot",
+    PivotModeHint => "Place the handle at the selection Center, Pivot, or Active object.",
+    PreparingAsset => "Preparing asset…",
+    RecoverWorkspacePreferences => "Recover Workspace Preferences…",
+    RefreshAsset => "Refresh Asset",
+    RenameAssetSource => "Rename Asset File",
+    ResetTranslationOffset => "Reset Translation Offset",
+    SceneEditorAssetChangesAreSaved => "Asset changes are saved to the project immediately.",
+    SceneEditorBaseColorUsesSrgb => "Base color uses sRGB. Roughness uses linear values.",
+    SceneEditorFinishingTheCurrentWorking => "Finishing the current working-copy job before closing…",
+    SceneEditorGroupScaleMustBe => "Group scale must be positive and uniform on X/Y/Z.",
+    SceneEditorHandleOrientationWorldOr => "Handle orientation: World or the active object's Local axes",
+    SceneEditorLightsUseIntensityAnd => "Lights use intensity and range instead of scale.",
+    SceneEditorOpeningDiscardsCurrentUnsaved => "Opening discards current unsaved scene and drafts. Cancel to preserve them.",
+    SceneEditorRecoveryCleanupFailed => "Recovery cleanup failed",
+    SceneEditorSaveTheSceneFirst => "Save the scene first to give its assets a project folder.",
+    SceneEditorSnapIncrementsForMove => "Snap increments for Move, Rotate and Scale",
+    SceneEditorTheCheckpointMayReappear => "The checkpoint may reappear next launch.",
+    SceneEditorTransformFieldsLocalTo => "Transform fields use parent coordinates.",
+    SceneEditorUseAnExistingAsset => "Use an existing asset ID. You can also manage a source from its Content row.",
+    SceneEditorUsesTheNormalsIn => "Uses the normals in your OBJ. Meshes without them are flat shaded.",
+    SnapWhileDragging => "Snap While Dragging",
+    SourceMaintenance => "Asset File",
+    UnappliedTranslationOffset => "Unapplied translation offset",
+    UseAs => "Use as",
+    WorkingCopyDetails => "Working-copy Details",
+    World => "World",
+    WorldTranslationOffset => "World translation offset",
+
+    // Ui
+    ActionNeeded => "ACTION NEEDED",
+    ApplyProperties => "Apply Properties",
+    CtrlO => "Ctrl+O",
+    DiscardAndContinue => "Discard and Continue",
+    DuplicateScenario => "Duplicate Scenario…",
+    FilePath => "File path",
+    InitialStock => "Initial stock",
+    Inspector => "INSPECTOR",
+    KeepYourChanges => "Keep your changes?",
+    New => "New",
+    NewScenarioCtrlN => "New scenario · Ctrl+N",
+    Open => "Open…",
+    ProductionPerTick => "Production per tick",
+    Ready => "READY",
+    Restart => "Restart",
+    RevertFields => "Revert Fields",
+    RuntimeObservation => "RUNTIME OBSERVATION",
+    SaveAndContinue => "Save and Continue",
+    SaveApplyHint => "Apply valid fields and save · Ctrl+S",
+    SaveYourChangesBeforeContinuing => "Save your changes before continuing?",
+    Saved => "SAVED",
+    Scenario => "Scenario",
+    ScenarioEditor => "/  SCENARIO EDITOR",
+    ScenarioId => "Scenario ID",
+    Step1Tick => "Step +1 Tick",
+    ThisDestinationCollectsDeliveries => "This destination collects deliveries.",
+    ThroughputLab => "Throughput lab",
+    TransportCapacity => "Transport capacity",
+    Ui4TicksSecond => "4 ticks / second",
+    UiChooseAUniqueId => "Choose a unique ID for the new scenario.",
+    UiCreateANewFile => "Create a new file · Ctrl+Shift+S",
+    UiCreatesAFreshIdentity => "Creates a fresh identity and an unsaved project.",
+    UiItemsAtTheSource => "Items at the source before the first tick. Zero is allowed.",
+    UiMaximumWholeItemsDelivered => "Maximum whole items delivered per tick. Must be greater than zero.",
+    UiProject => "PROJECT",
+    UiRedoCtrlShiftZ => "Redo · Ctrl+Shift+Z outside text fields",
+    UiResetRestartsTheSimulation => "Reset restarts the simulation from the scene settings.",
+    UiSceneSettingsChangedRestart => "Scene settings changed. Restart to use them.",
+    UiSelectACardOr => "Select a card or use the project list. Values above are runtime observations.",
+    UiSourceTransportAndDestination => "Source, transport and destination are views of this logistics scenario.",
+    UiSupplyCapacityAndDeliveries => "Supply, capacity and deliveries from the current run.",
+    UiSupplyLimitedTransportCan => "SUPPLY LIMITED   Transport can move all new production each tick.",
+    UiTabFocusSpaceRun => "Tab: focus  ·  Space: run/pause outside fields  ·  Ctrl+S: save",
+    UiTheSimulationUsesThe => "The simulation uses the current scene settings.",
+    UiUi1128AsciiLetters => "1–128 ASCII letters, digits, hyphens, underscores or dots.",
+    UiUndoCtrlZOutside => "Undo · Ctrl+Z outside text fields",
+    UiWholeItemsProducedBefore => "Whole items produced before transport each tick. Zero is allowed.",
+    Unsaved => "UNSAVED",
+
+    // Mod
+    ClearSearch => "Clear Search",
+    Pick => "Pick",
+
+    // Motif
+    Working => "Working…",
+
+    // Workspace
+    ArgumentsJsonStringArray => "Arguments (JSON string array)",
+    ChooseYourStyle => "Choose Your Style",
+    EditorExecutable => "Editor executable",
+    FlySpeed => "Fly Speed",
+    Mode => "Mode",
+    RemoveThisShortcut => "Remove this shortcut",
+    ResetAllPreferences => "Reset All Preferences",
+    ResetToDefaults => "Reset to Defaults",
+    Revert => "Revert",
+    Style => "Style",
+    ThemedWording => "Themed Wording",
+    UiScale => "UI Scale",
+    UnitsS => " units/s",
+    WorkspaceAlsoRepairsAnUnreadable => "Also repairs an unreadable preferences file",
+    WorkspaceClickThenPressThe => "Click, then press the new keys. Escape cancels.",
+    WorkspaceOccasionalRotFlavoredLines => "Occasional Rot-flavored lines in empty states and messages",
+    WorkspaceRunsWithoutAShell => "Runs without a shell. Placeholders: {workspace}, {file}, {line}.",
+    WorkspaceScrollWhileFlyingWith => "Scroll while flying with the right mouse button to change it",
+    WorkspaceTrustedAppsAndDiagnostics => "Trusted apps and diagnostics: Window → AI Connection…",
+
+    // Behavior External
+    WorkingOnTheScriptCopy => "Working on the script copy…",
+
+    // Command Catalog
+    CommandCatalogRepairExistingValuesAnd => "Repair existing values and choose a fresh argument name.",
+
+    // Runtime Debug
+    RuntimeDebugBreakpointAddedStartPlay => "Breakpoint added. Start Play again to activate it.",
+    RuntimeDebugChooseAScriptAnd => "Choose a script and enter a positive line number.",
+
+    // Runtime Input
+    RuntimeInputKeyboardInputOverflowClick => "Keyboard input overflow; click the game view again.",
+
+    // Behavior Ui
+    BehaviorUiPlayStoppedStartPlay => "Play stopped. Start Play again to retry.",
+    BehaviorUiSceneChangedPressPlay => "Scene changed. Press Play to run it.",
+    Playing => "Playing",
+    ReadyToPlay => "Ready to play.",
+    SceneChangedRestartingPlay => "Scene changed. Restarting Play…",
+    SceneChangedStartPlayAgain => "Scene changed. Start Play again.",
+    StartingPlay => "Starting Play…",
+
+    // Input Ui
+    InputUiChooseASupportedKey => "Choose a supported key without Ctrl, Alt, Super or Tab.",
+    InputUiThisActionAlreadyUses => "This action already uses that key; choose another key.",
+
+    // Model
+    ChooseANewFilePath => "Choose a new file path.",
+    ModelApplyOrDiscardInspector => "Apply or discard Inspector edits before using Undo or Redo.",
+    ModelEditHistoryRestoredRestart => "Edit history restored. Restart to see the changes.",
+    ModelPropertiesAppliedRestartTo => "Properties applied. Restart to use them.",
+    ProjectReady => "Project ready.",
+    RestoredThePreviousFieldValues => "Restored the previous field values.",
+    ScenarioSaved => "Scenario saved.",
+    SimulationRestarted => "Simulation restarted.",
+
+    // Hierarchy
+    NoObjectsMatchTheSearch => "No objects match the search.",
+
+    // Inspector
+    TransformsApplied => "Transforms applied.",
+
+    // Viewport
+    TransformUpdated => "Transform updated.",
+    ViewportSwitchToTheScene => "Switch to the Scene view to frame selected lights.",
+
+    // Recovery
+    RecoveryRecoveryEntryIsNot => "Recovery entry is not a real directory; move it aside explicitly.",
+
+    // Animation
+    AnimationRemoved => "Animation removed.",
+    AnimationUpdated => "Animation updated.",
+
+    // Asset Commands
+    AssetCommandsAnAssetTaskFinished => "An asset task finished unexpectedly. Check your Assets.",
+    AssetCommandsAssetCleanupWasInterrupted => "Asset cleanup was interrupted. It will finish later.",
+    AssetCommandsAssetsAreStillSaving => "Assets are still saving. The scene will close after.",
+    AssetCommandsContentLoadingCancelledRetry => "Content loading cancelled; Retry when ready.",
+    AssetCommandsCouldNotStartThe => "Could not start the asset task. Reopen the project.",
+    AssetCommandsProjectContentCouldNot => "Project content could not be loaded.",
+    AssetCommandsTheProjectContentChanged => "The project content changed. Try loading it again.",
+    AssetCommandsTheSaveFinishedUnexpectedly => "The save finished unexpectedly. Check the destination.",
+    AssetsUpdated => "Assets updated.",
+    ContentLoadingCancelled => "Content loading cancelled.",
+    FinishingAssetLoading => "Finishing asset loading…",
+    FinishingAssetUpdate => "Finishing asset update…",
+    PreparingContent => "Preparing content…",
+    ProjectContentLoaded => "Project content loaded.",
+    SaveCouldNotBePrepared => "Save could not be prepared.",
+    SavingFinish => "Finishing save…",
+    SavingPrepare => "Preparing to save…",
+    SavingScene => "Saving scene…",
+    SceneSaved => "Scene saved.",
+    SceneSavedFinishingAssetCleanup => "Scene saved. Finishing asset cleanup…",
+    UpdatingContent => "Updating content…",
+
+    // Assets Browser
+    AssetsBrowserTheProjectChangedWhile => "The project changed while dragging; drag the model again.",
+
+    // Behavior Commands
+    BehaviorCommandsAiUpdatedScriptSettings => "AI updated script settings. Save to keep the change.",
+
+    // Collider Commands
+    ColliderUpdated => "Collider updated.",
+
+    // Collider Ui
+    ColliderChangeCancelled => "Collider change cancelled.",
+
+    // Color Commands
+    AiChangedAColor => "AI changed a color.",
+    ColorApplied => "Color applied.",
+    ColorChangeCancelled => "Color change cancelled.",
+    ColorCommandsFinishOtherEditsBefore => "Finish other edits before applying color.",
+    ColorCommandsSelectionChangedCancelThe => "Selection changed. Cancel the color edit and try again.",
+
+    // Apps Ui
+    ConfigurationCopied => "Configuration copied.",
+
+    // Native
+    NativeAccessRevokedConnectAgain => "Access revoked. Connect again to allow it.",
+    NativeCouldntRevokeAccessDisconnected => "Couldn't revoke access. Disconnected for now. Try Revoke again.",
+    NativeTheRequestChangedOr => "The request changed or ended. Review it again.",
+
+    // Display Ui
+    DisplayChangeCancelled => "Display change cancelled.",
+    SceneDisplayUpdated => "Scene display updated.",
+
+    // Export Commands
+    ExportCommandsBuildFailed => "Build failed",
+    ExportCommandsBuildFinished => "Build finished.",
+
+    // Hud Ui
+    HudApplied => "HUD applied.",
+
+    // Lighting Ui
+    LightAdded => "Light added.",
+    LightingChangeCancelled => "Lighting change cancelled.",
+    LightingUiApplyOrCancelDrafts => "Apply or cancel drafts and resolve dialogs before creating a light.",
+    LightingUpdated => "Lighting updated.",
+
+    // Play Checks
+    PlayChecksCapturedTheSavedScene => "Captured the saved scene. Save the check to keep it.",
+    PlayChecksNewCheckAddInput => "New check. Add input and expected values, then Save Check.",
+
+    // Player View
+    GameCameraCleared => "Game camera cleared.",
+    GameCameraUpdated => "Game camera updated.",
+
+    // Recovered Input Ui
+    RecoveredActionDiscarded => "Recovered action discarded.",
+    RecoveredInputUiActionRestoredEditIts => "Action restored. Edit its fields, then Apply or Cancel.",
+
+    // Runtime Transform Ui
+    ShowingTheSavedSceneTransforms => "Showing the saved scene transforms.",
+
+    // Save Commands
+    SaveCommandsSceneSavedApplyOr => "Scene saved. Apply or discard pending field changes.",
+    SceneSavedFinishingCleanup => "Scene saved; finishing cleanup…",
+
+    // Scene Editor
+    GameCameraFinishBeforeClose => "Apply or cancel the Game Camera edit before closing.",
+    GameControlsRelease => "Press Escape to return to editor shortcuts.",
+    HistoryChanged => "History changed.",
+    InputActionApplied => "Input action applied.",
+    NewSceneFinishBeforeClose => "Finish or cancel New Scene before closing.",
+    ParentChangedWorldTransformPreserved => "Parent changed. World transform preserved.",
+    SceneEditorApplyOrCancelThe => "Apply or cancel the name edit before closing.",
+    SceneEditorAssetsAreStillSaving => "Assets are still saving. Wait a moment, then edit.",
+    SceneEditorChooseAFileInside => "Choose a file inside the current project folder.",
+    SceneEditorCopiedSelectionInsideThis => "Copied selection inside this editor window.",
+    SceneEditorCouldntApplyTwoRecovered => "Couldn't apply. Two recovered transform drafts are open.",
+    SceneEditorCouldntContinueFinishOr => "Couldn't continue. Finish or discard the recovered draft first.",
+    SceneEditorCouldntCreateAProject => "Couldn't create a project. Save your work first.",
+    SceneEditorCouldntSwitchProjectsSave => "Couldn't switch projects. Save your scene first.",
+    SceneEditorCreatedSceneWgslEdit => "Created scene.wgsl; edit it, then Refresh scene shader.",
+    SceneEditorEnterAnAssetId => "Enter an asset ID using letters, digits, dashes, underscores or dots.",
+    SceneEditorFinishOrCancelThe => "Finish or cancel the transform gesture first.",
+    SceneEditorFinishTransformEditsBefore => "Finish transform edits before refreshing the shader.",
+    SceneEditorLightsCannotBeScaled => "Lights cannot be scaled; use intensity or range.",
+    SceneEditorPastedSelectionOneUndo => "Pasted selection; one Undo restores the scene.",
+    SceneEditorRecoveredAsAnUnsaved => "Recovered as an unsaved copy. Save it under a new name.",
+    SceneEditorRecoveryCleanupIsStill => "Recovery cleanup is still finishing; retry Close once it completes.",
+    SceneEditorResolvePendingChangesBefore => "Resolve pending changes before switching projects.",
+    SceneEditorRunOrCancelThe => "Run or cancel the pending command first.",
+    SceneEditorSceneEditorApplyOrCancelThe => "Apply or cancel the Player View edit first.",
+    SceneEditorScriptImportedSaveThe => "Script imported. Save the scene to keep it.",
+    SceneEditorTranslationOffsetAppliedOne => "Translation offset applied; one Undo restores the selection.",
+    SceneEditorWaitingForAssetWork => "Waiting for asset work before the requested document action.",
+    TransformApplied => "Transform applied.",
+    TransformCancelled => "Transform cancelled.",
+
+    // Ui
+    EnterTheScenarioFilePath => "Enter the scenario file path.",
+    UiADuplicateMustHave => "A duplicate must have a different scenario ID.",
+
+    // Workspace
+    WorkspaceCouldntFindAPlace => "Couldn't find a place to save preferences.",
+    WorkspaceThatShortcutIsTaken => "That shortcut is taken. Choose another, or press Escape.",
+
+    // Runtime Debug
+    ChooseScript => "Choose Script",
+
+    // Runtime Input
+    GameControlsActive => "Game controls active. Press Escape to release.",
+    GameControlsClickGame => "Click Game to use its controls.",
+    GameControlsNoPlay => "Start Play to see input.",
+    GameControlsPaused => "Paused. Step runs without keyboard input.",
+    GameControlsPreviousPlay => "Start Play again to see current input.",
+    GroupTransforms => "Group Transforms",
+    ObjectTransforms => "Object Transforms",
+    RuntimeInputInputIsUnavailableFor => "Input is unavailable for this frame.",
+    RuntimeInputNoInputHasBeen => "No input has been processed yet.",
+
+    // Behavior Ui
+    AudioOutputReady => "Audio: output ready",
+    AudioPausedStepIsSilent => "Audio: paused (Step is silent)",
+    AudioReadyForFirstCue => "Audio: ready for first cue",
+    AudioReferencedSoundIsMissing => "Audio: referenced sound is missing",
+    AudioVoiceLimitReached => "Audio: voice limit reached",
+    BehaviorUiAudioUnavailableNoUsable => "Audio unavailable: no usable output device",
+    RevertPropertyValue => "Revert Property Value",
+    RevertStateDefault => "Revert State Default",
+
+    // Console
+    Clear => "Clear",
+    ShowErrors => "Show errors",
+    ShowMessages => "Show messages",
+    ShowWarnings => "Show warnings",
+
+    // Input Ui
+    ApplyAction => "Apply Action",
+    Axis101 => "Axis (−1 / 0 / +1)",
+    Button => "Button",
+    DeleteAction => "Delete Action",
+    InputActionConfirmDelete => "Delete this action? Scripts can still refer to it.",
+    InputActionPending => "Unapplied changes",
+    InputUiRecoveredChangesToAn => "Recovered changes to an existing action.",
+    InputUiRecoveredRequestToDelete => "Recovered request to delete this action.",
+    RecoveredNewAction => "Recovered new action.",
+
+    // Hierarchy
+    NoObjectsOrLightsMatch => "No objects or lights match.",
+
+    // Asset Commands
+    AssetDetailsHint => "Read details and see recovery actions.",
+    AssetDetailsWhileBusy => "Read asset details while the task finishes.",
+
+    // Assets Browser
+    AssetAnimatedModel => "Animated Model",
+    AssetsBrowserSaveTheSceneTo => "Save the scene to import assets into its project.",
+    Model => "Model",
+
+    // Color Commands
+    ColorCommandsChannelValueFrom0 => "Channel value from 0 to 1.",
+    ColorCommandsStoredAlphaTheCurrent => "Stored alpha; the current viewport renders opaque surfaces.",
+    ObjectTint => "Object Tint",
+
+    // Component Assets
+    AssetsUnavailable => "Assets unavailable",
+    ImportingAssets => "Importing assets…",
+    NoAssetsInThisFolder => "No assets in this folder",
+    NoMatchingAssets => "No matching assets",
+
+    // Native
+    AllowThisAiApp => "Allow this AI app?",
+    StartListeningForAiApps => "Start listening for AI apps?",
+
+    // Display Ui
+    LegacySdr => "Legacy SDR",
+    SurfaceHdr => "Surface HDR",
+
+    // Lighting Ui
+    ApplyAmbient => "Apply Ambient",
+    ApplyLight => "Apply Light",
+    DiffuseIntensity0To16 => "Diffuse intensity, 0 to 16.",
+    DirectionalRotationSetsEmittedDirection => "Directional · rotation sets emitted direction",
+    High => "High",
+    LightingUiPointPositionSetsSource => "Point · position sets source; range is in scene units",
+    LightingUiRelativeArtisticFill0 => "Relative artistic fill, 0 to 1. Linear RGB channels are 0 to 1.",
+    Standard => "Standard",
+
+    // Material Ui
+    Diffuse => "Diffuse",
+    MaterialMeshNeedsUvs => "Choose a mesh with UVs to add a texture.",
+    MaterialSharedMeshNeedsUvs => "Choose Make Unique to texture this object only.",
+    MaterialTextureUnavailable => "Texture unavailable. Repair the file and refresh.",
+    MaterialTextureUsingPrevious => "Using the previous texture. Repair the file and refresh.",
+    Nonmetallic => "Nonmetallic",
+    Roughness => "Roughness",
+    RoughnessMultiplier => "Roughness Multiplier",
+
+    // Play Checks
+    Axis => "Axis",
+    Boolean => "Boolean",
+    Number => "Number",
+    PlayCheckNoScene => "No saved scene captured",
+    PlayCheckSceneCaptured => "Saved scene captured",
+    Vector => "Vector",
+
+    // Project Picker
+    BackToEditor => "Back to Editor",
+    NotNow => "Not Now",
+
+    // Recovered Input Ui
+    RecoveredInputUiTheActionStillMatches => "The action still matches. Resume to keep your values.",
+    RecoveredInputUiTheSceneChangedBut => "The scene changed, but the action still matches. Resume to keep your values.",
+
+    // Scene Editor
+    AssetModelPathHint => "meshes/prop.glb",
+    BaseColorSrgb => "Base color (sRGB)",
+    FlatNormals => "Flat Normals",
+    MeshNormals => "Mesh Normals",
+    RelativePathSameExtension => "Relative path, same extension",
+    RoughnessMapLinear => "Roughness map (linear)",
+    Snap => "Snap",
+    SnapOn => "Snap On",
+
+    // Ui
+    NewScenario => "New scenario",
+    OpenFile => "Open File",
+    OpenScenario => "Open scenario",
+    Paused => "PAUSED",
+    Run => "Run",
+    Running => "RUNNING",
+    SaveFile => "Save File",
+    SaveScenarioAs => "Save scenario as",
+    UiDuplicateScenario => "Duplicate scenario",
+
+    // Workspace
+    TheRotEngineLook => "The Rot Engine look",
+    WorkspaceANeutralLookLike => "A neutral look, like other engines",
 }
 
 impl Text {

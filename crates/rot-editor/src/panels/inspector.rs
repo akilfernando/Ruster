@@ -1,6 +1,7 @@
 //! Inspector panel body, moved out of scene_editor.rs (S-07d).
 
 use super::super::*;
+use crate::strings::Text;
 
 impl SceneEditor {
     pub(in crate::scene_editor) fn inspector_contents(&mut self, ui: &mut egui::Ui) {
@@ -64,9 +65,12 @@ impl SceneEditor {
                         .on_hover_text(&title);
                 },
             );
-            ui.menu_button("Actions", |ui| {
+            ui.menu_button(Text::Actions.plain(), |ui| {
                 if ui
-                    .add_enabled(self.selected.is_some(), egui::Button::new("Rename object"))
+                    .add_enabled(
+                        self.selected.is_some(),
+                        egui::Button::new(Text::RenameObject.plain()),
+                    )
                     .clicked()
                 {
                     match self.guard() {
@@ -81,11 +85,11 @@ impl SceneEditor {
                         ui.close();
                     }
                 }
-                if ui.button("Copy").clicked() {
+                if ui.button(Text::LabelCopy.plain()).clicked() {
                     self.clipboard_action(false);
                     ui.close();
                 }
-                if ui.button("Paste").clicked() {
+                if ui.button(Text::LabelPaste.plain()).clicked() {
                     self.clipboard_action(true);
                     ui.close();
                 }
@@ -93,9 +97,9 @@ impl SceneEditor {
             if ui
                 .add_enabled(
                     self.hud_draft.is_some() || self.hud_editable(),
-                    egui::Button::new("HUD…"),
+                    egui::Button::new(Text::Hud.plain()),
                 )
-                .on_hover_text("Edit the creation's screen-space HUD")
+                .on_hover_text(Text::InspectorEditTheCreationsScreen.plain())
                 .clicked()
             {
                 self.hud_open = true;
@@ -103,11 +107,9 @@ impl SceneEditor {
             }
         });
         if self.selected.is_none() {
-            ui.label(
-                egui::RichText::new("Select an object or light to edit its properties.").weak(),
-            );
+            ui.label(egui::RichText::new(Text::InspectorSelectAnObjectOr.plain()).weak());
             if self.runtime.visible {
-                ui.strong("Components");
+                ui.strong(Text::Components.plain());
                 ui.small(crate::strings::tr(
                     ui.ctx(),
                     crate::strings::Text::EditsRestartPlay,
@@ -137,39 +139,118 @@ impl SceneEditor {
             self.runtime_transform_ui(ui);
         } else {
             ui.separator();
-            ui.strong("Transform");
+            ui.strong(Text::ComponentTransform.plain());
             if self.draft != self.baseline_fields {
-                ui.add_enabled_ui((self.hud_draft.is_none() && self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && !self.behavior.pending() && !self.runtime.command_draft_pending() && !self.input_actions.pending() && self.recovered_input.is_none() && !self.manipulation.active() && self.dialog.is_none() && !self.close_approved && !self.rename_pending && !self.new_scene_pending && !self.close_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none(), |ui| {
-                        ui.label("Recovered transform fields — repair or revert before other precision edits");
-                        let mut enter=false;
-                        let mut escape=false;
-                        let mut changed=false;
-                        if let Some(fields)=&mut self.draft {
-                            for (label, values) in [("Position", &mut fields.translation), (fields.rotation_unit.label(), &mut fields.rotation), ("Scale", &mut fields.scale)] {
+                ui.add_enabled_ui(
+                    (self.hud_draft.is_none()
+                        && self.color_draft.is_none()
+                        && self.material_draft.is_none()
+                        && self.lighting_draft.is_none()
+                        && self.display_draft.is_none()
+                        && self.collider_draft.is_none())
+                        && !self.behavior.pending()
+                        && !self.runtime.command_draft_pending()
+                        && !self.input_actions.pending()
+                        && self.recovered_input.is_none()
+                        && !self.manipulation.active()
+                        && self.dialog.is_none()
+                        && !self.close_approved
+                        && !self.rename_pending
+                        && !self.new_scene_pending
+                        && !self.close_pending
+                        && !self.workspace.settings_open
+                        && !self.recovery.open
+                        && self.recovery_transition.is_none(),
+                    |ui| {
+                        ui.label(Text::InspectorRecoveredTransformFieldsRepair.plain());
+                        let mut enter = false;
+                        let mut escape = false;
+                        let mut changed = false;
+                        if let Some(fields) = &mut self.draft {
+                            for (label, values) in [
+                                ("Position", &mut fields.translation),
+                                (fields.rotation_unit.label(), &mut fields.rotation),
+                                ("Scale", &mut fields.scale),
+                            ] {
                                 ui.label(label);
-                                ui.horizontal_wrapped(|ui| { for (axis,text) in ["X","Y","Z"].into_iter().zip(values) {
-                                    ui.label(axis);
-                                    let response=ui.add(egui::TextEdit::singleline(text).desired_width(70.0).char_limit(1024).interactive(ui.is_enabled()));
-                                    changed|=response.changed();
-                                    let owned=response.has_focus() || ui.memory(|m|m.had_focus_last_frame(response.id));
-                                    enter|=owned && ui.input(|i|i.key_pressed(egui::Key::Enter));
-                                    escape|=owned && ui.input(|i|i.key_pressed(egui::Key::Escape));
-                                }});
+                                ui.horizontal_wrapped(|ui| {
+                                    for (axis, text) in ["X", "Y", "Z"].into_iter().zip(values) {
+                                        ui.label(axis);
+                                        let response = ui.add(
+                                            egui::TextEdit::singleline(text)
+                                                .desired_width(70.0)
+                                                .char_limit(1024)
+                                                .interactive(ui.is_enabled()),
+                                        );
+                                        changed |= response.changed();
+                                        let owned = response.has_focus()
+                                            || ui.memory(|m| m.had_focus_last_frame(response.id));
+                                        enter |=
+                                            owned && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                        escape |=
+                                            owned && ui.input(|i| i.key_pressed(egui::Key::Escape));
+                                    }
+                                });
                             }
                         }
-                        if changed {self.draft_generation=self.draft_generation.wrapping_add(1);}
-                        if ui.button("Apply recovered transform fields").clicked() || enter {self.apply();}
-                        if ui.button("Revert transform drafts").clicked() || escape {self.sync_draft();}
-                    });
+                        if changed {
+                            self.draft_generation = self.draft_generation.wrapping_add(1);
+                        }
+                        if ui
+                            .button(Text::ApplyRecoveredTransformFields.plain())
+                            .clicked()
+                            || enter
+                        {
+                            self.apply();
+                        }
+                        if ui.button(Text::RevertTransformDrafts.plain()).clicked() || escape {
+                            self.sync_draft();
+                        }
+                    },
+                );
             }
-            ui.add_enabled_ui((self.hud_draft.is_none() && self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && self.draft == self.baseline_fields && !self.behavior.pending() && !self.runtime.command_draft_pending() && !self.input_actions.pending() && self.recovered_input.is_none() && !self.manipulation.ids.is_empty(), |ui| {
+            ui.add_enabled_ui(
+                (self.hud_draft.is_none()
+                    && self.color_draft.is_none()
+                    && self.material_draft.is_none()
+                    && self.lighting_draft.is_none()
+                    && self.display_draft.is_none()
+                    && self.collider_draft.is_none())
+                    && self.draft == self.baseline_fields
+                    && !self.behavior.pending()
+                    && !self.runtime.command_draft_pending()
+                    && !self.input_actions.pending()
+                    && self.recovered_input.is_none()
+                    && !self.manipulation.ids.is_empty(),
+                |ui| {
                     let precision_pending = self.manipulation.precision_pending();
-                    match self.manipulation.precision_ui(ui,&mut self.session,self.dialog.is_none()&&!self.close_approved&&!self.rename_pending&&!self.new_scene_pending&&!self.close_pending&&!self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none()) {
-                        Ok(true)=>{self.sync_draft();self.error.clear();self.notice="Edited transform components applied to the selection; one Undo restores them.".into();},
-                        Ok(false) if precision_pending && !self.manipulation.precision_pending() => self.error.clear(),
-                        Ok(false)=>{},Err(error)=>self.error=error,
+                    match self.manipulation.precision_ui(
+                        ui,
+                        &mut self.session,
+                        self.dialog.is_none()
+                            && !self.close_approved
+                            && !self.rename_pending
+                            && !self.new_scene_pending
+                            && !self.close_pending
+                            && !self.workspace.settings_open
+                            && !self.recovery.open
+                            && self.recovery_transition.is_none(),
+                    ) {
+                        Ok(true) => {
+                            self.sync_draft();
+                            self.error.clear();
+                            self.notice = Text::TransformsApplied.plain().into();
+                        }
+                        Ok(false)
+                            if precision_pending && !self.manipulation.precision_pending() =>
+                        {
+                            self.error.clear()
+                        }
+                        Ok(false) => {}
+                        Err(error) => self.error = error,
                     }
-                });
+                },
+            );
             ui.add_enabled_ui(
                 self.hud_draft.is_none()
                     && self.color_draft.is_none()
@@ -186,7 +267,7 @@ impl SceneEditor {
         }
         if self.runtime.visible {
             ui.separator();
-            ui.strong("Components");
+            ui.strong(Text::Components.plain());
         }
         self.light_inspector_ui(ui);
         ui.separator();
@@ -211,7 +292,7 @@ impl SceneEditor {
                 .iter()
                 .any(|object| object.id == id)
         }) {
-            ui.strong("Mesh");
+            ui.strong(Text::Mesh.plain());
             self.mesh_reference_ui(ui);
             self.collider_inspector_ui(ui);
             self.material_inspector_ui(ui);
@@ -222,14 +303,14 @@ impl SceneEditor {
         self.ambient_inspector_ui(ui);
         self.display_inspector_ui(ui);
         ui.separator();
-        egui::CollapsingHeader::new("Details")
+        egui::CollapsingHeader::new(Text::Details.plain())
             .id_salt("object_details")
             .show(ui, |ui| {
                 if let Some(id) = &self.selected {
                     ui.label(format!("Stable ID: {id}"));
                 }
                 if self.manipulation.ids.len() > 1 {
-                    ui.label("The last selected object is active.");
+                    ui.label(Text::InspectorTheLastSelectedObject.plain());
                 }
                 ui.label(format!(
                     "Loaded scene format v{}; Save writes v{}.",
@@ -261,17 +342,15 @@ impl SceneEditor {
                     })
                 }));
                 if let Some(mesh) = &mesh {
-                    if ui.button("Locate mesh in Content").clicked() {
+                    if ui.button(Text::LocateMeshInContent.plain()).clicked() {
                         self.locate_mesh(mesh);
                     }
                 }
             })
             .response
-            .on_hover_text(
-                "Drop a project mesh from Content here to assign it to the active object.",
-            );
+            .on_hover_text(Text::MeshDropHint.plain());
         response.context_menu(|ui| {
-            if ui.button("Use procedural cube").clicked() {
+            if ui.button(Text::UseProceduralCube.plain()).clicked() {
                 match self.assign_mesh_to(&id, None) {
                     Ok(_) => self.error.clear(),
                     Err(error) => self.error = error,
@@ -279,7 +358,7 @@ impl SceneEditor {
                 ui.close();
             }
             if let Some(mesh) = &mesh {
-                if ui.button("Locate mesh in Content").clicked() {
+                if ui.button(Text::LocateMeshInContent.plain()).clicked() {
                     self.locate_mesh(mesh);
                     ui.close();
                 }

@@ -543,7 +543,7 @@ impl RecoveryUi {
                 .wrap(),
             )
             .on_hover_text(&self.warning);
-            if ui.button("Retry recovery checkpoint").clicked() {
+            if ui.button(Text::RetryRecoveryCheckpoint.plain()).clicked() {
                 if self.store.is_none() {
                     match Self::directory().and_then(Store::open) {
                         Ok(store) => self.store = Some(store),
@@ -604,7 +604,10 @@ mod tests {
             "injected worker start failure"
         );
         recovery.observe(1, 0, 0, true, now + Duration::from_secs(30));
-        assert!(!recovery.due(now+Duration::from_secs(60)),"start failure must suspend the submitted state rather than cloning/retrying every frame");
+        assert!(
+            !recovery.due(now + Duration::from_secs(60)),
+            "start failure must suspend the submitted state rather than cloning/retrying every frame"
+        );
         assert!(
             recovery.deadline.remaining(now).is_none(),
             "no expired repaint timer may remain after start failure"

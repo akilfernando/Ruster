@@ -1,5 +1,6 @@
 //! Explicit review of one retained action draft after legacy visual recovery.
 use super::SceneEditor;
+use crate::strings::Text;
 use eframe::egui;
 
 impl SceneEditor {
@@ -44,7 +45,7 @@ impl SceneEditor {
         self.input_actions_open = true;
         self.draft_generation = self.draft_generation.wrapping_add(1);
         self.error.clear();
-        self.notice = "Action restored. Edit its fields, then Apply or Cancel.".into();
+        self.notice = Text::RecoveredInputUiActionRestoredEditIts.plain().into();
         Ok(())
     }
 
@@ -54,7 +55,7 @@ impl SceneEditor {
         }
         self.recovered_input_open = false;
         self.error.clear();
-        self.notice = "Recovered action discarded.".into();
+        self.notice = Text::RecoveredActionDiscarded.plain().into();
     }
 
     pub(super) fn recovered_input_notice(&mut self, ui: &mut egui::Ui) {
@@ -66,13 +67,14 @@ impl SceneEditor {
                 "Finish the recovered {name} edit in the Inspector first."
             ));
         } else if self.recovered_input_ready() {
-            ui.label("Review your recovered action before resuming or discarding it.");
+            ui.label(Text::RecoveredInputUiReviewYourRecoveredAction.plain());
         } else {
-            ui.label(
-                "Finish the current operation first. Your recovered action draft stays preserved.",
-            );
+            ui.label(Text::RecoveryFinishOperation.plain());
         }
-        if ui.button("Review recovered action…").clicked() {
+        if ui
+            .button(Text::RecoveredInputUiReviewRecoveredAction.plain())
+            .clicked()
+        {
             self.recovered_input_open = true;
             self.recovered_input_focused = false;
         }
@@ -95,62 +97,85 @@ impl SceneEditor {
         let mut resume = false;
         let mut discard = false;
         let mut keep = false;
-        let modal = egui::Modal::new(egui::Id::unique("recovered_action_review"))
-            .show(ctx, |ui| {
-                ui.set_width((ctx.content_rect().width() - 48.0).clamp(220.0, 560.0));
-                ui.heading("Review recovered action");
-                ui.separator();
-                egui::ScrollArea::vertical()
-                    .id_salt("recovered_action_body")
-                    .max_height((ctx.content_rect().height() - 132.0).max(48.0))
-                    .show(ui, |ui| {
-                        draft.recovered_values_ui(ui);
-                        ui.separator();
-                        if !ready {
-                            if let Some(name) = visual {
-                                ui.label(format!("Finish the recovered {name} edit in the Inspector first."));
-                            } else {
-                                ui.label("Finish the current operation first. Keep for later preserves this action draft.");
-                            }
+        let modal = egui::Modal::new(egui::Id::unique("recovered_action_review")).show(ctx, |ui| {
+            ui.set_width((ctx.content_rect().width() - 48.0).clamp(220.0, 560.0));
+            ui.heading(Text::ReviewRecoveredAction.plain());
+            ui.separator();
+            egui::ScrollArea::vertical()
+                .id_salt("recovered_action_body")
+                .max_height((ctx.content_rect().height() - 132.0).max(48.0))
+                .show(ui, |ui| {
+                    draft.recovered_values_ui(ui);
+                    ui.separator();
+                    if !ready {
+                        if let Some(name) = visual {
+                            ui.label(format!(
+                                "Finish the recovered {name} edit in the Inspector first."
+                            ));
+                        } else {
+                            ui.label(Text::RecoveredInputUiFinishTheCurrentOperation.plain());
                         }
-                        match &review {
-                            Ok(()) => {
-                                ui.label(if original_revision == self.session.scene().revision {
-                                    "The action still matches. Resume to keep your values."
-                                } else {
-                                    "The scene changed, but the action still matches. Resume to keep your values."
-                                });
-                            }
-                            Err(_) => { ui.colored_label(ui.visuals().error_fg_color, "The action no longer matches this scene. Keep the draft or discard it."); }
-                        }
-                        ui.label("The original checkpoint stays preserved.");
-                        egui::CollapsingHeader::new("Technical details")
-                            .id_salt("recovered_action_technical")
-                            .show(ui, |ui| {
-                                if let Some(origin) = &self.recovered_origin {
-                                    ui.add(egui::Label::new(origin.display().to_string()).wrap());
-                                }
-                                ui.label(format!("Draft from version {original_revision} · scene is at version {}", self.session.scene().revision));
-                                if let Err(error) = &review { ui.label(error); }
-                                ui.add(egui::TextEdit::multiline(&mut raw).font(egui::TextStyle::Monospace).desired_width(f32::INFINITY).interactive(false));
-                            });
-                    });
-                ui.separator();
-                // Keep decisions visible while long recovered values and
-                // optional technical details scroll within the body above.
-                ui.horizontal_wrapped(|ui| {
-                    let response = ui.add_enabled(ready && review.is_ok(), egui::Button::new("Resume editing"));
-                    let remove = ui.button("Discard recovered draft");
-                    let later = ui.button("Keep for later");
-                    if !self.recovered_input_focused {
-                        if response.enabled() { response.request_focus(); } else { later.request_focus(); }
-                        self.recovered_input_focused = true;
                     }
-                    resume = response.clicked();
-                    discard = remove.clicked();
-                    keep = later.clicked();
+                    match &review {
+                        Ok(()) => {
+                            ui.label(if original_revision == self.session.scene().revision {
+                                Text::RecoveredInputUiTheActionStillMatches.plain()
+                            } else {
+                                Text::RecoveredInputUiTheSceneChangedBut.plain()
+                            });
+                        }
+                        Err(_) => {
+                            ui.colored_label(
+                                ui.visuals().error_fg_color,
+                                Text::RecoveredInputUiTheActionNoLonger.plain(),
+                            );
+                        }
+                    }
+                    ui.label(Text::TheOriginalCheckpointStaysPreserved.plain());
+                    egui::CollapsingHeader::new(Text::TechnicalDetails.plain())
+                        .id_salt("recovered_action_technical")
+                        .show(ui, |ui| {
+                            if let Some(origin) = &self.recovered_origin {
+                                ui.add(egui::Label::new(origin.display().to_string()).wrap());
+                            }
+                            ui.label(format!(
+                                "Draft from version {original_revision} · scene is at version {}",
+                                self.session.scene().revision
+                            ));
+                            if let Err(error) = &review {
+                                ui.label(error);
+                            }
+                            ui.add(
+                                egui::TextEdit::multiline(&mut raw)
+                                    .font(egui::TextStyle::Monospace)
+                                    .desired_width(f32::INFINITY)
+                                    .interactive(false),
+                            );
+                        });
                 });
+            ui.separator();
+            // Keep decisions visible while long recovered values and
+            // optional technical details scroll within the body above.
+            ui.horizontal_wrapped(|ui| {
+                let response = ui.add_enabled(
+                    ready && review.is_ok(),
+                    egui::Button::new(Text::ResumeEditing.plain()),
+                );
+                let remove = ui.button(Text::DiscardRecoveredDraft.plain());
+                let later = ui.button(Text::RecoveryKeep.plain());
+                if !self.recovered_input_focused {
+                    if response.enabled() {
+                        response.request_focus();
+                    } else {
+                        later.request_focus();
+                    }
+                    self.recovered_input_focused = true;
+                }
+                resume = response.clicked();
+                discard = remove.clicked();
+                keep = later.clicked();
             });
+        });
         self.recovered_input_open = !keep && !modal.should_close();
         if !self.recovered_input_open {
             self.recovered_input_focused = false;

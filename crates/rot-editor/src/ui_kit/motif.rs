@@ -2,6 +2,7 @@
 //! contrast, a three-spore loading indicator and quiet backgrounds for the
 //! hub and About. Only the Rot style draws any of it; Plain gets neutral
 //! equivalents. Never inside working panels, behind text or in errors.
+use crate::strings::Text;
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke};
 
 fn rot(ui: &egui::Ui) -> bool {
@@ -82,7 +83,7 @@ pub fn spinner(ui: &mut egui::Ui, size: f32) -> egui::Response {
         );
     }
     ui.ctx().request_repaint();
-    response.on_hover_text("Working…")
+    response.on_hover_text(Text::Working.plain())
 }
 
 /// Mycelium threads creeping in from the bottom-left corner of `rect`, for

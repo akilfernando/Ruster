@@ -1,5 +1,6 @@
 //! Transient translation gestures and the window-owned geometry/light clipboard.
 //! Authored transactions stay in Session; no pointer frame enters undo history.
+use crate::strings::Text;
 use eframe::egui;
 use rot_scene::{Ambient, Light, Lighting, Object, OpaqueMaterial, Scene, Session, Transform};
 use std::{
@@ -735,8 +736,8 @@ impl Manipulation {
         let mut focused_field = None;
         let mut field_has_focus = false;
         if mixed.iter().any(|mixed| *mixed) {
-            ui.label("— = mixed values")
-                .on_hover_text("Applies to this component on every selected object.");
+            ui.label(Text::MixedValues.plain())
+                .on_hover_text(Text::ManipulationAppliesToThisComponent.plain());
         }
         let mut scrub_released = false;
         for (row, label) in ["Position", unit.label(), "Scale"].into_iter().enumerate() {
@@ -783,11 +784,11 @@ impl Manipulation {
                 }
             });
             if row == 2 && !scale_allowed {
-                ui.small("Lights keep unit scale; use intensity or point range.");
+                ui.small(Text::ManipulationLightsKeepUnitScale.plain());
             }
         }
         if previewing {
-            ui.small("Drag preview · release to apply · Escape to cancel");
+            ui.small(Text::ManipulationDragPreviewReleaseTo.plain());
             return Ok(false);
         }
         let mut apply = (focused_field.is_some() && enter_pressed) || scrub_released;
@@ -800,13 +801,13 @@ impl Manipulation {
                 apply |= ui
                     .add_enabled(
                         self.precision_pending(),
-                        egui::Button::new("Apply transform components"),
+                        egui::Button::new(Text::ApplyTransformComponents.plain()),
                     )
                     .clicked();
                 cancel |= ui
                     .add_enabled(
                         self.precision_pending(),
-                        egui::Button::new("Revert transform components"),
+                        egui::Button::new(Text::RevertTransformComponents.plain()),
                     )
                     .clicked();
             });
@@ -1399,8 +1400,10 @@ mod tests {
         m.edited[0] = true;
         m.precision_revision = Some(session.scene().revision);
         let precision_refused = m.apply_precision(&mut session).is_err();
-        assert!(gesture_refused && offset_refused && precision_refused,
-            "light fidelity refusals: gesture={gesture_refused}, offset={offset_refused}, precision={precision_refused}");
+        assert!(
+            gesture_refused && offset_refused && precision_refused,
+            "light fidelity refusals: gesture={gesture_refused}, offset={offset_refused}, precision={precision_refused}"
+        );
         assert_eq!(session.snapshot_bytes().unwrap(), before);
         assert!(!session.is_dirty());
         assert_eq!(session.path(), Some(path.as_path()));
@@ -1990,11 +1993,13 @@ mod tests {
         clipboard.paste(&mut source, root, 10).unwrap();
         assert_eq!(source.scene().materials.len(), 1);
         assert_eq!(source.scene().materials["paint"], edited);
-        assert!(clipboard.ids.iter().all(|id| source
-            .scene()
-            .objects
-            .iter()
-            .any(|o| &o.id == id && o.material.as_deref() == Some("paint"))));
+        assert!(clipboard.ids.iter().all(|id| {
+            source
+                .scene()
+                .objects
+                .iter()
+                .any(|o| &o.id == id && o.material.as_deref() == Some("paint"))
+        }));
         let mut destination_scene = Scene::empty("another-document");
         destination_scene
             .materials

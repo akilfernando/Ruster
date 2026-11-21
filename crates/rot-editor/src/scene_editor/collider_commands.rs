@@ -1,5 +1,6 @@
 //! Guarded full component replacement through the shared authored transaction.
 use super::SceneEditor;
+use crate::strings::Text;
 use rot_scene::{Collider, SceneError};
 use serde_json::{json, Value};
 
@@ -84,8 +85,7 @@ impl SceneEditor {
             })?;
         if result != revision {
             self.sync_draft();
-            self.notice =
-                "Collider updated. Undo restores the edit. Reset updates the preview.".into();
+            self.notice = Text::ColliderUpdated.plain().into();
         }
         Ok(
             json!({"session_token":token,"revision":result.to_string(),"changed":result!=revision,

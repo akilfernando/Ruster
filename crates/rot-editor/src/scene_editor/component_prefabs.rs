@@ -333,7 +333,7 @@ impl ComponentWorkspace {
         };
         let file = self.prefab_files.get(&link.asset);
         ui.separator();
-        ui.strong("Prefab");
+        ui.strong(Text::Prefab.plain());
         if let Some(file) = file {
             ui.label(
                 Path::new(&file.source)

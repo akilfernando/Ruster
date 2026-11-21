@@ -1,4 +1,5 @@
 //! Editor-only interaction state. Authored transactions and persistence belong to core.
+use crate::strings::Text;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -171,7 +172,7 @@ impl Editor {
             Ok(_) => {
                 self.fields = self.project.scenario().config().into();
                 self.field_validation_error = None;
-                self.notice = "Properties applied. Restart to use them.".into();
+                self.notice = Text::ModelPropertiesAppliedRestartTo.plain().into();
                 true
             }
             Err(ScenarioError::Simulation(error)) => {
@@ -189,12 +190,12 @@ impl Editor {
     pub fn revert_fields(&mut self) {
         self.fields = self.project.scenario().config().into();
         self.field_validation_error = None;
-        self.notice = "Restored the previous field values.".into();
+        self.notice = Text::RestoredThePreviousFieldValues.plain().into();
     }
 
     pub fn undo(&mut self, redo: bool) {
         if self.fields_changed() {
-            self.error = Some("Apply or discard Inspector edits before using Undo or Redo.".into());
+            self.error = Some(Text::ModelApplyOrDiscardInspector.plain().into());
             return;
         }
         let result = if redo {
@@ -206,8 +207,7 @@ impl Editor {
             Ok(_) => {
                 self.fields = self.project.scenario().config().into();
                 self.error = None;
-                self.notice =
-                    "Authored history restored. Runtime is unchanged; Reset to use it.".into();
+                self.notice = Text::ModelEditHistoryRestoredRestart.plain().into();
             }
             Err(error) => self.error = Some(error.to_string()),
         }
@@ -244,11 +244,12 @@ impl Editor {
                 let adapter = self.adapter.clone();
                 *self = Self::new(project);
                 self.adapter = adapter;
-                self.notice = "Project ready.".into();
+                self.notice = Text::ProjectReady.plain().into();
             }
             Err(error) => {
                 self.error = Some(format!(
-                    "{error}. Current project and fields are preserved; choose a valid file or identifier and retry."
+                    "Couldn’t open the project.
+{error}"
                 ));
                 self.pending = None;
             }
@@ -291,7 +292,8 @@ impl Editor {
             Ok(()) => self.saved(),
             Err(error) => {
                 self.error = Some(format!(
-                    "{error}. Your work is still in memory. Retry after resolving the conflict or use Save As with a new path."
+                    "Couldn’t save. Retry or choose Save As.
+{error}"
                 ))
             }
         }
@@ -299,7 +301,7 @@ impl Editor {
 
     pub fn save_as(&mut self) {
         if self.path_text.trim().is_empty() {
-            self.error = Some("Enter a destination path. Save As creates a new file; choose a path that does not exist.".into());
+            self.error = Some(Text::ChooseANewFilePath.plain().into());
             return;
         }
         match self.project.save_as(self.path_text.trim()) {
@@ -317,8 +319,7 @@ impl Editor {
 
     fn saved(&mut self) {
         self.error = None;
-        self.notice =
-            "Saved authored scenario and undo history. Runtime ticks are never saved.".into();
+        self.notice = Text::ScenarioSaved.plain().into();
         if let Some(action) = self.pending.take() {
             self.execute(action);
         }
@@ -328,15 +329,15 @@ impl Editor {
         self.running = false;
         self.runtime_config = self.project.scenario().config();
         self.simulation = Simulation::new(self.runtime_config).expect("validated scenario");
-        self.notice =
-            "Runtime reset to current authored properties. Saved data is unchanged.".into();
+        self.notice = Text::SimulationRestarted.plain().into();
     }
 
     pub fn step(&mut self) {
         if let Err(error) = self.simulation.step() {
             self.running = false;
             self.error = Some(format!(
-                "Runtime stopped: {error}. Reset, then reduce authored rates or initial stock."
+                "Simulation stopped. Lower the rates or initial stock, then restart.
+{error}"
             ));
         }
     }

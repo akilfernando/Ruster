@@ -1,4 +1,5 @@
 //! Generic scene authoring frontend; logistics rules stay in the legacy sample.
+use crate::strings::Text;
 mod ai_indicator;
 mod ai_steps;
 #[cfg(all(test, unix))]
@@ -1043,7 +1044,7 @@ impl SceneEditor {
                             .imported(import.next_base, self.session.scene().revision);
                         self.sync_draft();
                         self.observe_runtime();
-                        self.notice="Imported the observed working-file version through scene Undo. Save to keep it.".into();
+                        self.notice = Text::SceneEditorScriptImportedSaveThe.plain().into();
                         self.error.clear();
                         ctx.request_repaint();
                     }
@@ -1688,7 +1689,7 @@ impl SceneEditor {
         }
         next.workspace.welcome = false;
         next.render = render;
-        next.notice = "Recovered as an unsaved copy. Save it under a new name.".into();
+        next.notice = Text::SceneEditorRecoveredAsAnUnsaved.plain().into();
         if let Some(origin) = snapshot.origin.as_ref().or(snapshot.asset_origin.as_ref()) {
             let parent = if snapshot.origin.is_some() {
                 origin.parent().unwrap_or(origin)
@@ -1903,21 +1904,21 @@ impl SceneEditor {
         if let Some(error) = self.close_cleanup_error.clone() {
             egui::Modal::new(egui::Id::unique("close_recovery_failed")).show(ctx, |ui| {
                 ui.set_width((ctx.content_rect().width() - 48.0).clamp(220.0, 520.0));
-                ui.heading("Recovery cleanup failed");
+                ui.heading(Text::SceneEditorRecoveryCleanupFailed.plain());
                 egui::ScrollArea::vertical()
                     .max_height((ctx.content_rect().height() - 130.0).max(48.0))
                     .show(ui, |ui| {
                         ui.label(&error);
-                        ui.label("The checkpoint may reappear next launch.");
+                        ui.label(Text::SceneEditorTheCheckpointMayReappear.plain());
                     });
                 ui.horizontal_wrapped(|ui| {
-                    if ui.button("Close anyway").clicked() {
+                    if ui.button(Text::CloseAnyway.plain()).clicked() {
                         self.close_cleanup_error = None;
                         self.recovery.shutdown();
                         self.runtime.shutdown();
                         self.close_shutdown = true;
                     }
-                    let cancel = ui.button("Cancel closing");
+                    let cancel = ui.button(Text::CancelClosing.plain());
                     if self.confirm_focused != Some("cleanup-error") {
                         cancel.request_focus();
                         self.confirm_focused = Some("cleanup-error");
@@ -1937,8 +1938,8 @@ impl SceneEditor {
         {
             if !*cancelled {
                 egui::Modal::new(egui::Id::unique("close_recovery_wait")).show(ctx, |ui| {
-                    ui.heading("Finishing recovery cleanup…");
-                    if ui.button("Cancel closing").clicked()
+                    ui.heading(Text::FinishingRecoveryCleanup.plain());
+                    if ui.button(Text::CancelClosing.plain()).clicked()
                         || ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
                     {
                         *cancelled = true;
@@ -1952,12 +1953,12 @@ impl SceneEditor {
             Some(RecoveryTransition::Replace { .. })
         ) {
             egui::Modal::new(egui::Id::unique("recovery_replacement_wait")).show(ctx, |ui| {
-                ui.label("Finishing recovery before switching scenes…");
+                ui.label(Text::FinishingRecoveryBeforeSwitchingScenes.plain());
             });
         } else if self.close_approved && !self.close_shutdown && !self.external.finished() {
             egui::Modal::new(egui::Id::unique("external_close_wait")).show(ctx, |ui| {
-                ui.label("Finishing the current working-copy job before closing…");
-                let cancel = ui.button("Cancel closing");
+                ui.label(Text::SceneEditorFinishingTheCurrentWorking.plain());
+                let cancel = ui.button(Text::CancelClosing.plain());
                 cancel.request_focus();
                 if cancel.clicked()
                     || ui.input_mut(|input| {
@@ -2142,21 +2143,19 @@ impl SceneEditor {
     }
     fn apply(&mut self) -> bool {
         if self.player_view_draft.is_some() {
-            self.error = "Apply or cancel the Player View edit first.".into();
+            self.error = Text::SceneEditorSceneEditorApplyOrCancelThe.plain().into();
             return false;
         }
         if self.runtime.command_draft_pending() {
-            self.error =
-                "Invoke or cancel the pending Application command arguments before other changes."
-                    .into();
+            self.error = Text::SceneEditorRunOrCancelThe.plain().into();
             return false;
         }
         if self.recovered_input.is_some() {
-            self.error = "Couldn't continue. Finish or discard the recovered draft first.".into();
+            self.error = Text::SceneEditorCouldntContinueFinishOr.plain().into();
             return false;
         }
         if self.asset_publishing() || self.asset_loading() {
-            self.error = "Assets are still saving. Wait a moment, then edit.".into();
+            self.error = Text::SceneEditorAssetsAreStillSaving.plain().into();
             return false;
         }
         if self.hud_draft.is_some() {
@@ -2178,7 +2177,7 @@ impl SceneEditor {
             return self.apply_color_draft();
         }
         if self.manipulation.active() {
-            self.error = "Finish or cancel the transform gesture first.".into();
+            self.error = Text::SceneEditorFinishOrCancelThe.plain().into();
             return false;
         }
         if let Err(error) = self.behavior.apply_all(&mut self.session) {
@@ -2187,7 +2186,7 @@ impl SceneEditor {
         }
         self.observe_runtime();
         if self.manipulation.precision_pending() && self.draft != self.baseline_fields {
-            self.error = "Couldn't apply. Two recovered transform drafts are open.".into();
+            self.error = Text::SceneEditorCouldntApplyTwoRecovered.plain().into();
             return false;
         }
         if self.manipulation.precision_pending() {
@@ -2235,7 +2234,7 @@ impl SceneEditor {
             Ok(_) => {
                 self.sync_draft();
                 self.error.clear();
-                self.notice = "Transform applied.".into();
+                self.notice = Text::TransformApplied.plain().into();
                 true
             }
             Err(e) => {
@@ -2261,7 +2260,7 @@ impl SceneEditor {
         match result {
             Ok(_) => {
                 self.sync_draft();
-                self.notice = "History changed.".into()
+                self.notice = Text::HistoryChanged.plain().into()
             }
             Err(e) => self.error = e.to_string(),
         }
@@ -2389,9 +2388,9 @@ impl SceneEditor {
                 self.sync_draft();
                 self.error.clear();
                 self.notice = if paste {
-                    "Pasted selection; one Undo restores the scene."
+                    Text::SceneEditorPastedSelectionOneUndo.plain()
                 } else {
-                    "Copied selection inside this editor window."
+                    Text::SceneEditorCopiedSelectionInsideThis.plain()
                 }
                 .into();
                 if paste && !self.manipulation.paste_created_lights().is_empty() {
@@ -2421,41 +2420,51 @@ impl SceneEditor {
         egui::ComboBox::from_id_salt("tool_space")
             .width(56.0)
             .selected_text(if self.manipulation.local {
-                "Local"
+                Text::Local.plain()
             } else {
-                "World"
+                Text::World.plain()
             })
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut self.manipulation.local, false, "World");
-                ui.selectable_value(&mut self.manipulation.local, true, "Local");
+                ui.selectable_value(&mut self.manipulation.local, false, Text::World.plain());
+                ui.selectable_value(&mut self.manipulation.local, true, Text::Local.plain());
             })
             .response
-            .on_hover_text("Handle orientation: World or the active object's Local axes");
+            .on_hover_text(Text::SceneEditorHandleOrientationWorldOr.plain());
         egui::ComboBox::from_id_salt("tool_pivot")
             .width(76.0)
             .selected_text(match self.manipulation.pivot {
-                Pivot::Individual => "Pivot",
-                Pivot::Center => "Center",
-                Pivot::Active => "Active",
+                Pivot::Individual => Text::Pivot.plain(),
+                Pivot::Center => Text::ComponentCenter.plain(),
+                Pivot::Active => Text::Active.plain(),
             })
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut self.manipulation.pivot, Pivot::Center, "Center");
-                ui.selectable_value(&mut self.manipulation.pivot, Pivot::Individual, "Pivot");
-                ui.selectable_value(&mut self.manipulation.pivot, Pivot::Active, "Active");
+                ui.selectable_value(
+                    &mut self.manipulation.pivot,
+                    Pivot::Center,
+                    Text::ComponentCenter.plain(),
+                );
+                ui.selectable_value(
+                    &mut self.manipulation.pivot,
+                    Pivot::Individual,
+                    Text::Pivot.plain(),
+                );
+                ui.selectable_value(
+                    &mut self.manipulation.pivot,
+                    Pivot::Active,
+                    Text::Active.plain(),
+                );
             })
             .response
-            .on_hover_text(
-                "Handle position: selection Center, each object's own Pivot, or the Active object",
-            );
+            .on_hover_text(Text::PivotModeHint.plain());
         egui::ComboBox::from_id_salt("tool_snap")
             .width(64.0)
             .selected_text(if self.manipulation.snap {
-                "Snap On"
+                Text::SnapOn.plain()
             } else {
-                "Snap"
+                Text::Snap.plain()
             })
             .show_ui(ui, |ui| {
-                ui.checkbox(&mut self.manipulation.snap, "Snap While Dragging");
+                ui.checkbox(&mut self.manipulation.snap, Text::SnapWhileDragging.plain());
                 ui.separator();
                 for (label, value, range, speed, suffix) in [
                     (
@@ -2491,7 +2500,7 @@ impl SceneEditor {
                 }
             })
             .response
-            .on_hover_text("Snap increments for Move, Rotate and Scale");
+            .on_hover_text(Text::SceneEditorSnapIncrementsForMove.plain());
     }
     fn manipulation_mode_buttons(&mut self, ui: &mut egui::Ui) {
         use crate::manipulation::Tool;
@@ -2512,7 +2521,7 @@ impl SceneEditor {
             if !enabled {
                 response
                     .clone()
-                    .on_disabled_hover_text("Lights use intensity and range instead of scale.");
+                    .on_disabled_hover_text(Text::SceneEditorLightsUseIntensityAnd.plain());
             }
             if response.clicked() {
                 self.manipulation.tool = tool;
@@ -2569,14 +2578,14 @@ impl SceneEditor {
                             self.layout_menu(ui);
                         })
                         .response
-                        .on_hover_text("More tools");
+                        .on_hover_text(Text::MoreTools.plain());
                     } else {
                         egui::ComboBox::from_id_salt("toolbar_layout")
                             .width(96.0)
                             .selected_text(self.active_layout.label())
                             .show_ui(ui, |ui| self.layout_menu(ui))
                             .response
-                            .on_hover_text("Layout");
+                            .on_hover_text(Text::Layout.plain());
                     }
                 });
             },
@@ -2615,41 +2624,107 @@ impl SceneEditor {
     fn manipulation_ui(&mut self, ui: &mut egui::Ui) {
         let pending = self.manipulation.offset_pending();
         if pending {
-            ui.label("Unapplied translation offset");
+            ui.label(Text::UnappliedTranslationOffset.plain());
         }
-        egui::CollapsingHeader::new("Adjust selection").id_salt("selection_adjustments").open(pending.then_some(true)).show(ui,|ui| {
-            ui.label("World translation offset");
-            ui.add_enabled_ui((self.hud_draft.is_none() && self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && !self.manipulation.active() && !self.manipulation.precision_pending(), |ui| {
-                let mut enter=false;
-                let mut escape=false;
-                let group_width=crate::manipulation::component_group_width(ui);
-                ui.horizontal_wrapped(|ui| {
-                    for (axis,text) in ["X","Y","Z"].into_iter().zip(&mut self.manipulation.delta) {
-                        ui.allocate_ui_with_layout(egui::vec2(group_width,ui.spacing().interact_size.y),egui::Layout::left_to_right(egui::Align::Center),|ui| {
-                            ui.label(axis);
-                            let response=ui.add_sized([ui.available_width().max(48.0),ui.spacing().interact_size.y],egui::TextEdit::singleline(text).id(egui::Id::unique(("selection_offset",axis))).char_limit(1024).interactive(ui.is_enabled()));
-                            let owned=ui.is_enabled() && (response.has_focus() || response.lost_focus() || ui.memory(|m|m.had_focus_last_frame(response.id)));
-                            enter|=owned && ui.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Enter));
-                            escape|=owned && ui.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Escape));
-                            if response.changed() {self.draft_generation=self.draft_generation.wrapping_add(1);}
+        egui::CollapsingHeader::new(Text::AdjustSelection.plain())
+            .id_salt("selection_adjustments")
+            .open(pending.then_some(true))
+            .show(ui, |ui| {
+                ui.label(Text::WorldTranslationOffset.plain());
+                ui.add_enabled_ui(
+                    (self.hud_draft.is_none()
+                        && self.color_draft.is_none()
+                        && self.material_draft.is_none()
+                        && self.lighting_draft.is_none()
+                        && self.display_draft.is_none()
+                        && self.collider_draft.is_none())
+                        && !self.manipulation.active()
+                        && !self.manipulation.precision_pending(),
+                    |ui| {
+                        let mut enter = false;
+                        let mut escape = false;
+                        let group_width = crate::manipulation::component_group_width(ui);
+                        ui.horizontal_wrapped(|ui| {
+                            for (axis, text) in ["X", "Y", "Z"]
+                                .into_iter()
+                                .zip(&mut self.manipulation.delta)
+                            {
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(group_width, ui.spacing().interact_size.y),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(axis);
+                                        let response = ui.add_sized(
+                                            [
+                                                ui.available_width().max(48.0),
+                                                ui.spacing().interact_size.y,
+                                            ],
+                                            egui::TextEdit::singleline(text)
+                                                .id(egui::Id::unique(("selection_offset", axis)))
+                                                .char_limit(1024)
+                                                .interactive(ui.is_enabled()),
+                                        );
+                                        let owned = ui.is_enabled()
+                                            && (response.has_focus()
+                                                || response.lost_focus()
+                                                || ui.memory(|m| {
+                                                    m.had_focus_last_frame(response.id)
+                                                }));
+                                        enter |= owned
+                                            && ui.input_mut(|i| {
+                                                i.consume_key(
+                                                    egui::Modifiers::NONE,
+                                                    egui::Key::Enter,
+                                                )
+                                            });
+                                        escape |= owned
+                                            && ui.input_mut(|i| {
+                                                i.consume_key(
+                                                    egui::Modifiers::NONE,
+                                                    egui::Key::Escape,
+                                                )
+                                            });
+                                        if response.changed() {
+                                            self.draft_generation =
+                                                self.draft_generation.wrapping_add(1);
+                                        }
+                                    },
+                                );
+                            }
                         });
-                    }
-                });
-                ui.horizontal_wrapped(|ui| {
-                    if ui.button("Reset translation offset").clicked() || escape {
-                        self.manipulation.delta=std::array::from_fn(|_|"0".into());
-                        self.draft_generation=self.draft_generation.wrapping_add(1);
-                    }
-                    if ui.add_enabled(!self.manipulation.ids.is_empty(),egui::Button::new("Apply translation offset")).clicked() || (enter && !self.manipulation.ids.is_empty()) {
-                        let result=self.guard().and_then(|()|self.manipulation.apply_delta(&mut self.session));
-                        match result {
-                            Ok(())=>{self.manipulation.delta=std::array::from_fn(|_|"0".into());self.sync_draft();self.error.clear();self.notice="Translation offset applied; one Undo restores the selection.".into();},
-                            Err(error)=>self.error=error,
-                        }
-                    }
-                });
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.button(Text::ResetTranslationOffset.plain()).clicked() || escape {
+                                self.manipulation.delta = std::array::from_fn(|_| "0".into());
+                                self.draft_generation = self.draft_generation.wrapping_add(1);
+                            }
+                            if ui
+                                .add_enabled(
+                                    !self.manipulation.ids.is_empty(),
+                                    egui::Button::new(Text::ApplyTranslationOffset.plain()),
+                                )
+                                .clicked()
+                                || (enter && !self.manipulation.ids.is_empty())
+                            {
+                                let result = self.guard().and_then(|()| {
+                                    self.manipulation.apply_delta(&mut self.session)
+                                });
+                                match result {
+                                    Ok(()) => {
+                                        self.manipulation.delta =
+                                            std::array::from_fn(|_| "0".into());
+                                        self.sync_draft();
+                                        self.error.clear();
+                                        self.notice = Text::SceneEditorTranslationOffsetAppliedOne
+                                            .plain()
+                                            .into();
+                                    }
+                                    Err(error) => self.error = error,
+                                }
+                            }
+                        });
+                    },
+                );
             });
-        });
     }
     #[cfg(test)]
     fn asset_snapshot(&mut self) {
@@ -3840,7 +3915,7 @@ impl SceneEditor {
     /// Create Empty, 3D Object ▸ and Light ▸, as commands.
     fn create_entries(&mut self, ui: &mut egui::Ui) {
         self.command_item(ui, Action::CreateEmpty);
-        ui.menu_button("3D Object", |ui| {
+        ui.menu_button(Text::Component3dObject.plain(), |ui| {
             for action in [
                 Action::CreateCube,
                 Action::CreateSphere,
@@ -3849,7 +3924,7 @@ impl SceneEditor {
                 self.command_item(ui, action);
             }
         });
-        ui.menu_button("Light", |ui| {
+        ui.menu_button(Text::ComponentLight.plain(), |ui| {
             for action in [Action::CreateDirectionalLight, Action::CreateLight] {
                 self.command_item(ui, action);
             }
@@ -3947,7 +4022,7 @@ impl SceneEditor {
             egui::ComboBox::from_id_salt("assembly-parent")
                 .selected_text(parent.as_deref().unwrap_or("Scene root"))
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut parent, None, "Scene root (detach)");
+                    ui.selectable_value(&mut parent, None, Text::DetachToSceneRoot.plain());
                     for (key, g) in &self.session.scene().hierarchy.groups {
                         if key != &id {
                             ui.selectable_value(
@@ -3967,14 +4042,14 @@ impl SceneEditor {
                 Ok(_) => {
                     self.sync_draft();
                     self.error.clear();
-                    self.notice="Parent changed with world pose preserved; one Undo restores stored locals.".into();
+                    self.notice = Text::ParentChangedWorldTransformPreserved.plain().into();
                 }
                 Err(e) => self.error = e.to_string(),
             }
         }
-        ui.small("Transform fields: local to parent. Gizmos: world-space placement.");
+        ui.small(Text::SceneEditorTransformFieldsLocalTo.plain());
         if self.session.scene().hierarchy.groups.contains_key(&id) {
-            ui.small("Group scale must be positive and uniform on X/Y/Z.");
+            ui.small(Text::SceneEditorGroupScaleMustBe.plain());
         }
         if let Ok(poses) = self.session.scene().resolve_poses() {
             if let Some(t) = poses.transforms.get(&id) {
@@ -4020,7 +4095,7 @@ impl SceneEditor {
         if missing > 0 {
             ui.horizontal_wrapped(|ui| {
                         ui.colored_label(crate::editor_theme::colors(ui).warning, format!("{missing} objects have unresolved mesh references; placeholder cubes shown."));
-                        if ui.button("Locate missing content").clicked() {
+                        if ui.button(Text::LocateMissingContent.plain()).clicked() {
                             let id = self.session.scene().objects.iter().filter_map(|o| o.mesh.as_ref()).find(|id| !self.resolved.contains_key(*id)).cloned();
                             if let Some(id) = id { self.locate_mesh(&id); }
                         }
@@ -4061,13 +4136,15 @@ impl SceneEditor {
         if self.import_normal_policy().is_some() {
             crate::editor_theme::dialog_section(ui, "Mesh import settings");
             ui.horizontal(|ui| {
-                ui.label("Normals");
+                ui.label(Text::Normals.plain());
                 let focus = combo_focus::ComboFocus::capture(ui, "asset_import_normals");
                 let mut selected = false;
                 let response = egui::ComboBox::from_id_salt("asset_import_normals")
                     .selected_text(match self.asset_normal_policy {
-                        rot_assets::MeshNormalPolicy::Flat => "Flat normals",
-                        rot_assets::MeshNormalPolicy::AuthoredWhenComplete => "Mesh Normals",
+                        rot_assets::MeshNormalPolicy::Flat => Text::FlatNormals.plain(),
+                        rot_assets::MeshNormalPolicy::AuthoredWhenComplete => {
+                            Text::MeshNormals.plain()
+                        }
                     })
                     .show_ui(ui, |ui| {
                         for (value, label) in [
@@ -4088,20 +4165,19 @@ impl SceneEditor {
                     });
                 focus.restore(ui, &response.response, selected);
             });
-            ui.weak("Choose Flat for hard faces.").on_hover_text(
-                "Uses the normals in your OBJ. Meshes without them are flat shaded.",
-            );
+            ui.weak(Text::ChooseFlatForHardFaces.plain())
+                .on_hover_text(Text::SceneEditorUsesTheNormalsIn.plain());
         }
         if self.import_texture_role().is_some() {
             crate::editor_theme::dialog_section(ui, "Texture import settings");
             ui.horizontal(|ui| {
-                ui.label("Use as");
+                ui.label(Text::UseAs.plain());
                 let focus = combo_focus::ComboFocus::capture(ui, "asset_import_texture_role");
                 let mut selected = false;
                 let response = egui::ComboBox::from_id_salt("asset_import_texture_role")
                     .selected_text(match self.asset_texture_role {
-                        rot_assets::TextureRole::BaseColor => "Base color (sRGB)",
-                        rot_assets::TextureRole::Roughness => "Roughness map (linear)",
+                        rot_assets::TextureRole::BaseColor => Text::BaseColorSrgb.plain(),
+                        rot_assets::TextureRole::Roughness => Text::RoughnessMapLinear.plain(),
                     })
                     .show_ui(ui, |ui| {
                         for (role, label) in [
@@ -4119,7 +4195,7 @@ impl SceneEditor {
                     });
                 focus.restore(ui, &response.response, selected);
             });
-            ui.weak("Base color uses sRGB. Roughness uses linear values.");
+            ui.weak(Text::SceneEditorBaseColorUsesSrgb.plain());
         }
     }
 
@@ -4149,140 +4225,252 @@ impl SceneEditor {
             self.close_asset_dialog();
             return;
         }
-        egui::Modal::new(egui::Id::unique("asset_dialog")).frame(crate::editor_theme::dialog_frame(ctx)).show(ctx, |ui| {
-            use crate::editor_theme::{dialog_header, dialog_section, primary_button};
-            let rename = self.asset_rename_intent;
-            let can_edit = !self.asset_publishing() && !self.asset_loading();
-            let busy = self.asset_ops.busy();
-            let primary = if rename { "Rename asset source" } else { "Import asset" };
-            ui.set_width((ctx.content_rect().width() - 48.0).clamp(220.0, 520.0));
-            let has_project = self.asset_origin.is_some();
-            dialog_header(ui, primary, if rename {
-                "Move the source within this project. References keep the same asset ID."
-            } else {
-                "Add a GLB, OBJ, PNG or WAV file from your project folder."
-            });
-            if !has_project {
-                ui.weak("Save the scene first to give its assets a project folder.");
-            }
-            let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
-            let mut operation = None;
-            ui.add_enabled_ui(can_edit, |ui| {
-                egui::ScrollArea::vertical().id_salt("asset_tools_body")
-                    .max_height((ctx.content_rect().height() - 175.0).max(70.0))
-                    .show(ui, |ui| {
-                        let label = dialog_section(ui, if rename { "New source path" } else { "Source file" });
-                        let source = ui.horizontal(|ui| {
-                            let source = ui.add(egui::TextEdit::singleline(&mut self.asset_source)
-                                .id(egui::Id::unique("asset_import_source"))
-                                .hint_text(if rename { "Relative path, same extension" } else { "e.g. meshes/prop.glb" })
-                                .desired_width(if rename { f32::INFINITY } else { (ui.available_width() - 90.0).max(90.0) })
-                                .char_limit(256)).labelled_by(label.id);
-                            #[cfg(target_os = "linux")]
-                            if !rename {
-                                let previous = self.asset_source.clone();
-                                if self.asset_browser.show(ui, &mut self.asset_source, &mut self.error, project_picker::BrowseKind::ImportAsset) {
-                                    if let Some(relative) = self.asset_origin.as_ref()
-                                        .and_then(|root| std::path::Path::new(&self.asset_source).strip_prefix(root).ok())
-                                        .and_then(std::path::Path::to_str)
-                                        .filter(|path| !path.is_empty())
-                                    {
-                                        self.asset_source = relative.to_owned();
-                                    } else {
-                                        self.asset_source = previous;
-                                        self.error = "Choose a file inside the current project folder.".into();
+        egui::Modal::new(egui::Id::unique("asset_dialog"))
+            .frame(crate::editor_theme::dialog_frame(ctx))
+            .show(ctx, |ui| {
+                use crate::editor_theme::{dialog_header, dialog_section, primary_button};
+                let rename = self.asset_rename_intent;
+                let can_edit = !self.asset_publishing() && !self.asset_loading();
+                let busy = self.asset_ops.busy();
+                let primary = if rename {
+                    "Rename asset source"
+                } else {
+                    "Import asset"
+                };
+                ui.set_width((ctx.content_rect().width() - 48.0).clamp(220.0, 520.0));
+                let has_project = self.asset_origin.is_some();
+                dialog_header(
+                    ui,
+                    primary,
+                    if rename {
+                        "Move the source within this project. References keep the same asset ID."
+                    } else {
+                        "Add a GLB, OBJ, PNG or WAV file from your project folder."
+                    },
+                );
+                if !has_project {
+                    ui.weak(Text::SceneEditorSaveTheSceneFirst.plain());
+                }
+                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
+                let mut operation = None;
+                ui.add_enabled_ui(can_edit, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("asset_tools_body")
+                        .max_height((ctx.content_rect().height() - 175.0).max(70.0))
+                        .show(ui, |ui| {
+                            let label = dialog_section(
+                                ui,
+                                if rename {
+                                    "New source path"
+                                } else {
+                                    "Source file"
+                                },
+                            );
+                            let source = ui
+                                .horizontal(|ui| {
+                                    let source = ui
+                                        .add(
+                                            egui::TextEdit::singleline(&mut self.asset_source)
+                                                .id(egui::Id::unique("asset_import_source"))
+                                                .hint_text(if rename {
+                                                    Text::RelativePathSameExtension.plain()
+                                                } else {
+                                                    Text::AssetModelPathHint.plain()
+                                                })
+                                                .desired_width(if rename {
+                                                    f32::INFINITY
+                                                } else {
+                                                    (ui.available_width() - 90.0).max(90.0)
+                                                })
+                                                .char_limit(256),
+                                        )
+                                        .labelled_by(label.id);
+                                    #[cfg(target_os = "linux")]
+                                    if !rename {
+                                        let previous = self.asset_source.clone();
+                                        if self.asset_browser.show(
+                                            ui,
+                                            &mut self.asset_source,
+                                            &mut self.error,
+                                            project_picker::BrowseKind::ImportAsset,
+                                        ) {
+                                            if let Some(relative) = self
+                                                .asset_origin
+                                                .as_ref()
+                                                .and_then(|root| {
+                                                    std::path::Path::new(&self.asset_source)
+                                                        .strip_prefix(root)
+                                                        .ok()
+                                                })
+                                                .and_then(std::path::Path::to_str)
+                                                .filter(|path| !path.is_empty())
+                                            {
+                                                self.asset_source = relative.to_owned();
+                                            } else {
+                                                self.asset_source = previous;
+                                                self.error = Text::SceneEditorChooseAFileInside
+                                                    .plain()
+                                                    .into();
+                                            }
+                                        }
                                     }
-                                }
-                            }
-                            source
-                        }).inner;
-                        if !self.asset_focused && (self.asset_source_focus || rename) {
-                            source.request_focus();
-                            self.asset_focused = true;
-                        }
-                        let mut id_enter = false;
-                        let id_label = dialog_section(ui, "Asset ID");
-                        if rename {
-                            ui.label(&self.asset_id);
-                        } else {
-                            let field = ui.add(egui::TextEdit::singleline(&mut self.asset_id)
-                                .id(egui::Id::unique("asset_import_id"))
-                                .hint_text("Optional · defaults to filename")
-                                .desired_width(f32::INFINITY).char_limit(128)).labelled_by(id_label.id);
-                            if !self.asset_focused {
-                                field.request_focus();
+                                    source
+                                })
+                                .inner;
+                            if !self.asset_focused && (self.asset_source_focus || rename) {
+                                source.request_focus();
                                 self.asset_focused = true;
                             }
-                            id_enter = !popup_at_start && enter && (field.has_focus() || field.lost_focus());
-                            if id_enter {
-                                source.request_focus();
+                            let mut id_enter = false;
+                            let id_label = dialog_section(ui, "Asset ID");
+                            if rename {
+                                ui.label(&self.asset_id);
+                            } else {
+                                let field = ui
+                                    .add(
+                                        egui::TextEdit::singleline(&mut self.asset_id)
+                                            .id(egui::Id::unique("asset_import_id"))
+                                            .hint_text(Text::OptionalDefaultsToFilename.plain())
+                                            .desired_width(f32::INFINITY)
+                                            .char_limit(128),
+                                    )
+                                    .labelled_by(id_label.id);
+                                if !self.asset_focused {
+                                    field.request_focus();
+                                    self.asset_focused = true;
+                                }
+                                id_enter = !popup_at_start
+                                    && enter
+                                    && (field.has_focus() || field.lost_focus());
+                                if id_enter {
+                                    source.request_focus();
+                                }
                             }
-                        }
-                        self.asset_import_settings(ui);
-                        if has_project && !busy && !id_enter && !popup_at_start && !egui::Popup::is_any_open(ctx) && enter
-                            && (source.has_focus() || source.lost_focus())
-                            && !self.asset_source.trim().is_empty() {
-                            operation = Some(if rename { "asset_rename" } else { "asset_import" });
-                        }
-                        if !rename {
-                            ui.collapsing("Source maintenance", |ui| {
-                                ui.weak("Use an existing asset ID. You can also manage a source from its Content row.");
-                                ui.horizontal_wrapped(|ui| {
-                                    if ui.add_enabled(!busy && !self.asset_id.trim().is_empty(), egui::Button::new("Refresh asset")).clicked() {
-                                        operation = Some("asset_refresh");
-                                    }
-                                    if ui.add_enabled(!busy && !self.asset_id.trim().is_empty() && !self.asset_source.trim().is_empty(), egui::Button::new("Rename asset source")).clicked() {
-                                        operation = Some("asset_rename");
-                                    }
+                            self.asset_import_settings(ui);
+                            if has_project
+                                && !busy
+                                && !id_enter
+                                && !popup_at_start
+                                && !egui::Popup::is_any_open(ctx)
+                                && enter
+                                && (source.has_focus() || source.lost_focus())
+                                && !self.asset_source.trim().is_empty()
+                            {
+                                operation = Some(if rename {
+                                    "asset_rename"
+                                } else {
+                                    "asset_import"
                                 });
-                            });
-                        }
-                    });
-            });
-            ui.separator();
-            if !self.error.is_empty() {
-                ui.add(egui::Label::new(egui::RichText::new(&self.error).color(crate::editor_theme::colors(ui).error)).truncate()).on_hover_text(&self.error);
-            } else if busy {
-                ui.label("Preparing asset…");
-            } else if has_project {
-                ui.weak("Asset changes are saved to the project immediately.");
-            }
-            ui.horizontal_wrapped(|ui| {
-                if ui.button(if busy { "Cancel operation" } else { "Cancel" }).clicked() {
-                    self.close_asset_dialog();
-                    operation = None;
-                }
-                if !has_project && !rename && !busy && primary_button(ui, "Save scene first…").clicked() {
-                    self.close_asset_dialog();
-                    self.save();
-                }
-                ui.add_enabled_ui(has_project && can_edit && !busy && !self.asset_source.trim().is_empty(), |ui| {
-                    if primary_button(ui, primary).clicked() {
-                        operation = Some(if rename { "asset_rename" } else { "asset_import" });
-                    }
+                            }
+                            if !rename {
+                                ui.collapsing(Text::SourceMaintenance.plain(), |ui| {
+                                    ui.weak(Text::SceneEditorUseAnExistingAsset.plain());
+                                    ui.horizontal_wrapped(|ui| {
+                                        if ui
+                                            .add_enabled(
+                                                !busy && !self.asset_id.trim().is_empty(),
+                                                egui::Button::new(Text::RefreshAsset.plain()),
+                                            )
+                                            .clicked()
+                                        {
+                                            operation = Some("asset_refresh");
+                                        }
+                                        if ui
+                                            .add_enabled(
+                                                !busy
+                                                    && !self.asset_id.trim().is_empty()
+                                                    && !self.asset_source.trim().is_empty(),
+                                                egui::Button::new(Text::RenameAssetSource.plain()),
+                                            )
+                                            .clicked()
+                                        {
+                                            operation = Some("asset_rename");
+                                        }
+                                    });
+                                });
+                            }
+                        });
                 });
-            });
-            if let Some(op) = operation {
-                if op == "asset_import" && self.asset_id.trim().is_empty() {
-                    let stem = std::path::Path::new(self.asset_source.trim()).file_stem().and_then(|v| v.to_str()).unwrap_or_default();
-                    let suggested: String = stem.chars().take(128).map(|c| {
-                        if c.is_ascii_alphanumeric() || "_-.".contains(c) { c } else { '-' }
-                    }).collect();
-                    if suggested.trim_matches('-').is_empty() {
-                        self.error = "Enter an asset ID using letters, digits, dashes, underscores or dots.".into();
-                        return;
-                    }
-                    self.asset_id = suggested;
+                ui.separator();
+                if !self.error.is_empty() {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(&self.error)
+                                .color(crate::editor_theme::colors(ui).error),
+                        )
+                        .truncate(),
+                    )
+                    .on_hover_text(&self.error);
+                } else if busy {
+                    ui.label(Text::PreparingAsset.plain());
+                } else if has_project {
+                    ui.weak(Text::SceneEditorAssetChangesAreSaved.plain());
                 }
-                #[cfg(feature = "inspection")]
-                let observed = self.asset_ops.timing_begin(op);
-                let id = self.asset_id.clone();
-                let source = self.asset_source.clone();
-                self.start_human_asset(ctx, op, &id, &source, true);
-                #[cfg(feature = "inspection")]
-                self.asset_ops.timing_admitted(observed);
-            }
-        });
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .button(if busy {
+                            Text::CancelOperation.plain()
+                        } else {
+                            Text::ComponentCancel.plain()
+                        })
+                        .clicked()
+                    {
+                        self.close_asset_dialog();
+                        operation = None;
+                    }
+                    if !has_project
+                        && !rename
+                        && !busy
+                        && primary_button(ui, "Save scene first…").clicked()
+                    {
+                        self.close_asset_dialog();
+                        self.save();
+                    }
+                    ui.add_enabled_ui(
+                        has_project && can_edit && !busy && !self.asset_source.trim().is_empty(),
+                        |ui| {
+                            if primary_button(ui, primary).clicked() {
+                                operation = Some(if rename {
+                                    "asset_rename"
+                                } else {
+                                    "asset_import"
+                                });
+                            }
+                        },
+                    );
+                });
+                if let Some(op) = operation {
+                    if op == "asset_import" && self.asset_id.trim().is_empty() {
+                        let stem = std::path::Path::new(self.asset_source.trim())
+                            .file_stem()
+                            .and_then(|v| v.to_str())
+                            .unwrap_or_default();
+                        let suggested: String = stem
+                            .chars()
+                            .take(128)
+                            .map(|c| {
+                                if c.is_ascii_alphanumeric() || "_-.".contains(c) {
+                                    c
+                                } else {
+                                    '-'
+                                }
+                            })
+                            .collect();
+                        if suggested.trim_matches('-').is_empty() {
+                            self.error = Text::SceneEditorEnterAnAssetId.plain().into();
+                            return;
+                        }
+                        self.asset_id = suggested;
+                    }
+                    #[cfg(feature = "inspection")]
+                    let observed = self.asset_ops.timing_begin(op);
+                    let id = self.asset_id.clone();
+                    let source = self.asset_source.clone();
+                    self.start_human_asset(ctx, op, &id, &source, true);
+                    #[cfg(feature = "inspection")]
+                    self.asset_ops.timing_admitted(observed);
+                }
+            });
     }
     fn rename_dialog(&mut self, ctx: &egui::Context) {
         if !self.rename_pending {
@@ -4318,7 +4506,7 @@ impl SceneEditor {
                         self.rename_pending = true;
                     }
                 }
-                if ui.button("Cancel rename").clicked() || escape {
+                if ui.button(Text::CancelRename.plain()).clicked() || escape {
                     self.rename_pending = false;
                     self.sync_draft();
                 }
@@ -4354,7 +4542,7 @@ impl SceneEditor {
     }
     fn request_close(&mut self) {
         if self.player_view_draft.is_some() {
-            self.error = "Apply or cancel the Player View edit before closing.".into();
+            self.error = Text::GameCameraFinishBeforeClose.plain().into();
             return;
         }
         self.revoke_connection();
@@ -4366,8 +4554,7 @@ impl SceneEditor {
         self.runtime
             .stop(self.generation, self.session.scene().revision);
         if self.recovery_transition.is_some() {
-            self.error =
-                "Recovery cleanup is still finishing; retry Close once it completes.".into();
+            self.error = Text::SceneEditorRecoveryCleanupIsStill.plain().into();
             return;
         }
         self.manipulation.cancel();
@@ -4378,9 +4565,9 @@ impl SceneEditor {
             self.recovery.open = false;
         }
         if self.new_scene_pending {
-            self.error = "Resolve or cancel New scene before closing.".into();
+            self.error = Text::NewSceneFinishBeforeClose.plain().into();
         } else if self.rename_pending {
-            self.error = "Apply or cancel the name edit before closing.".into();
+            self.error = Text::SceneEditorApplyOrCancelThe.plain().into();
         } else if self.needs_recovery() {
             self.close_pending = true;
         } else {
@@ -4497,7 +4684,7 @@ impl SceneEditor {
                 self.asset_ops.cancel();
             }
             self.queued_action = Some(action);
-            self.notice = "Waiting for asset work before the requested document action.".into();
+            self.notice = Text::SceneEditorWaitingForAssetWork.plain().into();
             return;
         }
         if self.close_approved
@@ -4528,7 +4715,7 @@ impl SceneEditor {
             Action::Export => self.open_export_dialog(),
             Action::NewProject => {
                 if self.session.is_dirty() || self.guard().is_err() || self.asset_busy() {
-                    self.error = "Couldn't create a project. Save your work first.".into();
+                    self.error = Text::SceneEditorCouldntCreateAProject.plain().into();
                 } else {
                     self.release_runtime_input();
                     self.new_project_form = Some(project_picker::ProjectForm::new_project());
@@ -4536,7 +4723,7 @@ impl SceneEditor {
             }
             Action::OpenProject => {
                 if self.needs_recovery() || self.guard().is_err() || self.asset_busy() {
-                    self.error = "Couldn't switch projects. Save your scene first.".into();
+                    self.error = Text::SceneEditorCouldntSwitchProjectsSave.plain().into();
                 } else {
                     self.release_runtime_input();
                     self.runtime.cancel_native_hud_activation();
@@ -4658,7 +4845,7 @@ impl SceneEditor {
             Action::Move | Action::Rotate | Action::Scale => {
                 if action == Action::Scale && !self.manipulation.scale_allowed(self.session.scene())
                 {
-                    self.error = "Lights cannot be scaled; use intensity or range.".into();
+                    self.error = Text::SceneEditorLightsCannotBeScaled.plain().into();
                     return;
                 }
                 if self.guard().is_ok() {
@@ -4679,7 +4866,7 @@ impl SceneEditor {
             }
             Action::FocusRuntime => {
                 if self.runtime.input_owned() {
-                    self.notice = "Release runtime controls before using editor shortcuts.".into();
+                    self.notice = Text::GameControlsRelease.plain().into();
                 } else {
                     self.runtime.focus_controls = true;
                 }
@@ -4796,17 +4983,13 @@ impl SceneEditor {
                     .map_err(|error| error.to_string())
             });
         match result {
-            Ok(()) => {
-                self.notice = "Created scene.wgsl; edit it, then Refresh scene shader.".into()
-            }
+            Ok(()) => self.notice = Text::SceneEditorCreatedSceneWgslEdit.plain().into(),
             Err(error) => self.error = error,
         }
     }
     fn refresh_shader_command(&mut self) {
         if self.drafts() || self.manipulation.active() {
-            self.error =
-                "Apply/revert transform drafts and finish the gesture before shader refresh."
-                    .into();
+            self.error = Text::SceneEditorFinishTransformEditsBefore.plain().into();
         } else if let Err(error) = self.refresh_shader() {
             self.shader_notice = format!(
                 "Shader rejected; last good pipeline retained: {}",
@@ -4934,7 +5117,10 @@ impl SceneEditor {
                         )
                         .wrap(),
                     );
-                    if ui.button("Recover workspace preferences…").clicked() {
+                    if ui
+                        .button(Text::RecoverWorkspacePreferences.plain())
+                        .clicked()
+                    {
                         self.workspace.settings_open = true;
                         ui.close();
                     }
@@ -4960,7 +5146,7 @@ impl SceneEditor {
                     );
                     if diagnostic.source_id.is_some()
                         && diagnostic.source_hash.is_some()
-                        && ui.button("Open Script").clicked()
+                        && ui.button(Text::OpenScript.plain()).clicked()
                     {
                         if let Err(error) = self.behavior.navigate_diagnostic(
                             &self.session,
@@ -4974,7 +5160,7 @@ impl SceneEditor {
                 }
                 if !self.external.status.is_empty() {
                     ui.add(egui::Label::new(&self.external.status).wrap());
-                    if ui.button("Working-copy details").clicked() {
+                    if ui.button(Text::WorkingCopyDetails.plain()).clicked() {
                         self.external.open = true;
                         ui.close();
                     }
@@ -4985,7 +5171,7 @@ impl SceneEditor {
         ui.menu_button(label, |ui| {
             ui.set_max_width(360.0);
             if self.workspace.prefs.recent.is_empty() {
-                ui.label("No recent scenes.");
+                ui.label(Text::NoRecentScenes.plain());
             }
             for path in &self.workspace.prefs.recent {
                 let filename = path
@@ -5091,7 +5277,7 @@ impl SceneEditor {
             });
             crate::editor_theme::text_menu(ui, "Assets", |ui| {
                 self.command_item(ui, Action::ImportAsset);
-                ui.menu_button("Create", |ui| {
+                ui.menu_button(Text::ComponentCreate.plain(), |ui| {
                     self.command_item(ui, Action::CreateShaderSource);
                 });
                 self.command_item(ui, Action::RefreshShader);
@@ -5106,7 +5292,7 @@ impl SceneEditor {
                     self.command_item(ui, action);
                 }
                 ui.separator();
-                ui.menu_button("Mesh", |ui| {
+                ui.menu_button(Text::Mesh.plain(), |ui| {
                     self.command_item(ui, Action::AssignCube);
                     // One entry per imported mesh (parameterized, not a command).
                     for id in self
@@ -5157,7 +5343,7 @@ impl SceneEditor {
                     self.command_item(ui, action);
                 }
                 ui.separator();
-                ui.menu_button("Layouts", |ui| self.layout_menu(ui));
+                ui.menu_button(Text::Layouts.plain(), |ui| self.layout_menu(ui));
             });
             crate::editor_theme::text_menu(ui, "Help", |ui| {
                 for action in [
@@ -5292,7 +5478,7 @@ impl SceneEditor {
                 || self.recovery.open)
         {
             self.manipulation.cancel();
-            self.notice = "Transform cancelled.".into();
+            self.notice = Text::TransformCancelled.plain().into();
         }
         let input_blocked = self.hud_open
             || self.input_actions_open
@@ -5384,10 +5570,10 @@ impl SceneEditor {
                     if save.clicked() {
                         self.save_with_continuation(save_commands::Continuation::ThenNew);
                     }
-                    if ui.button("Discard and create new scene").clicked() {
+                    if ui.button(Text::DiscardAndCreateNewScene.plain()).clicked() {
                         self.replace_with_empty();
                     }
-                    if ui.button("Cancel new scene").clicked() {
+                    if ui.button(Text::CancelNewScene.plain()).clicked() {
                         self.new_scene_pending = false;
                     }
                     if !self.error.is_empty() {
@@ -5413,55 +5599,107 @@ impl SceneEditor {
             self.scene_file_browser = project_picker::FileBrowser::default();
         }
         if let Some(open) = self.dialog {
-            egui::Modal::new(egui::Id::unique("scene_path_dialog")).frame(crate::editor_theme::dialog_frame(&ctx)).show(&ctx,|ui| {
-                crate::editor_theme::dialog_header(ui, if open { "Open scene" } else { "Save scene as" }, if open { "Choose a saved scene to open in this editor." } else { "Choose where to save a new copy of this scene." });
-                self.confirm_focused=None;
-                let label = crate::editor_theme::dialog_section(ui, if open { "Scene file" } else { "Save location" });
-                let enter_pressed=ui.input(|i|i.key_pressed(egui::Key::Enter)&&i.modifiers.is_none());
-                let cancel=ui.input(|i|i.key_pressed(egui::Key::Escape)&&i.modifiers.is_none());
-                let edit=ui.horizontal(|ui| {
-                    let edit = ui.text_edit_singleline(&mut self.path_text).labelled_by(label.id);
-                    #[cfg(target_os = "linux")]
-                    self.scene_file_browser.show(ui, &mut self.path_text, &mut self.error, if open { project_picker::BrowseKind::OpenScene } else { project_picker::BrowseKind::SaveScene });
-                    edit
-                }).inner;
-                if !self.path_focused {edit.request_focus();self.path_focused=true;}
-                let submit=(edit.has_focus()||edit.lost_focus())&&enter_pressed;
-                let discards_changes = open && (self.session.is_dirty() || self.drafts());
-                if discards_changes {
-                    ui.colored_label(crate::editor_theme::colors(ui).warning,"Opening discards current unsaved scene and drafts. Cancel to preserve them.");
-                }
-                ui.horizontal(|ui| {
-                    let action_label = if discards_changes {
-                        "Open and discard current"
-                    } else if open {
-                        "Open scene"
-                    } else {
-                        "Save to new path"
-                    };
-                    let has_path = !self.path_text.trim().is_empty();
-                    let action = ui.add_enabled_ui(has_path, |ui| crate::editor_theme::primary_button(ui, action_label)).inner;
-                    if action.clicked() || (submit && has_path) {
-                        #[cfg(feature = "inspection")]
-                        let observed = if open { None } else { self.asset_ops.timing_begin("scene_save") };
-                        let path=PathBuf::from(self.path_text.trim());
+            egui::Modal::new(egui::Id::unique("scene_path_dialog"))
+                .frame(crate::editor_theme::dialog_frame(&ctx))
+                .show(&ctx, |ui| {
+                    crate::editor_theme::dialog_header(
+                        ui,
+                        if open { "Open scene" } else { "Save scene as" },
                         if open {
-                            if self.asset_loading(){self.cancel_asset_work();}
-                            if let Err(error)=self.asset_root_guard(){self.error=error;return;}
-                            match OpenedScene::open(&path) {
-                                Ok(document) => self.open_document(document),
-                                Err(error)=>self.error=error.to_string()
-                            }
+                            "Choose a saved scene to open in this editor."
                         } else {
-                            self.start_human_save(path, self.save_dialog_continuation);
-                        }
-                        #[cfg(feature = "inspection")]
-                        self.asset_ops.timing_admitted(observed);
+                            "Choose where to save a new copy of this scene."
+                        },
+                    );
+                    self.confirm_focused = None;
+                    let label = crate::editor_theme::dialog_section(
+                        ui,
+                        if open { "Scene file" } else { "Save location" },
+                    );
+                    let enter_pressed =
+                        ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
+                    let cancel =
+                        ui.input(|i| i.key_pressed(egui::Key::Escape) && i.modifiers.is_none());
+                    let edit = ui
+                        .horizontal(|ui| {
+                            let edit = ui
+                                .text_edit_singleline(&mut self.path_text)
+                                .labelled_by(label.id);
+                            #[cfg(target_os = "linux")]
+                            self.scene_file_browser.show(
+                                ui,
+                                &mut self.path_text,
+                                &mut self.error,
+                                if open {
+                                    project_picker::BrowseKind::OpenScene
+                                } else {
+                                    project_picker::BrowseKind::SaveScene
+                                },
+                            );
+                            edit
+                        })
+                        .inner;
+                    if !self.path_focused {
+                        edit.request_focus();
+                        self.path_focused = true;
                     }
-                    if ui.button("Cancel scene dialog").clicked()||cancel {self.dialog=None;self.path_focused=false;}
+                    let submit = (edit.has_focus() || edit.lost_focus()) && enter_pressed;
+                    let discards_changes = open && (self.session.is_dirty() || self.drafts());
+                    if discards_changes {
+                        ui.colored_label(
+                            crate::editor_theme::colors(ui).warning,
+                            Text::SceneEditorOpeningDiscardsCurrentUnsaved.plain(),
+                        );
+                    }
+                    ui.horizontal(|ui| {
+                        let action_label = if discards_changes {
+                            "Open and discard current"
+                        } else if open {
+                            "Open scene"
+                        } else {
+                            "Save to new path"
+                        };
+                        let has_path = !self.path_text.trim().is_empty();
+                        let action = ui
+                            .add_enabled_ui(has_path, |ui| {
+                                crate::editor_theme::primary_button(ui, action_label)
+                            })
+                            .inner;
+                        if action.clicked() || (submit && has_path) {
+                            #[cfg(feature = "inspection")]
+                            let observed = if open {
+                                None
+                            } else {
+                                self.asset_ops.timing_begin("scene_save")
+                            };
+                            let path = PathBuf::from(self.path_text.trim());
+                            if open {
+                                if self.asset_loading() {
+                                    self.cancel_asset_work();
+                                }
+                                if let Err(error) = self.asset_root_guard() {
+                                    self.error = error;
+                                    return;
+                                }
+                                match OpenedScene::open(&path) {
+                                    Ok(document) => self.open_document(document),
+                                    Err(error) => self.error = error.to_string(),
+                                }
+                            } else {
+                                self.start_human_save(path, self.save_dialog_continuation);
+                            }
+                            #[cfg(feature = "inspection")]
+                            self.asset_ops.timing_admitted(observed);
+                        }
+                        if ui.button(Text::CancelSceneDialog.plain()).clicked() || cancel {
+                            self.dialog = None;
+                            self.path_focused = false;
+                        }
+                    });
+                    if !self.error.is_empty() {
+                        ui.colored_label(crate::editor_theme::colors(ui).error, &self.error);
+                    }
                 });
-                if !self.error.is_empty(){ui.colored_label(crate::editor_theme::colors(ui).error,&self.error);}
-            });
         }
         self.content_ui(&ctx);
         self.play_checks_ui(&ctx);
@@ -5497,8 +5735,7 @@ impl SceneEditor {
                         self.sync_draft();
                         self.observe_runtime();
                         self.error.clear();
-                        self.notice =
-                            "Input action applied · Undo restores the previous definition.".into();
+                        self.notice = Text::InputActionApplied.plain().into();
                     }
                     Err(error) => self.error = error.to_string(),
                 }
@@ -5548,10 +5785,10 @@ impl SceneEditor {
                     if save.clicked() {
                         self.save_with_continuation(save_commands::Continuation::ThenClose);
                     }
-                    if ui.button("Discard and close scene").clicked() {
+                    if ui.button(Text::DiscardAndCloseScene.plain()).clicked() {
                         self.close_approved = true;
                     }
-                    if ui.button("Cancel closing scene").clicked() {
+                    if ui.button(Text::CancelClosingScene.plain()).clicked() {
                         self.close_pending = false;
                     }
                     if !self.error.is_empty() {
@@ -5688,7 +5925,7 @@ impl eframe::App for Host {
                         self.editor.open_document(session);
                     } else {
                         self.editor.error =
-                            "Resolve pending changes before switching projects.".into();
+                            Text::SceneEditorResolvePendingChangesBefore.plain().into();
                     }
                 } else if !back {
                     self.editor.project_picker = Some(picker);
@@ -6185,7 +6422,7 @@ mod tests {
                 if progress_action {
                     assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
                         egui::epaint::Shape::Text(text)
-                        if text.galley.job.text == "Keep editing"
+                        if text.galley.job.text == "Keep Editing"
                         && shape.clip_rect.contains_rect(egui::Rect::from_min_size(text.pos, text.galley.size())))),
                         "long progress must not clip its action");
                 }
@@ -6222,7 +6459,10 @@ mod tests {
                 if editor.error.contains('\n') && editor.error == editor.shader_notice {
                     let summary = editor.error.lines().next().unwrap();
                     let summary_count=output.shapes.iter().filter(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text==summary)).count();
-                    assert_eq!(summary_count,1,"identical multiline error/shader messages must share one concise footer summary at {size:?}");
+                    assert_eq!(
+                        summary_count, 1,
+                        "identical multiline error/shader messages must share one concise footer summary at {size:?}"
+                    );
                     full_problem_count.set(output.shapes.iter().filter(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text==editor.error)).count());
                 }
                 asset_row_visible.set(output.shapes.iter().any(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if (text.galley.job.text == "triangle" || text.galley.job.text.starts_with("triangle · Mesh · Ready")) && egui::Rect::from_min_size(text.pos,text.galley.size()).intersect(shape.clip_rect).height()>=text.galley.size().y-0.5)));
@@ -6436,7 +6676,10 @@ mod tests {
             frame(&mut editor, normal_size);
             frame(&mut editor, normal_size);
             let preferred_content_height = content_rect.get().unwrap().height();
-            assert!((preferred_content_height-(before.height()-10.0)).abs()<2.0,"real divider drag must establish a non-default preferred height: {preferred_content_height}");
+            assert!(
+                (preferred_content_height - (before.height() - 10.0)).abs() < 2.0,
+                "real divider drag must establish a non-default preferred height: {preferred_content_height}"
+            );
             let mut original: Option<egui::Rect> = None;
             for size in [
                 egui::vec2(1280.0, 800.0),
@@ -6645,9 +6888,9 @@ mod tests {
                 editor.workspace.error.clone(),
                 editor.runtime.status.clone(),
                 editor.external.status.clone(),
-                "Retry recovery checkpoint".into(),
-                "Recover workspace preferences…".into(),
-                "Working-copy details".into(),
+                "Retry Recovery Checkpoint".into(),
+                "Recover Workspace Preferences…".into(),
+                "Working-copy Details".into(),
             ];
             let status_ctx = egui::Context::default();
             let mut footer_time = 0.0;
@@ -6679,7 +6922,7 @@ mod tests {
                     modifiers: egui::Modifiers::NONE,
                 }]
             };
-            for action in ["Cancel", "Keep editing", "Details"] {
+            for action in ["Cancel", "Keep Editing", "Details"] {
                 let center = output
                     .shapes
                     .iter()
@@ -6763,7 +7006,9 @@ mod tests {
                         rect.left() >= shape.clip_rect.left() - 0.5
                             && rect.right() <= shape.clip_rect.right() + 0.5,
                         "Details must wrap the full width of {}: text={rect:?}, ink={:?}, clip={:?}",
-                        messages[index], text.visual_bounding_rect(), shape.clip_rect
+                        messages[index],
+                        text.visual_bounding_rect(),
+                        shape.clip_rect
                     );
                     let start = visible.top() - rect.top();
                     assert!(
@@ -6798,11 +7043,15 @@ mod tests {
                 output = footer(Vec::new());
             }
             for (index, message) in messages.iter().enumerate() {
-                assert!(heights[index].is_some_and(|height| covered_to[index] >= height - 0.5),
-                    "bounded Details must expose the entire diagnostic/action through scrolling: {message}");
+                assert!(
+                    heights[index].is_some_and(|height| covered_to[index] >= height - 0.5),
+                    "bounded Details must expose the entire diagnostic/action through scrolling: {message}"
+                );
             }
-            assert!(actions_visible.iter().all(|visible| *visible),
-                "each retained recovery/workspace/working-copy action must fit visibly at a scroll position");
+            assert!(
+                actions_visible.iter().all(|visible| *visible),
+                "each retained recovery/workspace/working-copy action must fit visibly at a scroll position"
+            );
             assert_eq!(
                 editor.error, messages[0],
                 "Details must preserve the retained problem"
@@ -7506,7 +7755,7 @@ mod tests {
                     "Visible runtime Inspector must show the retained numeric pose {value}"
                 );
             }
-            assert!(text.iter().any(|(label, _)| label == "Runtime transform"));
+            assert!(text.iter().any(|(label, _)| label == "Play Transform"));
             assert!(text.iter().any(|(label, _)| label.contains("Tick 37")));
             assert!(text
                 .iter()
@@ -7541,7 +7790,7 @@ mod tests {
         assert!(
             absent.iter().any(|(label, _)| {
                 let label = label.to_ascii_lowercase();
-                label.contains("not present")
+                label.contains("absent")
                     || label.contains("missing")
                     || label.contains("unavailable")
             }),
@@ -7728,7 +7977,7 @@ mod tests {
             .iter()
             .find_map(|shape| match &shape.shape {
                 egui::epaint::Shape::Text(text)
-                    if text.galley.job.text == "Show unapplied source draft" =>
+                    if text.galley.job.text == "Show Unapplied Script Changes" =>
                 {
                     Some(text.pos + text.galley.size() / 2.0)
                 }
@@ -9322,11 +9571,15 @@ mod tests {
                 }),
             )
             .unwrap();
-        assert_refusal(&mut editor, json!([
-            {"code":"input_actions","example":"Jump"}, {"code":"hud","example":"Score Display"},
-            {"code":"script_sources","example":"Movement"}, {"code":"object_scripts","example":"Left Cube"},
-            {"code":"application_script"}
-        ]), "Couldn't create an empty group. This legacy scene uses input actions (“Jump”), a HUD (“Score Display”), ordinary script sources (“Movement”), scripts attached to objects (“Left Cube”), a script attached to the application.");
+        assert_refusal(
+            &mut editor,
+            json!([
+                {"code":"input_actions","example":"Jump"}, {"code":"hud","example":"Score Display"},
+                {"code":"script_sources","example":"Movement"}, {"code":"object_scripts","example":"Left Cube"},
+                {"code":"application_script"}
+            ]),
+            "Couldn't create an empty group. This legacy scene uses input actions (“Jump”), a HUD (“Score Display”), ordinary script sources (“Movement”), scripts attached to objects (“Left Cube”), a script attached to the application.",
+        );
     }
 
     #[test]
@@ -11310,7 +11563,7 @@ mod tests {
                             .iter()
                             .find(|(_, node)| {
                                 node.role() == egui::accesskit::Role::Button
-                                    && node.label() == Some("Review recovered action…")
+                                    && node.label() == Some("Review Recovered Action…")
                             })
                             .and_then(|(_, node)| node.bounds())
                     })
@@ -11324,7 +11577,7 @@ mod tests {
                     "Review action outside {size:?}: {rect:?}"
                 );
                 assert!(
-                    visible_text(output, "Review recovered action…").is_some(),
+                    visible_text(output, "Review Recovered Action…").is_some(),
                     "Review action must paint without clipping"
                 );
                 let footer = footer_rect
@@ -11354,8 +11607,13 @@ mod tests {
                         ))
                     })
                     .collect();
-                assert!(painted.iter().any(|(_, bounds, clip)| footer.contains_rect(*bounds) && clip.contains_rect(*bounds)),
-                    "the status panel must paint a complete summary at {size:?}: footer={footer:?}, text={painted:?}");
+                assert!(
+                    painted
+                        .iter()
+                        .any(|(_, bounds, clip)| footer.contains_rect(*bounds)
+                            && clip.contains_rect(*bounds)),
+                    "the status panel must paint a complete summary at {size:?}: footer={footer:?}, text={painted:?}"
+                );
                 let accessible = output
                     .platform_output
                     .accesskit_update
@@ -11431,11 +11689,11 @@ mod tests {
                 );
                 output = frame(&mut layout_editor, vec![]);
                 assert_eq!(review_bounds(&output), pinned);
-                if visible_text(&output, "Apply display").is_some() {
+                if visible_text(&output, "Apply Display").is_some() {
                     break;
                 }
             }
-            let point = visible_text(&output, "Apply display")
+            let point = visible_text(&output, "Apply Display")
                 .expect("real wheel scrolling must reach Apply display")
                 .center();
             let pointer = |pressed| egui::Event::PointerButton {
@@ -11521,9 +11779,9 @@ mod tests {
                     .unwrap_or_else(|| panic!("missing review text {label} at {size:?}"))
             };
             for label in [
-                "Resume editing",
-                "Discard recovered draft",
-                "Keep for later",
+                "Resume Editing",
+                "Discard Recovered Draft",
+                "Keep for Later",
             ] {
                 let (rect, clip) = text_rect(&output, label);
                 assert!(

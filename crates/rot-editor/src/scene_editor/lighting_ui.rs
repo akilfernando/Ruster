@@ -1,5 +1,6 @@
 //! Recoverable light/ambient text with one shared authored transaction.
 use super::SceneEditor;
+use crate::strings::Text;
 use eframe::egui;
 use rot_scene::{Ambient, Light, LightKind, Lighting, Scene, ShadowQuality, SunShadow};
 use serde::{Deserialize, Serialize};
@@ -325,7 +326,7 @@ impl SceneEditor {
                 self.draft_generation = self.draft_generation.wrapping_add(1);
                 self.sync_draft();
                 self.error.clear();
-                self.notice = "Lighting updated.".into();
+                self.notice = Text::LightingUpdated.plain().into();
                 if !created.is_empty() {
                     self.notice
                         .push_str(" Added Sun to preserve the previous illumination.");
@@ -351,7 +352,7 @@ impl SceneEditor {
         self.lighting_draft = None;
         self.draft_generation = self.draft_generation.wrapping_add(1);
         self.error.clear();
-        self.notice = "Lighting change cancelled.".into();
+        self.notice = Text::LightingChangeCancelled.plain().into();
     }
     pub(super) fn create_light_ui(&mut self, kind: LightKind) -> bool {
         #[cfg(feature = "inspection")]
@@ -361,8 +362,7 @@ impl SceneEditor {
             self.session.scene().revision,
         );
         if !self.lighting_editable(false) || self.lighting_draft.is_some() {
-            self.error =
-                "Apply or cancel drafts and resolve dialogs before creating a light.".into();
+            self.error = Text::LightingUiApplyOrCancelDrafts.plain().into();
             #[cfg(feature = "inspection")]
             self.asset_ops
                 .timing_immediate_finished(observed.0, false, false);
@@ -390,7 +390,7 @@ impl SceneEditor {
             Ok((id, created)) => {
                 self.select_object(Some(id), false);
                 self.error.clear();
-                self.notice = "Light added.".into();
+                self.notice = Text::LightAdded.plain().into();
                 if created.len() > 1 {
                     self.notice
                         .push_str(" Added Sun to preserve the previous illumination.");
@@ -431,17 +431,19 @@ impl SceneEditor {
             LightingDraft::light(self.session.scene(), &id).unwrap()
         };
         ui.separator();
-        ui.strong("Light");
+        ui.strong(Text::ComponentLight.plain());
         ui.weak(
             match self.session.scene().lighting.light(&id).unwrap().kind {
-                LightKind::Directional { .. } => "Directional · rotation sets emitted direction",
-                LightKind::Point { .. } => "Point · position sets source; range is in scene units",
+                LightKind::Directional { .. } => {
+                    Text::DirectionalRotationSetsEmittedDirection.plain()
+                }
+                LightKind::Point { .. } => Text::LightingUiPointPositionSetsSource.plain(),
             },
         );
         if !self.shader_builtin {
             ui.colored_label(
                 ui.visuals().warn_fg_color,
-                "Custom shader controls appearance and may ignore lighting.",
+                Text::LightingUiCustomShaderControlsAppearance.plain(),
             );
         }
         self.lighting_form(ui, draft, own);
@@ -461,14 +463,14 @@ impl SceneEditor {
             .as_ref()
             .is_some_and(LightingDraft::is_ambient);
         ui.separator();
-        egui::CollapsingHeader::new("Scene lighting")
+        egui::CollapsingHeader::new(Text::SceneLighting.plain())
             .id_salt("scene_lighting")
             .open(own.then_some(true))
             .show(ui, |ui| {
                 if !self.shader_builtin {
                     ui.colored_label(
                         ui.visuals().warn_fg_color,
-                        "Custom shader controls appearance and may ignore lighting.",
+                        Text::LightingUiCustomShaderControlsAppearance.plain(),
                     );
                 }
                 let draft = if own {
@@ -503,15 +505,15 @@ impl SceneEditor {
             let mut foldout_owns_focus = false;
             let (color, intensity) = match &mut draft {
                 LightingDraft::Light { enabled, color, intensity, .. } => {
-                    let response = ui.checkbox(enabled, "Enabled"); changed |= response.changed(); discrete_changed |= response.changed(); fields.push(response);
+                    let response = ui.checkbox(enabled, Text::ComponentEnabled.plain()); changed |= response.changed(); discrete_changed |= response.changed(); fields.push(response);
                     (color, intensity)
                 }
-                LightingDraft::Ambient { color, intensity, .. } => { ui.strong("Ambient light"); (color, intensity) }
+                LightingDraft::Ambient { color, intensity, .. } => { ui.strong(Text::AmbientLight.plain()); (color, intensity) }
             };
             // Use the editor's familiar color picker while retaining exact raw
             // numeric text for keyboard entry and invalid-draft recovery.
             ui.horizontal(|ui| {
-                ui.label("Color");
+                ui.label(Text::Color.plain());
                 let mut picked = rgb(color).unwrap_or(committed_color);
                 let response = ui.color_edit_button_rgb(&mut picked);
                 if response.changed() {
@@ -534,32 +536,32 @@ impl SceneEditor {
                 }
             });
             ui.horizontal(|ui| {
-                ui.label("Intensity").on_hover_text(if ambient { "Relative artistic fill, 0 to 1. Linear RGB channels are 0 to 1." } else { "Diffuse intensity, 0 to 16." });
+                ui.label(Text::Intensity.plain()).on_hover_text(if ambient { Text::LightingUiRelativeArtisticFill0.plain() } else { Text::DiffuseIntensity0To16.plain() });
                 let response = ui.add(egui::TextEdit::singleline(intensity).id(egui::Id::unique(("lighting_intensity", prefix))).char_limit(64).desired_width(82.0));
                 changed |= response.changed(); raw_changed |= response.changed(); fields.push(response);
             });
             if let LightingDraft::Light { range: Some(range), .. } = &mut draft {
                 ui.horizontal(|ui| {
-                    ui.label("Range").on_hover_text("Smooth influence distance, from 0.1 to 10000 scene units.");
+                    ui.label(Text::Range.plain()).on_hover_text(Text::LightingUiSmoothInfluenceDistanceFrom.plain());
                     let response = ui.add(egui::TextEdit::singleline(range).id(egui::Id::unique("lighting_point_range")).char_limit(64).desired_width(82.0));
                     changed |= response.changed(); raw_changed |= response.changed(); fields.push(response);
                 });
             }
             if let LightingDraft::Light { shadow: Some(shadow), .. } = &mut draft {
                 ui.separator();
-                let response = ui.checkbox(&mut shadow.enabled, "Shadows")
-                    .on_hover_text("The Sun casts shadows from opaque objects.");
+                let response = ui.checkbox(&mut shadow.enabled, Text::Shadows.plain())
+                    .on_hover_text(Text::LightingUiTheSunCastsShadows.plain());
                 changed |= response.changed();
                 discrete_changed |= response.changed();
                 fields.push(response);
                 ui.horizontal(|ui| {
-                    ui.label("Quality");
+                    ui.label(Text::Quality.plain());
                     let before = shadow.quality;
                     let response = egui::ComboBox::from_id_salt("lighting_shadow_quality")
                         .width(110.0)
                         .selected_text(match shadow.quality {
-                            ShadowQuality::Standard => "Standard",
-                            ShadowQuality::High => "High",
+                            ShadowQuality::Standard => Text::Standard.plain(),
+                            ShadowQuality::High => Text::High.plain(),
                         })
                         .show_ui(ui, |ui| {
                             for (quality, label) in [(ShadowQuality::Standard, "Standard · 1024"), (ShadowQuality::High, "High · 2048")] {
@@ -570,11 +572,11 @@ impl SceneEditor {
                         });
                     changed |= before != shadow.quality;
                     discrete_changed |= before != shadow.quality;
-                    fields.push(response.response.on_hover_text("Higher quality shows finer shadow detail and uses more GPU memory."));
+                    fields.push(response.response.on_hover_text(Text::LightingUiHigherQualityShowsFiner.plain()));
                 });
                 // Expose an unfinished recovered bias instead of hiding its
                 // repair field. Valid settings remain behind the foldout.
-                let advanced = egui::CollapsingHeader::new("Advanced shadows")
+                let advanced = egui::CollapsingHeader::new(Text::AdvancedShadows.plain())
                     .id_salt("lighting_shadow_advanced")
                     .open((own && shadow.value().is_err()).then_some(true))
                     .show(ui, |ui| {
@@ -586,7 +588,7 @@ impl SceneEditor {
                                 ui.label(label).on_hover_text(hint);
                                 let response = ui.add(egui::TextEdit::singleline(text)
                                     .id(egui::Id::unique(id)).char_limit(64).desired_width(82.0))
-                                    .on_hover_text("Measured in shadow map pixels.");
+                                    .on_hover_text(Text::MeasuredInShadowMapPixels.plain());
                                 changed |= response.changed();
                                 raw_changed |= response.changed();
                                 fields.push(response);
@@ -630,12 +632,13 @@ impl SceneEditor {
                 let apply = ui.add_enabled(
                     editable,
                     egui::Button::new(if ambient {
-                        "Apply ambient"
+                        Text::ApplyAmbient.plain()
                     } else {
-                        "Apply light"
+                        Text::ApplyLight.plain()
                     }),
                 );
-                let cancel = ui.add_enabled(editable, egui::Button::new("Cancel"));
+                let cancel =
+                    ui.add_enabled(editable, egui::Button::new(Text::ComponentCancel.plain()));
                 let action_owns = editable
                     && [&apply, &cancel].iter().any(|response| {
                         response.has_focus()

@@ -3,6 +3,7 @@
 //! Add AI Configuration to This Project.
 use super::*;
 use crate::ai_apps;
+use crate::strings::Text;
 use std::path::Path;
 use std::sync::mpsc;
 
@@ -80,7 +81,7 @@ impl SceneEditor {
             .and_then(|p| p.parent())
             .map(Path::to_path_buf);
         let mut open = true;
-        egui::Window::new("Connect an AI App")
+        egui::Window::new(Text::AppsUiConnectAnAiApp.plain())
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
@@ -89,13 +90,13 @@ impl SceneEditor {
             .show(ctx, |ui| {
                 let busy = dialog.running.is_some();
                 if dialog.apps.is_empty() {
-                    ui.label("No AI apps found. Copy the setup into your AI app.");
+                    ui.label(Text::AppsUiNoAiAppsFound.plain());
                 }
                 for (app, connected) in dialog.apps.clone() {
                     ui.horizontal(|ui| {
                         ui.label(app.name);
                         if connected {
-                            ui.weak("Connected");
+                            ui.weak(Text::Connected.plain());
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let label = if connected { "Reconnect" } else { "Connect" };
@@ -126,19 +127,19 @@ impl SceneEditor {
                 ui.separator();
                 ui.horizontal_wrapped(|ui| {
                     if ui
-                        .button("Copy Configuration")
-                        .on_hover_text("Copy the MCP server entry for any other AI app")
+                        .button(Text::CopyConfiguration.plain())
+                        .on_hover_text(Text::AppsUiCopyTheMcpServer.plain())
                         .clicked()
                     {
                         ui.ctx().copy_text(ai_apps::snippet(&adapter));
-                        dialog.notice = "Configuration copied.".into();
+                        dialog.notice = Text::ConfigurationCopied.plain().into();
                     }
                     if ui
                         .add_enabled(
                             !busy && project.is_some(),
-                            egui::Button::new("Add AI Configuration to This Project"),
+                            egui::Button::new(Text::AppsUiAddAiConfigurationTo.plain()),
                         )
-                        .on_hover_text("Write setup files in the project folder.")
+                        .on_hover_text(Text::AppsUiWriteSetupFilesIn.plain())
                         .clicked()
                     {
                         let project = project.clone().unwrap();
@@ -173,7 +174,7 @@ impl SceneEditor {
                         }
                         if let Some(change) = dialog.last.clone().filter(|_| !busy) {
                             if ui
-                                .button("Undo")
+                                .button(Text::LabelUndo.plain())
                                 .on_hover_text(format!(
                                     "Remove Rot Engine from {} again",
                                     change.app.name
