@@ -407,7 +407,7 @@ impl External {
                                 self.status = status;
                             }
                             if !output.warning.is_empty() {
-                                self.status.push(' ');
+                                self.status.push('\n');
                                 self.status.push_str(&output.warning);
                             }
                             if let Some(plan) = output.launch {
@@ -759,18 +759,28 @@ fn run(input: Input) -> Result<Output, String> {
                 match files::persist_tooling(&context, &manifest, &output.base) {
                     Ok(updated) => {
                         manifest = updated;
-                        warning=format!("Generated LuaLS workspace {} with {declarations} source declarations; configuration {}.",context.root().display(),config.display());
+                        warning = format!(
+                            "{}\n{} · {declarations} scripts\n{}",
+                            Text::WorkingCopyLanguageReady.plain(),
+                            context.root().display(),
+                            config.display(),
+                        );
                     }
                     Err(error) => {
                         warning = format!(
-                            "Language tooling ownership was not retained: {}",
+                            "{}\n{}",
+                            Text::WorkingCopyLanguageSaveFailed.plain(),
                             files_error(error)
                         )
                     }
                 }
             }
             Err(error) => {
-                warning = format!("Language tooling was not updated: {}", files_error(error))
+                warning = format!(
+                    "{}\n{}",
+                    Text::WorkingCopyLanguageFailed.plain(),
+                    files_error(error)
+                )
             }
         }
     }
@@ -780,7 +790,8 @@ fn run(input: Input) -> Result<Output, String> {
         candidates.insert(id.into(), base.clone());
         if let Err(error) = files::promote_saved_bases(&context, &manifest, &candidates) {
             warning.push_str(&format!(
-                " Saved-base promotion preserved previous manifest: {error}"
+                "\n{}\n{error}",
+                Text::WorkingCopyComparisonFailed.plain()
             ));
         }
     }

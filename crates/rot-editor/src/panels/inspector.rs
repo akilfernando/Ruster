@@ -336,9 +336,9 @@ impl SceneEditor {
         let response = egui::Frame::group(ui.style())
             .show(ui, |ui| {
                 ui.label(mesh.as_deref().unwrap_or_else(|| {
-                    primitive.map_or("Procedural cube", |shape| match shape {
-                        rot_scene::Primitive::Sphere => "Procedural sphere",
-                        rot_scene::Primitive::Capsule => "Procedural capsule",
+                    primitive.map_or(Text::LabelAssignCube.plain(), |shape| match shape {
+                        rot_scene::Primitive::Sphere => Text::PrimitiveSphere.plain(),
+                        rot_scene::Primitive::Capsule => Text::PrimitiveCapsule.plain(),
                     })
                 }));
                 if let Some(mesh) = &mesh {

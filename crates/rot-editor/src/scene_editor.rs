@@ -810,6 +810,7 @@ impl SceneEditor {
             ai_connection_requested: false,
             player_view_draft: None,
             navigation: rot_render::NavigationOptions {
+                wording: &crate::strings::VIEWPORT,
                 camera,
                 reset: camera.is_none(),
                 ..Default::default()
@@ -11645,7 +11646,7 @@ mod tests {
             let mut output = frame(&mut layout_editor, vec![]);
             assert!(visible_text(
                 &output,
-                "Finish the recovered Scene display edit in the Inspector first."
+                "Finish the recovered Scene Display edit in the Inspector first."
             )
             .is_some());
             let pinned = review_bounds(&output);

@@ -1328,7 +1328,7 @@ mod tests {
             MaterialResponseMode::Dielectric
         );
         let shapes = frame(&mut editor, vec![]);
-        assert!(shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == "Surface shading needs Surface HDR in Scene display.")));
+        assert!(shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == "Surface shading needs Surface HDR in Scene Display.")));
         editor.shader_builtin = false;
         let shapes = frame(&mut editor, vec![]);
         assert!(shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == "A custom shader controls appearance. These settings are kept.")));

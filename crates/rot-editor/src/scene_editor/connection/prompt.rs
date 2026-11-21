@@ -166,9 +166,8 @@ impl Host {
                         }
                     }
                     Err(error) => {
-                        self.editor.ai_trust.notice = format!(
-                            "Could not remember {app} ({error}). It is allowed for this connection only."
-                        );
+                        self.editor.ai_trust.notice =
+                            format!("{}\n{app}: {error}", Text::AiAllowOnceFallback.plain());
                     }
                 }
                 self.approve_adapter(&owner);
@@ -236,7 +235,12 @@ impl Host {
     pub(super) fn trusted_apps_ui(&mut self, ui: &mut egui::Ui) {
         if !self.editor.ai_trust.notice.is_empty() {
             ui.add_space(4.0);
-            ui.colored_label(ui.visuals().warn_fg_color, &self.editor.ai_trust.notice);
+            let notice = &self.editor.ai_trust.notice;
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                notice.lines().next().unwrap_or(notice),
+            )
+            .on_hover_text(notice);
         }
         let trusted: Vec<_> = self
             .editor

@@ -158,7 +158,7 @@ impl SceneEditor {
         }
         if info.status != AssetStatus::Ready || store.texture(texture_id).is_none() {
             return Err(format!(
-                "Texture {texture_id} requires accepted ready content; repair its source and Refresh"
+                "Repair the file for texture {texture_id}, then refresh it."
             ));
         }
         Ok(())
@@ -174,7 +174,7 @@ impl SceneEditor {
             .ok_or_else(|| format!("Object {object_id} does not exist"))?;
         if !rot_render::object_has_complete_uvs(object, &self.resolved) {
             return Err(format!(
-                "Object {object_id} requires an accepted mesh with complete UVs before using a texture"
+                "Choose a mesh with UVs for {object_id} before adding a texture."
             ));
         }
         Ok(())

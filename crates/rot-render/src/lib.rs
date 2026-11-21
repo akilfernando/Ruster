@@ -526,8 +526,68 @@ pub enum ViewPreset {
 }
 /// Optional editor navigation. Keyboard movement requires focused viewport input
 /// and RMB held; frontends must disable it while text, modal or gesture owns input.
+/// Visible text for the shared viewport controls and warnings.
+#[derive(Debug)]
+pub struct ViewportWording {
+    pub perspective: &'static str,
+    pub orthographic: &'static str,
+    pub projection_hint: &'static str,
+    pub presets: &'static str,
+    pub reset: &'static str,
+    pub fit: &'static str,
+    pub stats: &'static str,
+    pub stats_hint: &'static str,
+    pub orientation_hint: &'static str,
+    pub perspective_short: &'static str,
+    pub orthographic_short: &'static str,
+    pub frame_time: &'static str,
+    pub fps: &'static str,
+    pub gpu: &'static str,
+    pub draw_calls: &'static str,
+    pub triangles: &'static str,
+    pub fit_error: &'static str,
+    pub light_error: &'static str,
+    pub camera_error: &'static str,
+    pub hierarchy_error: &'static str,
+    pub preset_labels: [&'static str; 8],
+}
+
+static DEFAULT_VIEWPORT_WORDING: ViewportWording = ViewportWording {
+    perspective: "Perspective",
+    orthographic: "Orthographic",
+    projection_hint: "Toggle perspective and orthographic projection.",
+    presets: "View Presets",
+    reset: "Reset Camera",
+    fit: "Fit",
+    stats: "Stats",
+    stats_hint: "Show frame time, FPS, draw calls and triangles.",
+    orientation_hint: "Click an axis to align. Click the center to switch projection.",
+    perspective_short: "Persp",
+    orthographic_short: "Ortho",
+    frame_time: "Frame",
+    fps: "FPS",
+    gpu: "GPU",
+    draw_calls: "Draw Calls",
+    triangles: "Triangles",
+    fit_error: "Cannot frame this content. Reduce its scale or widen the viewport.",
+    light_error: "Invalid lighting. Check the light settings.",
+    camera_error: "Game camera unavailable. Check the camera and viewport size.",
+    hierarchy_error: "Invalid hierarchy. Check the scene before opening it again.",
+    preset_labels: [
+        "Front (+Z)",
+        "Back (−Z)",
+        "Left (−X)",
+        "Right (+X)",
+        "Top (+Y)",
+        "Bottom (−Y)",
+        "Isometric",
+        "Free Perspective",
+    ],
+};
+
 #[derive(Clone, Debug)]
 pub struct NavigationOptions {
+    pub wording: &'static ViewportWording,
     /// Presentation-only: the native compact shell supplies these controls.
     pub show_controls: bool,
     /// Presentation-only ground guide, depth-tested with the editor scene.
@@ -565,6 +625,7 @@ pub struct NavigationOptions {
 impl Default for NavigationOptions {
     fn default() -> Self {
         Self {
+            wording: &DEFAULT_VIEWPORT_WORDING,
             show_controls: true,
             show_editor_grid: false,
             selection_feedback: false,
@@ -950,7 +1011,7 @@ pub struct ViewportInteraction {
 }
 
 /// Shared creator-facing explanation for an out-of-domain framing candidate.
-pub const FIT_ERROR: &str = "Cannot frame this content within the supported camera range. Reduce its coordinates or scale, or widen the viewport.";
+pub const FIT_ERROR: &str = DEFAULT_VIEWPORT_WORDING.fit_error;
 
 /// Paint a scene and return the viewport response and camera for a subsequent overlay.
 /// Every selected stable ID receives the existing material highlight. Disable navigation
@@ -1075,12 +1136,9 @@ pub fn allocate_viewport(
             egui::Sense::CLICK | egui::Sense::DRAG
         },
     );
-    // A layer above the scene image (painted later in this pass) but below
-    // menus and tooltips.
-    let overlay_layer = egui::LayerId::new(
-        egui::Order::Middle,
-        ui.scope_id().with("rot-viewport-overlay"),
-    );
+    // Draw viewport controls above the scene and below floating windows.
+    let layer = ui.layer_id();
+    let overlay_layer = egui::LayerId::new(layer.order, ui.scope_id().with("rot-viewport-overlay"));
     // Controls start at the visible top-left; the gizmo sits at the surface's
     // top-right corner.
     let visible = egui::Rect::from_min_max(navigation.overlay_origin.unwrap_or(rect.min), rect.max)
@@ -1090,6 +1148,7 @@ pub fn allocate_viewport(
     // View options float in the viewport's top-left corner (UX-STANDARDS §3).
     // Drawn after the surface so they sit on top for input.
     if navigation.show_controls && !navigation.player_view {
+        ui.ctx().set_sublayer(layer, overlay_layer);
         let origin = visible.min + egui::vec2(8.0, 8.0);
         let area = egui::Rect::from_min_max(origin, rect.max).intersect(rect);
         let layer = overlay_layer;
@@ -1103,32 +1162,34 @@ pub fn allocate_viewport(
         overlay.set_clip_rect(area);
         let ui = &mut overlay;
         ui.spacing_mut().item_spacing.x = 4.0;
+        let wording = navigation.wording;
         {
             if ui
                 .add_enabled(
                     navigation_enabled,
                     egui::Button::new(if camera.orthographic {
-                        "Orthographic"
+                        wording.orthographic
                     } else {
-                        "Perspective"
+                        wording.perspective
                     }),
                 )
-                .on_hover_text("Toggle perspective/orthographic projection")
+                .on_hover_text(wording.projection_hint)
                 .clicked()
             {
                 camera.orthographic = !camera.orthographic;
             }
-            ui.menu_button("View Presets", |ui| {
-                for (label, preset) in [
-                    ("Front (+Z)", ViewPreset::Front),
-                    ("Back (-Z)", ViewPreset::Back),
-                    ("Left (-X)", ViewPreset::Left),
-                    ("Right (+X)", ViewPreset::Right),
-                    ("Top (+Y)", ViewPreset::Top),
-                    ("Bottom (-Y)", ViewPreset::Bottom),
-                    ("Isometric", ViewPreset::Isometric),
-                    ("Free perspective", ViewPreset::Free),
-                ] {
+            ui.menu_button(wording.presets, |ui| {
+                let presets = [
+                    ViewPreset::Front,
+                    ViewPreset::Back,
+                    ViewPreset::Left,
+                    ViewPreset::Right,
+                    ViewPreset::Top,
+                    ViewPreset::Bottom,
+                    ViewPreset::Isometric,
+                    ViewPreset::Free,
+                ];
+                for (label, preset) in wording.preset_labels.into_iter().zip(presets) {
                     if ui
                         .add_enabled(navigation_enabled, egui::Button::new(label))
                         .clicked()
@@ -1139,7 +1200,7 @@ pub fn allocate_viewport(
                 }
                 ui.separator();
                 if ui
-                    .add_enabled(navigation_enabled, egui::Button::new("Reset Camera"))
+                    .add_enabled(navigation_enabled, egui::Button::new(wording.reset))
                     .clicked()
                 {
                     // Applied at the start of the next frame.
@@ -1149,15 +1210,18 @@ pub fn allocate_viewport(
                 }
             });
             if ui
-                .add_enabled(navigation_enabled, egui::Button::new("Fit"))
+                .add_enabled(navigation_enabled, egui::Button::new(wording.fit))
                 .clicked()
             {
                 selected_fit = false;
                 fitted = true;
             }
             if ui
-                .add(egui::Button::selectable(navigation.show_stats, "Stats"))
-                .on_hover_text("Show frame time, FPS, draw calls and triangles")
+                .add(egui::Button::selectable(
+                    navigation.show_stats,
+                    wording.stats,
+                ))
+                .on_hover_text(wording.stats_hint)
                 .clicked()
             {
                 navigation.show_stats = !navigation.show_stats;
@@ -1189,11 +1253,7 @@ pub fn allocate_viewport(
                 ui.scope_id().with("orientation-gizmo"),
                 egui::Sense::CLICK,
             )
-            .on_hover_text(
-                "Click an axis to view along it. Click the center or the label to \
-                     switch Perspective and Orthographic; Shift-click the center for \
-                     the default view.",
-            );
+            .on_hover_text(navigation.wording.orientation_hint);
         let target = response
             .hover_pos()
             .and_then(|pointer| gizmo_target(camera, center, pointer));
@@ -1300,7 +1360,13 @@ fn axis_color(preset: ViewPreset) -> egui::Color32 {
     }
 }
 
-fn paint_gizmo(painter: &egui::Painter, visuals: &egui::Visuals, camera: Camera, gizmo: Gizmo) {
+fn paint_gizmo(
+    painter: &egui::Painter,
+    visuals: &egui::Visuals,
+    camera: Camera,
+    gizmo: Gizmo,
+    wording: &ViewportWording,
+) {
     let center = gizmo.center;
     if gizmo.hovered.is_some() {
         painter.circle_filled(
@@ -1351,7 +1417,11 @@ fn paint_gizmo(painter: &egui::Painter, visuals: &egui::Visuals, camera: Camera,
     painter.text(
         center + egui::vec2(0.0, GIZMO_RADIUS + 16.0),
         egui::Align2::CENTER_CENTER,
-        if camera.orthographic { "Iso" } else { "Persp" },
+        if camera.orthographic {
+            wording.orthographic_short
+        } else {
+            wording.perspective_short
+        },
         egui::FontId::proportional(12.0),
         if center_hovered {
             visuals.strong_text_color()
@@ -1382,24 +1452,25 @@ fn paint_stats(
         .frame_cpu_seconds
         .filter(|seconds| *seconds > 0.0)
         .map(|seconds| seconds * 1000.0);
+    let wording = navigation.wording;
     let rows = [
         (
-            "Frame",
+            wording.frame_time,
             frame_ms.map_or_else(dash, |ms| format!("{ms:.1} ms")),
         ),
         (
-            "FPS",
+            wording.fps,
             frame_ms.map_or_else(dash, |ms| format!("{:.0}", 1000.0 / ms)),
         ),
         (
-            "GPU",
+            wording.gpu,
             gpu_us.map_or_else(dash, |us| format!("{:.2} ms", us / 1000.0)),
         ),
         (
-            "Draw calls",
+            wording.draw_calls,
             draw_calls.map_or_else(dash, |calls| calls.to_string()),
         ),
-        ("Triangles", format_count(triangles)),
+        (wording.triangles, format_count(triangles)),
     ];
     let font = egui::FontId::monospace(12.0);
     let text: String = rows
@@ -1510,7 +1581,7 @@ fn render_draw_scene(
         }) {
             Some(view) => Some(view),
             None => {
-                let message = "Player view unavailable; repair the view or viewport size.";
+                let message = navigation.wording.camera_error;
                 ui.colored_label(egui::Color32::RED, message);
                 return ViewportInteraction {
                     receipt: FrameReceipt::default(),
@@ -1551,9 +1622,7 @@ fn render_draw_scene(
                     response: surface.response,
                     picked: None,
                     fit_attempted: false,
-                    fit_error: Some(
-                        "Invalid hierarchy: repair the authored scene before rendering.",
-                    ),
+                    fit_error: Some(navigation.wording.hierarchy_error),
                     view: view.to_cols_array_2d(),
                     projection: projection.to_cols_array_2d(),
                     gizmo_projection: gizmo_projection.to_cols_array_2d(),
@@ -1636,7 +1705,7 @@ fn render_draw_scene(
             fit_error = None;
         } else {
             camera = preserved_camera;
-            fit_error = Some(FIT_ERROR);
+            fit_error = Some(navigation.wording.fit_error);
         }
     }
     let accepted_camera = camera;
@@ -1940,7 +2009,7 @@ fn render_draw_scene(
         ui.painter().text(
             rect.left_bottom() + egui::vec2(8.0, -8.0),
             egui::Align2::LEFT_BOTTOM,
-            "Invalid lighting. Repair scene light values.",
+            navigation.wording.light_error,
             egui::FontId::proportional(13.0),
             egui::Color32::YELLOW,
         );
@@ -1971,6 +2040,7 @@ fn render_draw_scene(
                 ui.visuals(),
                 camera,
                 gizmo,
+                navigation.wording,
             );
         }
         let painter = ui.ctx().layer_painter(overlay_layer).with_clip_rect(rect);

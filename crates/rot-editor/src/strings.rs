@@ -28,6 +28,14 @@ macro_rules! editor_text {
 }
 
 editor_text! {
+    ThemeSystem => "System",
+    ThemeDark => "Dark",
+    ThemeLight => "Light",
+    ThemeOledBlack => "OLED Black (Dark)",
+    StyleRot => "Rot",
+    StylePlain => "Plain",
+    PrimitiveSphere => "Procedural Sphere",
+    PrimitiveCapsule => "Procedural Capsule",
     Welcome => "Welcome to Rot Engine",
     NoRecentProjects => "No recent projects",
     EmptyHierarchy => "This scene is empty. Add an object with Create.",
@@ -298,11 +306,23 @@ editor_text! {
     RecoverySaveFailed => "Couldn't save a recovery copy. Choose Retry.",
     RecoveryCleanupFailed => "Couldn't clean up recovery copies.",
     ScriptApplicationCommands => "Application Commands",
+    AiAllowOnceFallback => "Couldn’t save access. Allowed for this connection only.",
     AiConnectionKeyChanged => "Only allow the app if you set it up again.",
     ScenarioAiUpdated => "AI updated the scenario. Restart to see the changes.",
     ScenarioUnapplied => "Unapplied Changes",
     ScenarioOpenFileHint => "Choose a scenario JSON file.",
     ScenarioSaveAsFileHint => "Choose a new file path. Existing files are protected.",
+    WorkingCopyLanguageReady => "Lua editor support updated.",
+    WorkingCopyLanguageFailed => "Couldn't update Lua editor support.",
+    WorkingCopyLanguageSaveFailed => "Couldn't save Lua editor settings.",
+    WorkingCopyComparisonFailed => "Couldn't update the saved script comparison.",
+    InputRecoveredActionChanged => "The original action changed or is missing.",
+    AssetSaveReopen => "asset cleanup stopped. Reopen the scene before editing assets.",
+    SaveStayedOnScene => "the scene changed, so New or Close was cancelled.",
+    RecoveryFull => "All 16 recovery slots are full. Discard an older copy.",
+    RecoveryMoveUnexpectedFiles => "Move unexpected files out of the recovery folder.",
+    ScriptKinematicUngroup => "Use a scene without groups for kinematic movement.",
+    ScriptKinematicBlocker => "Disable the script on blocker {object} before adding a mover.",
     WorkingCopySaveRequired => "Save the scene before using a working copy.",
     WorkingCopyInvalid => "Couldn't read the working copy.",
     WorkingCopyBusy => "A working-copy operation is still running.",
@@ -470,7 +490,7 @@ editor_text! {
     SpatialOverlapHint => "Move the probe away from the obstacle and start Play again.",
 
     // Behavior Ui
-    AddStateField => "Add state field",
+    AddStateField => "Add State Field",
     AddTypedProperty => "Add Typed Property",
     AddTypedStateField => "Add Typed State Field",
     BehaviorUiCapturedRuntimeVersionYour => "Captured runtime version; your current working copy is preserved.",
@@ -599,7 +619,7 @@ editor_text! {
     Search => "Search",
     SelectObjectsUsingIt => "Select Objects Using It",
     ShaderAndContentTools => "Shader and content tools",
-    ThumbnailSize => "Thumbnail size",
+    ThumbnailSize => "Thumbnail Size",
     Tools => "Tools",
 
     // Collider Ui
@@ -674,16 +694,16 @@ editor_text! {
     DisplayUiDisplayUi8To8Stops => "-8 to 8 stops. Zero is neutral; +1 doubles exposure and -1 halves it.",
     ExposureEv => "Exposure (EV)",
     Profile => "Profile",
-    SceneDisplay => "Scene display",
+    SceneDisplay => "Scene Display",
 
     // Export Commands
     BuildCancel => "Cancel Build",
     BuildStatusClose => "Close Build Status",
     ExportCommandsStartTheGameWith => "Start the game with this camera.",
-    ExportCommandsTheSavedPlayerView => "The saved Player View controls application framing.",
+    ExportCommandsTheSavedPlayerView => "The game uses the saved camera.",
     ExportCommandsUseBuiltInAppearance => "Use Built-in Appearance for This Session",
-    NoExportIsRunning => "No export is running.",
-    RemovingPrivateExportFiles => "Removing private export files…",
+    NoExportIsRunning => "No build is running.",
+    RemovingPrivateExportFiles => "Removing temporary build files…",
     SaveScene => "Save Scene",
 
     // Hud Ui
@@ -731,7 +751,7 @@ editor_text! {
     MeasuredInShadowMapPixels => "Measured in shadow map pixels.",
     Quality => "Quality",
     Range => "Range",
-    SceneLighting => "Scene lighting",
+    SceneLighting => "Scene Lighting",
     Shadows => "Shadows",
 
     // Material Ui
@@ -749,7 +769,7 @@ editor_text! {
     MaterialUiRoughness008To => "Roughness, 0.08 to 1. Lower gives a tighter highlight.",
     MaterialUiRoughnessMapIsInactive => "Roughness map is inactive with Diffuse shading. Settings are retained.",
     MaterialUiScalarViewportFallbackIs => "Scalar viewport fallback is provisional; export requires this map.",
-    MaterialUiSurfaceShadingNeedsSurface => "Surface shading needs Surface HDR in Scene display.",
+    MaterialUiSurfaceShadingNeedsSurface => "Surface shading needs Surface HDR in Scene Display.",
     Nearest => "Nearest",
     Repeat => "Repeat",
     Shading => "Shading",
@@ -771,6 +791,7 @@ editor_text! {
     EachRowIsOneTick => "Each row is one tick.",
     Equals => "Equals",
     Expected => "Expected",
+    PlayCheckActual => "Actual",
     FinalExpectations => "Final expectations",
     Held => "Held",
     Maximum => "Maximum",
@@ -854,7 +875,7 @@ editor_text! {
 
     // Scene Editor
     Active => "Active",
-    AdjustSelection => "Adjust selection",
+    AdjustSelection => "Adjust Selection",
     ApplyTranslationOffset => "Apply Translation Offset",
     CancelClosing => "Cancel Closing",
     CancelClosingScene => "Cancel Closing Scene",
@@ -1001,6 +1022,16 @@ editor_text! {
     BehaviorUiPlayStoppedStartPlay => "Play stopped. Start Play again to retry.",
     BehaviorUiSceneChangedPressPlay => "Scene changed. Press Play to run it.",
     Playing => "Playing",
+    PlayLastGoodTick => "Last successful tick:",
+    PlayStartFailed => "Couldn't start Play.",
+    PlayPauseFailed => "Couldn't pause.",
+    PlayStepFailed => "Couldn't advance one step.",
+    PlayRefreshFailed => "Couldn't update Play.",
+    PlayStopFailed => "Couldn't stop Play.",
+    PlayCommandFailed => "Couldn't run the command.",
+    HudButtonQueued => "Waiting for HUD button {button}…",
+    HudButtonRan => "Ran HUD button {button}.",
+    HudButtonFailed => "Couldn't run HUD button {button}.",
     ReadyToPlay => "Ready to play.",
     SceneChangedRestartingPlay => "Scene changed. Restarting Play…",
     SceneChangedStartPlayAgain => "Scene changed. Start Play again.",
@@ -1092,7 +1123,19 @@ editor_text! {
     SceneDisplayUpdated => "Scene display updated.",
 
     // Export Commands
-    ExportCommandsBuildFailed => "Build failed",
+    ExportCommandsBuildFailed => "Couldn't build the application.",
+    BuildFinishEdits => "Finish unapplied edits before building.",
+    BuildFinishDialog => "Close the open dialog or finish recovery before building.",
+    BuildFinishOffset => "Apply or cancel the translation offset before building.",
+    BuildSaveScene => "Save the scene before building.",
+    BuildCustomShader => "Couldn't build. Choose the built-in appearance.",
+    BuildWaitForPlayCheck => "Wait for the play check to finish saving.",
+    BuildAlreadyRunning => "A build is already running.",
+    BuildChooseKit => "Choose a prepared Linux runtime kit.",
+    BuildArchivePath => "Archive Destination (.tar.gz)",
+    BuildStartingCamera => "Starting Camera",
+    BuildUseCurrentView => "Use Current View",
+    BuildArchiveCreated => "Archive created.",
     ExportCommandsBuildFinished => "Build finished.",
 
     // Hud Ui
@@ -1295,7 +1338,71 @@ editor_text! {
     // Workspace
     TheRotEngineLook => "The Rot Engine look",
     WorkspaceANeutralLookLike => "A neutral look, like other engines",
+
+    // Viewport
+    Perspective => "Perspective",
+    Orthographic => "Orthographic",
+    ViewportProjectionHint => "Toggle perspective and orthographic projection.",
+    ViewportPresets => "View Presets",
+    ViewportResetCamera => "Reset Camera",
+    ViewportFit => "Fit",
+    ViewportStats => "Stats",
+    ViewportStatsHint => "Show frame time, FPS, draw calls and triangles.",
+    ViewportOrientationHint => "Click an axis to align. Click the center to switch projection.",
+    ViewportPerspectiveShort => "Persp",
+    ViewportOrthographicShort => "Ortho",
+    ViewportFrameTime => "Frame",
+    ViewportFps => "FPS",
+    ViewportGpu => "GPU",
+    ViewportDrawCalls => "Draw Calls",
+    ViewportTriangles => "Triangles",
+    ViewportFitError => "Cannot frame this content. Reduce its scale or widen the viewport.",
+    ViewportLightError => "Invalid lighting. Check the light settings.",
+    ViewportCameraError => "Game camera unavailable. Check the camera and viewport size.",
+    ViewportHierarchyError => "Invalid hierarchy. Check the scene before opening it again.",
+    ViewportFront => "Front (+Z)",
+    ViewportBack => "Back (−Z)",
+    ViewportLeft => "Left (−X)",
+    ViewportRight => "Right (+X)",
+    ViewportTop => "Top (+Y)",
+    ViewportBottom => "Bottom (−Y)",
+    ViewportIsometric => "Isometric",
+    ViewportFree => "Free Perspective",
 }
+
+/// The renderer also serves standalone applications. The editor supplies its own wording.
+pub static VIEWPORT: rot_render::ViewportWording = rot_render::ViewportWording {
+    perspective: Text::Perspective.plain(),
+    orthographic: Text::Orthographic.plain(),
+    projection_hint: Text::ViewportProjectionHint.plain(),
+    presets: Text::ViewportPresets.plain(),
+    reset: Text::ViewportResetCamera.plain(),
+    fit: Text::ViewportFit.plain(),
+    stats: Text::ViewportStats.plain(),
+    stats_hint: Text::ViewportStatsHint.plain(),
+    orientation_hint: Text::ViewportOrientationHint.plain(),
+    perspective_short: Text::ViewportPerspectiveShort.plain(),
+    orthographic_short: Text::ViewportOrthographicShort.plain(),
+    frame_time: Text::ViewportFrameTime.plain(),
+    fps: Text::ViewportFps.plain(),
+    gpu: Text::ViewportGpu.plain(),
+    draw_calls: Text::ViewportDrawCalls.plain(),
+    triangles: Text::ViewportTriangles.plain(),
+    fit_error: Text::ViewportFitError.plain(),
+    light_error: Text::ViewportLightError.plain(),
+    camera_error: Text::ViewportCameraError.plain(),
+    hierarchy_error: Text::ViewportHierarchyError.plain(),
+    preset_labels: [
+        Text::ViewportFront.plain(),
+        Text::ViewportBack.plain(),
+        Text::ViewportLeft.plain(),
+        Text::ViewportRight.plain(),
+        Text::ViewportTop.plain(),
+        Text::ViewportBottom.plain(),
+        Text::ViewportIsometric.plain(),
+        Text::ViewportFree.plain(),
+    ],
+};
 
 impl Text {
     pub fn rot(self) -> Option<&'static str> {
@@ -1308,7 +1415,7 @@ impl Text {
             Self::OpeningProject => Some("Spreading mycelium…"),
             Self::Building => Some("Fruiting…"),
             Self::BuildFinished => Some("Fruited."),
-            Self::NoResults => Some("Nothing under this log."),
+            Self::NoResults | Self::NoMatchingAssets => Some("Nothing under this log."),
             Self::AboutTagline => Some("Everything grows from rot."),
             _ => None,
         }
@@ -1372,10 +1479,38 @@ mod tests {
             "one themed line per screen"
         );
         assert_eq!(tr(&ctx, Text::LoadingContent), "Loading project content…");
+        set_themed(&ctx, false);
+        assert_eq!(tr(&ctx, Text::EmptyConsole), "No messages");
+    }
+
+    #[test]
+    fn table_uses_short_creator_wording() {
+        let internal = [
+            "revision",
+            "generation",
+            "authored",
+            "accepted",
+            "admitted",
+            "guard",
+            "token",
+            "catalog",
+            "publication",
+            "closure",
+            "bounded",
+            "binding",
+            "owner",
+            "lease",
+            "locator",
+            "enrollment",
+        ];
         for key in Text::ALL {
-            assert!(key.plain().len() <= 80, "{key:?} fits on one line");
-            if let Some(rot) = key.rot() {
-                assert!(rot.len() <= 80);
+            for line in std::iter::once(key.plain()).chain(key.rot()) {
+                assert!(line.chars().count() <= 80, "{key:?}: {line}");
+                for word in line.split(|c: char| !c.is_ascii_alphabetic()) {
+                    let lower = word.to_ascii_lowercase();
+                    let singular = lower.strip_suffix('s').unwrap_or(&lower);
+                    assert!(!internal.contains(&singular), "{key:?}: {word}");
+                }
             }
         }
     }

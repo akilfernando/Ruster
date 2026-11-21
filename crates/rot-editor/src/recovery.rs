@@ -216,7 +216,7 @@ impl Store {
     pub fn allocate(&self) -> Result<Journal, String> {
         let _directory = self.directory_lock()?;
         if self.directories()?.len() >= MAX_RECORDS {
-            return Err("All 16 recovery slots are occupied. Explicitly discard an older checkpoint or move it aside before restoring. Every record was preserved.".into());
+            return Err(crate::strings::Text::RecoveryFull.plain().into());
         }
         let temporary = tempfile::Builder::new()
             .prefix("window-")
@@ -373,7 +373,9 @@ fn retire_owned(path: &Path, owner: Lock) -> Result<(), String> {
     for entry in fs::read_dir(path).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         if entry.file_name() != ".owner" && entry.file_name() != RECORD_FILE {
-            return Err("Unexpected recovery directory contents; move them aside explicitly before cleanup.".into());
+            return Err(crate::strings::Text::RecoveryMoveUnexpectedFiles
+                .plain()
+                .into());
         }
         regular(&entry.path())?;
     }

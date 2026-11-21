@@ -668,7 +668,18 @@ impl SceneEditor {
                                 .filter(|row| row["passed"] != true)
                                 .chain(rows.iter().filter(|row| row["passed"] == true))
                             {
-                                ui.add(egui::Label::new(assertion_label(row)).wrap());
+                                let (summary, values) = assertion_display(row);
+                                if let Some((expected, actual)) = values {
+                                    ui.collapsing(summary, |ui| {
+                                        ui.label(format!("{}: {expected}", Text::Expected.plain()));
+                                        ui.label(format!(
+                                            "{}: {actual}",
+                                            Text::PlayCheckActual.plain()
+                                        ));
+                                    });
+                                } else {
+                                    ui.label(summary);
+                                }
                             }
                         }
                         if let Some(text) = report["diagnostic"].as_str() {
@@ -1085,7 +1096,7 @@ fn state_label(value: &StateValue) -> String {
         StateValue::Text(v) => v.clone(),
     }
 }
-fn assertion_label(row: &Value) -> String {
+fn assertion_display(row: &Value) -> (String, Option<(String, String)>) {
     let index = row["index"].as_u64().unwrap_or(0) + 1;
     let state = if row["passed"] == true {
         "Pass"
@@ -1093,7 +1104,7 @@ fn assertion_label(row: &Value) -> String {
         "Fail"
     };
     let Ok(expectation) = serde_json::from_value::<Expectation>(row["expectation"].clone()) else {
-        return format!("Assertion {index}: {state}");
+        return (format!("Assertion {index}: {state}"), None);
     };
     let selection = match expectation.select {
         Selection::Tick => Text::CompletedTick.plain().into(),
@@ -1121,8 +1132,9 @@ fn assertion_label(row: &Value) -> String {
     } else {
         ""
     };
-    format!(
-        "Assertion {index}: {selection} — {state}\nExpected: {expected}\nActual: {actual}{truncated}"
+    (
+        format!("Assertion {index}: {selection} — {state}"),
+        Some((expected, format!("{actual}{truncated}"))),
     )
 }
 

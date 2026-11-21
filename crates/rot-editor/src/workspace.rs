@@ -1624,10 +1624,8 @@ impl Workspace {
                 }
             });
         });
-        crate::ui_kit::property_row(ui, Text::ThemedWording.plain(), |ui| {
-            ui.checkbox(&mut self.prefs.themed_wording, "")
-                .on_hover_text(Text::WorkspaceOccasionalRotFlavoredLines.plain());
-        });
+        ui.checkbox(&mut self.prefs.themed_wording, Text::ThemedWording.plain())
+            .on_hover_text(Text::WorkspaceOccasionalRotFlavoredLines.plain());
     }
     fn viewport_page(&mut self, ui: &mut egui::Ui) {
         crate::ui_kit::property_row(ui, Text::FlySpeed.plain(), |ui| {

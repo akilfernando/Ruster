@@ -34,25 +34,23 @@ impl SceneEditor {
             self.guard()
         };
         guard.map_err(|code| match code.as_str() {
-            "drafts_pending" => "Finish or revert unapplied edits before exporting.".to_string(),
-            _ => "Resolve the open dialog or recovery choice before exporting.".to_string(),
+            "drafts_pending" => Text::BuildFinishEdits.plain().to_string(),
+            _ => Text::BuildFinishDialog.plain().to_string(),
         })?;
         if self.manipulation.offset_pending() {
-            return Err("Apply or reset the translation offset before exporting.".into());
+            return Err(Text::BuildFinishOffset.plain().into());
         }
         if self.export_needs_save() {
-            return Err("Save the scene before exporting.".into());
+            return Err(Text::BuildSaveScene.plain().into());
         }
         if !self.shader_builtin {
-            return Err("Couldn't export. Custom shaders aren't supported yet.".into());
+            return Err(Text::BuildCustomShader.plain().into());
         }
         if self.play_check_write_busy() {
-            return Err("Wait for the play-check save before exporting.".into());
+            return Err(Text::BuildWaitForPlayCheck.plain().into());
         }
         if self.creation_export.busy() {
-            return Err(
-                "An export is still active. Check its status and wait for it to finish.".into(),
-            );
+            return Err(Text::BuildAlreadyRunning.plain().into());
         }
         Ok(())
     }
@@ -145,7 +143,7 @@ impl SceneEditor {
         let runtime_kit = self
             .creation_export
             .runtime_kit()
-            .ok_or("Choose a prepared Linux runtime kit before exporting.")?
+            .ok_or(Text::BuildChooseKit.plain())?
             .to_path_buf();
         let request = Request {
             identity: self.export_identity(),
@@ -360,7 +358,7 @@ impl SceneEditor {
             return;
         }
         if let Err(e) = self.guard() {
-            self.error = format!("Finish current fields or dialogs before exporting ({e}).");
+            self.error = format!("{}\n{e}", Text::BuildFinishDialog.plain());
             return;
         }
         if self.export_title.is_empty() {
@@ -427,20 +425,19 @@ impl SceneEditor {
                     }
                     Some("cancelled") => self.notice = Text::BuildCancelled.plain().into(),
                     Some("failed") => {
-                        self.error = state["operation"]["error"]
-                            .as_str()
-                            .unwrap_or(Text::ExportCommandsBuildFailed.plain())
-                            .chars()
-                            .take(4096)
-                            .collect()
+                        self.error = Text::ExportCommandsBuildFailed.plain().into();
+                        if let Some(details) = state["operation"]["error"].as_str() {
+                            self.error.push('\n');
+                            self.error.extend(details.chars().take(4096));
+                        }
                     }
                     _ => (),
                 }
                 if let Some(warning) = state["operation"]["cleanup_warning"].as_str() {
                     if state["operation"]["state"] == "failed" {
-                        self.error = format!("{} {warning}", self.error);
+                        self.error = format!("{}\n{warning}", self.error);
                     } else {
-                        self.notice = format!("{} {warning}", self.notice);
+                        self.notice = format!("{}\n{warning}", self.notice);
                     }
                 }
             }
@@ -470,14 +467,14 @@ impl SceneEditor {
                     egui::TextEdit::singleline(&mut self.export_runtime_kit)
                         .desired_width(ui.available_width()),
                 ).labelled_by(template_label.id);
-                let archive_label = crate::editor_theme::dialog_section(ui, "Archive destination (.tar.gz)");
+                let archive_label = crate::editor_theme::dialog_section(ui, Text::BuildArchivePath.plain());
                 ui.add(
                     egui::TextEdit::singleline(&mut self.export_destination)
                         .desired_width(ui.available_width()),
                 ).labelled_by(archive_label.id);
-                crate::editor_theme::dialog_section(ui, "Starting camera");
+                crate::editor_theme::dialog_section(ui, Text::BuildStartingCamera.plain());
                 let has_player_view = self.session.scene().player_view.is_some();
-                let current_view = ui.add_enabled(!has_player_view, egui::Checkbox::new(&mut self.export_use_current_view, "Use current view"))
+                let current_view = ui.add_enabled(!has_player_view, egui::Checkbox::new(&mut self.export_use_current_view, Text::BuildUseCurrentView.plain()))
                     .on_hover_text(Text::ExportCommandsStartTheGameWith.plain());
                 if has_player_view {
                     ui.label(Text::ExportCommandsTheSavedPlayerView.plain());
@@ -583,7 +580,7 @@ impl SceneEditor {
                                 ui.label(
                                     state["operation"]["receipt"]["archive"]
                                         .as_str()
-                                        .unwrap_or("Archive created"),
+                                        .unwrap_or(Text::BuildArchiveCreated.plain()),
                                 );
                             }
                             Some("cancelled") => {
@@ -592,10 +589,13 @@ impl SceneEditor {
                             Some("failed") => {
                                 ui.colored_label(
                                     ui.visuals().error_fg_color,
-                                    state["operation"]["error"]
-                                        .as_str()
-                                        .unwrap_or("Build failed"),
+                                    Text::ExportCommandsBuildFailed.plain(),
                                 );
+                                if let Some(details) = state["operation"]["error"].as_str() {
+                                    ui.collapsing(Text::ErrorDetails.plain(), |ui| {
+                                        ui.add(egui::Label::new(details).wrap());
+                                    });
+                                }
                             }
                             _ => {
                                 ui.label(Text::NoExportIsRunning.plain());

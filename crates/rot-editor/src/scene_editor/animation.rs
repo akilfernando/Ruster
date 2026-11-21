@@ -29,18 +29,16 @@ impl SceneEditor {
     ) -> Result<AnimationBinding, (&'static str, String)> {
         let current = self.session.scene().animations.get(owner).ok_or((
             "animation_unbound",
-            format!(
-                "{owner} has no animation binding. Place the imported model to create one; the node map only exists from placement."
-            ),
+            format!("Place the imported model to animate {owner}."),
         ))?;
         let store = self.assets.as_ref().ok_or((
             "asset_unavailable",
-            "Open a project with a valid catalog.".to_owned(),
+            "Open a project with available assets.".to_owned(),
         ))?;
         let (model, _) = store.clip_owner(&current.clip).ok_or((
             "clip_unavailable",
             format!(
-                "Current clip {} is unavailable; refresh or re-import its source model, or remove the animation.",
+                "Clip {} is unavailable. Refresh the model or remove the animation.",
                 current.clip
             ),
         ))?;
@@ -60,7 +58,7 @@ impl SceneEditor {
             return Err((
                 "invalid_clip",
                 format!(
-                    "{clip} animates node {:?}, which this placement does not map. Place the model again.",
+                    "{clip} needs node {:?}. Place the model again.",
                     target.node
                 ),
             ));

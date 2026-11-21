@@ -25,10 +25,7 @@ impl BehaviorUi {
         object_id: String,
     ) -> Result<(), String> {
         if !session.scene().hierarchy.is_empty() {
-            return Err(
-                "Kinematic movement requires a flat scene; Groups are not supported in this slice."
-                    .into(),
-            );
+            return Err(Text::ScriptKinematicUngroup.plain().into());
         }
         let object = session
             .scene()
@@ -66,7 +63,7 @@ impl BehaviorUi {
                             collider.enabled && collider.role == rot_scene::ColliderRole::Blocker
                         })
                 }) {
-                    return Err(format!("Blocker {id} must stay stationary; disable its behavior before adding this mover."));
+                    return Err(Text::ScriptKinematicBlocker.plain().replace("{object}", id));
                 }
             }
         }

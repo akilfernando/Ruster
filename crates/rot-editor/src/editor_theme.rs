@@ -3,6 +3,7 @@
 //! One [`Palette`] per theme owns every chrome color. Call sites ask for the
 //! active palette through [`colors`]/[`palette`] so labels, warnings and axis
 //! tints stay readable after the creator switches themes.
+use crate::strings::Text;
 use crate::ui_kit::palette::rgb;
 pub use crate::ui_kit::palette::{
     Palette, DARK, LIGHT, OLED_BLACK, PLAIN_DARK, PLAIN_LIGHT, PLAIN_OLED_BLACK,
@@ -28,10 +29,10 @@ impl ThemeChoice {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::System => "System",
-            Self::Dark => "Dark",
-            Self::Light => "Light",
-            Self::OledBlack => "OLED black (dark)",
+            Self::System => Text::ThemeSystem.plain(),
+            Self::Dark => Text::ThemeDark.plain(),
+            Self::Light => Text::ThemeLight.plain(),
+            Self::OledBlack => Text::ThemeOledBlack.plain(),
         }
     }
 
@@ -63,8 +64,8 @@ impl Style {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Rot => "Rot",
-            Self::Plain => "Plain",
+            Self::Rot => Text::StyleRot.plain(),
+            Self::Plain => Text::StylePlain.plain(),
         }
     }
 

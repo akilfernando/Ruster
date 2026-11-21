@@ -598,9 +598,15 @@ When the serialized undo budget removes older reversible steps under pressure, t
 Rotation precision uses degrees; scene files, internal transforms and MCP use radians. Recovery draft v3 records units explicitly. Pending v1/v2 radian drafts retain their exact text and display a recovered-radians label until applied or reverted; clean baselines adopt degrees.
 
 
-### Behavior debugger
+### Script Debugger
 
-Choose **Behavior debugger…**, select an embedded source and enter a1-based line; Enter adds the exact current source/hash breakpoint. Reset arms the first nonempty configuration, then Step or Play reaches it. Breakpoint edits remain session-local. The window opens on a new stop, shows bounded stack/local values, and offers **Next (step over)**, **Continue behavior** and exact-hash source navigation. Tab/Enter traverses controls; Escape in the line field hides the window. Next skips nested calls unless explicitly breakpointed; reaching the root return pauses after the complete tick commits. Continue resumes the same execution. Stop, authored edits and normal close cancel a paused script independently of the command queue. Default execution keeps count-only hooks; no expression evaluator, variable mutation or external DAP server is enabled. New/Open clears breakpoints.
+Open **Window → Script Debugger…**, choose the script and enter its line number.
+**Add Breakpoint** applies to that version of the script. Start Play or Step to
+reach it. The window shows the call stack and local values. **Step Over**
+continues to the next line in the current call, **Continue** resumes execution,
+and **Show Paused Script** opens the paused version of the script.
+Breakpoints are cleared when you create or open another scene. Tab traverses
+the controls and Escape from the line field closes the window.
 
 The viewport retains its last committed frame while a tick is stopped or fails; runtime transforms never enter authored Save, Undo or recovery. Native/SDK acceptance is recorded separately from physical-focus and experienced-human familiarity evidence. Source-hash mismatch opens captured code read-only rather than highlighting a different current version.
 

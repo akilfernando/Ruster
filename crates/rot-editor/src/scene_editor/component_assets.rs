@@ -519,7 +519,7 @@ impl Browser {
             ui.add(
                 egui::Slider::new(&mut self.size, 40.0..=112.0)
                     .show_value(false)
-                    .text("Thumbnail size"),
+                    .text(Text::ThumbnailSize.plain()),
             );
         });
         ui.separator();
@@ -583,15 +583,18 @@ impl Browser {
             self.filter();
         }
         if self.visible.is_empty() {
-            ui.label(if loading {
-                Text::ImportingAssets.plain()
+            let status = if loading {
+                Text::ImportingAssets
             } else if failed && self.catalog.is_none() {
-                Text::AssetsUnavailable.plain()
-            } else if self.query.trim().is_empty() {
-                Text::NoAssetsInThisFolder.plain()
+                Text::AssetsUnavailable
+            } else if !self.query.trim().is_empty() {
+                Text::NoMatchingAssets
+            } else if self.folder == Path::new("Assets") && self.rows.is_empty() {
+                Text::EmptyAssets
             } else {
-                Text::NoMatchingAssets.plain()
-            });
+                Text::NoAssetsInThisFolder
+            };
+            ui.label(crate::strings::tr(ui.ctx(), status));
             return (None, None);
         }
         let tile_width = self.size.max(88.0);

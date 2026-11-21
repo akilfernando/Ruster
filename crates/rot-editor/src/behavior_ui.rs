@@ -24,6 +24,17 @@ fn fingerprint(value: &impl Serialize) -> String {
         Sha256::digest(serde_json::to_vec(value).expect("finite authored values"))
     )
 }
+fn play_failure(operation: Operation) -> Text {
+    match operation {
+        Operation::Reset | Operation::Play => Text::PlayStartFailed,
+        Operation::Pause => Text::PlayPauseFailed,
+        Operation::Step => Text::PlayStepFailed,
+        Operation::Invalidate => Text::PlayRefreshFailed,
+        Operation::Stop => Text::PlayStopFailed,
+        Operation::Command => Text::PlayCommandFailed,
+    }
+}
+
 fn annotated_template(source_id: &str, api: u32, template: &str) -> Result<String, String> {
     let hint = crate::behavior_files::annotation_hint_for_api(source_id, api)
         .map_err(|error| error.to_string())?;
@@ -2699,13 +2710,16 @@ impl RuntimeUi {
                                 self.ready = false;
                                 self.stale = self.frame.is_some();
                             }
-                            self.status = format!(
-                                "{operation:?} failed. Last successful tick: {}.",
-                                last_good
-                                    .map(|run| run.tick.to_string())
-                                    .as_deref()
-                                    .unwrap_or("none")
-                            );
+                            let summary = play_failure(operation).plain();
+                            self.status = if let Some(run) = last_good {
+                                format!(
+                                    "{summary}\n{} {}",
+                                    Text::PlayLastGoodTick.plain(),
+                                    run.tick
+                                )
+                            } else {
+                                summary.into()
+                            };
                             self.diagnostic = Some(diagnostic);
                         }
                         VmEvent::Rejected {
@@ -2725,13 +2739,7 @@ impl RuntimeUi {
                                 self.ready = false;
                                 self.stale = self.frame.is_some();
                             }
-                            self.status = format!(
-                                "{operation:?} couldn’t run: {message}. Last successful tick: {}.",
-                                last_good
-                                    .map(|run| run.tick.to_string())
-                                    .as_deref()
-                                    .unwrap_or("none")
-                            );
+                            self.status = format!("{}\n{message}", play_failure(operation).plain());
                         }
                     }
                 }
@@ -3024,7 +3032,8 @@ impl RuntimeUi {
                         ui.label(format!("Committed tick {}", frame.tick));
                     }
                     if !self.status.is_empty() {
-                        ui.label(&self.status);
+                        ui.label(self.status.lines().next().unwrap_or(&self.status))
+                            .on_hover_text(&self.status);
                     }
                     if let Some(diagnostic) = &self.diagnostic {
                         ui.collapsing(Text::ErrorDetails.plain(), |ui| {
@@ -3916,7 +3925,7 @@ mod tests {
         assert!(click(
             &mut state_editor,
             &application,
-            visible_text("Add state field")
+            visible_text("Add State Field")
         )
         .is_none());
         for _ in 0..12 {

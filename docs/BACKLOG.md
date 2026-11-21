@@ -34,6 +34,8 @@ package in your lane under **Now**. How to work is in the
 
 One line each. Anyone may add; the user or a planning pass orders them.
 
+- v23 Build cannot prepare the C-05 `group-selection.scene.json` test scene. The editor opens and displays its hierarchy, but Build's Error Details report `invalid scene: missing hierarchy target/group parent`. Add coverage for building a saved scene with nested objects and a transform-only parent (2026-11-22).
+
 - Grouping is blocked scene-wide by input actions, a HUD, ordinary script
   sources, or object/application script attachments. C-02/C-03 must preserve
   these features alongside hierarchy during migration. Until then, explain
@@ -340,7 +342,11 @@ holds no panel body; one `ui_drive.py` screenshot is unchanged; the gate
 passes.
 
 #### S-08 · String table and wording pass — M — ready
-Status: in progress — Codex, 2026-11-22 · editor-wide completion audit. v23 Linux build failures give recovery guidance and keyboard-accessible Error Details. Approved MCP clients can inspect the current or latest result. Legacy New Group explains which scene content blocks empty group creation. MCP exposes the same reasons. Legacy Material Inspector shows unapplied changes with Apply, Cancel and edit scope. Earlier slices cover v23 asset import and prefab errors, empty Hierarchy, project opening, build, recovery, Play Checks, script editing and runtime. Other wording remains open.
+Status: done — 2026-11-22. Legacy and v23 editor controls and messages use
+shared Plain and Rot wording. Build, Assets, prefab, recovery and script
+failures keep technical diagnostics available under Details or in the Console.
+Verified the wording and length audit and the Themed Wording toggle in the
+native editor. Reviewed Rot and Plain at 1280×800 and 1920×1080.
 **Outcome.** All text follows the [writing rules](UX-STANDARDS.md#8-writing)
 and comes from one table with Plain and Rot wording.
 **Facts.** Strings are inline. About 337 literals are longer than 80

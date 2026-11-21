@@ -161,7 +161,7 @@ impl Draft {
                 .as_ref()
                 .is_some_and(|id| session.action(id).is_none())
         {
-            return Err("The original action changed or is missing. Raw recovered values remain preserved for inspection or explicit discard.".into());
+            return Err(Text::InputRecoveredActionChanged.plain().into());
         }
         Ok(())
     }

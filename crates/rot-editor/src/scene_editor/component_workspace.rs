@@ -272,6 +272,7 @@ impl ComponentWorkspace {
             meshes,
             textures,
             navigation: rot_render::NavigationOptions {
+                wording: &crate::strings::VIEWPORT,
                 show_editor_grid: true,
                 reset: fit,
                 selection_feedback: true,
@@ -1554,13 +1555,13 @@ impl ComponentWorkspace {
         #[cfg(target_os = "linux")]
         let build_status = self.build.status();
         #[cfg(not(target_os = "linux"))]
-        let build_status = None::<&str>;
+        let build_status = None::<Text>;
         let scene_error = self.error.as_ref().or(self.asset_error.as_ref());
         #[cfg(target_os = "linux")]
         let scene_error = self.asset_import_error.as_ref().or(scene_error);
         #[cfg(target_os = "linux")]
         let build_status = if self.asset_import.is_some() {
-            Some("Importing assets…")
+            Some(Text::ImportingAssets)
         } else {
             build_status
         };
@@ -1574,7 +1575,7 @@ impl ComponentWorkspace {
                 if let Some(error) = scene_error {
                     ui.colored_label(editor_theme::colors(ui).error, error);
                 } else if let Some(status) = build_status {
-                    ui.add(egui::Label::new(status).truncate());
+                    ui.add(egui::Label::new(crate::strings::tr(ui.ctx(), status)).truncate());
                 } else if has_import_issues {
                     ui.colored_label(
                         editor_theme::colors(ui).error,
@@ -1648,6 +1649,9 @@ impl ComponentWorkspace {
                 });
                 let root = ui
                     .selectable_label(self.selection.is_empty(), Text::ComponentSceneRoot.plain());
+                if self.rows.is_empty() {
+                    ui.weak(crate::strings::tr(ui.ctx(), Text::EmptyHierarchy));
+                }
                 let mut selected = root.clicked().then_some(None);
                 let mut placed = AssetDrag::released(ui, &root).map(|asset| (asset, None));
                 let mut deleted = None;

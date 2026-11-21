@@ -6,17 +6,17 @@ use eframe::egui;
 impl SceneEditor {
     fn recovered_visual_name(&self) -> Option<&'static str> {
         if self.display_draft.is_some() {
-            Some("Scene display")
+            Some(Text::SceneDisplay.plain())
         } else if let Some(draft) = &self.lighting_draft {
             Some(if draft.is_ambient() {
-                "Scene lighting"
+                Text::SceneLighting.plain()
             } else {
-                "Light"
+                Text::ComponentLight.plain()
             })
         } else if self.material_draft.is_some() {
-            Some("Material")
+            Some(Text::ComponentMaterial.plain())
         } else if self.color_draft.is_some() {
-            Some("Color")
+            Some(Text::Color.plain())
         } else {
             None
         }

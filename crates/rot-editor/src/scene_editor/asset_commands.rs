@@ -862,7 +862,7 @@ impl Controller {
             .as_ref()
             .is_some_and(|save| save.followup.is_some())
         {
-            editor.append_save_warning("content worker stopped after the scene committed; reopen the scene before further content work");
+            editor.append_save_warning(Text::AssetSaveReopen.plain());
             self.status = Text::SceneSavedFinishingAssetCleanup.plain().into();
         } else if let Some(mut save) = (!held_save).then(|| self.saving.take()).flatten() {
             let message = if matches!(
@@ -1046,7 +1046,7 @@ impl Controller {
                             );
                             self.merge_save_retirement(returned);
                             if self.disconnected {
-                                editor.append_save_warning("content worker stopped after the scene committed; reopen the scene before further content work");
+                                editor.append_save_warning(Text::AssetSaveReopen.plain());
                             }
                             save.phase = Phase::FollowingUp;
                             save.followup = Some(SaveFollowup {
@@ -1402,7 +1402,7 @@ impl Controller {
                 editor.session.scene().revision,
             )
         {
-            editor.append_save_warning("document state changed during committed Save cleanup; automatic New or Close was cancelled");
+            editor.append_save_warning(Text::SaveStayedOnScene.plain());
             save.continuation = save_commands::Continuation::SaveOnly;
         }
         editor.finalize_saved_followup(save.continuation, followup.result.unwrap());
@@ -3692,7 +3692,7 @@ mod tests {
                 assert_eq!(receipt["followup_pending"], false);
                 let warning = receipt["warning"].as_str().unwrap();
                 if case == "save_committed_disconnect" {
-                    assert!(warning.contains("content worker stopped after the scene committed"));
+                    assert!(warning.contains("Reopen the scene before editing assets"));
                 } else {
                     assert!(warning.contains("recovery cleanup failed"));
                 }

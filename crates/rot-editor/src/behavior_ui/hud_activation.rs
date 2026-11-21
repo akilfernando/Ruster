@@ -121,7 +121,7 @@ impl RuntimeUi {
             button_id: button_id.into(),
             native,
         });
-        self.status = format!("HUD button {button_id} queued");
+        self.status = Text::HudButtonQueued.plain().replace("{button}", button_id);
         Ok((key, id))
     }
 
@@ -156,15 +156,15 @@ impl RuntimeUi {
         self.hud_activation.pending = None;
         self.hud_activation.latest_terminal = Some(match result {
             Ok(receipt) => {
-                self.status = format!(
-                    "HUD button {button_id} committed revision {} at tick {}",
-                    receipt.command.commit_revision, receipt.command.tick
-                );
+                self.status = Text::HudButtonRan.plain().replace("{button}", &button_id);
                 json!({"run_id":run_id(key), "activation_id":activation_id.to_string(),
                     "button_id":button_id, "status":"committed", "receipt":receipt})
             }
             Err(error) => {
-                self.status = format!("HUD button {button_id} failed. {error}");
+                let summary = Text::HudButtonFailed
+                    .plain()
+                    .replace("{button}", &button_id);
+                self.status = format!("{summary}\n{error}");
                 json!({"run_id":run_id(key), "activation_id":activation_id.to_string(),
                     "button_id":button_id, "status":"failed", "error":error})
             }

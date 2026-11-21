@@ -400,16 +400,16 @@ impl BuildUi {
         self.path.is_some()
     }
 
-    pub(super) fn status(&self) -> Option<&'static str> {
+    pub(super) fn status(&self) -> Option<Text> {
         if self.is_open() {
             return None;
         }
         match self.outcome.as_ref()? {
-            BuildOutcome::Cancelled => Some(Text::BuildCancelled.plain()),
+            BuildOutcome::Cancelled => Some(Text::BuildCancelled),
             BuildOutcome::Failed(_) => None,
-            BuildOutcome::Built => Some(Text::BuildFinished.plain()),
-            BuildOutcome::Launched => Some(Text::BuildLaunched.plain()),
-            BuildOutcome::LaunchFailed(_) => Some(Text::BuildLaunchFailed.plain()),
+            BuildOutcome::Built => Some(Text::BuildFinished),
+            BuildOutcome::Launched => Some(Text::BuildLaunched),
+            BuildOutcome::LaunchFailed(_) => Some(Text::BuildLaunchFailed),
         }
     }
 
@@ -505,7 +505,7 @@ impl BuildUi {
                     } else {
                         Text::Building
                     };
-                    ui.label(status.plain());
+                    ui.label(crate::strings::tr(ctx, status));
                     let button = ui
                         .with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
                             ui.add_enabled_ui(!cancelling, |ui| {
