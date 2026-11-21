@@ -1,7 +1,7 @@
 //! The command palette (Ctrl+K): search every registered command and run it
 //! (UX-STANDARDS §7, S-09).
 use super::SceneEditor;
-use crate::workspace::Action;
+use crate::workspace::{Action, Workspace};
 use eframe::egui;
 
 #[derive(Default)]
@@ -66,8 +66,33 @@ impl SceneEditor {
         let Some(mut palette) = self.palette.take() else {
             return;
         };
-        let found = matches(&palette.query);
-        palette.selected = palette.selected.min(found.len().saturating_sub(1));
+        let (run, keep_open) = palette.show(
+            ctx,
+            &self.workspace,
+            |action| action != Action::GroupSelection,
+            |action| self.command_enabled(action),
+        );
+        if let Some(action) = run {
+            self.queued_action = Some(action);
+            self.process_queued_action();
+        }
+        if keep_open {
+            self.palette = Some(palette);
+        }
+    }
+}
+
+impl Palette {
+    pub(super) fn show(
+        &mut self,
+        ctx: &egui::Context,
+        workspace: &Workspace,
+        available: impl Fn(Action) -> bool,
+        enabled: impl Fn(Action) -> bool,
+    ) -> (Option<Action>, bool) {
+        let mut found = matches(&self.query);
+        found.retain(|&action| available(action));
+        self.selected = self.selected.min(found.len().saturating_sub(1));
         let (up, down, enter, escape) = ctx.input_mut(|input| {
             (
                 input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
@@ -77,14 +102,12 @@ impl SceneEditor {
             )
         });
         if up {
-            palette.selected = palette.selected.saturating_sub(1);
+            self.selected = self.selected.saturating_sub(1);
         }
-        if down && palette.selected + 1 < found.len() {
-            palette.selected += 1;
+        if down && self.selected + 1 < found.len() {
+            self.selected += 1;
         }
-        let mut run = enter
-            .then(|| found.get(palette.selected).copied())
-            .flatten();
+        let mut run = enter.then(|| found.get(self.selected).copied()).flatten();
         let width = (ctx.content_rect().width() - 48.0).clamp(240.0, 560.0);
         egui::Area::new(egui::Id::unique("rot_command_palette"))
             .order(egui::Order::Foreground)
@@ -93,16 +116,16 @@ impl SceneEditor {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.set_width(width);
                     let search = ui.add(
-                        egui::TextEdit::singleline(&mut palette.query)
+                        egui::TextEdit::singleline(&mut self.query)
                             .hint_text("Search commands")
                             .desired_width(f32::INFINITY),
                     );
-                    if !palette.opened {
+                    if !self.opened {
                         search.request_focus();
-                        palette.opened = true;
+                        self.opened = true;
                     }
                     if search.changed() {
-                        palette.selected = 0;
+                        self.selected = 0;
                     }
                     ui.separator();
                     egui::ScrollArea::vertical()
@@ -112,16 +135,15 @@ impl SceneEditor {
                                 egui::Layout::top_down_justified(egui::Align::Min),
                                 |ui| {
                                     for (index, action) in found.iter().enumerate() {
-                                        let enabled = self.command_enabled(*action);
                                         let row = ui.add_enabled(
-                                            enabled,
+                                            enabled(*action),
                                             egui::Button::selectable(
-                                                index == palette.selected,
+                                                index == self.selected,
                                                 palette_label(*action),
                                             )
-                                            .shortcut_text(self.workspace.shortcut_hint(*action)),
+                                            .shortcut_text(workspace.shortcut_hint(*action)),
                                         );
-                                        if index == palette.selected && (up || down) {
+                                        if index == self.selected && (up || down) {
                                             row.scroll_to_me(None);
                                         }
                                         if row.clicked() {
@@ -139,14 +161,8 @@ impl SceneEditor {
                         });
                 });
             });
-        if let Some(action) = run.filter(|action| self.command_enabled(*action)) {
-            self.queued_action = Some(action);
-            self.process_queued_action();
-            return;
-        }
-        if !escape {
-            self.palette = Some(palette);
-        }
+        let run = run.filter(|&action| enabled(action));
+        (run, !escape && run.is_none())
     }
 }
 

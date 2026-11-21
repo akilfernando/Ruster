@@ -191,7 +191,7 @@ impl ComponentWorkspace {
             }
             "scene_mesh" => 5,
             "scene_create" | "scene_group_create" => {
-                let optional = ["parent_id", "transform", "primitive"];
+                let optional = ["parent_id", "transform", "primitive", "member_ids"];
                 4 + optional
                     .iter()
                     .filter(|key| map.contains_key(**key))
@@ -307,6 +307,23 @@ impl ComponentWorkspace {
         if creation {
             let id = args["object_id"].as_str().ok_or_else(invalid)?;
             let name = args["name"].as_str().ok_or_else(invalid)?;
+            if let Some(members) = args.get("member_ids") {
+                if op != "scene_group_create" || map.len() != 5 {
+                    return Err(invalid());
+                }
+                let ids = batch(members)
+                    .ok_or_else(invalid)?
+                    .iter()
+                    .map(|member| {
+                        member
+                            .as_str()
+                            .filter(|id| !id.is_empty() && id.len() <= 128)
+                            .ok_or_else(invalid)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let id = self.group_selection(revision, Some(id), name, &ids)?;
+                return Ok(json!({"object_id":id,"changed":true,"dirty":self.session.is_dirty()}));
+            }
             let geometry = match (op, args.get("primitive")) {
                 ("scene_group_create", None) => None,
                 ("scene_create", None | Some(Value::Null)) => Some(Geometry::Cube),

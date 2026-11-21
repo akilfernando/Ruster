@@ -196,8 +196,18 @@ unparent it. You can also change **Parent** in Inspector. Both preserve the
 object’s world transform. Drag to the top or bottom edge of a row to place
 the object before or after it. **Object → Move Up** and **Move Down** reorder
 the selection among its siblings. Ctrl-click toggles objects in the selection
-and Shift-click selects a range. Drag a selected row to move the selection
-together, or set its **Parent** in Inspector. Edit **Enabled**, individual
+and Shift-click selects a range. Select objects and choose **Object → Group
+Selection**, right-click a selected Hierarchy row and choose **Group Selection**,
+or press **Ctrl+G**. Remap the shortcut in **Edit → Keyboard Shortcuts…**.
+The editor selects the new group and keeps its members in scene-file order
+with their world transforms preserved. It places the group under their shared
+parent or at **Scene Root** if their parents differ. If both an ancestor and
+its child are selected, the child stays attached to the ancestor. Finish pending
+Inspector edits and unlock the affected objects before grouping. You can undo or
+redo the entire group in one step.
+
+Drag a selected row to move the selection together, or set its **Parent**
+in Inspector. Edit **Enabled**, individual
 Transform axes, or properties of shared components, then choose **Apply**.
 A dash or **Mixed** marks values that differ. An expression such as `+=1`
 adds 1 to each object's own numeric value. **Object → Delete** removes selected objects

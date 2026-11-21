@@ -15,17 +15,9 @@ Updated 2026-11-21. See the [archive](archive/STATUS-2026-11-17.md) for earlier 
 
 ## What to do next
 
-The 2026-11-19 independent Phase 1 pass reviewed the Scene, Inspector,
-Assets and Recovery surfaces at 1280×800, 1920×1080 and 960×1080 in Rot
-and Plain, combining light and dark modes with scales 1 and 1.5. The
-MCP smoke read back an exact transform and verified both undos restored
-the original objects. Its private pre-authorized client exercised STDIO,
-with 94 tools and a 36,330-byte tool list. The full workspace gate passed
-(499 tests, 21 ignored). Assets search now wraps at narrow widths. At
-960×1080 and scale 1.5, the Inspector stacks Transform labels above
-the axis fields. A native screenshot confirms all nine fields are visible.
-Runtime and recovery status messages now use shorter wording. Remaining
-indirect copy is still open in the checklist.
+The 2026-11-19 Phase 1 pass reviewed Scene, Inspector, Assets and Recovery
+in Rot and Plain, confirmed all nine Transform fields at 960×1080 and scale
+1.5, and verified shared Undo over STDIO. The full workspace gate passed.
 
 The [human walkthrough](research/EDITOR-WORKFLOW-COMPARISON.md#proposed-editor-baseline-walkthrough)
 and concurrent ChatGPT editing were exercised on 2026-11-19. Native tests
@@ -45,6 +37,9 @@ Editor and viewer draw, fit and pick from cached world matrices, including shear
 v23 Build writes and launches a Linux player folder without Python. Approved
 MCP clients can create parent-local objects and frame hierarchies for capture.
 Hierarchy offers Create Child and Frame Selected. MCP can also manage assets.
+Group Selection in v23 inserts a parent around the selected objects with
+world transforms preserved. The Object menu, Hierarchy context menu,
+remappable Ctrl+G and approved MCP clients share one Undo entry.
 On Linux, v23 watches `Assets/` for imports and changes. The Assets panel
 shows live folders, previews and diagnostics, accepts drops, and places
 meshes and multi-primitive GLB hierarchies with Undo. File actions keep stable IDs
@@ -95,18 +90,8 @@ The previous build is in `~/.local/share/rot-engine/previous` for `--rollback`.
   and the projects in `~/Projects/Ruster-Creations`, which will not load in a
   build from this branch until their files are renamed.
 
-## Recently finished
-
-- 2026-11-19 · T-02 and S-08 wording sweep: Rot-only motifs and activity
-  pulse, shorter editor messages, and shared wording for Hierarchy, project
-  opening and build states. Captured the hub and populated editor in Rot
-  and Plain, including wide editor views. The active AI pulse was not
-  exercised in those captures.
-- 2026-11-18 · S-10: Edit → Preferences… (Ctrl+,) is a window with General,
-  Appearance, Viewport, Shortcuts (every command, search, conflicts),
-  External Tools and AI pages; changes apply at once, no Save button. Edit
-  → Project Settings… has Project, Input Actions and Build pages.
-- The [backlog](BACKLOG.md) lists the other completed packages.
+The [backlog](BACKLOG.md) lists completed packages, including Rot styling,
+the wording sweep, Preferences and Project Settings.
 
 ## Not verified
 

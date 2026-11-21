@@ -873,6 +873,20 @@ mod tests {
             .unwrap();
         assert_eq!(roof(&session, "third").transform.translation[1], 2.3);
         assert_ne!(roof(&session, "third").components, third.components);
+        let before_group = session.scene().clone();
+        let revision = session.revision();
+        assert!(session
+            .group_selection(revision, "village", "Village", &["second", &third.id])
+            .is_err());
+        assert_eq!(session.scene(), &before_group);
+        session
+            .group_selection(revision, "village", "Village", &["third", "second"])
+            .unwrap();
+        assert_eq!(session.scene().prefabs, before_group.prefabs);
+        assert_eq!(file.borrow().as_ref().unwrap(), &applied);
+        session.undo(revision + 1).unwrap();
+        assert_eq!(session.scene(), &before_group);
+
         let directory = tempfile::tempdir().unwrap();
         let saved = directory.path().join("scene.json");
         session.save(&saved).unwrap();

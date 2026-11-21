@@ -58,12 +58,24 @@ pub fn valid(name: &str, args: &Value) -> bool {
                 field,
             ],
             if name == "scene_group_create" {
-                &["parent_id", "transform"]
+                &["parent_id", "transform", "member_ids"]
             } else {
                 &[]
             },
         )
         && (name != "scene_group_create" || valid_creation_options(map))
+        && map.get("member_ids").is_none_or(|members| {
+            !map.contains_key("parent_id")
+                && !map.contains_key("transform")
+                && members.as_array().is_some_and(|ids| {
+                    (1..=256).contains(&ids.len())
+                        && ids.iter().all(|value| {
+                            value
+                                .as_str()
+                                .is_some_and(|id| !id.is_empty() && id.len() <= 128)
+                        })
+                })
+        })
         && super::canonical_u64(&args["expected_revision"])
         && [("expected_session_token", 256), ("object_id", 128)]
             .iter()
@@ -84,8 +96,9 @@ pub fn list() -> Vec<Value> {
         props[field]=if name=="scene_group_create" {json!({"type":"string","minLength":1,"maxLength":128})} else {json!({"type":["string","null"],"minLength":1,"maxLength":128,"description":"Group stable ID, or null to detach preserving world pose."})};
         if name == "scene_group_create" {
             creation_properties(props.as_object_mut().expect("property map"));
+            props["member_ids"] = json!({"type":"array","items":{"type":"string","minLength":1,"maxLength":128},"minItems":1,"maxItems":256});
         }
-        json!({"name":name,"description":if name=="scene_group_create" {"Create an assembly group. Legacy groups use positive uniform scale; see group_creation_blockers in scene_inspect for content restrictions. Shares Undo with the editor."} else {"Reparent one geometry/group/point-light target to a group, or detach with null. Preserve the complete descendant world closure within 2e-6 relative per matrix element or refuse atomically. Legacy authoring combinations reject. Shared guarded history; no implicit save."},"inputSchema":{"type":"object","properties":props,"required":["expected_session_token","expected_revision","object_id",field],"additionalProperties":false},"annotations":{"readOnlyHint":false,"destructiveHint":false,"openWorldHint":false}})
+        json!({"name":name,"description":if name=="scene_group_create" {"Create an empty assembly group, or group existing v23 objects with member_ids."} else {"Reparent one geometry/group/point-light target to a group, or detach with null. Preserve the complete descendant world closure within 2e-6 relative per matrix element or refuse atomically. Legacy authoring combinations reject. Shared guarded history; no implicit save."},"inputSchema":{"type":"object","properties":props,"required":["expected_session_token","expected_revision","object_id",field],"additionalProperties":false},"annotations":{"readOnlyHint":false,"destructiveHint":false,"openWorldHint":false}})
     }).collect()
 }
 #[cfg(test)]
@@ -108,5 +121,18 @@ mod tests {
             args["expected_revision"] = json!("01");
             assert!(!valid(name, &args));
         }
+        let args = json!({
+            "expected_session_token":"scene", "expected_revision":"0",
+            "object_id":"assembly", "name":"Assembly", "member_ids":["b", "a", "b"]
+        });
+        assert!(valid("scene_group_create", &args));
+        for bad in [Value::Null, json!([]), json!([17]), json!(vec!["a"; 257])] {
+            let mut malformed = args.clone();
+            malformed["member_ids"] = bad;
+            assert!(!valid("scene_group_create", &malformed));
+        }
+        let mut conflicting = args;
+        conflicting["parent_id"] = Value::Null;
+        assert!(!valid("scene_group_create", &conflicting));
     }
 }

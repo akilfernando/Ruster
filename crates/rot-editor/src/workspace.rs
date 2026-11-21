@@ -82,6 +82,7 @@ pub(super) enum Action {
     CreateShaderSource,
     RefreshShader,
     CreateEmpty,
+    GroupSelection,
     CreateDirectionalLight,
     GameCamera,
     GameUi,
@@ -104,7 +105,7 @@ pub(super) enum Action {
     CommandPalette,
 }
 impl Action {
-    pub const ALL: [Self; 68] = [
+    pub const ALL: [Self; 69] = [
         Self::New,
         Self::Open,
         Self::Save,
@@ -153,6 +154,7 @@ impl Action {
         Self::CreateShaderSource,
         Self::RefreshShader,
         Self::CreateEmpty,
+        Self::GroupSelection,
         Self::CreateDirectionalLight,
         Self::GameCamera,
         Self::GameUi,
@@ -225,6 +227,7 @@ impl Action {
             Self::CreateShaderSource => "Shader Source",
             Self::RefreshShader => "Refresh Scene Shader",
             Self::CreateEmpty => "Create Empty",
+            Self::GroupSelection => "Group Selection",
             Self::CreateDirectionalLight => "Directional Light",
             Self::GameCamera => "Camera…",
             Self::GameUi => "Game UI…",
@@ -297,6 +300,7 @@ impl Action {
             Self::CreateShaderSource => "Create shader source",
             Self::RefreshShader => "Refresh scene shader",
             Self::CreateEmpty => "Create empty",
+            Self::GroupSelection => "Group selection",
             Self::CreateDirectionalLight => "Create directional light",
             Self::GameCamera => "Game camera",
             Self::GameUi => "Game UI",
@@ -421,6 +425,7 @@ impl Default for Preferences {
             (Action::Rename, Key::F2, false, false),
             (Action::SelectAll, Key::A, true, false),
             (Action::FocusRuntime, Key::G, true, true),
+            (Action::GroupSelection, Key::G, true, false),
             (Action::Play, Key::P, true, false),
             (Action::Pause, Key::P, true, true),
             (Action::NextPanel, Key::F6, false, false),
@@ -1463,6 +1468,7 @@ impl Workspace {
                 && !matches!(
                     binding.action,
                     Action::FocusRuntime
+                        | Action::GroupSelection
                         | Action::Play
                         | Action::Pause
                         | Action::Step
@@ -1634,7 +1640,11 @@ impl Workspace {
         });
     }
     fn shortcuts_page(&mut self, ui: &mut egui::Ui) {
-        crate::ui_kit::search_field(ui, &mut self.shortcut_query, "Search");
+        let search = crate::ui_kit::search_field(ui, &mut self.shortcut_query, "Search");
+        if !self.settings_focused {
+            search.request_focus();
+            self.settings_focused = true;
+        }
         ui.add_space(crate::ui_kit::tokens::SPACE_XS);
         let query = self.shortcut_query.to_lowercase();
         for action in Action::ALL {
@@ -1698,11 +1708,18 @@ impl Workspace {
         ui.weak("Trusted apps and diagnostics: Window → AI Connection…");
     }
     pub fn settings_ui(&mut self, ctx: &egui::Context) {
-        let _ = self.settings_ui_with_footer(ctx);
+        let _ = self.settings_ui_with_footer(ctx, false);
+    }
+    pub fn shortcuts_ui(&mut self, ctx: &egui::Context) {
+        let _ = self.settings_ui_with_footer(ctx, true);
     }
     /// The Preferences window: a page list on the left, the page on the
     /// right. Changes apply at once and are saved when it closes.
-    fn settings_ui_with_footer(&mut self, ctx: &egui::Context) -> Option<[egui::Rect; 3]> {
+    fn settings_ui_with_footer(
+        &mut self,
+        ctx: &egui::Context,
+        shortcuts_only: bool,
+    ) -> Option<[egui::Rect; 3]> {
         if !self.settings_open {
             return None;
         }
@@ -1715,7 +1732,12 @@ impl Workspace {
         let screen = ctx.content_rect();
         let mut open = true;
         let mut footer = [egui::Rect::NOTHING; 3];
-        egui::Window::new("Preferences")
+        let title = if shortcuts_only {
+            Action::KeyboardShortcuts.label().trim_end_matches('…')
+        } else {
+            "Preferences"
+        };
+        egui::Window::new(title)
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
@@ -1729,19 +1751,24 @@ impl Workspace {
                 let footer_height = ui.spacing().interact_size.y * 2.0 + 8.0;
                 let body_height = (ui.available_height() - footer_height).max(48.0);
                 ui.horizontal_top(|ui| {
-                    ui.vertical(|ui| {
-                        ui.set_width(120.0);
-                        for page in SettingsPage::ALL {
-                            let tab =
-                                ui.selectable_value(&mut self.settings_page, page, page.label());
-                            // Focus starts in the window, on the open page.
-                            if !self.settings_focused && page == self.settings_page {
-                                tab.request_focus();
-                                self.settings_focused = true;
+                    if !shortcuts_only {
+                        ui.vertical(|ui| {
+                            ui.set_width(120.0);
+                            for page in SettingsPage::ALL {
+                                let tab = ui.selectable_value(
+                                    &mut self.settings_page,
+                                    page,
+                                    page.label(),
+                                );
+                                // Focus starts in the window, on the open page.
+                                if !self.settings_focused && page == self.settings_page {
+                                    tab.request_focus();
+                                    self.settings_focused = true;
+                                }
                             }
-                        }
-                    });
-                    ui.separator();
+                        });
+                        ui.separator();
+                    }
                     ui.vertical(|ui| {
                         egui::ScrollArea::vertical()
                             .id_salt("preferences-page")
@@ -1781,12 +1808,14 @@ impl Workspace {
                         self.dirty = true;
                         self.layout_generation = self.layout_generation.wrapping_add(1);
                     }
-                    let all = ui
-                        .button("Reset All Preferences")
-                        .on_hover_text("Also repairs an unreadable preferences file");
-                    footer[1] = all.rect;
-                    if all.clicked() {
-                        self.reset_preferences();
+                    if !shortcuts_only {
+                        let all = ui
+                            .button("Reset All Preferences")
+                            .on_hover_text("Also repairs an unreadable preferences file");
+                        footer[1] = all.rect;
+                        if all.clicked() {
+                            self.reset_preferences();
+                        }
                     }
                     let close = ui.button("Close");
                     footer[2] = close.rect;
@@ -2120,7 +2149,7 @@ mod tests {
                         screen_rect: Some(logical),
                         ..Default::default()
                     },
-                    |_| footer = w.settings_ui_with_footer(&ctx),
+                    |_| footer = w.settings_ui_with_footer(&ctx, false),
                 );
                 output.textures_delta.clear();
             }
@@ -2343,6 +2372,7 @@ mod tests {
                     Action::Play,
                     Action::Pause,
                     Action::Step,
+                    Action::GroupSelection,
                 ]
                 .iter()
                 .any(|action| binding["action"] == action.name())
@@ -2355,6 +2385,9 @@ mod tests {
             Preferences::default().external_editor
         );
         assert_eq!(upgraded.bindings.len(), Action::ALL.len());
+        assert!(upgraded.bindings.iter().any(|binding| {
+            binding.action == Action::GroupSelection && binding.text() == "Ctrl+G"
+        }));
         assert_eq!(
             upgraded
                 .bindings
@@ -2616,6 +2649,32 @@ mod tests {
         w.close_settings();
         assert!(!w.settings_open);
         assert!(!Workspace::at(Some(path.clone())).prefs.allow_ai_connections);
+
+        let ctx = egui::Context::default();
+        w.open_settings(SettingsPage::Shortcuts);
+        w.capture = Some(Action::GroupSelection);
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                focused: true,
+                events: vec![egui::Event::Key {
+                    key: egui::Key::G,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::ALT,
+                }],
+                ..Default::default()
+            },
+            |_| assert!(w.shortcuts(&ctx, false).is_none()),
+        );
+        output.textures_delta.clear();
+        assert!(w.capture.is_none());
+        assert_eq!(w.shortcut_hint(Action::GroupSelection), "Alt+G");
+        w.close_settings();
+        assert_eq!(
+            Workspace::at(Some(path)).shortcut_hint(Action::GroupSelection),
+            "Alt+G"
+        );
         w.reset_page(SettingsPage::Ai);
         assert!(w.prefs.allow_ai_connections);
     }

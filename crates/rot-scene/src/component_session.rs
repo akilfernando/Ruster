@@ -349,6 +349,80 @@ impl ComponentSession {
         self.commit(changes)
     }
 
+    /// Insert an identity parent around the topmost selected objects in file order.
+    pub fn group_selection(
+        &mut self,
+        expected: u64,
+        id: &str,
+        name: &str,
+        ids: &[&str],
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected)?;
+        let mut indices = self.selection_roots(ids)?;
+        indices.sort_unstable();
+        let Some(&first) = indices.first() else {
+            return Err(SceneError::Invalid("Select an object to group.".into()));
+        };
+        let objects = &self.scene.objects;
+        let first_parent = &objects[first].parent;
+        let parent = if indices
+            .iter()
+            .all(|&index| &objects[index].parent == first_parent)
+        {
+            first_parent.as_deref()
+        } else {
+            None
+        };
+        let moved = self
+            .with_parent(&indices, parent)
+            .map_err(|_| SceneError::CannotPreserveWorldTransform)?;
+        if indices
+            .iter()
+            .any(|&index| objects[index].parent.as_deref() != parent)
+        {
+            // A decomposition error small enough for a root can be magnified
+            // by descendants. Prove the whole affected subtree before editing.
+            let hierarchy = ObjectHierarchy::build(objects)?;
+            let mut world = self
+                .scene
+                .world_matrices()
+                .map_err(|_| SceneError::CannotPreserveWorldTransform)?;
+            let mut changed = vec![false; objects.len()];
+            let roots: HashMap<_, _> = indices.iter().copied().zip(&moved).collect();
+            for index in hierarchy.order {
+                let matrix = if let Some(root) = roots.get(&index) {
+                    crate::hierarchy::Pose::from_local(&root.transform).matrix()
+                } else if let Some(parent) = hierarchy.parents[index].filter(|&p| changed[p]) {
+                    world[parent]
+                        * crate::hierarchy::Pose::from_local(&objects[index].transform).matrix()
+                } else {
+                    continue;
+                };
+                if !crate::hierarchy::close(world[index], matrix) {
+                    return Err(SceneError::CannotPreserveWorldTransform);
+                }
+                world[index] = matrix;
+                changed[index] = true;
+            }
+        }
+        let changes = indices.into_iter().zip(moved).map(|(index, mut object)| {
+            object.parent = Some(id.into());
+            SceneChange::Replace { index, object }
+        });
+        let group = ObjectNode {
+            id: id.into(),
+            name: name.into(),
+            parent: parent.map(str::to_owned),
+            enabled: true,
+            transform: Transform::default(),
+            components: Vec::new(),
+        };
+        self.commit(changes.chain([SceneChange::Insert {
+            index: first,
+            object: group,
+        }]))
+    }
+
     /// Place an object immediately before or after a sibling in file order.
     /// If needed, adopt the sibling's parent while preserving the world pose.
     pub fn place_next_to(
@@ -1041,6 +1115,103 @@ fn digest(mut input: impl Read) -> io::Result<[u8; 32]> {
 mod tests {
     use super::*;
     use crate::{hierarchy::close, Scene, Session};
+
+    #[test]
+    fn group_selection_preserves_hierarchy_world_pose_and_history() {
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("group")).unwrap()).unwrap();
+        scene.objects = [
+            ("stage", None, [2., 0., 1.], [0., 0.7, 0.], [2., 1., 1.]),
+            ("a", Some("stage"), [1., 0., 0.], [0., 0.3, 0.], [1.; 3]),
+            ("leaf", Some("a"), [0., 1., 0.], [0.; 3], [1.; 3]),
+            ("b", Some("stage"), [2., 0., 0.], [0.; 3], [1.; 3]),
+            ("free", None, [-2., 0., 1.], [0.; 3], [1.; 3]),
+        ]
+        .into_iter()
+        .map(|(id, parent, translation, rotation, scale)| ObjectNode {
+            id: id.into(),
+            name: id.into(),
+            enabled: true,
+            parent: parent.map(str::to_owned),
+            transform: Transform {
+                translation,
+                rotation,
+                scale,
+            },
+            components: Vec::new(),
+        })
+        .collect();
+        let world = scene.world_matrices().unwrap();
+        for (members, parent, ordered_members) in [
+            (vec!["free", "stage"], None, vec!["stage", "free"]),
+            (vec!["b", "leaf", "a", "a"], Some("stage"), vec!["a", "b"]),
+            (vec!["free", "b"], None, vec!["b", "free"]),
+        ] {
+            let mut session = ComponentSession::new(scene.clone()).unwrap();
+            assert!(matches!(
+                session.group_selection(1, "new-group", "Group", &members),
+                Err(SceneError::StaleRevision { .. })
+            ));
+            assert_eq!(
+                session
+                    .group_selection(0, "new-group", "Group", &members)
+                    .unwrap(),
+                1
+            );
+            let grouped = session.scene().clone();
+            let node = grouped
+                .objects
+                .iter()
+                .find(|node| node.id == "new-group")
+                .unwrap();
+            assert_eq!(node.parent.as_deref(), parent);
+            assert_eq!(node.transform, Transform::default());
+            assert!(node.components.is_empty());
+            assert_eq!(
+                grouped
+                    .objects
+                    .iter()
+                    .filter(|node| node.parent.as_deref() == Some("new-group"))
+                    .map(|node| node.id.as_str())
+                    .collect::<Vec<_>>(),
+                ordered_members,
+            );
+            for ((node, got), (original, want)) in grouped
+                .objects
+                .iter()
+                .zip(grouped.world_matrices().unwrap())
+                .filter(|(node, _)| node.id != "new-group")
+                .zip(scene.objects.iter().zip(&world))
+            {
+                assert_eq!(node.id, original.id);
+                assert!(close(*want, got), "world pose changed on {}", node.id);
+                if parent.is_some() {
+                    assert_eq!(node.transform, original.transform);
+                }
+                if node.id == "leaf" {
+                    assert_eq!(node.parent.as_deref(), Some("a"));
+                }
+            }
+            assert_eq!(session.undo(1).unwrap(), 2);
+            assert_eq!(session.scene(), &scene);
+            assert_eq!(session.redo(2).unwrap(), 3);
+            assert_eq!(session.scene(), &grouped);
+            let folder = tempfile::tempdir().unwrap();
+            let path = folder.path().join("group.scene.json");
+            session.save(&path).unwrap();
+            assert_eq!(ComponentSession::open(&path).unwrap().scene(), &grouped);
+        }
+
+        let mut session = ComponentSession::new(scene.clone()).unwrap();
+        let refused = session.group_selection(0, "new-group", "Group", &["free", "a"]);
+        assert!(matches!(
+            refused,
+            Err(SceneError::CannotPreserveWorldTransform)
+        ));
+        assert_eq!(session.revision(), 0);
+        assert_eq!(session.scene(), &scene);
+        assert!(matches!(session.undo(0), Err(SceneError::NoUndo)));
+    }
 
     #[test]
     fn placing_beside_a_sibling_reorders_and_reparents_in_one_edit() {

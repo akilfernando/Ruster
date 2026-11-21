@@ -18,6 +18,10 @@ pub enum Text {
     GroupCreateWaitForAssets,
     GroupCreateSceneFull,
     GroupCreated,
+    GroupSelectionName,
+    GroupSelectionLocked,
+    GroupSelectionWorldTransform,
+    GroupSelectionFailed,
     GroupBlockerInput,
     GroupBlockerHud,
     GroupBlockerScriptSources,
@@ -161,7 +165,7 @@ pub enum Text {
 
 impl Text {
     #[cfg(test)]
-    pub const ALL: [Self; 146] = [
+    pub const ALL: [Self; 150] = [
         Self::Welcome,
         Self::NoRecentProjects,
         Self::EmptyHierarchy,
@@ -172,6 +176,10 @@ impl Text {
         Self::GroupCreateWaitForAssets,
         Self::GroupCreateSceneFull,
         Self::GroupCreated,
+        Self::GroupSelectionName,
+        Self::GroupSelectionLocked,
+        Self::GroupSelectionWorldTransform,
+        Self::GroupSelectionFailed,
         Self::GroupBlockerInput,
         Self::GroupBlockerHud,
         Self::GroupBlockerScriptSources,
@@ -324,6 +332,12 @@ impl Text {
             Self::GroupCreateWaitForAssets => "Wait for assets to finish before creating a group.",
             Self::GroupCreateSceneFull => "Couldn't create a group. This scene is full.",
             Self::GroupCreated => "Created an empty group.",
+            Self::GroupSelectionName => "Group",
+            Self::GroupSelectionLocked => "Unlock the objects before grouping them.",
+            Self::GroupSelectionWorldTransform => {
+                "Grouping would change the objects’ world transforms."
+            }
+            Self::GroupSelectionFailed => "Couldn't group selection.",
             Self::GroupBlockerInput => "input actions",
             Self::GroupBlockerHud => "a HUD",
             Self::GroupBlockerScriptSources => "ordinary script sources",

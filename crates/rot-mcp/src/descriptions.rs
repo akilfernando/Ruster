@@ -30,7 +30,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("scene_replay", "Run the scene's start-up in isolation for a number of ticks and return a fingerprint. Does not affect Play."),
     ("scene_collider_set", "Set or remove (null) an object's collider."),
     ("scene_color", "Set an object's color as RGBA from 0 to 1."),
-    ("scene_group_create", "Create an empty object for assembly. In v23, set an optional parent and local transform. Before repeating an assembly, consider framing and inspecting the first one."),
+    ("scene_group_create", "Create an empty group. In v23, pass member_ids to group 1–256 objects in one Undo step with world transforms preserved. Omit parent_id and transform when grouping."),
     ("scene_reparent", "Move an object under a parent object, or to the top level with null, keeping its world position."),
     ("material_inspect", "List committed materials, textures, users and display settings. A pending_material summary, when present, reports a human edit's intent, IDs and affected object count."),
     ("scene_material_set", "Create or replace a material. Changes apply to every object using it; assign_object_id assigns a new material."),

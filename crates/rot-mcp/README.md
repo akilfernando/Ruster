@@ -65,6 +65,13 @@ connected project.
   `object_scripts`, and `application_script`. An empty list means the scene's
   content allows empty group creation. Session, revision, drafts and capacity
   checks still apply. A content refusal returns `invalid_arguments`.
+- In v23, pass `member_ids` with 1–256 existing object IDs to
+  `scene_group_create`. The group keeps member order from the scene and their
+  world transforms. Selected descendants stay with their selected ancestors.
+  The group goes under the members’ shared parent or at the scene root if
+  they have different parents. Omit `parent_id` and `transform` when passing
+  `member_ids`. The editor selects the group and both clients share one Undo
+  entry. Leave out `member_ids` to create an empty group as before.
 - `viewport_screenshot` returns a PNG of the viewport, at most 512 pixels, in
   one call. `viewport_capture_start` and `viewport_capture_inspect` do the
   same in two steps. Use `viewport_capture_pick` with the capture ID and

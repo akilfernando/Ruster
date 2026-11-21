@@ -2,18 +2,18 @@
 //! a disposable projection and cannot change the authored document.
 use super::{
     component_inspector, component_live, component_multi::MultiInspector, component_view::Flag,
-    hud_interaction, project_picker, OpenedScene,
+    hud_interaction, palette, project_picker, OpenedScene,
 };
 use crate::behavior_ui::{PlayShortcut, RuntimeSource, RuntimeUi};
 use crate::editor_theme;
 use crate::strings::Text;
 use crate::ui_kit::tokens::{ROW_HEIGHT, SPACE_XS};
-use crate::workspace::{Action, SceneViewState, Workspace};
+use crate::workspace::{Action, SceneViewState, SettingsPage, Workspace};
 use eframe::egui;
 use rot_scene::component_scene::{
     Component, ComponentInstance, ComponentSession, Geometry, ObjectHierarchy, ObjectNode,
 };
-use rot_scene::{Primitive, Transform};
+use rot_scene::{Primitive, SceneError, Transform};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 
@@ -178,6 +178,7 @@ pub(super) struct ComponentWorkspace {
     hud_cache: rot_scene::hud::HudCache,
     hud_controls: hud_interaction::HudControls,
     workspace: Workspace,
+    palette: Option<palette::Palette>,
     meshes: rot_app::MeshMap,
     textures: rot_app::TextureMap,
     navigation: rot_render::NavigationOptions,
@@ -242,6 +243,7 @@ impl ComponentWorkspace {
             parents,
             scene_view: SceneViewState::default(),
             view_flags: Vec::new(),
+            palette: None,
             session,
             path,
             assets,
@@ -790,6 +792,34 @@ impl ComponentWorkspace {
         parent: Option<String>,
         transform: Transform,
     ) -> Result<String, rot_scene::SceneError> {
+        let (id, mesh_id) = self.fresh_object_ids(requested_id)?;
+        let components = geometry
+            .map(|geometry| ComponentInstance {
+                id: mesh_id,
+                enabled: true,
+                kind: Component::MeshRenderer {
+                    geometry,
+                    tint: [1.0; 4],
+                    material: None,
+                },
+            })
+            .into_iter()
+            .collect();
+        let node = ObjectNode {
+            id: id.clone(),
+            name: name.into(),
+            enabled: true,
+            parent,
+            transform,
+            components,
+        };
+        self.session.put_object(self.session.revision(), node)?;
+        self.select(Some(id.clone()));
+        self.refresh();
+        Ok(id)
+    }
+
+    fn fresh_object_ids(&self, requested_id: Option<&str>) -> Result<(String, String), SceneError> {
         let used: HashSet<_> = self
             .session
             .scene()
@@ -826,31 +856,73 @@ impl ComponentWorkspace {
                     && requested_id != Some(mesh.as_str())
             })
             .expect("finite scene IDs");
-        let id = requested_id.map_or(generated_id, str::to_owned);
-        let components = geometry
-            .map(|geometry| ComponentInstance {
-                id: mesh_id,
-                enabled: true,
-                kind: Component::MeshRenderer {
-                    geometry,
-                    tint: [1.0; 4],
-                    material: None,
-                },
-            })
-            .into_iter()
-            .collect();
-        let node = ObjectNode {
-            id: id.clone(),
-            name: name.into(),
-            enabled: true,
-            parent,
-            transform,
-            components,
-        };
-        self.session.put_object(revision, node)?;
+        Ok((requested_id.map_or(generated_id, str::to_owned), mesh_id))
+    }
+
+    fn group_selection(
+        &mut self,
+        expected: u64,
+        requested_id: Option<&str>,
+        name: &str,
+        ids: &[&str],
+    ) -> Result<String, (&'static str, String)> {
+        if self.draft_dirty() {
+            return Err(("drafts_pending", Text::GroupCreateFinishEdit.plain().into()));
+        }
+        if !self.scene_view.locked.is_empty() {
+            let selected: HashSet<_> = ids.iter().copied().collect();
+            let objects = &self.session.scene().objects;
+            let mut root_depth = None;
+            for &(index, depth) in &self.rows {
+                if root_depth.is_some_and(|root| depth <= root) {
+                    root_depth = None;
+                }
+                if root_depth.is_none() && selected.contains(objects[index].id.as_str()) {
+                    root_depth = Some(depth);
+                }
+                if root_depth.is_some() && self.view_flags[index].locked {
+                    return Err(("objects_locked", Text::GroupSelectionLocked.plain().into()));
+                }
+            }
+        }
+        let (id, _) = self
+            .fresh_object_ids(requested_id)
+            .map_err(|error| ("invalid_arguments", error.to_string()))?;
+        self.session
+            .group_selection(expected, &id, name, ids)
+            .map_err(|error| match error {
+                SceneError::ObjectNotFound(_) => ("object_not_found", error.to_string()),
+                SceneError::StaleRevision { .. } => ("stale_revision", error.to_string()),
+                SceneError::CannotPreserveWorldTransform => (
+                    "world_transform_unrepresentable",
+                    Text::GroupSelectionWorldTransform.plain().into(),
+                ),
+                SceneError::Invalid(reason) => ("invalid_arguments", reason),
+                _ => ("group_selection_failed", error.to_string()),
+            })?;
         self.select(Some(id.clone()));
         self.refresh();
         Ok(id)
+    }
+
+    fn group_selection_from_ui(&mut self, hit: Option<&str>) {
+        let targets = self.target_ids(hit);
+        if targets.is_empty() {
+            return;
+        }
+        let ids: Vec<_> = targets.iter().map(String::as_str).collect();
+        self.error = self
+            .group_selection(
+                self.session.revision(),
+                None,
+                Text::GroupSelectionName.plain(),
+                &ids,
+            )
+            .err()
+            .map(|(code, message)| match code {
+                "drafts_pending" | "objects_locked" | "world_transform_unrepresentable" => message,
+                _ => format!("{} {message}", Text::GroupSelectionFailed.plain()),
+            });
     }
 
     fn delete(&mut self, hit: Option<&str>) {
@@ -1091,6 +1163,18 @@ impl ComponentWorkspace {
                 self.save();
                 return;
             }
+            Action::KeyboardShortcuts => {
+                self.workspace.open_settings(SettingsPage::Shortcuts);
+                return;
+            }
+            Action::CommandPalette => {
+                self.palette = Some(Default::default());
+                return;
+            }
+            Action::GroupSelection => {
+                self.group_selection_from_ui(None);
+                return;
+            }
             Action::Frame => {
                 self.error = self.frame_objects(None, None).err().map(str::to_owned);
                 return;
@@ -1127,17 +1211,28 @@ impl ComponentWorkspace {
     }
 
     fn menu_action(&mut self, ui: &mut egui::Ui, action: Action) {
-        if ui
-            .add(
-                egui::Button::new(action.label())
-                    .shortcut_text(self.workspace.shortcut_hint(action)),
-            )
-            .clicked()
-        {
+        if action_menu_item(ui, &self.workspace, action, true) {
             self.command_from_ui(ui.ctx(), action);
-            ui.close();
         }
     }
+}
+
+fn action_menu_item(
+    ui: &mut egui::Ui,
+    workspace: &Workspace,
+    action: Action,
+    enabled: bool,
+) -> bool {
+    let clicked = ui
+        .add_enabled(
+            enabled,
+            egui::Button::new(action.label()).shortcut_text(workspace.shortcut_hint(action)),
+        )
+        .clicked();
+    if clicked {
+        ui.close();
+    }
+    clicked
 }
 
 fn hierarchy_rows(objects: &[ObjectNode]) -> (Vec<(usize, usize)>, Vec<Option<usize>>) {
@@ -1359,10 +1454,10 @@ impl ComponentWorkspace {
         self.asset_import_frame(&ctx, blocked);
         let asset_dialog = self.asset_browser.file_dialog_open();
         self.runtime.input_begin(&ctx, blocked || asset_dialog);
-        if let Some(action) = self
-            .workspace
-            .shortcuts(&ctx, blocked || asset_dialog || self.runtime.input_owned())
-        {
+        if let Some(action) = self.workspace.shortcuts(
+            &ctx,
+            blocked || asset_dialog || self.runtime.input_owned() || self.palette.is_some(),
+        ) {
             self.command_from_ui(&ctx, action);
         }
         egui::Panel::top("component_menu").show(ui, |ui| {
@@ -1376,10 +1471,16 @@ impl ComponentWorkspace {
                 editor_theme::text_menu(ui, Text::ComponentEditMenu.plain(), |ui| {
                     self.menu_action(ui, Action::Undo);
                     self.menu_action(ui, Action::Redo);
+                    ui.separator();
+                    self.menu_action(ui, Action::KeyboardShortcuts);
+                    self.menu_action(ui, Action::CommandPalette);
                 });
                 editor_theme::text_menu(ui, Text::ComponentObjectMenu.plain(), |ui| {
                     self.create_menu(ui);
                     ui.separator();
+                    ui.add_enabled_ui(!blocked && !self.selection.is_empty(), |ui| {
+                        self.menu_action(ui, Action::GroupSelection);
+                    });
                     ui.add_enabled_ui(!self.selection.is_empty(), |ui| {
                         self.menu_action(ui, Action::Delete)
                     });
@@ -1484,6 +1585,49 @@ impl ComponentWorkspace {
                 }
             });
         }
+        self.workspace.shortcuts_ui(&ctx);
+        if let Some(mut palette) = self.palette.take() {
+            let (action, keep_open) = palette.show(
+                &ctx,
+                &self.workspace,
+                |action| {
+                    matches!(
+                        action,
+                        Action::Open
+                            | Action::Save
+                            | Action::Undo
+                            | Action::Redo
+                            | Action::CreateEmpty
+                            | Action::CreateCube
+                            | Action::CreateSphere
+                            | Action::CreateCapsule
+                            | Action::GroupSelection
+                            | Action::Delete
+                            | Action::Frame
+                            | Action::FindContent
+                            | Action::ToggleAssets
+                            | Action::KeyboardShortcuts
+                            | Action::Play
+                            | Action::Pause
+                            | Action::Step
+                    ) || cfg!(target_os = "linux")
+                        && matches!(action, Action::ImportAsset | Action::Export)
+                },
+                |action| {
+                    !blocked
+                        && (!matches!(
+                            action,
+                            Action::GroupSelection | Action::Delete | Action::Frame
+                        ) || !self.selection.is_empty())
+                },
+            );
+            if keep_open {
+                self.palette = Some(palette);
+            }
+            if let Some(action) = action {
+                self.command_from_ui(&ctx, action);
+            }
+        }
         self.show_assets(ui, blocked);
         let hierarchy_limit = ui.available_width() * 0.26;
         let inspector_limit = ui.available_width() * 0.34;
@@ -1503,6 +1647,7 @@ impl ComponentWorkspace {
                 let mut deleted = None;
                 let mut child = None;
                 let mut framed = None;
+                let mut grouped = None;
                 let mut prefab = None;
                 let mut view_change = None;
                 let revision = self.session.revision();
@@ -1599,6 +1744,14 @@ impl ComponentWorkspace {
                                             }
                                         }
                                     });
+                                    if action_menu_item(
+                                        ui,
+                                        &self.workspace,
+                                        Action::GroupSelection,
+                                        !blocked,
+                                    ) {
+                                        grouped = Some(object.id.clone());
+                                    }
                                     if ui
                                         .add(
                                             egui::Button::new(Action::Frame.label()).shortcut_text(
@@ -1643,6 +1796,8 @@ impl ComponentWorkspace {
                     self.move_in_hierarchy(Some(&id), destination);
                 } else if let Some((action, parent)) = child {
                     self.create(action, Some(parent));
+                } else if let Some(id) = grouped {
+                    self.group_selection_from_ui(Some(&id));
                 } else if let Some(id) = framed {
                     self.error = self.frame_objects(Some(&id), None).err().map(str::to_owned);
                 } else if let Some(id) = prefab.filter(|_| self.apply()) {
@@ -1904,6 +2059,104 @@ impl ComponentWorkspace {
 mod tests {
     use super::*;
     use rot_scene::{component_scene::ComponentScene, Scene, Session};
+
+    #[cfg(unix)]
+    #[test]
+    fn group_selection_shares_editor_and_mcp_guards_and_history() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let member = scene.objects[0].id.clone();
+        let child = scene.objects[1].id.clone();
+        scene.objects[1].parent = Some(member.clone());
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.adopt_workspace(Workspace::at_for_test(folder.path().join("editor.json")));
+        editor.select(Some(member.clone()));
+        let mut args = serde_json::json!({
+            "expected_session_token":"scene","expected_revision":"0",
+            "object_id":"assembly","name":"Assembly","member_ids":[member],
+        });
+
+        editor.draft.as_mut().unwrap().name = "Pending name".into();
+        editor.command(Action::GroupSelection);
+        assert_eq!(
+            editor.error.as_deref(),
+            Some(Text::GroupCreateFinishEdit.plain())
+        );
+        assert_eq!(
+            editor.ai_command("scene", "scene_group_create", &args)["error"]["code"],
+            "drafts_pending"
+        );
+        assert_eq!(editor.session.scene(), &scene);
+        editor.command(Action::KeyboardShortcuts);
+        let ctx = egui::Context::default();
+        let run_key = |editor: &mut ComponentWorkspace, key, modifiers| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events: vec![egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    }],
+                    ..Default::default()
+                },
+                |ui| {
+                    editor.show_workspace(ui, false);
+                },
+            );
+            output.textures_delta.clear();
+        };
+        run_key(&mut editor, egui::Key::Escape, egui::Modifiers::NONE);
+        assert!(!editor.workspace.settings_open);
+        assert_eq!(editor.draft.as_ref().unwrap().name, "Pending name");
+        editor.rebuild_draft();
+
+        editor.set_view_flag(Flag::Locked, true, vec![child.clone()]);
+        editor.command(Action::GroupSelection);
+        assert_eq!(
+            editor.error.as_deref(),
+            Some(Text::GroupSelectionLocked.plain())
+        );
+        assert_eq!(
+            editor.ai_command("scene", "scene_group_create", &args)["error"]["code"],
+            "objects_locked"
+        );
+        editor.set_view_flag(Flag::Locked, false, vec![child]);
+        args["expected_revision"] = "1".into();
+        assert_eq!(
+            editor.ai_command("scene", "scene_group_create", &args)["error"]["code"],
+            "stale_revision"
+        );
+        assert_eq!(editor.session.scene(), &scene);
+        assert!(matches!(editor.session.undo(0), Err(SceneError::NoUndo)));
+
+        args["expected_revision"] = "0".into();
+        let grouped = editor.ai_command("scene", "scene_group_create", &args);
+        assert_eq!(grouped["result"]["revision"], "1", "{grouped}");
+        assert_eq!(editor.selection_anchor.as_deref(), Some("assembly"));
+        let expected = editor.session.scene().clone();
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene(), &scene);
+        editor.command(Action::Redo);
+        assert_eq!(editor.session.scene(), &expected);
+        assert!(editor.save());
+        assert_eq!(ComponentSession::open(path).unwrap().scene(), &expected);
+        editor.command(Action::Undo);
+        editor.select(Some(member));
+        run_key(&mut editor, egui::Key::G, egui::Modifiers::CTRL);
+        assert_eq!(editor.session.scene().objects[0].name, "Group");
+        args = serde_json::json!({"expected_session_token":"scene","expected_revision":"5"});
+        assert_eq!(
+            editor.ai_command("scene", "scene_undo", &args)["result"]["revision"],
+            "6"
+        );
+        assert_eq!(editor.session.scene(), &scene);
+    }
 
     #[test]
     #[ignore = "explicit release benchmark; runs editor panels without a window or 3D rendering"]
