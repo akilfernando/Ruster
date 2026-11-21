@@ -50,7 +50,10 @@ shows live folders, previews and diagnostics, accepts drops, and places
 meshes and multi-primitive GLB hierarchies with Undo. File actions keep stable IDs
 on rename and preserve sources in project trash. GLB imports support relative
 PNG textures and report material fallbacks and skipped triangles in the Assets
-Inspector and MCP. A relocated build loaded 80 meshes.
+Inspector and MCP. Failed imports show the source path, recovery, last working
+version availability and separate Error Details in the Inspector. Approved MCP
+clients can page the same issues, including sources with no asset ID. A
+relocated build loaded 80 meshes.
 v23 prefabs link reusable hierarchies in the editor and MCP. Child transform
 and mesh tint overrides support Apply, Revert and shared Undo. The cottage
 trial verified a roof fix across three placements and in a relocated build.

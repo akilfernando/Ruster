@@ -372,10 +372,14 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
                 || matches!(args["primitive"].as_str(), Some("sphere" | "capsule")));
     }
     if name == "asset_inspect" {
-        return exact_keys(args, &[], &["offset", "model_offset", "prefab_offset"])
-            && args.get("offset").is_none_or(canonical_u64)
+        return exact_keys(
+            args,
+            &[],
+            &["offset", "model_offset", "prefab_offset", "issue_offset"],
+        ) && args.get("offset").is_none_or(canonical_u64)
             && args.get("model_offset").is_none_or(canonical_u64)
-            && args.get("prefab_offset").is_none_or(canonical_u64);
+            && args.get("prefab_offset").is_none_or(canonical_u64)
+            && args.get("issue_offset").is_none_or(canonical_u64);
     }
     if name == "scene_prefab" {
         let Some(action) = args.get("action").and_then(Value::as_str) else {
@@ -569,7 +573,7 @@ fn tools() -> Value {
         json!({"name":"project_connect","description":"Choose which open editor to work with, by project name, project folder, scene file or ID from project_list. A folder or scene file that is not open is opened in Rot Engine. Only needed when several editors are open or none is. With a registry configured, connect the exact registered project and include the returned connection in later calls.","inputSchema":object_schema(json!({"project":{"type":"string","minLength":1,"maxLength":1024}}),vec!["project"])}),
     ];
     for (name, description) in [
-        ("asset_inspect", "Inspect bounded pages of project meshes/textures and static GLB model summaries with status and catalog revision. offset pages resources; model_offset independently pages models. Follow next_offset/model_next_offset; restart if catalog/session revisions change. No resource payloads."),
+        ("asset_inspect", "Inspect pages of project assets and GLB models. Follow next_offset and model_next_offset. v23 also lists prefabs and import issues by path, including files with no ID. Follow prefab_next_offset and issue_next_offset using the matching offsets. Issues can change without a catalog revision."),
         ("asset_import", "Import one bounded project-relative OBJ mesh, bounded PCM16 WAV sound, supported PNG texture or self-contained static GLB model into the immediately persisted typed catalog. GLB rejects normal_policy/texture_role; supports a bounded named hierarchy and opaque nonmetallic materials with embedded PNGs. Unsupported semantics reject; place separately with scene_model_place. Optional normal_policy selects a distinct OBJ interpretation: flat or authored_when_complete; omitted preserves flat. PNG-only texture_role selects base_color_srgb or roughness_linear; omission preserves base color. The two options cannot be combined. Another interpretation needs a distinct asset ID; Refresh preserves the accepted interpretation. Requires scene/session/catalog revisions. Does not assign it or save the scene."),
         ("asset_refresh", "Reimport one registered mesh, texture or static GLB model, retaining last-good accepted content on failure. Model refresh accepts geometry/normal/UV/image changes only with the same named structure, transforms and material settings; it updates resources without rewriting placed scene copies. Catalog persists independently of scene history."),
         ("asset_rename", "Rename one registered OBJ or PNG source within the project without overwrite or changing its extension/kind, preserving stable asset ID; catalog update is independent of scene undo."),
@@ -614,6 +618,7 @@ fn tools() -> Value {
         if name == "asset_inspect" {
             properties.insert("model_offset".into(), decimal.clone());
             properties.insert("prefab_offset".into(), decimal.clone());
+            properties.insert("issue_offset".into(), decimal.clone());
         }
         if name == "scene_model_place" { properties.insert("name".into(), json!({"type":"string","minLength":1,"maxLength":128,"description":"Optional display name for the creator-owned placement root."})); }
         if name == "scene_prefab" {
@@ -2480,7 +2485,15 @@ mod tests {
                 "asset_inspect",
                 &json!({"model_offset":value})
             ));
+            assert!(!valid_arguments(
+                "asset_inspect",
+                &json!({"issue_offset":value})
+            ));
         }
+        assert!(valid_arguments(
+            "asset_inspect",
+            &json!({"issue_offset": "4"})
+        ));
         let mut invalid = refresh;
         invalid["asset_id"] = Value::Null;
         assert!(!valid_arguments("asset_refresh", &invalid));
@@ -2535,6 +2548,10 @@ mod tests {
         );
         assert_eq!(
             schema("scene_model_place")["properties"]["name"]["type"],
+            "string"
+        );
+        assert_eq!(
+            schema("asset_inspect")["properties"]["issue_offset"]["type"],
             "string"
         );
         assert_eq!(

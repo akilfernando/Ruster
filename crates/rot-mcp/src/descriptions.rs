@@ -5,7 +5,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("project_list", "List the open Rot Engine editors with their project folder and scene."),
     ("project_connect", "Work with one open editor, chosen by project name, folder, scene file or ID from project_list. A folder or scene that is not open is opened in Rot Engine."),
     ("project_disconnect", "Disconnect from the current editor."),
-    ("asset_inspect", "List project assets, models and v23 prefabs. Follow the next offsets to read more."),
+    ("asset_inspect", "List assets, models and v23 prefabs and import issues. Follow the next offsets to read more."),
     ("asset_import", "Import a project file as an asset: OBJ mesh, PNG texture, WAV sound or GLB model. Saved to the project at once; place models with scene_model_place."),
     ("asset_refresh", "Reimport an asset after its file changed. Keeps the previous version if the new file fails."),
     ("asset_rename", "Rename an OBJ or PNG asset's file inside the project, keeping its asset ID."),

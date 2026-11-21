@@ -1,14 +1,17 @@
 //! File-backed Assets panel for the component workspace.
+use super::super::asset_inspection::{import_issue_text, ImportIssue};
 use super::super::assets_browser::{asset_glyph, texture_thumbnail, TextureThumbnails};
 use super::{ComponentWorkspace, Geometry, Transform};
+use crate::ui_kit::tokens::{SPACE_L, SPACE_XS};
 use crate::{editor_theme, strings::Text};
 use eframe::egui;
 use rot_assets::{
     AssetKind, AssetStateIdentity, AssetStatus, MeshNormalPolicy, PrefabFile, ProjectFileIssue,
     TextureRole,
 };
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[cfg(target_os = "linux")]
 use super::super::project_assets::FileAction;
@@ -40,8 +43,10 @@ struct AssetRow {
     kind: &'static str,
     settings: Option<&'static str>,
     model: bool,
+    registered: bool,
     status: AssetStatus,
-    diagnostic: Option<String>,
+    diagnostic: Option<Arc<str>>,
+    last_good_available: bool,
     warnings: Vec<String>,
 }
 
@@ -61,8 +66,10 @@ impl AssetRow {
             kind,
             settings: None,
             model: false,
+            registered: true,
             status,
             diagnostic: None,
+            last_good_available: false,
             warnings: Vec::new(),
         }
     }
@@ -121,6 +128,7 @@ pub(super) struct Browser {
     pub(super) open: bool,
     pub(super) focus_search: bool,
     pub(super) selected: Option<String>,
+    pub(super) issues: BTreeMap<String, ImportIssue>,
     size: f32,
     folder: PathBuf,
     query: String,
@@ -144,6 +152,7 @@ impl Default for Browser {
             open: true,
             focus_search: false,
             selected: None,
+            issues: BTreeMap::new(),
             size: 64.0,
             folder: "Assets".into(),
             query: String::new(),
@@ -278,6 +287,19 @@ impl Browser {
         issues: &[ProjectFileIssue],
         prefabs: &[PrefabFile],
     ) {
+        let selected_source = self
+            .selected
+            .as_ref()
+            .and_then(|id| self.by_id.get(id))
+            .map(|&index| self.rows[index].source.clone());
+        let project_prefix = format!("{}{}", assets.root().display(), std::path::MAIN_SEPARATOR);
+        let diagnostic = |text: &str| -> Arc<str> {
+            if text.contains(&project_prefix) {
+                text.replace(&project_prefix, "").into()
+            } else {
+                text.into()
+            }
+        };
         self.catalog = Some(assets.state_identity());
         self.rows.clear();
         for info in assets.infos() {
@@ -287,7 +309,7 @@ impl Browser {
                 AssetKind::Sound => "Sound",
             };
             let mut row = AssetRow::new(&info.id, &info.source, kind, info.status.clone());
-            row.diagnostic.clone_from(&info.diagnostic);
+            row.diagnostic = info.diagnostic.as_deref().map(diagnostic);
             row.settings = match (info.mesh_normal_policy, info.texture_role) {
                 (Some(MeshNormalPolicy::Flat), _) => Some("Normals: Flat"),
                 (Some(MeshNormalPolicy::AuthoredWhenComplete), _) => Some("Normals: From the file"),
@@ -308,35 +330,84 @@ impl Browser {
                 AssetRow::new(&prefab.id, &prefab.source, "Prefab", AssetStatus::Ready)
             }),
         );
-        let mut issue_by_path: HashMap<_, _> = issues
-            .iter()
-            .map(|issue| (issue.path.as_str(), issue))
-            .collect();
+        self.issues.clear();
+        for issue in issues {
+            let entry = self
+                .issues
+                .entry(issue.path.clone())
+                .or_insert(ImportIssue {
+                    status: issue.status.clone(),
+                    asset_id: None,
+                    last_good_available: false,
+                    diagnostic: None,
+                });
+            let detail = diagnostic(&issue.message);
+            if entry
+                .diagnostic
+                .as_ref()
+                .is_none_or(|previous| detail < *previous)
+            {
+                entry.status = issue.status.clone();
+                entry.diagnostic = Some(detail);
+            }
+        }
         for row in &mut self.rows {
-            if let Some(issue) = issue_by_path.get(row.source.as_str()) {
-                if row.status == AssetStatus::Ready {
-                    row.status = issue.status.clone();
-                    row.diagnostic = Some(issue.message.clone());
+            if let Some(issue) = self
+                .issues
+                .get(&row.source)
+                .filter(|_| row.status == AssetStatus::Ready)
+            {
+                row.status = issue.status.clone();
+                row.diagnostic.clone_from(&issue.diagnostic);
+            }
+        }
+        for row in &mut self.rows {
+            if row.status != AssetStatus::Ready {
+                // A model is registered in an open store only while its accepted
+                // GLB payload is loaded. Other assets can have metadata alone.
+                row.last_good_available = row.model
+                    || assets.mesh(&row.id).is_some()
+                    || assets.texture(&row.id).is_some()
+                    || assets.sound(&row.id).is_some();
+                let issue = self
+                    .issues
+                    .entry(row.source.clone())
+                    .or_insert(ImportIssue {
+                        status: row.status.clone(),
+                        asset_id: None,
+                        last_good_available: false,
+                        diagnostic: row.diagnostic.clone(),
+                    });
+                // Separate interpretations share a source. If one is
+                // unavailable, report that representation before the others.
+                if issue.asset_id.is_none() || issue.last_good_available && !row.last_good_available
+                {
+                    issue.asset_id = Some(row.id.clone());
+                    issue.status = row.status.clone();
+                    issue.last_good_available = row.last_good_available;
+                    issue.diagnostic.clone_from(&row.diagnostic);
                 }
             }
         }
-        for row in &self.rows {
-            issue_by_path.remove(row.source.as_str());
-        }
-        self.rows.extend(issue_by_path.values().filter_map(|issue| {
-            let kind = match Path::new(&issue.path).extension()?.to_str()? {
-                "obj" => "Mesh",
-                "png" => "Texture",
-                "wav" => "Sound",
-                "glb" => "Model",
-                "prefab" => "Prefab",
-                "rotmeta" => "Import Settings",
-                _ => return None,
-            };
-            let mut row = AssetRow::new(&issue.path, &issue.path, kind, issue.status.clone());
-            row.diagnostic = Some(issue.message.clone());
-            Some(row)
-        }));
+        self.rows
+            .extend(self.issues.iter().filter_map(|(source, issue)| {
+                if issue.asset_id.is_some() {
+                    return None;
+                }
+                let kind = match Path::new(source).extension()?.to_str()? {
+                    "obj" => "Mesh",
+                    "png" => "Texture",
+                    "wav" => "Sound",
+                    "glb" => "Model",
+                    "prefab" => "Prefab",
+                    "rotmeta" => "Import Settings",
+                    _ => return None,
+                };
+                let mut row = AssetRow::new(source, source, kind, issue.status.clone());
+                row.registered = false;
+                row.diagnostic.clone_from(&issue.diagnostic);
+                Some(row)
+            }));
         self.rows
             .sort_by(|left, right| left.searchable.cmp(&right.searchable));
         let mut folders: BTreeSet<_> = folders.into_iter().collect();
@@ -363,7 +434,12 @@ impl Browser {
             .as_ref()
             .is_some_and(|id| !self.by_id.contains_key(id))
         {
-            self.selected = None;
+            self.selected = selected_source.and_then(|source| {
+                self.rows
+                    .iter()
+                    .find(|row| row.source == source)
+                    .map(|row| row.id.clone())
+            });
         }
         self.filter();
     }
@@ -602,14 +678,37 @@ impl Browser {
             ui.strong("Import Settings");
             ui.label(settings);
         }
-        if let Some(diagnostic) = &row.diagnostic {
-            if row.kind == "Prefab" {
-                ui.colored_label(editor_theme::colors(ui).error, Text::PrefabInvalid.plain());
-                ui.collapsing(Text::ErrorDetails.plain(), |ui| {
-                    ui.add(egui::Label::new(diagnostic).wrap().selectable(true));
-                });
+        if row.status != AssetStatus::Ready {
+            let (message, recovery) = import_issue_text(&row.status);
+            let message = if row.kind == "Prefab" && row.status == AssetStatus::Invalid {
+                Text::PrefabInvalid
             } else {
-                ui.colored_label(editor_theme::colors(ui).error, diagnostic);
+                message
+            };
+            ui.colored_label(editor_theme::colors(ui).error, message.plain());
+            ui.label(recovery.plain());
+            if row.registered {
+                let fallback = if row.last_good_available {
+                    Text::AssetLastGoodAvailable
+                } else {
+                    Text::AssetNoLastGood
+                };
+                ui.label(fallback.plain());
+            }
+            if let Some(diagnostic) = &row.diagnostic {
+                egui::CollapsingHeader::new(Text::ErrorDetails.plain())
+                    .id_salt(&row.id)
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical()
+                            .max_height(ui.available_height() / 2.0)
+                            .show(ui, |ui| {
+                                ui.add(
+                                    egui::Label::new(diagnostic.as_ref())
+                                        .wrap()
+                                        .selectable(true),
+                                );
+                            });
+                    });
             }
         }
         #[cfg(target_os = "linux")]
@@ -632,13 +731,20 @@ impl Browser {
                 prefab: row.kind == "Prefab",
             });
         }
-        if !row.warnings.is_empty() {
+        let ready_detail = row
+            .diagnostic
+            .as_deref()
+            .filter(|_| row.status == AssetStatus::Ready);
+        if ready_detail.is_some() || !row.warnings.is_empty() {
             ui.separator();
             ui.heading("Import Warnings");
             egui::ScrollArea::vertical()
                 .id_salt("model_import_warnings")
                 .show(ui, |ui| {
-                    for warning in &row.warnings {
+                    for warning in ready_detail
+                        .into_iter()
+                        .chain(row.warnings.iter().map(String::as_str))
+                    {
                         ui.colored_label(ui.visuals().warn_fg_color, warning);
                     }
                 });
@@ -738,14 +844,19 @@ fn asset_tile(
             colors.secondary,
         );
     }
-    let (caption, color) = if row.status == AssetStatus::Ready {
-        (row.label.clone(), ui.visuals().text_color())
-    } else {
-        (
-            format!("{} · {}", row.status_label(), row.label),
-            colors.error,
-        )
-    };
+    if row.status != AssetStatus::Ready {
+        let center = image.right_top() + egui::vec2(-SPACE_L, SPACE_L);
+        ui.painter()
+            .circle_filled(center, SPACE_L / 2.0, colors.error);
+        ui.painter().text(
+            center,
+            egui::Align2::CENTER_CENTER,
+            "!",
+            egui::FontId::proportional(SPACE_L - SPACE_XS),
+            colors.surface,
+        );
+    }
+    let color = ui.visuals().text_color();
     let label = ui.text_style_height(&egui::TextStyle::Small);
     let galley = ui.painter().layout_job(egui::text::LayoutJob {
         wrap: egui::text::TextWrapping {
@@ -755,7 +866,7 @@ fn asset_tile(
             overflow_character: Some('…'),
         },
         ..egui::text::LayoutJob::simple_singleline(
-            caption,
+            row.label.clone(),
             egui::FontId::proportional(label),
             color,
         )

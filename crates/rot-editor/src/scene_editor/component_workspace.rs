@@ -365,9 +365,7 @@ impl ComponentWorkspace {
                     self.meshes = snapshot.store.mesh_snapshots();
                     self.textures = snapshot.store.texture_snapshots();
                     self.assets = Some(snapshot.store);
-                    self.asset_error = snapshot
-                        .warning
-                        .or_else(|| snapshot.issues.first().map(ToString::to_string));
+                    self.asset_error = snapshot.warning;
                 }
                 Err(error) => self.asset_error = Some(error),
             }
@@ -1459,12 +1457,22 @@ impl ComponentWorkspace {
         } else {
             build_status
         };
-        if scene_error.is_some() || build_status.is_some() || self.prefab_feedback.is_some() {
+        let has_import_issues = !self.asset_browser.issues.is_empty();
+        if scene_error.is_some()
+            || build_status.is_some()
+            || self.prefab_feedback.is_some()
+            || has_import_issues
+        {
             egui::Panel::bottom("component_status").show(ui, |ui| {
                 if let Some(error) = scene_error {
                     ui.colored_label(editor_theme::colors(ui).error, error);
                 } else if let Some(status) = build_status {
                     ui.add(egui::Label::new(status).truncate());
+                } else if has_import_issues {
+                    ui.colored_label(
+                        editor_theme::colors(ui).error,
+                        Text::AssetImportsNeedAttention.plain(),
+                    );
                 }
                 if self
                     .prefab_feedback
@@ -1977,6 +1985,96 @@ mod tests {
         };
         assert_eq!(reopened.scene().objects[0].name, "Changed");
         assert!(!reopened.is_dirty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn asset_inspect_reports_first_import_failure_retained_model_and_recovery() {
+        use rot_assets::fixtures::{animated_glb, AnimatedFixture};
+        use serde_json::{json, Value};
+
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let path = root.join("scene.json");
+        ComponentScene::from_legacy(&Session::new(Scene::empty("imports")).unwrap())
+            .unwrap()
+            .save_new(&path)
+            .unwrap();
+        let assets = root.join("Assets");
+        std::fs::create_dir(&assets).unwrap();
+        let model = animated_glb(AnimatedFixture {
+            material_fallbacks: true,
+            ..Default::default()
+        });
+        let accepted = assets.join("Accepted.glb");
+        let fresh = assets.join("Fresh.glb");
+        let unavailable = assets.join("Unavailable.obj");
+        std::fs::write(&accepted, &model).unwrap();
+        std::fs::write(&fresh, b"bad GLB").unwrap();
+        std::fs::write(&unavailable, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap();
+        let mut store = rot_assets::AssetStore::open(root).unwrap();
+        store
+            .import("unavailable", "Assets/Unavailable.obj")
+            .unwrap();
+        drop(store);
+        std::fs::remove_dir_all(root.join(".rot-cache")).unwrap();
+        std::fs::remove_file(&unavailable).unwrap();
+        let mut store = rot_assets::AssetStore::open(root).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let inspect = |editor: &mut ComponentWorkspace| {
+            let reply = editor.ai_command("session", "asset_inspect", &json!({}));
+            assert_eq!(reply["ok"], true, "{reply}");
+            reply["result"].clone()
+        };
+        let mut update = |editor: &mut ComponentWorkspace| {
+            let issues = store.reconcile_project_files(&BTreeSet::new(), || true);
+            editor
+                .asset_browser
+                .refresh(&store, Vec::new(), &issues, &[]);
+            editor.meshes = store.mesh_snapshots();
+            editor.textures = store.texture_snapshots();
+            editor.assets = Some(store.project_snapshot());
+            inspect(editor)
+        };
+
+        let initial = update(&mut editor);
+        let model_id = initial["models"][0]["id"].as_str().unwrap();
+        assert!(initial["models"][0]["warning_count"].as_u64().unwrap() > 0);
+        assert_eq!(initial["issue_count"], 2);
+        let first = &initial["issues"][0];
+        assert_eq!(first["source"], "Assets/Fresh.glb");
+        assert_eq!(first["status"], "invalid");
+        assert_eq!(first["asset_id"], Value::Null);
+        assert_eq!(first["last_good_available"], false);
+        assert!(first["diagnostic"]
+            .as_str()
+            .is_some_and(|text| !text.is_empty()));
+        let missing = &initial["issues"][1];
+        assert_eq!(missing["asset_id"], "unavailable");
+        assert_eq!(missing["status"], "missing");
+        assert_eq!(missing["last_good_available"], false);
+
+        editor.place_model(model_id, None, None).unwrap();
+        let placed = editor.session.scene().clone();
+        std::fs::write(&accepted, b"bad GLB").unwrap();
+        let rejected = update(&mut editor);
+        assert_eq!(rejected["asset_revision"], initial["asset_revision"]);
+        assert_eq!(rejected["issues"][0]["asset_id"], model_id);
+        assert_eq!(rejected["issues"][0]["last_good_available"], true);
+        assert_eq!(editor.session.scene(), &placed);
+        editor.place_model(model_id, None, None).unwrap();
+        let both = editor.session.scene().clone();
+
+        std::fs::write(&accepted, &model).unwrap();
+        let recovered = update(&mut editor);
+        assert_eq!(recovered["issue_count"], 2);
+        assert_eq!(recovered["issues"][0], *first);
+        assert_eq!(recovered["models"], initial["models"]);
+        assert_eq!(editor.session.scene(), &both);
+        assert!(editor.save());
+        assert_eq!(ComponentSession::open(&path).unwrap().scene(), &both);
+        editor.place_model(model_id, None, None).unwrap();
     }
 
     #[cfg(target_os = "linux")]

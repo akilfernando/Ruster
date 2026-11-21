@@ -463,10 +463,12 @@ impl ComponentWorkspace {
     fn inspect_assets(&self, args: &Value) -> Result<Value, CommandError> {
         let invalid = || ("invalid_arguments", "Check the asset page offsets.".into());
         let map = args.as_object().ok_or_else(invalid)?;
-        if map
-            .keys()
-            .any(|key| !matches!(key.as_str(), "offset" | "model_offset" | "prefab_offset"))
-        {
+        if map.keys().any(|key| {
+            !matches!(
+                key.as_str(),
+                "offset" | "model_offset" | "prefab_offset" | "issue_offset"
+            )
+        }) {
             return Err(invalid());
         }
         let offset = |field: &str| {
@@ -499,6 +501,12 @@ impl ComponentWorkspace {
         result["prefab_count"] = json!(self.prefab_files.len());
         result["prefab_next_offset"] = json!((prefab_offset + 16 < self.prefab_files.len())
             .then(|| (prefab_offset + 16).to_string()));
+        asset_inspection::append_import_issues(
+            &mut result,
+            &self.asset_browser.issues,
+            offset("issue_offset")?,
+        )
+        .map_err(|message| ("invalid_arguments", message.into()))?;
         Ok(result)
     }
 

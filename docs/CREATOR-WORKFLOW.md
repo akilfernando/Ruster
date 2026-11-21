@@ -91,6 +91,14 @@ Warnings** in the Inspector for material fallbacks or skipped faces.
 You can still place the model. `asset_inspect` reports
 the warning count and up to two warnings per model.
 
+When a file fails to import, select its marked tile under **Assets**. The
+Inspector shows its project-relative path and how to recover. Open **Error
+Details** for the importer message. Replace or restore the source at the
+same path. The editor watches for changes, and **Asset Actions → Reimport**
+lets you retry. If the Inspector says the last working version is available,
+you can still use that version while you repair the source. Keep the
+`.rotmeta` sidecar in place to preserve the asset's ID and scene references.
+
 An approved MCP client can inspect the current catalog with `asset_inspect`,
 then call `asset_import` or `asset_refresh` with its current asset revision.
 Use project-relative paths. Sources in `Assets/` already picked up by the
@@ -98,6 +106,15 @@ watcher can be assigned with their existing IDs. Import a different
 interpretation only when needed, such as flat normals for an OBJ. Assign a
 mesh with `scene_mesh` using the current catalog revision. Assignment shares
 the editor's Undo history and is saved with the scene.
+
+In v23, `asset_inspect` also lists import issues by source path, including
+files without an asset ID. Each issue includes recovery guidance, a separate
+diagnostic, and whether the last working content is available for the reported
+ID. If multiple import settings share a source, the issue shows an unavailable
+interpretation first. Follow `issue_next_offset` using `issue_offset`. These
+pages are independent of assets, models and prefabs. Recheck the first issue
+page after making a repair because issues can change without a catalog
+revision.
 
 ## Reuse a hierarchy as a prefab
 

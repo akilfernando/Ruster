@@ -1,9 +1,70 @@
 //! Bounded borrowed catalog observations for the native bridge.
-use rot_assets::AssetStore;
+use crate::strings::Text;
+use rot_assets::{AssetStatus, AssetStore};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 const PAGE_SIZE: usize = 16;
 const DIAGNOSTIC_CHARS: usize = 256;
+const ISSUE_PAGE_SIZE: usize = 4;
+const ISSUE_TEXT_BYTES: usize = 256;
+
+pub(super) struct ImportIssue {
+    pub status: AssetStatus,
+    pub asset_id: Option<String>,
+    pub last_good_available: bool,
+    pub diagnostic: Option<Arc<str>>,
+}
+
+pub(super) fn import_issue_text(status: &AssetStatus) -> (Text, Text) {
+    if *status == AssetStatus::Missing {
+        (Text::AssetSourceMissing, Text::AssetRestoreSource)
+    } else {
+        (Text::AssetImportFailed, Text::AssetReplaceSource)
+    }
+}
+
+pub(super) fn append_import_issues(
+    page: &mut Value,
+    issues: &BTreeMap<String, ImportIssue>,
+    offset: usize,
+) -> Result<(), &'static str> {
+    let count = issues.len();
+    if offset > count {
+        return Err("issue_offset exceeds count");
+    }
+    let records: Vec<_> = issues
+        .iter()
+        .skip(offset)
+        .take(ISSUE_PAGE_SIZE)
+        .map(|(source, issue)| {
+            let (message, recovery) = import_issue_text(&issue.status);
+            let (source, source_truncated) = bounded_issue_text(source);
+            let (diagnostic, diagnostic_truncated) = issue
+                .diagnostic
+                .as_deref()
+                .map(bounded_issue_text)
+                .map_or((None, false), |(text, truncated)| (Some(text), truncated));
+            json!({
+                "source": source, "source_truncated": source_truncated, "status": issue.status,
+                "asset_id": issue.asset_id, "last_good_available": issue.last_good_available,
+                "message": message.plain(), "recovery": recovery.plain(),
+                "diagnostic": diagnostic, "diagnostic_truncated": diagnostic_truncated,
+            })
+        })
+        .collect();
+    page["issues"] = json!(records);
+    page["issue_count"] = json!(count);
+    page["issue_next_offset"] =
+        json!((count - offset > ISSUE_PAGE_SIZE).then(|| (offset + ISSUE_PAGE_SIZE).to_string()));
+    Ok(())
+}
+
+fn bounded_issue_text(text: &str) -> (&str, bool) {
+    let end = text.floor_char_boundary(ISSUE_TEXT_BYTES);
+    (&text[..end], end != text.len())
+}
 
 pub(super) fn page(store: &AssetStore, offset: usize) -> Result<Value, &'static str> {
     let count = store.infos().len();
@@ -102,6 +163,57 @@ pub(super) fn page_with_models(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn import_issue_pages_are_ordered_and_bound_text_independently() {
+        let root = tempfile::tempdir().unwrap();
+        let store = AssetStore::open(root.path()).unwrap();
+        let mut page = page_with_models(&store, 0, 0).unwrap();
+        let issues = (0..9)
+            .rev()
+            .map(|index| {
+                (
+                    format!("Assets/{index}{}.obj", "é".repeat(200)),
+                    ImportIssue {
+                        status: AssetStatus::Invalid,
+                        asset_id: None,
+                        last_good_available: false,
+                        diagnostic: Some("\0".repeat(100_000).into()),
+                    },
+                )
+            })
+            .collect();
+        append_import_issues(&mut page, &issues, 0).unwrap();
+        assert_eq!(page["issue_count"], 9);
+        assert_eq!(page["issue_next_offset"], "4");
+        assert_eq!(page["issues"].as_array().unwrap().len(), ISSUE_PAGE_SIZE);
+        assert_eq!(page["issues"][0]["source_truncated"], true);
+        assert_eq!(page["issues"][0]["diagnostic_truncated"], true);
+        assert!(page["issues"][0]["source"]
+            .as_str()
+            .unwrap()
+            .starts_with("Assets/0"));
+        assert!(serde_json::to_vec(&page).unwrap().len() < 15_000);
+        append_import_issues(&mut page, &issues, 4).unwrap();
+        assert_eq!(page["issue_next_offset"], "8");
+        assert!(page["issues"][0]["source"]
+            .as_str()
+            .unwrap()
+            .starts_with("Assets/4"));
+        append_import_issues(&mut page, &issues, 8).unwrap();
+        assert_eq!(page["issue_next_offset"], Value::Null);
+        assert_eq!(page["issues"].as_array().unwrap().len(), 1);
+        assert!(page["issues"][0]["source"]
+            .as_str()
+            .unwrap()
+            .starts_with("Assets/8"));
+        append_import_issues(&mut page, &issues, 9).unwrap();
+        assert_eq!(page["issues"], json!([]));
+        assert!(append_import_issues(&mut page, &issues, 10).is_err());
+        for field in ["assets", "models", "next_offset", "model_next_offset"] {
+            assert_eq!(page[field], page_with_models(&store, 0, 0).unwrap()[field]);
+        }
+    }
 
     #[test]
     fn large_source_diagnostic_is_bounded_without_changing_accepted_assets() {
