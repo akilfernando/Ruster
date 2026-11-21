@@ -343,7 +343,7 @@ holds no panel body; one `ui_drive.py` screenshot is unchanged; the gate
 passes.
 
 #### S-08 · String table and wording pass — M — ready
-Status: partial · v23 prefab feedback verified 2026-11-21. Save, place, override and refresh errors use the shared table with diagnostics behind Error Details. The Inspector explains source recovery. Native checks reproduced a name collision and a rejected refresh, then verified retry and recovery in Rot and Plain at both standard sizes. Other generated messages still need review. The 2026-11-19 sweep covered empty Hierarchy, project opening, build, recovery, Play Checks, script editing and runtime messages.
+Status: in progress — Codex Sol, 2026-11-21 · v23 asset import feedback after the prefab feedback slice.
 **Outcome.** All text follows the [writing rules](UX-STANDARDS.md#8-writing)
 and comes from one table with Plain and Rot wording.
 **Facts.** Strings are inline. About 337 literals are longer than 80
