@@ -1,9 +1,18 @@
 //! One recoverable material form, using the same validated commands as agents.
 use super::{combo_focus::ComboFocus, SceneEditor};
+use crate::strings::Text;
 use eframe::egui;
 use rot_assets::{AssetKind, AssetStatus, TextureRole};
 use rot_scene::{MaterialResponse, OpaqueMaterial, Scene, TextureAddress, TextureFilter};
 use serde::{Deserialize, Serialize};
+
+fn material_user_count(scene: &Scene, material_id: &str) -> usize {
+    scene
+        .objects
+        .iter()
+        .filter(|object| object.material.as_deref() == Some(material_id))
+        .count()
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -38,7 +47,7 @@ pub(super) struct MaterialDraft {
     pub address: TextureAddress,
 }
 impl MaterialDraft {
-    fn new(scene: &Scene, object_id: &str, intent: MaterialIntent) -> Option<Self> {
+    pub(super) fn new(scene: &Scene, object_id: &str, intent: MaterialIntent) -> Option<Self> {
         let object = scene.objects.iter().find(|object| object.id == object_id)?;
         let original = object
             .material
@@ -54,10 +63,15 @@ impl MaterialDraft {
             original.clone()?
         };
         let name = match intent {
-            MaterialIntent::Create => "Material".to_string(),
+            MaterialIntent::Create => Text::ComponentMaterial.plain().into(),
             MaterialIntent::MakeUnique => {
-                let original = value.name.as_deref().unwrap_or("Material");
-                let copy = format!("{original} copy");
+                let original = value
+                    .name
+                    .as_deref()
+                    .unwrap_or(Text::ComponentMaterial.plain());
+                let copy = Text::MaterialCopyName
+                    .plain()
+                    .replace("{material}", original);
                 if copy.len() <= 128 {
                     copy
                 } else {
@@ -86,6 +100,17 @@ impl MaterialDraft {
             address: value.address,
         })
     }
+
+    pub(super) fn affected_object_count(&self, scene: &Scene) -> usize {
+        match self.intent {
+            MaterialIntent::EditShared => self
+                .original_assignment
+                .as_deref()
+                .map_or(0, |id| material_user_count(scene, id)),
+            MaterialIntent::Create | MaterialIntent::MakeUnique => 1,
+        }
+    }
+
     pub fn storage_valid(&self) -> bool {
         rot_scene::validate_id(&self.object_id).is_ok()
             && self
@@ -138,9 +163,9 @@ impl MaterialDraft {
             let value = text
                 .trim()
                 .parse::<f64>()
-                .map_err(|_| "Enter three finite tint channels from 0 to 1.")?;
+                .map_err(|_| Text::MaterialTintInvalid.plain())?;
             if !value.is_finite() || !(0.0..=1.0).contains(&value) {
-                return Err("Enter three finite tint channels from 0 to 1.".into());
+                return Err(Text::MaterialTintInvalid.plain().into());
             }
             *output = value as f32;
         }
@@ -156,7 +181,7 @@ impl MaterialDraft {
                     .parse::<f64>()
                     .ok()
                     .filter(|value| value.is_finite() && (0.08..=1.0).contains(value))
-                    .ok_or("Roughness requires a finite number from 0.08 to 1.")?;
+                    .ok_or(Text::MaterialRoughnessInvalid.plain())?;
                 MaterialResponse::Dielectric {
                     roughness: original as f32,
                 }
@@ -230,19 +255,17 @@ impl SceneEditor {
         );
         let result = (|| {
             if !self.material_editable_for_save(true) {
-                return Err(
-                    "Finish other edits and resolve dialogs before applying the material.".into(),
-                );
+                return Err(Text::MaterialApplyBlocked.plain().into());
             }
             if !draft.validate_snapshot(self.session.scene(), self.selected.as_deref()) {
-                return Err("Material target changed; cancel this draft and inspect again.".into());
+                return Err(Text::MaterialTargetChanged.plain().into());
             }
             let value = draft.parse()?;
             if draft.intent == MaterialIntent::EditShared {
                 let id = draft
                     .original_assignment
                     .as_deref()
-                    .ok_or("Material no longer assigned.")?;
+                    .ok_or(Text::MaterialUnassigned.plain())?;
                 self.validate_material_candidate(id, &value)?;
                 self.session
                     .set_material(draft.revision, id, value)
@@ -266,9 +289,7 @@ impl SceneEditor {
                             rot_render::object_has_complete_uvs(object, &self.resolved)
                         })
                 {
-                    return Err(
-                        "Assign a mesh with complete UVs before using a textured material.".into(),
-                    );
+                    return Err(Text::MaterialTextureNeedsUvs.plain().into());
                 }
                 self.session
                     .create_and_assign_material(draft.revision, &draft.object_id, id, value)
@@ -282,8 +303,7 @@ impl SceneEditor {
                 self.draft_generation = self.draft_generation.wrapping_add(1);
                 self.sync_draft();
                 self.error.clear();
-                self.notice =
-                    "Material applied. Undo restores the edit; Reset updates the preview.".into();
+                self.notice = Text::MaterialApplied.plain().into();
                 true
             }
             Err(error) => {
@@ -303,7 +323,7 @@ impl SceneEditor {
         self.material_draft = None;
         self.draft_generation = self.draft_generation.wrapping_add(1);
         self.error.clear();
-        self.notice = "Material change cancelled.".into();
+        self.notice = Text::MaterialCancelled.plain().into();
     }
     fn assign_material_ui(&mut self, object_id: &str, material: Option<String>) {
         if !self.material_editable() || self.material_draft.is_some() {
@@ -320,7 +340,7 @@ impl SceneEditor {
             Ok(_) => {
                 self.sync_draft();
                 self.error.clear();
-                self.notice = "Material assignment updated.".into();
+                self.notice = Text::MaterialAssigned.plain().into();
             }
             Err(error) => self.error = error,
         }
@@ -426,7 +446,6 @@ impl SceneEditor {
         self.material_draft = Some(draft);
         self.draft_generation = self.draft_generation.wrapping_add(1);
         self.error.clear();
-        self.notice = "Texture chosen. Apply material to commit the edit.".into();
         Ok(())
     }
 
@@ -446,132 +465,196 @@ impl SceneEditor {
             return;
         };
         let editable = self.material_editable();
+        let popup_at_start = egui::Popup::is_any_open(ui.ctx());
         ui.separator();
-        ui.horizontal(|ui| {
-            ui.strong("Material");
-            ui.weak("Opaque").on_hover_text(
-                "Base-color PNGs render as opaque surfaces; texture alpha is not used.",
-            );
+        ui.horizontal_wrapped(|ui| {
+            ui.strong(Text::ComponentMaterial.plain());
+            if self.material_draft.is_some() {
+                ui.colored_label(
+                    crate::editor_theme::colors(ui).warning,
+                    Text::MaterialUnapplied.plain(),
+                );
+            } else if let Some(id) = object.material.as_deref() {
+                let count = material_user_count(self.session.scene(), id);
+                ui.weak(if count == 1 {
+                    Text::MaterialUsedByOne.plain().into()
+                } else {
+                    Text::MaterialUsedByMany
+                        .plain()
+                        .replace("{count}", &count.to_string())
+                });
+            }
         });
-        let choices = self
-            .session
-            .scene()
-            .materials
-            .iter()
-            .map(|(id, material)| {
-                (
-                    id.clone(),
-                    material.name.clone().unwrap_or_else(|| id.clone()),
-                )
-            })
-            .collect::<Vec<_>>();
-        let mut remove = None;
-        ui.add_enabled_ui(editable && self.material_draft.is_none(), |ui| {
-            ui.menu_button("Manage materials", |ui| {
-                egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
-                    if choices.is_empty() { ui.label("No materials yet."); }
-                    for (id,name) in &choices {
-                        let users = self.session.scene().objects.iter().filter(|object| object.material.as_deref()==Some(id.as_str())).count();
-                        ui.push_id(id, |ui| ui.horizontal(|ui| {
-                            ui.label(name).on_hover_text(id);
-                            if ui.add_enabled(users==0,egui::Button::new("Delete"))
-                                .on_hover_text(if users==0 {"Delete the unused material; Undo restores it.".to_string()} else {format!("Used by {users} objects; clear their assignments first.")}).clicked() {
-                                remove=Some(id.clone());ui.close();
-                            }
-                        }));
+        let mut started_draft = false;
+        let mut actions = None;
+        if let Some(draft) = self.material_draft.as_ref() {
+            actions = Some(
+                ui.horizontal_wrapped(|ui| {
+                    let apply = ui
+                        .add_enabled(editable, egui::Button::new(Text::MaterialApply.plain()))
+                        .on_hover_text(Text::MaterialApplyHint.plain());
+                    let cancel = ui
+                        .add_enabled(editable, egui::Button::new(Text::ComponentCancel.plain()))
+                        .on_hover_text(Text::MaterialCancelHint.plain());
+                    (apply, cancel)
+                })
+                .inner,
+            );
+            let scope = match draft.intent {
+                MaterialIntent::EditShared => {
+                    let count = draft.affected_object_count(self.session.scene());
+                    if count == 1 {
+                        Text::MaterialAffectsOne.plain().into()
+                    } else {
+                        Text::MaterialAffectsMany
+                            .plain()
+                            .replace("{count}", &count.to_string())
                     }
+                }
+                MaterialIntent::Create => Text::MaterialNewFor
+                    .plain()
+                    .replace("{object}", object.display_name()),
+                MaterialIntent::MakeUnique => Text::MaterialUniqueFor
+                    .plain()
+                    .replace("{object}", object.display_name()),
+            };
+            ui.horizontal_wrapped(|ui| {
+                ui.set_min_height(ui.spacing().interact_size.y);
+                ui.weak(scope);
+            });
+        } else {
+            let scene = self.session.scene();
+            let mut assigned = object.material.as_deref();
+            let mut remove = None;
+            ui.add_enabled_ui(editable, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    let focus = ComboFocus::capture(ui, "object_material_assignment");
+                    let mut selected = false;
+                    let response = egui::ComboBox::from_id_salt("object_material_assignment")
+                        .truncate()
+                        .selected_text(
+                            assigned
+                                .and_then(|id| {
+                                    scene
+                                        .materials
+                                        .get(id)
+                                        .map(|material| material.display_name(id))
+                                })
+                                .unwrap_or(Text::ComponentNoMaterial.plain()),
+                        )
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_value(
+                                    &mut assigned,
+                                    None,
+                                    Text::ComponentNoMaterial.plain(),
+                                )
+                                .clicked()
+                            {
+                                selected = true;
+                                ui.close();
+                            }
+                            for (id, material) in &scene.materials {
+                                if ui
+                                    .selectable_value(
+                                        &mut assigned,
+                                        Some(id.as_str()),
+                                        material.display_name(id),
+                                    )
+                                    .on_hover_text(id)
+                                    .clicked()
+                                {
+                                    selected = true;
+                                    ui.close();
+                                }
+                            }
+                        });
+                    focus.restore(ui, &response.response, selected);
+                    ui.menu_button(Text::MaterialManage.plain(), |ui| {
+                        egui::ScrollArea::vertical()
+                            .max_height(240.0)
+                            .show(ui, |ui| {
+                                if scene.materials.is_empty() {
+                                    ui.label(Text::MaterialEmpty.plain());
+                                }
+                                for (id, material) in &scene.materials {
+                                    let unused = material_user_count(scene, id) == 0;
+                                    ui.push_id(id, |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.label(material.display_name(id)).on_hover_text(id);
+                                            if ui
+                                                .add_enabled(
+                                                    unused,
+                                                    egui::Button::new(Text::MaterialDelete.plain()),
+                                                )
+                                                .on_hover_text(if unused {
+                                                    Text::MaterialDeleteHint.plain()
+                                                } else {
+                                                    Text::MaterialInUseHint.plain()
+                                                })
+                                                .clicked()
+                                            {
+                                                remove = Some(id.clone());
+                                                ui.close();
+                                            }
+                                        })
+                                    });
+                                }
+                            });
+                    });
                 });
             });
-        });
-        if let Some(id) = remove {
-            match self
-                .session
-                .remove_material(self.session.scene().revision, &id)
-            {
-                Ok(_) => {
-                    self.sync_draft();
-                    self.error.clear();
-                    self.notice = "Unused material deleted. Undo restores it.".into();
+            let assignment = assigned.map(str::to_owned);
+            if let Some(id) = remove {
+                match self
+                    .session
+                    .remove_material(self.session.scene().revision, &id)
+                {
+                    Ok(_) => {
+                        self.sync_draft();
+                        self.error.clear();
+                        self.notice = Text::MaterialDeleted.plain().into();
+                    }
+                    Err(error) => self.error = error.to_string(),
                 }
-                Err(error) => self.error = error.to_string(),
             }
+            if assignment != object.material {
+                self.assign_material_ui(&object.id, assignment);
+            }
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .add_enabled(editable, egui::Button::new(Text::MaterialNew.plain()))
+                    .clicked()
+                {
+                    started_draft = true;
+                    self.begin_material_draft(ui, MaterialIntent::Create);
+                }
+                if object.material.is_some()
+                    && ui
+                        .add_enabled(
+                            editable && !started_draft,
+                            egui::Button::new(Text::MaterialMakeUnique.plain()),
+                        )
+                        .on_hover_text(Text::MaterialUniqueHint.plain())
+                        .clicked()
+                {
+                    started_draft = true;
+                    self.begin_material_draft(ui, MaterialIntent::MakeUnique);
+                }
+            });
         }
-        let mut assigned = object.material.clone();
-        ui.add_enabled_ui(editable && self.material_draft.is_none(), |ui| {
-            let focus = ComboFocus::capture(ui, "object_material_assignment");
-            let mut selected = false;
-            let response = egui::ComboBox::from_id_salt("object_material_assignment")
-                .selected_text(
-                    choices
-                        .iter()
-                        .find(|(id, _)| Some(id) == assigned.as_ref())
-                        .map(|(_, name)| name.as_str())
-                        .unwrap_or("None"),
-                )
-                .show_ui(ui, |ui| {
-                    if ui.selectable_value(&mut assigned, None, "None").clicked() {
-                        selected = true;
-                        ui.close();
-                    }
-                    for (id, name) in &choices {
-                        if ui
-                            .selectable_value(&mut assigned, Some(id.clone()), name)
-                            .on_hover_text(id)
-                            .clicked()
-                        {
-                            selected = true;
-                            ui.close();
-                        }
-                    }
-                });
-            focus.restore(ui, &response.response, selected);
-        });
-        if assigned != object.material {
-            self.assign_material_ui(&object.id, assigned);
-        }
-        let mut started_draft = false;
-        ui.horizontal_wrapped(|ui| {
-            if ui.add_enabled(editable && self.material_draft.is_none(), egui::Button::new("New material")).clicked() {
-                started_draft = true;
-                self.begin_material_draft(ui, MaterialIntent::Create);
-            }
-            if object.material.is_some() && ui.add_enabled(editable && self.material_draft.is_none(), egui::Button::new("Make unique"))
-                .on_hover_text("Copy this material for the active object; other objects keep the original.").clicked() {
-                started_draft = true;
-                self.begin_material_draft(ui, MaterialIntent::MakeUnique);
-            }
-        });
         let Some(mut draft) = self.material_draft.clone().or_else(|| {
             MaterialDraft::new(self.session.scene(), &object.id, MaterialIntent::EditShared)
         }) else {
             return;
         };
-        if draft.intent == MaterialIntent::EditShared {
-            let users = self
-                .session
-                .scene()
-                .objects
-                .iter()
-                .filter(|other| other.material == draft.original_assignment)
-                .count();
-            ui.weak(format!(
-                "Shared by {users} {}",
-                if users == 1 { "object" } else { "objects" }
-            ));
-        } else {
-            ui.strong(if draft.intent == MaterialIntent::Create {
-                "New material"
-            } else {
-                "Independent material copy"
-            });
-        }
-        let popup_at_start = egui::Popup::is_any_open(ui.ctx());
         let mut changed = false;
         let mut enter = false;
         let mut escape = false;
         let mut submitting_field = None;
         let mut dropped_texture = None;
-        ui.add_enabled_ui(editable, |ui| {
+        let fields_ui = egui::UiBuilder::new().id_salt("material_fields");
+        ui.scope_builder(if editable { fields_ui } else { fields_ui.disabled() }, |ui| {
             ui.label("Name");
             let name = ui.add(
                 egui::TextEdit::singleline(&mut draft.name)
@@ -768,8 +851,9 @@ impl SceneEditor {
             changed |= filter != draft.filter || address != draft.address;
             for response in &fields {
                 let owned = editable && (response.has_focus()
-                    || response.lost_focus()
-                    || ui.memory(|memory| memory.had_focus_last_frame(response.id)));
+                    || ui.memory(|memory| {
+                        memory.focused().is_none() && memory.had_focus_last_frame(response.id)
+                    }));
                 if owned && !started_draft && !popup_at_start && !egui::Popup::is_any_open(ui.ctx())
                 {
                     if ui.input_mut(|input| {
@@ -797,9 +881,11 @@ impl SceneEditor {
             }
         }
         if self.material_draft.is_some() {
-            ui.horizontal(|ui| {
-                let apply = ui.add_enabled(editable, egui::Button::new("Apply material"));
-                let cancel = ui.add_enabled(editable, egui::Button::new("Cancel material"));
+            let mut apply_clicked = false;
+            let mut cancel_clicked = false;
+            if let Some((apply, cancel)) = actions {
+                apply_clicked = apply.clicked();
+                cancel_clicked = cancel.clicked();
                 let action_owns = editable
                     && [&apply, &cancel].iter().any(|response| {
                         response.has_focus()
@@ -813,15 +899,14 @@ impl SceneEditor {
                         input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
                     });
                 }
-                if (apply.clicked() || (editable && enter)) && !self.apply_material_draft() {
-                    if let Some(id) = submitting_field {
-                        ui.memory_mut(|memory| memory.request_focus(id));
-                    }
+            }
+            if cancel_clicked || escape {
+                self.cancel_material_draft();
+            } else if (apply_clicked || (editable && enter)) && !self.apply_material_draft() {
+                if let Some(id) = submitting_field {
+                    ui.memory_mut(|memory| memory.request_focus(id));
                 }
-                if cancel.clicked() || escape {
-                    self.cancel_material_draft();
-                }
-            });
+            }
         }
     }
 }
@@ -845,6 +930,76 @@ mod tests {
         editor.select_object(Some("left".into()), false);
         editor
     }
+
+    #[test]
+    fn material_inspect_reports_scope_without_revealing_draft_values() {
+        let mut editor = editor();
+        let inspect = |editor: &mut SceneEditor| {
+            editor
+                .material_command("scene", "material_inspect", &json!({"limit":"1"}))
+                .unwrap()
+        };
+        let before = inspect(&mut editor);
+        assert!(before.get("pending_material").is_none());
+        assert_eq!(before["materials"][0]["assigned_count"], 2);
+
+        for (intent, scope) in [
+            (
+                MaterialIntent::EditShared,
+                json!({"intent":"edit_shared","object_id":"left","material_id":"shared","affected_object_count":2}),
+            ),
+            (
+                MaterialIntent::MakeUnique,
+                json!({"intent":"make_unique","object_id":"left","source_material_id":"shared","affected_object_count":1}),
+            ),
+            (
+                MaterialIntent::Create,
+                json!({"intent":"create","object_id":"left","affected_object_count":1}),
+            ),
+        ] {
+            let mut draft = MaterialDraft::new(editor.session.scene(), "left", intent).unwrap();
+            draft.name = "Unpublished name".into();
+            draft.tint[0] = "invalid".into();
+            editor.material_draft = Some(draft.clone());
+
+            let read = inspect(&mut editor);
+            assert_eq!(read["pending_material"], scope);
+            assert_eq!(read["materials"], before["materials"]);
+            assert_eq!(read["revision"], before["revision"]);
+            let write = editor.material_command(
+                "scene",
+                "scene_material_set",
+                &json!({
+                    "expected_session_token":"scene",
+                    "expected_revision":read["revision"],
+                    "expected_asset_revision":read["asset_revision"],
+                    "material_id":"shared",
+                    "material":{
+                        "tint":[0.0,0.0,0.0], "base_color_texture":null,
+                        "filter":"linear", "address":"repeat"
+                    }
+                }),
+            );
+            assert_eq!(write.unwrap_err().0, "drafts_pending");
+            assert_eq!(editor.material_draft.as_ref(), Some(&draft));
+            editor.cancel_material_draft();
+            assert!(inspect(&mut editor).get("pending_material").is_none());
+        }
+
+        let mut draft =
+            MaterialDraft::new(editor.session.scene(), "left", MaterialIntent::EditShared).unwrap();
+        draft.tint[0] = "0.25".into();
+        editor.material_draft = Some(draft);
+        assert!(editor.apply_material_draft());
+        let after = inspect(&mut editor);
+        assert!(after.get("pending_material").is_none());
+        assert_eq!(
+            after["materials"][0]["material"]["tint"],
+            json!([0.25, 1.0, 1.0])
+        );
+        assert_eq!(editor.session.undo_len(), 1);
+    }
+
     // Full inspector ownership risk: failed Enter must leave editable text,
     // Tab/Escape must still work, and UI Make unique must be one transaction.
     #[test]

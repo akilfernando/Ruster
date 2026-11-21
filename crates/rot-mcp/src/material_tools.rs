@@ -4,27 +4,27 @@ use serde_json::{json, Map, Value};
 const TOOLS: &[(&str, &str, &[&str])] = &[
     (
         "material_inspect",
-        "Read a bounded page of scene-owned opaque material definitions including authored response/roughness and both texture slots, shared-user counts and separate texture-role/readiness/UV diagnostics, plus authored scene display/exposure and separately labeled last-prepared viewport feedback. Prepared feedback may be stale and does not prove GPU completion or hidden rendering. Reports scene session/revision and asset_revision (string0 without a catalog); no image bytes, source bodies or filesystem access. Optional canonical-string offset and limit1..16; default limit16.",
+        "Read a bounded page of scene-owned opaque material definitions including authored response/roughness and both texture slots, shared-user counts and separate texture-role/readiness/UV diagnostics, plus authored scene display/exposure and separately labeled last-prepared viewport feedback. Prepared feedback may be stale and does not prove GPU completion or hidden rendering. If a human material edit is pending, pending_material reports its intent, object_id, any known material_id or source_material_id, and affected_object_count. Listed materials show committed settings. Reports scene session/revision and asset_revision (string0 without a catalog); no image bytes, source bodies or filesystem access. Optional canonical-string offset and limit1..16; default limit16.",
         &[],
     ),
     (
         "scene_material_set",
-        "Create or fully replace a scene-owned opaque material. Shared edits affect every assigned object; object tint remains multiplied into appearance. Optional assign_object_id atomically assigns only a newly created material. Both texture slots require matching accepted import roles and complete UVs for all users, including inactive roughness maps. Omitted or null roughness_texture clears that slot; assignment never changes the scalar or scene display. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry; preview unchanged until Reset. Source imports/refresh remain outside scene Undo.",
+        "Create or fully replace a scene-owned opaque material. Shared edits affect every assigned object; object tint remains multiplied into appearance. Optional assign_object_id atomically assigns only a newly created material. Both texture slots require matching accepted import roles and complete UVs for all users, including inactive roughness maps. Omitted or null roughness_texture clears that slot; assignment never changes the scalar or scene display. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry. Source imports/refresh remain outside scene Undo.",
         &["material_id", "material"],
     ),
     (
         "scene_material_assign",
-        "Assign a scene-owned material to one object, or null to clear its assignment. Retains object tint; textures require accepted texture content and complete object UVs. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry; preview unchanged until Reset. Source imports/refresh remain outside scene Undo.",
+        "Assign a scene-owned material to one object, or null to clear its assignment. Retains object tint; textures require accepted texture content and complete object UVs. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry. Source imports/refresh remain outside scene Undo.",
         &["object_id", "material_id"],
     ),
     (
         "scene_material_copy",
-        "Copy one material into a fresh scene-owned ID with an optional display name. Does not assign objects. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry; preview unchanged until Reset. Source imports/refresh remain outside scene Undo.",
+        "Copy one material into a fresh scene-owned ID with an optional display name. Does not assign objects. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry. Source imports/refresh remain outside scene Undo.",
         &["source_id", "new_material_id"],
     ),
     (
         "scene_material_remove",
-        "Remove an unreferenced scene-owned material; rejects materials still assigned to objects. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry; preview unchanged until Reset. Source imports/refresh remain outside scene Undo.",
+        "Remove an unreferenced scene-owned material; rejects materials still assigned to objects. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry. Source imports/refresh remain outside scene Undo.",
         &["material_id"],
     ),
 ];

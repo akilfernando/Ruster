@@ -1,5 +1,5 @@
 //! Shared material transactions; neither human drafts nor preview are applied here.
-use super::SceneEditor;
+use super::{material_ui::MaterialIntent, SceneEditor};
 use rot_assets::{AssetKind, AssetStatus, TextureRole};
 use rot_scene::{OpaqueMaterial, SceneError};
 use serde_json::{json, Map, Value};
@@ -339,9 +339,24 @@ impl SceneEditor {
                 .map_or(0, |store| store.revision())
                 .to_string()
         });
-        Ok(
-            json!({"session_token":token,"scene_id":self.session.scene().id,"revision":self.session.scene().revision.to_string(),"asset_revision":asset_revision,"asset_operation":self.asset_observation(),"catalog_available":self.assets.is_some(),"display":self.session.scene().display,"viewport_display_report":self.surface_feedback(),"materials":materials,"material_count":count,"next_offset":if offset+limit<count {Some((offset+limit).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending()}),
-        )
+        let scene = self.session.scene();
+        let mut result = json!({"session_token":token,"scene_id":scene.id,"revision":scene.revision.to_string(),"asset_revision":asset_revision,"asset_operation":self.asset_observation(),"catalog_available":self.assets.is_some(),"display":scene.display,"viewport_display_report":self.surface_feedback(),"materials":materials,"material_count":count,"next_offset":if offset+limit<count {Some((offset+limit).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending()});
+        if let Some(draft) = &self.material_draft {
+            let mut pending = json!({
+                "intent": draft.intent,
+                "object_id": draft.object_id,
+                "affected_object_count": draft.affected_object_count(scene)
+            });
+            if let Some(id) = &draft.original_assignment {
+                match draft.intent {
+                    MaterialIntent::EditShared => pending["material_id"] = json!(id),
+                    MaterialIntent::MakeUnique => pending["source_material_id"] = json!(id),
+                    MaterialIntent::Create => {}
+                }
+            }
+            result["pending_material"] = pending;
+        }
+        Ok(result)
     }
 
     pub(super) fn material_command(

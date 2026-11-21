@@ -49,9 +49,16 @@ connected project.
 - Decimal arguments accept JSON integers or decimal strings.
 - When the creator pauses AI edits (the toolbar mushroom), changes wait
   inside the call until resumed, up to 50 seconds; reads still run.
-- If the creator has an unfinished field edit, it is committed before the AI
-  edit; during a drag the AI edit waits up to a second. AI changes appear in
+- Pending transform and other ordinary field edits can commit before the AI
+  edit. During a drag the AI edit waits up to a second. AI changes appear in
   the Edit menu as "Undo AI: Move Cube".
+- In legacy scenes, `material_inspect` lists committed material settings and
+  includes `pending_material` while the creator has an unapplied material edit.
+  The summary gives the intent (`edit_shared`, `make_unique`, or `create`),
+  `object_id`, `affected_object_count`, and the `material_id` for a shared edit
+  or `source_material_id` for a copy. AI requests leave pending material edits
+  in the Inspector. Material writes return `drafts_pending` until the creator
+  applies or cancels the edit.
 - `viewport_screenshot` returns a PNG of the viewport, at most 512 pixels, in
   one call. `viewport_capture_start` and `viewport_capture_inspect` do the
   same in two steps. Use `viewport_capture_pick` with the capture ID and

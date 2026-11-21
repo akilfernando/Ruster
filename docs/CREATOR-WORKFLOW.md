@@ -116,6 +116,25 @@ pages are independent of assets, models and prefabs. Recheck the first issue
 page after making a repair because issues can change without a catalog
 revision.
 
+## Edit a material in a legacy scene
+
+Select an object and find **Material** in the Inspector. Editing a material
+field shows **Unapplied Changes** and how many objects the edit affects.
+Choose **Apply Material** to update the shared material in one Undo step.
+Choose **Make Unique** to copy the material for the selected object, or
+**New Material** to create one for it. Apply creates and assigns the material
+in one step. **Cancel** discards the pending edit.
+
+With a material field focused, press Enter to apply or Escape to cancel. If
+a dropdown is open, those keys act on the dropdown first. Saving applies a
+valid pending edit before writing the scene. Correct or cancel an invalid
+edit to save.
+
+An approved MCP client can use `material_inspect` to read committed settings.
+The optional `pending_material` summary reports the current edit's intent,
+target IDs, and affected object count. Apply or cancel the pending edit
+before retrying a material command that writes to the scene.
+
 ## Reuse a hierarchy as a prefab
 
 1. In a v23 project, create an empty root and use **Create Child** to build

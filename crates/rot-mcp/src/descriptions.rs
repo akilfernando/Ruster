@@ -32,7 +32,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("scene_color", "Set an object's color as RGBA from 0 to 1."),
     ("scene_group_create", "Create an empty object for assembly. In v23, set an optional parent and local transform. Before repeating an assembly, consider framing and inspecting the first one."),
     ("scene_reparent", "Move an object under a parent object, or to the top level with null, keeping its world position."),
-    ("material_inspect", "List the scene's materials with their textures, users and display settings."),
+    ("material_inspect", "List committed materials, textures, users and display settings. A pending_material summary, when present, reports a human edit's intent, IDs and affected object count."),
     ("scene_material_set", "Create or replace a material. Changes apply to every object using it; assign_object_id assigns a new material."),
     ("scene_material_assign", "Assign a material to an object, or null to remove it."),
     ("scene_material_copy", "Copy a material under a new ID."),

@@ -105,6 +105,72 @@ mod tests {
     }
 
     #[test]
+    fn native_ai_requests_preserve_the_pending_material_edit() {
+        let ctx = egui::Context::default();
+        let mut scene = Scene::demo();
+        scene.materials.insert("shared".into(), Default::default());
+        for object in &mut scene.objects[..2] {
+            object.material = Some("shared".into());
+        }
+        let mut host = Host {
+            editor: SceneEditor::new(Session::new(scene).unwrap()),
+            input: Default::default(),
+            bridge: None,
+            workspace: None,
+            workspace_enabled: false,
+        };
+        host.editor.select_object(Some("left".into()), false);
+        let mut draft = material_ui::MaterialDraft::new(
+            host.editor.session.scene(),
+            "left",
+            material_ui::MaterialIntent::EditShared,
+        )
+        .unwrap();
+        draft.tint[0] = "0.25".into();
+        host.editor.material_draft = Some(draft.clone());
+        let before = host.editor.session.snapshot_bytes().unwrap();
+        let dispatch = |host: &mut Host, operation, arguments| {
+            let (bridge, mut reply) = crate::bridge::queued_test_bridge(
+                json!({"operation":operation,"arguments":arguments}),
+                Instant::now() + Duration::from_secs(10),
+            );
+            host.bridge = Some(bridge);
+            tick(host, &ctx, vec![]);
+            reply().unwrap()
+        };
+        let read = dispatch(&mut host, "material_inspect", json!({}));
+        let result = &read["result"];
+        assert_eq!(result["pending_material"]["affected_object_count"], 2);
+        let rejected = dispatch(
+            &mut host,
+            "scene_material_set",
+            json!({
+                "expected_session_token":result["session_token"],
+                "expected_revision":result["revision"],
+                "expected_asset_revision":result["asset_revision"],
+                "material_id":"shared",
+                "material":{
+                    "tint":[0.5,0.5,0.5], "base_color_texture":null,
+                    "filter":"linear", "address":"repeat"
+                }
+            }),
+        );
+        assert_eq!(rejected["error"]["code"], "drafts_pending");
+        let rejected = dispatch(
+            &mut host,
+            "scene_ambient_set",
+            json!({
+                "expected_session_token":result["session_token"],
+                "expected_revision":result["revision"],
+                "ambient":{"color":[1,1,1],"intensity":0.1}
+            }),
+        );
+        assert_eq!(rejected["error"]["code"], "drafts_pending");
+        assert_eq!(host.editor.material_draft.as_ref(), Some(&draft));
+        assert_eq!(host.editor.session.snapshot_bytes().unwrap(), before);
+    }
+
+    #[test]
     fn hidden_owner_dispatch_preserves_fresh_input_drafts_close_and_expiry() {
         let ctx = egui::Context::default();
         let mut host = Host {
@@ -345,8 +411,8 @@ impl Host {
     }
 
     /// Serve AI requests: several per frame while they keep arriving, within a
-    /// few milliseconds. A creator's pending field edit is committed first, as
-    /// if they had pressed Enter, so the AI's change lands on top of it.
+    /// few milliseconds. Pending field edits can settle before an AI change.
+    /// Material drafts stay open for the creator to apply or cancel.
     #[cfg(unix)]
     fn dispatch_ai_requests(&mut self, ctx: &egui::Context) {
         let budget = std::time::Instant::now() + std::time::Duration::from_millis(4);
@@ -366,7 +432,10 @@ impl Host {
                 && !self.editor.manipulation.active()
             {
                 for _ in 0..8 {
-                    if !self.editor.drafts() || !self.editor.apply() {
+                    if self.editor.material_draft.is_some()
+                        || !self.editor.drafts()
+                        || !self.editor.apply()
+                    {
                         break;
                     }
                 }
