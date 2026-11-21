@@ -312,19 +312,19 @@ impl RuntimeUi {
                                 });
                             }
                         } else {
-                            ui.label(if frame.tick == 0 { "Reset complete. No input tick committed." }
-                                else { "Last committed input is unavailable for this snapshot." });
+                            ui.label(if frame.tick == 0 { "No input has been processed yet." }
+                                else { "Input is unavailable for this frame." });
                         }
                         ui.separator();
                         ui.heading(if frame.scene.hierarchy.is_empty() {
-                            "Object transforms"
+                            "Object Transforms"
                         } else {
-                            "Group transforms"
+                            "Group Transforms"
                         });
                         let bindings = &frame.authoring.bindings;
                         let count = bindings.values().filter(|binding| binding.enabled).count();
-                        if count == 0 { ui.label("No enabled behavior bindings."); }
-                        if count > 16 { ui.label(format!("Showing the first 16 of {count} enabled bindings.")); }
+                        if count == 0 { ui.label("No scripts are enabled."); }
+                        if count > 16 { ui.label(format!("Showing 16 of {count} enabled script instances.")); }
                         for (id, binding) in bindings.iter().filter(|(_, binding)| binding.enabled).take(16) {
                             match &binding.target {
                                 rot_scene::BindingTarget::Object(owner) => {
@@ -345,7 +345,7 @@ impl RuntimeUi {
                                     }
                                 }
                                 rot_scene::BindingTarget::Application => {
-                                    ui.label(format!("{id} · Application behavior"));
+                                    ui.label(format!("{id} · Application script"));
                                 }
                             }
                         }
@@ -1110,7 +1110,7 @@ mod tests {
                         assert!(visible_label(&rendered.borrow(), "Scene controls"));
                     }
                     if navigation == egui::Key::End {
-                        assert!(visible_label(&rendered.borrow(), "Object transforms"));
+                        assert!(visible_label(&rendered.borrow(), "Object Transforms"));
                     }
                     if navigation == egui::Key::PageDown && size.y == 480.0 {
                         assert!(

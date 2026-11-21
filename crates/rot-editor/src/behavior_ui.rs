@@ -1277,147 +1277,301 @@ impl BehaviorUi {
         if !editable {
             ui.label(Text::ScriptFinishOtherEdits.plain());
         }
-        ui.add_enabled_ui(editable,|ui| {
-            if let Some((id,binding))=attached {
-                if let Some(source)=session.source(&binding.source_id) {ui.label(source.label.as_deref().unwrap_or(&binding.source_id));}
-                let mut enabled=binding.enabled;
-                if ui.checkbox(&mut enabled,"Enabled").changed() {action=Some(Action::Enable(id.clone(),enabled));}
+        ui.add_enabled_ui(editable, |ui| {
+            if let Some((id, binding)) = attached {
+                if let Some(source) = session.source(&binding.source_id) {
+                    ui.label(source.label.as_deref().unwrap_or(&binding.source_id));
+                }
+                let mut enabled = binding.enabled;
+                if ui.checkbox(&mut enabled, "Enabled").changed() {
+                    action = Some(Action::Enable(id.clone(), enabled));
+                }
                 ui.horizontal_wrapped(|ui| {
-                    if ui.button(Text::ScriptEditSource.plain()).clicked() {action=Some(Action::OpenSource(binding.source_id.clone()));}
-                    ui.menu_button("Manage",|ui| {
-                        if ui.button(Text::ScriptDetach.plain()).clicked() {action=Some(Action::Detach(id.clone()));ui.close();}
-                        ui.menu_button("Other sources",|ui| {for (id,label) in &self.sources {if ui.button(label).clicked(){action=Some(Action::OpenSource(id.clone()));ui.close();}}});
+                    if ui.button(Text::ScriptEditSource.plain()).clicked() {
+                        action = Some(Action::OpenSource(binding.source_id.clone()));
+                    }
+                    ui.menu_button("Manage", |ui| {
+                        if ui.button(Text::ScriptDetach.plain()).clicked() {
+                            action = Some(Action::Detach(id.clone()));
+                            ui.close();
+                        }
+                        ui.menu_button("Other sources", |ui| {
+                            for (id, label) in &self.sources {
+                                if ui.button(label).clicked() {
+                                    action = Some(Action::OpenSource(id.clone()));
+                                    ui.close();
+                                }
+                            }
+                        });
                     });
                 });
-                if let Some(source)=session.source(&binding.source_id) {
-
-                    if source.language_id!=rot_behavior::LANGUAGE_ID||![rot_behavior::HOST_API_VERSION,rot_behavior::INPUT_HOST_API_VERSION,rot_behavior::SPATIAL_HOST_API_VERSION,rot_behavior::STATE_HOST_API_VERSION,rot_behavior::LIFECYCLE_HOST_API_VERSION,rot_behavior::GROUP_ROTATION_HOST_API_VERSION,rot_behavior::KINEMATIC_HOST_API_VERSION].contains(&source.host_api_version) {ui.colored_label(ui.visuals().warn_fg_color,Text::ScriptCompatibilityWarning.plain());}
-                } else {ui.colored_label(ui.visuals().warn_fg_color,Text::ScriptMissingSource.plain());}
+                if let Some(source) = session.source(&binding.source_id) {
+                    if source.language_id != rot_behavior::LANGUAGE_ID
+                        || ![
+                            rot_behavior::HOST_API_VERSION,
+                            rot_behavior::INPUT_HOST_API_VERSION,
+                            rot_behavior::SPATIAL_HOST_API_VERSION,
+                            rot_behavior::STATE_HOST_API_VERSION,
+                            rot_behavior::LIFECYCLE_HOST_API_VERSION,
+                            rot_behavior::GROUP_ROTATION_HOST_API_VERSION,
+                            rot_behavior::KINEMATIC_HOST_API_VERSION,
+                        ]
+                        .contains(&source.host_api_version)
+                    {
+                        ui.colored_label(
+                            ui.visuals().warn_fg_color,
+                            Text::ScriptCompatibilityWarning.plain(),
+                        );
+                    }
+                } else {
+                    ui.colored_label(
+                        ui.visuals().warn_fg_color,
+                        Text::ScriptMissingSource.plain(),
+                    );
+                }
                 ui.label("Properties");
-                for (name,summary) in &self.property_rows {
-                    ui.push_id((id,name),|ui| {
+                for (name, summary) in &self.property_rows {
+                    ui.push_id((id, name), |ui| {
                         ui.horizontal_wrapped(|ui| {
                             ui.label(name);
                             ui.label(summary);
-                            if ui.add_enabled(!self.property_dirty,egui::Button::new("Edit value")).clicked() {action=Some(Action::EditProperty(id.clone(),name.clone()));}
-                            ui.menu_button("…",|ui| {if ui.button("Remove value").clicked(){action=Some(Action::RemoveProperty(id.clone(),name.clone()));ui.close();}}).response.on_hover_text("Property actions");
-                        });
-                    });
-                }
-                egui::CollapsingHeader::new(Text::ScriptAddProperty.plain()).id_salt(("add_behavior_property",id)).show(ui,|ui| {
-                let popup_at_start = egui::Popup::is_any_open(ui.ctx());
-                ui.label("Name");
-                let name = text(ui,&mut self.new_property,128);
-                egui::ComboBox::from_label("Property type").selected_text(["Number","Bool","Text","Vec3",Text::ScriptObjectReference.plain(),Text::ScriptAssetReference.plain(),"Sound"][self.new_type]).show_ui(ui,|ui| {
-                    for (index,label) in ["Number","Bool","Text","Vec3",Text::ScriptObjectReference.plain(),Text::ScriptAssetReference.plain(),"Sound"].into_iter().enumerate() {if ui.selectable_value(&mut self.new_type,index,label).clicked() {ui.close();}}
-                });
-                let enter = ui.is_enabled()
-                    && !popup_at_start
-                    && !egui::Popup::is_any_open(ui.ctx())
-                    && (name.has_focus()
-                        || (name.lost_focus() && ui.memory(|memory| memory.focused().is_none())))
-                    && ui.input_mut(|input| {
-                        input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
-                    });
-                if ui.button("Add typed property").clicked() || enter {
-                    let value=match self.new_type {0=>PropertyValue::Number(0.0),1=>PropertyValue::Bool(false),2=>PropertyValue::Text(String::new()),3=>PropertyValue::Vec3([0.0;3]),4=>PropertyValue::ObjectRef(None),5=>PropertyValue::AssetRef(None),_=>PropertyValue::SoundRef(rot_scene::SoundRef {asset_id:None,gain:1.0})};
-                    action=Some(Action::AddProperty(id.clone(),self.new_property.clone(),value));
-                }
-                });
-                if !assembly {
-                ui.separator();
-                ui.strong(Text::ScriptStateDefaults.plain());
-                for (name, value) in &binding.state_defaults {
-                    ui.push_id(("state", id, name), |ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label(name);
-                            ui.label(property_summary(&state_property(value)));
                             if ui
-                                .add_enabled(!self.property_dirty, egui::Button::new("Edit default"))
+                                .add_enabled(!self.property_dirty, egui::Button::new("Edit value"))
                                 .clicked()
                             {
-                                action = Some(Action::EditState(id.clone(), name.clone()));
+                                action = Some(Action::EditProperty(id.clone(), name.clone()));
                             }
-                            if ui.button("Remove field").clicked() {
-                                action = Some(Action::RemoveState(id.clone(), name.clone()));
-                            }
+                            ui.menu_button("…", |ui| {
+                                if ui.button("Remove value").clicked() {
+                                    action = Some(Action::RemoveProperty(id.clone(), name.clone()));
+                                    ui.close();
+                                }
+                            })
+                            .response
+                            .on_hover_text("Property actions");
                         });
                     });
                 }
-                let mut state_add_changed = false;
-                egui::CollapsingHeader::new("Add state field")
-                                .id_salt(("add_state", id))
-                                .default_open(self.state_add_dirty)
-                                .show(ui, |ui| {
-                                    if self.state_add_dirty && self.state_add.as_ref().is_some_and(|draft| draft.binding != *id) {
-                                        ui.label("Finish or cancel the other script’s state field first.");
-                                        return;
+                egui::CollapsingHeader::new(Text::ScriptAddProperty.plain())
+                    .id_salt(("add_behavior_property", id))
+                    .show(ui, |ui| {
+                        let popup_at_start = egui::Popup::is_any_open(ui.ctx());
+                        ui.label("Name");
+                        let name = text(ui, &mut self.new_property, 128);
+                        egui::ComboBox::from_label("Property type")
+                            .selected_text(
+                                [
+                                    "Number",
+                                    "Bool",
+                                    "Text",
+                                    "Vec3",
+                                    Text::ScriptObjectReference.plain(),
+                                    Text::ScriptAssetReference.plain(),
+                                    "Sound",
+                                ][self.new_type],
+                            )
+                            .show_ui(ui, |ui| {
+                                for (index, label) in [
+                                    "Number",
+                                    "Bool",
+                                    "Text",
+                                    "Vec3",
+                                    Text::ScriptObjectReference.plain(),
+                                    Text::ScriptAssetReference.plain(),
+                                    "Sound",
+                                ]
+                                .into_iter()
+                                .enumerate()
+                                {
+                                    if ui
+                                        .selectable_value(&mut self.new_type, index, label)
+                                        .clicked()
+                                    {
+                                        ui.close();
                                     }
-                                    if !self.state_add_dirty && self.state_add.as_ref().is_none_or(|draft|
-                                        draft.binding != *id || draft.revision != session.scene().revision) {
-                                        self.state_add = Some(StateAddDraft {
-                                            binding: id.clone(),
-                                            revision: session.scene().revision,
-                                            base_hash: fingerprint(binding),
-                                            source_hash: session.source(&binding.source_id)
-                                                .map(|source| rot_behavior::source_hash(&source.text)),
-                                            name: String::new(),
-                                            kind: 0,
-                                        });
-                                    }
-                                    ui.add_enabled_ui(!self.source_dirty && !self.property_dirty, |ui| {
-                                        let draft = self.state_add.as_mut().expect("current state field form");
-                                        let popup_at_start = egui::Popup::is_any_open(ui.ctx());
-                                        ui.label("Field name");
-                                        let name_id = egui::Id::unique(("behavior-state-add-name", generation, draft.binding.as_str()));
-                                        let name = text_with_id(ui, &mut draft.name, 128, name_id);
-                                        #[cfg(test)] {self.state_add_name_response=Some((name.id,name.rect));}
-                                        if self.state_add_focus && ui.is_enabled() {
-                                            name.request_focus();
-                                            name.scroll_to_me(Some(egui::Align::Center));
-                                            self.state_add_focus=false;
-                                        }
-                                        state_add_changed |= name.changed();
-                                        let kind = egui::ComboBox::from_label("State field type")
-                                            .selected_text(["Number", "Bool", "Text", "Vec3"][draft.kind])
-                                            .show_ui(ui, |ui| {
-                                                for (index, label) in ["Number", "Bool", "Text", "Vec3"].into_iter().enumerate() {
-                                                    state_add_changed |= ui.selectable_value(&mut draft.kind, index, label).changed();
-                                                }
-                                            });
-                                        let owns_key = name.has_focus() || kind.response.has_focus()
-                                            || (name.lost_focus() && ui.memory(|memory| memory.focused().is_none()));
-                                        let enter = owns_key && !popup_at_start && !egui::Popup::is_any_open(ui.ctx())
-                                            && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-                                        if ui.button("Add typed state field").clicked() || enter {
-                                            name.surrender_focus();
-                                            kind.response.surrender_focus();
-                                            action = Some(Action::AddState(id.clone(), draft.name.clone(), draft.value()));
-                                        }
-                                        let escape = owns_key && !popup_at_start && !egui::Popup::is_any_open(ui.ctx())
-                                            && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-                                        if ui.button("Cancel new state field").clicked() || escape {
-                                            name.surrender_focus();
-                                            kind.response.surrender_focus();
-                                            action = Some(Action::CancelStateAdd);
+                                }
+                            });
+                        let enter = ui.is_enabled()
+                            && !popup_at_start
+                            && !egui::Popup::is_any_open(ui.ctx())
+                            && (name.has_focus()
+                                || (name.lost_focus()
+                                    && ui.memory(|memory| memory.focused().is_none())))
+                            && ui.input_mut(|input| {
+                                input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                            });
+                        if ui.button("Add typed property").clicked() || enter {
+                            let value = match self.new_type {
+                                0 => PropertyValue::Number(0.0),
+                                1 => PropertyValue::Bool(false),
+                                2 => PropertyValue::Text(String::new()),
+                                3 => PropertyValue::Vec3([0.0; 3]),
+                                4 => PropertyValue::ObjectRef(None),
+                                5 => PropertyValue::AssetRef(None),
+                                _ => PropertyValue::SoundRef(rot_scene::SoundRef {
+                                    asset_id: None,
+                                    gain: 1.0,
+                                }),
+                            };
+                            action = Some(Action::AddProperty(
+                                id.clone(),
+                                self.new_property.clone(),
+                                value,
+                            ));
+                        }
+                    });
+                if !assembly {
+                    ui.separator();
+                    ui.strong(Text::ScriptStateDefaults.plain());
+                    for (name, value) in &binding.state_defaults {
+                        ui.push_id(("state", id, name), |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(name);
+                                ui.label(property_summary(&state_property(value)));
+                                if ui
+                                    .add_enabled(
+                                        !self.property_dirty,
+                                        egui::Button::new("Edit default"),
+                                    )
+                                    .clicked()
+                                {
+                                    action = Some(Action::EditState(id.clone(), name.clone()));
+                                }
+                                if ui.button("Remove field").clicked() {
+                                    action = Some(Action::RemoveState(id.clone(), name.clone()));
+                                }
+                            });
+                        });
+                    }
+                    let mut state_add_changed = false;
+                    egui::CollapsingHeader::new("Add state field")
+                        .id_salt(("add_state", id))
+                        .default_open(self.state_add_dirty)
+                        .show(ui, |ui| {
+                            if self.state_add_dirty
+                                && self
+                                    .state_add
+                                    .as_ref()
+                                    .is_some_and(|draft| draft.binding != *id)
+                            {
+                                ui.label("Finish or cancel the other script’s state field first.");
+                                return;
+                            }
+                            if !self.state_add_dirty
+                                && self.state_add.as_ref().is_none_or(|draft| {
+                                    draft.binding != *id
+                                        || draft.revision != session.scene().revision
+                                })
+                            {
+                                self.state_add = Some(StateAddDraft {
+                                    binding: id.clone(),
+                                    revision: session.scene().revision,
+                                    base_hash: fingerprint(binding),
+                                    source_hash: session
+                                        .source(&binding.source_id)
+                                        .map(|source| rot_behavior::source_hash(&source.text)),
+                                    name: String::new(),
+                                    kind: 0,
+                                });
+                            }
+                            ui.add_enabled_ui(!self.source_dirty && !self.property_dirty, |ui| {
+                                let draft =
+                                    self.state_add.as_mut().expect("current state field form");
+                                let popup_at_start = egui::Popup::is_any_open(ui.ctx());
+                                ui.label("Field name");
+                                let name_id = egui::Id::unique((
+                                    "behavior-state-add-name",
+                                    generation,
+                                    draft.binding.as_str(),
+                                ));
+                                let name = text_with_id(ui, &mut draft.name, 128, name_id);
+                                #[cfg(test)]
+                                {
+                                    self.state_add_name_response = Some((name.id, name.rect));
+                                }
+                                if self.state_add_focus && ui.is_enabled() {
+                                    name.request_focus();
+                                    name.scroll_to_me(Some(egui::Align::Center));
+                                    self.state_add_focus = false;
+                                }
+                                state_add_changed |= name.changed();
+                                let kind = egui::ComboBox::from_label("State field type")
+                                    .selected_text(["Number", "Bool", "Text", "Vec3"][draft.kind])
+                                    .show_ui(ui, |ui| {
+                                        for (index, label) in ["Number", "Bool", "Text", "Vec3"]
+                                            .into_iter()
+                                            .enumerate()
+                                        {
+                                            state_add_changed |= ui
+                                                .selectable_value(&mut draft.kind, index, label)
+                                                .changed();
                                         }
                                     });
-                                });
-                if state_add_changed {
-                    self.state_add_dirty = true;
-                    self.changed();
-                }
-                if let Some(command_action)=self.command_catalog(ui,session,id,binding,generation) {action=Some(command_action);}
-                }
-                egui::CollapsingHeader::new(Text::ScriptDetails.plain()).id_salt(("behavior_details",id)).show(ui,|ui| {
-                    ui.label(format!("Attachment: {id}"));ui.label(format!("Source: {}",binding.source_id));
-                    if let Some(source)=session.source(&binding.source_id) {ui.label(format!("Language {} · host API {}",source.language_id,source.host_api_version));
-                        if source.host_api_version==rot_behavior::KINEMATIC_HOST_API_VERSION {ui.label("Kinematic Mover").on_hover_text("Requires an enabled Blocker Sphere, uniform scale, and a flat scene. Other blockers stay stationary. Set axis_x and axis_z to Axis action IDs. Leave an axis blank to disable movement on it.");}
+                                let owns_key = name.has_focus()
+                                    || kind.response.has_focus()
+                                    || (name.lost_focus()
+                                        && ui.memory(|memory| memory.focused().is_none()));
+                                let enter = owns_key
+                                    && !popup_at_start
+                                    && !egui::Popup::is_any_open(ui.ctx())
+                                    && ui.input_mut(|input| {
+                                        input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                                    });
+                                if ui.button("Add typed state field").clicked() || enter {
+                                    name.surrender_focus();
+                                    kind.response.surrender_focus();
+                                    action = Some(Action::AddState(
+                                        id.clone(),
+                                        draft.name.clone(),
+                                        draft.value(),
+                                    ));
+                                }
+                                let escape = owns_key
+                                    && !popup_at_start
+                                    && !egui::Popup::is_any_open(ui.ctx())
+                                    && ui.input_mut(|input| {
+                                        input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                                    });
+                                if ui.button("Cancel new state field").clicked() || escape {
+                                    name.surrender_focus();
+                                    kind.response.surrender_focus();
+                                    action = Some(Action::CancelStateAdd);
+                                }
+                            });
+                        });
+                    if state_add_changed {
+                        self.state_add_dirty = true;
+                        self.changed();
                     }
-                    ui.label(format!("{} / {} properties",binding.properties.len(),rot_scene::MAX_PROPERTIES));
-                });
+                    if let Some(command_action) =
+                        self.command_catalog(ui, session, id, binding, generation)
+                    {
+                        action = Some(command_action);
+                    }
+                }
+                egui::CollapsingHeader::new(Text::ScriptDetails.plain())
+                    .id_salt(("behavior_details", id))
+                    .show(ui, |ui| {
+                        ui.label(format!("Attachment: {id}"));
+                        ui.label(format!("Source: {}", binding.source_id));
+                        if let Some(source) = session.source(&binding.source_id) {
+                            ui.label(format!(
+                                "Language {} · host API {}",
+                                source.language_id, source.host_api_version
+                            ));
+                            if source.host_api_version == rot_behavior::KINEMATIC_HOST_API_VERSION {
+                                ui.label("Kinematic Mover")
+                                    .on_hover_text(Text::ScriptKinematicHint.plain());
+                            }
+                        }
+                        ui.label(format!(
+                            "{} / {} properties",
+                            binding.properties.len(),
+                            rot_scene::MAX_PROPERTIES
+                        ));
+                    });
             } else {
-                ui.menu_button(Text::ScriptAdd.plain(),|ui| {
+                ui.menu_button(Text::ScriptAdd.plain(), |ui| {
                     let create_label = match &target {
                         BindingTarget::Application => Text::ScriptLuaApplication.plain(),
                         BindingTarget::Object(_) => Text::ScriptLuaFollower.plain(),
@@ -1431,28 +1585,49 @@ impl BehaviorUi {
                         });
                         ui.close();
                     }
-                    if let BindingTarget::Object(id)=&target {
-                        if ui.button(Text::ScriptLuaKinematic.plain()).on_hover_text("Requires one enabled Blocker Sphere in a flat scene. Other blockers stay stationary.").clicked() {
-                            action=Some(Action::CreateKinematic(id.clone()));ui.close();
+                    if let BindingTarget::Object(id) = &target {
+                        if ui
+                            .button(Text::ScriptLuaKinematic.plain())
+                            .on_hover_text(Text::ScriptKinematicHint.plain())
+                            .clicked()
+                        {
+                            action = Some(Action::CreateKinematic(id.clone()));
+                            ui.close();
                         }
                     }
-                    ui.menu_button(Text::ScriptAttachExisting.plain(),|ui| {
+                    ui.menu_button(Text::ScriptAttachExisting.plain(), |ui| {
                         let mut any = false;
                         for (id, label) in &self.sources {
                             if session.source(id).is_some_and(|source| {
-                                (source.host_api_version == rot_behavior::GROUP_ROTATION_HOST_API_VERSION) == assembly
-                                && (source.host_api_version != rot_behavior::KINEMATIC_HOST_API_VERSION || matches!(target,BindingTarget::Object(_)))
+                                (source.host_api_version
+                                    == rot_behavior::GROUP_ROTATION_HOST_API_VERSION)
+                                    == assembly
+                                    && (source.host_api_version
+                                        != rot_behavior::KINEMATIC_HOST_API_VERSION
+                                        || matches!(target, BindingTarget::Object(_)))
                             }) {
                                 any = true;
                                 if ui.button(label).clicked() {
-                                    action = Some(Action::Attach { target: target.clone(), source: id.clone() });
+                                    action = Some(Action::Attach {
+                                        target: target.clone(),
+                                        source: id.clone(),
+                                    });
                                     ui.close();
                                 }
                             }
                         }
-                        if !any { ui.label("No compatible sources in this scene."); }
+                        if !any {
+                            ui.label("No compatible sources in this scene.");
+                        }
                     });
-                    ui.menu_button("Browse embedded sources…",|ui| {for (id,label) in &self.sources {if ui.button(label).clicked() {action=Some(Action::OpenSource(id.clone()));ui.close();}}});
+                    ui.menu_button("Browse embedded sources…", |ui| {
+                        for (id, label) in &self.sources {
+                            if ui.button(label).clicked() {
+                                action = Some(Action::OpenSource(id.clone()));
+                                ui.close();
+                            }
+                        }
+                    });
                 });
             }
         });
@@ -2329,7 +2504,7 @@ impl RuntimeUi {
         });
         self.begin_reset(key);
         self.diagnostic = None;
-        self.status = "Resetting behavior runtime…".into();
+        self.status = "Starting Play…".into();
         self.flush();
         Ok(key)
     }
@@ -2350,8 +2525,7 @@ impl RuntimeUi {
     }
     fn acknowledge_reset(&mut self, key: RunKey, tick: u64) {
         if self.reset_key == Some(key) {
-            self.status =
-                format!("Reset accepted at tick {tick}; waiting for its matching viewport frame.");
+            self.status = format!("Waiting for the viewport at tick {tick}…");
             self.reset_ack = Some(key);
             self.complete_reset();
         }
@@ -2479,7 +2653,7 @@ impl RuntimeUi {
                                 self.ready = false;
                                 self.playing = false;
                                 self.stale = self.frame.is_some();
-                                self.status = "Scene changed. Reset to run it again.".into();
+                                self.status = "Scene changed. Start Play again.".into();
                             }
                             State::Stopped => {
                                 self.ready = false;
@@ -2834,7 +3008,7 @@ impl RuntimeUi {
                         ui.label(&self.status);
                     }
                     if let Some(diagnostic) = &self.diagnostic {
-                        ui.collapsing("Last failure details", |ui| {
+                        ui.collapsing("Error Details", |ui| {
                             ui.set_max_width(360.0);
                             egui::ScrollArea::vertical()
                                 .id_salt("runtime_diagnostic_details")
@@ -2845,7 +3019,7 @@ impl RuntimeUi {
                                         &diagnostic.message,
                                     );
                                     ui.label(format!(
-                                        "Source {} · hash {} · line {} · object {} · binding {}",
+                                        "Script {} · hash {} · line {} · object {} · instance {}",
                                         diagnostic.source_id.as_deref().unwrap_or("—"),
                                         diagnostic.source_hash.as_deref().unwrap_or("—"),
                                         diagnostic

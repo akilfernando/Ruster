@@ -237,7 +237,7 @@ impl RuntimeUi {
         let key = self
             .worker
             .as_ref()
-            .ok_or("Reset runtime first.")?
+            .ok_or("Start Play first.")?
             .current_key();
         self.pending = Some(match operation {
             Operation::Play => Request::Play(key),
@@ -343,7 +343,7 @@ impl RuntimeUi {
                 || point.line == 0
                 || point.line > 16385
             {
-                return Err("Breakpoint source hash or line is stale/invalid.".into());
+                return Err("Breakpoint Script hash or line is stale/invalid.".into());
             }
             if point.binding_id.as_ref().is_some_and(|id| {
                 session
@@ -367,7 +367,7 @@ impl RuntimeUi {
                 .map_err(|e| e.to_string())?;
             self.status = format!("Breakpoint configuration: {state:?}");
         } else {
-            self.status = "Breakpoint configured; Reset runtime to arm the debugger.".into();
+            self.status = "Breakpoint added. Start Play again to activate it.".into();
         }
         self.debug.points = points;
         Ok(())
@@ -396,58 +396,150 @@ impl RuntimeUi {
         let mut point = None;
         let mut remove = None;
         let mut resume = None;
-        egui::Window::new("Behavior debugger").open(&mut opened).default_width(600.0)
-            .max_width((ctx.content_rect().width()-48.0).max(240.0)).show(ctx, |ui| {
-            ui.small("Reset to activate breakpoints for the current script.");
-            ui.add_enabled_ui(!blocked, |ui| {
-                egui::ComboBox::from_label("Breakpoint source").selected_text(if self.debug.source.is_empty() { "Choose source" } else { &self.debug.source }).show_ui(ui, |ui| {
-                    for id in session.authoring().sources.keys() { ui.selectable_value(&mut self.debug.source, id.clone(), id); }
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Line");
-                    let field=ui.add(egui::TextEdit::singleline(&mut self.debug.line).char_limit(5).desired_width(70.0));
-                    let owns=field.has_focus()||field.lost_focus();
-                    let enter=owns&&ui.input_mut(|input|input.consume_key(egui::Modifiers::NONE,egui::Key::Enter));
-                    let escape=owns&&ui.input_mut(|input|input.consume_key(egui::Modifiers::NONE,egui::Key::Escape));
-                    if enter { field.request_focus(); }
-                    if escape { self.debug.open=false; field.surrender_focus(); }
-                    if ui.button("Add breakpoint").clicked() || enter {
-                        if let (Some(source), Ok(line)) = (session.source(&self.debug.source), self.debug.line.parse::<u32>()) {
-                            point = Some(Breakpoint { source_id:self.debug.source.clone(), source_hash:rot_behavior::source_hash(&source.text), line, binding_id:None });
-                        } else { self.status = "Choose a source and a positive line number.".into(); }
-                    }
-                });
-            });
-            egui::ScrollArea::vertical().id_salt("breakpoint_list").max_height(110.0).show(ui, |ui| {
-                for (index, point) in self.debug.points.iter().enumerate() {
-                    ui.horizontal(|ui| {
-                        let stale = self.debug.source_hashes.get(&point.source_id) != Some(&point.source_hash);
-                        ui.label(format!("{}:{} · {}{}", point.source_id, point.line, &point.source_hash[..12], if stale { " (stale)" } else { "" }));
-                        if ui.add_enabled(!blocked, egui::Button::new("Remove")).clicked() { remove = Some(index); }
-                    });
-                }
-            });
-            if let Some(stop) = &stop {
-                ui.separator();
-                ui.label(format!("Stopped {}:{} · {:?} · stop {}", stop.source_id, stop.line.unwrap_or(0), stop.reason, stop.stop.get()));
-                ui.label(format!("Committed tick {} · pending tick {} remains private", stop.committed_tick, stop.attempted_tick));
-                ui.horizontal(|ui| {
-                    if ui.add_enabled(!blocked, egui::Button::new("Next (step over)")).clicked() { resume = Some(Resume::Next); }
-                    if ui.add_enabled(!blocked, egui::Button::new("Continue behavior")).clicked() { resume = Some(Resume::Continue); }
-                    if ui.button("Show stopped source").clicked() { navigate = true; }
-                });
-                egui::ScrollArea::vertical().id_salt("debug_locals").max_height(300.0).show(ui, |ui| {
-                    for (index, frame) in stop.frames.iter().enumerate() {
-                        ui.collapsing(format!("Frame {index}: {} · line {}", frame.name.as_deref().unwrap_or("<anonymous>"), frame.line.unwrap_or(0)), |ui| {
-                            for local in &frame.locals {
-                                ui.label(format!("{} #{} = {}", local.name, local.ordinal, node_summary(stop, local.node, 0)));
+        egui::Window::new("Script Debugger")
+            .open(&mut opened)
+            .default_width(600.0)
+            .max_width((ctx.content_rect().width() - 48.0).max(240.0))
+            .show(ctx, |ui| {
+                ui.small("Breakpoints take effect the next time you start Play.");
+                ui.add_enabled_ui(!blocked, |ui| {
+                    egui::ComboBox::from_label("Breakpoint Script")
+                        .selected_text(if self.debug.source.is_empty() {
+                            "Choose Script"
+                        } else {
+                            &self.debug.source
+                        })
+                        .show_ui(ui, |ui| {
+                            for id in session.authoring().sources.keys() {
+                                ui.selectable_value(&mut self.debug.source, id.clone(), id);
                             }
                         });
-                    }
-                    if stop.truncated { ui.small("Inspection bounds reached; some values are truncated."); }
+                    ui.horizontal(|ui| {
+                        ui.label("Line");
+                        let field = ui.add(
+                            egui::TextEdit::singleline(&mut self.debug.line)
+                                .char_limit(5)
+                                .desired_width(70.0),
+                        );
+                        let owns = field.has_focus() || field.lost_focus();
+                        let enter = owns
+                            && ui.input_mut(|input| {
+                                input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                            });
+                        let escape = owns
+                            && ui.input_mut(|input| {
+                                input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                            });
+                        if enter {
+                            field.request_focus();
+                        }
+                        if escape {
+                            self.debug.open = false;
+                            field.surrender_focus();
+                        }
+                        if ui.button("Add Breakpoint").clicked() || enter {
+                            if let (Some(source), Ok(line)) = (
+                                session.source(&self.debug.source),
+                                self.debug.line.parse::<u32>(),
+                            ) {
+                                point = Some(Breakpoint {
+                                    source_id: self.debug.source.clone(),
+                                    source_hash: rot_behavior::source_hash(&source.text),
+                                    line,
+                                    binding_id: None,
+                                });
+                            } else {
+                                self.status =
+                                    "Choose a script and enter a positive line number.".into();
+                            }
+                        }
+                    });
                 });
-            } else { ui.label("No current source stop. Reset, then Step or Play to reach an armed breakpoint."); }
-        });
+                egui::ScrollArea::vertical()
+                    .id_salt("breakpoint_list")
+                    .max_height(110.0)
+                    .show(ui, |ui| {
+                        for (index, point) in self.debug.points.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                let stale = self.debug.source_hashes.get(&point.source_id)
+                                    != Some(&point.source_hash);
+                                ui.label(format!(
+                                    "{}:{} · {}{}",
+                                    point.source_id,
+                                    point.line,
+                                    &point.source_hash[..12],
+                                    if stale { " (stale)" } else { "" }
+                                ));
+                                if ui
+                                    .add_enabled(!blocked, egui::Button::new("Remove"))
+                                    .clicked()
+                                {
+                                    remove = Some(index);
+                                }
+                            });
+                        }
+                    });
+                if let Some(stop) = &stop {
+                    ui.separator();
+                    ui.label(format!(
+                        "Stopped {}:{} · {:?} · stop {}",
+                        stop.source_id,
+                        stop.line.unwrap_or(0),
+                        stop.reason,
+                        stop.stop.get()
+                    ));
+                    ui.label(format!(
+                        "Committed tick {} · pending tick {} remains private",
+                        stop.committed_tick, stop.attempted_tick
+                    ));
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(!blocked, egui::Button::new("Step Over"))
+                            .clicked()
+                        {
+                            resume = Some(Resume::Next);
+                        }
+                        if ui
+                            .add_enabled(!blocked, egui::Button::new("Continue"))
+                            .clicked()
+                        {
+                            resume = Some(Resume::Continue);
+                        }
+                        if ui.button("Show Paused Script").clicked() {
+                            navigate = true;
+                        }
+                    });
+                    egui::ScrollArea::vertical()
+                        .id_salt("debug_locals")
+                        .max_height(300.0)
+                        .show(ui, |ui| {
+                            for (index, frame) in stop.frames.iter().enumerate() {
+                                ui.collapsing(
+                                    format!(
+                                        "Frame {index}: {} · line {}",
+                                        frame.name.as_deref().unwrap_or("<anonymous>"),
+                                        frame.line.unwrap_or(0)
+                                    ),
+                                    |ui| {
+                                        for local in &frame.locals {
+                                            ui.label(format!(
+                                                "{} #{} = {}",
+                                                local.name,
+                                                local.ordinal,
+                                                node_summary(stop, local.node, 0)
+                                            ));
+                                        }
+                                    },
+                                );
+                            }
+                            if stop.truncated {
+                                ui.small("Some values are too large to show in full.");
+                            }
+                        });
+                } else {
+                    ui.label("Start Play or Step to reach a breakpoint.");
+                }
+            });
         self.debug.open &= opened;
         if let Some(point) = point {
             if let Err(error) = self.breakpoint(session, point, true) {

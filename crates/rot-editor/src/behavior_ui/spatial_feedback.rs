@@ -139,7 +139,7 @@ impl RuntimeUi {
         let selected = &mut self.spatial_feedback_index;
         *selected = (*selected).min(queries.len() - 1);
         let retained = self.stale || !self.visible;
-        egui::menu::SubMenuButton::new("Spatial feedback")
+        egui::menu::SubMenuButton::new("Spatial Feedback")
             .config(
                 egui::menu::MenuConfig::default()
                     .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
@@ -150,14 +150,8 @@ impl RuntimeUi {
                 );
                 ui.label(format!("Committed tick {}", frame.tick));
                 if retained {
-                    ui.colored_label(
-                        ui.visuals().warn_fg_color,
-                        "Previous scene snapshot · Reset required",
-                    );
+                    ui.colored_label(ui.visuals().warn_fg_color, "From a previous Play session");
                 }
-                ui.label(if matches!(queries[*selected].query, QueryResult::MoveAndSlide {..}) {
-                    "Kinematic movement commits the safe translation and preserves rotation and scale."
-                } else { "Queries inspect the scene. Your script chooses movement." });
                 ui.horizontal(|ui| {
                     let previous =
                         ui.add_enabled(*selected > 0, egui::Button::new("Previous query"));
@@ -191,10 +185,7 @@ impl RuntimeUi {
                     )
                     .wrap(),
                 );
-                ui.label(format!(
-                    "Queried tick {} · scene revision {}",
-                    observation.snapshot_tick, observation.scene_revision
-                ));
+                ui.label(format!("Queried at tick {}", observation.snapshot_tick));
                 match &observation.query {
                     QueryResult::Sweep { result, .. } => {
                         if let Some(point) = result.point {
@@ -213,7 +204,7 @@ impl RuntimeUi {
                         }
                         ui.label(format!("Clearance {} scene units", result.clearance));
                         if matches!(result.outcome, SweepOutcome::InitialOverlap) {
-                            ui.label("Move the probe out of the blocker, then Reset.");
+                            ui.label("Move the probe away from the obstacle and start Play again.");
                         }
                     }
                     QueryResult::MoveAndSlide { delta, result, .. } => {
@@ -229,30 +220,41 @@ impl RuntimeUi {
                             ))
                             .on_hover_text(format!("{position:?}"));
                         }
-                        egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
-                            for contact in result.contacts.iter()
-                                .take(rot_behavior::spatial::MAX_SLIDE_CONTACTS)
-                            {
-                                let name = frame.scene.objects.iter()
-                                    .find(|object| object.id == contact.target_id)
-                                    .map(|object| object.display_name())
-                                    .unwrap_or(&contact.target_id);
-                                ui.add(egui::Label::new(format!(
-                                    "{name} · {}", contact.target_id
-                                )).wrap());
-                                ui.label(format!(
-                                    "Contact [{:.4}, {:.4}, {:.4}]",
-                                    contact.point[0], contact.point[1], contact.point[2]
-                                ))
-                                .on_hover_text(format!("{:?}", contact.point));
-                                ui.label(format!(
-                                    "Normal [{:.4}, {:.4}, {:.4}]",
-                                    contact.normal[0], contact.normal[1], contact.normal[2]
-                                ))
-                                .on_hover_text(format!("{:?}", contact.normal));
-                                ui.label(format!("Clearance {} scene units", contact.clearance));
-                            }
-                        });
+                        egui::ScrollArea::vertical()
+                            .max_height(180.0)
+                            .show(ui, |ui| {
+                                for contact in result
+                                    .contacts
+                                    .iter()
+                                    .take(rot_behavior::spatial::MAX_SLIDE_CONTACTS)
+                                {
+                                    let name = frame
+                                        .scene
+                                        .objects
+                                        .iter()
+                                        .find(|object| object.id == contact.target_id)
+                                        .map(|object| object.display_name())
+                                        .unwrap_or(&contact.target_id);
+                                    ui.add(
+                                        egui::Label::new(format!("{name} · {}", contact.target_id))
+                                            .wrap(),
+                                    );
+                                    ui.label(format!(
+                                        "Contact [{:.4}, {:.4}, {:.4}]",
+                                        contact.point[0], contact.point[1], contact.point[2]
+                                    ))
+                                    .on_hover_text(format!("{:?}", contact.point));
+                                    ui.label(format!(
+                                        "Normal [{:.4}, {:.4}, {:.4}]",
+                                        contact.normal[0], contact.normal[1], contact.normal[2]
+                                    ))
+                                    .on_hover_text(format!("{:?}", contact.normal));
+                                    ui.label(format!(
+                                        "Clearance {} scene units",
+                                        contact.clearance
+                                    ));
+                                }
+                            });
                     }
                     QueryResult::Overlap { result } => {
                         ui.label(format!(
@@ -470,7 +472,7 @@ mod tests {
         let parent = point(&shapes, "Runtime");
         draw(&ctx, &mut runtime, click(parent));
         let shapes = draw(&ctx, &mut runtime, vec![]);
-        let menu = point(&shapes, "Spatial feedback");
+        let menu = point(&shapes, "Spatial Feedback");
         draw(&ctx, &mut runtime, click(menu));
         assert!(
             egui::Popup::is_any_open(&ctx),
@@ -517,7 +519,7 @@ mod tests {
         draw(
             &ctx,
             &mut runtime,
-            click(point(&shapes, "Spatial feedback")),
+            click(point(&shapes, "Spatial Feedback")),
         );
         draw(&ctx, &mut runtime, vec![]);
         assert!(egui::Popup::is_any_open(&ctx));
@@ -546,7 +548,7 @@ mod tests {
         draw(
             &ctx,
             &mut runtime,
-            click(point(&shapes, "Spatial feedback")),
+            click(point(&shapes, "Spatial Feedback")),
         );
         let shapes = draw(&ctx, &mut runtime, vec![]);
         draw(&ctx, &mut runtime, click(point(&shapes, "Previous query")));

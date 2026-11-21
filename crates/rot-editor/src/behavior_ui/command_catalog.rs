@@ -230,10 +230,7 @@ impl BehaviorUi {
         }
         let mut action = None;
         ui.separator();
-        ui.strong("Application command definitions");
-        ui.weak(
-            "Typed arguments supply defaults. Reset captures this catalog for paused invocation.",
-        );
+        ui.strong(Text::ScriptApplicationCommands.plain());
         for (id, definition) in &binding.commands {
             ui.push_id(("command-definition", binding_id, id), |ui| {
                 ui.horizontal_wrapped(|ui| {
@@ -410,7 +407,7 @@ impl BehaviorUi {
             }
             ui.colored_label(
                 ui.visuals().warn_fg_color,
-                "Unapplied authored command draft. Apply or Cancel before other changes.",
+                "Apply or cancel the command changes first.",
             );
         }
         action

@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Align2, Color32, FontId, Key, RichText, Sense, Stroke, Vec2};
 
 use crate::model::{Action, Editor, PathMode, Selection};
+use crate::strings::Text;
 
 // Legacy scenario mode has no preference file and always uses the dark theme.
 const ACCENT: Color32 = crate::editor_theme::DARK.accent;
@@ -151,7 +152,7 @@ impl Editor {
                         clean_fields && self.project.scenario().undo_len() > 0,
                         egui::Button::new("Undo"),
                     )
-                    .on_hover_text("Authored undo · Ctrl+Z outside text fields")
+                    .on_hover_text("Undo · Ctrl+Z outside text fields")
                     .clicked()
                 {
                     self.undo(false);
@@ -161,7 +162,7 @@ impl Editor {
                         clean_fields && self.project.scenario().redo_len() > 0,
                         egui::Button::new("Redo"),
                     )
-                    .on_hover_text("Authored redo · Ctrl+Shift+Z outside text fields")
+                    .on_hover_text("Redo · Ctrl+Shift+Z outside text fields")
                     .clicked()
                 {
                     self.undo(true);
@@ -278,7 +279,7 @@ impl Editor {
             ui.add_space(12.0);
             ui.label(RichText::new("INSPECTOR").strong().color(MUTED));
             ui.heading(self.selection.label());
-            ui.label(RichText::new("AUTHORED PROPERTIES").small().color(ACCENT));
+            ui.label(RichText::new("Properties").small().color(ACCENT));
             ui.add_space(9.0);
             if matches!(self.selection, Selection::Scenario | Selection::Source) {
                 field(ui, "Initial stock", "initial-stock", &mut self.fields.initial, "Items at the source before the first tick. Zero is allowed.");
@@ -296,7 +297,7 @@ impl Editor {
                 if ui.add_enabled(self.fields_changed(), egui::Button::new("Revert fields")).clicked() { self.revert_fields(); }
             });
             if self.fields_changed() {
-                ui.label(RichText::new("Unapplied fields · Apply validates all properties. Save also applies valid fields.").small().color(Color32::from_rgb(244, 192, 109)));
+                ui.label(RichText::new(Text::ScenarioUnapplied.plain()).small().color(Color32::from_rgb(244, 192, 109)));
             }
             ui.add_space(15.0);
             ui.separator();
@@ -326,11 +327,11 @@ impl Editor {
             ui.horizontal(|ui| {
                 if ui.button(if self.running { "Pause" } else { "Run" }).clicked() { self.running = !self.running; self.last_tick = Instant::now(); }
                 if ui.add_enabled(!self.running, egui::Button::new("Step +1 tick")).clicked() { self.step(); }
-                if ui.button("Reset runtime").clicked() { self.reset(); }
+                if ui.button("Restart").clicked() { self.reset(); }
                 ui.label(RichText::new("4 ticks / second").small().color(MUTED));
             });
             if self.runtime_stale() {
-                ui.label(RichText::new("Scene settings changed. Reset to use them.").color(Color32::from_rgb(244, 192, 109)));
+                ui.label(RichText::new("Scene settings changed. Restart to use them.").color(Color32::from_rgb(244, 192, 109)));
             } else {
                 ui.label(RichText::new("The simulation uses the current scene settings.").small().color(MUTED));
             }
@@ -408,21 +409,56 @@ impl Editor {
         if let Some(mode) = self.path_mode {
             egui::Modal::new(egui::Id::unique("path-dialog")).show(ctx, |ui| {
                 ui.set_width(540.0);
-                ui.heading(if mode == PathMode::Open { "Open scenario" } else { "Save scenario as" });
-                ui.label(if mode == PathMode::Open { "Enter a v1 scenario JSON path. Relative paths use the launch directory." } else { "Enter a new file path. Existing files are protected; Save updates the current file." });
+                ui.heading(if mode == PathMode::Open {
+                    "Open scenario"
+                } else {
+                    "Save scenario as"
+                });
+                let hint = if mode == PathMode::Open {
+                    Text::ScenarioOpenFileHint
+                } else {
+                    Text::ScenarioSaveAsFileHint
+                };
+                ui.label(hint.plain());
                 let label = ui.label("File path");
-                let response = ui.add(egui::TextEdit::singleline(&mut self.path_text).id(egui::Id::unique("file-path")).desired_width(f32::INFINITY));
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut self.path_text)
+                        .id(egui::Id::unique("file-path"))
+                        .desired_width(f32::INFINITY),
+                );
                 let response = response.labelled_by(label.id);
-                if self.dialog_focus { response.request_focus(); self.dialog_focus = false; }
-                if let Some(error) = self.diagnostic() { ui.colored_label(Color32::from_rgb(255, 143, 137), error); }
+                if self.dialog_focus {
+                    response.request_focus();
+                    self.dialog_focus = false;
+                }
+                if let Some(error) = self.diagnostic() {
+                    ui.colored_label(Color32::from_rgb(255, 143, 137), error);
+                }
                 ui.horizontal(|ui| {
-                    if ui.button(if mode == PathMode::Open { "Open file" } else { "Save file" }).clicked() {
+                    if ui
+                        .button(if mode == PathMode::Open {
+                            "Open file"
+                        } else {
+                            "Save file"
+                        })
+                        .clicked()
+                    {
                         if mode == PathMode::Open {
-                            if self.path_text.trim().is_empty() { self.error = Some("Enter the scenario file path.".into()); }
-                            else { let path = self.path_text.trim().into(); self.path_mode = None; self.request(Action::Open(path)); }
-                        } else { self.save_as(); }
+                            if self.path_text.trim().is_empty() {
+                                self.error = Some("Enter the scenario file path.".into());
+                            } else {
+                                let path = self.path_text.trim().into();
+                                self.path_mode = None;
+                                self.request(Action::Open(path));
+                            }
+                        } else {
+                            self.save_as();
+                        }
                     }
-                    if ui.button("Cancel").clicked() { self.path_mode = None; self.pending = None; }
+                    if ui.button("Cancel").clicked() {
+                        self.path_mode = None;
+                        self.pending = None;
+                    }
                 });
             });
         } else if let Some(duplicate) = self.identity_mode {

@@ -98,7 +98,7 @@ impl RuntimeUi {
             if self.stale || !self.ready || Some(frame.key) != self.current_run() {
                 ui.colored_label(
                     ui.visuals().warn_fg_color,
-                    "Showing a previous run. Reset to see current defaults.",
+                    "Start Play again to see the current defaults.",
                 );
             }
             if frame.state.binding(&self.state_binding).is_none() {

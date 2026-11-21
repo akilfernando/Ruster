@@ -2,6 +2,7 @@
 //! Allow Always, Allow Once or Deny. It floats over the editor and blocks
 //! nothing else.
 use super::*;
+use crate::strings::Text;
 use std::path::Path;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -107,13 +108,18 @@ impl Host {
             .show(ctx, |ui| {
                 if new_key {
                     ui.strong(format!("{app} presents a new key"));
-                    ui.label(format!(
-                        "{app} was allowed before with a different key. Allow it only if you set it up again."
-                    ));
+                    ui.label(Text::AiConnectionKeyChanged.plain());
                 } else {
                     ui.strong(format!("Allow {app} to edit this project?"));
-                    let suffix = if self.editor.component.is_some() { "" } else { " and save it" };
-                    ui.label(format!("{app} can read and change {}{suffix}.", self.editor.document_label()));
+                    let suffix = if self.editor.component.is_some() {
+                        ""
+                    } else {
+                        " and save it"
+                    };
+                    ui.label(format!(
+                        "{app} can read and change {}{suffix}.",
+                        self.editor.document_label()
+                    ));
                 }
                 if app != name {
                     ui.weak(format!("Reported name: {name}"));

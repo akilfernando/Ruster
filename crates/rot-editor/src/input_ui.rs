@@ -464,7 +464,7 @@ impl InputUi {
             || key.is_none()
             || matches!(key, Some(InputKey::Escape | InputKey::Tab))
         {
-            self.message = "Choose a supported logical key without Ctrl/Alt/Super. Tab and Escape belong to the editor.".into();
+            self.message = "Choose a supported key without Ctrl, Alt, Super or Tab.".into();
             return;
         }
         let key = key.expect("checked supported key");
@@ -895,7 +895,7 @@ impl InputUi {
                             next_capture = row.capture;
                         }
                     }
-                    ui.weak("Assign up to four keys total. Empty bindings stay neutral.");
+                    ui.weak("Assign up to four keys.");
                     for conflict in conflicts(session, &draft.id, &draft.kind) {
                         ui.colored_label(ui.visuals().warn_fg_color, conflict);
                     }

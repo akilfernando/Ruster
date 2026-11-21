@@ -1,5 +1,6 @@
 //! One explicit off-UI working-copy job; embedded source retains save authority.
 use crate::behavior_files::{self as files, Context, LaunchSpec, SyncBase, SyncOutcome};
+use crate::strings::Text;
 use eframe::egui;
 use rot_scene::{Authoring, BehaviorSource, Session};
 use std::{
@@ -14,15 +15,15 @@ use std::{
 };
 fn files_error(error: files::FilesError) -> String {
     let kind = match error.kind {
-        files::ErrorKind::Unsaved => "Save required",
-        files::ErrorKind::Invalid => "Invalid working-copy data",
-        files::ErrorKind::Busy => "Working-copy context busy",
-        files::ErrorKind::Conflict => "Working-copy conflict",
-        files::ErrorKind::Missing => "Working copy missing",
-        files::ErrorKind::TooLarge => "Working-copy limit exceeded",
-        files::ErrorKind::Io => "Working-copy I/O failed",
+        files::ErrorKind::Unsaved => Text::WorkingCopySaveRequired.plain(),
+        files::ErrorKind::Invalid => Text::WorkingCopyInvalid.plain(),
+        files::ErrorKind::Busy => Text::WorkingCopyBusy.plain(),
+        files::ErrorKind::Conflict => Text::WorkingCopyConflict.plain(),
+        files::ErrorKind::Missing => Text::WorkingCopyMissing.plain(),
+        files::ErrorKind::TooLarge => Text::WorkingCopyLimit.plain(),
+        files::ErrorKind::Io => Text::WorkingCopyIo.plain(),
     };
-    format!("{kind}: {}", error.message)
+    format!("{kind}\n{}", error.message)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -142,7 +143,7 @@ impl External {
         self.promote_pending = false;
         self.open = false;
         self.status = if self.job.is_some() {
-            "Previous document's working-copy job is finishing; it cannot import into this document.".into()
+            Text::WorkingCopyPreviousScene.plain().into()
         } else {
             String::new()
         };
@@ -202,22 +203,22 @@ impl External {
         self.live.retain(|id, _| session.source(id).is_some());
         self.reap();
         if self.closing {
-            return Err("Finish or cancel closing before external editor operations.".into());
+            return Err(Text::WorkingCopyClosing.plain().into());
         }
         if self.job.is_some() {
-            return Err("A working-copy job is still finishing; retry after its result.".into());
+            return Err(Text::WorkingCopyBusy.plain().into());
         }
         if matches!(intent, Intent::Open { .. } | Intent::OpenExisting { .. })
             && self.children.len() >= 8
         {
-            return Err("Eight editor launcher processes are still active; retry after one exits. Rot Engine leaves external editors running.".into());
+            return Err(Text::WorkingCopyWaitForEditors.plain().into());
         }
         let source = session
             .source(source_id)
-            .ok_or("Source is missing; no working copy was changed.")?;
+            .ok_or(Text::WorkingCopyScriptMissing.plain())?;
         let scene = session
             .path()
-            .ok_or("Save this scene before creating or checking external working copies.")?
+            .ok_or(Text::WorkingCopySaveRequired.plain())?
             .to_path_buf();
         let observed = self
             .view
@@ -229,9 +230,7 @@ impl External {
             Intent::ImportObserved | Intent::OverwriteObserved | Intent::OpenExisting { .. }
         ) && observed.is_none()
         {
-            return Err(
-                "Refresh and inspect an observed file version before resolving a conflict.".into(),
-            );
+            return Err(Text::WorkingCopyRefreshConflict.plain().into());
         }
         if matches!(
             intent,
@@ -241,7 +240,7 @@ impl External {
             .as_ref()
             .is_none_or(|view| view.revision != session.scene().revision)
         {
-            return Err("Embedded state changed after the observed file comparison; Refresh before resolving versions.".into());
+            return Err(Text::WorkingCopyRefreshChanged.plain().into());
         }
         if self
             .view
@@ -317,23 +316,59 @@ impl External {
     ) -> Result<(), String> {
         let ctx = ctx.clone();
         let epoch = self.launch_epoch.clone();
-        self.status = "Launching the configured editor for the validated working copy…".into();
-        self.job=Some(std::thread::Builder::new().name("rot-editor-launch".into()).spawn(move|| {
-            let result=(|| {
-                let valid=||epoch.load(Ordering::SeqCst)==key.launch_epoch;
-                if !valid() {return Err("Editor launch cancelled before process creation; files preserved.".into());}
-                let observed=files::import_observed(&plan.context,&plan.id,&plan.source,&plan.expected).map_err(files_error)?;
-                let SyncOutcome::ImportCandidate{path,..}=observed else {return Err("Observed working-copy validation returned no source version; editor was not launched.".into());};
-                if path!=plan.path {return Err("Controlled working-copy path changed; editor was not launched.".into());}
-                let mut command=plan.config.command(&plan.context,&path,plan.line).map_err(files_error)?;
-                // This is the launch commit point: a queued/new document, draft
-                // or close cancels up to this final check, without blocking UI.
-                if !valid() {return Err("Editor launch cancelled before process creation; files preserved.".into());}
-                let child=command.spawn().map_err(|error|format!("Editor process launch failed: {error}"))?;
-                Ok(Output{outcome:None,child:Some(child),warning:String::new(),promotion:Some(format!("Opened observed working copy {} at line {}. Embedded and external versions were preserved.",path.display(),plan.line)),launch:None})
-            })();
-            ctx.request_repaint();Completion{key,result}
-        }).map_err(|error|error.to_string())?);
+        self.status = Text::WorkingCopyOpening.plain().into();
+        self.job = Some(
+            std::thread::Builder::new()
+                .name("rot-editor-launch".into())
+                .spawn(move || {
+                    let result = (|| {
+                        let valid = || epoch.load(Ordering::SeqCst) == key.launch_epoch;
+                        if !valid() {
+                            return Err(Text::WorkingCopyOpenCancelled.plain().into());
+                        }
+                        let observed = files::import_observed(
+                            &plan.context,
+                            &plan.id,
+                            &plan.source,
+                            &plan.expected,
+                        )
+                        .map_err(files_error)?;
+                        let SyncOutcome::ImportCandidate { path, .. } = observed else {
+                            return Err(Text::WorkingCopyInvalidEncoding.plain().into());
+                        };
+                        if path != plan.path {
+                            return Err(Text::WorkingCopyFileChanged.plain().into());
+                        }
+                        let mut command = plan
+                            .config
+                            .command(&plan.context, &path, plan.line)
+                            .map_err(files_error)?;
+                        // This is the launch commit point: a queued/new document, draft
+                        // or close cancels up to this final check, without blocking UI.
+                        if !valid() {
+                            return Err(Text::WorkingCopyOpenCancelled.plain().into());
+                        }
+                        let child = command
+                            .spawn()
+                            .map_err(|error| format!("Editor process launch failed: {error}"))?;
+                        Ok(Output {
+                            outcome: None,
+                            child: Some(child),
+                            warning: String::new(),
+                            promotion: Some(format!(
+                                "{}\n{} · line {}",
+                                Text::WorkingCopyOpened.plain(),
+                                path.display(),
+                                plan.line
+                            )),
+                            launch: None,
+                        })
+                    })();
+                    ctx.request_repaint();
+                    Completion { key, result }
+                })
+                .map_err(|error| error.to_string())?,
+        );
         Ok(())
     }
     pub fn poll(
@@ -351,26 +386,47 @@ impl External {
         if self.job.as_ref().is_some_and(JoinHandle::is_finished) {
             let completed = self.job.take().unwrap().join();
             match completed {
-                Err(_)=>self.status="Working-copy job stopped unexpectedly; embedded source and existing files were preserved. Retry explicitly.".into(),
-                Ok(completed)=> {
-                    match completed.result {
-                        Err(error)=>self.status=error,
-                        Ok(mut output)=> {
-                            if let Some(child)=output.child.take() {self.children.push(child);}
-                            if !completed.key.matches(session,generation) {self.status="Scene/source changed during the working-copy job. Embedded data was preserved; Refresh again to compare current versions.".into();}
-                            else {
-                                if let Some(outcome)=output.outcome {import=self.accept(completed.key.source_id.as_deref().unwrap(),session,outcome,blocked);}
-                                else if let Some(status)=output.promotion {self.status=status;}
-                                if !output.warning.is_empty() {self.status.push(' ');self.status.push_str(&output.warning);}
-                                if let Some(plan)=output.launch {
-                                    if !blocked && !self.closing && completed.key.launch_epoch==self.launch_epoch.load(Ordering::SeqCst) {
-                                        if let Err(error)=self.start_launch(ctx,completed.key,plan) {self.status=error;}
-                                    } else {self.status="Editor launch cancelled because document/drafts/closing changed; working files were preserved.".into();}
+                Err(_) => self.status = Text::WorkingCopyStopped.plain().into(),
+                Ok(completed) => match completed.result {
+                    Err(error) => self.status = error,
+                    Ok(mut output) => {
+                        if let Some(child) = output.child.take() {
+                            self.children.push(child);
+                        }
+                        if !completed.key.matches(session, generation) {
+                            self.status = Text::WorkingCopySceneChanged.plain().into();
+                        } else {
+                            if let Some(outcome) = output.outcome {
+                                import = self.accept(
+                                    completed.key.source_id.as_deref().unwrap(),
+                                    session,
+                                    outcome,
+                                    blocked,
+                                );
+                            } else if let Some(status) = output.promotion {
+                                self.status = status;
+                            }
+                            if !output.warning.is_empty() {
+                                self.status.push(' ');
+                                self.status.push_str(&output.warning);
+                            }
+                            if let Some(plan) = output.launch {
+                                if !blocked
+                                    && !self.closing
+                                    && completed.key.launch_epoch
+                                        == self.launch_epoch.load(Ordering::SeqCst)
+                                {
+                                    if let Err(error) = self.start_launch(ctx, completed.key, plan)
+                                    {
+                                        self.status = error;
+                                    }
+                                } else {
+                                    self.status = Text::WorkingCopyOpenCancelled.plain().into();
                                 }
                             }
                         }
                     }
-                }
+                },
             }
             self.reap();
         }
@@ -438,7 +494,7 @@ impl External {
                     observed: Some(base.file_sha256),
                     language_changed: false,
                 });
-                self.status=format!("Working copy ready: {}. Embedded source remains authoritative; project Save retains matching synchronization bases.",path.display());
+                self.status = Text::WorkingCopyReady.plain().into();
             }
             SyncOutcome::ImportCandidate {
                 path,
@@ -460,7 +516,7 @@ impl External {
                     || rot_behavior::source_hash(&session.source(id).unwrap().text)
                         != expected_embedded_sha256
                 {
-                    self.status="External file changed while embedded drafts/dialogs were active. Both versions preserved; resolve drafts then import the observed version or Refresh.".into();
+                    self.status = Text::WorkingCopyDraftConflict.plain().into();
                     self.open = true;
                 } else {
                     let mut source = session.source(id).unwrap().clone();
@@ -485,7 +541,7 @@ impl External {
                     observed: Some(file_sha256),
                     language_changed: false,
                 });
-                self.status="Embedded and external versions conflict. Both were preserved. Choose the observed file version or explicitly replace that exact file version.".into();
+                self.status = Text::WorkingCopyReviewConflict.plain().into();
                 self.open = true;
             }
             SyncOutcome::Missing { path } => {
@@ -497,7 +553,7 @@ impl External {
                     observed: None,
                     language_changed: false,
                 });
-                self.status="Working file is missing. Refresh does not recreate it; Export explicitly to create a copy.".into();
+                self.status = Text::WorkingCopyExportMissing.plain().into();
                 self.open = true;
             }
             SyncOutcome::LanguageChanged {
@@ -512,7 +568,11 @@ impl External {
                     observed: None,
                     language_changed: true,
                 });
-                self.status=format!("Language/API changed. Existing file {} was preserved; explicitly export the new language/API working copy.",previous_path.display());
+                self.status = format!(
+                    "{}\n{}",
+                    Text::WorkingCopyLanguageChanged.plain(),
+                    previous_path.display()
+                );
                 self.open = true;
             }
         }
@@ -529,7 +589,7 @@ impl External {
             view.observed = Some(base.file_sha256.clone());
             view.language_changed = false;
         }
-        self.status=format!("Imported observed external version for {} through scene Undo. Save the project to retain it.",base.source_id);
+        self.status = Text::WorkingCopyImported.plain().into();
         self.live.insert(base.source_id.clone(), base);
     }
     pub fn ui(
@@ -544,34 +604,84 @@ impl External {
         let mut opened = true;
         let mut close = false;
         let mut request = None;
-        egui::Window::new("External working copy").open(&mut opened).default_width(520.0).max_width((ctx.content_rect().width()-48.0).max(220.0)).show(ctx,|ui| {
-            egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-230.0).max(32.0)).show(ui,|ui| {
-                ui.label(&self.status);
-                if let Some(view)=&self.view {
-                    ui.label(format!("Source {}",view.source));
-                    ui.add(egui::Label::new(view.path.display().to_string()).truncate()).on_hover_text(view.path.display().to_string());
-                    if let Some(hash)=&view.embedded {ui.add(egui::Label::new(format!("Embedded {hash}")).truncate()).on_hover_text(hash);}
-                    if let Some(hash)=&view.observed {ui.add(egui::Label::new(format!("Observed file {hash}")).truncate()).on_hover_text(hash);}
-                    if view.revision!=revision {ui.label("Embedded state changed since this observation; Refresh before choosing versions.");}
-                }
-            });
-            if let Some(view)=&self.view {
-                ui.add_enabled_ui(enabled && self.job.is_none(),|ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        if ui.button("Refresh working copy").clicked() {request=Some((view.source.clone(),Intent::Refresh));}
-                        ui.add_enabled_ui(view.revision==revision,|ui| {
-                            if view.language_changed && ui.button("Export new language/API copy").clicked() {request=Some((view.source.clone(),Intent::ExportNewLanguage));}
-                            if view.observed.is_some() {
-                                if ui.button("Open observed file in Zed (keep both versions)").clicked() {request=Some((view.source.clone(),Intent::OpenExisting{line:1}));}
-                                if ui.button("Import observed file through Undo").clicked() {request=Some((view.source.clone(),Intent::ImportObserved));}
-                                if ui.button("Replace observed file with embedded source").clicked() {request=Some((view.source.clone(),Intent::OverwriteObserved));}
-                            } else if !view.language_changed && ui.button("Export working copy").clicked() {request=Some((view.source.clone(),Intent::Export));}
+        egui::Window::new(Text::WorkingCopyHeading.plain())
+            .open(&mut opened)
+            .default_width(520.0)
+            .max_width((ctx.content_rect().width() - 48.0).max(220.0))
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height((ctx.content_rect().height() - 230.0).max(32.0))
+                    .show(ui, |ui| {
+                        let (summary, details) =
+                            self.status.split_once('\n').unwrap_or((&self.status, ""));
+                        ui.label(summary);
+                        if !details.is_empty() {
+                            ui.collapsing(Text::ErrorDetails.plain(), |ui| {
+                                ui.add(egui::Label::new(details).wrap().selectable(true));
+                            });
+                        }
+                        if let Some(view) = &self.view {
+                            ui.label(format!("Source {}", view.source));
+                            ui.add(egui::Label::new(view.path.display().to_string()).truncate())
+                                .on_hover_text(view.path.display().to_string());
+                            if let Some(hash) = &view.embedded {
+                                ui.add(egui::Label::new(format!("Embedded {hash}")).truncate())
+                                    .on_hover_text(hash);
+                            }
+                            if let Some(hash) = &view.observed {
+                                ui.add(
+                                    egui::Label::new(format!("Observed file {hash}")).truncate(),
+                                )
+                                .on_hover_text(hash);
+                            }
+                            if view.revision != revision {
+                                ui.label(Text::WorkingCopyObservationChanged.plain());
+                            }
+                        }
+                    });
+                if let Some(view) = &self.view {
+                    ui.add_enabled_ui(enabled && self.job.is_none(), |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.button(Text::ScriptRefreshWorkingCopy.plain()).clicked() {
+                                request = Some((view.source.clone(), Intent::Refresh));
+                            }
+                            ui.add_enabled_ui(view.revision == revision, |ui| {
+                                if view.language_changed
+                                    && ui.button(Text::WorkingCopyExportNew.plain()).clicked()
+                                {
+                                    request =
+                                        Some((view.source.clone(), Intent::ExportNewLanguage));
+                                }
+                                if view.observed.is_some() {
+                                    if ui.button(Text::WorkingCopyOpenFile.plain()).clicked() {
+                                        request = Some((
+                                            view.source.clone(),
+                                            Intent::OpenExisting { line: 1 },
+                                        ));
+                                    }
+                                    if ui.button(Text::WorkingCopyImportFile.plain()).clicked() {
+                                        request =
+                                            Some((view.source.clone(), Intent::ImportObserved));
+                                    }
+                                    if ui.button(Text::WorkingCopyReplaceFile.plain()).clicked() {
+                                        request =
+                                            Some((view.source.clone(), Intent::OverwriteObserved));
+                                    }
+                                } else if !view.language_changed
+                                    && ui.button(Text::ScriptExportWorkingCopy.plain()).clicked()
+                                {
+                                    request = Some((view.source.clone(), Intent::Export));
+                                }
+                            });
                         });
                     });
-                });
-            }
-            close=ui.button("Close working-copy status").clicked() || (enabled && ui.input_mut(|input|input.consume_key(egui::Modifiers::NONE,egui::Key::Escape)));
-        });
+                }
+                close = ui.button(Text::CloseErrorDetails.plain()).clicked()
+                    || (enabled
+                        && ui.input_mut(|input| {
+                            input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                        }));
+            });
         if !opened || close {
             self.open = false;
         }
@@ -584,7 +694,19 @@ fn run(input: Input) -> Result<Output, String> {
     let Some(intent) = input.intent else {
         let promotion =
             files::promote_saved_bases(&context, &manifest, &input.live).map_err(files_error)?;
-        return Ok(Output{outcome:None,child:None,warning:String::new(),launch:None,promotion:Some(format!("Saved synchronization bases: {} promoted, {} still unsaved, {} obsolete metadata entries pruned. Working files preserved.",promotion.promoted.len(),promotion.not_saved.len(),promotion.pruned.len()))});
+        return Ok(Output {
+            outcome: None,
+            child: None,
+            warning: String::new(),
+            launch: None,
+            promotion: Some(format!(
+                "{}\n{} updated, {} unsaved, {} expired",
+                Text::WorkingCopySaveRecorded.plain(),
+                promotion.promoted.len(),
+                promotion.not_saved.len(),
+                promotion.pruned.len()
+            )),
+        });
     };
     let id = input.key.source_id.as_deref().unwrap();
     let source = input.source.as_ref().unwrap();
@@ -593,17 +715,13 @@ fn run(input: Input) -> Result<Output, String> {
         let observed =
             files::import_observed(&context, id, source, expected).map_err(files_error)?;
         let SyncOutcome::ImportCandidate { path, .. } = observed else {
-            return Err(
-                "Observed file has no importable UTF-8 source version; no editor launched.".into(),
-            );
+            return Err(Text::WorkingCopyInvalidEncoding.plain().into());
         };
         return Ok(Output {
             outcome: None,
             child: None,
             warning: String::new(),
-            promotion: Some(
-                "Observed working file prepared without modifying either version.".into(),
-            ),
+            promotion: Some(Text::WorkingCopyPrepared.plain().into()),
             launch: Some(LaunchPlan {
                 context: context.clone(),
                 id: id.into(),

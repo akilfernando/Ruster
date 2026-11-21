@@ -171,7 +171,7 @@ impl Editor {
             Ok(_) => {
                 self.fields = self.project.scenario().config().into();
                 self.field_validation_error = None;
-                self.notice = "Authored properties applied. Reset runtime to use them.".into();
+                self.notice = "Properties applied. Restart to use them.".into();
                 true
             }
             Err(ScenarioError::Simulation(error)) => {
