@@ -61,6 +61,10 @@ Inspector and MCP. Failed imports show the source path, recovery, last working
 version availability and separate Error Details in the Inspector. Approved MCP
 clients can page the same issues, including sources with no asset ID. A
 relocated build loaded 80 meshes.
+The v23 Mesh Renderer can create and assign a textured material or edit
+an existing shared definition. The editor shows its affected object count.
+Native edits and approved MCP commands share Undo and preserve scene
+material edits when the source GLB is reimported.
 v23 prefabs link reusable hierarchies in the editor and MCP. Child transform
 and mesh tint overrides support Apply, Revert and shared Undo. The cottage
 trial verified a roof fix across three placements and in a relocated build.

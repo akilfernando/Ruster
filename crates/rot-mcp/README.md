@@ -59,6 +59,20 @@ connected project.
   or `source_material_id` for a copy. AI requests leave pending material edits
   in the Inspector. Material writes return `drafts_pending` until the creator
   applies or cancels the edit.
+- In v23, use `rot_tools` to call `material_inspect`. It reports committed
+  material values, assigned-object counts, texture roles and UV diagnostics.
+  `pending_material` reports the intent, target component and affected
+  object count during a native draft. Apply or cancel the native draft
+  before writing or saving.
+- Use the scene session, revision and asset revision from `material_inspect`
+  with `scene_material_set` or `scene_material_assign`. Inspect the assigned
+  count before replacing a shared definition. To create and assign in one
+  Undo step, pass a fresh material ID and `assign_object_id` to
+  `scene_material_set`. Include `component_id` when the object has multiple
+  Mesh Renderers. Preserve the existing texture, response and sampler fields
+  when replacing a definition for an unrelated property.
+- When `scene_components_edit` changes a textured Mesh Renderer binding,
+  include `expected_asset_revision` from the current asset inspection.
 - In legacy scenes, `scene_inspect` reports `group_creation_blockers` for
   `scene_group_create`. Each entry includes a `code` and can include a named
   `example`. Codes are `input_actions`, `hud`, `script_sources`,

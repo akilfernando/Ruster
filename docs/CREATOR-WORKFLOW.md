@@ -140,6 +140,19 @@ pages are independent of assets, models and prefabs. Recheck the first issue
 page after making a repair because issues can change without a catalog
 revision.
 
+## Edit a shared material in v23
+
+Select an object with a **Mesh Renderer**. **New Material** opens a draft
+for that renderer. **Apply** creates and assigns the material in one Undo
+step. To change an existing definition, choose **Edit Material** and check
+the affected object count before applying. The renderer's own **Tint**
+still multiplies the shared material color.
+
+Set the material tint, **Base color (sRGB)**, and nonmetallic roughness in
+the dialog. A texture needs the matching import role and a mesh with UVs.
+Press Enter to apply or Escape to cancel. Apply or cancel before saving.
+Edits to materials copied from GLB models are saved with the scene.
+
 ## Edit a material in a legacy scene
 
 Select an object and find **Material** in the Inspector. Editing a material
