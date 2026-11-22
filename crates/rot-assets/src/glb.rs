@@ -425,6 +425,59 @@ struct Sampler {
     wrap_t: Option<u32>,
 }
 
+impl Sampler {
+    fn filtering(&self) -> Result<(bool, Option<String>), AssetError> {
+        let (mag, mag_name) = match self.mag_filter {
+            None => (None, "default"),
+            Some(9728) => (Some(false), "NEAREST"),
+            Some(9729) => (Some(true), "LINEAR"),
+            Some(token) => return Err(error(format!("GLB sampler magFilter {token} is invalid"))),
+        };
+        let (min, mip, min_name) = match self.min_filter {
+            None => (None, None, "default"),
+            Some(9728) => (Some(false), None, "NEAREST"),
+            Some(9729) => (Some(true), None, "LINEAR"),
+            Some(9984) => (Some(false), Some(false), "NEAREST_MIPMAP_NEAREST"),
+            Some(9985) => (Some(true), Some(false), "LINEAR_MIPMAP_NEAREST"),
+            Some(9986) => (Some(false), Some(true), "NEAREST_MIPMAP_LINEAR"),
+            Some(9987) => (Some(true), Some(true), "LINEAR_MIPMAP_LINEAR"),
+            Some(token) => return Err(error(format!("GLB sampler minFilter {token} is invalid"))),
+        };
+        let mut explicit = [mag, min, mip].into_iter().flatten();
+        let score: i32 = explicit
+            .clone()
+            .map(|linear| if linear { 1 } else { -1 })
+            .sum();
+        let linear = if score == 0 {
+            min.or(mag).unwrap_or(true)
+        } else {
+            score > 0
+        };
+        let approximate =
+            min.is_some() && mip.is_none() || explicit.any(|requested| requested != linear);
+        let warning = approximate.then(|| {
+            let setting = if linear { "Linear" } else { "Nearest" };
+            format!("sampler mag {mag_name} / min {min_name} uses Rot {setting} with mipmaps")
+        });
+        Ok((linear, warning))
+    }
+
+    fn wrapping(&self) -> Result<bool, AssetError> {
+        let s = self.wrap_s.unwrap_or(10497);
+        let t = self.wrap_t.unwrap_or(10497);
+        for (field, token) in [("wrapS", s), ("wrapT", t)] {
+            if !matches!(token, 10497 | 33071 | 33648) {
+                return Err(error(format!("GLB sampler {field} {token} is invalid")));
+            }
+        }
+        match (s, t) {
+            (10497, 10497) => Ok(true),
+            (33071, 33071) => Ok(false),
+            _ => Err(error("GLB sampler must repeat or clamp on both axes")),
+        }
+    }
+}
+
 fn u32_at(bytes: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
 }
@@ -1104,6 +1157,7 @@ impl Decoder<'_> {
         {
             fallbacks.push("emissive factor omitted");
         }
+        let mut sampler_warning = None;
         let mut definition = ModelMaterial {
             base_color_factor: [rgba[0], rgba[1], rgba[2]],
             roughness: roughness.max(MIN_DIELECTRIC_ROUGHNESS),
@@ -1130,19 +1184,8 @@ impl Decoder<'_> {
             let texture = at(&self.doc.textures, binding.index, "texture")?;
             if let Some(index) = texture.sampler {
                 let sampler = at(&self.doc.samplers, index, "sampler")?;
-                definition.linear = match (sampler.mag_filter, sampler.min_filter) {
-                    (None | Some(9729), None | Some(9987)) => true,
-                    (Some(9728), Some(9984)) => false,
-                    _ => return Err(error("GLB sampler must match linear/trilinear or nearest/nearest-mipmap filtering")),
-                };
-                definition.repeat = match (
-                    sampler.wrap_s.unwrap_or(10497),
-                    sampler.wrap_t.unwrap_or(10497),
-                ) {
-                    (10497, 10497) => true,
-                    (33071, 33071) => false,
-                    _ => return Err(error("GLB sampler must repeat or clamp on both axes")),
-                };
+                (definition.linear, sampler_warning) = sampler.filtering()?;
+                definition.repeat = sampler.wrapping()?;
             }
             let image = at(&self.doc.images, texture.source, "image")?;
             let (view, bytes) = self.view(image.buffer_view)?;
@@ -1163,6 +1206,7 @@ impl Decoder<'_> {
             )?;
             definition.base_color_texture = Some(id);
         }
+        fallbacks.extend(sampler_warning.as_deref());
         if !fallbacks.is_empty() {
             self.model
                 .info
@@ -1608,4 +1652,101 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
     }
     decoder.model.info.warnings.sort_unstable();
     Ok(decoder.model)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sampler_matches_explicit_filters_and_reports_approximations() {
+        // Columns: omitted, NEAREST and LINEAR magnification.
+        // Each pair is (Rot Linear, needs warning).
+        let expected = [
+            (None, [(true, false), (false, false), (true, false)]),
+            (Some(9728), [(false, true), (false, true), (false, true)]),
+            (Some(9729), [(true, true), (true, true), (true, true)]),
+            (Some(9984), [(false, false), (false, false), (false, true)]),
+            (Some(9985), [(true, true), (false, true), (true, true)]),
+            (Some(9986), [(false, true), (false, true), (true, true)]),
+            (Some(9987), [(true, false), (true, true), (true, false)]),
+        ];
+        for (min_filter, row) in expected {
+            for (mag_filter, expected) in [None, Some(9728), Some(9729)].into_iter().zip(row) {
+                let sampler = Sampler {
+                    mag_filter,
+                    min_filter,
+                    ..Sampler::default()
+                };
+                let (linear, warning) = sampler.filtering().unwrap();
+                assert_eq!(
+                    (linear, warning.is_some()),
+                    expected,
+                    "{mag_filter:?}, {min_filter:?}"
+                );
+            }
+        }
+        let official = Sampler {
+            mag_filter: Some(9729),
+            min_filter: Some(9986),
+            ..Sampler::default()
+        };
+        assert_eq!(
+            official.filtering().unwrap(),
+            (
+                true,
+                Some(
+                    "sampler mag LINEAR / min NEAREST_MIPMAP_LINEAR uses Rot Linear with mipmaps"
+                        .into()
+                )
+            )
+        );
+        for (sampler, diagnostic) in [
+            (
+                Sampler {
+                    mag_filter: Some(9986),
+                    ..Default::default()
+                },
+                "magFilter 9986",
+            ),
+            (
+                Sampler {
+                    min_filter: Some(9727),
+                    ..Default::default()
+                },
+                "minFilter 9727",
+            ),
+        ] {
+            assert!(sampler
+                .filtering()
+                .unwrap_err()
+                .to_string()
+                .contains(diagnostic));
+        }
+        for (wrap_s, wrap_t, expected) in [
+            (None, Some(10497), Ok(true)),
+            (Some(33071), Some(33071), Ok(false)),
+            (Some(33071), None, Err("repeat or clamp on both axes")),
+            (
+                Some(33648),
+                Some(33648),
+                Err("repeat or clamp on both axes"),
+            ),
+            (None, Some(1), Err("wrapT 1")),
+        ] {
+            let sampler = Sampler {
+                wrap_s,
+                wrap_t,
+                ..Default::default()
+            };
+            match expected {
+                Ok(repeat) => assert_eq!(sampler.wrapping().unwrap(), repeat),
+                Err(diagnostic) => assert!(sampler
+                    .wrapping()
+                    .unwrap_err()
+                    .to_string()
+                    .contains(diagnostic)),
+            }
+        }
+    }
 }

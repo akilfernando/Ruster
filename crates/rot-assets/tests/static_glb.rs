@@ -172,6 +172,15 @@ fn model_bytes(nodes: Vec<serde_json::Value>, roughness: f32) -> Vec<u8> {
 }
 
 fn model_with_image(nodes: Vec<serde_json::Value>, roughness: f32, image: Option<&str>) -> Vec<u8> {
+    model_with_sampler(nodes, roughness, image, None)
+}
+
+fn model_with_sampler(
+    nodes: Vec<serde_json::Value>,
+    roughness: f32,
+    image: Option<&str>,
+    sampler: Option<serde_json::Value>,
+) -> Vec<u8> {
     use serde_json::json;
     let mut bin = [0.0_f32, 0., 0., 1., 0., 0., 0., 1., 0.]
         .into_iter()
@@ -221,6 +230,10 @@ fn model_with_image(nodes: Vec<serde_json::Value>, roughness: f32, image: Option
                 .flat_map(u16::to_le_bytes),
         );
         document["buffers"][0]["byteLength"] = json!(bin.len());
+    }
+    if let Some(sampler) = sampler {
+        document["samplers"] = json!([sampler]);
+        document["textures"][0]["sampler"] = json!(0);
     }
     let mut document = serde_json::to_vec(&document).unwrap();
     document.resize(document.len().next_multiple_of(4), b' ');
@@ -443,6 +456,64 @@ fn external_png_is_pinned_then_refreshed_by_a_texture_only_change() {
     let reopened = AssetStore::open(directory.path()).unwrap();
     assert_eq!(reopened.model(&first.id), Some(second));
     assert_eq!(reads(&reopened), second_png);
+}
+
+#[test]
+fn sampler_approximation_warns_without_changing_texture_identity() {
+    use serde_json::json;
+    let project = tempfile::tempdir().unwrap();
+    let assets = project.path().join("Assets");
+    fs::create_dir(&assets).unwrap();
+    let source = assets.join("sampler.glb");
+    let texture = fs::File::create(assets.join("paint.png")).unwrap();
+    let mut png = png::Encoder::new(texture, 1, 1);
+    png.set_color(png::ColorType::Rgb);
+    png.set_depth(png::BitDepth::Eight);
+    png.write_header()
+        .unwrap()
+        .write_image_data(&[120, 75, 20])
+        .unwrap();
+    let write = |mag, min| {
+        fs::write(
+            &source,
+            model_with_sampler(
+                vec![json!({"name":"Mesh","mesh":0})],
+                0.6,
+                Some("paint.png"),
+                Some(json!({"magFilter":mag, "minFilter":min, "wrapS":33071, "wrapT":33071})),
+            ),
+        )
+        .unwrap();
+    };
+
+    write(9728, 9984);
+    let (mut store, issues) = AssetStore::open_project(project.path()).unwrap();
+    assert!(issues.is_empty(), "{issues:?}");
+    let original = store.models().next().unwrap().clone();
+    let material = &original.materials["Paint"];
+    assert!(!material.linear && !material.repeat);
+    assert_eq!(original.warnings, ["Skipped 1 degenerate triangle."]);
+    let texture = material.base_color_texture.as_ref().unwrap();
+    let before = store.texture(texture).unwrap().clone();
+
+    write(9728, 9985);
+    let accepted = store
+        .refresh_glb_at(store.revision(), &original.id)
+        .unwrap();
+    assert_eq!(accepted.materials, original.materials);
+    assert_eq!(accepted.nodes, original.nodes);
+    assert!(accepted.warnings.iter().any(|warning| {
+        warning == "Paint: sampler mag NEAREST / min LINEAR_MIPMAP_NEAREST uses Rot Nearest with mipmaps"
+    }));
+
+    let revision = store.revision();
+    write(1, 9985);
+    let refused = store.refresh_glb_at(revision, &original.id).unwrap_err();
+    assert!(refused.to_string().contains("magFilter 1"), "{refused}");
+    assert_eq!(store.revision(), revision);
+    let reopened = AssetStore::open(project.path()).unwrap();
+    assert_eq!(reopened.model(&original.id), Some(&accepted));
+    assert_eq!(reopened.texture(texture), Some(&before));
 }
 
 #[test]
