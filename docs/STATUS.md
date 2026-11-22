@@ -34,9 +34,10 @@ The v23 Inspector shows live Transform and script state during Play and Step.
 The editor and viewer draw, fit and pick from cached world matrices.
 Linux Build preserves static hierarchy transforms, including shear. A relocated
 player loaded 5,000 objects. Build failures offer keyboard-accessible Error Details.
-v23 Point Lights can be created as objects or attached to meshes. The Inspector
-and approved MCP clients edit the same component. The editor warns at the
-render budget and keeps extra lights editable. Attached lights work in static Linux builds.
+v23 point and directional lights can be created as objects or attached to meshes.
+The Inspector and approved MCP clients edit the same component. The editor warns
+at the render budget and keeps extra lights editable. Static Linux builds preserve
+attached lights and a parented sun's direction and shadow settings.
 Approved MCP clients see v23 scene context, share hierarchy Undo and can save
 with inspected guards. Three linked cottages survived reopen and a relocated build.
 Group Selection in v23 inserts a parent around the selected objects with

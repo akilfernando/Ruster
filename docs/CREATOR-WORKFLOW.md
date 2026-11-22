@@ -225,18 +225,22 @@ applies either setting to the selection. You can still select objects in the
 Hierarchy and edit them in the Inspector. These settings are saved on this
 machine for the scene. Play and exported games use the scene's authored state.
 
-Choose **Object → Light → Point Light** to create a light with its own
-Transform. To use an existing object's position, select it and choose
-**Add Component → Light**. Edit **Color**, **Intensity**, **Range** or
-**Enable Point Light** in the Inspector, then choose **Apply**. Approved
-AI clients can inspect and edit the same Light component using
-`scene_components_inspect` and `scene_components_edit`.
+Choose **Object → Light → Point Light** or **Directional Light** to create a
+light with its own Transform. Attach a light to an existing object through
+**Add Component → Light** for a point light or **Directional Light** for a sun.
+Edit **Color**, **Intensity**, or **Range** (point lights), then choose **Apply**.
+Rotate a directional light or its parent to aim it. Light travels along the
+light's local −Z axis. Use **Shadows** and **Quality** to configure the sun's
+shadow. **Advanced Shadows** exposes depth bias and normal offset in shadow
+texels. Turning shadows off keeps those settings. Approved AI clients can
+inspect and edit the same component with `scene_components_inspect` and
+`scene_components_edit`.
 
-The renderer uses up to four enabled point lights in scene order. The
-editor keeps extra lights and shows a warning. Approved clients see the
-warning in the first page of `scene_inspect`. Disable an earlier light to
-preview the next one. The editor's visibility controls also affect the
-preview. A static Linux build uses the authored enabled states.
+The renderer uses up to four enabled point lights and one enabled directional
+light in scene order. The editor keeps extra lights and shows a warning.
+Approved clients see the warning in the first page of `scene_inspect`. Disable
+an earlier light to preview the next one. The editor's visibility controls also
+affect the preview. A static Linux build uses the authored enabled states.
 
 **File → Save** writes the edits to the v23 file. An approved MCP client
 can call `scene_persistence_inspect`, then `scene_save` with the inspected
@@ -280,8 +284,9 @@ Static hierarchies can use mesh objects as parents and keep the world placement
 you see in the editor, including shear from rotated, nonuniformly scaled groups.
 The headless report for these hierarchies includes `world_matrices`, keyed by
 object ID. This path covers enabled objects and meshes in static scenes.
-It also supports point lights attached to static meshes. Editor Play
-supports dedicated v23 point-light objects through the behavior runtime.
+It also supports lights attached to static meshes and directional lights with
+parents. Editor Play supports dedicated light objects in compatible v23 scenes
+through the behavior runtime.
 Scripted or animated hierarchies and scenes with input actions, HUD controls
 or a gameplay camera still depend on the behavior runtime.
 The editor finds the `rot-motion-lab` player alongside `rot-editor`. Local
