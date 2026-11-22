@@ -225,8 +225,12 @@ applies either setting to the selection. You can still select objects in the
 Hierarchy and edit them in the Inspector. These settings are saved on this
 machine for the scene. Play and exported games use the scene's authored state.
 
-**File → Save** writes the edits to the v23 file. When opening another
-scene, **Save and Open** saves pending changes. **Discard and Open** leaves
+**File → Save** writes the edits to the v23 file. An approved MCP client
+can call `scene_persistence_inspect`, then `scene_save` with the inspected
+session, revision and persistence guards. This saves the active scene in
+place. Finish any pending Inspector edits before saving through MCP. If
+the Save reply is lost, inspect `last_committed_save` before retrying.
+When opening another scene, **Save and Open** saves pending changes. **Discard and Open** leaves
 the original file as saved, and **Cancel** keeps the current edits. Use
 **Play**, **Pause**, **Step**, and **Stop** for supported scenes. During Play
 or while paused, Inspector shows the latest committed Transform and script
