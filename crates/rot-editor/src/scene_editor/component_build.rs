@@ -755,7 +755,9 @@ mod tests {
 
     #[test]
     fn file_backed_script_build_pins_bytes_and_bakes_one_source() {
-        use rot_scene::component_scene::{Component, ComponentInstance, ScriptSourceKind};
+        use rot_scene::component_scene::{
+            Component, ComponentInstance, PrefabSource, ScriptSourceKind,
+        };
         use rot_scene::{BehaviorBinding, BindingTarget};
 
         let directory = tempfile::tempdir().unwrap();
@@ -790,6 +792,29 @@ mod tests {
                 },
             });
         }
+        let prefab = PrefabSource::from_selection(&scene, &scene.objects[0].id).unwrap();
+        let mut placed = ComponentSession::new(scene.clone()).unwrap();
+        placed
+            .place_prefab(
+                0,
+                "spinner-prefab".into(),
+                prefab.content_hash().unwrap(),
+                &prefab,
+                "placed-spinner",
+                Transform::default(),
+                None,
+            )
+            .unwrap();
+        let copied = placed
+            .scene()
+            .objects
+            .iter()
+            .find(|object| object.id == "placed-spinner")
+            .unwrap();
+        assert!(copied.components.iter().any(|component| matches!(
+            &component.kind,
+            Component::Script { binding, source_kind: Some(ScriptSourceKind::Asset) }
+                if binding.source_id == "spin" && binding.object_id() == Some("placed-spinner"))));
         scene.save_new(&path).unwrap();
         let session = ComponentSession::open(&path).unwrap();
         let capture = |assets: &AssetStore| BuildRequest::capture(&session, Some(assets)).unwrap();
