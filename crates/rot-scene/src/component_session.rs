@@ -1,6 +1,6 @@
 use super::{
-    prefab::Materialization, ComponentScene, ObjectHierarchy, ObjectNode, PrefabInstance,
-    PrefabProperty, PrefabSource,
+    prefab::Materialization, Component, ComponentScene, ObjectHierarchy, ObjectNode,
+    PrefabInstance, PrefabProperty, PrefabSource,
 };
 use crate::{BehaviorSource, OpaqueMaterial, SceneError, SceneLock, Transform};
 use sha2::{Digest, Sha256};
@@ -343,6 +343,55 @@ impl ComponentSession {
         }
         if changes.is_empty() {
             return Ok(self.revision);
+        }
+        self.commit(changes)
+    }
+
+    /// Create or replace a scene-owned material, optionally assigning a new
+    /// material to one exact Mesh Renderer as part of the same transaction.
+    pub fn set_material(
+        &mut self,
+        expected: u64,
+        id: &str,
+        value: OpaqueMaterial,
+        assign: Option<(&str, &str)>,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected)?;
+        let previous = self.scene.materials.get(id);
+        if assign.is_none() && previous == Some(&value) {
+            return Ok(self.revision);
+        }
+        let mut changes = vec![SceneChange::Material {
+            id: id.to_owned(),
+            value: Some(value),
+        }];
+        if let Some((object_id, component_id)) = assign {
+            if previous.is_some() {
+                return Err(SceneError::Invalid(
+                    "Choose a new material ID to create and assign.".into(),
+                ));
+            }
+            let index = self
+                .scene
+                .objects
+                .iter()
+                .position(|object| object.id == object_id)
+                .ok_or_else(|| SceneError::ObjectNotFound(object_id.to_owned()))?;
+            let mut object = self.scene.objects[index].clone();
+            match object
+                .components
+                .iter_mut()
+                .find(|component| component.id == component_id)
+                .map(|component| &mut component.kind)
+            {
+                Some(Component::MeshRenderer { material, .. }) => *material = Some(id.to_owned()),
+                _ => {
+                    return Err(SceneError::Invalid(
+                        "Choose a Mesh Renderer to assign the material.".into(),
+                    ))
+                }
+            }
+            changes.push(SceneChange::Replace { index, object });
         }
         self.commit(changes)
     }

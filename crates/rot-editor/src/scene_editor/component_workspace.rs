@@ -18,6 +18,9 @@ use rot_scene::{Primitive, SceneError, Transform};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 
+#[path = "component_material.rs"]
+pub(super) mod component_material;
+
 #[path = "component_transform.rs"]
 mod viewport_transform;
 use glam::DMat4;
@@ -227,6 +230,8 @@ pub(super) struct ComponentWorkspace {
     selected_index: Option<usize>,
     draft: Option<ObjectNode>,
     multi_draft: Option<MultiInspector>,
+    material_draft: Option<component_material::Draft>,
+    material_usage: component_material::Usage,
     edit_scene_during_play: bool,
     component_picker: component_inspector::ComponentPicker,
     error: Option<String>,
@@ -337,6 +342,8 @@ impl ComponentWorkspace {
             selection_anchor: None,
             draft: None,
             multi_draft: None,
+            material_draft: None,
+            material_usage: component_material::Usage::default(),
             edit_scene_during_play: false,
             component_picker: Default::default(),
             error: None,
@@ -667,8 +674,12 @@ impl ComponentWorkspace {
     }
 
     #[cfg(unix)]
+    pub(super) fn material_edit_pending(&self) -> bool {
+        self.material_draft.is_some()
+    }
+
     fn authored_edit_pending(&self) -> bool {
-        self.transform_tool.active() || self.draft_dirty()
+        self.transform_tool.active() || self.material_draft.is_some() || self.draft_dirty()
     }
 
     fn refresh(&mut self) {
@@ -781,7 +792,7 @@ impl ComponentWorkspace {
     }
 
     fn apply(&mut self) -> bool {
-        if self.transform_tool.active() {
+        if self.transform_tool.active() || self.material_draft.is_some() {
             return false;
         }
         if !self.draft_dirty() {
@@ -789,7 +800,10 @@ impl ComponentWorkspace {
         }
         let revision = self.session.revision();
         let result = if let Some(draft) = self.draft.clone() {
-            self.session.put_object(revision, draft)
+            let prior = &self.session.scene().objects
+                [self.selected_index.expect("draft requires selection")];
+            self.validate_material_bindings(prior, &draft)
+                .and_then(|()| self.session.put_object(revision, draft))
         } else if let Some(draft) = &self.multi_draft {
             let edits = self
                 .session
@@ -797,7 +811,11 @@ impl ComponentWorkspace {
                 .objects
                 .iter()
                 .filter(|object| self.selection.contains(&object.id))
-                .map(|object| draft.edit(object))
+                .map(|object| {
+                    let next = draft.edit(object)?;
+                    self.validate_material_bindings(object, &next)?;
+                    Ok(next)
+                })
                 .collect::<Result<Vec<_>, _>>();
             edits.and_then(|edits| self.session.put_objects(revision, edits))
         } else {
@@ -1223,7 +1241,7 @@ impl ComponentWorkspace {
     }
 
     fn command_from_ui(&mut self, ctx: &egui::Context, action: Action) {
-        if self.transform_tool.active() {
+        if self.transform_tool.active() || self.material_draft.is_some() {
             return;
         }
         #[cfg(not(target_os = "linux"))]
@@ -1245,7 +1263,7 @@ impl ComponentWorkspace {
     }
 
     fn command(&mut self, action: Action) {
-        if self.transform_tool.active() {
+        if self.transform_tool.active() || self.material_draft.is_some() {
             return;
         }
         let revision = self.session.revision();
@@ -1714,10 +1732,12 @@ impl ComponentWorkspace {
         if publishing {
             ui.disable();
         }
+        let material_close_pending = self.defer_material_close(&ctx);
         if (build_open || publishing) && ctx.input(|input| input.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
         if !build_open
+            && !material_close_pending
             && !self.close_approved
             && (self.session.is_dirty() || self.draft_dirty())
             && ctx.input(|input| input.viewport().close_requested())
@@ -1727,7 +1747,11 @@ impl ComponentWorkspace {
             self.close_pending = true;
         }
         self.poll_runtime(&ctx);
-        let blocked = self.close_pending || self.open_path.is_some() || build_open || publishing;
+        let blocked = self.close_pending
+            || self.open_path.is_some()
+            || build_open
+            || publishing
+            || self.material_draft.is_some();
         #[cfg(target_os = "linux")]
         self.asset_import_frame(&ctx, blocked);
         let asset_dialog = self.asset_browser.file_dialog_open();
@@ -2230,14 +2254,21 @@ impl ComponentWorkspace {
                                 self.parent_ui(ui);
                                 self.prefab_inspector(ui);
                                 ui.separator();
-                                if let Some(draft) = &mut self.draft {
-                                    submit |= component_inspector::components(
-                                        ui,
-                                        draft,
-                                        &self.meshes,
-                                        self.assets.as_ref(),
-                                        &self.session.scene().materials,
-                                    );
+                                if self.draft.is_some() {
+                                    let allow_new = self.material_controls();
+                                    let (component_submit, material_request) =
+                                        component_inspector::components(
+                                            ui,
+                                            self.draft.as_mut().expect("selected draft"),
+                                            &self.meshes,
+                                            self.assets.as_ref(),
+                                            &self.session.scene().materials,
+                                            allow_new,
+                                        );
+                                    submit |= component_submit;
+                                    if let Some(request) = material_request {
+                                        self.begin_material(request);
+                                    }
                                 }
                                 if ui
                                     .add_enabled(
@@ -2259,6 +2290,7 @@ impl ComponentWorkspace {
                     && !asset_dialog
                     && !self.close_pending
                     && self.open_path.is_none()
+                    && self.material_draft.is_none()
                     && !egui::Popup::is_any_open(&ctx)
                     && ui.input_mut(|input| {
                         input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
@@ -2282,6 +2314,7 @@ impl ComponentWorkspace {
             self.build
                 .show(&ctx, &self.session, self.assets.as_ref(), draft_dirty);
         }
+        self.show_material_draft(&ctx);
         if let Some(mut path) = self.open_path.take() {
             let mut cancel = false;
             let mut opened = None;

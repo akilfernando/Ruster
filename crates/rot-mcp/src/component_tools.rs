@@ -40,7 +40,7 @@ pub(super) fn list() -> [Value; 2] {
             "annotations":{"readOnlyHint":true,"openWorldHint":false}}),
         json!({"name":"scene_components_edit","description":"",
             "inputSchema":object_schema(json!({"expected_session_token":{"type":"string","minLength":1,"maxLength":256},
-                "expected_revision":offset,"edits":{"type":"array","minItems":1,"maxItems":64,"items":edit}}),
+                "expected_revision":offset,"expected_asset_revision":offset,"edits":{"type":"array","minItems":1,"maxItems":64,"items":edit}}),
                 vec!["expected_session_token","expected_revision","edits"]),
             "annotations":{"readOnlyHint":false,"openWorldHint":false}}),
     ]
@@ -65,11 +65,14 @@ pub(super) fn valid(name: &str, args: &Value) -> bool {
     exact_keys(
         map,
         &["expected_session_token", "expected_revision", "edits"],
-        &[],
+        &["expected_asset_revision"],
     ) && args["expected_session_token"]
         .as_str()
         .is_some_and(|token| !token.is_empty() && token.len() <= 256)
         && canonical_u64(&args["expected_revision"])
+        && args
+            .get("expected_asset_revision")
+            .is_none_or(canonical_u64)
         && args["edits"].as_array().is_some_and(|edits| {
             (1..=64).contains(&edits.len())
                 && edits.iter().all(|edit| {

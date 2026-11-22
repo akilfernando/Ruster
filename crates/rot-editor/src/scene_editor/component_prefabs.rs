@@ -130,8 +130,7 @@ impl ComponentWorkspace {
     #[cfg(target_os = "linux")]
     pub(super) fn reconcile_prefabs(&mut self) {
         if !self.prefab_refresh_pending
-            || self.transform_tool.active()
-            || self.draft_dirty()
+            || self.authored_edit_pending()
             || self.runtime.in_play_mode()
         {
             return;

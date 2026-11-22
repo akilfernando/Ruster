@@ -10,14 +10,14 @@ fn error(code: &str, message: impl Into<String>) -> CommandError {
     (code.into(), message.into())
 }
 
-fn exact_keys(map: &Map<String, Value>, required: &[&str], optional: &[&str]) -> bool {
+pub(super) fn exact_keys(map: &Map<String, Value>, required: &[&str], optional: &[&str]) -> bool {
     required.iter().all(|field| map.contains_key(*field))
         && map
             .keys()
             .all(|field| required.contains(&field.as_str()) || optional.contains(&field.as_str()))
 }
 
-fn number(value: &Value) -> Result<u64, CommandError> {
+pub(super) fn number(value: &Value) -> Result<u64, CommandError> {
     let text = value
         .as_str()
         .filter(|text| {
@@ -35,7 +35,7 @@ fn number(value: &Value) -> Result<u64, CommandError> {
         .map_err(|_| error("invalid_arguments", "Decimal value exceeds u64"))
 }
 
-fn id(value: &Value) -> Result<&str, CommandError> {
+pub(super) fn id(value: &Value) -> Result<&str, CommandError> {
     let id = value
         .as_str()
         .ok_or_else(|| error("invalid_arguments", "Expected a stable ID string"))?;
@@ -64,7 +64,7 @@ fn optional_name(value: Option<&Value>) -> Result<Option<String>, CommandError> 
     }
 }
 
-fn material(value: &Value) -> Result<OpaqueMaterial, CommandError> {
+pub(super) fn material(value: &Value) -> Result<OpaqueMaterial, CommandError> {
     let map = value
         .as_object()
         .filter(|map| {

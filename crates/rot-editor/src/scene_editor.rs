@@ -5832,7 +5832,13 @@ impl eframe::App for Host {
         self.input.observe(raw, ctx);
         if self.editor.component.is_some() {
             #[cfg(unix)]
-            if raw.viewport().close_requested() {
+            if raw.viewport().close_requested()
+                && !self
+                    .editor
+                    .component
+                    .as_ref()
+                    .is_some_and(|component| component.material_edit_pending())
+            {
                 self.disconnect_adapter();
             }
             return;

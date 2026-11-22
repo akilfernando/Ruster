@@ -48,7 +48,8 @@ fn fields(name: &str) -> Option<Vec<&'static str>> {
 fn optional(name: &str) -> &'static [&'static str] {
     match name {
         "material_inspect" => &["offset", "limit"],
-        "scene_material_set" => &["assign_object_id"],
+        "scene_material_set" => &["assign_object_id", "component_id"],
+        "scene_material_assign" => &["component_id"],
         "scene_material_copy" => &["name"],
         _ => &[],
     }

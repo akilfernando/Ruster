@@ -148,7 +148,13 @@ pub(super) fn components(
     meshes: &rot_app::MeshMap,
     assets: Option<&rot_assets::AssetStore>,
     materials: &BTreeMap<String, OpaqueMaterial>,
-) -> bool {
+    allow_new_material: bool,
+) -> (
+    bool,
+    Option<super::component_workspace::component_material::Request>,
+) {
+    use super::component_workspace::component_material::{Intent, Request};
+    let mut material_request = None;
     let mut submit = false;
     let mut remove = None;
     for (index, component) in draft.components.iter_mut().enumerate() {
@@ -171,7 +177,42 @@ pub(super) fn components(
                         tint,
                         material,
                     } => {
-                        mesh_fields(ui, geometry, tint, material, meshes, assets, materials);
+                        mesh_fields(ui, geometry, material, meshes, assets, materials);
+                        ui.horizontal_wrapped(|ui| {
+                            if ui
+                                .add_enabled(
+                                    allow_new_material,
+                                    egui::Button::new(Text::MaterialNew.plain()),
+                                )
+                                .on_disabled_hover_text(Text::ComponentPrefabMaterialSource.plain())
+                                .clicked()
+                            {
+                                material_request = Some(Request {
+                                    component: component.id.clone(),
+                                    intent: Intent::Create,
+                                });
+                            }
+                            if ui
+                                .add_enabled(
+                                    material.is_some(),
+                                    egui::Button::new(Text::MaterialEdit.plain()),
+                                )
+                                .clicked()
+                            {
+                                material_request = material.clone().map(|id| Request {
+                                    component: component.id.clone(),
+                                    intent: Intent::Edit(id),
+                                });
+                            }
+                        });
+                        ui_kit::property_row_with_label(
+                            ui,
+                            Text::ComponentTint.plain(),
+                            |ui, label| {
+                                ui.color_edit_button_rgba_unmultiplied(tint)
+                                    .labelled_by(label);
+                            },
+                        );
                     }
                     Component::Collider {
                         role,
@@ -202,7 +243,7 @@ pub(super) fn components(
         draft.components.remove(index);
         submit = true;
     }
-    submit
+    (submit, material_request)
 }
 
 pub(super) fn geometry_name<'a>(
@@ -237,7 +278,6 @@ pub(super) fn geometry_choices(meshes: &rot_app::MeshMap) -> impl Iterator<Item 
 fn mesh_fields(
     ui: &mut egui::Ui,
     geometry: &mut Geometry,
-    tint: &mut [f32; 4],
     material: &mut Option<String>,
     meshes: &rot_app::MeshMap,
     assets: Option<&rot_assets::AssetStore>,
@@ -288,12 +328,6 @@ fn mesh_fields(
                     .on_hover_text(id);
                 }
             });
-    });
-    ui_kit::property_row(ui, Text::ComponentTint.plain(), |ui| {
-        let mut color = *tint;
-        if ui.color_edit_button_rgba_unmultiplied(&mut color).changed() {
-            *tint = color;
-        }
     });
 }
 

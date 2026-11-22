@@ -28,6 +28,11 @@ impl ComponentWorkspace {
                 | "behavior_runtime_stop"
         ) {
             self.execute_ai_runtime(token, op, args)
+        } else if matches!(
+            op,
+            "material_inspect" | "scene_material_set" | "scene_material_assign"
+        ) {
+            self.material_command(token, op, args)
         } else {
             self.execute_ai_command(token, op, args)
                 .map_err(|(code, message)| (code.to_owned(), message))
@@ -243,7 +248,7 @@ impl ComponentWorkspace {
             }
             "scene_transform" | "scene_rename" | "scene_reparent" => 4,
             "scene_transform_many" | "scene_delete" | "scene_delete_many" => 3,
-            "scene_components_edit" => 3,
+            "scene_components_edit" => 3 + usize::from(map.contains_key("expected_asset_revision")),
             "scene_undo" | "scene_redo" => 2,
             _ => {
                 return Err((
@@ -401,6 +406,7 @@ impl ComponentWorkspace {
             "scene_mesh" => {
                 let (object, details) = self.mesh_assignment(args)?;
                 payload = details;
+                self.validate_edited_material_bindings(&object)?;
                 self.session.put_object(revision, object)
             }
             "scene_transform" => {
@@ -522,7 +528,11 @@ impl ComponentWorkspace {
                 self.session.remove_subtrees(revision, &ids)
             }
             "scene_components_edit" => {
-                let edits = self.component_edits(&args["edits"])?;
+                let asset_revision = map
+                    .get("expected_asset_revision")
+                    .map(|value| decimal(value).ok_or_else(invalid))
+                    .transpose()?;
+                let edits = self.component_edits(&args["edits"], asset_revision)?;
                 self.session.put_objects(revision, edits)
             }
             "scene_undo" => self.prefab_history(revision, true),
@@ -595,6 +605,18 @@ impl ComponentWorkspace {
         )
         .map_err(|message| ("invalid_arguments", message.into()))?;
         Ok(result)
+    }
+
+    fn validate_edited_material_bindings(&self, object: &ObjectNode) -> Result<(), CommandError> {
+        let before = self
+            .session
+            .scene()
+            .objects
+            .iter()
+            .find(|before| before.id == object.id)
+            .ok_or_else(object_not_found)?;
+        self.validate_material_bindings(before, object)
+            .map_err(|error| ("material_unavailable", error.to_string()))
     }
 
     fn mesh_assignment(&self, args: &Value) -> Result<(ObjectNode, Value), CommandError> {
@@ -716,7 +738,11 @@ impl ComponentWorkspace {
         }))
     }
 
-    fn component_edits(&self, value: &Value) -> Result<Vec<ObjectNode>, CommandError> {
+    fn component_edits(
+        &self,
+        value: &Value,
+        asset_revision: Option<u64>,
+    ) -> Result<Vec<ObjectNode>, CommandError> {
         let edits = value
             .as_array()
             .filter(|edits| (1..=64).contains(&edits.len()))
@@ -758,6 +784,29 @@ impl ComponentWorkspace {
                 }
             };
             action.apply(&mut changed[index])?;
+        }
+        for object in &changed {
+            let before = originals[object.id.as_str()];
+            if self.changes_textured_binding(before, object) {
+                let expected = asset_revision.ok_or_else(|| (
+                    "asset_revision_required",
+                    "Inspect project assets and pass expected_asset_revision when changing a textured Mesh Renderer.".into(),
+                ))?;
+                if self.assets_loading() {
+                    return Err((
+                        "assets_loading",
+                        "Wait for the project assets to load.".into(),
+                    ));
+                }
+                if expected != self.material_asset_revision() {
+                    return Err((
+                        "stale_asset_revision",
+                        "Inspect the project assets again.".into(),
+                    ));
+                }
+            }
+            self.validate_material_bindings(before, object)
+                .map_err(|error| ("material_unavailable", error.to_string()))?;
         }
         Ok(changed)
     }
