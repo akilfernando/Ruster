@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-11-22. See the [archive](archive/STATUS-2026-11-17.md) for earlier status.
+Updated 2026-11-23. See the [archive](archive/STATUS-2026-11-17.md) for earlier status.
 
 ## Where to work
 
@@ -34,8 +34,8 @@ The v23 Inspector shows live Transform and script state during Play and Step.
 The editor and viewer draw, fit and pick from cached world matrices.
 Linux Build preserves static hierarchy transforms, including shear. A relocated
 player loaded 5,000 objects. Build failures offer keyboard-accessible Error Details.
-Approved MCP clients can inspect builds, create parent-local objects, frame
-hierarchies and manage assets. Hierarchy offers Create Child and Frame Selected.
+Approved MCP clients see the active project, scene and selection in v23. They can
+create parent-local objects, frame hierarchies, manage assets and inspect builds.
 Group Selection in v23 inserts a parent around the selected objects with
 world transforms preserved. The Object menu, Hierarchy context menu,
 remappable Ctrl+G and approved MCP clients share one Undo entry.

@@ -26,6 +26,11 @@ and an `Assets/` folder. Open the project again from the hub or open its
 `scene.json` directly. **Basic 3D** still opens the legacy editor with its
 ground, cube, sun, and game camera.
 
+For AI-assisted editing, call `scene_inspect` first. Its first page identifies
+the open project and scene, the active object, and up to 16 selected object
+IDs. It reports the full selection count even when a selected object is on
+a later page. Read subsequent pages using `next_offset`.
+
 To assemble an object from parts, right-click the parent in the Hierarchy
 and choose **Create Child**. The new part starts at the parent's origin.
 Edit the part's position, rotation, and scale in the Inspector. An approved
