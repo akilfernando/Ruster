@@ -89,6 +89,15 @@ connected project.
   disappear while the object's Lua and enabled collider stay active.
   When changing a textured Mesh Renderer binding, include
   `expected_asset_revision` from the current asset inspection.
+- For a v23 Lua file, find a ready asset with `kind: "script"` in
+  `asset_inspect`. In `scene_components_edit`, add a component with
+  `type: "script"`, `source_kind: "asset"`, a unique component ID and
+  `enabled: true`. Set `binding.object_id` to the owner,
+  `binding.source_id` to the asset ID, `binding.enabled` to true, and
+  `binding.properties` to an empty object. Supply the session, scene
+  and asset revision guards. The edit shares Undo with the editor.
+  A new Play run uses the latest accepted file. Build embeds the accepted
+  source. File-backed object scripts use the Lua transform API.
 - In legacy scenes, `scene_inspect` reports `group_creation_blockers` for
   `scene_group_create`. Each entry includes a `code` and can include a named
   `example`. Codes are `input_actions`, `hud`, `script_sources`,

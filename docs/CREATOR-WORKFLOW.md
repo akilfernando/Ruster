@@ -186,6 +186,35 @@ The optional `pending_material` summary reports the current edit's intent,
 target IDs, and affected object count. Apply or cancel the pending edit
 before retrying a material command that writes to the scene.
 
+## Attach a Lua file in v23
+
+Save a UTF-8 `.lua` file under the project's **Assets** folder. For
+example, this file rotates its owner at 1.2 radians per second.
+
+```lua
+return {
+    update = function(object, properties, dt)
+        object.rotation[2] = object.rotation[2] + 1.2 * dt
+        return object
+    end
+}
+```
+
+Select a mesh object and choose **Add Component → Script**. Find the file
+under **Choose Script** and select it. Enter selects the matching item and
+Escape closes the picker. The Inspector shows the source filename. One Undo
+removes the attachment. The source file remains in Assets.
+
+Use **Play** or **Step** to run the file with Rot's Lua transform API.
+An open run uses the source it started with. Stop and start Play after
+saving edits to the file. If Play reports a missing or invalid source,
+repair that file in Assets and try again. A Lua file can be up to 16 KiB.
+
+Use **Rename…** on the file in Assets to keep its ID and attachments.
+A linked prefab can reuse the same asset. Saving the scene records the
+asset reference. Linux Build verifies the accepted source and embeds it
+in the packaged scene so the standalone can run independently.
+
 ## Reuse a hierarchy as a prefab
 
 1. In a v23 project, create an empty root and use **Create Child** to build

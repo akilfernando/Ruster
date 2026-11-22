@@ -31,6 +31,9 @@ move or delete objects together, and save. Inspector edits shared Transform
 and component values. Viewport settings stay local. Automatic upgrades remain open.
 
 The v23 Inspector shows live Transform and script state during Play and Step.
+Assets watches Lua files. Add Component → Script and approved MCP
+attach the same stable file reference. New Play runs pick up accepted
+edits, and Linux Build embeds a verified copy of the source.
 The editor and viewer draw, fit and pick from cached world matrices.
 Play and Linux Build share the same render data for supported static hierarchies,
 including shear. A disabled Mesh Renderer in supported scripted v23 scenes
