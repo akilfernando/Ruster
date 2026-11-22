@@ -4658,7 +4658,7 @@ mod tests {
         scene.objects.push(object);
         let focal = matrix.transform_point3(Vec3::ZERO);
         let up = matrix.transform_vector3(Vec3::Y).normalize();
-        let projection = Mat4::orthographic_rh_gl(-2., 2., -2., 2., 0.1, 12.);
+        let projection = Mat4::orthographic_rh(-2., 2., -2., 2., 0.1, 12.);
         for side in [-1., 1.] {
             let camera = focal + matrix.transform_vector3(Vec3::Z).normalize() * (6. * side);
             let vp = projection * Mat4::look_at_rh(camera, focal, up);
