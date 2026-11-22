@@ -1,12 +1,18 @@
 //! A small read-only launch descriptor for exported creator content.
 //! The supported scene document owns authored state; this is not a second project editor.
 use crate::{MeshMap, ResourceRoot, TextureMap};
+use rot_assets::TextureRole;
 use rot_scene::{
-    component_scene::{self, Component, ComponentScene},
-    Scene, SceneError, Session, SoundAssetReferences,
+    component_scene::{self, Component, ComponentScene, Geometry},
+    OpaqueMaterial, Scene, SceneError, Session, SoundAssetReferences,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+    sync::Arc,
+    time::Duration,
+};
 
 pub const DESCRIPTOR_NAME: &str = "app.json";
 pub const FORMAT: &str = "rot-application";
@@ -58,6 +64,13 @@ impl RuntimeScene {
         }
     }
 
+    pub fn draw_dependencies(&self) -> Result<DrawDependencies, String> {
+        match self {
+            Self::Behavior(session) => DrawDependencies::from_scene(session.scene()),
+            Self::StaticHierarchy { scene, .. } => DrawDependencies::from_components(scene),
+        }
+    }
+
     pub fn sound_asset_references(&self) -> SoundAssetReferences {
         match self {
             Self::Behavior(session) => session.sound_asset_references(),
@@ -73,11 +86,16 @@ pub fn static_component_preview(
     if supports_static_preview(scene)
         && (scene.objects.len() > rot_scene::MAX_OBJECTS
             || scene.objects.iter().any(|object| {
-                object.parent.is_some()
+                !object.enabled
+                    || object.parent.is_some()
                     || object
                         .components
                         .iter()
-                        .any(|component| matches!(component.kind, Component::Light { .. }))
+                        .any(|component| match component.kind {
+                            Component::Light { .. } => true,
+                            Component::MeshRenderer { .. } => !component.enabled,
+                            _ => false,
+                        })
             }))
     {
         return rot_render::component_preview::project(scene)
@@ -92,15 +110,99 @@ fn supports_static_preview(scene: &ComponentScene) -> bool {
         && scene.actions == Default::default()
         && scene.hud.is_default()
         && scene.gameplay_camera.is_none()
-        // Keep every authored mesh dependency in the preview's asset closure.
         && scene.objects.iter().all(|object| {
-            object.enabled
-                && object.components.iter().all(|component| match component.kind {
-                    Component::Script { .. } | Component::Animator { .. } => false,
-                    Component::MeshRenderer { .. } => component.enabled,
-                    _ => true,
-                })
+            object.components.iter().all(|component| {
+                !matches!(
+                    component.kind,
+                    Component::Script { .. } | Component::Animator { .. }
+                )
+            })
         })
+}
+
+/// Assets referenced by mesh renderers, including static meshes that start disabled.
+pub struct DrawDependencies {
+    pub meshes: BTreeSet<String>,
+    pub texture_roles: BTreeMap<String, TextureRole>,
+}
+
+impl DrawDependencies {
+    pub fn from_scene(scene: &Scene) -> Result<Self, String> {
+        let meshes = scene
+            .objects
+            .iter()
+            .filter_map(|object| object.mesh.clone());
+        let materials = scene
+            .objects
+            .iter()
+            .filter_map(|object| object.material.as_ref())
+            .filter_map(|id| scene.materials.get(id));
+        Self::collect(meshes, materials)
+    }
+
+    fn from_components(scene: &ComponentScene) -> Result<Self, String> {
+        let renderers = || {
+            scene.objects.iter().flat_map(|object| {
+                object
+                    .components
+                    .iter()
+                    .filter_map(|component| match &component.kind {
+                        Component::MeshRenderer {
+                            geometry, material, ..
+                        } => Some((geometry, material)),
+                        _ => None,
+                    })
+            })
+        };
+        let meshes = renderers().filter_map(|(geometry, _)| match geometry {
+            Geometry::Imported { asset } => Some(asset.clone()),
+            _ => None,
+        });
+        let materials = renderers()
+            .filter_map(|(_, material)| material.as_ref())
+            .filter_map(|id| scene.materials.get(id));
+        Self::collect(meshes, materials)
+    }
+
+    fn collect<'a>(
+        meshes: impl Iterator<Item = String>,
+        materials: impl Iterator<Item = &'a OpaqueMaterial>,
+    ) -> Result<Self, String> {
+        let meshes: BTreeSet<_> = meshes.collect();
+        let texture_roles = texture_roles(materials)?;
+        if texture_roles.keys().any(|id| meshes.contains(id)) {
+            return Err("Mesh and texture asset IDs must be distinct before export.".into());
+        }
+        Ok(Self {
+            meshes,
+            texture_roles,
+        })
+    }
+}
+
+pub fn texture_roles<'a>(
+    materials: impl Iterator<Item = &'a OpaqueMaterial>,
+) -> Result<BTreeMap<String, TextureRole>, String> {
+    let mut roles = BTreeMap::new();
+    for material in materials {
+        // Inactive slots are still authored launch dependencies.
+        for (id, role) in [
+            (&material.base_color_texture, TextureRole::BaseColor),
+            (&material.roughness_texture, TextureRole::Roughness),
+        ] {
+            if let Some(id) = id {
+                if roles
+                    .insert(id.clone(), role)
+                    .is_some_and(|old| old != role)
+                {
+                    return Err(
+                        "One texture identity cannot serve conflicting material roles.".into(),
+                    );
+                }
+            }
+        }
+    }
+    Ok(roles)
 }
 
 /// Explicit launch framing. Navigation remains interactive after initialization.
@@ -420,9 +522,32 @@ impl CreationManifest {
         let scene = RuntimeScene::from_snapshot(&bytes)?;
         match &scene {
             RuntimeScene::Behavior(session) => self.validate_behavior_scene(session)?,
-            RuntimeScene::StaticHierarchy { .. } => {
+            RuntimeScene::StaticHierarchy { scene, .. } => {
                 if self.version != NO_AUDIO_VERSION {
                     return Err("Static component hierarchies require descriptor version 5".into());
+                }
+                let dependencies = DrawDependencies::from_components(scene)?;
+                for id in dependencies.meshes {
+                    if !self.meshes.contains_key(&id) {
+                        return Err(format!("Application is missing the required mesh {id}."));
+                    }
+                }
+                let roles = self
+                    .texture_roles
+                    .as_ref()
+                    .expect("descriptor roles validated");
+                for (id, role) in dependencies.texture_roles {
+                    match roles.get(&id) {
+                        Some(actual) if *actual == role => {}
+                        Some(_) => return Err(format!(
+                            "Application texture {id} has the wrong role for its material slot."
+                        )),
+                        None => {
+                            return Err(format!(
+                                "Application is missing the required texture {id}."
+                            ))
+                        }
+                    }
                 }
             }
         }

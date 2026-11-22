@@ -1,5 +1,4 @@
 //! Stage a runnable v23 creation and publish the entire directory atomically.
-use crate::creation_export::{draw_dependencies, scene_texture_roles};
 use crate::{
     editor_theme,
     strings::Text,
@@ -10,8 +9,8 @@ use crate::{
 };
 use eframe::egui;
 use rot_app::creation::{
-    CreationManifest, RuntimeScene, DESCRIPTOR_NAME, FORMAT, NO_ANIMATION_VERSION,
-    NO_AUDIO_VERSION, VERSION,
+    CreationManifest, DrawDependencies, RuntimeScene, DESCRIPTOR_NAME, FORMAT,
+    NO_ANIMATION_VERSION, NO_AUDIO_VERSION, VERSION,
 };
 use rot_assets::{AssetKind, AssetStore};
 use rot_scene::component_scene::ComponentSession;
@@ -125,6 +124,7 @@ impl From<String> for BuildFailure {
 struct BuildRequest {
     bytes: Vec<u8>,
     scene: RuntimeScene,
+    dependencies: DrawDependencies,
     assets: Option<rot_assets::ExportSnapshot>,
 }
 
@@ -146,12 +146,14 @@ impl BuildRequest {
                 .map_err(|error| error.to_string())?;
         }
         let scene = RuntimeScene::from_snapshot(&bytes)?;
-        let (meshes, textures) = draw_dependencies(scene.draw_scene())
+        let dependencies = scene
+            .draw_dependencies()
             .map_err(|error| BuildFailureKind::AssetUnavailable.detail(error))?;
         let sounds = scene.sound_asset_references();
-        let ids = meshes
+        let ids = dependencies
+            .meshes
             .iter()
-            .chain(&textures)
+            .chain(dependencies.texture_roles.keys())
             .chain(&sounds.assets)
             .cloned()
             .chain(
@@ -175,6 +177,7 @@ impl BuildRequest {
         Ok(Self {
             bytes,
             scene,
+            dependencies,
             assets,
         })
     }
@@ -245,8 +248,10 @@ impl BuildRequest {
         let stage = staging.path();
         let sound = self.scene.sound_asset_references();
         let draw = self.scene.draw_scene();
-        let (mesh_ids, _) = draw_dependencies(draw)?;
-        let roles = scene_texture_roles(draw)?;
+        let DrawDependencies {
+            meshes: mesh_ids,
+            texture_roles: roles,
+        } = self.dependencies;
         let animated = !draw.animations.is_empty();
         let mut manifest = CreationManifest {
             format: FORMAT.into(),
@@ -704,6 +709,151 @@ mod tests {
         Scene, Session, Transform,
     };
     use serde_json::json;
+
+    #[test]
+    fn builds_disabled_component_assets_and_keeps_game_visibility() {
+        use rot_assets::TextureRole;
+        use rot_scene::component_scene::{Component, ComponentInstance, Geometry};
+        use rot_scene::{LightKind, OpaqueMaterial};
+
+        let folder = tempfile::tempdir().unwrap();
+        let root = folder.path().join("source");
+        fs::create_dir(&root).unwrap();
+        let player = root.join("player");
+        fs::write(&player, b"test player").unwrap();
+        fs::set_permissions(&player, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(
+            root.join("hidden.obj"),
+            b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n",
+        )
+        .unwrap();
+        let mut png = png::Encoder::new(fs::File::create(root.join("hidden.png")).unwrap(), 1, 1);
+        png.set_color(png::ColorType::Rgba);
+        png.set_depth(png::BitDepth::Eight);
+        png.write_header()
+            .unwrap()
+            .write_image_data(&[100, 20, 40, 255])
+            .unwrap();
+        let mut assets = AssetStore::open(&root).unwrap();
+        assets.import("hidden-model", "hidden.obj").unwrap();
+        assets.import("hidden-color", "hidden.png").unwrap();
+        assets
+            .import_texture("hidden-roughness", "hidden.png", TextureRole::Roughness)
+            .unwrap();
+
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.materials.insert(
+            "hidden-material".into(),
+            OpaqueMaterial {
+                base_color_texture: Some("hidden-color".into()),
+                roughness_texture: Some("hidden-roughness".into()),
+                ..OpaqueMaterial::default()
+            },
+        );
+        let mesh = |id: &str, enabled| ComponentInstance {
+            id: id.into(),
+            enabled,
+            kind: Component::MeshRenderer {
+                geometry: Geometry::Imported {
+                    asset: "hidden-model".into(),
+                },
+                tint: [1.0; 4],
+                material: Some("hidden-material".into()),
+            },
+        };
+        let light = |id: &str| ComponentInstance {
+            id: id.into(),
+            enabled: true,
+            kind: Component::Light {
+                color: [1.0; 3],
+                intensity: 2.0,
+                kind: LightKind::Point { range: 6.0 },
+            },
+        };
+        scene.objects[0].enabled = false;
+        scene.objects[1].parent = Some(scene.objects[0].id.clone());
+        scene.objects[1].components =
+            vec![mesh("hidden-child-mesh", true), light("hidden-child-light")];
+        scene.objects.push(ObjectNode {
+            id: "lamp".into(),
+            name: "Lamp".into(),
+            enabled: true,
+            parent: None,
+            transform: Transform::default(),
+            components: vec![
+                mesh("lamp-disabled-mesh", false),
+                light("lamp-enabled-light"),
+            ],
+        });
+        let path = root.join("scene.json");
+        scene.save_new(&path).unwrap();
+        let session = ComponentSession::open(&path).unwrap();
+        assert!(matches!(
+            BuildRequest::capture(&session, None),
+            Err(BuildFailure {
+                kind: BuildFailureKind::AssetUnavailable,
+                ..
+            })
+        ));
+        let destination = folder.path().join("build");
+        BuildRequest::capture(&session, Some(&assets))
+            .unwrap()
+            .publish(&destination, &player, &AtomicBool::new(false))
+            .unwrap();
+
+        let relocated = folder.path().join("relocated");
+        fs::rename(destination, &relocated).unwrap();
+        fs::rename(root, folder.path().join("offline-source")).unwrap();
+        let resources = rot_app::ResourceRoot::new(&relocated).unwrap();
+        let manifest = CreationManifest::load(&resources).unwrap();
+        let RuntimeScene::StaticHierarchy {
+            scene: packaged,
+            preview,
+        } = manifest.load_runtime_scene(&resources).unwrap()
+        else {
+            panic!("expected static component runtime")
+        };
+        assert_eq!(*packaged, scene);
+        let meshes = manifest.load_meshes(&resources).unwrap();
+        let textures = manifest.load_textures(&resources).unwrap();
+        assert!(meshes.contains_key("hidden-model"));
+        assert_eq!(textures["hidden-color"].role, TextureRole::BaseColor);
+        assert_eq!(textures["hidden-roughness"].role, TextureRole::Roughness);
+        assert_eq!(preview.scene().objects.len(), 1);
+        assert_eq!(preview.scene().objects[0].id, scene.objects[2].id);
+        let expected = scene.world_matrices().unwrap()[2].as_mat4();
+        assert_eq!(preview.draw_matrices(), [expected]);
+        assert!(preview
+            .scene()
+            .lighting
+            .light("lamp-enabled-light")
+            .is_some());
+        assert!(preview
+            .scene()
+            .lighting
+            .light("hidden-child-light")
+            .is_none());
+        assert!(preview
+            .framed_camera(&["lamp"].into(), &meshes, 1.0, None, None)
+            .is_none());
+        rot_app::Content::with_component_preview(preview, meshes, textures).unwrap();
+
+        let mut malformed = manifest.clone();
+        malformed.meshes.remove("hidden-model");
+        malformed.mesh_normal_policies.remove("hidden-model");
+        assert!(
+            matches!(malformed.load_runtime_scene(&resources), Err(message) if message.contains("required mesh hidden-model"))
+        );
+        let mut malformed = manifest;
+        malformed
+            .texture_roles
+            .as_mut()
+            .unwrap()
+            .insert("hidden-color".into(), TextureRole::Roughness);
+        assert!(
+            matches!(malformed.load_runtime_scene(&resources), Err(message) if message.contains("hidden-color") && message.contains("wrong role"))
+        );
+    }
 
     #[test]
     fn builds_static_point_lights_with_the_editor_projection() {

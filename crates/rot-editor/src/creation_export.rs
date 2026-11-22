@@ -75,52 +75,23 @@ pub(crate) fn scene_dependencies(
 pub(crate) fn draw_dependencies(
     scene: &rot_scene::Scene,
 ) -> Result<(BTreeSet<String>, BTreeSet<String>), String> {
-    let meshes: BTreeSet<_> = scene
-        .objects
-        .iter()
-        .filter_map(|o| o.mesh.clone())
-        .collect();
-    let textures: BTreeSet<_> = scene_texture_roles(scene)?.into_keys().collect();
-    if !meshes.is_disjoint(&textures) {
-        return Err("Mesh and texture asset IDs must be distinct before export.".into());
-    }
-    Ok((meshes, textures))
+    let dependencies = rot_app::creation::DrawDependencies::from_scene(scene)?;
+    Ok((
+        dependencies.meshes,
+        dependencies.texture_roles.into_keys().collect(),
+    ))
 }
 
 pub(crate) fn scene_texture_roles(
     scene: &rot_scene::Scene,
 ) -> Result<BTreeMap<String, rot_assets::TextureRole>, String> {
-    let mut roles = BTreeMap::new();
-    for material in scene
-        .objects
-        .iter()
-        .filter_map(|object| object.material.as_ref())
-        .filter_map(|id| scene.materials.get(id))
-    {
-        // Inactive slots are still authored launch dependencies.
-        for (id, role) in [
-            (
-                &material.base_color_texture,
-                rot_assets::TextureRole::BaseColor,
-            ),
-            (
-                &material.roughness_texture,
-                rot_assets::TextureRole::Roughness,
-            ),
-        ] {
-            if let Some(id) = id {
-                if roles
-                    .insert(id.clone(), role)
-                    .is_some_and(|old| old != role)
-                {
-                    return Err(
-                        "One texture identity cannot serve conflicting material roles.".into(),
-                    );
-                }
-            }
-        }
-    }
-    Ok(roles)
+    rot_app::creation::texture_roles(
+        scene
+            .objects
+            .iter()
+            .filter_map(|object| object.material.as_ref())
+            .filter_map(|id| scene.materials.get(id)),
+    )
 }
 
 pub(crate) fn camera_value(camera: rot_render::CameraState) -> Value {
