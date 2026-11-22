@@ -46,6 +46,10 @@ with inspected guards. Three linked cottages survived reopen and a relocated bui
 Group Selection in v23 inserts a parent around the selected objects with
 world transforms preserved. The Object menu, Hierarchy context menu,
 remappable Ctrl+G and approved MCP clients share one Undo entry.
+The v23 **Move Tool** (W) previews geometry and light movement while dragging.
+It supports World and Local axes and distance snapping. Release commits one
+shared Undo entry. Approved MCP clients read the committed scene during the
+drag. Rotate and Scale handles are still in progress.
 On Linux, v23 watches `Assets/` for imports and changes. The Assets panel
 shows live folders, previews and diagnostics, accepts drops, and places
 meshes and multi-primitive GLB hierarchies with Undo. File actions keep stable IDs
@@ -105,4 +109,5 @@ Preferences and Project Settings.
 
 ## Not verified
 
-- Gizmo drag latency is not measured (injected drags do not engage the gizmo).
+- Gizmo display latency and physical pointer input remain unverified. Isolated
+  app-scoped pointer tests cover v23 Move and its live preview.
