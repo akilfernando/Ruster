@@ -224,9 +224,7 @@ impl ComponentWorkspace {
 
     fn has_uvs(&self, geometry: &Geometry) -> bool {
         match geometry {
-            // The renderer's procedural fallback cube has no sampled UVs.
-            Geometry::Cube => false,
-            Geometry::Primitive { .. } => true,
+            Geometry::Cube | Geometry::Primitive { .. } => true,
             Geometry::Imported { asset } => self
                 .meshes
                 .get(asset)
@@ -1216,12 +1214,6 @@ mod tests {
             "stale_asset_revision"
         );
         generic["expected_asset_revision"] = json!(asset_rev);
-        assert_eq!(
-            assign(&mut editor, &generic)["error"]["code"],
-            "material_unavailable"
-        );
-        assert_eq!(editor.session.revision(), 3);
-        generic["edits"][0]["component"]["geometry"] = json!({"type":"primitive","shape":"sphere"});
         let created = assign(&mut editor, &generic);
         assert_eq!(created["ok"], true, "{created}");
         assert_eq!(editor.session.revision(), 4);

@@ -1880,14 +1880,17 @@ fn render_draw_scene(
             .material
             .as_ref()
             .and_then(|id| scene.materials.get(id));
+        let has_uvs = material.is_some_and(|material| {
+            material.base_color_texture.is_some() || material.roughness_texture.is_some()
+        }) && draw_mesh_has_complete_uvs(object, mesh);
         let binding = BindingKey {
             texture: material.and_then(|material| material.base_color_texture.clone()),
             roughness: material.and_then(|material| material.roughness_texture.clone()),
             missing_roughness: material
                 .is_some_and(|material| material.roughness_texture.is_some())
-                && !mesh.is_some_and(|mesh| mesh.has_complete_uvs()),
+                && !has_uvs,
             missing: material.is_some_and(|material| material.base_color_texture.is_some())
-                && !mesh.is_some_and(|mesh| mesh.has_complete_uvs()),
+                && !has_uvs,
             sampling: material.map_or(1, |material| {
                 u8::from(material.filter == rot_scene::TextureFilter::Linear)
                     | (u8::from(material.address == rot_scene::TextureAddress::Clamp) << 1)
@@ -1912,17 +1915,15 @@ fn render_draw_scene(
                 texture: binding
                     .texture
                     .as_ref()
-                    .and_then(|id| {
-                        mesh.filter(|mesh| mesh.has_complete_uvs())
-                            .and_then(|_| textures.get(id))
-                    })
+                    .and_then(|id| (!binding.missing).then(|| textures.get(id)).flatten())
                     .cloned(),
                 roughness: binding
                     .roughness
                     .as_ref()
                     .and_then(|id| {
-                        mesh.filter(|mesh| mesh.has_complete_uvs())
-                            .and_then(|_| textures.get(id))
+                        (!binding.missing_roughness)
+                            .then(|| textures.get(id))
+                            .flatten()
                     })
                     .cloned(),
                 binding,
@@ -2078,14 +2079,18 @@ fn object_mesh<'a>(
     }
 }
 
-/// Whether textured materials can sample this object: a resolved mesh asset
-/// with a complete UV set, or a built-in sphere/capsule. The procedural cube
-/// keeps its existing missing-texture marker.
+// The default Cube uses its own GPU mesh. A missing imported mesh uses that
+// same geometry as a fallback, but must keep its missing-UV diagnostics.
+fn draw_mesh_has_complete_uvs(object: &Object, mesh: Option<&Arc<rot_assets::Mesh>>) -> bool {
+    mesh.map_or(object.mesh.is_none(), |mesh| mesh.has_complete_uvs())
+}
+
+/// Whether the object's authored geometry has complete texture coordinates.
 pub fn object_has_complete_uvs(
     object: &Object,
     meshes: &BTreeMap<String, Arc<rot_assets::Mesh>>,
 ) -> bool {
-    object_mesh(object, meshes).is_some_and(|mesh| mesh.has_complete_uvs())
+    draw_mesh_has_complete_uvs(object, object_mesh(object, meshes))
 }
 
 /// Restricted frontends reuse the renderer's exact projection, hierarchy and

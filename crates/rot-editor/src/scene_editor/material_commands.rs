@@ -525,7 +525,7 @@ mod tests {
     fn material_commands_guard_shared_assets_and_preserve_repairable_history() {
         let mut builtins =
             SceneEditor::new(rot_scene::Session::new(rot_scene::Scene::demo()).unwrap());
-        assert!(builtins.validate_material_object_uvs("left").is_err());
+        assert!(builtins.validate_material_object_uvs("left").is_ok());
         for (revision, shape) in [rot_scene::Primitive::Sphere, rot_scene::Primitive::Capsule]
             .into_iter()
             .enumerate()
