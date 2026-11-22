@@ -264,11 +264,8 @@ struct Node<'a> {
     // Defer matrix shape diagnostics until the node path is known.
     #[serde(default, borrow, deserialize_with = "present")]
     matrix: Option<&'a RawValue>,
-    #[serde(default, deserialize_with = "present")]
     translation: Option<[f64; 3]>,
-    #[serde(default, deserialize_with = "present")]
     rotation: Option<[f64; 4]>,
-    #[serde(default, deserialize_with = "present")]
     scale: Option<[f64; 3]>,
 }
 

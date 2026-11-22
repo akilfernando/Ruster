@@ -250,7 +250,7 @@ fn optional_and_repeated_names_keep_distinct_paths_across_refresh_and_reopen() {
         json!({"name":"Twin","mesh":0,"translation":[2,0,0]}),
         json!({"name":"","mesh":0}),
         json!({"mesh":0}),
-        json!({"name":"node-3","mesh":0}),
+        json!({"name":"node-3","mesh":0,"translation":null,"rotation":null,"scale":null}),
         json!({"name":" ","mesh":0}),
         json!({"name":"Part/Subpart","mesh":0}),
     ];
@@ -274,6 +274,11 @@ fn optional_and_repeated_names_keep_distinct_paths_across_refresh_and_reopen() {
         assert!(!ModelInfo::is_primitive_path(path));
         assert!(resources.insert(node.mesh_id.as_ref().unwrap()));
     }
+    let named = &first.nodes["Assembly/node-3"];
+    assert_eq!(named.translation, [0.; 3]);
+    assert_eq!(named.rotation, [0.; 3]);
+    assert_eq!(named.scale, [1.; 3]);
+
     let mut reordered = nodes;
     reordered[0]["children"] = json!([7, 6, 5, 4, 3, 2, 1]);
     fs::write(&source, model_bytes(reordered, 0.6)).unwrap();
