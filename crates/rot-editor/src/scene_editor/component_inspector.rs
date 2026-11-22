@@ -301,8 +301,14 @@ fn point_light_fields(
     range: &mut f32,
 ) -> bool {
     ui_kit::property_row(ui, Text::Color.plain(), |ui| {
-        ui.color_edit_button_rgb(color)
-            .on_hover_text(Text::Color.plain());
+        let mut picked = *color;
+        if ui
+            .color_edit_button_rgb(&mut picked)
+            .on_hover_text(Text::Color.plain())
+            .changed()
+        {
+            *color = picked;
+        }
     });
     let intensity = ui_kit::property_row(ui, Text::Intensity.plain(), |ui| {
         ui.add(
