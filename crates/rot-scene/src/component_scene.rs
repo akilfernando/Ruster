@@ -388,7 +388,7 @@ impl ComponentScene {
         let hierarchy = ObjectHierarchy::build(&self.objects)?;
         let mut world = vec![DMat4::IDENTITY; self.objects.len()];
         for index in hierarchy.order {
-            let local = crate::hierarchy::Pose::from_local(&self.objects[index].transform).matrix();
+            let local = self.objects[index].transform.affine_matrix();
             let matrix = hierarchy.parents[index].map_or(local, |parent| world[parent] * local);
             if !matrix.is_finite() {
                 return Err(SceneError::Invalid(format!(

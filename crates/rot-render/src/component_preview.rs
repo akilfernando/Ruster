@@ -68,6 +68,33 @@ impl ComponentPreview {
         Ok(())
     }
 
+    /// Stage matrices and light poses for touched objects using the same projection
+    /// as an authored refresh. Light kind and shadow settings stay on the light.
+    pub fn set_transformed_rows<'a>(
+        &mut self,
+        draws: impl Iterator<Item = (usize, DMat4)>,
+        lights: impl Iterator<Item = (&'a str, DMat4)>,
+    ) -> Result<(), SceneError> {
+        for (row, world) in draws {
+            let object = &self.scene.objects[row];
+            self.matrices[row] = draw_matrix(world, &object.id)?;
+        }
+        let mut lights = lights.peekable();
+        if lights.peek().is_some() {
+            let Lighting::Authored {
+                lights: authored, ..
+            } = &mut Arc::make_mut(&mut self.scene).lighting
+            else {
+                unreachable!("preview light IDs require authored lighting");
+            };
+            for (id, world) in lights {
+                let light = authored.get_mut(id).expect("preview light ID");
+                light.transform = light_transform(world, &light.kind, id)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn light_budget_exceeded(&self) -> bool {
         self.light_budget_exceeded
     }
@@ -148,6 +175,43 @@ impl ComponentPreview {
     }
 }
 
+fn draw_matrix(world: DMat4, id: &str) -> Result<Mat4, SceneError> {
+    let matrix = world.as_mat4();
+    let linear = Mat3::from_mat4(matrix);
+    let determinant = linear.determinant();
+    if !matrix.is_finite()
+        || !determinant.is_finite()
+        || determinant <= 0.0
+        || !linear.inverse().is_finite()
+    {
+        return Err(SceneError::Invalid(format!(
+            "world transform on {id} exceeds renderer precision"
+        )));
+    }
+    Ok(matrix)
+}
+
+fn light_transform(world: DMat4, kind: &LightKind, id: &str) -> Result<Transform, SceneError> {
+    let mut transform = Transform {
+        translation: world.w_axis.truncate().as_vec3().to_array(),
+        ..Transform::default()
+    };
+    if matches!(kind, LightKind::Directional { .. }) {
+        let direction = world.z_axis.truncate();
+        let magnitude = direction.abs().max_element();
+        if !magnitude.is_finite() || magnitude == 0.0 {
+            return Err(SceneError::Invalid(format!(
+                "world direction on {id} exceeds renderer precision"
+            )));
+        }
+        let axis = (direction / magnitude).normalize().as_vec3();
+        let (z, y, x) = Quat::from_rotation_arc(Vec3::Z, axis).to_euler(EulerRot::ZYX);
+        transform.rotation = [x, y, z];
+    }
+    transform.validate()?;
+    Ok(transform)
+}
+
 pub enum LoadedPreview {
     Legacy(Scene),
     Components(ComponentPreview),
@@ -223,20 +287,7 @@ pub fn project_editor_with_world(
                 } => {
                     let mut draw = Object::cube(object.id.clone(), Some(object.name.clone()));
                     draw.transform = object.transform.clone();
-                    let matrix = world[index].as_mat4();
-                    let linear = Mat3::from_mat4(matrix);
-                    let determinant = linear.determinant();
-                    if !matrix.is_finite()
-                        || !determinant.is_finite()
-                        || determinant <= 0.0
-                        || !linear.inverse().is_finite()
-                    {
-                        return Err(SceneError::Invalid(format!(
-                            "world transform on {} exceeds renderer precision",
-                            object.id
-                        )));
-                    }
-                    matrices.push(matrix);
+                    matrices.push(draw_matrix(world[index], &object.id)?);
                     draw.color = *tint;
                     draw.material.clone_from(material);
                     match geometry {
@@ -262,24 +313,7 @@ pub fn project_editor_with_world(
                         continue;
                     }
                     *count += 1;
-                    let mut transform = Transform {
-                        translation: world[index].w_axis.truncate().as_vec3().to_array(),
-                        ..Transform::default()
-                    };
-                    if matches!(kind, LightKind::Directional { .. }) {
-                        let direction = world[index].z_axis.truncate();
-                        let magnitude = direction.abs().max_element();
-                        if magnitude == 0.0 {
-                            return Err(SceneError::Invalid(format!(
-                                "world direction on {} exceeds renderer precision",
-                                object.id
-                            )));
-                        }
-                        let axis = (direction / magnitude).normalize().as_vec3();
-                        let (z, y, x) =
-                            Quat::from_rotation_arc(Vec3::Z, axis).to_euler(EulerRot::ZYX);
-                        transform.rotation = [x, y, z];
-                    }
+                    let transform = light_transform(world[index], kind, &object.id)?;
                     lights.insert(
                         component.id.clone(),
                         Light {

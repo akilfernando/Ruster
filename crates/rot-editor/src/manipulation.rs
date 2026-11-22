@@ -30,7 +30,7 @@ fn rotation(t: &Transform) -> DQuat {
     let [x, y, z] = t.rotation.map(f64::from);
     DQuat::from_rotation_z(z) * DQuat::from_rotation_y(y) * DQuat::from_rotation_x(x)
 }
-fn nearby_euler(q: DQuat, original: [f32; 3]) -> [f64; 3] {
+pub(super) fn nearby_euler(q: DQuat, original: [f32; 3]) -> [f64; 3] {
     let old = Transform {
         rotation: original,
         ..Default::default()

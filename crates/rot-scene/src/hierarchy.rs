@@ -90,6 +90,11 @@ impl Pose {
     }
 }
 impl Transform {
+    /// Evaluate the stored local pose in the same precision used by the hierarchy.
+    pub fn affine_matrix(&self) -> DMat4 {
+        Pose::from_local(self).matrix()
+    }
+
     /// Convert an affine matrix to stored TRS, rejecting shear and precision loss.
     pub fn try_from_affine(matrix: DMat4) -> Result<Self, SceneError> {
         let failure = || invalid("matrix cannot be represented by an authored transform");

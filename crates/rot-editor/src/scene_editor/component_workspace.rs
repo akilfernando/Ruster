@@ -6,6 +6,7 @@ use super::{
 };
 use crate::behavior_ui::{PlayShortcut, RuntimeSource, RuntimeUi};
 use crate::editor_theme;
+use crate::manipulation::{Pivot, Tool};
 use crate::strings::Text;
 use crate::ui_kit::tokens::{ROW_HEIGHT, SPACE_XS};
 use crate::workspace::{Action, SceneViewState, SettingsPage, Workspace};
@@ -17,10 +18,10 @@ use rot_scene::{Primitive, SceneError, Transform};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 
-#[path = "component_move.rs"]
-mod viewport_move;
+#[path = "component_transform.rs"]
+mod viewport_transform;
 use glam::DMat4;
-use viewport_move::MoveTool;
+use viewport_transform::TransformTool;
 
 #[cfg(unix)]
 #[path = "component_capture.rs"]
@@ -216,7 +217,7 @@ pub(super) struct ComponentWorkspace {
     viewport_aspect: Option<f32>,
     preview: Result<rot_render::component_preview::ComponentPreview, rot_scene::SceneError>,
     preview_world: Vec<DMat4>,
-    move_tool: MoveTool,
+    transform_tool: TransformTool,
     rows: Vec<(usize, usize)>,
     parents: Vec<Option<usize>>,
     scene_view: SceneViewState,
@@ -282,7 +283,7 @@ impl ComponentWorkspace {
         let mut editor = Self {
             preview,
             preview_world,
-            move_tool: MoveTool::default(),
+            transform_tool: TransformTool::default(),
             rows,
             parents,
             scene_view: SceneViewState::default(),
@@ -582,7 +583,7 @@ impl ComponentWorkspace {
     }
 
     fn rebuild_draft(&mut self) {
-        self.move_tool.invalidate_target();
+        self.transform_tool.invalidate_target();
         #[cfg(unix)]
         {
             self.capture.epoch += 1;
@@ -667,7 +668,7 @@ impl ComponentWorkspace {
 
     #[cfg(unix)]
     fn authored_edit_pending(&self) -> bool {
-        self.move_tool.active() || self.draft_dirty()
+        self.transform_tool.active() || self.draft_dirty()
     }
 
     fn refresh(&mut self) {
@@ -694,8 +695,8 @@ impl ComponentWorkspace {
     }
 
     fn refresh_view(&mut self) {
-        self.move_tool.cancel();
-        self.move_tool.invalidate_target();
+        self.transform_tool.cancel();
+        self.transform_tool.invalidate_target();
         #[cfg(unix)]
         {
             self.capture.epoch += 1;
@@ -780,7 +781,7 @@ impl ComponentWorkspace {
     }
 
     fn apply(&mut self) -> bool {
-        if self.move_tool.active() {
+        if self.transform_tool.active() {
             return false;
         }
         if !self.draft_dirty() {
@@ -1222,7 +1223,7 @@ impl ComponentWorkspace {
     }
 
     fn command_from_ui(&mut self, ctx: &egui::Context, action: Action) {
-        if self.move_tool.active() {
+        if self.transform_tool.active() {
             return;
         }
         #[cfg(not(target_os = "linux"))]
@@ -1244,13 +1245,18 @@ impl ComponentWorkspace {
     }
 
     fn command(&mut self, action: Action) {
-        if self.move_tool.active() {
+        if self.transform_tool.active() {
             return;
         }
         let revision = self.session.revision();
         let result = match action {
-            Action::Move => {
-                self.move_tool.enabled = true;
+            Action::Move | Action::Rotate | Action::Scale => {
+                self.transform_tool.enabled = true;
+                self.transform_tool.tool = match action {
+                    Action::Rotate => Tool::Rotate,
+                    Action::Scale => Tool::Scale,
+                    _ => Tool::Translate,
+                };
                 return;
             }
             Action::Open => {
@@ -1454,7 +1460,7 @@ impl ComponentWorkspace {
         self.navigation.player_view = frame.is_some() && scene.player_view.is_some();
         self.navigation.focusable = playing && !self.session.scene().actions.is_empty();
         self.navigation.enabled =
-            !blocked && !self.runtime.input_owned() && !self.move_tool.active();
+            !blocked && !self.runtime.input_owned() && !self.transform_tool.active();
         self.navigation.show_editor_grid = frame.is_none();
         let mut surface =
             rot_render::allocate_viewport(ui, scene, selection.as_slice(), &mut self.navigation);
@@ -1480,10 +1486,10 @@ impl ComponentWorkspace {
                 self.error = Some(error);
             }
         }
-        surface.input_owned = hud_owns || self.move_tool.active();
+        surface.input_owned = hud_owns || self.transform_tool.active();
         let preview = match &frame {
             Some(frame) => frame.static_preview.as_deref(),
-            None => self.move_tool.preview().or(self.preview.as_ref().ok()),
+            None => self.transform_tool.preview().or(self.preview.as_ref().ok()),
         };
         let interaction = if let Some(preview) = preview {
             preview.render(
@@ -1510,7 +1516,7 @@ impl ComponentWorkspace {
         #[cfg(not(unix))]
         let save_pending = false;
         let moving = frame.is_none()
-            && self.draw_move_tool(
+            && self.draw_transform_tool(
                 ui,
                 &interaction,
                 blocked
@@ -1564,61 +1570,126 @@ impl ComponentWorkspace {
         painted
     }
 
-    fn move_toolbar(&mut self, ui: &mut egui::Ui, blocked: bool) {
+    fn transform_toolbar(&mut self, ui: &mut egui::Ui, blocked: bool) {
         ui.add_enabled_ui(!blocked, |ui| {
             if ui
-                .selectable_label(!self.move_tool.enabled, Text::ComponentSelectTool.plain())
+                .selectable_label(
+                    !self.transform_tool.enabled,
+                    Text::ComponentSelectTool.plain(),
+                )
                 .clicked()
             {
-                self.move_tool.enabled = false;
-                if self.error.as_deref() == Some(Text::ComponentMoveHidden.plain()) {
+                self.transform_tool.enabled = false;
+                if self.error.as_deref() == Some(Text::ComponentTransformHidden.plain()) {
                     self.error = None;
                 }
             }
-            let move_label = Action::Move.label();
-            let tooltip = self.workspace.shortcut_hint(Action::Move);
-            if ui
-                .selectable_label(self.move_tool.enabled, move_label)
-                .on_hover_text(format!("{move_label} {tooltip}"))
-                .clicked()
-            {
-                self.command(Action::Move);
+            for (tool, action) in [
+                (Tool::Translate, Action::Move),
+                (Tool::Rotate, Action::Rotate),
+                (Tool::Scale, Action::Scale),
+            ] {
+                let label = action.label();
+                let tooltip = self.workspace.shortcut_hint(action);
+                if ui
+                    .selectable_label(
+                        self.transform_tool.enabled && self.transform_tool.tool == tool,
+                        label,
+                    )
+                    .on_hover_text(format!("{label} {tooltip}"))
+                    .clicked()
+                {
+                    self.command(action);
+                }
             }
-            egui::ComboBox::from_id_salt("component_move_space")
-                .width(56.0)
-                .selected_text(if self.move_tool.local {
-                    Text::Local.plain()
-                } else {
-                    Text::World.plain()
-                })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.move_tool.local, false, Text::World.plain());
-                    ui.selectable_value(&mut self.move_tool.local, true, Text::Local.plain());
-                })
-                .response
-                .on_hover_text(Text::SceneEditorHandleOrientationWorldOr.plain());
-            egui::ComboBox::from_id_salt("component_move_snap")
-                .width(64.0)
-                .selected_text(if self.move_tool.snap {
-                    Text::SnapOn.plain()
-                } else {
-                    Text::Snap.plain()
-                })
-                .show_ui(ui, |ui| {
-                    ui.checkbox(&mut self.move_tool.snap, Text::SnapWhileDragging.plain());
-                    crate::ui_kit::property_row(
-                        ui,
-                        Text::ComponentMoveSnapDistance.plain(),
-                        |ui| {
-                            ui.add(
-                                egui::DragValue::new(&mut self.move_tool.snap_distance)
-                                    .speed(0.1)
-                                    .range(0.001..=1000.0),
-                            );
-                        },
-                    );
+            if ui.available_width() < 440.0 {
+                ui.menu_button(Text::ComponentTransformOptions.plain(), |ui| {
+                    self.transform_options(ui);
                 });
+            } else {
+                self.transform_options(ui);
+            }
         });
+    }
+
+    fn transform_options(&mut self, ui: &mut egui::Ui) {
+        let (local, pivot) = (self.transform_tool.local, self.transform_tool.pivot);
+        egui::ComboBox::from_id_salt("component_move_space")
+            .width(56.0)
+            .selected_text(if self.transform_tool.local {
+                Text::Local.plain()
+            } else {
+                Text::World.plain()
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut self.transform_tool.local, false, Text::World.plain());
+                ui.selectable_value(&mut self.transform_tool.local, true, Text::Local.plain());
+            })
+            .response
+            .on_hover_text(Text::SceneEditorHandleOrientationWorldOr.plain());
+        let pivot_label = |pivot| match pivot {
+            Pivot::Center => Text::ComponentCenter.plain(),
+            Pivot::Active => Text::Active.plain(),
+            Pivot::Individual => Text::ComponentIndividual.plain(),
+        };
+        egui::ComboBox::from_id_salt("component_transform_pivot")
+            .width(64.0)
+            .selected_text(pivot_label(self.transform_tool.pivot))
+            .show_ui(ui, |ui| {
+                for pivot in [Pivot::Center, Pivot::Active, Pivot::Individual] {
+                    ui.selectable_value(&mut self.transform_tool.pivot, pivot, pivot_label(pivot));
+                }
+            })
+            .response
+            .on_hover_text(Text::ComponentTransformPivotHint.plain());
+        egui::ComboBox::from_id_salt("component_move_snap")
+            .width(64.0)
+            .selected_text(if self.transform_tool.snap {
+                Text::SnapOn.plain()
+            } else {
+                Text::Snap.plain()
+            })
+            .show_ui(ui, |ui| {
+                ui.checkbox(
+                    &mut self.transform_tool.snap,
+                    Text::SnapWhileDragging.plain(),
+                );
+                for (label, value, range, speed, suffix) in [
+                    (
+                        Text::ComponentMoveSnapDistance,
+                        &mut self.transform_tool.snap_distance,
+                        0.001..=1000.,
+                        0.1,
+                        "",
+                    ),
+                    (
+                        Text::ComponentRotateSnapAngle,
+                        &mut self.transform_tool.snap_degrees,
+                        0.1..=180.,
+                        1.,
+                        "°",
+                    ),
+                    (
+                        Text::ComponentScaleSnapIncrement,
+                        &mut self.transform_tool.snap_scale,
+                        0.001..=10.,
+                        0.05,
+                        "",
+                    ),
+                ] {
+                    crate::ui_kit::property_row(ui, label.plain(), |ui| {
+                        ui.add(
+                            egui::DragValue::new(value)
+                                .speed(speed)
+                                .range(range)
+                                .suffix(suffix),
+                        );
+                    });
+                }
+            });
+        if (local, pivot) != (self.transform_tool.local, self.transform_tool.pivot) {
+            self.transform_tool.invalidate_target();
+        }
     }
 
     pub(super) fn show(&mut self, ui: &mut egui::Ui) -> Option<OpenedScene> {
@@ -1669,22 +1740,22 @@ impl ComponentWorkspace {
                     || input.viewport().close_requested()
             })
         {
-            self.move_tool.cancel();
+            self.transform_tool.cancel();
         }
-        let move_active = self.move_tool.active();
+        let transform_active = self.transform_tool.active();
         self.runtime.input_begin(&ctx, blocked || asset_dialog);
         if let Some(action) = self.workspace.shortcuts(
             &ctx,
             blocked
                 || asset_dialog
-                || move_active
+                || transform_active
                 || self.runtime.input_owned()
                 || self.palette.is_some(),
         ) {
             self.command_from_ui(&ctx, action);
         }
         egui::Panel::top("component_menu").show(ui, |ui| {
-            if move_active {
+            if transform_active {
                 ui.disable();
             }
             egui::MenuBar::new().ui(ui, |ui| {
@@ -1766,16 +1837,16 @@ impl ComponentWorkspace {
         });
         let assets_loading = self.assets_loading();
         egui::Panel::top("component_play").show(ui, |ui| {
-            if move_active {
+            if transform_active {
                 ui.disable();
             }
             ui.horizontal(|ui| {
-                self.move_toolbar(ui, blocked || self.runtime.in_play_mode());
+                self.transform_toolbar(ui, blocked || self.runtime.in_play_mode());
                 self.runtime.controls_for_source(
                     ui,
                     RuntimeSource::Components(&self.session),
                     RUNTIME_GENERATION,
-                    blocked || assets_loading || move_active || self.draft_dirty(),
+                    blocked || assets_loading || transform_active || self.draft_dirty(),
                     self.assets.as_ref(),
                 );
             });
@@ -1839,6 +1910,8 @@ impl ComponentWorkspace {
                         Action::Open
                             | Action::Save
                             | Action::Move
+                            | Action::Rotate
+                            | Action::Scale
                             | Action::Undo
                             | Action::Redo
                             | Action::CreateEmpty
@@ -1874,14 +1947,14 @@ impl ComponentWorkspace {
                 self.command_from_ui(&ctx, action);
             }
         }
-        self.show_assets(ui, blocked || move_active);
+        self.show_assets(ui, blocked || transform_active);
         let hierarchy_limit = ui.available_width() * 0.26;
         let inspector_limit = ui.available_width() * 0.34;
         egui::Panel::left("component_hierarchy")
             .default_size(self.workspace.prefs.hierarchy_width.min(hierarchy_limit))
             .max_size(hierarchy_limit)
             .show(ui, |ui| {
-                if move_active {
+                if transform_active {
                     ui.disable();
                 }
                 ui.set_min_width(ui.available_width());
@@ -2074,7 +2147,7 @@ impl ComponentWorkspace {
             .default_size(self.workspace.prefs.inspector_width.min(inspector_limit))
             .max_size(inspector_limit)
             .show(ui, |ui| {
-                if move_active {
+                if transform_active {
                     ui.disable();
                 }
                 ui.set_min_width(ui.available_width());
@@ -2195,7 +2268,7 @@ impl ComponentWorkspace {
                 }
             });
         #[cfg(target_os = "linux")]
-        self.asset_context_frame(&ctx, blocked || move_active);
+        self.asset_context_frame(&ctx, blocked || transform_active);
         let viewport = egui::CentralPanel::default()
             .show(ui, |ui| {
                 draw_viewport

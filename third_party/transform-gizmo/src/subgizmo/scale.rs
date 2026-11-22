@@ -23,6 +23,7 @@ pub(crate) struct ScaleParams {
 #[derive(Default, Debug, Copy, Clone)]
 pub(crate) struct ScaleState {
     start_delta: f64,
+    start_direction: emath::Vec2,
 }
 
 #[derive(Default, Debug, Copy, Clone)]
@@ -54,9 +55,9 @@ impl SubGizmoKind for Scale {
     fn pick(subgizmo: &mut ScaleSubGizmo, ray: Ray) -> Option<f64> {
         let pick_result = Self::pick_preview(subgizmo, ray);
 
-        let start_delta = distance_from_origin_2d(subgizmo, ray.screen_pos)?;
-
-        subgizmo.state.start_delta = start_delta;
+        let offset = offset_from_origin(subgizmo, ray.screen_pos)?;
+        subgizmo.state.start_delta = f64::from(offset.length());
+        subgizmo.state.start_direction = offset;
 
         if pick_result.picked {
             Some(pick_result.t)
@@ -66,13 +67,20 @@ impl SubGizmoKind for Scale {
     }
 
     fn update(subgizmo: &mut ScaleSubGizmo, ray: Ray) -> Option<GizmoResult> {
-        let mut delta = distance_from_origin_2d(subgizmo, ray.screen_pos)?;
+        let offset = offset_from_origin(subgizmo, ray.screen_pos)?;
+        let mut delta = f64::from(offset.length());
+        if subgizmo.config.signed_scale && offset.dot(subgizmo.state.start_direction) < 0.0 {
+            delta = -delta;
+        }
         delta /= subgizmo.state.start_delta;
 
         if subgizmo.config.snapping {
             delta = round_to_interval(delta, subgizmo.config.snap_scale as f64);
         }
-        delta = delta.max(1e-4) - 1.0;
+        if !subgizmo.config.signed_scale {
+            delta = delta.max(1e-4);
+        }
+        delta -= 1.0;
 
         let direction = match (subgizmo.transform_kind, subgizmo.direction) {
             (TransformKind::Axis, _) => gizmo_local_normal(&subgizmo.config, subgizmo.direction),
@@ -110,12 +118,12 @@ impl SubGizmoKind for Scale {
     }
 }
 
-fn distance_from_origin_2d<T: SubGizmoKind>(
+fn offset_from_origin<T: SubGizmoKind>(
     subgizmo: &SubGizmoConfig<T>,
     cursor_pos: Pos2,
-) -> Option<f64> {
+) -> Option<emath::Vec2> {
     let viewport = subgizmo.config.viewport;
     let gizmo_pos = world_to_screen(viewport, subgizmo.config.mvp, DVec3::new(0.0, 0.0, 0.0))?;
 
-    Some(cursor_pos.distance(gizmo_pos) as f64)
+    Some(cursor_pos - gizmo_pos)
 }

@@ -44,6 +44,9 @@ pub struct GizmoConfig {
     pub snap_distance: f32,
     /// Scale increment for snapping scalings.
     pub snap_scale: f32,
+    /// Return a signed scale when the cursor crosses the pivot, so an authoring
+    /// client can reject zero or negative factors explicitly.
+    pub signed_scale: bool,
     /// Visual settings for the gizmo, affecting appearance and visibility.
     pub visuals: GizmoVisuals,
     /// Ratio of window's physical size to logical size.
@@ -64,6 +67,7 @@ impl Default for GizmoConfig {
             snap_angle: DEFAULT_SNAP_ANGLE,
             snap_distance: DEFAULT_SNAP_DISTANCE,
             snap_scale: DEFAULT_SNAP_SCALE,
+            signed_scale: false,
             visuals: GizmoVisuals::default(),
             pixels_per_point: 1.0,
         }
