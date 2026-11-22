@@ -30,7 +30,7 @@ pub(super) struct TransformTool {
     target_dirty: bool,
     gesture: Option<Gesture>,
     gizmo: Gizmo,
-    suppress_pointer: bool,
+    pointer_release: PointerRelease,
 }
 
 impl Default for TransformTool {
@@ -48,8 +48,26 @@ impl Default for TransformTool {
             target_dirty: true,
             gesture: None,
             gizmo: Gizmo::default(),
-            suppress_pointer: false,
+            pointer_release: PointerRelease::Idle,
         }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PointerRelease {
+    Idle,
+    Pending,
+    InFrame(u64),
+}
+
+impl PointerRelease {
+    fn suppress(&mut self, frame: u64, down: bool, pressed: bool, released: bool) -> bool {
+        *self = match *self {
+            Self::Pending if released || !down && !pressed => Self::InFrame(frame),
+            Self::InFrame(release) if release != frame => Self::Idle,
+            state => state,
+        };
+        *self != Self::Idle
     }
 }
 
@@ -136,7 +154,7 @@ impl TransformTool {
 
     pub fn cancel(&mut self) {
         if self.gesture.take().is_some() {
-            self.suppress_pointer = true;
+            self.pointer_release = PointerRelease::Pending;
             self.gizmo = Gizmo::default();
         }
     }
@@ -311,8 +329,30 @@ impl ComponentWorkspace {
         viewport: &ViewportInteraction,
         blocked: bool,
     ) -> bool {
-        if !self.transform_tool.enabled || self.preview.is_err() {
+        let inactive = !self.transform_tool.enabled || self.preview.is_err();
+        if inactive && self.transform_tool.pointer_release == PointerRelease::Idle {
             return false;
+        }
+        let (focused, cursor, pressed, down, released, escape, snap_modifier) = ui.input(|input| {
+            (
+                input.focused,
+                input.pointer.hover_pos(),
+                input.pointer.button_pressed(egui::PointerButton::Primary),
+                input.pointer.button_down(egui::PointerButton::Primary),
+                input.pointer.button_released(egui::PointerButton::Primary),
+                input.key_pressed(egui::Key::Escape),
+                input.modifiers.ctrl,
+            )
+        });
+        let suppressed = self.transform_tool.pointer_release != PointerRelease::Idle
+            && self.transform_tool.pointer_release.suppress(
+                ui.ctx().cumulative_frame_nr(),
+                down,
+                pressed,
+                released,
+            );
+        if inactive {
+            return suppressed;
         }
         if self.transform_tool.target_dirty && self.transform_tool.gesture.is_none() {
             self.transform_tool.target_dirty = false;
@@ -326,16 +366,6 @@ impl ComponentWorkspace {
                 Err(error) => self.error = Some(error.plain().into()),
             }
         }
-        let (focused, cursor, pressed, down, escape, snap_modifier) = ui.input(|input| {
-            (
-                input.focused,
-                input.pointer.hover_pos(),
-                input.pointer.button_pressed(egui::PointerButton::Primary),
-                input.pointer.button_down(egui::PointerButton::Primary),
-                input.key_pressed(egui::Key::Escape),
-                input.modifiers.ctrl,
-            )
-        });
         let owned_before = self.transform_tool.active();
         if owned_before
             && (blocked
@@ -351,10 +381,6 @@ impl ComponentWorkspace {
             self.transform_tool.cancel();
             ui.ctx().request_repaint();
             return true;
-        }
-        let suppressed = self.transform_tool.suppress_pointer;
-        if !down && !pressed {
-            self.transform_tool.suppress_pointer = false;
         }
         let Some(target) = self.transform_tool.target.as_ref() else {
             return owned_before || suppressed;
@@ -399,7 +425,7 @@ impl ComponentWorkspace {
             ..Default::default()
         });
         let cursor = cursor.unwrap_or_default();
-        let permitted = focused && !blocked && !escape && !self.transform_tool.suppress_pointer;
+        let permitted = focused && !blocked && !escape && !suppressed;
         let hovered = permitted && viewport.response.hovered() && viewport.rect.contains(cursor);
         let update = self.transform_tool.gizmo.update(
             GizmoInteraction {
@@ -414,7 +440,7 @@ impl ComponentWorkspace {
             self.transform_tool.gesture = self.begin_transform(cursor);
             if self.transform_tool.gesture.is_none() {
                 self.transform_tool.gizmo = Gizmo::default();
-                self.transform_tool.suppress_pointer = true;
+                self.transform_tool.pointer_release = PointerRelease::Pending;
                 self.error = Some(Text::ComponentMoveOutsideRange.plain().into());
                 return true;
             }
@@ -447,6 +473,8 @@ impl ComponentWorkspace {
         if !down {
             if let Some(gesture) = self.transform_tool.gesture.take() {
                 self.transform_tool.gizmo = Gizmo::default();
+                self.transform_tool.pointer_release =
+                    PointerRelease::InFrame(ui.ctx().cumulative_frame_nr());
                 self.commit_transform(gesture);
                 ui.ctx().request_repaint();
                 return true;

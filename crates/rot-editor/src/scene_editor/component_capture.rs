@@ -7,8 +7,8 @@ use super::ComponentWorkspace;
 use crate::behavior_worker::{Frame, RunKey};
 use crate::bridge::Authority;
 use eframe::egui;
-use serde_json::{json, Value};
-use std::sync::{atomic::AtomicBool, mpsc, Arc};
+use serde_json::{Value, json};
+use std::sync::{Arc, atomic::AtomicBool, mpsc};
 use std::time::{Duration, Instant};
 
 type CaptureResult = Result<Value, (String, String)>;
@@ -492,7 +492,7 @@ impl ComponentWorkspace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rot_scene::{component_scene::ComponentScene, Scene, Session};
+    use rot_scene::{Scene, Session, component_scene::ComponentScene};
 
     #[test]
     fn viewport_move_handles_preview_descendants_and_cancel_without_mutating_authored_state() {
@@ -777,7 +777,7 @@ mod tests {
         });
         let mut editor =
             ComponentWorkspace::new(path, ComponentSession::new(scene.clone()).unwrap());
-        editor.select(Some(owner));
+        editor.select(Some(owner.clone()));
         editor.navigation.camera = Some(rot_render::CameraState {
             target: [0.; 3],
             yaw: 0.4,
@@ -789,7 +789,10 @@ mod tests {
         editor.transform_tool.snap = true;
 
         let ctx = egui::Context::default();
-        let frame = |editor: &mut ComponentWorkspace, events| {
+        let frame = |editor: &mut ComponentWorkspace, events: Vec<egui::Event>| {
+            let release = events
+                .iter()
+                .any(|event| matches!(event, egui::Event::PointerButton { pressed: false, .. }));
             let mut output = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
@@ -801,8 +804,14 @@ mod tests {
                 },
                 |ui| {
                     editor.show_workspace(ui, true);
+                    if release && ctx.current_pass_index() == 0 {
+                        ctx.request_discard("repeat layout on the handle release frame");
+                    }
                 },
             );
+            if release {
+                assert_eq!(output.platform_output.num_completed_passes, 2);
+            }
             output.textures_delta.clear();
         };
         let key = |key| egui::Event::Key {
@@ -897,6 +906,11 @@ mod tests {
         frame(&mut editor, vec![button(crossed, false)]);
         assert_eq!(editor.session.scene(), &scene);
         assert_eq!(editor.session.revision(), 4);
+        assert!(editor.selection.contains(&owner));
+        assert_eq!(
+            editor.error.as_deref(),
+            Some(crate::strings::Text::ComponentScalePositive.plain())
+        );
     }
 
     #[test]
