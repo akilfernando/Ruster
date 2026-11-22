@@ -2540,6 +2540,11 @@ impl Resources {
             cube: GpuMesh::new(device, None, &primitives::cube()),
             sphere: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Sphere)),
             capsule: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Capsule)),
+            triangular_prism: GpuMesh::new(
+                device,
+                None,
+                builtin_mesh(rot_scene::Primitive::TriangularPrism),
+            ),
         };
         // One constant attribute serves every mesh without authored UVs. This
         // fixed renderer overhead is separate from imported mesh admission.
@@ -2595,7 +2600,7 @@ impl Resources {
             });
         let metrics = Arc::new(Mutex::new(Metrics {
             mesh_bytes,
-            mesh_uploads: 3,
+            mesh_uploads: 1 + rot_scene::Primitive::ALL.len() as u64,
             mesh_upload_bytes: mesh_bytes,
             lighting_bytes: LIGHTING_BYTES,
             lighting_uploads: 1,
@@ -2973,6 +2978,7 @@ struct BuiltinMeshes {
     cube: GpuMesh,
     sphere: GpuMesh,
     capsule: GpuMesh,
+    triangular_prism: GpuMesh,
 }
 impl BuiltinMeshes {
     fn get(&self, primitive: Option<rot_scene::Primitive>) -> &GpuMesh {
@@ -2980,6 +2986,7 @@ impl BuiltinMeshes {
             None => &self.cube,
             Some(rot_scene::Primitive::Sphere) => &self.sphere,
             Some(rot_scene::Primitive::Capsule) => &self.capsule,
+            Some(rot_scene::Primitive::TriangularPrism) => &self.triangular_prism,
         }
     }
     // An asset key that is not resident falls back to the cube, never to a
@@ -2995,7 +3002,7 @@ impl BuiltinMeshes {
         }
     }
     fn bytes(&self) -> u64 {
-        self.cube.bytes + self.sphere.bytes + self.capsule.bytes
+        self.cube.bytes + self.sphere.bytes + self.capsule.bytes + self.triangular_prism.bytes
     }
 }
 
@@ -4639,6 +4646,32 @@ mod tests {
             Some(scene.objects[0].id.clone())
         );
     }
+    #[test]
+    fn triangular_prism_picking_respects_transformed_gable_corners() {
+        let mut scene = Scene::empty("roof");
+        let mut object =
+            Object::procedural("roof", None, Some(rot_scene::Primitive::TriangularPrism));
+        object.transform.translation = [2., 1., -3.];
+        object.transform.rotation = [0.15, 0.73, -0.3];
+        object.transform.scale = [2.5, 0.6, 1.6];
+        let matrix = model(&object);
+        scene.objects.push(object);
+        let focal = matrix.transform_point3(Vec3::ZERO);
+        let up = matrix.transform_vector3(Vec3::Y).normalize();
+        let projection = Mat4::orthographic_rh_gl(-2., 2., -2., 2., 0.1, 12.);
+        for side in [-1., 1.] {
+            let camera = focal + matrix.transform_vector3(Vec3::Z).normalize() * (6. * side);
+            let vp = projection * Mat4::look_at_rh(camera, focal, up);
+            for (x, y, expected) in [(0.0, 0.35, true), (0.45, 0.35, false), (0.40, -0.4, true)] {
+                let ndc = vp.project_point3(matrix.transform_point3(Vec3::new(x, y, 0.)));
+                assert_eq!(
+                    pick(&scene, &BTreeMap::new(), vp, ndc.x, ndc.y).is_some(),
+                    expected
+                );
+            }
+        }
+    }
+
     #[test]
     fn imported_triangle_controls_pick_and_exact_fit_bounds() {
         for shape in rot_scene::Primitive::ALL {

@@ -402,6 +402,7 @@ editor_text! {
     LabelCommandPalette => "Command Palette…",
     LabelCopy => "Copy",
     LabelCreateCapsule => "Capsule",
+    LabelCreateTriangularPrism => "Triangular Prism",
     LabelCreateCube => "Cube",
     LabelCreateDirectionalLight => "Directional Light",
     LabelCreateEmpty => "Create Empty",

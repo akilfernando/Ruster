@@ -912,6 +912,9 @@ impl ComponentWorkspace {
             Action::CreateCapsule => Some(Geometry::Primitive {
                 shape: Primitive::Capsule,
             }),
+            Action::CreateTriangularPrism => Some(Geometry::Primitive {
+                shape: Primitive::TriangularPrism,
+            }),
             _ => None,
         };
         let name = if geometry.is_some() {
@@ -1221,6 +1224,7 @@ impl ComponentWorkspace {
                 Action::CreateCube,
                 Action::CreateSphere,
                 Action::CreateCapsule,
+                Action::CreateTriangularPrism,
             ] {
                 self.menu_action(ui, action);
             }
@@ -1348,6 +1352,7 @@ impl ComponentWorkspace {
             | Action::CreateCube
             | Action::CreateSphere
             | Action::CreateCapsule
+            | Action::CreateTriangularPrism
             | Action::CreateLight
             | Action::CreateDirectionalLight => {
                 self.create(action, None);
@@ -1976,6 +1981,7 @@ impl ComponentWorkspace {
                             | Action::CreateCube
                             | Action::CreateSphere
                             | Action::CreateCapsule
+                            | Action::CreateTriangularPrism
                             | Action::CreateLight
                             | Action::CreateDirectionalLight
                             | Action::GroupSelection
@@ -2120,6 +2126,7 @@ impl ComponentWorkspace {
                                             Action::CreateCube,
                                             Action::CreateSphere,
                                             Action::CreateCapsule,
+                                            Action::CreateTriangularPrism,
                                             Action::CreateLight,
                                             Action::CreateDirectionalLight,
                                         ] {

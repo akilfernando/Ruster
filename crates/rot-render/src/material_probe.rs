@@ -1736,7 +1736,10 @@ pub(super) fn verify_cube_material(device: &wgpu::Device, queue: &wgpu::Queue) {
         }
     }
     let uploaded = metrics.lock().unwrap().clone();
-    assert_eq!(uploaded.mesh_uploads, 3);
+    assert_eq!(
+        uploaded.mesh_uploads,
+        1 + rot_scene::Primitive::ALL.len() as u64
+    );
     assert_eq!(uploaded.texture_uploads, 1);
 
     let mut sun = Light::directional(None);

@@ -151,6 +151,7 @@ impl SceneEditor {
                                 Action::CreateCube,
                                 Action::CreateSphere,
                                 Action::CreateCapsule,
+                                Action::CreateTriangularPrism,
                                 Action::CreateDirectionalLight,
                                 Action::CreateLight,
                             ] {

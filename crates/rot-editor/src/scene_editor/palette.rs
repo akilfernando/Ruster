@@ -41,6 +41,7 @@ pub(super) fn palette_label(action: Action) -> String {
         | CreateCube
         | CreateSphere
         | CreateCapsule
+        | CreateTriangularPrism
         | CreateLight
         | CreateDirectionalLight
         | Front

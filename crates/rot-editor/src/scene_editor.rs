@@ -2277,7 +2277,10 @@ impl SceneEditor {
         }
         let revision = self.session.scene().revision;
         let selected = self.selected.clone();
-        let creating = matches!(action, "create" | "create_sphere" | "create_capsule");
+        let creating = matches!(
+            action,
+            "create" | "create_sphere" | "create_capsule" | "create_triangular_prism"
+        );
         let new_id = if creating {
             match crate::manipulation::Manipulation::fresh_ids(&self.session, 1) {
                 Ok(mut ids) => ids.remove(0),
@@ -2290,10 +2293,11 @@ impl SceneEditor {
             String::new()
         };
         let result = match action {
-            "create" | "create_sphere" | "create_capsule" => {
+            "create" | "create_sphere" | "create_capsule" | "create_triangular_prism" => {
                 let primitive = match action {
                     "create_sphere" => Some(rot_scene::Primitive::Sphere),
                     "create_capsule" => Some(rot_scene::Primitive::Capsule),
+                    "create_triangular_prism" => Some(rot_scene::Primitive::TriangularPrism),
                     _ => None,
                 };
                 let name = primitive.map_or("Cube", rot_scene::Primitive::label);
@@ -2823,7 +2827,7 @@ impl SceneEditor {
                 .map_err(|_| {
                     (
                         "invalid_arguments".into(),
-                        "primitive must be sphere, capsule or null (cube)".into(),
+                        "primitive must be sphere, capsule, triangular_prism or null (cube)".into(),
                     )
                 }),
         }
@@ -3925,6 +3929,7 @@ impl SceneEditor {
                 Action::CreateCube,
                 Action::CreateSphere,
                 Action::CreateCapsule,
+                Action::CreateTriangularPrism,
             ] {
                 self.command_item(ui, action);
             }
@@ -4711,6 +4716,7 @@ impl SceneEditor {
             Action::CreateCube => self.object_action("create"),
             Action::CreateSphere => self.object_action("create_sphere"),
             Action::CreateCapsule => self.object_action("create_capsule"),
+            Action::CreateTriangularPrism => self.object_action("create_triangular_prism"),
             Action::CreateLight => {
                 self.create_light_ui(rot_scene::LightKind::Point { range: 5.0 });
             }

@@ -42,6 +42,11 @@ impl Probe {
                 cube: GpuMesh::new(device, None, &primitives::cube()),
                 sphere: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Sphere)),
                 capsule: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Capsule)),
+                triangular_prism: GpuMesh::new(
+                    device,
+                    None,
+                    builtin_mesh(rot_scene::Primitive::TriangularPrism),
+                ),
             },
             meshes: BTreeMap::new(),
             instances,
@@ -1112,7 +1117,7 @@ fn verify_asset_submission_backpressure(
     let accepted_a = metrics.lock().unwrap().clone();
     assert_eq!(
         (accepted_a.texture_uploads, accepted_a.mesh_uploads),
-        (1, 4) // Three engine-owned meshes plus the admitted asset.
+        (1, 2 + rot_scene::Primitive::ALL.len() as u64) // Cube and the admitted asset.
     );
 
     let delayed_before = delayed.load(Ordering::Relaxed);

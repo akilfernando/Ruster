@@ -1,5 +1,4 @@
-//! Engine-owned procedural meshes: the unit cube plus the built-in sphere and
-//! capsule. Built-ins are not assets; they never count toward asset admission.
+//! Engine-owned procedural meshes shared by rendering, Fit and picking.
 
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 use std::sync::{Arc, OnceLock};
@@ -24,9 +23,11 @@ const CAPSULE_HALF_CYLINDER: f32 = 0.5;
 pub fn builtin_mesh(primitive: Primitive) -> &'static Arc<Mesh> {
     static SPHERE: OnceLock<Arc<Mesh>> = OnceLock::new();
     static CAPSULE: OnceLock<Arc<Mesh>> = OnceLock::new();
+    static TRIANGULAR_PRISM: OnceLock<Arc<Mesh>> = OnceLock::new();
     match primitive {
         Primitive::Sphere => SPHERE.get_or_init(|| Arc::new(sphere())),
         Primitive::Capsule => CAPSULE.get_or_init(|| Arc::new(capsule())),
+        Primitive::TriangularPrism => TRIANGULAR_PRISM.get_or_init(|| Arc::new(triangular_prism())),
     }
 }
 
@@ -56,6 +57,48 @@ pub(crate) fn cube() -> Mesh {
         vertices,
         indices,
         texcoords: Some(texcoords),
+    }
+}
+
+fn triangular_prism() -> Mesh {
+    let a = Vec3::new(-0.5, -0.5, 0.5);
+    let b = Vec3::new(0.5, -0.5, 0.5);
+    let c = Vec3::new(0.0, 0.5, 0.5);
+    let d = a - Vec3::Z;
+    let e = b - Vec3::Z;
+    let f = c - Vec3::Z;
+    let mut vertices = Vec::with_capacity(18);
+    let mut indices = Vec::with_capacity(24);
+    let mut texcoords = Vec::with_capacity(18);
+    let cap_uvs = [[0., 0.], [1., 0.], [0.5, 1.]];
+    let quad_uvs = [[0., 0.], [1., 0.], [1., 1.], [0., 1.]];
+    for (positions, uvs) in [
+        (&[a, b, c][..], &cap_uvs[..]),
+        (&[e, d, f][..], &cap_uvs[..]),
+        // Each eave is the bottom of its texture, with the ridge at V=1.
+        (&[d, a, c, f][..], &quad_uvs[..]),
+        (&[b, e, f, c][..], &quad_uvs[..]),
+        (&[d, e, b, a][..], &quad_uvs[..]),
+    ] {
+        let base = vertices.len() as u32;
+        let normal = (positions[1] - positions[0])
+            .cross(positions[2] - positions[0])
+            .normalize()
+            .to_array();
+        vertices.extend(positions.iter().map(|point| Vertex {
+            position: point.to_array(),
+            normal,
+        }));
+        texcoords.extend_from_slice(uvs);
+        indices.extend([base, base + 1, base + 2]);
+        if positions.len() == 4 {
+            indices.extend([base, base + 2, base + 3]);
+        }
+    }
+    Mesh {
+        vertices,
+        texcoords: Some(texcoords),
+        indices,
     }
 }
 
@@ -176,6 +219,68 @@ fn revolve(rows: &[Row]) -> Mesh {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn triangular_prism_is_closed_outward_and_textured() {
+        use std::collections::HashMap;
+
+        let mesh = builtin_mesh(Primitive::TriangularPrism);
+        rot_assets::validate_mesh(mesh).unwrap();
+        assert_eq!(
+            (
+                mesh.vertices.len(),
+                mesh.indices.len(),
+                mesh.payload_bytes()
+            ),
+            (18, 24, 672)
+        );
+        let uvs = mesh.texcoords.as_ref().unwrap();
+        let points: Vec<_> = mesh
+            .vertices
+            .iter()
+            .map(|v| Vec3::from(v.position))
+            .collect();
+        assert_eq!(
+            points.iter().copied().reduce(Vec3::min).unwrap(),
+            Vec3::splat(-0.5)
+        );
+        assert_eq!(
+            points.iter().copied().reduce(Vec3::max).unwrap(),
+            Vec3::splat(0.5)
+        );
+
+        let mut edges = HashMap::new();
+        for triangle in mesh.indices.chunks_exact(3) {
+            let [a, b, c] = [triangle[0], triangle[1], triangle[2]].map(|id| points[id as usize]);
+            let normal = (b - a).cross(c - a).normalize();
+            let interior = Vec3::new(0.0, -0.2, 0.0);
+            assert!(normal.dot((a + b + c) / 3.0 - interior) > 0.0);
+            for index in triangle {
+                assert!(
+                    normal.abs_diff_eq(Vec3::from(mesh.vertices[*index as usize].normal), 1.0e-6)
+                );
+            }
+            for (start, end) in [(a, b), (b, c), (c, a)] {
+                let edge = (
+                    start.to_array().map(f32::to_bits),
+                    end.to_array().map(f32::to_bits),
+                );
+                *edges.entry(edge).or_insert(0) += 1;
+            }
+        }
+        assert_eq!(edges.len(), 24);
+        for ((a, b), count) in &edges {
+            assert_eq!((*count, edges[&(*b, *a)]), (1, 1));
+        }
+        for (point, uv) in points.iter().zip(uvs).take(6) {
+            assert_eq!(*uv, [0.5 + point.x * point.z.signum(), point.y + 0.5]);
+        }
+        for (point, uv) in points.iter().zip(uvs).skip(6).take(8) {
+            assert_eq!(uv[1], point.y + 0.5);
+        }
+        assert!(mesh.has_complete_uvs());
+        assert!(Arc::ptr_eq(mesh, builtin_mesh(Primitive::TriangularPrism)));
+    }
 
     // Unique risk: generator edits silently break the GPU/picking contract —
     // out-of-range indices, non-unit normals, incomplete UVs, inward winding

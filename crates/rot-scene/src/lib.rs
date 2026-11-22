@@ -173,13 +173,16 @@ pub enum Primitive {
     Sphere,
     /// Radius 0.5, total height 2 along local Y (Unity default proportions).
     Capsule,
+    /// Unit XYZ bounds, Y up, with a centred ridge running along local Z.
+    TriangularPrism,
 }
 impl Primitive {
-    pub const ALL: [Self; 2] = [Self::Sphere, Self::Capsule];
+    pub const ALL: [Self; 3] = [Self::Sphere, Self::Capsule, Self::TriangularPrism];
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Sphere => "sphere",
             Self::Capsule => "capsule",
+            Self::TriangularPrism => "triangular_prism",
         }
     }
     pub fn parse(value: &str) -> Option<Self> {
@@ -189,6 +192,7 @@ impl Primitive {
         match self {
             Self::Sphere => "Sphere",
             Self::Capsule => "Capsule",
+            Self::TriangularPrism => "Triangular Prism",
         }
     }
 }
@@ -1909,7 +1913,7 @@ fn reject_pre_v18_primitive_fields(
 ) -> Result<(), SceneError> {
     if has_object_field_or_delta(value, version, "primitive", "primitive") {
         Err(SceneError::Invalid(
-            "built-in sphere and capsule primitives require scene v18".into(),
+            "built-in primitives require scene v18".into(),
         ))
     } else {
         Ok(())
@@ -7153,7 +7157,7 @@ mod tests {
                 "primitive",
                 17,
                 "primitives require scene v18",
-                json!("sphere"),
+                json!("triangular_prism"),
             ),
         ] {
             for version in 1..=last_old {
@@ -7317,18 +7321,18 @@ mod tests {
         let mut shapes = Session::new(Scene::demo()).unwrap();
         shapes.set_mesh(0, "left", mesh.clone()).unwrap();
         shapes
-            .set_primitive(1, "left", Some(Primitive::Sphere))
+            .set_primitive(1, "left", Some(Primitive::TriangularPrism))
             .unwrap();
         assert_eq!(shapes.undo_len(), 2);
         let object = &shapes.scene().objects[0];
         assert_eq!(
             (&object.mesh, object.primitive),
-            (&None, Some(Primitive::Sphere))
+            (&None, Some(Primitive::TriangularPrism))
         );
         let before = shapes.document.clone();
         assert_eq!(
             shapes
-                .set_primitive(2, "left", Some(Primitive::Sphere))
+                .set_primitive(2, "left", Some(Primitive::TriangularPrism))
                 .unwrap(),
             2
         );
@@ -7351,7 +7355,10 @@ mod tests {
         shapes.set_mesh(4, "left", mesh.clone()).unwrap();
         assert_eq!(shapes.undo_len(), 3);
         shapes.undo(5).unwrap();
-        assert_eq!(shapes.scene().objects[0].primitive, Some(Primitive::Sphere));
+        assert_eq!(
+            shapes.scene().objects[0].primitive,
+            Some(Primitive::TriangularPrism)
+        );
         // set_mesh(None) still means "cube" and clears the primitive.
         shapes.set_mesh(6, "left", None).unwrap();
         let object = &shapes.scene().objects[0];

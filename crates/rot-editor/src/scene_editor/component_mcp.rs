@@ -209,6 +209,7 @@ impl ComponentWorkspace {
                 result["selected_count"] = json!(self.selection.len());
                 result["selected_object_ids"] = json!(selected_ids);
                 result["assembly_guidance"] = json!("When building repeated structures, use viewport_frame and viewport_screenshot to check one complete assembly from the front, side, and top before making linked copies with scene_prefab.");
+                result["primitive_guidance"] = json!("triangular_prism is 1 unit per axis (local bounds -0.5 to 0.5), with a bounding-box center pivot, +Y up, and its ridge along local Z. With parent_id, position and scale are parent-local.");
             }
             return Ok(result);
         }
@@ -249,7 +250,7 @@ impl ComponentWorkspace {
                     .filter(|key| map.contains_key(**key))
                     .count()
             }
-            "scene_transform" | "scene_rename" | "scene_reparent" => 4,
+            "scene_transform" | "scene_rename" | "scene_reparent" | "scene_primitive" => 4,
             "scene_transform_many" | "scene_delete" | "scene_delete_many" => 3,
             "scene_components_edit" => 3 + usize::from(map.contains_key("expected_asset_revision")),
             "scene_undo" | "scene_redo" => 2,
@@ -380,11 +381,7 @@ impl ComponentWorkspace {
                 ("scene_group_create", None) => None,
                 ("scene_create", None | Some(Value::Null)) => Some(Geometry::Cube),
                 ("scene_create", Some(Value::String(shape))) => Some(Geometry::Primitive {
-                    shape: match shape.as_str() {
-                        "sphere" => Primitive::Sphere,
-                        "capsule" => Primitive::Capsule,
-                        _ => return Err(invalid()),
-                    },
+                    shape: Primitive::parse(shape).ok_or_else(invalid)?,
                 }),
                 _ => return Err(invalid()),
             };
@@ -409,6 +406,30 @@ impl ComponentWorkspace {
             "scene_mesh" => {
                 let (object, details) = self.mesh_assignment(args)?;
                 payload = details;
+                self.validate_edited_material_bindings(&object)?;
+                self.session.put_object(revision, object)
+            }
+            "scene_primitive" => {
+                let id = args["object_id"].as_str().ok_or_else(invalid)?;
+                let next = match args.get("primitive") {
+                    Some(Value::Null) => Geometry::Cube,
+                    Some(Value::String(shape)) => Geometry::Primitive {
+                        shape: Primitive::parse(shape).ok_or_else(invalid)?,
+                    },
+                    _ => return Err(invalid()),
+                };
+                let mut object = self
+                    .session
+                    .scene()
+                    .objects
+                    .iter()
+                    .find(|object| object.id == id)
+                    .cloned()
+                    .ok_or_else(object_not_found)?;
+                let (component_id, geometry) = single_renderer_geometry(&mut object)?;
+                *geometry = next;
+                payload = json!({"object_id":id, "component_id":component_id,
+                    "primitive":args["primitive"]});
                 self.validate_edited_material_bindings(&object)?;
                 self.session.put_object(revision, object)
             }
@@ -659,20 +680,7 @@ impl ComponentWorkspace {
             .find(|object| object.id == id)
             .cloned()
             .ok_or_else(object_not_found)?;
-        let mut meshes = object.components.iter_mut().filter_map(|component| {
-            if let Component::MeshRenderer { geometry, .. } = &mut component.kind {
-                Some((&component.id, geometry))
-            } else {
-                None
-            }
-        });
-        let (component_id, geometry) = meshes.next().ok_or_else(component_not_found)?;
-        if meshes.next().is_some() {
-            return Err((
-                "ambiguous_component",
-                "Inspect the object and edit its chosen Mesh Renderer by component ID.".into(),
-            ));
-        }
+        let (component_id, geometry) = single_renderer_geometry(&mut object)?;
         let before = match &*geometry {
             Geometry::Imported { asset } => Some(asset.clone()),
             _ => None,
@@ -858,6 +866,26 @@ impl ComponentWorkspace {
         }
         Ok(changed)
     }
+}
+
+fn single_renderer_geometry(
+    object: &mut ObjectNode,
+) -> Result<(&str, &mut Geometry), CommandError> {
+    let mut meshes = object.components.iter_mut().filter_map(|component| {
+        if let Component::MeshRenderer { geometry, .. } = &mut component.kind {
+            Some((&component.id, geometry))
+        } else {
+            None
+        }
+    });
+    let (component_id, geometry) = meshes.next().ok_or_else(component_not_found)?;
+    if meshes.next().is_some() {
+        return Err((
+            "ambiguous_component",
+            "Inspect the object and edit its chosen Mesh Renderer by component ID.".into(),
+        ));
+    }
+    Ok((component_id, geometry))
 }
 
 type CommandError = (&'static str, String);
@@ -1070,6 +1098,7 @@ mod tests {
             "selected_count",
             "selected_object_ids",
             "assembly_guidance",
+            "primitive_guidance",
         ] {
             assert!(second_page.get(key).is_none(), "{key}");
         }
@@ -1349,23 +1378,48 @@ mod tests {
             ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
         let mut args = json!({
             "expected_session_token":"session","expected_revision":"0",
-            "object_id":scene.objects[0].id,"name":"Sphere","primitive":"sphere",
+            "object_id":scene.objects[0].id,"name":"Roof","primitive":"triangular_prism",
         });
         let rejected = editor.ai_command("session", "scene_create", &args);
         assert_eq!(rejected["error"]["code"], "invalid_arguments");
         assert_eq!(editor.session.scene(), &scene);
         assert_eq!(editor.session.revision(), 0);
 
-        args["object_id"] = json!("agent-sphere");
+        args["object_id"] = json!("agent-prism");
         let created = editor.ai_command("session", "scene_create", &args);
         assert_eq!(created["result"]["revision"], "1");
         let node = editor.session.scene().objects.last().unwrap();
-        assert_eq!(node.id, "agent-sphere");
+        assert_eq!(node.id, "agent-prism");
         assert!(matches!(
             node.components[0].kind,
             Component::MeshRenderer {
                 geometry: Geometry::Primitive {
-                    shape: Primitive::Sphere
+                    shape: Primitive::TriangularPrism
+                },
+                ..
+            }
+        ));
+        let component = node.components[0].id.clone();
+        args["expected_revision"] = json!("1");
+        args.as_object_mut().unwrap().remove("name");
+        args["primitive"] = Value::Null;
+        let swapped = editor.ai_command("session", "scene_primitive", &args);
+        assert_eq!(swapped["result"]["component_id"], component, "{swapped}");
+        assert!(matches!(
+            editor.session.scene().objects.last().unwrap().components[0].kind,
+            Component::MeshRenderer {
+                geometry: Geometry::Cube,
+                ..
+            }
+        ));
+        editor.command(Action::Undo);
+        let shape = editor.session.scene().objects.last().unwrap();
+        assert_eq!(shape.components[0].id, component);
+        assert!(matches!(
+            shape.components[0].kind,
+            Component::MeshRenderer {
+                geometry: Geometry::Primitive {
+                    shape: Primitive::TriangularPrism
                 },
                 ..
             }
