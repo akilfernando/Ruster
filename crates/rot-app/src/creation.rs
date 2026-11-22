@@ -96,7 +96,7 @@ enum OversizedFormat {
 }
 
 fn probe_large_scene(source: impl Read) -> Result<OversizedFormat, SceneError> {
-    let token_budget = Cell::new(None);
+    let token_budget = Cell::new(Some(0));
     let decision = Cell::new(None);
     let mut parser = serde_json::Deserializer::from_reader(ProbeReader {
         source,
@@ -149,7 +149,9 @@ impl<'de> de::Visitor<'de> for OversizedEnvelope<'_> {
                     if known_version {
                         return Err(M::Error::duplicate_field("format_version"));
                     }
+                    self.token_budget.set(Some(0));
                     let version = fields.next_value::<u64>()?;
+                    self.token_budget.set(None);
                     match version.cmp(&u64::from(component_scene::FORMAT_VERSION)) {
                         std::cmp::Ordering::Less => {
                             self.decision.set(Some(OversizedFormat::Legacy))
@@ -946,15 +948,26 @@ mod tests {
             prefix_only(legacy_prefix),
             Ok(OversizedFormat::Legacy)
         ));
-        let format_prefix = br#"{"format":""#;
-        assert!(
-            matches!(prefix_only(format_prefix), Err(SceneError::Format(error))
+        for prefix in [
+            br#"{"format":""#.as_slice(),
+            br#"{"format":"rot-scene","format_version":""#,
+            br#"""#,
+        ] {
+            assert!(matches!(prefix_only(prefix), Err(SceneError::Format(error))
                 if error.to_string().contains("oversized scene envelope token")
-            )
-        );
+            ));
+        }
         let escaped = br#"{"f\u006frmat" :  "r\u006ft-scene", "format_version":23,"scene":"#;
         assert!(matches!(
             prefix_only(escaped),
+            Ok(OversizedFormat::Components)
+        ));
+        let whitespace = " \t\r\n".repeat(512);
+        let spaced = format!(
+            r#"{whitespace}{{"format":"rot-scene","format_version":{whitespace}23{whitespace},"scene":"#
+        );
+        assert!(matches!(
+            prefix_only(spaced.as_bytes()),
             Ok(OversizedFormat::Components)
         ));
     }
