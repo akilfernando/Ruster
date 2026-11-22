@@ -2,7 +2,7 @@ use super::{
     prefab::Materialization, Component, ComponentScene, ObjectHierarchy, ObjectNode,
     PrefabInstance, PrefabProperty, PrefabSource,
 };
-use crate::{BehaviorSource, OpaqueMaterial, SceneError, SceneLock, Transform};
+use crate::{BehaviorSource, DisplayProfile, OpaqueMaterial, SceneError, SceneLock, Transform};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
@@ -78,6 +78,7 @@ enum SceneChange {
         index: usize,
         object: ObjectNode,
     },
+    Display(DisplayProfile),
     Material {
         id: String,
         value: Option<OpaqueMaterial>,
@@ -108,6 +109,7 @@ impl SceneChange {
                 index,
                 object: std::mem::replace(&mut objects[index], object),
             },
+            Self::Display(value) => Self::Display(std::mem::replace(&mut scene.display, value)),
             Self::Material { id, value } => {
                 let previous = match value {
                     Some(material) => scene.materials.insert(id.clone(), material),
@@ -345,6 +347,20 @@ impl ComponentSession {
             return Ok(self.revision);
         }
         self.commit(changes)
+    }
+
+    /// Change scene-wide display settings as one reversible authoring edit.
+    pub fn set_display(
+        &mut self,
+        expected: u64,
+        display: DisplayProfile,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected)?;
+        display.validate()?;
+        if display == self.scene.display {
+            return Ok(self.revision);
+        }
+        self.commit([SceneChange::Display(display)])
     }
 
     /// Create or replace a scene-owned material, optionally assigning a new

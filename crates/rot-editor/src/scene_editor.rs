@@ -5837,7 +5837,7 @@ impl eframe::App for Host {
                     .editor
                     .component
                     .as_ref()
-                    .is_some_and(|component| component.material_edit_pending())
+                    .is_some_and(|component| component.surface_edit_pending())
             {
                 self.disconnect_adapter();
             }

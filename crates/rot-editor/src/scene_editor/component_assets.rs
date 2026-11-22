@@ -42,6 +42,7 @@ struct AssetRow {
     folder: PathBuf,
     kind: &'static str,
     settings: Option<&'static str>,
+    can_import_roughness: bool,
     model: bool,
     registered: bool,
     status: AssetStatus,
@@ -65,6 +66,7 @@ impl AssetRow {
             folder: path.parent().unwrap_or(Path::new("")).to_owned(),
             kind,
             settings: None,
+            can_import_roughness: false,
             model: false,
             registered: true,
             status,
@@ -347,7 +349,7 @@ impl Browser {
                 .entry(issue.path.clone())
                 .or_insert(ImportIssue {
                     status: issue.status.clone(),
-                    asset_id: None,
+                    asset_id: issue.asset_id.clone(),
                     last_good_available: false,
                     diagnostic: None,
                 });
@@ -357,16 +359,16 @@ impl Browser {
                 .as_ref()
                 .is_none_or(|previous| detail < *previous)
             {
+                entry.asset_id.clone_from(&issue.asset_id);
                 entry.status = issue.status.clone();
                 entry.diagnostic = Some(detail);
             }
         }
         for row in &mut self.rows {
-            if let Some(issue) = self
-                .issues
-                .get(&row.source)
-                .filter(|_| row.status == AssetStatus::Ready)
-            {
+            if let Some(issue) = self.issues.get(&row.source).filter(|issue| {
+                row.status == AssetStatus::Ready
+                    && issue.asset_id.as_deref().is_none_or(|id| id == row.id)
+            }) {
                 row.status = issue.status.clone();
                 row.diagnostic.clone_from(&issue.diagnostic);
             }
@@ -399,9 +401,10 @@ impl Browser {
                 }
             }
         }
+        let known_sources: BTreeSet<_> = self.rows.iter().map(|row| row.source.clone()).collect();
         self.rows
             .extend(self.issues.iter().filter_map(|(source, issue)| {
-                if issue.asset_id.is_some() {
+                if known_sources.contains(source) {
                     return None;
                 }
                 let kind = match Path::new(source).extension()?.to_str()? {
@@ -423,6 +426,11 @@ impl Browser {
         let mut folders: BTreeSet<_> = folders.into_iter().collect();
         folders.extend([PathBuf::new(), "Assets".into()]);
         let mut names = HashMap::new();
+        let roughness_sources: BTreeSet<_> = assets
+            .infos()
+            .filter(|info| info.texture_role == Some(TextureRole::Roughness))
+            .map(|info| info.source.as_str())
+            .collect();
         self.by_id.clear();
         for (index, row) in self.rows.iter().enumerate() {
             self.by_id.insert(row.id.clone(), index);
@@ -430,8 +438,12 @@ impl Browser {
             *names.entry(row.source.clone()).or_insert(0) += 1;
         }
         for row in &mut self.rows {
+            row.can_import_roughness = row.source.ends_with(".png")
+                && Path::new(&row.source).starts_with("Assets")
+                && row.status != AssetStatus::Missing
+                && !roughness_sources.contains(row.source.as_str());
             if names[&row.source] > 1 {
-                row.label = format!("{} · {}", row.label, row.id);
+                row.label = format!("{} · {}", row.label, row.settings.unwrap_or(&row.id));
             }
         }
         self.folders = folders.into_iter().collect();
@@ -774,42 +786,47 @@ fn file_actions(ui: &mut egui::Ui, row: &AssetRow) -> Option<ContextAction> {
     let supported = rot_assets::AssetStore::project_source_limit(&row.source).is_ok();
     let duplicate = supported && row.status != AssetStatus::Missing;
     let can_move = duplicate && source.starts_with("Assets");
-    let action = if ui
-        .add_enabled(
-            can_move,
-            egui::Button::new(Text::AssetRenameCommand.plain()),
-        )
-        .clicked()
-    {
-        Some(ContextAction::Rename(source.to_owned()))
-    } else if ui
-        .add_enabled(
-            duplicate,
-            egui::Button::new(crate::workspace::Action::Duplicate.label()),
-        )
-        .clicked()
-    {
-        Some(ContextAction::File(FileAction::Duplicate(
-            source.to_owned(),
-        )))
-    } else if ui
-        .add_enabled(supported, egui::Button::new(Text::AssetReimport.plain()))
-        .clicked()
-    {
-        Some(ContextAction::File(FileAction::Reimport(source.to_owned())))
-    } else if ui
-        .add_enabled(
-            can_move,
-            egui::Button::new(Text::AssetDeleteCommand.plain()),
-        )
-        .clicked()
-    {
-        Some(ContextAction::Delete(source.to_owned()))
-    } else if ui.button(Text::AssetShowInFileManager.plain()).clicked() {
-        Some(ContextAction::Reveal(row.folder.clone()))
-    } else {
-        None
-    };
+    let action =
+        if row.can_import_roughness && ui.button(Text::AssetImportAsRoughness.plain()).clicked() {
+            Some(ContextAction::File(FileAction::InterpretRoughness(
+                source.to_owned(),
+            )))
+        } else if ui
+            .add_enabled(
+                can_move,
+                egui::Button::new(Text::AssetRenameCommand.plain()),
+            )
+            .clicked()
+        {
+            Some(ContextAction::Rename(source.to_owned()))
+        } else if ui
+            .add_enabled(
+                duplicate,
+                egui::Button::new(crate::workspace::Action::Duplicate.label()),
+            )
+            .clicked()
+        {
+            Some(ContextAction::File(FileAction::Duplicate(
+                source.to_owned(),
+            )))
+        } else if ui
+            .add_enabled(supported, egui::Button::new(Text::AssetReimport.plain()))
+            .clicked()
+        {
+            Some(ContextAction::File(FileAction::Reimport(source.to_owned())))
+        } else if ui
+            .add_enabled(
+                can_move,
+                egui::Button::new(Text::AssetDeleteCommand.plain()),
+            )
+            .clicked()
+        {
+            Some(ContextAction::Delete(source.to_owned()))
+        } else if ui.button(Text::AssetShowInFileManager.plain()).clicked() {
+            Some(ContextAction::Reveal(row.folder.clone()))
+        } else {
+            None
+        };
     if action.is_some() {
         ui.close();
     }

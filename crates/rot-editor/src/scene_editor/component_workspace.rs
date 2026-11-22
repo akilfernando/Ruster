@@ -18,6 +18,9 @@ use rot_scene::{Primitive, SceneError, Transform};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 
+#[path = "component_display.rs"]
+mod component_display;
+
 #[path = "component_material.rs"]
 pub(super) mod component_material;
 
@@ -231,6 +234,7 @@ pub(super) struct ComponentWorkspace {
     draft: Option<ObjectNode>,
     multi_draft: Option<MultiInspector>,
     material_draft: Option<component_material::Draft>,
+    display_draft: Option<component_display::Draft>,
     material_usage: component_material::Usage,
     edit_scene_during_play: bool,
     component_picker: component_inspector::ComponentPicker,
@@ -343,6 +347,7 @@ impl ComponentWorkspace {
             draft: None,
             multi_draft: None,
             material_draft: None,
+            display_draft: None,
             material_usage: component_material::Usage::default(),
             edit_scene_during_play: false,
             component_picker: Default::default(),
@@ -673,13 +678,12 @@ impl ComponentWorkspace {
             || self.multi_draft.as_ref().is_some_and(MultiInspector::dirty)
     }
 
-    #[cfg(unix)]
-    pub(super) fn material_edit_pending(&self) -> bool {
-        self.material_draft.is_some()
+    pub(super) fn surface_edit_pending(&self) -> bool {
+        self.material_draft.is_some() || self.display_draft.is_some()
     }
 
     fn authored_edit_pending(&self) -> bool {
-        self.transform_tool.active() || self.material_draft.is_some() || self.draft_dirty()
+        self.transform_tool.active() || self.surface_edit_pending() || self.draft_dirty()
     }
 
     fn refresh(&mut self) {
@@ -792,7 +796,7 @@ impl ComponentWorkspace {
     }
 
     fn apply(&mut self) -> bool {
-        if self.transform_tool.active() || self.material_draft.is_some() {
+        if self.transform_tool.active() || self.surface_edit_pending() {
             return false;
         }
         if !self.draft_dirty() {
@@ -1241,7 +1245,7 @@ impl ComponentWorkspace {
     }
 
     fn command_from_ui(&mut self, ctx: &egui::Context, action: Action) {
-        if self.transform_tool.active() || self.material_draft.is_some() {
+        if self.transform_tool.active() || self.surface_edit_pending() {
             return;
         }
         #[cfg(not(target_os = "linux"))]
@@ -1263,7 +1267,7 @@ impl ComponentWorkspace {
     }
 
     fn command(&mut self, action: Action) {
-        if self.transform_tool.active() || self.material_draft.is_some() {
+        if self.transform_tool.active() || self.surface_edit_pending() {
             return;
         }
         let revision = self.session.revision();
@@ -1732,12 +1736,13 @@ impl ComponentWorkspace {
         if publishing {
             ui.disable();
         }
-        let material_close_pending = self.defer_material_close(&ctx);
+        let surface_close_pending =
+            self.defer_material_close(&ctx) || self.defer_display_close(&ctx);
         if (build_open || publishing) && ctx.input(|input| input.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
         if !build_open
-            && !material_close_pending
+            && !surface_close_pending
             && !self.close_approved
             && (self.session.is_dirty() || self.draft_dirty())
             && ctx.input(|input| input.viewport().close_requested())
@@ -1751,7 +1756,7 @@ impl ComponentWorkspace {
             || self.open_path.is_some()
             || build_open
             || publishing
-            || self.material_draft.is_some();
+            || self.surface_edit_pending();
         #[cfg(target_os = "linux")]
         self.asset_import_frame(&ctx, blocked);
         let asset_dialog = self.asset_browser.file_dialog_open();
@@ -1792,6 +1797,19 @@ impl ComponentWorkspace {
                 editor_theme::text_menu(ui, Text::ComponentEditMenu.plain(), |ui| {
                     self.menu_action(ui, Action::Undo);
                     self.menu_action(ui, Action::Redo);
+                    ui.separator();
+                    if ui
+                        .add_enabled(
+                            !blocked
+                                && !self.authored_edit_pending()
+                                && !self.runtime.in_play_mode(),
+                            egui::Button::new(Text::SceneDisplay.plain()),
+                        )
+                        .clicked()
+                    {
+                        self.begin_display();
+                        ui.close();
+                    }
                     ui.separator();
                     self.menu_action(ui, Action::KeyboardShortcuts);
                     self.menu_action(ui, Action::CommandPalette);
@@ -2290,7 +2308,7 @@ impl ComponentWorkspace {
                     && !asset_dialog
                     && !self.close_pending
                     && self.open_path.is_none()
-                    && self.material_draft.is_none()
+                    && !self.surface_edit_pending()
                     && !egui::Popup::is_any_open(&ctx)
                     && ui.input_mut(|input| {
                         input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
@@ -2315,6 +2333,7 @@ impl ComponentWorkspace {
                 .show(&ctx, &self.session, self.assets.as_ref(), draft_dirty);
         }
         self.show_material_draft(&ctx);
+        self.show_display_draft(&ctx);
         if let Some(mut path) = self.open_path.take() {
             let mut cancel = false;
             let mut opened = None;

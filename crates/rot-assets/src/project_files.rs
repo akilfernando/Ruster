@@ -19,6 +19,8 @@ pub use prefabs::{publish_project_prefab, PrefabFile};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjectFileIssue {
+    /// The failing interpretation, if other imports can still use this source.
+    pub asset_id: Option<String>,
     pub path: String,
     pub status: AssetStatus,
     pub message: String,
@@ -27,6 +29,7 @@ pub struct ProjectFileIssue {
 impl ProjectFileIssue {
     fn invalid(path: impl Into<String>, error: impl std::fmt::Display) -> Self {
         Self {
+            asset_id: None,
             path: path.into(),
             status: AssetStatus::Invalid,
             message: error.to_string(),
@@ -247,10 +250,10 @@ impl AssetStore {
                 return diagnostics;
             }
             let refresh = changed(&source);
-            if let Err(err) =
-                self.reconcile_source(&source, importer, metadata, &sidecar_ids, refresh, &active)
+            match self.reconcile_source(&source, importer, metadata, &sidecar_ids, refresh, &active)
             {
-                diagnostics.push(ProjectFileIssue::invalid(source, err));
+                Ok(issues) => diagnostics.extend(issues),
+                Err(err) => diagnostics.push(ProjectFileIssue::invalid(source, err)),
             }
         }
         let missing: Vec<_> = self
@@ -280,6 +283,7 @@ impl AssetStore {
         for model in self.registry.models.values() {
             if model.source.starts_with("Assets/") && !self.root.join(&model.source).is_file() {
                 diagnostics.push(ProjectFileIssue {
+                    asset_id: Some(model.id.clone()),
                     path: model.source.clone(),
                     status: AssetStatus::Missing,
                     message: "Source file is missing.".into(),
@@ -297,7 +301,7 @@ impl AssetStore {
         sidecar_ids: &BTreeMap<String, usize>,
         refresh: bool,
         active: &impl Fn() -> bool,
-    ) -> Result<(), AssetError> {
+    ) -> Result<Vec<ProjectFileIssue>, AssetError> {
         let registered = self.registered_interpretations(source);
         let old_metadata = metadata;
         let mut metadata = old_metadata.clone().unwrap_or_default();
@@ -353,17 +357,16 @@ impl AssetStore {
             if !active() {
                 break;
             }
+            let id = interpretation.id.clone();
             if let Err(error) =
                 self.reconcile_interpretation(source, importer, interpretation, refresh, active)
             {
-                failures.push(error.to_string());
+                let mut issue = ProjectFileIssue::invalid(source, error);
+                issue.asset_id = Some(id);
+                failures.push(issue);
             }
         }
-        if failures.is_empty() {
-            Ok(())
-        } else {
-            Err(error(failures.join(", ")))
-        }
+        Ok(failures)
     }
 
     /// Validate the interpretation identities before moving a registered source.
@@ -390,6 +393,39 @@ impl AssetStore {
             return Err(error("The sidecar belongs to another source."));
         }
         Ok(())
+    }
+
+    /// Publish another interpretation of a managed PNG through the same
+    /// transaction as a guarded asset import.
+    pub fn interpret_project_texture(
+        &mut self,
+        source: &str,
+        role: TextureRole,
+        active: impl Fn() -> bool,
+    ) -> Result<(), AssetError> {
+        Self::project_source_limit(source)?;
+        if !source.ends_with(".png") || !Path::new(source).starts_with("Assets") {
+            return Err(error("Choose a PNG in the Assets folder."));
+        }
+        let path = confined_path(&self.root, source, false)?;
+        let sidecar = existing_metadata(&sidecar_path(&path))?.unwrap_or_default();
+        let hash = digest(source.as_bytes());
+        let id = (1..)
+            .map(|suffix| format!("asset-{}-{suffix}", &hash[..24]))
+            .find(|id| {
+                !self.registry.has_asset_id(id) && !sidecar.iter().any(|entry| entry.id == *id)
+            })
+            .expect("finite catalog");
+        let request = self.request_at(
+            self.revision(),
+            AssetMutation::ImportTexture {
+                id,
+                source: source.into(),
+                role,
+            },
+        )?;
+        self.publish_project_request(request.prepare(), active)
+            .map(|_| ())
     }
 
     /// Give a copied source new identities while retaining its accepted import settings.

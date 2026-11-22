@@ -34,6 +34,11 @@ impl ComponentPreview {
         Arc::clone(&self.scene)
     }
 
+    /// A display-only edit leaves draw rows, poses and asset bindings intact.
+    pub fn set_display(&mut self, display: rot_scene::DisplayProfile) {
+        Arc::make_mut(&mut self.scene).display = display;
+    }
+
     pub fn draw_matrices(&self) -> &[Mat4] {
         &self.matrices
     }

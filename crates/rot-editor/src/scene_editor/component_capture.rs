@@ -101,6 +101,11 @@ impl ComponentWorkspace {
         }
     }
 
+    pub(super) fn invalidate_display_capture(&mut self) {
+        self.capture.epoch += 1;
+        self.capture.view = None;
+    }
+
     pub(super) fn capture_viewport(
         &self,
         ui: &egui::Ui,
@@ -280,7 +285,9 @@ impl ComponentWorkspace {
         args: &Value,
     ) -> CaptureResult {
         let map = args.as_object().ok_or_else(|| fail("invalid_arguments"))?;
-        if self.transform_tool.active() && op != "viewport_capture_inspect" {
+        if (self.transform_tool.active() || self.display_draft.is_some())
+            && op != "viewport_capture_inspect"
+        {
             return Err(fail("view_busy"));
         }
         match op {

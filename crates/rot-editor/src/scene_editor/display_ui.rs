@@ -22,15 +22,19 @@ pub(super) struct DisplayDraft {
 
 impl DisplayDraft {
     pub(super) fn new(scene: &Scene) -> Self {
+        Self::from_profile(scene.revision, scene.display)
+    }
+
+    pub(super) fn from_profile(revision: u64, display: DisplayProfile) -> Self {
         Self {
-            revision: scene.revision,
-            original: scene.display,
-            profile: if scene.display.is_legacy() {
+            revision,
+            original: display,
+            profile: if display.is_legacy() {
                 DisplayMode::Legacy
             } else {
                 DisplayMode::Surface
             },
-            exposure_stops: scene.display.exposure_stops().unwrap_or(0.0).to_string(),
+            exposure_stops: display.exposure_stops().unwrap_or(0.0).to_string(),
         }
     }
     pub(super) fn storage_valid(&self) -> bool {

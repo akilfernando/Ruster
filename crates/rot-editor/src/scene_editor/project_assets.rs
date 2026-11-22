@@ -64,6 +64,7 @@ struct AssetJob {
 
 pub(super) enum FileAction {
     Reimport(PathBuf),
+    InterpretRoughness(PathBuf),
     Duplicate(PathBuf),
     Rename { source: PathBuf, stem: String },
     Trash(PathBuf),
@@ -280,7 +281,7 @@ fn run(
             }
             Ok(Job::FileAction(job)) => {
                 let outcome = if store.matches_identity(&job.catalog) && active() {
-                    file_action(&store, &held_root, &mut watcher, job.action, active)
+                    file_action(&mut store, &held_root, &mut watcher, job.action, active)
                 } else {
                     Err("The project or asset catalog changed. Try again.".into())
                 };
@@ -439,7 +440,7 @@ fn ensure_assets(root: &fs::File, folder: &Path) -> Result<(), String> {
 }
 
 fn file_action(
-    store: &AssetStore,
+    store: &mut AssetStore,
     held_root: &fs::File,
     watcher: &mut WatchTree<'_>,
     action: FileAction,
@@ -449,6 +450,16 @@ fn file_action(
     match action {
         FileAction::Reimport(source) => {
             AssetStore::project_source_limit(source.to_str().unwrap_or_default())
+                .map_err(|error| error.to_string())?;
+            Ok(source)
+        }
+        FileAction::InterpretRoughness(source) => {
+            store
+                .interpret_project_texture(
+                    source.to_str().unwrap_or_default(),
+                    rot_assets::TextureRole::Roughness,
+                    active,
+                )
                 .map_err(|error| error.to_string())?;
             Ok(source)
         }

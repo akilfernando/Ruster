@@ -81,6 +81,7 @@ pub(super) struct Draft {
     value: OpaqueMaterial,
     affected: usize,
     base_colors: BTreeMap<String, String>,
+    roughness_maps: BTreeMap<String, String>,
     opened_frame: Option<u64>,
     error: Option<String>,
 }
@@ -123,17 +124,21 @@ fn good_texture(assets: Option<&AssetStore>, id: &str, role: TextureRole) -> boo
     })
 }
 
-fn ready_base_colors(assets: Option<&AssetStore>) -> BTreeMap<String, String> {
+fn ready_texture_choices(
+    assets: Option<&AssetStore>,
+    role: TextureRole,
+) -> BTreeMap<String, String> {
     let Some(assets) = assets else {
         return BTreeMap::new();
     };
     let mut textures = assets
         .infos()
-        .filter(|info| {
-            standalone_texture(info, TextureRole::BaseColor) && assets.texture(&info.id).is_some()
-        })
+        .filter(|info| standalone_texture(info, role) && assets.texture(&info.id).is_some())
         .map(|info| (info.id.clone(), file_name(&info.source).to_owned()))
         .collect::<BTreeMap<_, _>>();
+    if role != TextureRole::BaseColor {
+        return textures;
+    }
     for model in assets.models() {
         for id in model
             .materials
@@ -405,7 +410,8 @@ impl ComponentWorkspace {
             intent: request.intent,
             value,
             affected,
-            base_colors: ready_base_colors(self.assets.as_ref()),
+            base_colors: ready_texture_choices(self.assets.as_ref(), TextureRole::BaseColor),
+            roughness_maps: ready_texture_choices(self.assets.as_ref(), TextureRole::Roughness),
             opened_frame: None,
             error: None,
         });
@@ -495,7 +501,12 @@ impl ComponentWorkspace {
                         draft.value.tint = color;
                     }
                 });
-                texture_choice(ui, &mut draft.value.base_color_texture, &draft.base_colors);
+                texture_choice(
+                    ui,
+                    Text::BaseColorSrgb,
+                    &mut draft.value.base_color_texture,
+                    &draft.base_colors,
+                );
                 ui_kit::property_row_with_label(
                     ui,
                     Text::ComponentMaterialResponse.plain(),
@@ -521,6 +532,12 @@ impl ComponentWorkspace {
                             };
                         }
                     },
+                );
+                texture_choice(
+                    ui,
+                    Text::RoughnessMapLinear,
+                    &mut draft.value.roughness_texture,
+                    &draft.roughness_maps,
                 );
                 let mapped = draft.value.roughness_texture.is_some();
                 if let MaterialResponse::Dielectric { roughness } = &mut draft.value.response {
@@ -573,17 +590,18 @@ impl ComponentWorkspace {
 
 fn texture_choice(
     ui: &mut egui::Ui,
+    text: Text,
     slot: &mut Option<String>,
     choices: &BTreeMap<String, String>,
 ) {
-    ui_kit::property_row_with_label(ui, Text::BaseColorSrgb.plain(), |ui, label| {
+    ui_kit::property_row_with_label(ui, text.plain(), |ui, label| {
         let current = slot.clone();
         let selected = current
             .as_deref()
             .map_or(Text::ComponentNoTexture.plain(), |id| {
                 choices.get(id).map_or(id, String::as_str)
             });
-        let field = egui::ComboBox::from_id_salt("base_color")
+        let field = egui::ComboBox::from_id_salt(text.plain())
             .width(ui.available_width())
             .truncate()
             .selected_text(selected)
@@ -854,6 +872,9 @@ impl ComponentWorkspace {
             "materials":materials, "material_count":count, "next_offset":(offset+limit<count).then(||(offset+limit).to_string()),
             "dirty":self.session.is_dirty(), "drafts_pending":self.authored_edit_pending(),
         });
+        if self.display_draft.is_some() {
+            result["pending_display"] = json!(true);
+        }
         if let Some(draft) = &self.material_draft {
             let mut pending = json!({
                 "intent":if matches!(draft.intent, Intent::Create) {"create"} else {"edit_shared"},

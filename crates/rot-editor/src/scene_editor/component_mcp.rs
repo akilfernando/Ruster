@@ -28,6 +28,8 @@ impl ComponentWorkspace {
                 | "behavior_runtime_stop"
         ) {
             self.execute_ai_runtime(token, op, args)
+        } else if op == "scene_display_set" {
+            self.display_command(token, args)
         } else if matches!(
             op,
             "material_inspect" | "scene_material_set" | "scene_material_assign"
