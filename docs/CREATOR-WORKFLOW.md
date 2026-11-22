@@ -149,11 +149,23 @@ the affected object count before applying. The renderer's own **Tint**
 still multiplies the shared material color.
 
 Set the material tint, **Base color (sRGB)**, and nonmetallic roughness in
-the dialog. A texture needs the matching import role and a mesh with UVs.
-The built-in Cube samples the full texture on each face. Nonmetallic
-roughness responds to lighting when the scene uses Surface HDR.
+the dialog. To use a loose PNG as a roughness map, put it in the project's
+Assets folder, right-click its tile, and choose **Import as Roughness**.
+Choose it under **Roughness map (linear)** in the material dialog. Choose
+**None** to clear the map. The scalar roughness stays available, and
+existing Base Color assignments keep their sRGB interpretation. Textures
+need meshes with UVs. The built-in Cube samples each face.
 Press Enter to apply or Escape to cancel. Apply or cancel before saving.
 Edits to materials copied from GLB models are saved with the scene.
+
+## Set scene display in v23
+
+Open **Edit → Scene Display** with or without an object selected.
+**Legacy SDR** is the default. Choose **Surface HDR** to see nonmetallic
+roughness respond to lighting, then set **Exposure (EV)** from −8 to +8
+stops. HDR starts at zero stops when enabled from Legacy SDR. Apply saves
+the change to shared Undo history. Cancel discards the draft. Save the
+scene to retain the display settings for the next open and for builds.
 
 ## Edit a material in a legacy scene
 

@@ -71,6 +71,18 @@ connected project.
   `scene_material_set`. Include `component_id` when the object has multiple
   Mesh Renderers. Preserve the existing texture, response and sampler fields
   when replacing a definition for an unrelated property.
+- For a v23 roughness PNG in the project, call `asset_import` with
+  `texture_role: "roughness_linear"` and current scene and asset guards
+  from `asset_inspect`. Use a separate asset ID if the source is also used
+  as Base Color. When the import is ready, set `roughness_texture` on the
+  shared material, keeping the existing response and scalar roughness.
+- In v23, `material_inspect` also reports committed `display` and whether
+  a native `pending_display` draft is open. Use `scene_display_set` through
+  `rot_tools` with the current session token and revision. The display
+  accepts `{"type":"legacy_sdr"}` or
+  `{"type":"surface_hdr","exposure_stops":0}`, with exposure from −8 to +8
+  stops. One accepted change shares Undo with the editor. Apply or cancel
+  the native draft before writing or saving.
 - When `scene_components_edit` changes a textured Mesh Renderer binding,
   include `expected_asset_revision` from the current asset inspection.
 - In legacy scenes, `scene_inspect` reports `group_creation_blockers` for
