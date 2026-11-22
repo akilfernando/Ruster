@@ -95,7 +95,10 @@ in **Mesh Renderer → Geometry**. Click **Apply**, then save the scene.
 
 Double-click an imported GLB or choose **Place in Scene** to create an
 editable hierarchy. Placement copies the node names, local transforms, and
-materials into the scene. A mesh with multiple triangle primitives gets
+materials into the scene. Rot accepts node matrices that can be represented
+as translation, rotation, and positive scale. Unnamed and repeated-name nodes
+use their source node indices for identity. Keep those indices stable when
+reimporting an existing model. A mesh with multiple triangle primitives gets
 one child per surface. Each surface keeps its material and inherits
 animation from the original node. Placement binds the first supported
 transform clip. Place, Undo, and Redo operate on the hierarchy and its
