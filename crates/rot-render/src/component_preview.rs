@@ -5,7 +5,7 @@ use super::{
     ViewportInteraction, ViewportSurface,
 };
 use eframe::egui;
-use glam::{DMat4, EulerRot, Mat3, Mat4, Quat, Vec3};
+use glam::{DMat4, DVec3, EulerRot, Mat3, Mat4, Quat, Vec3};
 use rot_scene::component_scene::{self, Component, ComponentScene, Geometry};
 use rot_scene::{
     Light, LightKind, Lighting, Object, Scene, SceneError, Transform, MAX_DIRECTIONAL_LIGHTS,
@@ -38,33 +38,30 @@ impl ComponentPreview {
         &self.matrices
     }
 
-    /// Translate the affected draw rows from the same committed anchor.
-    pub fn translate_from(
+    /// Refresh transient translations from committed double-precision world positions.
+    pub fn set_translated_rows(
         &mut self,
-        anchor: &Self,
-        draw_rows: &[usize],
-        light_ids: &[String],
-        displacement: Vec3,
+        draw_rows: &[(usize, DVec3)],
+        light_positions: &[(String, DVec3)],
+        displacement: DVec3,
     ) -> Result<(), SceneError> {
-        for &row in draw_rows {
-            let original = anchor.matrices[row];
-            self.matrices[row].w_axis = original.w_axis + displacement.extend(0.0);
-            if !self.matrices[row].w_axis.is_finite() {
+        for &(row, original) in draw_rows {
+            let position = (original + displacement).as_vec3();
+            if !position.is_finite() {
                 return Err(SceneError::Invalid(
                     "world move exceeds renderer precision".into(),
                 ));
             }
+            self.matrices[row].w_axis = position.extend(1.0);
         }
-        if !light_ids.is_empty() {
+        if !light_positions.is_empty() {
             let Lighting::Authored { lights, .. } = &mut Arc::make_mut(&mut self.scene).lighting
             else {
                 unreachable!("preview light IDs require authored lighting");
             };
-            for id in light_ids {
+            for (id, original) in light_positions {
                 let light = lights.get_mut(id).expect("preview light ID");
-                let original = anchor.scene.lighting.light(id).expect("committed light");
-                light.transform.translation =
-                    (Vec3::from_array(original.transform.translation) + displacement).to_array();
+                light.transform.translation = (original + displacement).as_vec3().to_array();
                 light.transform.validate()?;
             }
         }

@@ -2,10 +2,10 @@
 use super::ComponentWorkspace;
 use crate::{manipulation::paint_gizmo, strings::Text};
 use eframe::egui;
-use glam::{DMat4, DQuat, DVec3};
+use glam::{DMat3, DQuat, DVec3};
 use rot_render::{component_preview::ComponentPreview, ViewportInteraction};
 use rot_scene::component_scene::ObjectNode;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use transform_gizmo_egui::{
     math::{
         DMat4 as GizmoMatrix, DQuat as GizmoRotation, DVec3 as GizmoVector,
@@ -53,15 +53,16 @@ struct Gesture {
     proxy: GizmoTransform,
     roots: Vec<MoveRoot>,
     preview: ComponentPreview,
-    draw_rows: Vec<usize>,
-    lights: Vec<String>,
 }
 
 struct MoveRoot {
     index: usize,
-    parent_inverse: DMat4,
+    parent_basis: DMat3,
+    parent_inverse: DMat3,
     original: [f32; 3],
     local: [f32; 3],
+    draw_rows: Vec<(usize, DVec3)>,
+    lights: Vec<(String, DVec3)>,
 }
 
 impl MoveTool {
@@ -140,19 +141,22 @@ impl ComponentWorkspace {
         let target = self.move_tool.target.as_ref()?;
         let objects = &self.session.scene().objects;
         let preview = self.preview.as_ref().ok()?;
-        let roots: Vec<_> = target
+        let mut roots: Vec<_> = target
             .roots
             .iter()
             .map(|&index| {
-                let parent_inverse = self.parents[index].map_or(DMat4::IDENTITY, |parent| {
-                    self.preview_world[parent].inverse()
+                let parent_basis = self.parents[index].map_or(DMat3::IDENTITY, |parent| {
+                    DMat3::from_mat4(self.preview_world[parent])
                 });
                 let original = objects[index].transform.translation;
                 MoveRoot {
                     index,
-                    parent_inverse,
+                    parent_basis,
+                    parent_inverse: parent_basis.inverse(),
                     original,
                     local: original,
+                    draw_rows: Vec::new(),
+                    lights: Vec::new(),
                 }
             })
             .collect();
@@ -160,43 +164,47 @@ impl ComponentWorkspace {
             return None;
         }
 
-        let selected: HashSet<_> = target.roots.iter().copied().collect();
-        let mut moved = HashSet::new();
-        let mut lights = Vec::new();
-        let mut depth = None;
-        for &(index, row_depth) in &self.rows {
-            if depth.is_some_and(|start| row_depth <= start) {
-                depth = None;
+        let selected: HashMap<_, _> = target
+            .roots
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(root, index)| (index, root))
+            .collect();
+        let mut moved = HashMap::new();
+        let mut subtree = None;
+        for &(index, depth) in &self.rows {
+            if subtree.is_some_and(|(start, _)| depth <= start) {
+                subtree = None;
             }
-            if selected.contains(&index) {
-                depth = Some(row_depth);
+            if let Some(&root) = selected.get(&index) {
+                subtree = Some((depth, root));
             }
-            if depth.is_some() {
-                moved.insert(objects[index].id.as_str());
-                lights.extend(objects[index].components.iter().filter_map(|component| {
-                    preview
-                        .scene()
-                        .lighting
-                        .light(&component.id)
-                        .map(|_| component.id.clone())
-                }));
+            if let Some((_, root)) = subtree {
+                let original = self.preview_world[index].w_axis.truncate();
+                moved.insert(objects[index].id.as_str(), (root, original));
+                roots[root]
+                    .lights
+                    .extend(objects[index].components.iter().filter_map(|component| {
+                        preview
+                            .scene()
+                            .lighting
+                            .light(&component.id)
+                            .map(|_| (component.id.clone(), original))
+                    }));
             }
         }
-        let draw_rows = preview
-            .scene()
-            .objects
-            .iter()
-            .enumerate()
-            .filter_map(|(index, object)| moved.contains(object.id.as_str()).then_some(index))
-            .collect();
+        for (index, object) in preview.scene().objects.iter().enumerate() {
+            if let Some(&(root, original)) = moved.get(object.id.as_str()) {
+                roots[root].draw_rows.push((index, original));
+            }
+        }
         Some(Gesture {
             revision: self.session.revision(),
             cursor_start,
             proxy: target.proxy,
             roots,
             preview: preview.clone(),
-            draw_rows,
-            lights,
         })
     }
 
@@ -310,7 +318,7 @@ impl ComponentWorkspace {
                 DVec3::from_array(GizmoVector::from(transforms[0].translation).to_array())
                     - DVec3::from_array(GizmoVector::from(target.proxy.translation).to_array())
             };
-            if !gesture.update(self.preview.as_ref().unwrap(), displacement) {
+            if !gesture.update(displacement) {
                 self.move_tool.cancel();
                 self.error = Some(Text::ComponentMoveOutsideRange.plain().into());
                 ui.ctx().request_repaint();
@@ -359,22 +367,79 @@ impl ComponentWorkspace {
 }
 
 impl Gesture {
-    fn update(&mut self, anchor: &ComponentPreview, delta: DVec3) -> bool {
+    fn update(&mut self, delta: DVec3) -> bool {
         for root in &mut self.roots {
-            let local = DVec3::from_array(root.original.map(f64::from))
-                + root.parent_inverse.transform_vector3(delta);
+            let original = DVec3::from_array(root.original.map(f64::from));
+            let local = original + root.parent_inverse * delta;
             if !local.is_finite() || local.abs().max_element() > 10_000.0 {
                 return false;
             }
-            root.local = local.as_vec3().to_array();
+            let local = local.as_vec3();
+            if local.to_array() != root.local {
+                // Match the authored f32 transform at the root. Every descendant
+                // shares this exact world displacement, independent of its basis.
+                let world_delta = root.parent_basis * (local.as_dvec3() - original);
+                if self
+                    .preview
+                    .set_translated_rows(&root.draw_rows, &root.lights, world_delta)
+                    .is_err()
+                {
+                    return false;
+                }
+                root.local = local.to_array();
+            }
         }
-        self.preview
-            .translate_from(anchor, &self.draw_rows, &self.lights, delta.as_vec3())
-            .is_ok()
+        true
     }
 }
 
 fn node_rotation(node: &ObjectNode) -> DQuat {
     let [x, y, z] = node.transform.rotation.map(f64::from);
     DQuat::from_rotation_z(z) * DQuat::from_rotation_y(y) * DQuat::from_rotation_x(x)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rot_scene::component_scene::{ComponentScene, ComponentSession};
+    use rot_scene::{Scene, Session, Transform};
+
+    #[test]
+    fn viewport_move_preview_uses_quantized_root_translation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("precision.scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.objects[0].parent = Some("large-scale".into());
+        scene.objects[0].transform.translation = [4096., 0., 0.];
+        scene.objects.push(ObjectNode {
+            id: "large-scale".into(),
+            name: "Large Scale".into(),
+            enabled: true,
+            parent: None,
+            transform: Transform {
+                scale: [1000.; 3],
+                ..Default::default()
+            },
+            components: Vec::new(),
+        });
+        let mut editor = ComponentWorkspace::new(path, ComponentSession::new(scene).unwrap());
+        editor.select(Some(editor.session.scene().objects[0].id.clone()));
+        editor.move_tool.target = editor.move_target().ok().flatten();
+        let mut gesture = editor.begin_move(egui::Pos2::ZERO).unwrap();
+        let original = gesture.preview.draw_matrices()[0].w_axis;
+
+        // 0.2 world units under this parent rounds away in the stored
+        // local position, although the world renderer could show the shift.
+        assert!(gesture.update(DVec3::new(0.2, 0., 0.)));
+        assert_eq!(gesture.preview.draw_matrices()[0].w_axis, original);
+        assert!(gesture.update(DVec3::new(0.3, 0., 0.)));
+        let moved = gesture.preview.draw_matrices()[0].w_axis;
+        assert_eq!(moved.x - original.x, 0.5);
+        editor.commit_move(gesture);
+        assert_eq!(editor.session.revision(), 1);
+        assert_eq!(
+            editor.preview.as_ref().unwrap().draw_matrices()[0].w_axis,
+            moved
+        );
+    }
 }
