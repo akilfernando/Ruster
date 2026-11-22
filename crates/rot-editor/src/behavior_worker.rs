@@ -1070,6 +1070,7 @@ impl Execution {
         self.due = None;
         self.runtime = None;
         self.static_frame = None;
+        self.hidden_mesh_renderers = None;
         self.key = None;
         self.last_input = None;
         self.published_scene = None;
