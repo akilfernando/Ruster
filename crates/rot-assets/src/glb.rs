@@ -2,6 +2,7 @@
 use super::*;
 use glam::{DMat4, DQuat, DVec3, EulerRot};
 use serde_json::value::RawValue;
+use std::borrow::Cow;
 
 pub const MAX_GLB_SOURCE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_JSON_BYTES: usize = 2 * 1024 * 1024;
@@ -1201,35 +1202,34 @@ impl Decoder<'_> {
         parent: Option<&str>,
         ancestors: &mut Vec<PlacementPose>,
     ) -> Result<(), AssetError> {
-        let mut names = BTreeSet::new();
-        let mut repeated = BTreeSet::new();
-        if indices.len() > 1 {
+        let mut unique = [true; MAX_MODEL_ITEMS];
+        {
+            let mut names = BTreeMap::new();
             for &index in indices {
                 let name = at(&self.doc.nodes, index, "node")?.name.as_str();
-                if path_safe(name) && !names.insert(name) {
-                    repeated.insert(name);
+                if !path_safe(name) {
+                    unique[index] = false;
+                } else if indices.len() > 1 {
+                    if let Some(previous) = names.insert(name, index) {
+                        unique[previous] = false;
+                        unique[index] = false;
+                    }
                 }
             }
         }
-        let paths = indices
-            .iter()
-            .map(|&index| {
-                let name = at(&self.doc.nodes, index, "node")?.name.as_str();
-                // Leading space separates indexed segments from authored names.
-                // Only the exact single-space segment marks a split primitive.
-                let segment = if path_safe(name) && !repeated.contains(name) {
-                    name.to_owned()
-                } else {
-                    format!(" node-{index}")
-                };
-                Ok(if let Some(parent) = parent {
-                    format!("{parent}/{segment}")
-                } else {
-                    segment
-                })
-            })
-            .collect::<Result<Vec<_>, AssetError>>()?;
-        for (&index, path) in indices.iter().zip(paths) {
+        for &index in indices {
+            // Leading space separates indexed segments from authored names.
+            // Only the exact single-space segment marks a split primitive.
+            let segment = if unique[index] {
+                Cow::Borrowed(self.doc.nodes[index].name.as_str())
+            } else {
+                Cow::Owned(format!(" node-{index}"))
+            };
+            let path = if let Some(parent) = parent {
+                format!("{parent}/{segment}")
+            } else {
+                segment.into_owned()
+            };
             self.node(index, path, parent, ancestors)?;
         }
         Ok(())
