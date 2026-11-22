@@ -83,7 +83,7 @@ editor_text! {
     ComponentMeshRenderer => "Mesh Renderer",
     ComponentLight => "Light",
     ViewportLightLimit => "Some lights are outside the render budget.",
-    ViewportLightLimitDetail => "Rendering uses the first enabled, visible lights in scene order, up to one Directional Light and four Point Lights. Disable an earlier light to make room.",
+    ViewportLightLimitDetail => "First 4 visible, enabled Point Lights and 1 Directional Light in scene order.",
     ComponentCollider => "Collider",
     ComponentApply => "Apply",
     ComponentUnsaved => "Unsaved changes",
