@@ -585,10 +585,13 @@ impl ComponentPicker {
             if self.picking_script {
                 ui.label(Text::ChooseScript.plain());
             }
-            let edit = ui.add(
-                egui::TextEdit::singleline(&mut self.search)
-                    .hint_text(Text::ComponentSearch.plain()),
-            );
+            let edit = ui.add(egui::TextEdit::singleline(&mut self.search).hint_text(
+                if self.picking_script {
+                    Text::ComponentSearchScripts.plain()
+                } else {
+                    Text::ComponentSearch.plain()
+                },
+            ));
             if !self.open {
                 edit.request_focus();
             }
@@ -596,23 +599,35 @@ impl ComponentPicker {
                 && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
             let search = self.search.trim().to_ascii_lowercase();
             if self.picking_script {
-                let scripts = assets
+                let scripts: Vec<_> = assets
                     .into_iter()
-                    .flat_map(|store| store.infos())
+                    .flat_map(rot_assets::AssetStore::infos)
                     .filter(|info| {
                         info.kind == rot_assets::AssetKind::Script
                             && info.status == rot_assets::AssetStatus::Ready
-                    });
+                    })
+                    .collect();
+                let mut names = BTreeMap::new();
+                for info in &scripts {
+                    *names.entry(script_filename(&info.source)).or_insert(0usize) += 1;
+                }
                 let mut found = false;
                 egui::ScrollArea::vertical()
                     .max_height(240.)
                     .show(ui, |ui| {
                         for info in scripts
+                            .into_iter()
                             .filter(|info| info.source.to_ascii_lowercase().contains(&search))
                         {
                             found = true;
+                            let basename = script_filename(&info.source);
+                            let label = if names[basename] > 1 {
+                                info.source.as_str()
+                            } else {
+                                basename
+                            };
                             let chosen = ui
-                                .button(script_filename(&info.source))
+                                .add(egui::Button::new(label).truncate())
                                 .on_hover_text(&info.source)
                                 .clicked();
                             if chosen || (submit && add.is_none()) {

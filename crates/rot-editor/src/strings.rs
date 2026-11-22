@@ -103,6 +103,7 @@ editor_text! {
     ComponentAdd => "Add Component",
     ComponentEnable => "Enable",
     ComponentSearch => "Search Components",
+    ComponentSearchScripts => "Search Scripts",
     ComponentRemove => "Remove Component",
     ComponentGeometry => "Geometry",
     ComponentTint => "Tint",

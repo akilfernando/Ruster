@@ -754,6 +754,65 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn file_backed_script_build_pins_bytes_and_bakes_one_source() {
+        use rot_scene::component_scene::{Component, ComponentInstance, ScriptSourceKind};
+        use rot_scene::{BehaviorBinding, BindingTarget};
+
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let path = root.join("source.scene.json");
+        let player = root.join(PLAYER);
+        let source = root.join("Assets/spin.lua");
+        fs::create_dir(source.parent().unwrap()).unwrap();
+        fs::write(&player, b"dummy player").unwrap();
+        fs::set_permissions(&player, fs::Permissions::from_mode(0o755)).unwrap();
+        let original = "return { update = function(o, p, dt) o.rotation[3] = 1; return o end }";
+        let changed = original.replace("= 1", "= 2");
+        assert_eq!(original.len(), changed.len());
+        fs::write(&source, original).unwrap();
+        let mut assets = AssetStore::open(root).unwrap();
+        assets.import("spin", "Assets/spin.lua").unwrap();
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        for object in scene.objects.iter_mut().take(2) {
+            object.components.push(ComponentInstance {
+                id: format!("{}-script", object.id),
+                enabled: true,
+                kind: Component::Script {
+                    binding: BehaviorBinding {
+                        target: BindingTarget::Object(object.id.clone()),
+                        source_id: "spin".into(),
+                        enabled: true,
+                        properties: BTreeMap::new(),
+                        commands: BTreeMap::new(),
+                        state_defaults: BTreeMap::new(),
+                    },
+                    source_kind: Some(ScriptSourceKind::Asset),
+                },
+            });
+        }
+        scene.save_new(&path).unwrap();
+        let session = ComponentSession::open(&path).unwrap();
+        let capture = |assets: &AssetStore| BuildRequest::capture(&session, Some(assets)).unwrap();
+        let stale = capture(&assets);
+        fs::write(&source, &changed).unwrap();
+        let refused = root.join("refused");
+        let not_cancelled = AtomicBool::new(false);
+        assert!(matches!(stale.publish(&refused, &player, &not_cancelled),
+            Err(PublishError::Failed(error)) if error.diagnostic.contains("Assets/spin.lua")));
+        assert!(!refused.exists());
+        assets.refresh("spin").unwrap();
+        let destination = root.join("built");
+        capture(&assets)
+            .publish(&destination, &player, &not_cancelled)
+            .unwrap();
+        let baked = ComponentScene::open(destination.join("scene.json")).unwrap();
+        assert!(baked.script_asset_ids().is_empty());
+        assert_eq!(baked.sources.len(), 1);
+        assert_eq!(baked.sources.values().next().unwrap().text, changed);
+        assert_eq!(ComponentScene::open(path).unwrap(), scene);
+    }
+
+    #[test]
     fn builds_large_component_scene_from_verified_saved_bytes() {
         use rot_scene::component_scene::PrefabSource;
 

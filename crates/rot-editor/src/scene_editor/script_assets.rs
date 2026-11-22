@@ -5,10 +5,21 @@ use std::collections::BTreeMap;
 const _: () = assert!(rot_assets::MAX_LUA_SOURCE_BYTES == rot_scene::MAX_SOURCE_BYTES);
 
 pub(super) fn source(path: &str, text: String) -> BehaviorSource {
-    let label = path.trim();
+    const MAX_LABEL_BYTES: usize = 128;
+    let clean: String = path
+        .chars()
+        .map(|ch| if ch.is_control() { '�' } else { ch })
+        .collect();
+    let clean = clean.trim();
+    let label = if clean.len() <= MAX_LABEL_BYTES {
+        clean.to_owned()
+    } else {
+        let prefix = "…/";
+        let cutoff = clean.ceil_char_boundary(clean.len() - (MAX_LABEL_BYTES - prefix.len()));
+        format!("{prefix}{}", &clean[cutoff..])
+    };
     BehaviorSource {
-        label: (!label.is_empty() && label.len() <= 128 && !label.chars().any(char::is_control))
-            .then(|| label.to_owned()),
+        label: Some(label),
         language_id: rot_behavior::LANGUAGE_ID.into(),
         host_api_version: rot_behavior::HOST_API_VERSION,
         text,
@@ -46,4 +57,52 @@ pub(crate) fn resolved(
         .bake_script_assets(sources)
         .map_err(|failure| failure.to_string())?;
     Ok(Some(resolved))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rot_scene::component_scene::{Component, ComponentInstance, ScriptSourceKind};
+    use rot_scene::{BehaviorBinding, BindingTarget, Scene, Session};
+
+    #[test]
+    fn resolved_script_never_heals_an_unrelated_dangling_embedded_binding() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Assets/spin.lua");
+        std::fs::create_dir(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "return {}").unwrap();
+        let mut assets = AssetStore::open(dir.path()).unwrap();
+        assets.import("spin", "Assets/spin.lua").unwrap();
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let object = &mut scene.objects[0];
+        for (id, source_id, source_kind) in [
+            ("embedded", "asset-lua-1", None),
+            ("file", "spin", Some(ScriptSourceKind::Asset)),
+        ] {
+            object.components.push(ComponentInstance {
+                id: id.into(),
+                enabled: true,
+                kind: Component::Script {
+                    binding: BehaviorBinding {
+                        target: BindingTarget::Object(object.id.clone()),
+                        source_id: source_id.into(),
+                        enabled: true,
+                        properties: BTreeMap::new(),
+                        commands: BTreeMap::new(),
+                        state_defaults: BTreeMap::new(),
+                    },
+                    source_kind,
+                },
+            });
+        }
+        let original = scene.clone();
+        let baked = resolved(&scene, Some(&assets), true).unwrap().unwrap();
+        assert!(!baked.sources.contains_key("asset-lua-1"));
+        assert!(baked.sources.contains_key("asset-lua-2"));
+        assert!(matches!(
+            &baked.objects[0].components[1].kind,
+            Component::Script { binding, source_kind: None }
+                if binding.source_id == "asset-lua-1"));
+        assert_eq!(scene, original);
+    }
 }

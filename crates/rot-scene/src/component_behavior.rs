@@ -36,20 +36,47 @@ impl ComponentScene {
         &mut self,
         sources: BTreeMap<String, BehaviorSource>,
     ) -> Result<(), SceneError> {
-        if sources.is_empty() && self.script_asset_ids().is_empty() {
+        let required = self.script_asset_ids();
+        if let Some(id) = required.iter().find(|id| !sources.contains_key(**id)) {
+            return Err(SceneError::Invalid(format!(
+                "Lua asset {id} is unavailable"
+            )));
+        }
+        if sources.len() != required.len() {
+            return Err(SceneError::Invalid(
+                "Lua assets do not match the script references".into(),
+            ));
+        }
+        if sources.is_empty() {
             return Ok(());
         }
         if self.sources.len().saturating_add(sources.len()) > MAX_SOURCES {
             return Err(SceneError::Invalid("script source limit exceeded".into()));
         }
+        drop(required);
+        let reserved: HashSet<_> = self
+            .objects
+            .iter()
+            .flat_map(|object| &object.components)
+            .filter_map(|component| match &component.kind {
+                Component::Script {
+                    binding,
+                    source_kind: None,
+                } => Some(binding.source_id.as_str()),
+                _ => None,
+            })
+            .collect();
+        for source in sources.values() {
+            source.validate()?;
+        }
         let mut keys = BTreeMap::new();
         let mut index = 1;
         for (asset, source) in sources {
-            source.validate()?;
             let key = loop {
                 let candidate = format!("asset-lua-{index}");
                 index += 1;
-                if !self.sources.contains_key(&candidate) {
+                if !self.sources.contains_key(&candidate) && !reserved.contains(candidate.as_str())
+                {
                     break candidate;
                 }
             };
@@ -67,15 +94,7 @@ impl ComponentScene {
             } = &mut component.kind
             {
                 if source_kind.is_some() {
-                    binding.source_id = keys
-                        .get(&binding.source_id)
-                        .ok_or_else(|| {
-                            SceneError::Invalid(format!(
-                                "Lua asset {} is unavailable",
-                                binding.source_id
-                            ))
-                        })?
-                        .clone();
+                    binding.source_id = keys[&binding.source_id].clone();
                     *source_kind = None;
                 }
             }
