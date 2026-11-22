@@ -107,8 +107,11 @@ the model ID and current asset revision.
 
 Keep any PNG files a GLB references beside the model or in their original
 subfolder. Rot imports them with the model and refreshes the model when a
-referenced PNG in `Assets/` changes. Select a GLB and look under **Import
-Warnings** in the Inspector for material fallbacks or skipped faces.
+referenced PNG in `Assets/` changes. Base-color textures support 8-bit
+noninterlaced indexed PNG alongside RGB and RGBA. Rot uses mipmaps and
+chooses the filter that matches the most explicitly requested sampling
+stages. Select a GLB and look under **Import Warnings** in the Inspector for
+sampler approximations, other material fallbacks, or skipped faces.
 You can still place the model. `asset_inspect` reports
 the warning count and up to two warnings per model.
 

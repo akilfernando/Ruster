@@ -51,7 +51,8 @@ shows live folders, previews and diagnostics, accepts drops, and places
 meshes and multi-primitive GLB hierarchies with Undo. File actions keep stable IDs
 on rename and preserve sources in project trash. GLB imports support
 representable node matrices, unnamed or repeated names, and relative PNG
-textures. Import reports material fallbacks and skipped triangles in the Assets
+textures. Base-color textures support indexed PNG. Import reports sampler
+approximations, other material fallbacks and skipped triangles in the Assets
 Inspector and MCP. Failed imports show the source path, recovery, last working
 version availability and separate Error Details in the Inspector. Approved MCP
 clients can page the same issues, including sources with no asset ID. A
