@@ -156,12 +156,12 @@ fn assembly_gate_render_consumers_share_the_flattened_world() {
 }
 
 #[test]
-fn hidden_behavior_mesh_keeps_the_owner_pose_and_enabled_child() {
+fn hidden_behavior_mesh_keeps_the_owner_pose_and_enabled_sibling() {
     use rot_scene::component_scene::ComponentScene;
 
     let mut original = Scene::empty("runtime-hierarchy");
     let mut parent = Object::cube("parent", None);
-    parent.transform.translation = [3., 1., -2.];
+    parent.transform.translation = [1., 0., -1.];
     parent.collider = Some(rot_scene::Collider {
         enabled: true,
         ..Default::default()
@@ -169,10 +169,19 @@ fn hidden_behavior_mesh_keeps_the_owner_pose_and_enabled_child() {
     let mut child = Object::cube("child", None);
     child.transform.translation = [1., 2., 3.];
     original.objects.extend([parent, child]);
-    original
-        .hierarchy
-        .parents
-        .insert("child".into(), "parent".into());
+    original.hierarchy.groups.insert(
+        "group".into(),
+        rot_scene::Group {
+            name: None,
+            transform: rot_scene::Transform {
+                translation: [3., 1., -2.],
+                ..Default::default()
+            },
+        },
+    );
+    for id in ["parent", "child"] {
+        original.hierarchy.parents.insert(id.into(), "group".into());
+    }
     let mut authored =
         ComponentScene::from_legacy(&rot_scene::Session::new(original).unwrap()).unwrap();
     authored.objects[0].components[0].enabled = false;
@@ -182,6 +191,7 @@ fn hidden_behavior_mesh_keeps_the_owner_pose_and_enabled_child() {
     assert_eq!(scene.objects[0].id, "parent");
     assert!(scene.objects[0].collider.unwrap().enabled);
     let poses = scene.resolve_poses().unwrap();
+    assert_eq!(poses.transforms["parent"].translation, [4., 1., -3.]);
     let mut resolved = scene.clone();
     for object in &mut resolved.objects {
         object.transform = poses.transforms[&object.id].clone();
