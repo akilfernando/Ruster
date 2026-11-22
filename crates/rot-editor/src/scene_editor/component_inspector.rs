@@ -4,14 +4,18 @@ use crate::ui_kit;
 use crate::workspace::Action;
 use eframe::egui;
 use rot_scene::component_scene::{Component, ComponentInstance, Geometry, ObjectNode};
-use rot_scene::{ColliderRole, ColliderShape, Light, LightKind, OpaqueMaterial, Primitive};
-use std::collections::BTreeMap;
+use rot_scene::{
+    ColliderRole, ColliderShape, Light, LightKind, OpaqueMaterial, Primitive, ShadowQuality,
+    SunShadow,
+};
+use std::{collections::BTreeMap, ops::RangeInclusive};
 
 #[derive(Clone, Copy)]
 pub(super) enum AddComponent {
     MeshRenderer,
     Collider,
     Light,
+    DirectionalLight,
 }
 
 impl AddComponent {
@@ -20,6 +24,7 @@ impl AddComponent {
             Self::MeshRenderer => Text::ComponentMeshRenderer,
             Self::Collider => Text::ComponentCollider,
             Self::Light => Text::ComponentLight,
+            Self::DirectionalLight => Text::LabelCreateDirectionalLight,
         }
     }
 
@@ -38,8 +43,11 @@ impl AddComponent {
                     offset: [0.0; 3],
                     shape: ColliderShape::default(),
                 },
-                Self::Light => {
-                    let light = Light::point(None);
+                Self::Light | Self::DirectionalLight => {
+                    let light = match self {
+                        Self::DirectionalLight => Light::directional(None),
+                        _ => Light::point(None),
+                    };
                     Component::Light {
                         color: light.color,
                         intensity: light.intensity,
@@ -129,7 +137,7 @@ pub(super) fn component_label(component: &Component) -> Text {
             kind: LightKind::Point { .. },
             ..
         } => Text::LabelCreateLight,
-        Component::Light { .. } => Text::ComponentLight,
+        Component::Light { .. } => Text::LabelCreateDirectionalLight,
         Component::Collider { .. } => Text::ComponentCollider,
     }
 }
@@ -147,12 +155,7 @@ pub(super) fn components(
         let label = component_label(&component.kind);
         let editable = matches!(
             component.kind,
-            Component::MeshRenderer { .. }
-                | Component::Collider { .. }
-                | Component::Light {
-                    kind: LightKind::Point { .. },
-                    ..
-                }
+            Component::MeshRenderer { .. } | Component::Collider { .. } | Component::Light { .. }
         );
         let widget = egui::CollapsingHeader::new(label.plain())
             .id_salt((&draft.id, &component.id))
@@ -180,8 +183,8 @@ pub(super) fn components(
                     Component::Light {
                         color,
                         intensity,
-                        kind: LightKind::Point { range },
-                    } => submit |= point_light_fields(ui, color, intensity, range),
+                        kind,
+                    } => submit |= light_fields(ui, color, intensity, kind),
                     Component::Script { binding } => binding.enabled = component.enabled,
                     _ => {}
                 }
@@ -294,35 +297,107 @@ fn mesh_fields(
     });
 }
 
-fn point_light_fields(
+fn light_fields(
     ui: &mut egui::Ui,
     color: &mut [f32; 3],
     intensity: &mut f32,
-    range: &mut f32,
+    kind: &mut LightKind,
 ) -> bool {
-    ui_kit::property_row(ui, Text::Color.plain(), |ui| {
+    ui_kit::property_row_with_label(ui, Text::Color.plain(), |ui, label| {
         let mut picked = *color;
         if ui
             .color_edit_button_rgb(&mut picked)
+            .labelled_by(label)
             .on_hover_text(Text::Color.plain())
             .changed()
         {
             *color = picked;
         }
     });
-    let intensity = ui_kit::property_row(ui, Text::Intensity.plain(), |ui| {
-        ui.add(
-            egui::DragValue::new(intensity)
-                .speed(0.01)
-                .range(0.0..=16.0),
-        )
-        .on_hover_text(Text::DiffuseIntensity0To16.plain())
+    let submit = number_field(
+        ui,
+        Text::Intensity,
+        intensity,
+        0.01,
+        0.0..=16.0,
+        Text::DiffuseIntensity0To16,
+    );
+    submit
+        | match kind {
+            LightKind::Point { range } => number_field(
+                ui,
+                Text::Range,
+                range,
+                0.1,
+                0.1..=10_000.0,
+                Text::LightingUiSmoothInfluenceDistanceFrom,
+            ),
+            LightKind::Directional { shadow } => shadow_fields(ui, shadow),
+        }
+}
+
+fn shadow_fields(ui: &mut egui::Ui, shadow: &mut SunShadow) -> bool {
+    ui.checkbox(&mut shadow.enabled, Text::Shadows.plain())
+        .on_hover_text(Text::LightingUiTheSunCastsShadows.plain());
+    let qualities = [
+        (ShadowQuality::Standard, Text::Standard),
+        (ShadowQuality::High, Text::High),
+    ];
+    ui_kit::property_row_with_label(ui, Text::Quality.plain(), |ui, label| {
+        egui::ComboBox::from_id_salt("shadow_quality")
+            .width(ui.available_width())
+            .truncate()
+            .selected_text(match shadow.quality {
+                ShadowQuality::Standard => Text::Standard.plain(),
+                ShadowQuality::High => Text::High.plain(),
+            })
+            .show_ui(ui, |ui| {
+                for (quality, label) in qualities {
+                    ui.selectable_value(&mut shadow.quality, quality, label.plain());
+                }
+            })
+            .response
+            .labelled_by(label)
+            .on_hover_text(Text::LightingUiHigherQualityShowsFiner.plain());
     });
-    let range = ui_kit::property_row(ui, Text::Range.plain(), |ui| {
-        ui.add(egui::DragValue::new(range).speed(0.1).range(0.1..=10_000.0))
-            .on_hover_text(Text::LightingUiSmoothInfluenceDistanceFrom.plain())
+    egui::CollapsingHeader::new(Text::ComponentAdvancedShadows.plain())
+        .show(ui, |ui| {
+            let depth = number_field(
+                ui,
+                Text::ComponentShadowDepthBias,
+                &mut shadow.depth_bias_texels,
+                0.01,
+                0.0..=4.0,
+                Text::ComponentShadowTexels,
+            );
+            let normal = number_field(
+                ui,
+                Text::ComponentShadowNormalOffset,
+                &mut shadow.normal_bias_texels,
+                0.01,
+                0.0..=4.0,
+                Text::ComponentShadowTexels,
+            );
+            depth || normal
+        })
+        .body_returned
+        .unwrap_or(false)
+}
+
+fn number_field(
+    ui: &mut egui::Ui,
+    label: Text,
+    value: &mut f32,
+    speed: f64,
+    range: RangeInclusive<f32>,
+    tooltip: Text,
+) -> bool {
+    let response = ui_kit::property_row_with_label(ui, label.plain(), |ui, label| {
+        ui.add(egui::DragValue::new(value).speed(speed).range(range))
+            .labelled_by(label)
+            .on_hover_text(tooltip.plain())
     });
-    enter_commits(ui, &intensity) || enter_commits(ui, &range)
+    enter_commits(ui, &response)
 }
 
 fn collider_fields(
@@ -422,6 +497,7 @@ impl ComponentPicker {
                 AddComponent::MeshRenderer,
                 AddComponent::Collider,
                 AddComponent::Light,
+                AddComponent::DirectionalLight,
             ] {
                 if kind.label().plain().to_ascii_lowercase().contains(&search)
                     && (ui.button(kind.label().plain()).clicked() || submit && add.is_none())
@@ -444,12 +520,66 @@ mod tests {
     use super::*;
 
     #[test]
+    fn directional_light_advanced_shadows_commit_on_enter() {
+        let ctx = egui::Context::default();
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let mut shadow = SunShadow {
+            enabled: true,
+            quality: ShadowQuality::High,
+            ..SunShadow::default()
+        };
+        let mut submissions = 0;
+        let mut frame = |events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ui| submissions += usize::from(shadow_fields(ui, &mut shadow)),
+            );
+            output.textures_delta.clear();
+        };
+        let key = |key| {
+            [true, false].map(|pressed| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            })
+        };
+        frame(vec![]);
+        frame(key(egui::Key::Tab).into()); // Shadows
+        frame(key(egui::Key::Tab).into()); // Quality
+        frame(key(egui::Key::Tab).into()); // Advanced Shadows
+        frame(key(egui::Key::Enter).into());
+        frame(vec![]);
+        frame(key(egui::Key::Tab).into()); // Depth Bias
+        frame(vec![egui::Event::Text("1.25".into())]);
+        frame(key(egui::Key::Tab).into()); // Normal Offset
+        frame(vec![egui::Event::Text("2.5".into())]);
+        frame(key(egui::Key::Enter).into());
+        frame(vec![]);
+        assert_eq!(submissions, 1);
+        assert_eq!(
+            shadow,
+            SunShadow {
+                enabled: true,
+                quality: ShadowQuality::High,
+                depth_bias_texels: 1.25,
+                normal_bias_texels: 2.5,
+            }
+        );
+    }
+
+    #[test]
     fn point_light_fields_tab_and_submit_numeric_changes() {
         let ctx = egui::Context::default();
         let original = [0.13, 0.24, 0.35];
         let mut color = original;
         let mut intensity = 1.0;
-        let mut range = 5.0;
+        let mut kind = LightKind::Point { range: 5.0 };
         let mut submissions = 0;
         let mut frame = |events| {
             let mut output = ctx.run_ui(
@@ -459,12 +589,8 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    submissions += usize::from(point_light_fields(
-                        ui,
-                        &mut color,
-                        &mut intensity,
-                        &mut range,
-                    ));
+                    submissions +=
+                        usize::from(light_fields(ui, &mut color, &mut intensity, &mut kind));
                 },
             );
             output.textures_delta.clear();
@@ -488,7 +614,7 @@ mod tests {
         frame(vec![]);
         assert_eq!(submissions, 1);
         assert_eq!(intensity, 2.5);
-        assert_eq!(range, 7.5);
+        assert_eq!(kind, LightKind::Point { range: 7.5 });
         assert_eq!(color, original);
     }
 }

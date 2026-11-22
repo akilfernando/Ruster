@@ -808,7 +808,16 @@ impl ComponentWorkspace {
         if !self.apply() {
             return;
         }
-        if action == Action::CreateLight {
+        use component_inspector::AddComponent;
+        let light = match action {
+            Action::CreateLight => Some((AddComponent::Light, rot_scene::Light::point(None))),
+            Action::CreateDirectionalLight => Some((
+                AddComponent::DirectionalLight,
+                rot_scene::Light::directional(None),
+            )),
+            _ => None,
+        };
+        if let Some((kind, light)) = light {
             let result = self
                 .fresh_object_ids(None, "light")
                 .and_then(|(id, component_id)| {
@@ -817,10 +826,8 @@ impl ComponentWorkspace {
                         name: action.label().into(),
                         enabled: true,
                         parent,
-                        transform: rot_scene::Light::point(None).transform,
-                        components: vec![
-                            component_inspector::AddComponent::Light.instance(component_id)
-                        ],
+                        transform: light.transform,
+                        components: vec![kind.instance(component_id)],
                     })
                 });
             self.error = result.err().map(|error| error.to_string());
@@ -1148,6 +1155,7 @@ impl ComponentWorkspace {
             }
         });
         ui.menu_button(Text::ComponentLight.plain(), |ui| {
+            self.menu_action(ui, Action::CreateDirectionalLight);
             self.menu_action(ui, Action::CreateLight);
         });
     }
@@ -1254,7 +1262,8 @@ impl ComponentWorkspace {
             | Action::CreateCube
             | Action::CreateSphere
             | Action::CreateCapsule
-            | Action::CreateLight => {
+            | Action::CreateLight
+            | Action::CreateDirectionalLight => {
                 self.create(action, None);
                 return;
             }
@@ -1688,6 +1697,7 @@ impl ComponentWorkspace {
                             | Action::CreateSphere
                             | Action::CreateCapsule
                             | Action::CreateLight
+                            | Action::CreateDirectionalLight
                             | Action::GroupSelection
                             | Action::Delete
                             | Action::Frame
@@ -1828,6 +1838,7 @@ impl ComponentWorkspace {
                                             Action::CreateSphere,
                                             Action::CreateCapsule,
                                             Action::CreateLight,
+                                            Action::CreateDirectionalLight,
                                         ] {
                                             if action_menu_item(
                                                 ui,
@@ -2876,6 +2887,86 @@ mod tests {
         let edited = &editor.session.scene().objects[0].components[1];
         assert!(!edited.enabled);
         assert_eq!(edited.kind, replacement.kind);
+        assert!(editor.save());
+        assert_eq!(
+            ComponentSession::open(&path).unwrap().scene(),
+            editor.session.scene()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directional_light_settings_survive_mcp_and_editor_edits() {
+        use component_inspector::AddComponent;
+        use rot_scene::{Light, LightKind, ShadowQuality, SunShadow};
+        use serde_json::json;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        let scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.command(Action::CreateDirectionalLight);
+        let light = editor.session.scene().objects.last().unwrap();
+        assert_eq!(light.name, Action::CreateDirectionalLight.label());
+        assert_eq!(light.transform, Light::directional(None).transform);
+        let default = json!(light.components[0]);
+        assert_eq!(default["kind"]["type"], "directional");
+        assert!(default["kind"].get("shadow").is_none());
+
+        let mesh_object = editor.session.scene().objects[0].clone();
+        editor.select(Some(mesh_object.id.clone()));
+        editor.add_component(AddComponent::DirectionalLight);
+        let object = &editor.session.scene().objects[0];
+        assert_eq!(object.transform, mesh_object.transform);
+        assert_eq!(object.components[0], mesh_object.components[0]);
+        let mut configured = object.components[1].clone();
+        let mut shadow = SunShadow {
+            enabled: true,
+            quality: ShadowQuality::High,
+            depth_bias_texels: 0.35,
+            normal_bias_texels: 1.25,
+        };
+        configured.kind = Component::Light {
+            color: [0.98, 0.96, 0.75],
+            intensity: 1.5,
+            kind: LightKind::Directional { shadow },
+        };
+        let result = editor.ai_command("scene", "scene_components_edit", &json!({
+            "expected_session_token":"scene", "expected_revision":editor.session.revision().to_string(),
+            "edits":[{"operation":"replace", "object_id":mesh_object.id, "component":configured}],
+        }));
+        assert_eq!(result["result"]["changed"], true, "{result}");
+
+        let draft = &mut editor.draft.as_mut().unwrap().components[1];
+        let Component::Light {
+            intensity,
+            kind: LightKind::Directional { shadow: settings },
+            ..
+        } = &mut draft.kind
+        else {
+            panic!("expected directional light");
+        };
+        *intensity = 2.0;
+        settings.enabled = false;
+        shadow.enabled = false;
+        assert_eq!(*settings, shadow);
+        assert!(editor.apply());
+        let edited = editor.session.scene().objects[0].components[1].clone();
+        assert_eq!(
+            edited.kind,
+            Component::Light {
+                color: [0.98, 0.96, 0.75],
+                intensity: 2.0,
+                kind: LightKind::Directional { shadow },
+            }
+        );
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene().objects[0].components[1], configured);
+        editor.command(Action::Redo);
+        assert_eq!(editor.session.scene().objects[0].components[1], edited);
+        assert_eq!(edited.id, configured.id);
         assert!(editor.save());
         assert_eq!(
             ComponentSession::open(&path).unwrap().scene(),

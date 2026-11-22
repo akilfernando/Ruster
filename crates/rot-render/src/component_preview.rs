@@ -273,6 +273,59 @@ mod tests {
     use std::fs;
 
     #[test]
+    fn parented_directional_light_uses_rotated_local_axis_in_gpu_packet() {
+        use crate::lighting_gpu::LightingPacket;
+        use rot_scene::component_scene::{ComponentInstance, ObjectNode};
+        use std::f32::consts::{FRAC_PI_2, FRAC_PI_6};
+
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("sun")).unwrap()).unwrap();
+        scene.objects = vec![
+            ObjectNode {
+                id: "parent".into(),
+                name: "Parent".into(),
+                enabled: true,
+                parent: None,
+                transform: Transform {
+                    rotation: [0.0, FRAC_PI_2, 0.0],
+                    scale: [2.0, 1.0, 3.0],
+                    ..Transform::default()
+                },
+                components: Vec::new(),
+            },
+            ObjectNode {
+                id: "lamp".into(),
+                name: "Directional Light".into(),
+                enabled: true,
+                parent: Some("parent".into()),
+                transform: Transform {
+                    rotation: [-FRAC_PI_6, 0.0, 0.0],
+                    ..Transform::default()
+                },
+                components: vec![ComponentInstance {
+                    id: "directional".into(),
+                    enabled: true,
+                    kind: Component::Light {
+                        color: [1.0; 3],
+                        intensity: 0.72,
+                        kind: Light::directional(None).kind,
+                    },
+                }],
+            },
+        ];
+        // +Z is the shader's direction to the light; the emitted ray is -Z.
+        let expected = Vec3::new(3.0 * FRAC_PI_6.cos(), FRAC_PI_6.sin(), 0.0).normalize();
+        let packet = |scene: &ComponentScene| {
+            LightingPacket::try_pack(&project(scene).unwrap().scene().lighting).unwrap()
+        };
+        let incoming = packet(&scene).direction_to_light;
+        assert!(Vec3::from_slice(&incoming[..3]).abs_diff_eq(expected, 1e-5));
+        scene.objects[0].transform.translation = [20.0, 8.0, -10.0];
+        scene.objects[1].transform.translation = [-2.0, 3.0, 4.0];
+        assert_eq!(packet(&scene).direction_to_light, incoming);
+    }
+
+    #[test]
     fn frame_uses_only_target_world_geometry_in_all_three_views() {
         let mut setup = Scene::demo();
         setup.objects[0].transform.translation = [120., 2., -25.];

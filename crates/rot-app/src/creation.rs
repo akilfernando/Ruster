@@ -3,7 +3,7 @@
 use crate::{MeshMap, ResourceRoot, TextureMap};
 use rot_scene::{
     component_scene::{self, Component, ComponentScene},
-    LightKind, Scene, SceneError, Session, SoundAssetReferences,
+    Scene, SceneError, Session, SoundAssetReferences,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
@@ -37,20 +37,15 @@ impl RuntimeScene {
             {
                 let scene = ComponentScene::read_json(bytes).map_err(error)?;
                 let supports_static = supports_static_preview(&scene);
-                // Static point lights share the editor's transforms and render budget.
-                let has_point_light = supports_static
+                // Static lights share the editor's transforms and render budget.
+                let has_light = supports_static
                     && scene.objects.iter().any(|object| {
-                        object.components.iter().any(|component| {
-                            matches!(
-                                component.kind,
-                                Component::Light {
-                                    kind: LightKind::Point { .. },
-                                    ..
-                                }
-                            )
-                        })
+                        object
+                            .components
+                            .iter()
+                            .any(|component| matches!(component.kind, Component::Light { .. }))
                     });
-                if !has_point_light {
+                if !has_light {
                     match Session::from_component_runtime(&scene) {
                         Ok(session) => return behavior(session),
                         Err(_)

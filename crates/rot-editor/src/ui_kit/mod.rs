@@ -109,19 +109,28 @@ pub fn property_row<R>(
     label: &str,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> R {
+    property_row_with_label(ui, label, |ui, _| add_contents(ui))
+}
+
+/// Supply the visible label's ID to the control for accessibility.
+pub fn property_row_with_label<R>(
+    ui: &mut egui::Ui,
+    label: &str,
+    add_contents: impl FnOnce(&mut egui::Ui, egui::Id) -> R,
+) -> R {
     let column = label_column(ui);
     ui.horizontal(|ui| {
         ui.set_min_height(ROW_HEIGHT);
-        ui.allocate_ui_with_layout(
+        let label = ui.allocate_ui_with_layout(
             egui::vec2(column, ROW_HEIGHT),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
                 ui.set_min_width(column);
                 ui.add(egui::Label::new(label).truncate())
-                    .on_hover_text(label);
+                    .on_hover_text(label)
             },
         );
-        add_contents(ui)
+        add_contents(ui, label.inner.id)
     })
     .inner
 }
