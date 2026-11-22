@@ -8780,33 +8780,42 @@ mod tests {
         e.sync_draft();
         e.history(false);
         assert!(e.session.scene().objects.iter().all(|o| o.mesh.is_none()));
-        // A typed texture drag is valid content but must never assign geometry.
+        // Dropping a texture drafts a material and leaves the Cube geometry alone.
         let texture = e.asset_payload("texture").unwrap();
-        assert!(e.check_asset_drag(&texture).is_ok());
-        assert!(e.accept_asset_drop("left", &texture).is_err());
+        let cube = e.session.scene().objects[0].clone();
+        let before_drop = e.session.scene().materials.clone();
         let revision = e.session.scene().revision;
-        e.session
-            .set_mesh(revision, "left", Some("mapped".into()))
-            .unwrap();
-        e.session
-            .set_material(
-                revision + 1,
-                "surface",
-                rot_scene::OpaqueMaterial {
-                    base_color_texture: Some("texture".into()),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        e.session
-            .assign_material(revision + 2, "left", Some("surface".into()))
-            .unwrap();
-        e.sync_draft();
+        assert_eq!(e.accept_asset_drop("left", &texture).unwrap(), revision);
+        assert_eq!(e.session.scene().objects[0], cube);
+        assert!(e.apply_material_draft());
+        let textured = e.session.scene().objects[0].clone();
+        let material = textured.material.as_ref().unwrap();
+        assert_eq!(
+            e.session.scene().materials[material]
+                .base_color_texture
+                .as_deref(),
+            Some("texture")
+        );
+        assert_eq!(textured.mesh, cube.mesh);
+        assert_eq!(textured.primitive, cube.primitive);
+        assert_eq!(e.session.undo_len(), 1);
+        e.history(false);
+        assert_eq!(e.session.scene().objects[0], cube);
+        assert_eq!(e.session.scene().materials, before_drop);
+        e.history(true);
+        assert_eq!(e.session.scene().objects[0], textured);
+
+        e.assign_mesh_to("left", Some("mapped".into())).unwrap();
+        assert_eq!(e.session.scene().objects[0].mesh.as_deref(), Some("mapped"));
+        assert_eq!(e.session.scene().objects[0].material, textured.material);
+        e.assign_mesh_to("left", None).unwrap();
+        assert_eq!(e.session.scene().objects[0], textured);
+
         let before = e.session.snapshot_bytes().unwrap();
-        for mesh in [None, Some("triangle".into())] {
-            assert!(e.assign_mesh_to("left", mesh).unwrap_err().contains("UV"));
-        }
-        assert!(e.assign_mesh_to("left", Some("mapped".into())).is_ok());
+        assert!(e
+            .assign_mesh_to("left", Some("triangle".into()))
+            .unwrap_err()
+            .contains("UV"));
         let inspected = e.command("test", "scene_inspect", json!({}));
         let rejected = e.command(
             "test",
