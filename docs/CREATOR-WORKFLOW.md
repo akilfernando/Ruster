@@ -250,6 +250,12 @@ On Linux, save the v23 scene, then use **File → Build…**. Choose a new
 folder and select **Build** or **Build and Run**. The folder contains an
 `application` executable, the saved v23 scene, and its project assets.
 Run `application --headless --ticks 16` to check it without opening a window.
+Static hierarchies can use mesh objects as parents and keep the world placement
+you see in the editor, including shear from rotated, nonuniformly scaled groups.
+The headless report for these hierarchies includes `world_matrices`, keyed by
+object ID. This path covers enabled objects and meshes in static scenes.
+Scripted or animated hierarchies and scenes with input actions, HUD controls
+or a gameplay camera still depend on the behavior runtime.
 The editor finds the `rot-motion-lab` player alongside `rot-editor`. Local
 installs include both. When building from source, build both Cargo packages.
 

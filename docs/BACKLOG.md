@@ -34,8 +34,6 @@ package in your lane under **Now**. How to work is in the
 
 One line each. Anyone may add; the user or a planning pass orders them.
 
-- v23 Build cannot prepare the C-05 `group-selection.scene.json` test scene. The editor opens and displays its hierarchy, but Build's Error Details report `invalid scene: missing hierarchy target/group parent`. Add coverage for building a saved scene with nested objects and a transform-only parent (2026-11-22).
-
 - Grouping is blocked scene-wide by input actions, a HUD, ordinary script
   sources, or object/application script attachments. C-02/C-03 must preserve
   these features alongside hierarchy during migration. Until then, explain
@@ -637,7 +635,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-06 General MCP tools | A small set of object, component, asset, play and screenshot tools that call the command layer. Tool list under 15 KB. | in progress · v23 discovery and registered native connections, parent-local creation and transform conventions, object and component batches, shared history, Play, front/side/top hierarchy framing and capture, geometry picking, asset inspection, import, refresh and OBJ mesh assignment. v23 MCP rename remains open |
 | C-07 Prefabs | Prefab assets, instances, per-property overrides, apply and revert. | done · 2026-11-20 · Native controls and approved Claude Code assembled and reused a cottage. Three placements retained independent transforms and an override through a shared roof fix, save, reopen and relocated Linux Build. Linked prefab source updates checked at 5,000 objects · [implementation brief](#c-07-implementation-brief) |
 | C-08 General glTF import | Multi-primitive meshes, full PBR material mapping, cameras and lights; warnings instead of refusals. | in progress · Codex, 2026-11-20 · v23 places GLB hierarchies with per-surface materials, transform clips, shared Undo, and MCP. All 15 GLBs in the Kenney Starter Kit 3D Platformer import with their relative PNG textures. Import warns about common material fallbacks and skipped degenerate triangles. Broader material mapping, cameras and lights remain open |
-| C-09 Build and Run | The editor ships a player binary; Build writes a runnable folder; no Python. | in progress — Sol, 2026-11-22 · fixing v23 hierarchy Build. Legacy Build still uses the runtime kit |
+| C-09 Build and Run | The editor ships a player binary; Build writes a runnable folder; no Python. | in progress · 2026-11-22 · v23 static hierarchies with renderable parents and transform-only groups build to a relocated Linux player with world transforms preserved. Legacy Build still uses the runtime kit |
 | C-10 Scripts as files | Lua files in `Assets/`, one growing API (lifecycle, find, spawn, destroy, components, input, time), reload on save, open in the creator's code editor. | brief needed |
 | C-11 Scenes and projects | Several scenes per project, a project settings file, a startup scene. | ready after C-02 |
 | C-12 Benchmark scenes | 5,000- and 50,000-object scenes and a one-command frame-time report. | done · 2026-11-19 · deterministic v23 scene export and [release timings](../crates/rot-render/README.md#large-scene-benchmark) |

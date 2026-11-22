@@ -15,14 +15,12 @@ Updated 2026-11-22. See the [archive](archive/STATUS-2026-11-17.md) for earlier 
 
 ## What to do next
 
-The 2026-11-19 Phase 1 pass reviewed Scene, Inspector, Assets and Recovery
-in Rot and Plain, confirmed all nine Transform fields at 960×1080 and scale
-1.5, and verified shared Undo over STDIO. The full workspace gate passed.
-
-The [human walkthrough](research/EDITOR-WORKFLOW-COMPARISON.md#proposed-editor-baseline-walkthrough)
-and concurrent ChatGPT editing were exercised on 2026-11-19. Native tests
-covered script error details and Play/Pause/Stop. The full UI checklist
-remains open, including its Phase 2 5,000-object case.
+The 2026-11-19 Phase 1 pass reviewed Scene, Inspector, Assets and Recovery in
+Rot and Plain, confirmed all nine Transform fields at 960×1080 and 1.5× UI
+scale, and verified shared Undo over STDIO. The
+[human walkthrough](research/EDITOR-WORKFLOW-COMPARISON.md#proposed-editor-baseline-walkthrough)
+also exercised concurrent ChatGPT editing. Native tests covered script errors
+and Play/Pause/Stop. The full UI checklist remains open.
 
 The [C-01 design](plans/C-01-OBJECT-COMPONENT-MODEL.md) guides the v23 cutover.
 C-02 preserves authored content during migration, supports grouped object
@@ -33,12 +31,11 @@ move or delete objects together, and save. Inspector edits shared Transform
 and component values. Viewport settings stay local. Automatic upgrades remain open.
 
 The v23 Inspector shows live Transform and script state during Play and Step.
-Editor and viewer draw, fit and pick from cached world matrices, including shear.
-v23 Build writes and launches a Linux player folder without Python. Build
-failures explain how to retry and offer keyboard-accessible Error Details.
-Approved MCP clients can inspect the latest build result, create parent-local
-objects and frame hierarchies for capture.
-Hierarchy offers Create Child and Frame Selected. MCP can also manage assets.
+The editor and viewer draw, fit and pick from cached world matrices.
+Linux Build preserves static hierarchy transforms, including shear. A relocated
+player loaded 5,000 objects. Build failures offer keyboard-accessible Error Details.
+Approved MCP clients can inspect builds, create parent-local objects, frame
+hierarchies and manage assets. Hierarchy offers Create Child and Frame Selected.
 Group Selection in v23 inserts a parent around the selected objects with
 world transforms preserved. The Object menu, Hierarchy context menu,
 remappable Ctrl+G and approved MCP clients share one Undo entry.
