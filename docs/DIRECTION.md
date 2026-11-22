@@ -60,6 +60,8 @@ The user-confirmed requirement that direct-editor and native-MCP routes are firs
 
 ## Session goal discipline
 
+On 2026-11-22 the user authorized ongoing development across verified goals. Astra defines each finite creator outcome, Sol implements it, and the coordinating agent verifies and continues into the next goal without a separate prompt. Pursue Unity and Unreal parity, measured performance, first-class manual and AI-assisted workflows, and the optional Rot aesthetic within the existing roadmap.
+
 Confirmed by the user on2026-11-05: future session goals must be more targeted; generic long-horizon goals led to overlooked key details. Keep the product vision separate from the finite objective of an implementation session. Before setting a substantial goal, inspect the actual capability baseline and identify missing dependencies; a successful example must not stand in for the engine capabilities it bypasses.
 
 Use one concrete creator outcome and record: the starting state and final runnable artifact, included behavior and explicit exclusions, required direct-editor/MCP and exported-runtime journeys, failure/recovery/keyboard cases, relevant correctness and measured-cost evidence, unresolved decisions/external gates, and an objective stopping condition. Scale this checklist to the work; it is not a new universal test suite. User confirmation is needed for consequential scope/product choices, not routine authorized implementation details. Set the goal only after it is concrete enough to evaluate, and do not silently grow it into a new subsystem.
