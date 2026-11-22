@@ -2,6 +2,7 @@
 use super::{ComponentWorkspace, HierarchyDestination, RUNTIME_GENERATION};
 use crate::behavior_ui::RuntimeSource;
 use crate::scene_editor::{asset_inspection, runtime_commands};
+use crate::strings::Text;
 use rot_scene::component_scene::{
     Component, ComponentInstance, Geometry, ObjectNode, PrefabFields, PrefabProperty,
 };
@@ -167,6 +168,9 @@ impl ComponentWorkspace {
                 "dirty":self.session.is_dirty(), "drafts_pending":self.draft_dirty(),
             });
             if offset == 0 {
+                if self.light_budget_exceeded() {
+                    result["lighting_warning"] = json!(Text::ViewportLightLimitDetail.plain());
+                }
                 let active = self
                     .selected_index
                     .and_then(|index| scene.objects.get(index))

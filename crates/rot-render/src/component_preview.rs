@@ -7,7 +7,10 @@ use super::{
 use eframe::egui;
 use glam::{EulerRot, Mat3, Mat4, Quat, Vec3};
 use rot_scene::component_scene::{self, Component, ComponentScene, Geometry};
-use rot_scene::{Light, LightKind, Lighting, Object, Scene, SceneError, Transform};
+use rot_scene::{
+    Light, LightKind, Lighting, Object, Scene, SceneError, Transform, MAX_DIRECTIONAL_LIGHTS,
+    MAX_POINT_LIGHTS,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -18,11 +21,16 @@ pub struct ComponentPreview {
     scene: Scene,
     matrices: Vec<Mat4>,
     unpickable: BTreeSet<String>,
+    light_budget_exceeded: bool,
 }
 
 impl ComponentPreview {
     pub fn scene(&self) -> &Scene {
         &self.scene
+    }
+
+    pub fn light_budget_exceeded(&self) -> bool {
+        self.light_budget_exceeded
     }
 
     fn draw_scene(&self) -> DrawScene<'_> {
@@ -144,6 +152,9 @@ pub fn project_editor(
     scene.display = component_scene.display;
     let mut lights = BTreeMap::new();
     let mut matrices = Vec::new();
+    let mut point_lights = 0;
+    let mut directional_lights = 0;
+    let mut light_budget_exceeded = false;
     let mut authored_lighting = component_scene.ambient.is_some();
     for (index, object) in component_scene.objects.iter().enumerate() {
         authored_lighting |= object
@@ -192,6 +203,17 @@ pub fn project_editor(
                     intensity,
                     kind,
                 } => {
+                    let (count, limit) = match kind {
+                        LightKind::Point { .. } => (&mut point_lights, MAX_POINT_LIGHTS),
+                        LightKind::Directional { .. } => {
+                            (&mut directional_lights, MAX_DIRECTIONAL_LIGHTS)
+                        }
+                    };
+                    if *count == limit {
+                        light_budget_exceeded = true;
+                        continue;
+                    }
+                    *count += 1;
                     let mut transform = Transform {
                         translation: world[index].w_axis.truncate().as_vec3().to_array(),
                         ..Transform::default()
@@ -240,6 +262,7 @@ pub fn project_editor(
         scene,
         matrices,
         unpickable,
+        light_budget_exceeded,
     })
 }
 

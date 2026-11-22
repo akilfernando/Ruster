@@ -4,13 +4,14 @@ use crate::ui_kit;
 use crate::workspace::Action;
 use eframe::egui;
 use rot_scene::component_scene::{Component, ComponentInstance, Geometry, ObjectNode};
-use rot_scene::{ColliderRole, ColliderShape, OpaqueMaterial, Primitive};
+use rot_scene::{ColliderRole, ColliderShape, Light, LightKind, OpaqueMaterial, Primitive};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy)]
 pub(super) enum AddComponent {
     MeshRenderer,
     Collider,
+    Light,
 }
 
 impl AddComponent {
@@ -18,6 +19,7 @@ impl AddComponent {
         match self {
             Self::MeshRenderer => Text::ComponentMeshRenderer,
             Self::Collider => Text::ComponentCollider,
+            Self::Light => Text::ComponentLight,
         }
     }
 
@@ -36,6 +38,14 @@ impl AddComponent {
                     offset: [0.0; 3],
                     shape: ColliderShape::default(),
                 },
+                Self::Light => {
+                    let light = Light::point(None);
+                    Component::Light {
+                        color: light.color,
+                        intensity: light.intensity,
+                        kind: light.kind,
+                    }
+                }
             },
         }
     }
@@ -115,6 +125,10 @@ pub(super) fn component_label(component: &Component) -> Text {
         Component::Animator { .. } => Text::ComponentAnimator,
         Component::Script { .. } => Text::ComponentScript,
         Component::MeshRenderer { .. } => Text::ComponentMeshRenderer,
+        Component::Light {
+            kind: LightKind::Point { .. },
+            ..
+        } => Text::LabelCreateLight,
         Component::Light { .. } => Text::ComponentLight,
         Component::Collider { .. } => Text::ComponentCollider,
     }
@@ -131,12 +145,18 @@ pub(super) fn components(
     let mut remove = None;
     for (index, component) in draft.components.iter_mut().enumerate() {
         let label = component_label(&component.kind);
+        let editable = matches!(
+            component.kind,
+            Component::MeshRenderer { .. }
+                | Component::Collider { .. }
+                | Component::Light {
+                    kind: LightKind::Point { .. },
+                    ..
+                }
+        );
         let widget = egui::CollapsingHeader::new(label.plain())
             .id_salt((&draft.id, &component.id))
-            .default_open(matches!(
-                component.kind,
-                Component::MeshRenderer { .. } | Component::Collider { .. }
-            ))
+            .default_open(editable)
             .show(ui, |ui| {
                 ui.checkbox(
                     &mut component.enabled,
@@ -157,14 +177,16 @@ pub(super) fn components(
                     } => {
                         submit |= collider_fields(ui, role, offset, shape);
                     }
+                    Component::Light {
+                        color,
+                        intensity,
+                        kind: LightKind::Point { range },
+                    } => submit |= point_light_fields(ui, color, intensity, range),
                     Component::Script { binding } => binding.enabled = component.enabled,
                     _ => {}
                 }
             });
-        if matches!(
-            component.kind,
-            Component::MeshRenderer { .. } | Component::Collider { .. }
-        ) {
+        if editable {
             widget.header_response.context_menu(|ui| {
                 if ui.button(Text::ComponentRemove.plain()).clicked() {
                     remove = Some(index);
@@ -272,6 +294,31 @@ fn mesh_fields(
     });
 }
 
+fn point_light_fields(
+    ui: &mut egui::Ui,
+    color: &mut [f32; 3],
+    intensity: &mut f32,
+    range: &mut f32,
+) -> bool {
+    ui_kit::property_row(ui, Text::Color.plain(), |ui| {
+        ui.color_edit_button_rgb(color)
+            .on_hover_text(Text::Color.plain());
+    });
+    let intensity = ui_kit::property_row(ui, Text::Intensity.plain(), |ui| {
+        ui.add(
+            egui::DragValue::new(intensity)
+                .speed(0.01)
+                .range(0.0..=16.0),
+        )
+        .on_hover_text(Text::DiffuseIntensity0To16.plain())
+    });
+    let range = ui_kit::property_row(ui, Text::Range.plain(), |ui| {
+        ui.add(egui::DragValue::new(range).speed(0.1).range(0.1..=10_000.0))
+            .on_hover_text(Text::LightingUiSmoothInfluenceDistanceFrom.plain())
+    });
+    enter_commits(ui, &intensity) || enter_commits(ui, &range)
+}
+
 fn collider_fields(
     ui: &mut egui::Ui,
     role: &mut ColliderRole,
@@ -365,7 +412,11 @@ impl ComponentPicker {
             let submit = (edit.has_focus() || edit.lost_focus())
                 && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
             let search = self.search.trim().to_ascii_lowercase();
-            for kind in [AddComponent::MeshRenderer, AddComponent::Collider] {
+            for kind in [
+                AddComponent::MeshRenderer,
+                AddComponent::Collider,
+                AddComponent::Light,
+            ] {
                 if kind.label().plain().to_ascii_lowercase().contains(&search)
                     && (ui.button(kind.label().plain()).clicked() || submit && add.is_none())
                 {

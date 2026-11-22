@@ -3,7 +3,7 @@
 use crate::{MeshMap, ResourceRoot, TextureMap};
 use rot_scene::{
     component_scene::{self, Component, ComponentScene},
-    Scene, SceneError, Session, SoundAssetReferences,
+    LightKind, Scene, SceneError, Session, SoundAssetReferences,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
@@ -36,18 +36,34 @@ impl RuntimeScene {
                 if version == u64::from(component_scene::FORMAT_VERSION) =>
             {
                 let scene = ComponentScene::read_json(bytes).map_err(error)?;
-                match Session::from_component_runtime(&scene) {
-                    Ok(session) => behavior(session),
-                    Err(_) if is_static_hierarchy(&scene) => {
-                        let preview =
-                            rot_render::component_preview::project(&scene).map_err(error)?;
-                        Ok(Self::StaticHierarchy {
-                            scene: Box::new(scene),
-                            preview: Arc::new(preview),
+                let supports_static = supports_static_preview(&scene);
+                // Static point lights share the editor's transforms and render budget.
+                let has_point_light = supports_static
+                    && scene.objects.iter().any(|object| {
+                        object.components.iter().any(|component| {
+                            matches!(
+                                component.kind,
+                                Component::Light {
+                                    kind: LightKind::Point { .. },
+                                    ..
+                                }
+                            )
                         })
+                    });
+                if !has_point_light {
+                    match Session::from_component_runtime(&scene) {
+                        Ok(session) => return behavior(session),
+                        Err(_)
+                            if supports_static
+                                && scene.objects.iter().any(|object| object.parent.is_some()) => {}
+                        Err(err) => return Err(error(err)),
                     }
-                    Err(err) => Err(error(err)),
                 }
+                let preview = rot_render::component_preview::project(&scene).map_err(error)?;
+                Ok(Self::StaticHierarchy {
+                    scene: Box::new(scene),
+                    preview: Arc::new(preview),
+                })
             }
             Err(err) => Err(error(err)),
         }
@@ -69,12 +85,11 @@ impl RuntimeScene {
     }
 }
 
-fn is_static_hierarchy(scene: &ComponentScene) -> bool {
+fn supports_static_preview(scene: &ComponentScene) -> bool {
     scene.sources.is_empty()
         && scene.actions == Default::default()
         && scene.hud.is_default()
         && scene.gameplay_camera.is_none()
-        && scene.objects.iter().any(|object| object.parent.is_some())
         // Keep every authored mesh dependency in the preview's asset closure.
         && scene.objects.iter().all(|object| {
             object.enabled

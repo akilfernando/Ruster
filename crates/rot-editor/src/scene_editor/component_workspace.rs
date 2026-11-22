@@ -808,6 +808,24 @@ impl ComponentWorkspace {
         if !self.apply() {
             return;
         }
+        if action == Action::CreateLight {
+            let result = self
+                .fresh_object_ids(None, "light")
+                .and_then(|(id, component_id)| {
+                    self.insert_object(ObjectNode {
+                        id,
+                        name: action.label().into(),
+                        enabled: true,
+                        parent,
+                        transform: rot_scene::Light::point(None).transform,
+                        components: vec![
+                            component_inspector::AddComponent::Light.instance(component_id)
+                        ],
+                    })
+                });
+            self.error = result.err().map(|error| error.to_string());
+            return;
+        }
         let geometry = match action {
             Action::CreateCube => Some(Geometry::Cube),
             Action::CreateSphere => Some(Geometry::Primitive {
@@ -837,7 +855,7 @@ impl ComponentWorkspace {
         parent: Option<String>,
         transform: Transform,
     ) -> Result<String, rot_scene::SceneError> {
-        let (id, mesh_id) = self.fresh_object_ids(requested_id)?;
+        let (id, mesh_id) = self.fresh_object_ids(requested_id, "mesh")?;
         let components = geometry
             .map(|geometry| ComponentInstance {
                 id: mesh_id,
@@ -850,21 +868,29 @@ impl ComponentWorkspace {
             })
             .into_iter()
             .collect();
-        let node = ObjectNode {
-            id: id.clone(),
+        self.insert_object(ObjectNode {
+            id,
             name: name.into(),
             enabled: true,
             parent,
             transform,
             components,
-        };
+        })
+    }
+
+    fn insert_object(&mut self, node: ObjectNode) -> Result<String, SceneError> {
+        let id = node.id.clone();
         self.session.put_object(self.session.revision(), node)?;
         self.select(Some(id.clone()));
         self.refresh();
         Ok(id)
     }
 
-    fn fresh_object_ids(&self, requested_id: Option<&str>) -> Result<(String, String), SceneError> {
+    fn fresh_object_ids(
+        &self,
+        requested_id: Option<&str>,
+        component_suffix: &str,
+    ) -> Result<(String, String), SceneError> {
         let used: HashSet<_> = self
             .session
             .scene()
@@ -892,8 +918,8 @@ impl ComponentWorkspace {
         let (generated_id, mesh_id) = (revision..)
             .map(|suffix| {
                 let id = format!("object-{stamp:x}-{suffix:x}");
-                let mesh = format!("{id}-mesh");
-                (id, mesh)
+                let component = format!("{id}-{component_suffix}");
+                (id, component)
             })
             .find(|(object, mesh)| {
                 !used.contains(object.as_str())
@@ -931,7 +957,7 @@ impl ComponentWorkspace {
             }
         }
         let (id, _) = self
-            .fresh_object_ids(requested_id)
+            .fresh_object_ids(requested_id, "mesh")
             .map_err(|error| ("invalid_arguments", error.to_string()))?;
         self.session
             .group_selection(expected, &id, name, ids)
@@ -1104,6 +1130,12 @@ impl ComponentWorkspace {
         })
     }
 
+    fn light_budget_exceeded(&self) -> bool {
+        self.preview
+            .as_ref()
+            .is_ok_and(|preview| preview.light_budget_exceeded())
+    }
+
     fn create_menu(&mut self, ui: &mut egui::Ui) {
         self.menu_action(ui, Action::CreateEmpty);
         ui.menu_button(Text::Component3dObject.plain(), |ui| {
@@ -1114,6 +1146,9 @@ impl ComponentWorkspace {
             ] {
                 self.menu_action(ui, action);
             }
+        });
+        ui.menu_button(Text::ComponentLight.plain(), |ui| {
+            self.menu_action(ui, Action::CreateLight);
         });
     }
 
@@ -1218,7 +1253,8 @@ impl ComponentWorkspace {
             Action::CreateEmpty
             | Action::CreateCube
             | Action::CreateSphere
-            | Action::CreateCapsule => {
+            | Action::CreateCapsule
+            | Action::CreateLight => {
                 self.create(action, None);
                 return;
             }
@@ -1601,16 +1637,24 @@ impl ComponentWorkspace {
             build_status
         };
         let has_import_issues = !self.asset_browser.issues.is_empty();
+        let light_budget_exceeded = self.light_budget_exceeded();
         if scene_error.is_some()
             || build_status.is_some()
             || self.prefab_feedback.is_some()
             || has_import_issues
+            || light_budget_exceeded
         {
             egui::Panel::bottom("component_status").show(ui, |ui| {
                 if let Some(error) = scene_error {
                     ui.colored_label(editor_theme::colors(ui).error, error);
                 } else if let Some(status) = build_status {
                     ui.add(egui::Label::new(crate::strings::tr(ui.ctx(), status)).truncate());
+                } else if light_budget_exceeded {
+                    ui.colored_label(
+                        editor_theme::colors(ui).warning,
+                        Text::ViewportLightLimit.plain(),
+                    )
+                    .on_hover_text(Text::ViewportLightLimitDetail.plain());
                 } else if has_import_issues {
                     ui.colored_label(
                         editor_theme::colors(ui).error,
@@ -1643,6 +1687,7 @@ impl ComponentWorkspace {
                             | Action::CreateCube
                             | Action::CreateSphere
                             | Action::CreateCapsule
+                            | Action::CreateLight
                             | Action::GroupSelection
                             | Action::Delete
                             | Action::Frame
@@ -1782,10 +1827,15 @@ impl ComponentWorkspace {
                                             Action::CreateCube,
                                             Action::CreateSphere,
                                             Action::CreateCapsule,
+                                            Action::CreateLight,
                                         ] {
-                                            if ui.button(action.label()).clicked() {
+                                            if action_menu_item(
+                                                ui,
+                                                &self.workspace,
+                                                action,
+                                                !blocked,
+                                            ) {
                                                 child = Some((action, object.id.clone()));
-                                                ui.close();
                                             }
                                         }
                                     });
@@ -2750,6 +2800,63 @@ mod tests {
         assert!(!object.components[1].enabled);
         let (play_scene, _) = reopened.scene().behavior_input().unwrap();
         assert!(!play_scene.objects[0].collider.unwrap().enabled);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn point_light_native_and_mcp_edits_share_history() {
+        use component_inspector::AddComponent;
+        use rot_scene::LightKind;
+        use serde_json::json;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        let scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("scene")).unwrap()).unwrap();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.command(Action::CreateCube);
+        let cube = editor.session.scene().objects[0].id.clone();
+        editor.create(Action::CreateLight, Some(cube.clone()));
+        let light = editor.session.scene().objects[1].clone();
+        assert_eq!(light.parent.as_deref(), Some(cube.as_str()));
+        assert_eq!(light.name, Action::CreateLight.label());
+        assert_eq!(light.transform.translation, [0.0, 2.0, 0.0]);
+        assert_eq!(
+            light.components,
+            [AddComponent::Light.instance(light.components[0].id.clone())]
+        );
+
+        editor.select(Some(cube.clone()));
+        editor.add_component(AddComponent::Light);
+        let original = editor.session.scene().objects[0].components.clone();
+        let mut replacement = original[1].clone();
+        replacement.kind = Component::Light {
+            color: [0.15, 0.4, 0.9],
+            intensity: 3.5,
+            kind: LightKind::Point { range: 7.0 },
+        };
+        let result = editor.ai_command("scene", "scene_components_edit", &json!({
+            "expected_session_token":"scene", "expected_revision":editor.session.revision().to_string(),
+            "edits":[
+                {"operation":"replace", "object_id":cube, "component":replacement},
+                {"operation":"set_enabled", "object_id":cube, "component_id":replacement.id, "enabled":false},
+            ],
+        }));
+        assert_eq!(result["result"]["changed"], true, "{result}");
+        assert_eq!(editor.session.scene().objects[0].components[0], original[0]);
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene().objects[0].components, original);
+        editor.command(Action::Redo);
+        let edited = &editor.session.scene().objects[0].components[1];
+        assert!(!edited.enabled);
+        assert_eq!(edited.kind, replacement.kind);
+        assert!(editor.save());
+        assert_eq!(
+            ComponentSession::open(&path).unwrap().scene(),
+            editor.session.scene()
+        );
     }
 
     #[test]

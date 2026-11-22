@@ -706,6 +706,92 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn builds_static_point_lights_with_the_editor_projection() {
+        use rot_scene::component_scene::{Component, ComponentInstance};
+        use rot_scene::LightKind;
+
+        let folder = tempfile::tempdir().unwrap();
+        let root = folder.path();
+        let input = root.join("scene.json");
+        let player = root.join("player");
+        fs::write(&player, b"test player").unwrap();
+        fs::set_permissions(&player, fs::Permissions::from_mode(0o755)).unwrap();
+        let mut authored =
+            ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let lamp = |id: &str| ComponentInstance {
+            id: id.into(),
+            enabled: true,
+            kind: Component::Light {
+                color: [0.4, 0.8, 0.3],
+                intensity: 2.5,
+                kind: LightKind::Point { range: 8.0 },
+            },
+        };
+        authored.objects[0].components.push(lamp("accent"));
+        // Build accepts the mixed mesh/light object even with no hierarchy.
+        let build = |scene: &ComponentScene, name: &str| {
+            let input = input.with_file_name(format!("{name}.json"));
+            scene.save_new(&input).unwrap();
+            let session = ComponentSession::open(&input).unwrap();
+            let destination = root.join(name);
+            BuildRequest::capture(&session, None)
+                .unwrap()
+                .publish(&destination, &player, &AtomicBool::new(false))
+                .unwrap();
+            let resources = rot_app::ResourceRoot::new(&destination).unwrap();
+            let manifest = CreationManifest::load(&resources).unwrap();
+            manifest.load_runtime_scene(&resources).unwrap()
+        };
+        let flat = build(&authored, "flat");
+        assert_eq!(flat.draw_scene().lighting.light_count(), 1);
+        assert_eq!(flat.draw_scene().objects.len(), authored.objects.len());
+
+        let parent_translation = authored.objects[0].transform.translation;
+        let parent = authored.objects[0].id.clone();
+        authored.objects.push(ObjectNode {
+            id: "lamp".into(),
+            name: "Lamp".into(),
+            enabled: true,
+            parent: Some(parent),
+            transform: Transform {
+                translation: [0.0, 2.0, 0.0],
+                ..Transform::default()
+            },
+            components: (0..rot_scene::MAX_POINT_LIGHTS)
+                .map(|index| lamp(&format!("lamp-{index}")))
+                .collect(),
+        });
+        let runtime = build(&authored, "parented");
+        let RuntimeScene::StaticHierarchy { scene, preview } = runtime else {
+            panic!("expected static component draw input")
+        };
+        assert_eq!(*scene, authored);
+        assert!(preview.light_budget_exceeded());
+        let editor_preview = rot_render::component_preview::project(&authored).unwrap();
+        assert_eq!(preview.scene(), editor_preview.scene());
+        assert_eq!(
+            preview.scene().lighting.light_count(),
+            rot_scene::MAX_POINT_LIGHTS
+        );
+        let translation = preview
+            .scene()
+            .lighting
+            .light("lamp-0")
+            .unwrap()
+            .transform
+            .translation;
+        assert_eq!(
+            translation,
+            [
+                parent_translation[0],
+                parent_translation[1] + 2.0,
+                parent_translation[2]
+            ]
+        );
+        assert!(preview.scene().lighting.light("lamp-3").is_none());
+    }
+
+    #[test]
     fn build_preserves_v23_and_publishes_only_a_complete_new_folder() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
