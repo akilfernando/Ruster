@@ -134,18 +134,17 @@ impl BuildRequest {
         store: Option<&AssetStore>,
     ) -> Result<Self, BuildFailure> {
         let mut bytes = session
-            .saved_bytes(rot_scene::MAX_FILE_BYTES)
+            .saved_bytes()
             .map_err(|error| BuildFailureKind::SceneUnavailable.detail(error))?;
-        if !session.scene().prefabs.is_empty() {
-            let mut baked = rot_scene::component_scene::ComponentScene::read_json(bytes.as_slice())
-                .map_err(|error| error.to_string())?;
-            baked.prefabs.clear();
+        let mut authored = session.scene().clone();
+        if !authored.prefabs.is_empty() {
+            authored.prefabs.clear();
             bytes.clear();
-            baked
+            authored
                 .write_json(&mut bytes)
                 .map_err(|error| error.to_string())?;
         }
-        let scene = RuntimeScene::from_snapshot(&bytes)?;
+        let scene = RuntimeScene::from_components(Box::new(authored))?;
         let dependencies = scene
             .draw_dependencies()
             .map_err(|error| BuildFailureKind::AssetUnavailable.detail(error))?;
@@ -709,6 +708,67 @@ mod tests {
         Scene, Session, Transform,
     };
     use serde_json::json;
+
+    #[test]
+    fn builds_large_component_scene_from_verified_saved_bytes() {
+        use rot_scene::component_scene::PrefabSource;
+
+        let folder = tempfile::tempdir().unwrap();
+        let root = folder.path();
+        let input = root.join("large.scene.json");
+        let player = root.join("player");
+        fs::write(&player, b"test player").unwrap();
+        fs::set_permissions(&player, fs::Permissions::from_mode(0o755)).unwrap();
+        let scene = rot_render::benchmark::scene(5_000).unwrap();
+        scene.save_new(&input).unwrap();
+        let original = fs::read(&input).unwrap();
+        assert!(original.len() as u64 > rot_scene::MAX_FILE_BYTES);
+        let mut session = ComponentSession::open(&input).unwrap();
+        let build = |name: &str, session: &ComponentSession| {
+            let destination = root.join(name);
+            BuildRequest::capture(session, None)
+                .unwrap()
+                .publish(&destination, &player, &AtomicBool::new(false))
+                .unwrap();
+            destination
+        };
+        let plain = build("plain", &session);
+        assert_eq!(fs::read(plain.join("scene.json")).unwrap(), original);
+        let resources = rot_app::ResourceRoot::new(&plain).unwrap();
+        let manifest = CreationManifest::load(&resources).unwrap();
+        let runtime = manifest.load_runtime_scene(&resources).unwrap();
+        assert_eq!(runtime.draw_scene().objects.len(), 5_000);
+
+        // A same-length external change still fails the saved SHA guard.
+        let changed = String::from_utf8(original.clone())
+            .unwrap()
+            .replacen("Object 0", "Object X", 1);
+        assert_eq!(changed.len(), original.len());
+        fs::write(&input, changed).unwrap();
+        assert!(matches!(
+            session.saved_bytes(),
+            Err(rot_scene::SceneError::Conflict)
+        ));
+        fs::write(&input, original).unwrap();
+
+        let prefab = PrefabSource::from_selection(session.scene(), "object-0").unwrap();
+        session
+            .link_prefab(
+                0,
+                "roof".into(),
+                "Assets/Roof.prefab".into(),
+                &prefab,
+                |_| Ok(()),
+            )
+            .unwrap();
+        assert!(BuildRequest::capture(&session, None).is_err());
+        session.save(&input).unwrap();
+        let built = build("baked", &session);
+        let baked = ComponentScene::open(&built.join("scene.json")).unwrap();
+        assert_eq!(baked.objects, session.scene().objects);
+        assert!(baked.prefabs.is_empty());
+        assert_eq!(ComponentScene::open(&input).unwrap().prefabs.len(), 1);
+    }
 
     #[test]
     fn builds_disabled_component_assets_and_keeps_game_visibility() {

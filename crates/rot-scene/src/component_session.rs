@@ -18,7 +18,13 @@ pub struct ComponentSession {
     saved_state: Option<u64>,
     undo: Vec<HistoryEntry>,
     redo: Vec<HistoryEntry>,
-    saved: Option<(PathBuf, [u8; 32])>,
+    saved: Option<SavedDocument>,
+}
+
+struct SavedDocument {
+    path: PathBuf,
+    digest: [u8; 32],
+    bytes: u64,
 }
 
 /// Identity of the bytes written by a successful scene publication.
@@ -169,10 +175,14 @@ impl ComponentSession {
             digest: Sha256::new(),
         };
         let scene = ComponentScene::read_json(&mut input)?;
+        let bytes = input.file.stream_position()?;
         Ok(Self::from_saved(
             scene,
-            lock.path.clone(),
-            input.digest.finalize().into(),
+            SavedDocument {
+                path: lock.path.clone(),
+                digest: input.digest.finalize().into(),
+                bytes,
+            },
         ))
     }
 
@@ -188,11 +198,18 @@ impl ComponentSession {
         let legacy = crate::Session::from_snapshot_bytes(&bytes)?;
         let scene = ComponentScene::from_legacy(&legacy)?;
         let expected = Sha256::digest(&bytes).into();
-        let (hash, _) = Self::publish(&scene, &lock.path, Some(expected))?;
-        Ok(Self::from_saved(scene, lock.path.clone(), hash))
+        let (digest, bytes) = Self::publish(&scene, &lock.path, Some(expected))?;
+        Ok(Self::from_saved(
+            scene,
+            SavedDocument {
+                path: lock.path.clone(),
+                digest,
+                bytes,
+            },
+        ))
     }
 
-    fn from_saved(scene: ComponentScene, path: PathBuf, digest: [u8; 32]) -> Self {
+    fn from_saved(scene: ComponentScene, saved: SavedDocument) -> Self {
         Self {
             scene,
             revision: 0,
@@ -200,7 +217,7 @@ impl ComponentSession {
             saved_state: Some(0),
             undo: Vec::new(),
             redo: Vec::new(),
-            saved: Some((path, digest)),
+            saved: Some(saved),
         }
     }
 
@@ -216,25 +233,32 @@ impl ComponentSession {
         self.saved_state != Some(self.state)
     }
 
-    /// Capture the exact saved document for a bounded consumer such as the player.
-    /// Refuse a stale file or an unsaved edit before handing bytes to the consumer.
-    pub fn saved_bytes(&self, limit: u64) -> Result<Vec<u8>, SceneError> {
-        let (path, hash) = self
+    /// Capture the exact bytes of the saved v23 document. The recorded length
+    /// bounds the read even if the scene has since been replaced or grown.
+    pub fn saved_bytes(&self) -> Result<Vec<u8>, SceneError> {
+        let saved = self
             .saved
             .as_ref()
             .filter(|_| !self.is_dirty())
             .ok_or_else(|| SceneError::Invalid("Save the scene before building.".into()))?;
-        let lock = SceneLock::acquire(path)?;
-        let mut bytes = Vec::new();
-        File::open(&lock.path)?
-            .take(limit.saturating_add(1))
-            .read_to_end(&mut bytes)?;
-        if bytes.len() as u64 > limit {
-            return Err(SceneError::Invalid(
-                "The saved scene exceeds the current player file limit.".into(),
-            ));
+        let lock = SceneLock::acquire(&saved.path)?;
+        let mut file = File::open(&lock.path)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() || metadata.len() != saved.bytes {
+            return Err(SceneError::Conflict);
         }
-        if <[u8; 32]>::from(Sha256::digest(&bytes)) != *hash {
+        let mut bytes = Vec::new();
+        let len = usize::try_from(saved.bytes)
+            .map_err(|_| SceneError::Invalid("The saved scene cannot fit in memory.".into()))?;
+        bytes
+            .try_reserve_exact(len)
+            .map_err(|_| SceneError::Invalid("The saved scene cannot fit in memory.".into()))?;
+        (&mut file)
+            .take(saved.bytes.saturating_add(1))
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 != saved.bytes
+            || <[u8; 32]>::from(Sha256::digest(&bytes)) != saved.digest
+        {
             return Err(SceneError::Conflict);
         }
         Ok(bytes)
@@ -1056,7 +1080,7 @@ impl ComponentSession {
     }
 
     pub fn path(&self) -> Option<&Path> {
-        self.saved.as_ref().map(|(path, _)| path.as_path())
+        self.saved.as_ref().map(|saved| saved.path.as_path())
     }
 
     /// Write one current scene under the cooperative lock. Saving preserves the
@@ -1073,8 +1097,8 @@ impl ComponentSession {
         let baseline = self
             .saved
             .as_ref()
-            .filter(|(path, _)| *path == lock.path)
-            .map(|(_, digest)| *digest);
+            .filter(|saved| saved.path == lock.path)
+            .map(|saved| saved.digest);
         let (digest, bytes) = Self::publish(&self.scene, &lock.path, baseline)?;
         Ok(self.record_saved(lock.path.clone(), digest, bytes))
     }
@@ -1082,14 +1106,14 @@ impl ComponentSession {
     /// Capture the current authored state for background save preparation.
     #[cfg(unix)]
     pub fn active_save(&self, expected_path: &Path) -> Result<ComponentSave, SceneError> {
-        let (path, digest) = self
+        let saved = self
             .saved
             .as_ref()
-            .filter(|(path, _)| path == expected_path)
+            .filter(|saved| saved.path == expected_path)
             .ok_or(SceneError::Conflict)?;
         Ok(ComponentSave {
-            path: path.clone(),
-            baseline: *digest,
+            path: saved.path.clone(),
+            baseline: saved.digest,
             revision: self.revision,
             state: self.state,
             scene: self.scene.clone(),
@@ -1106,10 +1130,9 @@ impl ComponentSession {
     ) -> Result<SavedComponentScene, SceneError> {
         if self.revision != prepared.revision
             || self.state != prepared.state
-            || self
-                .saved
-                .as_ref()
-                .is_none_or(|(path, digest)| path != &prepared.path || *digest != prepared.baseline)
+            || self.saved.as_ref().is_none_or(|saved| {
+                saved.path != prepared.path || saved.digest != prepared.baseline
+            })
         {
             return Err(SceneError::Conflict);
         }
@@ -1126,7 +1149,11 @@ impl ComponentSession {
     }
 
     fn record_saved(&mut self, path: PathBuf, digest: [u8; 32], bytes: u64) -> SavedComponentScene {
-        self.saved = Some((path, digest));
+        self.saved = Some(SavedDocument {
+            path,
+            digest,
+            bytes,
+        });
         self.saved_state = Some(self.state);
         SavedComponentScene {
             sha256: format!("{:x}", sha2::digest::Output::<Sha256>::from(digest)),

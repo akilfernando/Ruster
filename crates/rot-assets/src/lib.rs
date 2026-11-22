@@ -1313,7 +1313,8 @@ pub fn read_regular_file(path: &Path, limit: usize) -> Result<Vec<u8>, AssetErro
     read_bounded(path, limit)
 }
 
-fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>, AssetError> {
+/// Open one checked regular-file handle for consumers that decode from a stream.
+pub fn open_regular_file(path: &Path) -> Result<File, AssetError> {
     // Preflight before open: opening a FIFO for reading can block indefinitely.
     // The post-open check still verifies the opened object; noncooperating
     // concurrent filesystem replacement is outside this crate's lock contract.
@@ -1327,8 +1328,14 @@ fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>, AssetError> {
     if !file.metadata()?.is_file() {
         return Err(error("expected a regular file"));
     }
+    Ok(file)
+}
+
+fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>, AssetError> {
     let mut bytes = Vec::new();
-    file.take((limit + 1) as u64).read_to_end(&mut bytes)?;
+    open_regular_file(path)?
+        .take((limit + 1) as u64)
+        .read_to_end(&mut bytes)?;
     if bytes.len() > limit {
         return Err(error(format!("file exceeds {limit} byte limit")));
     }

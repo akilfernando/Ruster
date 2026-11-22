@@ -97,6 +97,12 @@ impl ResourceRoot {
             .map_err(|error| format!("texture resource: {error}"))
     }
 
+    pub(crate) fn open_regular(&self, relative: impl AsRef<Path>) -> Result<std::fs::File, String> {
+        let path = self.resolve(relative)?;
+        rot_assets::open_regular_file(&path)
+            .map_err(|error| format!("resource {}: {error}", path.display()))
+    }
+
     /// Bounded regular-file bytes beneath this read-only resource root.
     pub fn read(&self, relative: impl AsRef<Path>, limit: usize) -> Result<Vec<u8>, String> {
         let path = self.resolve(relative)?;

@@ -9,6 +9,8 @@ use rot_scene::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fs::File,
+    io::{BufReader, Cursor, Read, Seek},
     path::Path,
     sync::Arc,
     time::Duration,
@@ -32,28 +34,97 @@ pub enum RuntimeScene {
     },
 }
 
-impl RuntimeScene {
-    pub fn from_snapshot(bytes: &[u8]) -> Result<Self, String> {
-        let behavior = |session| Ok(Self::Behavior(Box::new(session)));
-        let error = |error: SceneError| error.to_string();
+enum SceneSnapshot {
+    Legacy(Box<Session>),
+    Components(Box<ComponentScene>),
+}
+
+impl SceneSnapshot {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, SceneError> {
+        if bytes.len() as u64 > rot_scene::MAX_FILE_BYTES {
+            return Self::read_large(Cursor::new(bytes));
+        }
         match Session::from_snapshot_bytes(bytes) {
-            Ok(session) => behavior(session),
+            Ok(session) => Ok(Self::Legacy(Box::new(session))),
             Err(SceneError::UnsupportedVersion(version))
                 if version == u64::from(component_scene::FORMAT_VERSION) =>
             {
-                let scene = ComponentScene::read_json(bytes).map_err(error)?;
-                let Some(preview) = static_component_preview(&scene).map_err(error)? else {
-                    return Session::from_component_runtime(&scene)
-                        .map_err(error)
-                        .and_then(behavior);
-                };
-                Ok(Self::StaticHierarchy {
-                    scene: Box::new(scene),
-                    preview,
-                })
+                ComponentScene::read_json(bytes)
+                    .map(Box::new)
+                    .map(Self::Components)
             }
-            Err(err) => Err(error(err)),
+            Err(error) => Err(error),
         }
+    }
+
+    fn from_file(mut file: File) -> Result<Self, SceneError> {
+        if file.metadata()?.len() <= rot_scene::MAX_FILE_BYTES {
+            let mut bytes = Vec::new();
+            (&mut file)
+                .take(rot_scene::MAX_FILE_BYTES + 1)
+                .read_to_end(&mut bytes)?;
+            if bytes.len() as u64 <= rot_scene::MAX_FILE_BYTES {
+                return Self::from_bytes(&bytes);
+            }
+            file.rewind()?;
+        }
+        Self::read_large(file)
+    }
+
+    fn read_large(mut input: impl Read + Seek) -> Result<Self, SceneError> {
+        #[derive(Deserialize)]
+        struct Envelope {
+            format: String,
+            format_version: u64,
+        }
+
+        // Probe only the discriminator. serde skips the contents of other
+        // fields whatever their order, with no large JSON value to retain.
+        let header: Envelope = serde_json::from_reader(BufReader::new(&mut input))?;
+        if header.format != "rot-scene" {
+            return Err(SceneError::Invalid("expected a rot-scene document".into()));
+        }
+        match header
+            .format_version
+            .cmp(&u64::from(component_scene::FORMAT_VERSION))
+        {
+            std::cmp::Ordering::Less => Err(SceneError::Invalid("file exceeds 1 MiB".into())),
+            std::cmp::Ordering::Greater => {
+                Err(SceneError::UnsupportedVersion(header.format_version))
+            }
+            std::cmp::Ordering::Equal => {
+                input.rewind()?;
+                // The strict decoder checks every field and duplicate. A
+                // failed component decode never retries as legacy.
+                ComponentScene::read_json(input)
+                    .map(Box::new)
+                    .map(Self::Components)
+            }
+        }
+    }
+}
+
+impl RuntimeScene {
+    pub fn from_snapshot(bytes: &[u8]) -> Result<Self, String> {
+        Self::from_document(SceneSnapshot::from_bytes(bytes).map_err(|error| error.to_string())?)
+    }
+
+    fn from_document(snapshot: SceneSnapshot) -> Result<Self, String> {
+        match snapshot {
+            SceneSnapshot::Legacy(session) => Ok(Self::Behavior(session)),
+            SceneSnapshot::Components(scene) => Self::from_components(scene),
+        }
+    }
+
+    pub fn from_components(scene: Box<ComponentScene>) -> Result<Self, String> {
+        let error = |error: SceneError| error.to_string();
+        let Some(preview) = static_component_preview(&scene).map_err(error)? else {
+            return Session::from_component_runtime(&scene)
+                .map(Box::new)
+                .map(Self::Behavior)
+                .map_err(error);
+        };
+        Ok(Self::StaticHierarchy { scene, preview })
     }
 
     /// Current draw references, for dependency capture and package validation.
@@ -518,8 +589,9 @@ impl CreationManifest {
 
     pub fn load_runtime_scene(&self, root: &ResourceRoot) -> Result<RuntimeScene, String> {
         self.validate()?;
-        let bytes = root.read(&self.scene, rot_scene::MAX_FILE_BYTES as usize)?;
-        let scene = RuntimeScene::from_snapshot(&bytes)?;
+        let snapshot = SceneSnapshot::from_file(root.open_regular(&self.scene)?)
+            .map_err(|error| error.to_string())?;
+        let scene = RuntimeScene::from_document(snapshot)?;
         match &scene {
             RuntimeScene::Behavior(session) => self.validate_behavior_scene(session)?,
             RuntimeScene::StaticHierarchy { scene, .. } => {
@@ -558,8 +630,14 @@ impl CreationManifest {
 
     pub fn load_session(&self, root: &ResourceRoot) -> Result<Session, String> {
         self.validate()?;
-        let bytes = root.read(&self.scene, rot_scene::MAX_FILE_BYTES as usize)?;
-        let session = Session::from_runtime_snapshot(&bytes).map_err(|error| error.to_string())?;
+        let snapshot = SceneSnapshot::from_file(root.open_regular(&self.scene)?)
+            .map_err(|error| error.to_string())?;
+        let session = match snapshot {
+            SceneSnapshot::Legacy(session) => *session,
+            SceneSnapshot::Components(scene) => {
+                Session::from_component_runtime(&scene).map_err(|error| error.to_string())?
+            }
+        };
         self.validate_behavior_scene(&session)?;
         Ok(session)
     }
@@ -709,6 +787,50 @@ impl CreationManifest {
 mod tests {
     use super::*;
     use crate::Content;
+
+    #[test]
+    fn oversized_package_scene_keeps_strict_version_dispatch() {
+        let project = tempfile::tempdir().unwrap();
+        let root = ResourceRoot::new(project.path()).unwrap();
+        let path = project.path().join("scene.json");
+        let manifest: CreationManifest = serde_json::from_value(serde_json::json!({
+            "format": FORMAT, "version": NO_AUDIO_VERSION, "title": "Roof",
+            "scene": "scene.json", "tick_nanos": 16_666_667,
+            "meshes": {}, "texture_roles": {}
+        }))
+        .unwrap();
+        let legacy = Session::new(Scene::demo()).unwrap();
+        let mut authored = ComponentScene::from_legacy(&legacy).unwrap();
+        authored.objects[0].enabled = false;
+        let body = serde_json::to_string(&authored).unwrap();
+        let limit = rot_scene::MAX_FILE_BYTES as usize;
+        let test = |json: String, length: usize| {
+            let mut bytes = json.into_bytes();
+            bytes.resize(length, b' ');
+            std::fs::write(&path, &bytes).unwrap();
+            let snapshot = RuntimeScene::from_snapshot(&bytes);
+            let packaged = manifest.load_runtime_scene(&root);
+            assert_eq!(snapshot.is_ok(), packaged.is_ok());
+            packaged
+        };
+        let envelope = format!(r#"{{"scene":{body},"format_version":23,"format":"rot-scene"}}"#);
+        let loaded = test(envelope.clone(), limit + 1).unwrap();
+        let RuntimeScene::StaticHierarchy { scene, .. } = loaded else {
+            panic!("expected component projection");
+        };
+        assert_eq!(*scene, authored);
+        let legacy_json = String::from_utf8(legacy.snapshot_bytes().unwrap()).unwrap();
+        assert!(test(legacy_json.clone(), limit).is_ok());
+        assert!(matches!(test(legacy_json, limit + 1), Err(error) if error.contains("1 MiB")));
+        assert!(test(envelope.replace("23,", "24,"), limit + 1).is_err());
+        assert!(test(
+            format!(r#"{{"format_version":23,{}"#, &envelope[1..]),
+            limit + 1
+        )
+        .is_err());
+        assert!(test(format!(r#"{{"unknown":true,{}"#, &envelope[1..]), limit + 1).is_err());
+        assert!(test(envelope[..envelope.len() - 1].into(), limit + 1).is_err());
+    }
 
     #[test]
     fn descriptor6_requires_exact_sound_history_and_valid_wav() {
