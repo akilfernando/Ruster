@@ -32,8 +32,9 @@ and component values. Viewport settings stay local. Automatic upgrades remain op
 
 The v23 Inspector shows live Transform and script state during Play and Step.
 The editor and viewer draw, fit and pick from cached world matrices.
-Linux Build preserves static hierarchy transforms, including shear. A relocated
-player loaded 5,000 objects. Build failures offer keyboard-accessible Error Details.
+Play and Linux Build share the same render data for supported static hierarchies,
+including shear. A relocated player loaded 5,000 objects. Build failures offer
+keyboard-accessible Error Details.
 v23 point and directional lights can be created as objects or attached to meshes.
 The Inspector and approved MCP clients edit the same component. The editor warns
 at the render budget and keeps extra lights editable. Static Linux builds preserve
