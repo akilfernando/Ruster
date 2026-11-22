@@ -6,11 +6,12 @@ use rot_scene::{
     component_scene::{self, Component, ComponentScene, Geometry},
     OpaqueMaterial, Scene, SceneError, Session, SoundAssetReferences,
 };
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
 use std::{
+    cell::Cell,
     collections::{BTreeMap, BTreeSet},
     fs::File,
-    io::{BufReader, Cursor, Read, Seek},
+    io::{self, BufReader, Cursor, Read, Seek},
     path::Path,
     sync::Arc,
     time::Duration,
@@ -72,27 +73,10 @@ impl SceneSnapshot {
     }
 
     fn read_large(mut input: impl Read + Seek) -> Result<Self, SceneError> {
-        #[derive(Deserialize)]
-        struct Envelope {
-            format: String,
-            format_version: u64,
-        }
-
-        // Probe only the discriminator. serde skips the contents of other
-        // fields whatever their order, with no large JSON value to retain.
-        let header: Envelope = serde_json::from_reader(BufReader::new(&mut input))?;
-        if header.format != "rot-scene" {
-            return Err(SceneError::Invalid("expected a rot-scene document".into()));
-        }
-        match header
-            .format_version
-            .cmp(&u64::from(component_scene::FORMAT_VERSION))
-        {
-            std::cmp::Ordering::Less => Err(SceneError::Invalid("file exceeds 1 MiB".into())),
-            std::cmp::Ordering::Greater => {
-                Err(SceneError::UnsupportedVersion(header.format_version))
-            }
-            std::cmp::Ordering::Equal => {
+        match probe_large_scene(BufReader::new(&mut input))? {
+            OversizedFormat::Legacy => Err(SceneError::Invalid("file exceeds 1 MiB".into())),
+            OversizedFormat::Future(version) => Err(SceneError::UnsupportedVersion(version)),
+            OversizedFormat::Components => {
                 input.rewind()?;
                 // The strict decoder checks every field and duplicate. A
                 // failed component decode never retries as legacy.
@@ -101,6 +85,127 @@ impl SceneSnapshot {
                     .map(Self::Components)
             }
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum OversizedFormat {
+    Legacy,
+    Future(u64),
+    Components,
+}
+
+fn probe_large_scene(source: impl Read) -> Result<OversizedFormat, SceneError> {
+    let token_budget = Cell::new(None);
+    let decision = Cell::new(None);
+    let mut parser = serde_json::Deserializer::from_reader(ProbeReader {
+        source,
+        token_budget: &token_budget,
+        decision: &decision,
+    });
+    let result = parser.deserialize_map(OversizedEnvelope {
+        token_budget: &token_budget,
+        decision: &decision,
+    });
+    if let Some(decision) = decision.get() {
+        return Ok(decision);
+    }
+    result?;
+    Err(SceneError::Invalid("expected a rot-scene document".into()))
+}
+
+struct OversizedEnvelope<'a> {
+    token_budget: &'a Cell<Option<usize>>,
+    decision: &'a Cell<Option<OversizedFormat>>,
+}
+
+impl<'de> de::Visitor<'de> for OversizedEnvelope<'_> {
+    type Value = ();
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a rot-scene envelope")
+    }
+
+    fn visit_map<M: de::MapAccess<'de>>(self, mut fields: M) -> Result<(), M::Error> {
+        use serde::de::Error;
+
+        let mut known_format = false;
+        let mut known_version = false;
+        loop {
+            self.token_budget.set(Some(0));
+            let field = fields.next_key::<String>()?;
+            self.token_budget.set(None);
+            match field.as_deref() {
+                Some("format") => {
+                    self.token_budget.set(Some(0));
+                    let format = fields.next_value::<String>()?;
+                    self.token_budget.set(None);
+                    if format != "rot-scene" || known_format {
+                        return Err(M::Error::custom("invalid rot-scene format"));
+                    }
+                    known_format = true;
+                }
+                Some("format_version") => {
+                    if known_version {
+                        return Err(M::Error::duplicate_field("format_version"));
+                    }
+                    let version = fields.next_value::<u64>()?;
+                    match version.cmp(&u64::from(component_scene::FORMAT_VERSION)) {
+                        std::cmp::Ordering::Less => {
+                            self.decision.set(Some(OversizedFormat::Legacy))
+                        }
+                        std::cmp::Ordering::Greater => {
+                            self.decision.set(Some(OversizedFormat::Future(version)))
+                        }
+                        std::cmp::Ordering::Equal => known_version = true,
+                    }
+                }
+                Some(_) => {
+                    fields.next_value::<de::IgnoredAny>()?;
+                }
+                None => return Err(M::Error::custom("missing rot-scene format or version")),
+            }
+            if known_format && known_version {
+                self.decision.set(Some(OversizedFormat::Components));
+            }
+            if self.decision.get().is_some() {
+                // Stop serde before it reads any remaining fields. For a
+                // v23 candidate the authoritative parse will read them.
+                return Err(M::Error::custom("scene format identified"));
+            }
+        }
+    }
+}
+
+struct ProbeReader<'a, R> {
+    source: R,
+    token_budget: &'a Cell<Option<usize>>,
+    decision: &'a Cell<Option<OversizedFormat>>,
+}
+
+impl<R: Read> Read for ProbeReader<'_, R> {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        if self.decision.get().is_some() {
+            return Ok(0);
+        }
+        let Some(consumed) = self.token_budget.get() else {
+            return self.source.read(bytes);
+        };
+        // Enough for the longest envelope key written as Unicode escapes.
+        if consumed == 128 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "oversized scene envelope token",
+            ));
+        }
+        let len = bytes.len().min(1);
+        let read = self.source.read(&mut bytes[..len])?;
+        if read == 1
+            && (consumed != 0 || !matches!(bytes[0], b' ' | b'\r' | b'\n' | b'\t' | b':' | b','))
+        {
+            self.token_budget.set(Some(consumed + 1));
+        }
+        Ok(read)
     }
 }
 
@@ -830,6 +935,28 @@ mod tests {
         .is_err());
         assert!(test(format!(r#"{{"unknown":true,{}"#, &envelope[1..]), limit + 1).is_err());
         assert!(test(envelope[..envelope.len() - 1].into(), limit + 1).is_err());
+    }
+
+    #[test]
+    fn oversized_scene_probe_stops_at_the_discriminator() {
+        let legacy_prefix = br#"{"format":"rot-scene","format_version":22,"scene":"#;
+        let prefix_only =
+            |prefix: &[u8]| probe_large_scene(prefix.chain(std::io::repeat(b'x').take(8192)));
+        assert!(matches!(
+            prefix_only(legacy_prefix),
+            Ok(OversizedFormat::Legacy)
+        ));
+        let format_prefix = br#"{"format":""#;
+        assert!(
+            matches!(prefix_only(format_prefix), Err(SceneError::Format(error))
+                if error.to_string().contains("oversized scene envelope token")
+            )
+        );
+        let escaped = br#"{"f\u006frmat" :  "r\u006ft-scene", "format_version":23,"scene":"#;
+        assert!(matches!(
+            prefix_only(escaped),
+            Ok(OversizedFormat::Components)
+        ));
     }
 
     #[test]
