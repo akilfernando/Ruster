@@ -97,6 +97,36 @@ fn split_primitives_keep_surface_ids_when_material_slots_reorder() {
 }
 
 #[test]
+fn repeated_animated_nodes_target_the_source_node_instead_of_split_primitives() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("rig.glb");
+    fs::write(
+        &source,
+        animated_glb(AnimatedFixture {
+            sibling_name: "Arm",
+            split_materials: true,
+            ..Default::default()
+        }),
+    )
+    .unwrap();
+    let mut store = AssetStore::open(root.path()).unwrap();
+    let accepted = store.import_glb_at(0, "rig", "rig.glb").unwrap();
+    let clip = &accepted.clips["Swing"];
+    assert_eq!(accepted.nodes["Rig/ node-1"].name, "Arm");
+    assert_eq!(accepted.nodes["Rig/ node-2"].name, "Arm");
+    for target in &clip.targets {
+        assert_eq!(target.node, "Rig/ node-1");
+        assert!(!rot_assets::ModelInfo::is_primitive_path(&target.node));
+    }
+    assert!(accepted.nodes.keys().any(|path| {
+        path.starts_with("Rig/ node-1/") && rot_assets::ModelInfo::is_primitive_path(path)
+    }));
+    let reopened = AssetStore::open(root.path()).unwrap();
+    assert_eq!(reopened.model("rig"), Some(&accepted));
+    assert_eq!(reopened.clip(&clip.id), store.clip(&clip.id));
+}
+
+#[test]
 fn clip_import_refresh_and_reopen_keep_stable_identity() {
     let root = tempfile::tempdir().unwrap();
     let source = root.path().join("rig.glb");

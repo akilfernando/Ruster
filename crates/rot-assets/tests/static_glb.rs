@@ -238,6 +238,123 @@ fn model_with_image(nodes: Vec<serde_json::Value>, roughness: f32, image: Option
 }
 
 #[test]
+fn optional_and_repeated_names_keep_distinct_paths_across_refresh_and_reopen() {
+    use rot_assets::ModelInfo;
+    use serde_json::json;
+
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("assembly.glb");
+    let nodes = vec![
+        json!({"name":"Assembly","children":[1,2,3,4,5,6,7]}),
+        json!({"name":"Twin","mesh":0}),
+        json!({"name":"Twin","mesh":0,"translation":[2,0,0]}),
+        json!({"name":"","mesh":0}),
+        json!({"mesh":0}),
+        json!({"name":"node-3","mesh":0}),
+        json!({"name":" ","mesh":0}),
+        json!({"name":"Part/Subpart","mesh":0}),
+    ];
+    fs::write(&source, model_bytes(nodes.clone(), 0.6)).unwrap();
+    let mut store = AssetStore::open(root.path()).unwrap();
+    let first = store.import_glb_at(0, "assembly", "assembly.glb").unwrap();
+    let names = [
+        ("Assembly/ node-1", "Twin"),
+        ("Assembly/ node-2", "Twin"),
+        ("Assembly/ node-3", "Node 4"),
+        ("Assembly/ node-4", "Node 5"),
+        ("Assembly/node-3", "node-3"),
+        ("Assembly/ node-6", "Node 7"),
+        ("Assembly/ node-7", "Part/Subpart"),
+    ];
+    let mut resources = BTreeSet::new();
+    for (path, name) in names {
+        let node = &first.nodes[path];
+        assert_eq!(node.name, name);
+        assert_eq!(node.parent.as_deref(), Some("Assembly"));
+        assert!(!ModelInfo::is_primitive_path(path));
+        assert!(resources.insert(node.mesh_id.as_ref().unwrap()));
+    }
+    let mut reordered = nodes;
+    reordered[0]["children"] = json!([7, 6, 5, 4, 3, 2, 1]);
+    fs::write(&source, model_bytes(reordered, 0.6)).unwrap();
+    let refreshed = store.refresh_glb_at(1, "assembly").unwrap();
+    assert_eq!(first.nodes, refreshed.nodes);
+    assert_eq!(
+        AssetStore::open(root.path()).unwrap().model("assembly"),
+        Some(&refreshed)
+    );
+}
+
+#[test]
+fn asymmetric_matrix_preserves_column_major_pose_and_invalid_refresh_keeps_it() {
+    use glam::{DMat4, DQuat, DVec3, EulerRot};
+    use serde_json::json;
+
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("matrix.glb");
+    // +90 degrees around Y, distinct local X/Y/Z scales, and translation.
+    let matrix = [
+        0., 0., -2., 0., 0., 3., 0., 0., 4., 0., 0., 0., 7., -2., 5., 1.,
+    ];
+    let nodes = |mesh| vec![json!({"name":"Assembly","children":[1]}), mesh];
+    fs::write(
+        &source,
+        model_bytes(
+            nodes(json!({"name":"Asymmetric","mesh":0,"matrix":matrix})),
+            0.6,
+        ),
+    )
+    .unwrap();
+    let mut store = AssetStore::open(root.path()).unwrap();
+    let accepted = store.import_glb_at(0, "matrix", "matrix.glb").unwrap();
+    let node = &accepted.nodes["Assembly/Asymmetric"];
+    let [x, y, z] = node.rotation.map(f64::from);
+    let rendered = DMat4::from_scale_rotation_translation(
+        DVec3::from_array(node.scale.map(f64::from)),
+        DQuat::from_euler(EulerRot::ZYX, z, y, x),
+        DVec3::from_array(node.translation.map(f64::from)),
+    );
+    assert!(rendered
+        .transform_point3(DVec3::new(1., 2., 3.))
+        .abs_diff_eq(DVec3::new(19., 4., 3.), 1e-5));
+    assert_eq!(node.scale, [2., 3., 4.]);
+
+    let mut shear = matrix;
+    shear[4] = 1.;
+    let mut reflected = matrix;
+    reflected[2] = 2.;
+    let mut perspective = matrix;
+    perspective[3] = 0.1;
+    for (candidate, diagnostic) in [
+        (json!({"matrix":[0,1]}), "16 finite column-major numbers"),
+        (json!({"matrix":null}), "16 finite column-major numbers"),
+        (
+            json!({"matrix":matrix,"translation":[0,0,0]}),
+            "either a matrix",
+        ),
+        (json!({"matrix":shear}), "contains shear"),
+        (json!({"matrix":reflected}), "contains a reflection"),
+        (json!({"matrix":perspective}), "must be affine"),
+    ] {
+        let mut mesh = candidate;
+        mesh["name"] = json!("Asymmetric");
+        mesh["mesh"] = json!(0);
+        fs::write(&source, model_bytes(nodes(mesh), 0.6)).unwrap();
+        let error = store.refresh_glb_at(1, "matrix").unwrap_err().to_string();
+        assert!(
+            error.contains("Assembly/Asymmetric") && error.contains(diagnostic),
+            "{error}"
+        );
+        assert_eq!(store.revision(), 1);
+        assert_eq!(store.model("matrix"), Some(&accepted));
+    }
+    assert_eq!(
+        AssetStore::open(root.path()).unwrap().model("matrix"),
+        Some(&accepted)
+    );
+}
+
+#[test]
 fn external_png_is_pinned_then_refreshed_by_a_texture_only_change() {
     use rot_assets::AssetMutation;
     use serde_json::json;

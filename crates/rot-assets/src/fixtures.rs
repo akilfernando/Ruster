@@ -16,6 +16,7 @@ pub struct AnimatedFixture {
     pub split_materials: bool,
     pub reverse_primitives: bool,
     pub material_fallbacks: bool,
+    pub sibling_name: &'static str,
 }
 
 impl Default for AnimatedFixture {
@@ -29,6 +30,7 @@ impl Default for AnimatedFixture {
             split_materials: false,
             reverse_primitives: false,
             material_fallbacks: false,
+            sibling_name: "Base",
         }
     }
 }
@@ -70,7 +72,7 @@ pub fn animated_glb(fixture: AnimatedFixture) -> Vec<u8> {
         "nodes":[
             {"name":"Rig","children":[1,2]},
             {"name":"Arm","mesh":0},
-            {"name":"Base","mesh":0,"translation":[0,-1,0]},
+            {"name":fixture.sibling_name,"mesh":0,"translation":[0,-1,0]},
         ],
         "meshes":[{"primitives":[{"attributes":{"POSITION":0},"material":0}]}],
         "materials":[{"name":"Paint","pbrMetallicRoughness":{"metallicFactor":0,"roughnessFactor":0.6}}],

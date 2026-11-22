@@ -1,6 +1,7 @@
 //! Admission for the bounded, self-contained static GLB 2.0 subset.
 use super::*;
 use glam::{DMat4, DQuat, DVec3, EulerRot};
+use serde_json::value::RawValue;
 
 pub const MAX_GLB_SOURCE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_JSON_BYTES: usize = 2 * 1024 * 1024;
@@ -210,13 +211,14 @@ struct AnimationSampler {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct Document {
+struct Document<'a> {
     asset: Header,
     #[serde(default, rename = "extensionsUsed")]
     _extensions_used: Vec<String>,
     scene: Option<usize>,
     scenes: Vec<SourceScene>,
-    nodes: Vec<Node>,
+    #[serde(borrow)]
+    nodes: Vec<Node<'a>>,
     meshes: Vec<SourceMesh>,
     buffers: Vec<Buffer>,
     buffer_views: Vec<BufferView>,
@@ -253,14 +255,27 @@ struct SourceScene {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Node {
+struct Node<'a> {
+    #[serde(default)]
     name: String,
     mesh: Option<usize>,
     #[serde(default)]
     children: Vec<usize>,
+    // Defer matrix shape diagnostics until the node path is known.
+    #[serde(default, borrow, deserialize_with = "present")]
+    matrix: Option<&'a RawValue>,
+    #[serde(default, deserialize_with = "present")]
     translation: Option<[f64; 3]>,
+    #[serde(default, deserialize_with = "present")]
     rotation: Option<[f64; 4]>,
+    #[serde(default, deserialize_with = "present")]
     scale: Option<[f64; 3]>,
+}
+
+fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    value: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(value).map(Some)
 }
 
 #[derive(Deserialize)]
@@ -591,13 +606,16 @@ fn at<'a, T>(values: &'a [T], index: usize, label: &str) -> Result<&'a T, AssetE
         .ok_or_else(|| error(format!("GLB {label} index {index} is out of range")))
 }
 
+fn path_safe(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name.trim() == name
+        && !name.contains('/')
+        && !name.chars().any(char::is_control)
+}
+
 fn named(name: &str) -> Result<&str, AssetError> {
-    if name.is_empty()
-        || name.len() > 128
-        || name.trim() != name
-        || name.contains('/')
-        || name.chars().any(char::is_control)
-    {
+    if !path_safe(name) {
         return Err(error("GLB names must use 1..128 UTF-8 bytes with no slash, controls or surrounding whitespace"));
     }
     Ok(name)
@@ -608,15 +626,28 @@ pub(super) fn resource_id(model: &str, domain: &str, key: &str) -> String {
     format!("glb-{domain}-{stable}")
 }
 
-impl Node {
+impl Node<'_> {
     fn placement(
         &self,
+        index: usize,
         parent: Option<&str>,
         becomes_group: bool,
     ) -> Result<ModelNode, AssetError> {
-        let translation = self.translation.unwrap_or([0.; 3]);
-        let scale = self.scale.unwrap_or([1.; 3]);
-        let orientation = DQuat::from_array(self.rotation.unwrap_or([0., 0., 0., 1.]));
+        let matrix = self.matrix.map(read_node_matrix).transpose()?;
+        let (scale, orientation, translation) = if let Some(matrix) = matrix {
+            if self.translation.is_some() || self.rotation.is_some() || self.scale.is_some() {
+                return Err(error(
+                    "use either a matrix or translation, rotation and scale",
+                ));
+            }
+            matrix_trs(matrix, becomes_group)?
+        } else {
+            (
+                self.scale.unwrap_or([1.; 3]),
+                DQuat::from_array(self.rotation.unwrap_or([0., 0., 0., 1.])),
+                self.translation.unwrap_or([0.; 3]),
+            )
+        };
         if !translation
             .iter()
             .all(|n| n.is_finite() && n.abs() <= 10_000.)
@@ -637,16 +668,87 @@ impl Node {
         {
             return Err(error("GLB nodes placed as Groups require positive uniform scale; apply scale in Blender before export"));
         }
-        Ok(ModelNode {
-            name: self.name.clone(),
+        let name = self.name.trim();
+        let name = if name.is_empty() || name.len() > 128 || name.chars().any(char::is_control) {
+            format!("Node {}", index + 1)
+        } else {
+            name.to_owned()
+        };
+        let definition = ModelNode {
+            name,
             parent: parent.map(str::to_owned),
             translation: translation.map(|n| n as f32),
             rotation: [x as f32, y as f32, z as f32],
             scale: stored_scale,
             mesh_id: None,
             material: None,
-        })
+        };
+        if let Some(matrix) = matrix {
+            if !matrix_close(matrix, PlacementPose::from_local(&definition).matrix()) {
+                return Err(error("matrix cannot be represented at scene precision"));
+            }
+        }
+        Ok(definition)
     }
+}
+
+fn read_node_matrix(value: &RawValue) -> Result<DMat4, AssetError> {
+    let elements: [f64; 16] = serde_json::from_str(value.get())
+        .map_err(|_| error("matrix requires 16 finite column-major numbers"))?;
+    if [elements[3], elements[7], elements[11], elements[15]] != [0., 0., 0., 1.] {
+        return Err(error("matrix must be affine"));
+    }
+    Ok(DMat4::from_cols_array(&elements))
+}
+
+fn matrix_trs(
+    matrix: DMat4,
+    becomes_group: bool,
+) -> Result<([f64; 3], DQuat, [f64; 3]), AssetError> {
+    let axes = [
+        matrix.x_axis.truncate(),
+        matrix.y_axis.truncate(),
+        matrix.z_axis.truncate(),
+    ];
+    let scale = axes.map(|axis| axis.length());
+    if !scale
+        .iter()
+        .all(|axis| axis.is_finite() && (0.001..=1000.).contains(axis))
+    {
+        return Err(error("matrix requires positive scales in 0.001..1000"));
+    }
+    let [x, y, z] = std::array::from_fn(|index| axes[index] / scale[index]);
+    if [x.dot(y), x.dot(z), y.dot(z)]
+        .into_iter()
+        .any(|dot| dot.abs() > 2e-6)
+    {
+        return Err(error("matrix contains shear"));
+    }
+    if x.cross(y).dot(z) <= 0. {
+        return Err(error("matrix contains a reflection"));
+    }
+    let (_, rotation, translation) = matrix.to_scale_rotation_translation();
+    // A uniform scale exported as a float matrix may produce axes that
+    // differ slightly after measuring column lengths.
+    let average = scale.into_iter().sum::<f64>() / 3.;
+    let scale = if becomes_group
+        && scale
+            .iter()
+            .all(|length| (length - average).abs() <= 2e-6 * average)
+    {
+        [average; 3]
+    } else {
+        scale
+    };
+    Ok((scale, rotation.normalize(), translation.to_array()))
+}
+
+fn matrix_close(expected: DMat4, stored: DMat4) -> bool {
+    expected
+        .to_cols_array()
+        .into_iter()
+        .zip(stored.to_cols_array())
+        .all(|(a, b)| a.is_finite() && b.is_finite() && (a - b).abs() <= 2e-6 * a.abs().max(1.))
 }
 
 /// Use scene storage precision and nearest-parent-first composition so even
@@ -676,6 +778,10 @@ impl PlacementPose {
         }
     }
 
+    fn matrix(self) -> DMat4 {
+        DMat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation)
+    }
+
     fn validate_world(self) -> Result<(), &'static str> {
         if !self.translation.is_finite()
             || self.translation.abs().max_element() > 10_000.
@@ -688,19 +794,13 @@ impl PlacementPose {
         }
         let (z, y, x) = self.rotation.to_euler(EulerRot::ZYX);
         let [x, y, z] = [x, y, z].map(|n| f64::from(n as f32));
-        let exact =
-            DMat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation);
+        let exact = self.matrix();
         let stored = DMat4::from_scale_rotation_translation(
             self.scale.as_vec3().as_dvec3(),
             DQuat::from_euler(EulerRot::ZYX, z, y, x),
             self.translation.as_vec3().as_dvec3(),
         );
-        if !exact
-            .to_cols_array()
-            .into_iter()
-            .zip(stored.to_cols_array())
-            .all(|(a, b)| a.is_finite() && b.is_finite() && (a - b).abs() <= 2e-6 * a.abs().max(1.))
-        {
+        if !matrix_close(exact, stored) {
             return Err("resolved pose cannot be represented at scene precision; adjust source rotations and scale");
         }
         Ok(())
@@ -708,7 +808,7 @@ impl PlacementPose {
 }
 
 struct Decoder<'a> {
-    doc: Document,
+    doc: Document<'a>,
     bin: &'a [u8],
     seen: BTreeSet<usize>,
     used_materials: BTreeMap<String, usize>,
@@ -1098,9 +1198,50 @@ impl Decoder<'_> {
         Ok(())
     }
 
+    fn siblings(
+        &mut self,
+        indices: &[usize],
+        parent: Option<&str>,
+        ancestors: &mut Vec<PlacementPose>,
+    ) -> Result<(), AssetError> {
+        let mut names = BTreeSet::new();
+        let mut repeated = BTreeSet::new();
+        if indices.len() > 1 {
+            for &index in indices {
+                let name = at(&self.doc.nodes, index, "node")?.name.as_str();
+                if path_safe(name) && !names.insert(name) {
+                    repeated.insert(name);
+                }
+            }
+        }
+        let paths = indices
+            .iter()
+            .map(|&index| {
+                let name = at(&self.doc.nodes, index, "node")?.name.as_str();
+                // Leading space separates indexed segments from authored names.
+                // Only the exact single-space segment marks a split primitive.
+                let segment = if path_safe(name) && !repeated.contains(name) {
+                    name.to_owned()
+                } else {
+                    format!(" node-{index}")
+                };
+                Ok(if let Some(parent) = parent {
+                    format!("{parent}/{segment}")
+                } else {
+                    segment
+                })
+            })
+            .collect::<Result<Vec<_>, AssetError>>()?;
+        for (&index, path) in indices.iter().zip(paths) {
+            self.node(index, path, parent, ancestors)?;
+        }
+        Ok(())
+    }
+
     fn node(
         &mut self,
         index: usize,
+        path: String,
         parent: Option<&str>,
         ancestors: &mut Vec<PlacementPose>,
     ) -> Result<(), AssetError> {
@@ -1108,11 +1249,6 @@ impl Decoder<'_> {
             return Err(error("GLB hierarchy contains a repeated or cyclic node"));
         }
         let node = at(&self.doc.nodes, index, "node")?;
-        let name = named(&node.name)?;
-        let path = parent.map_or_else(|| name.to_owned(), |parent| format!("{parent}/{name}"));
-        if self.model.info.nodes.contains_key(&path) {
-            return Err(error(format!("duplicate GLB sibling path {path:?}")));
-        }
         let primitives = node
             .mesh
             .map(|mesh| at(&self.doc.meshes, mesh, "mesh"))
@@ -1130,7 +1266,7 @@ impl Decoder<'_> {
             return Err(error(format!("GLB node {path:?} exceeds eight Group levels with the placement root; simplify the source hierarchy")));
         }
         let mut definition = node
-            .placement(parent, becomes_group)
+            .placement(index, parent, becomes_group)
             .map_err(|e| error(format!("GLB node {path:?}: {e}")))?;
         let local = PlacementPose::from_local(&definition);
         let world = ancestors
@@ -1177,9 +1313,7 @@ impl Decoder<'_> {
             self.group_paths.insert(path.clone());
         }
         ancestors.push(local);
-        for child in children {
-            self.node(child, Some(&path), ancestors)?;
-        }
+        self.siblings(&children, Some(&path), ancestors)?;
         ancestors.pop();
         Ok(())
     }
@@ -1195,6 +1329,9 @@ impl Decoder<'_> {
             .paths
             .get(&channel.target.node)
             .ok_or_else(|| fail("a channel targets a node outside the imported hierarchy"))?;
+        if self.doc.nodes[channel.target.node].matrix.is_some() {
+            return Err(fail(&format!("node {node:?} must use TRS for animation")));
+        }
         let property = match channel.target.path.as_str() {
             "translation" => ClipProperty::Translation,
             "rotation" => ClipProperty::Rotation,
@@ -1392,7 +1529,7 @@ impl Decoder<'_> {
 
 pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedModel, AssetError> {
     let (json, bin) = chunks(bytes)?;
-    let doc: Document = serde_json::from_slice(json)
+    let doc: Document<'_> = serde_json::from_slice(json)
         .map_err(|e| error(format!("unsupported or invalid static GLB document: {e}")))?;
     let [buffer] = doc.buffers.as_slice() else {
         return Err(error("GLB requires exactly one embedded buffer"));
@@ -1449,9 +1586,7 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
         },
     };
     let mut ancestors = Vec::with_capacity(MAX_GROUP_LEVELS);
-    for root in roots {
-        decoder.node(root, None, &mut ancestors)?;
-    }
+    decoder.siblings(&roots, None, &mut ancestors)?;
     if !decoder
         .model
         .resources
