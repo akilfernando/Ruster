@@ -539,9 +539,11 @@ impl CreationManifest {
                 for (id, role) in dependencies.texture_roles {
                     match roles.get(&id) {
                         Some(actual) if *actual == role => {}
-                        Some(_) => return Err(format!(
+                        Some(_) => {
+                            return Err(format!(
                             "Application texture {id} has the wrong role for its material slot."
-                        )),
+                        ))
+                        }
                         None => {
                             return Err(format!(
                                 "Application is missing the required texture {id}."

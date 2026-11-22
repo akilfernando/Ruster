@@ -285,8 +285,11 @@ lights. Mesh objects can have children and carry lights. A directional light
 can follow its parent's rotation. Rotated objects under nonuniform scale keep
 their placement, including shear. The headless report includes `world_matrices`
 keyed by object ID, and `behavior_runtime_inspect` includes world matrices on
-the paged render objects in a paused static Game. Local Scene visibility does
-not affect Game or Build. This path covers enabled objects and meshes.
+the paged render objects in a paused static Game. Local Scene visibility only
+affects editing. In Play and Build, disabling a parent hides its descendants.
+Disabling a Mesh Renderer keeps enabled sibling components, such as a Point
+Light, active. Build includes imported meshes and textures referenced by
+disabled geometry and preserves the authored enabled states.
 Scripted or animated hierarchies and scenes with input actions, HUD controls
 or a gameplay camera still depend on the behavior runtime.
 The editor finds the `rot-motion-lab` player alongside `rot-editor`. Local
