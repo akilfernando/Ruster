@@ -235,7 +235,11 @@ scene. **Stop** returns Inspector to the authored values.
 
 On Unix, an approved AI app can add cubes, spheres, capsules and empty
 groups to the open v23 scene. It can inspect, rename, reparent, move or
-delete objects. Batched moves or deletes take one Undo each.
+delete objects. Batched moves or deletes take one Undo each. In v23,
+`scene_reparent` accepts an `object_id` or an ordered `object_ids` list.
+Choose `parent_id` (null for Scene Root), `before_id`, or `after_id`.
+Sibling placement uses the requested order. Children stay attached to any
+moved ancestor, and world placement is kept when representable.
 The AI can inspect components by ID and add, replace, enable, disable or
 remove them in one batch. Undo restores the entire batch.
 Use **Window → AI Connection…** to pause edits or disconnect. When using a
