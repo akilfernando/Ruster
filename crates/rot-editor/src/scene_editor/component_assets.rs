@@ -441,6 +441,17 @@ impl Browser {
                 row.diagnostic.clone_from(&issue.diagnostic);
                 Some(row)
             }));
+        // A reserved sidecar ID can identify a native issue row, but MCP
+        // reports an asset ID only after an interpretation is registered.
+        for issue in self.issues.values_mut() {
+            if issue
+                .asset_id
+                .as_deref()
+                .is_some_and(|id| !known_ids.contains(id))
+            {
+                issue.asset_id = None;
+            }
+        }
         self.rows
             .sort_by(|left, right| left.searchable.cmp(&right.searchable));
         let mut folders: BTreeSet<_> = folders.into_iter().collect();
@@ -1192,6 +1203,7 @@ mod tests {
         let alias = &browser.rows[browser.by_id[source]];
         assert_eq!(alias.settings, Some(Text::BaseColorSrgb.plain()));
         assert_eq!(alias.status, AssetStatus::Invalid);
+        assert_eq!(browser.issues[source].asset_id, None);
         assert!(!browser.issues[source].last_good_available);
 
         let same_id_failure = rot_assets::ProjectFileIssue {
