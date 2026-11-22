@@ -764,7 +764,7 @@ mod tests {
         assert!(BuildRequest::capture(&session, None).is_err());
         session.save(&input).unwrap();
         let built = build("baked", &session);
-        let baked = ComponentScene::open(&built.join("scene.json")).unwrap();
+        let baked = ComponentScene::open(built.join("scene.json")).unwrap();
         assert_eq!(baked.objects, session.scene().objects);
         assert!(baked.prefabs.is_empty());
         assert_eq!(ComponentScene::open(&input).unwrap().prefabs.len(), 1);

@@ -213,7 +213,7 @@ impl<R: Read> Read for ProbeReader<'_, R> {
 
 impl RuntimeScene {
     pub fn from_snapshot(bytes: &[u8]) -> Result<Self, String> {
-        Self::from_document(SceneSnapshot::from_bytes(bytes).map_err(|error| error.to_string())?)
+        Self::from_document(SceneSnapshot::from_bytes(bytes).map_err(snapshot_error)?)
     }
 
     fn from_document(snapshot: SceneSnapshot) -> Result<Self, String> {
@@ -254,6 +254,16 @@ impl RuntimeScene {
             Self::Behavior(session) => session.sound_asset_references(),
             Self::StaticHierarchy { .. } => SoundAssetReferences::default(),
         }
+    }
+}
+
+fn snapshot_error(error: SceneError) -> String {
+    match error {
+        SceneError::UnsupportedVersion(version) => format!(
+            "unsupported scene version {version}. The player supports versions 1 through {}.",
+            component_scene::FORMAT_VERSION
+        ),
+        error => error.to_string(),
     }
 }
 
@@ -696,8 +706,8 @@ impl CreationManifest {
 
     pub fn load_runtime_scene(&self, root: &ResourceRoot) -> Result<RuntimeScene, String> {
         self.validate()?;
-        let snapshot = SceneSnapshot::from_file(root.open_regular(&self.scene)?)
-            .map_err(|error| error.to_string())?;
+        let snapshot =
+            SceneSnapshot::from_file(root.open_regular(&self.scene)?).map_err(snapshot_error)?;
         let scene = RuntimeScene::from_document(snapshot)?;
         match &scene {
             RuntimeScene::Behavior(session) => self.validate_behavior_scene(session)?,
@@ -737,8 +747,8 @@ impl CreationManifest {
 
     pub fn load_session(&self, root: &ResourceRoot) -> Result<Session, String> {
         self.validate()?;
-        let snapshot = SceneSnapshot::from_file(root.open_regular(&self.scene)?)
-            .map_err(|error| error.to_string())?;
+        let snapshot =
+            SceneSnapshot::from_file(root.open_regular(&self.scene)?).map_err(snapshot_error)?;
         let session = match snapshot {
             SceneSnapshot::Legacy(session) => *session,
             SceneSnapshot::Components(scene) => {
@@ -929,7 +939,8 @@ mod tests {
         let legacy_json = String::from_utf8(legacy.snapshot_bytes().unwrap()).unwrap();
         assert!(test(legacy_json.clone(), limit).is_ok());
         assert!(matches!(test(legacy_json, limit + 1), Err(error) if error.contains("1 MiB")));
-        assert!(test(envelope.replace("23,", "24,"), limit + 1).is_err());
+        assert!(matches!(test(envelope.replace("23,", "24,"), limit + 1),
+            Err(error) if error.contains("unsupported scene version 24") && error.contains("1 through 23")));
         assert!(test(
             format!(r#"{{"format_version":23,{}"#, &envelope[1..]),
             limit + 1
