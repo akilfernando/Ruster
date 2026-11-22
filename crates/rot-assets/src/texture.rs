@@ -152,6 +152,8 @@ fn preflight(bytes: &[u8], role: TextureRole) -> Result<(), AssetError> {
     let mut data_ended = false;
     let mut ended = false;
     let mut ihdr = false;
+    let mut indexed = false;
+    let mut palette_entries = None;
     while offset < bytes.len() {
         let header_end = offset
             .checked_add(8)
@@ -184,8 +186,10 @@ fn preflight(bytes: &[u8], role: TextureRole) -> Result<(), AssetError> {
                 ihdr = true;
                 let (width, height) = (number(&data[..4]), number(&data[4..8]));
                 chain_bytes(width, height, role)?;
+                indexed = role == TextureRole::BaseColor && data[9] == 3;
                 if data[8] != 8
                     || !(matches!(data[9], 2 | 6)
+                        || indexed
                         || (role == TextureRole::Roughness && data[9] == 0))
                     || data[10] != 0
                     || data[11] != 0
@@ -193,13 +197,32 @@ fn preflight(bytes: &[u8], role: TextureRole) -> Result<(), AssetError> {
                 {
                     return Err(error(
                         match role {
-                            TextureRole::BaseColor => "supported PNG is noninterlaced 8-bit RGB/RGBA with standard compression/filtering",
+                            TextureRole::BaseColor => "supported PNG is noninterlaced 8-bit RGB/RGBA/indexed with standard compression/filtering",
                             TextureRole::Roughness => "supported roughness PNG is noninterlaced 8-bit grayscale/RGB/RGBA with standard compression/filtering",
                         },
                     ));
                 }
             }
+            b"PLTE" if indexed => {
+                if image_data
+                    || palette_entries.is_some()
+                    || !(3..=768).contains(&length)
+                    || length % 3 != 0
+                {
+                    return Err(error("indexed PNG requires one valid palette before IDAT"));
+                }
+                palette_entries = Some(length / 3);
+            }
+            b"tRNS" if indexed => {
+                if image_data || palette_entries.is_none_or(|count| !(1..=count).contains(&length))
+                {
+                    return Err(error("invalid indexed PNG transparency"));
+                }
+            }
             b"IDAT" => {
+                if indexed && palette_entries.is_none() {
+                    return Err(error("indexed PNG is missing its palette"));
+                }
                 if data_ended {
                     return Err(error("PNG IDAT chunks must be consecutive"));
                 }
@@ -309,6 +332,7 @@ pub fn decode_png_with_role(bytes: &[u8], role: TextureRole) -> Result<Texture, 
         .map_err(|e| error(format!("PNG finish: {e}")))?;
     let channels = match info.color_type {
         png::ColorType::Grayscale if role == TextureRole::Roughness => 1,
+        png::ColorType::Indexed if role == TextureRole::BaseColor => 1,
         png::ColorType::Rgb => 3,
         png::ColorType::Rgba => 4,
         _ => return Err(error("unexpected PNG output type")),
@@ -321,12 +345,28 @@ pub fn decode_png_with_role(bytes: &[u8], role: TextureRole) -> Result<Texture, 
         return Err(error("PNG output does not match checked header"));
     }
     let mut pixels = Vec::with_capacity(size);
-    for pixel in raw[..info.buffer_size()].chunks_exact(channels) {
-        match role {
-            TextureRole::BaseColor => {
-                pixels.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255])
+    let decoded = &raw[..info.buffer_size()];
+    if info.color_type == png::ColorType::Indexed {
+        let palette = reader
+            .info()
+            .palette
+            .as_deref()
+            .ok_or_else(|| error("indexed PNG is missing its palette"))?;
+        let (colors, _) = palette.as_chunks::<3>();
+        for &index in decoded {
+            let rgb = colors
+                .get(usize::from(index))
+                .ok_or_else(|| error("PNG pixel references an undefined palette entry"))?;
+            pixels.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+        }
+    } else {
+        for pixel in decoded.chunks_exact(channels) {
+            match role {
+                TextureRole::BaseColor => {
+                    pixels.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
+                }
+                TextureRole::Roughness => pixels.push(pixel[0]),
             }
-            TextureRole::Roughness => pixels.push(pixel[0]),
         }
     }
     drop(raw);
@@ -554,6 +594,51 @@ pub(crate) mod tests {
         chunk.extend_from_slice(&crc32(&chunk[4..]).to_be_bytes());
         [&bytes[..at], &chunk, &bytes[at..]].concat()
     }
+    #[test]
+    fn indexed_png_decodes_palette_colors_as_opaque_srgb() {
+        let indexed = |indices: &[u8]| {
+            let mut bytes = Vec::new();
+            let mut encoder = png::Encoder::new(&mut bytes, 2, 2);
+            encoder.set_color(png::ColorType::Indexed);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder.set_palette(vec![12, 34, 56, 70, 80, 90]);
+            encoder.set_trns(vec![0, 120]);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(indices)
+                .unwrap();
+            bytes
+        };
+        let encoded = indexed(&[0, 1, 1, 0]);
+        let expected = png(
+            2,
+            2,
+            png::ColorType::Rgba,
+            png::BitDepth::Eight,
+            &[
+                12, 34, 56, 0, 70, 80, 90, 120, 70, 80, 90, 120, 12, 34, 56, 0,
+            ],
+        );
+        let palette = decode_png(&encoded).unwrap();
+        assert_eq!(
+            palette.mips[0].bytes,
+            [12, 34, 56, 255, 70, 80, 90, 255, 70, 80, 90, 255, 12, 34, 56, 255]
+        );
+        assert_eq!(palette, decode_png(&expected).unwrap());
+        assert!(decode_png_with_role(&encoded, TextureRole::Roughness).is_err());
+
+        let undefined = decode_png(&indexed(&[0, 2, 1, 0])).unwrap_err();
+        assert!(
+            undefined.to_string().contains("undefined palette entry"),
+            "{undefined}"
+        );
+        let duplicate = insert_chunk(&encoded, b"PLTE", &[1, 2, 3], 33);
+        assert!(decode_png(&duplicate).is_err());
+        let invalid_size = insert_chunk(&encoded, b"PLTE", &[1, 2, 3, 4], 33);
+        assert!(decode_png(&invalid_size).is_err());
+    }
+
     // One boundary case owns PNG policy, opaque color normalization, linear-light
     // odd-size mips and derived-cache validation, rather than duplicating them in UI tests.
     #[test]
