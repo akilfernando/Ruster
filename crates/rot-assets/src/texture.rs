@@ -207,7 +207,7 @@ fn preflight(bytes: &[u8], role: TextureRole) -> Result<(), AssetError> {
                 if image_data
                     || palette_entries.is_some()
                     || !(3..=768).contains(&length)
-                    || length % 3 != 0
+                    || !length.is_multiple_of(3)
                 {
                     return Err(error("indexed PNG requires one valid palette before IDAT"));
                 }
