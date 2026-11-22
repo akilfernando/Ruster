@@ -83,8 +83,12 @@ connected project.
   `{"type":"surface_hdr","exposure_stops":0}`, with exposure from −8 to +8
   stops. One accepted change shares Undo with the editor. Apply or cancel
   the native draft before writing or saving.
-- When `scene_components_edit` changes a textured Mesh Renderer binding,
-  include `expected_asset_revision` from the current asset inspection.
+- Use a `set_enabled` edit in `scene_components_edit` to disable or enable
+  an exact Mesh Renderer with one shared Undo. Supported scripted v23 Play
+  and builds use this authored flag. A disabled renderer and its shadow
+  disappear while the object's Lua and enabled collider stay active.
+  When changing a textured Mesh Renderer binding, include
+  `expected_asset_revision` from the current asset inspection.
 - In legacy scenes, `scene_inspect` reports `group_creation_blockers` for
   `scene_group_create`. Each entry includes a `code` and can include a named
   `example`. Codes are `input_actions`, `hud`, `script_sources`,

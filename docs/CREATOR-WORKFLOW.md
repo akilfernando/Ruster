@@ -335,11 +335,15 @@ their placement, including shear. The headless report includes `world_matrices`
 keyed by object ID, and `behavior_runtime_inspect` includes world matrices on
 the paged render objects in a paused static Game. Local Scene visibility only
 affects editing. In Play and Build, disabling a parent hides its descendants.
-Disabling a Mesh Renderer keeps enabled sibling components, such as a Point
-Light, active. Build includes imported meshes and textures referenced by
-disabled geometry and preserves the authored enabled states.
+Disabling a Mesh Renderer keeps enabled components on the same object
+active. In a supported scripted scene, clear **Enable Mesh Renderer**, select
+**Apply**, and start Play. The object keeps its identity, Lua behavior and
+enabled collider while the mesh and its shadow disappear. Undo restores the
+renderer for the next Play session. Build preserves these authored states and
+includes imported meshes and textures referenced by disabled geometry.
 Scripted or animated hierarchies and scenes with input actions, HUD controls
-or a gameplay camera still depend on the behavior runtime.
+or a gameplay camera use the behavior runtime. Its hierarchy still uses
+transform-only groups as parents.
 The editor finds the `rot-motion-lab` player alongside `rot-editor`. Local
 installs include both. When building from source, build both Cargo packages.
 

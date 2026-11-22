@@ -33,9 +33,10 @@ and component values. Viewport settings stay local. Automatic upgrades remain op
 The v23 Inspector shows live Transform and script state during Play and Step.
 The editor and viewer draw, fit and pick from cached world matrices.
 Play and Linux Build share the same render data for supported static hierarchies,
-including shear. Inactive objects and Mesh Renderers stay inactive, and Build
-retains their referenced assets. A relocated Vulkan player loaded a 1.44 MB
-v23 scene with 5,000 objects and an imported textured mesh. Build failures
+including shear. A disabled Mesh Renderer in supported scripted v23 scenes
+hides its mesh and shadow while its Lua behavior and collider keep running.
+Build retains assets referenced by disabled geometry. A relocated Vulkan
+player loaded a 1.44 MB v23 scene with 5,000 objects and an imported mesh. Build failures
 offer keyboard-accessible Error Details.
 v23 point and directional lights can be created as objects or attached to meshes.
 The Inspector and approved MCP clients edit the same component. The editor warns
