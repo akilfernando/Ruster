@@ -36,28 +36,14 @@ impl RuntimeScene {
                 if version == u64::from(component_scene::FORMAT_VERSION) =>
             {
                 let scene = ComponentScene::read_json(bytes).map_err(error)?;
-                let supports_static = supports_static_preview(&scene);
-                // Static lights share the editor's transforms and render budget.
-                let has_light = supports_static
-                    && scene.objects.iter().any(|object| {
-                        object
-                            .components
-                            .iter()
-                            .any(|component| matches!(component.kind, Component::Light { .. }))
-                    });
-                if !has_light {
-                    match Session::from_component_runtime(&scene) {
-                        Ok(session) => return behavior(session),
-                        Err(_)
-                            if supports_static
-                                && scene.objects.iter().any(|object| object.parent.is_some()) => {}
-                        Err(err) => return Err(error(err)),
-                    }
-                }
-                let preview = rot_render::component_preview::project(&scene).map_err(error)?;
+                let Some(preview) = static_component_preview(&scene).map_err(error)? else {
+                    return Session::from_component_runtime(&scene)
+                        .map_err(error)
+                        .and_then(behavior);
+                };
                 Ok(Self::StaticHierarchy {
                     scene: Box::new(scene),
-                    preview: Arc::new(preview),
+                    preview,
                 })
             }
             Err(err) => Err(error(err)),
@@ -78,6 +64,27 @@ impl RuntimeScene {
             Self::StaticHierarchy { .. } => SoundAssetReferences::default(),
         }
     }
+}
+
+/// Return the same authored rendering snapshot for Game view and a packaged player.
+pub fn static_component_preview(
+    scene: &ComponentScene,
+) -> Result<Option<Arc<rot_render::component_preview::ComponentPreview>>, SceneError> {
+    if supports_static_preview(scene)
+        && (scene.objects.len() > rot_scene::MAX_OBJECTS
+            || scene.objects.iter().any(|object| {
+                object.parent.is_some()
+                    || object
+                        .components
+                        .iter()
+                        .any(|component| matches!(component.kind, Component::Light { .. }))
+            }))
+    {
+        return rot_render::component_preview::project(scene)
+            .map(Arc::new)
+            .map(Some);
+    }
+    Ok(None)
 }
 
 fn supports_static_preview(scene: &ComponentScene) -> bool {

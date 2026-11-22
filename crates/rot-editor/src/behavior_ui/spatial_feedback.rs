@@ -311,6 +311,7 @@ mod tests {
                 commit_revision: 0,
                 last_step_commit_revision: None,
                 commit_revision_required: false,
+                static_preview: None,
                 command_schema_hash: None,
                 authoring: std::sync::Arc::new(Default::default()),
                 state: std::sync::Arc::new(rot_behavior::RuntimeState::default()),

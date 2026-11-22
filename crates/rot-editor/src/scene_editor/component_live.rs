@@ -79,7 +79,13 @@ pub(super) fn show(
         Text::ComponentPlayTick.plain(),
         frame.tick
     ));
-    if let Some(values) = transform_values(&frame.scene, selection) {
+    let values = if let Some(object) = selected.filter(|_| frame.static_preview.is_some()) {
+        // Game and the selected authored object belong to the same revision.
+        Some(axes(&object.transform).map(|vector| vector.map(Some)))
+    } else {
+        transform_values(&frame.scene, selection)
+    };
+    if let Some(values) = values {
         ui.separator();
         ui.heading(Text::ComponentTransform.plain());
         for (label, values) in [

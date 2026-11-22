@@ -1433,7 +1433,11 @@ impl ComponentWorkspace {
             }
         }
         surface.input_owned = hud_owns;
-        let interaction = if let (None, Ok(preview)) = (&frame, &self.preview) {
+        let preview = match &frame {
+            Some(frame) => frame.static_preview.as_deref(),
+            None => self.preview.as_ref().ok(),
+        };
+        let interaction = if let Some(preview) = preview {
             preview.render(
                 ui,
                 selection.as_slice(),
@@ -2702,6 +2706,157 @@ mod tests {
         assert_eq!(editor.session.scene(), &reparented);
         assert!(editor.save());
         assert_eq!(ComponentSession::open(&path).unwrap().scene(), &reparented);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn static_component_play_preserves_world_draw_data_and_shares_mcp_controls() {
+        use rot_scene::{Light, Lighting};
+        use serde_json::{json, Value};
+        use std::{
+            sync::Arc,
+            time::{Duration, Instant},
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        let mut authored = rot_render::benchmark::scene(5_000).unwrap();
+        authored.objects.truncate(280);
+        // A nonuniformly scaled parent and a tilted child produce shear.
+        let parent = authored.objects[1].id.clone();
+        authored.objects[1].transform.scale = [2.0, 0.5, 1.0];
+        authored.objects[1].transform.rotation[1] = 0.5;
+        authored.objects[0].parent = Some(parent.clone());
+        authored.objects[0].transform.rotation[2] = 0.7;
+        let sun = Light::directional(None);
+        authored.objects[0].components.push(ComponentInstance {
+            id: "sun".into(),
+            enabled: true,
+            kind: Component::Light {
+                color: sun.color,
+                intensity: sun.intensity,
+                kind: sun.kind,
+            },
+        });
+        let world = authored.world_matrices().unwrap()[0];
+        assert!(Transform::try_from_affine(world).is_err());
+        authored.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let context = egui::Context::default();
+        editor.adopt_workspace(Workspace::at_for_test(dir.path().join("workspace.json")));
+        editor.set_view_flag(Flag::Hidden, true, vec![parent]);
+        assert_eq!(editor.preview.as_ref().unwrap().scene().objects.len(), 278);
+
+        let tick_editor = |editor: &mut ComponentWorkspace| {
+            let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+                editor.show_workspace(ui, false);
+            });
+            output.textures_delta.clear();
+            editor.ai_command("scene", "behavior_runtime_inspect", &json!({}))["result"].clone()
+        };
+        let wait = |editor: &mut ComponentWorkspace, predicate: &dyn Fn(&Value) -> bool| {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                let report = tick_editor(editor);
+                if predicate(&report) {
+                    break report;
+                }
+                assert!(Instant::now() < deadline, "{report}");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        };
+        let control = |editor: &mut ComponentWorkspace, op: &str, run: &str| {
+            editor.ai_command(
+                "scene",
+                op,
+                &json!({
+                    "expected_session_token":"scene", "expected_revision":"0",
+                    "expected_run_id":run
+                }),
+            )
+        };
+
+        editor.command(Action::Play);
+        let running = wait(&mut editor, &|report| {
+            report["playing"] == true && report["tick"] != "0"
+        });
+        let run = running["run_id"].as_str().unwrap();
+        assert_eq!(running["object_count"], 280);
+        assert_eq!(
+            running["objects"][0]["world_matrix"],
+            json!(world.as_mat4().to_cols_array_2d())
+        );
+        assert!(running["lighting"]["lights"].get("sun").is_some());
+        let tail = editor.ai_command(
+            "scene",
+            "behavior_runtime_inspect",
+            &json!({"offset":"272"}),
+        );
+        assert_eq!(tail["result"]["objects"].as_array().unwrap().len(), 8);
+        assert!(tail["result"]["next_offset"].is_null());
+        let expected = rot_app::creation::static_component_preview(&authored)
+            .unwrap()
+            .unwrap();
+        let preview = editor
+            .runtime
+            .displayed_frame()
+            .unwrap()
+            .static_preview
+            .clone()
+            .unwrap();
+        assert_eq!(preview.draw_matrices(), expected.draw_matrices());
+        assert_eq!(preview.scene().lighting, expected.scene().lighting);
+        assert!(matches!(
+            preview.scene().lighting,
+            Lighting::Authored { .. }
+        ));
+
+        assert_eq!(
+            control(&mut editor, "behavior_runtime_pause", "1:0:0")["error"]["code"],
+            "stale_run"
+        );
+        let pause = control(&mut editor, "behavior_runtime_pause", run);
+        assert_eq!(pause["ok"], true, "{pause}");
+        let paused = wait(&mut editor, &|report| {
+            report["playing"] == false && report["busy"] == false
+        });
+        let tick = paused["tick"].as_str().unwrap().parse::<u64>().unwrap();
+        let step = control(&mut editor, "behavior_runtime_step", run);
+        assert_eq!(step["ok"], true, "{step}");
+        let advanced = (tick + 1).to_string();
+        let stepped = wait(&mut editor, &|report| {
+            report["tick"] == advanced && report["busy"] == false
+        });
+        assert_eq!(stepped["playing"], false);
+        assert!(Arc::ptr_eq(
+            &preview,
+            editor
+                .runtime
+                .displayed_frame()
+                .unwrap()
+                .static_preview
+                .as_ref()
+                .unwrap()
+        ));
+        let receipt = editor.ai_command(
+            "scene",
+            "behavior_runtime_inspect",
+            &json!({"operation_id":step["result"]["operation_id"]}),
+        );
+        assert_eq!(receipt["result"]["operation"]["state"], "completed");
+        assert!(receipt["result"]["operation"]["committed_input"].is_null());
+
+        let stop = control(&mut editor, "behavior_runtime_stop", run);
+        assert_eq!(stop["ok"], true, "{stop}");
+        wait(&mut editor, &|report| {
+            report["visible"] == false && report["busy"] == false
+        });
+        assert!(editor.runtime.displayed_frame().is_none());
+        assert_eq!(editor.session.scene(), &authored);
+        assert_eq!(editor.session.revision(), 0);
+        assert!(matches!(editor.session.undo(0), Err(SceneError::NoUndo)));
+        assert_eq!(ComponentScene::open(&path).unwrap(), authored);
     }
 
     #[test]

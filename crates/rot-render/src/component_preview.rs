@@ -17,8 +17,9 @@ use std::sync::Arc;
 
 /// Render-only draw data. The matrices stay aligned with the draw rows even
 /// when several mesh components belong to one object.
+#[derive(Debug)]
 pub struct ComponentPreview {
-    scene: Scene,
+    scene: Arc<Scene>,
     matrices: Vec<Mat4>,
     unpickable: BTreeSet<String>,
     light_budget_exceeded: bool,
@@ -27,6 +28,14 @@ pub struct ComponentPreview {
 impl ComponentPreview {
     pub fn scene(&self) -> &Scene {
         &self.scene
+    }
+
+    pub fn scene_snapshot(&self) -> Arc<Scene> {
+        Arc::clone(&self.scene)
+    }
+
+    pub fn draw_matrices(&self) -> &[Mat4] {
+        &self.matrices
     }
 
     pub fn light_budget_exceeded(&self) -> bool {
@@ -259,7 +268,7 @@ pub fn project_editor(
     }
     scene.lighting.validate()?;
     Ok(ComponentPreview {
-        scene,
+        scene: Arc::new(scene),
         matrices,
         unpickable,
         light_budget_exceeded,

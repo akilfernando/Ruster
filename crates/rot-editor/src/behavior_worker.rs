@@ -14,6 +14,7 @@ use rot_behavior::debug::{
     Breakpoint, DebugError, DebugHandle, DebugRunId, DebugSession, Resume, StopId, StopSnapshot,
 };
 use rot_behavior::{Diagnostic, Engine, Limits, Runtime};
+use rot_render::component_preview::ComponentPreview;
 use rot_scene::input::{ActionFrame, ActionMap, InputKey, KeyEventAccumulator};
 use rot_scene::{Authoring, Scene};
 use sha2::{Digest, Sha256};
@@ -41,6 +42,7 @@ pub(super) struct Frame {
     pub command_schema_hash: Option<String>,
     pub authoring: Arc<Authoring>,
     pub scene: Arc<Scene>,
+    pub static_preview: Option<Arc<ComponentPreview>>,
     pub state: Arc<rot_behavior::RuntimeState>,
     pub input: Option<Arc<LastConsumedInput>>,
     pub query_observations: Option<Arc<[rot_behavior::QueryObservation]>>,
@@ -153,6 +155,10 @@ pub(super) enum Command {
         sounds: Sounds,
         clips: Arc<rot_behavior::Clips>,
     },
+    ResetStatic {
+        key: RunKey,
+        preview: Arc<ComponentPreview>,
+    },
     Play {
         key: RunKey,
     },
@@ -192,6 +198,7 @@ impl Command {
     pub fn key(&self) -> RunKey {
         match self {
             Self::Reset { key, .. }
+            | Self::ResetStatic { key, .. }
             | Self::Play { key }
             | Self::Pause { key }
             | Self::Step { key }
@@ -204,7 +211,7 @@ impl Command {
     }
     fn operation(&self) -> Operation {
         match self {
-            Self::Reset { .. } => Operation::Reset,
+            Self::Reset { .. } | Self::ResetStatic { .. } => Operation::Reset,
             Self::Play { .. } => Operation::Play,
             Self::Pause { .. } => Operation::Pause,
             Self::Step { .. } | Self::ProgramStep { .. } => Operation::Step,
@@ -238,6 +245,10 @@ pub(super) enum Event {
         run: RunInfo,
         input: InputReceipt,
     },
+    StaticStep {
+        key: RunKey,
+        run: RunInfo,
+    },
     State {
         key: RunKey,
         state: State,
@@ -263,6 +274,7 @@ impl Event {
             | Self::Command { key, .. }
             | Self::HudActivation { key, .. }
             | Self::Step { key, .. }
+            | Self::StaticStep { key, .. }
             | Self::State { key, .. }
             | Self::Error { key, .. }
             | Self::Rejected { key, .. } => *key,
@@ -783,7 +795,10 @@ impl Worker {
         }
         let boundary = matches!(
             command,
-            Command::Reset { .. } | Command::Invalidate { .. } | Command::Stop { .. }
+            Command::Reset { .. }
+                | Command::ResetStatic { .. }
+                | Command::Invalidate { .. }
+                | Command::Stop { .. }
         );
         if boundary && (key.reset_epoch == 0 || self.boundary_sent.get()) {
             return Err(RequestError {
@@ -804,6 +819,7 @@ impl Worker {
             Command::Pause { .. }
                 | Command::Step { .. }
                 | Command::Reset { .. }
+                | Command::ResetStatic { .. }
                 | Command::Invalidate { .. }
                 | Command::Stop { .. }
         ) {
@@ -1000,6 +1016,7 @@ impl Drop for Worker {
 struct Execution {
     engine: Option<Engine>,
     runtime: Option<Runtime>,
+    static_frame: Option<Frame>,
     key: Option<RunKey>,
     playing: bool,
     due: Option<Instant>,
@@ -1012,11 +1029,13 @@ struct Execution {
 }
 impl Execution {
     fn info(&self) -> Option<RunInfo> {
-        self.runtime.as_ref().zip(self.key).map(|(r, key)| RunInfo {
-            key,
-            tick: r.tick(),
-        })
+        let tick = match &self.static_frame {
+            Some(frame) => frame.tick,
+            None => self.runtime.as_ref()?.tick(),
+        };
+        self.key.map(|key| RunInfo { key, tick })
     }
+
     fn stop_audio(&mut self, shared: &Shared) {
         self.audio.stop();
         self.audio_enabled = false;
@@ -1047,6 +1066,7 @@ impl Execution {
         self.playing = false;
         self.due = None;
         self.runtime = None;
+        self.static_frame = None;
         self.key = None;
         self.last_input = None;
         self.published_scene = None;
@@ -1088,6 +1108,10 @@ fn frame(shared: &Shared, execution: &mut Execution, repaint: &Option<Repaint>, 
     if !active(shared, info.key) || shared.cancel.load(Ordering::SeqCst) {
         return;
     }
+    if let Some(frame) = &execution.static_frame {
+        publish_frame(shared, frame.clone(), repaint);
+        return;
+    }
     let runtime = execution
         .runtime
         .as_ref()
@@ -1104,9 +1128,9 @@ fn frame(shared: &Shared, execution: &mut Execution, repaint: &Option<Repaint>, 
             .expect("Reset publishes scene before commands"),
     );
     let query_observations = execution.published_queries.clone();
-    let mut latest = shared.latest.lock().unwrap_or_else(|p| p.into_inner());
-    if active(shared, info.key) && !shared.cancel.load(Ordering::SeqCst) {
-        *latest = Some(Frame {
+    publish_frame(
+        shared,
+        Frame {
             state: Arc::clone(
                 execution
                     .runtime
@@ -1132,9 +1156,18 @@ fn frame(shared: &Shared, execution: &mut Execution, repaint: &Option<Repaint>, 
                 .map(str::to_owned),
             authoring: Arc::clone(execution.runtime.as_ref().unwrap().authoring_snapshot()),
             scene,
+            static_preview: None,
             input: execution.last_input.clone(),
             query_observations,
-        });
+        },
+        repaint,
+    );
+}
+
+fn publish_frame(shared: &Shared, frame: Frame, repaint: &Option<Repaint>) {
+    let mut latest = shared.latest.lock().unwrap_or_else(|p| p.into_inner());
+    if active(shared, frame.key) && !shared.cancel.load(Ordering::SeqCst) {
+        *latest = Some(frame);
     }
     drop(latest);
     if let Some(notify) = repaint {
@@ -1167,6 +1200,32 @@ fn process(
         return None;
     }
     match command {
+        Command::ResetStatic { preview, .. } => {
+            execution.stop(shared);
+            if !activate(shared, key) {
+                return None;
+            }
+            execution.key = Some(key);
+            execution.static_frame = Some(Frame {
+                key,
+                tick: 0,
+                commit_revision: 0,
+                last_step_commit_revision: None,
+                commit_revision_required: false,
+                command_schema_hash: None,
+                scene: preview.scene_snapshot(),
+                static_preview: Some(preview),
+                authoring: Arc::default(),
+                state: Arc::default(),
+                input: None,
+                query_observations: None,
+            });
+            frame(shared, execution, repaint, false);
+            Some(Event::Reset {
+                key,
+                run: RunInfo { key, tick: 0 },
+            })
+        }
         Command::Reset {
             scene,
             authoring,
@@ -1175,6 +1234,7 @@ fn process(
             ..
         } => {
             let _ = shared.revoke_input(true);
+            execution.static_frame = None;
             execution.playing = false;
             execution.due = None;
             execution.stop_audio(shared);
@@ -1537,7 +1597,7 @@ fn process(
         }
         Command::Play { .. } | Command::Pause { .. } | Command::Step { .. } => {
             if execution.key != Some(key)
-                || execution.runtime.is_none()
+                || (execution.runtime.is_none() && execution.static_frame.is_none())
                 || shared.cancel.load(Ordering::SeqCst)
             {
                 return Some(reject(
@@ -1557,7 +1617,7 @@ fn process(
                             Some(Instant::now() + Duration::from_secs_f64(limits.fixed_dt));
                     }
                     let input_epoch = shared.input_epoch.load(Ordering::SeqCst);
-                    if input_epoch != u64::MAX {
+                    if execution.runtime.is_some() && input_epoch != u64::MAX {
                         shared.input_enabled.store(true, Ordering::SeqCst);
                         if shared.input_epoch.load(Ordering::SeqCst) != input_epoch
                             || !active(shared, key)
@@ -1599,6 +1659,26 @@ fn process(
 }
 fn step(execution: &mut Execution, shared: &Shared, repaint: &Option<Repaint>) -> Option<Event> {
     let key = execution.key?;
+    if let Some(frame) = &mut execution.static_frame {
+        let Some(tick) = frame.tick.checked_add(1) else {
+            execution.playing = false;
+            execution.due = None;
+            return Some(reject(
+                execution,
+                key,
+                Operation::Step,
+                "Runtime tick limit reached.",
+            ));
+        };
+        frame.tick = tick;
+        frame.commit_revision = tick;
+        frame.last_step_commit_revision = Some(tick);
+        publish_frame(shared, frame.clone(), repaint);
+        return Some(Event::StaticStep {
+            key,
+            run: RunInfo { key, tick },
+        });
+    }
     #[cfg(test)]
     test_gate(&shared.input_gate);
     let admitted = {
@@ -1764,6 +1844,7 @@ fn run(
     let mut execution = Execution {
         engine: None,
         runtime: None,
+        static_frame: None,
         key: None,
         playing: false,
         due: None,
@@ -1828,7 +1909,7 @@ fn run(
             if execution.playing && execution.due.is_some_and(|due| due <= Instant::now()) {
                 let scheduled = execution.due.expect("due tick checked above");
                 if let Some(event) = step(&mut execution, &shared, &repaint) {
-                    if !matches!(event, Event::Step { .. }) {
+                    if !matches!(event, Event::Step { .. } | Event::StaticStep { .. }) {
                         pending = Some(event);
                     }
                 }

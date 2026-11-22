@@ -2119,6 +2119,10 @@ enum Request {
         sounds: BTreeMap<String, Arc<rot_assets::AudioClip>>,
         clips: Arc<rot_behavior::Clips>,
     },
+    ResetStatic {
+        key: RunKey,
+        preview: Arc<rot_render::component_preview::ComponentPreview>,
+    },
     Play(RunKey),
     Pause(RunKey),
     Step(RunKey),
@@ -2154,6 +2158,10 @@ impl Request {
                 authoring: authoring.clone(),
                 sounds: sounds.clone(),
                 clips: clips.clone(),
+            },
+            Self::ResetStatic { key, preview } => VmCommand::ResetStatic {
+                key: *key,
+                preview: Arc::clone(preview),
             },
             Self::Play(key) => VmCommand::Play { key: *key },
             Self::Pause(key) => VmCommand::Pause { key: *key },
@@ -2492,6 +2500,17 @@ impl RuntimeUi {
         generation: u64,
         assets: Option<&rot_assets::AssetStore>,
     ) -> Result<RunKey, String> {
+        if let RuntimeSource::Components(session) = source {
+            if let Some(preview) = rot_app::creation::static_component_preview(session.scene())
+                .map_err(|error| error.to_string())?
+            {
+                let key = self.new_run(ctx, generation, source.revision())?;
+                self.captured = None;
+                self.pending = Some(Request::ResetStatic { key, preview });
+                self.finish_reset_submission(key);
+                return Ok(key);
+            }
+        }
         let (mut scene, authoring) = match source {
             RuntimeSource::Legacy(session) => {
                 (session.scene().clone(), session.authoring().clone())
@@ -2512,13 +2531,8 @@ impl RuntimeUi {
             }
             _ => Arc::default(),
         };
-        self.ensure_worker(ctx)?;
-        self.supersede_hud_activation("Runtime Reset superseded HUD activation");
-        self.supersede_operation();
+        let key = self.new_run(ctx, generation, source.revision())?;
         let worker = self.worker.as_mut().unwrap();
-        let key = worker
-            .advance(generation, source.revision())
-            .map_err(|e| e.to_string())?;
         worker
             .set_breakpoints(key, self.debug.points.clone())
             .map_err(|e| e.to_string())?;
@@ -2531,11 +2545,31 @@ impl RuntimeUi {
             sounds,
             clips,
         });
+        self.finish_reset_submission(key);
+        Ok(key)
+    }
+
+    fn new_run(
+        &mut self,
+        ctx: &egui::Context,
+        generation: u64,
+        revision: u64,
+    ) -> Result<RunKey, String> {
+        self.ensure_worker(ctx)?;
+        self.supersede_hud_activation("Runtime Reset superseded HUD activation");
+        self.supersede_operation();
+        self.worker
+            .as_mut()
+            .unwrap()
+            .advance(generation, revision)
+            .map_err(|error| error.to_string())
+    }
+
+    fn finish_reset_submission(&mut self, key: RunKey) {
         self.begin_reset(key);
         self.diagnostic = None;
         self.status = Text::StartingPlay.plain().into();
         self.flush();
-        Ok(key)
     }
     fn clear_reset(&mut self) {
         self.reset_key = None;
@@ -2609,7 +2643,7 @@ impl RuntimeUi {
                 self.awaiting = Some((
                     key,
                     match request {
-                        Request::Reset { .. } => Operation::Reset,
+                        Request::Reset { .. } | Request::ResetStatic { .. } => Operation::Reset,
                         Request::Play(_) => Operation::Play,
                         Request::Pause(_) => Operation::Pause,
                         Request::Step(_) | Request::ProgramStep { .. } => Operation::Step,
@@ -2657,7 +2691,7 @@ impl RuntimeUi {
                             self.status =
                                 format!("Ran {} at tick {}.", receipt.command_id, receipt.tick);
                         }
-                        VmEvent::Step { run, .. } => {
+                        VmEvent::Step { run, .. } | VmEvent::StaticStep { run, .. } => {
                             self.playing = false;
                             self.status = format!("Advanced to tick {}.", run.tick)
                         }
@@ -4320,6 +4354,7 @@ mod tests {
                 commit_revision: 0,
                 last_step_commit_revision: None,
                 commit_revision_required: false,
+                static_preview: None,
                 command_schema_hash: None,
                 authoring: Arc::new(Default::default()),
                 state: std::sync::Arc::new(rot_behavior::RuntimeState::default()),
@@ -4348,6 +4383,7 @@ mod tests {
             commit_revision: 0,
             last_step_commit_revision: None,
             commit_revision_required: false,
+            static_preview: None,
             command_schema_hash: None,
             authoring: Arc::new(Default::default()),
             state: std::sync::Arc::new(rot_behavior::RuntimeState::default()),
@@ -4368,6 +4404,7 @@ mod tests {
             commit_revision: 0,
             last_step_commit_revision: None,
             commit_revision_required: false,
+            static_preview: None,
             command_schema_hash: None,
             authoring: Arc::new(Default::default()),
             state: std::sync::Arc::new(rot_behavior::RuntimeState::default()),

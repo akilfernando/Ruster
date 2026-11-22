@@ -170,7 +170,7 @@ impl RuntimeUi {
             VmEvent::HudActivation { .. } => return,
             VmEvent::Reset { .. } => Operation::Reset,
             VmEvent::Command { .. } => Operation::Command,
-            VmEvent::Step { .. } => Operation::Step,
+            VmEvent::Step { .. } | VmEvent::StaticStep { .. } => Operation::Step,
             VmEvent::State { state, .. } => match state {
                 State::Playing => Operation::Play,
                 State::Paused => Operation::Pause,
@@ -688,13 +688,25 @@ impl RuntimeUi {
                 .and_then(|frame| frame.query_observations.as_deref())
                 .unwrap_or(&[]);
             let query_page: Vec<_> = queries.iter().skip(offset).take(16).collect();
+            let preview = self
+                .frame
+                .as_ref()
+                .and_then(|frame| frame.static_preview.as_deref());
             let objects: Vec<_> = self
                 .frame
                 .iter()
                 .flat_map(|frame| frame.scene.objects.iter())
+                .enumerate()
                 .skip(offset)
                 .take(16)
-                .map(|object| json!({"id":object.id,"transform":object.transform}))
+                .map(|(index, object)| {
+                    let mut value = json!({"id":object.id,"transform":object.transform});
+                    if let Some(preview) = preview {
+                        value["world_matrix"] =
+                            json!(preview.draw_matrices()[index].to_cols_array_2d());
+                    }
+                    value
+                })
                 .collect();
             let total = self
                 .frame
@@ -721,6 +733,16 @@ impl RuntimeUi {
                 .map_or(0, |frame| frame.state.binding_ids().count());
             let mut report = json!({"run_id":current.map(run_id),"frame_run_id":self.frame.as_ref().map(|frame|run_id(frame.key)),"stale":self.stale,"visible":self.visible,"ready":self.ready,"playing":self.playing,"busy":self.pending.is_some()||self.awaiting.is_some()||self.hud_activation_busy(),"debug_stop_id":self.debug_snapshot().map(|stop|stop.stop.get().to_string()),"tick":self.frame.as_ref().map(|frame|frame.tick.to_string()),"commit_revision":self.frame.as_ref().map(|frame|frame.commit_revision.to_string()),"commit_revision_required":self.frame.as_ref().is_some_and(|frame|frame.commit_revision_required),"last_step_commit_revision":self.frame.as_ref().and_then(|frame|frame.last_step_commit_revision).map(|value|value.to_string()),"status":self.status,"diagnostic":self.diagnostic,"operation":receipt,"recent_operations":self.debug.recent.iter().map(Receipt::value).collect::<Vec<_>>(),"input":input_meta,"last_committed_input":last_input,"query_observations":query_page,"query_observation_count":queries.len(),"next_query_offset":(offset.saturating_add(16)<queries.len()).then(||offset.saturating_add(16).to_string()),"input_observation":"Input and query snapshots describe last_step_commit_revision, preserved across commands.","objects":objects,"object_count":total,"next_offset":(offset.saturating_add(16)<total).then(||offset.saturating_add(16).to_string()),
                 "groups":groups,"group_count":group_count,"next_group_offset":(offset.saturating_add(16)<group_count).then(||offset.saturating_add(16).to_string()),"state_owners":owners,"state_snapshot_status":self.state_snapshot_status(),"state_captured_revision":self.frame.as_ref().map(|frame|frame.key.authored_revision.to_string()),"state_owner_count":owner_count,"next_state_owner_offset":(offset.saturating_add(16)<owner_count).then(||offset.saturating_add(16).to_string())});
+            if let Some(preview) = preview {
+                report["object_transform_space"] = json!("local");
+                report["world_matrix_layout"] = json!("column-major");
+                if offset == 0 {
+                    report["lighting"] = json!(preview.scene().lighting);
+                    if preview.light_budget_exceeded() {
+                        report["lighting_warning"] = json!(Text::ViewportLightLimitDetail.plain());
+                    }
+                }
+            }
             if let Some(audio) = self
                 .worker
                 .as_ref()
