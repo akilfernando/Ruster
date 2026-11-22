@@ -152,7 +152,7 @@ impl ComponentWorkspace {
                     result
                 })
                 .collect();
-            return Ok(json!({
+            let mut result = json!({
                 "scene_id":scene.id, "objects":page, "object_count":scene.objects.len(),
                 "next_offset": (objects.len() > page.len()).then(|| (offset + page.len()).to_string()),
                 "stored_coordinate_space":"local", "loaded_format_version":23,
@@ -165,7 +165,40 @@ impl ComponentWorkspace {
                     "example":"For a pitched roof on a turned house, rotate the parent about Y and tilt the roof child about its local X. Do not add the parent's heading to the roof rotation."
                 })),
                 "dirty":self.session.is_dirty(), "drafts_pending":self.draft_dirty(),
-            }));
+            });
+            if offset == 0 {
+                let active = self
+                    .selected_index
+                    .and_then(|index| scene.objects.get(index))
+                    .map(|object| object.id.as_str())
+                    .or_else(|| {
+                        self.selection_anchor
+                            .as_deref()
+                            .filter(|id| self.selection.contains(*id))
+                    });
+                // Include the active object first; order of other selected IDs is unspecified.
+                let mut selected_ids: Vec<_> = active.into_iter().collect();
+                if self.selection.len() > selected_ids.len() {
+                    selected_ids.extend(
+                        self.selection
+                            .iter()
+                            .map(String::as_str)
+                            .filter(|id| Some(*id) != active)
+                            .take(16 - selected_ids.len()),
+                    );
+                }
+                result["project_name"] = json!(self
+                    .path
+                    .parent()
+                    .and_then(std::path::Path::file_name)
+                    .map(|name| name.to_string_lossy()));
+                result["scene_name"] = json!(scene.id);
+                result["active_object_id"] = json!(active);
+                result["selected_count"] = json!(self.selection.len());
+                result["selected_object_ids"] = json!(selected_ids);
+                result["assembly_guidance"] = json!("When building repeated structures, use viewport_frame and viewport_screenshot to check one complete assembly from the front, side, and top before making linked copies with scene_prefab.");
+            }
+            return Ok(result);
         }
         if op == "scene_components_inspect" {
             return self.inspect_components(args);
@@ -869,10 +902,87 @@ fn decimal(value: &Value) -> Option<u64> {
 mod tests {
     use super::*;
     use crate::workspace::Action;
+    use eframe::egui;
     use rot_scene::{
         component_scene::{ComponentScene, ComponentSession},
         Scene, Session,
     };
+
+    #[test]
+    fn inspect_first_page_reports_live_context_and_bounds_selection() {
+        let directory = tempfile::tempdir().unwrap();
+        let project = directory.path().join("Riverside village");
+        std::fs::create_dir(&project).unwrap();
+        let path = project.join("start.scene");
+        let mut scene = rot_render::benchmark::scene(5_000).unwrap();
+        scene.id = "village".into();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let inspect = |editor: &mut ComponentWorkspace, args: Value| {
+            let reply = editor.ai_command("session", "scene_inspect", &args);
+            assert_eq!(reply["ok"], true, "{reply}");
+            reply["result"].clone()
+        };
+        let offset = json!({"offset":"16"});
+        let second_page = inspect(&mut editor, offset.clone());
+        assert_eq!(second_page["objects"][0]["id"], scene.objects[16].id);
+        assert_eq!(second_page["next_offset"], "32");
+        assert_eq!(second_page["stored_coordinate_space"], "local");
+        assert!(second_page["transform_conventions"].is_null());
+        for key in [
+            "project_name",
+            "scene_name",
+            "active_object_id",
+            "selected_count",
+            "selected_object_ids",
+            "assembly_guidance",
+        ] {
+            assert!(second_page.get(key).is_none(), "{key}");
+        }
+
+        let row = editor.rows.len() - 1;
+        let id = &scene.objects[editor.rows[row].0].id;
+        editor.select_row(row, egui::Modifiers::NONE);
+        let first_page = inspect(&mut editor, json!({}));
+        assert_eq!(first_page["project_name"], "Riverside village");
+        assert_eq!(first_page["scene_name"], "village");
+        assert_eq!(first_page["scene_id"], "village");
+        assert_eq!(first_page["stored_coordinate_space"], "local");
+        assert_eq!(first_page["transform_conventions"]["up"], "+Y");
+        assert_eq!(first_page["objects"].as_array().unwrap().len(), 16);
+        assert!(first_page["objects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|object| object["id"] != *id));
+        assert_eq!(first_page["next_offset"], "16");
+        assert_eq!(first_page["object_count"], 5_000);
+        assert_eq!(first_page["active_object_id"], *id);
+        assert_eq!(first_page["selected_count"], 1);
+        assert_eq!(first_page["selected_object_ids"], json!([id]));
+        assert!(first_page["assembly_guidance"]
+            .as_str()
+            .unwrap()
+            .contains("scene_prefab"));
+        assert_eq!(inspect(&mut editor, offset), second_page);
+
+        editor.select_row(0, egui::Modifiers::SHIFT);
+        let range = inspect(&mut editor, json!({"offset":"0"}));
+        assert_eq!(range["selected_count"], 5_000);
+        assert_eq!(range["selected_object_ids"].as_array().unwrap().len(), 16);
+        assert_eq!(range["active_object_id"], *id);
+        assert_eq!(range["selected_object_ids"][0], *id);
+        let bytes = serde_json::to_vec(&range).unwrap().len();
+        assert!(bytes < 8_192, "first page is {bytes} bytes");
+
+        editor.select(None);
+        let cleared = inspect(&mut editor, json!({}));
+        assert!(cleared["active_object_id"].is_null());
+        assert_eq!(cleared["selected_count"], 0);
+        assert_eq!(cleared["selected_object_ids"], json!([]));
+        assert_eq!(cleared["revision"], "0");
+    }
 
     #[test]
     fn create_child_composes_local_rotation_and_shares_undo() {

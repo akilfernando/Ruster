@@ -13,7 +13,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("scene_prefab", "Save a v23 hierarchy as a prefab, place a linked copy, or apply/revert one override. Place needs asset_id. Tint needs component_id."),
     ("scene_mesh", "Give an object an imported mesh, or null for the built-in cube."),
     ("shader_refresh", "Reload the project's scene.wgsl shader, keeping the last working one on error. builtin true switches back to the built-in shader."),
-    ("scene_inspect", "List scene objects 16 at a time with their transforms and properties. Start without offset and follow next_offset."),
+    ("scene_inspect", "List scene objects and transforms 16 at a time. Start without offset for v23 project, scene, selection, and assembly guidance. Follow next_offset."),
     ("scene_create", "Create a cube, sphere or capsule. In v23, set an optional parent and local transform when creating a part."),
     ("scene_primitive", "Change an object's built-in shape to sphere, capsule or cube (null)."),
     ("scene_rename", "Rename an object. Its ID stays the same."),
