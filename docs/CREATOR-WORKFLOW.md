@@ -217,14 +217,19 @@ its child are selected, the child stays attached to the ancestor. Finish pending
 Inspector edits and unlock the affected objects before grouping. You can undo or
 redo the entire group in one step.
 
-Choose **Move Tool** in the viewport toolbar or press **W** to move the
-selection. Drag an axis, a plane, or the center handle. **World** uses scene
-axes and **Local** uses the active root's orientation. **Snap** sets the
-distance increment, and holding **Ctrl** enables it for the drag.
-When you select a parent and child together, the child follows its parent.
-The geometry and lights respond during the drag. Release to commit one
-Undo entry or press **Escape** to cancel. An approved AI client sees the
-committed scene while you drag and can undo the move after release.
+Use **Move Tool** (W), **Rotate Tool** (E), and **Scale Tool** (R) in the
+viewport toolbar. **World** uses scene axes and **Local** uses the active
+root's orientation. **Center** uses the selection center, **Active** uses
+the active root, and **Individual** transforms each selected root about
+its own origin. When you select a parent and child together, the child
+follows its parent. **Snap** sets the distance, angle, and scale increments.
+Hold **Ctrl** to enable snapping for a drag.
+
+Geometry and lights respond while you drag. Release to commit one Undo
+entry or press **Escape** to cancel. Approved AI clients see the committed
+scene during a drag and share Undo after release. If a rotation or
+nonuniform scale cannot be stored under a scaled parent, use **Local**
+and **Individual**. For scale you can also drag the uniform ring.
 
 Drag a selected row to move the selection together, or set its **Parent**
 in Inspector. Edit **Enabled**, individual

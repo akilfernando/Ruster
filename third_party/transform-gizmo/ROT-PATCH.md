@@ -7,3 +7,7 @@ Origin commit `07a951ec17ebff2de4608b711ee0544ff2c8063c`, published archive hash
 The narrow patch avoids duplicating the egui0.36 paint/math/color/font family while integrating with the existing0.37 editor. Glam0.32 remains additional to renderer0.30; no measured executable/memory or compile-time advantage is implied. No unsafe-code waiver is added. This is a bounded editor integration candidate; native and workflow acceptance remain required. The source/gesture assessment and trial failures/corrections are in `docs/MANIPULATION.md` and `docs/evidence/M8-gizmo-trial.md` from the repository root.
 
 Revisit/removal trigger: upstream compatible release, GUI dependency upgrade, changed geometry conventions or failed interaction evidence. Compare against upstream source and retain license/provenance checks when updating. Do not replace the root HAL patch or weaken Vulkan validation.
+
+The v23 viewport opts into signed scale factors so it can refuse an edit
+that crosses the pivot and would require zero or negative scale. The default
+keeps upstream's unsigned radial scale behavior for other callers.

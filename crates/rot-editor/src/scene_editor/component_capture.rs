@@ -7,8 +7,8 @@ use super::ComponentWorkspace;
 use crate::behavior_worker::{Frame, RunKey};
 use crate::bridge::Authority;
 use eframe::egui;
-use serde_json::{Value, json};
-use std::sync::{Arc, atomic::AtomicBool, mpsc};
+use serde_json::{json, Value};
+use std::sync::{atomic::AtomicBool, mpsc, Arc};
 use std::time::{Duration, Instant};
 
 type CaptureResult = Result<Value, (String, String)>;
@@ -492,7 +492,7 @@ impl ComponentWorkspace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rot_scene::{Scene, Session, component_scene::ComponentScene};
+    use rot_scene::{component_scene::ComponentScene, Scene, Session};
 
     #[test]
     fn viewport_move_handles_preview_descendants_and_cancel_without_mutating_authored_state() {

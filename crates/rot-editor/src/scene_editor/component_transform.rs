@@ -1,12 +1,12 @@
 //! A pointer drag changes only a disposable draw snapshot until release.
 use super::ComponentWorkspace;
 use crate::{
-    manipulation::{Pivot, Tool, nearby_euler, paint_gizmo},
+    manipulation::{nearby_euler, paint_gizmo, Pivot, Tool},
     strings::Text,
 };
 use eframe::egui;
 use glam::{DMat3, DMat4, DQuat, DVec3, EulerRot};
-use rot_render::{ViewportInteraction, component_preview::ComponentPreview};
+use rot_render::{component_preview::ComponentPreview, ViewportInteraction};
 use rot_scene::Transform;
 use std::collections::HashMap;
 use transform_gizmo_egui::{

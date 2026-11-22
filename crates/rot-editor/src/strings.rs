@@ -206,7 +206,7 @@ editor_text! {
     ComponentTransformPivotHint => "Use the selection center, active object, or each object’s own pivot.",
     ComponentRotateUnsupported => "Cannot rotate this selection in this space. Try Local and Individual.",
     ComponentScalePositive => "Scale must stay positive. Drag on the same side of the pivot.",
-    ComponentScaleUnsupported => "Cannot scale this selection on these axes. Try uniform scale or Local and Individual.",
+    ComponentScaleUnsupported => "Scale cannot use these axes. Try uniform scale or Local and Individual.",
     ComponentMoveUp => "Move Up",
     ComponentMoveDown => "Move Down",
     ComponentObjectsSelected => "objects selected",
