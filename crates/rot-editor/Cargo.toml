@@ -11,6 +11,7 @@ repository.workspace = true
 inspection = ["eframe/inspection"]
 
 [dependencies]
+glam = "0.30"
 rot-core = { path = "../rot-core" }
 rot-scene = { path = "../rot-scene" }
 rot-render = { path = "../rot-render" }

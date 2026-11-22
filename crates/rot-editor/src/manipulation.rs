@@ -1156,22 +1156,7 @@ impl Manipulation {
                 }
             }
         }
-        let draw = self.gizmo.draw();
-        let vertices = draw
-            .vertices
-            .into_iter()
-            .zip(draw.colors)
-            .map(|(pos, [r, g, b, a])| egui::epaint::Vertex {
-                pos: pos.into(),
-                uv: egui::Pos2::ZERO,
-                color: egui::Rgba::from_rgba_premultiplied(r, g, b, a).into(),
-            })
-            .collect();
-        ui.painter().with_clip_rect(viewport.rect).add(egui::Mesh {
-            indices: draw.indices,
-            vertices,
-            ..Default::default()
-        });
+        paint_gizmo(ui, viewport.rect, &self.gizmo);
         if blocked {
             return Ok(true);
         }
@@ -1188,6 +1173,25 @@ impl Manipulation {
         }
         Ok(before_active || self.active())
     }
+}
+
+pub(super) fn paint_gizmo(ui: &egui::Ui, rect: egui::Rect, gizmo: &Gizmo) {
+    let draw = gizmo.draw();
+    let vertices = draw
+        .vertices
+        .into_iter()
+        .zip(draw.colors)
+        .map(|(pos, [r, g, b, a])| egui::epaint::Vertex {
+            pos: pos.into(),
+            uv: egui::Pos2::ZERO,
+            color: egui::Rgba::from_rgba_premultiplied(r, g, b, a).into(),
+        })
+        .collect();
+    ui.painter().with_clip_rect(rect).add(egui::Mesh {
+        indices: draw.indices,
+        vertices,
+        ..Default::default()
+    });
 }
 
 #[cfg(test)]

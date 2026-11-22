@@ -129,7 +129,11 @@ impl ComponentWorkspace {
 
     #[cfg(target_os = "linux")]
     pub(super) fn reconcile_prefabs(&mut self) {
-        if !self.prefab_refresh_pending || self.draft_dirty() || self.runtime.in_play_mode() {
+        if !self.prefab_refresh_pending
+            || self.move_tool.active()
+            || self.draft_dirty()
+            || self.runtime.in_play_mode()
+        {
             return;
         }
         self.prefab_refresh_pending = false;

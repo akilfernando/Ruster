@@ -67,7 +67,7 @@ impl ComponentWorkspace {
             if self.ai_asset_write.is_some() || self.asset_import.is_some() {
                 return Err(("asset_busy".into(), "An asset operation is running.".into()));
             }
-            if self.ai_transition_pending() || self.draft_dirty() {
+            if self.ai_transition_pending() || self.authored_edit_pending() {
                 return Err((
                     "drafts_pending".into(),
                     "Finish the pending editor change first.".into(),
@@ -123,7 +123,7 @@ impl ComponentWorkspace {
                         "stale_revision",
                         "The scene changed during asset preparation.",
                     ))
-                } else if self.ai_transition_pending() || self.draft_dirty() {
+                } else if self.ai_transition_pending() || self.authored_edit_pending() {
                     Some(("drafts_pending", "Finish the pending editor change first."))
                 } else if self
                     .assets

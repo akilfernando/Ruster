@@ -17,6 +17,11 @@ use rot_scene::{Primitive, SceneError, Transform};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 
+#[path = "component_move.rs"]
+mod viewport_move;
+use glam::DMat4;
+use viewport_move::MoveTool;
+
 #[cfg(unix)]
 #[path = "component_capture.rs"]
 mod capture;
@@ -210,6 +215,8 @@ pub(super) struct ComponentWorkspace {
     navigation: rot_render::NavigationOptions,
     viewport_aspect: Option<f32>,
     preview: Result<rot_render::component_preview::ComponentPreview, rot_scene::SceneError>,
+    preview_world: Vec<DMat4>,
+    move_tool: MoveTool,
     rows: Vec<(usize, usize)>,
     parents: Vec<Option<usize>>,
     scene_view: SceneViewState,
@@ -255,6 +262,15 @@ impl ComponentWorkspace {
             };
         #[cfg(target_os = "linux")]
         let (assets, asset_error): (Option<rot_assets::AssetStore>, _) = (None, None);
+        let projection = rot_render::component_preview::project_editor_with_world(
+            session.scene(),
+            &BTreeSet::new(),
+            BTreeSet::new(),
+        );
+        let (preview, preview_world) = match projection {
+            Ok((preview, world)) => (Ok(preview), world),
+            Err(error) => (Err(error), Vec::new()),
+        };
         let meshes = assets
             .as_ref()
             .map_or_else(Default::default, rot_assets::AssetStore::mesh_snapshots);
@@ -264,7 +280,9 @@ impl ComponentWorkspace {
         let fit = !session.scene().objects.is_empty();
         let (rows, parents) = hierarchy_rows(&session.scene().objects);
         let mut editor = Self {
-            preview: rot_render::component_preview::project(session.scene()),
+            preview,
+            preview_world,
+            move_tool: MoveTool::default(),
             rows,
             parents,
             scene_view: SceneViewState::default(),
@@ -564,6 +582,7 @@ impl ComponentWorkspace {
     }
 
     fn rebuild_draft(&mut self) {
+        self.move_tool.invalidate_target();
         #[cfg(unix)]
         {
             self.capture.epoch += 1;
@@ -646,6 +665,11 @@ impl ComponentWorkspace {
             || self.multi_draft.as_ref().is_some_and(MultiInspector::dirty)
     }
 
+    #[cfg(unix)]
+    fn authored_edit_pending(&self) -> bool {
+        self.move_tool.active() || self.draft_dirty()
+    }
+
     fn refresh(&mut self) {
         if !self.selection.is_empty() || self.selection_anchor.is_some() {
             let present: HashSet<_> = self
@@ -670,36 +694,46 @@ impl ComponentWorkspace {
     }
 
     fn refresh_view(&mut self) {
+        self.move_tool.cancel();
+        self.move_tool.invalidate_target();
         #[cfg(unix)]
         {
             self.capture.epoch += 1;
         }
         let scene = self.session.scene();
         self.view_flags.clear();
-        if self.scene_view.hidden.is_empty() && self.scene_view.locked.is_empty() {
-            self.preview = rot_render::component_preview::project(scene);
-            return;
-        }
-        self.view_flags
-            .resize(scene.objects.len(), ViewFlags::default());
         let mut hidden = BTreeSet::new();
         let mut locked = BTreeSet::new();
-        for &(index, _) in &self.rows {
-            let id = &scene.objects[index].id;
-            let parent = self.parents[index].map_or(ViewFlags::default(), |i| self.view_flags[i]);
-            let flags = ViewFlags {
-                hidden: parent.hidden || self.scene_view.hidden.contains(id),
-                locked: parent.locked || self.scene_view.locked.contains(id),
-            };
-            if flags.hidden {
-                hidden.insert(id.clone());
+        if !self.scene_view.hidden.is_empty() || !self.scene_view.locked.is_empty() {
+            self.view_flags
+                .resize(scene.objects.len(), ViewFlags::default());
+            for &(index, _) in &self.rows {
+                let id = &scene.objects[index].id;
+                let parent =
+                    self.parents[index].map_or(ViewFlags::default(), |i| self.view_flags[i]);
+                let flags = ViewFlags {
+                    hidden: parent.hidden || self.scene_view.hidden.contains(id),
+                    locked: parent.locked || self.scene_view.locked.contains(id),
+                };
+                if flags.hidden {
+                    hidden.insert(id.clone());
+                }
+                if flags.locked {
+                    locked.insert(id.clone());
+                }
+                self.view_flags[index] = flags;
             }
-            if flags.locked {
-                locked.insert(id.clone());
-            }
-            self.view_flags[index] = flags;
         }
-        self.preview = rot_render::component_preview::project_editor(scene, &hidden, locked);
+        match rot_render::component_preview::project_editor_with_world(scene, &hidden, locked) {
+            Ok((preview, world)) => {
+                self.preview = Ok(preview);
+                self.preview_world = world;
+            }
+            Err(error) => {
+                self.preview = Err(error);
+                self.preview_world.clear();
+            }
+        }
     }
 
     fn set_view_flag(&mut self, flag: Flag, set: bool, ids: Vec<String>) {
@@ -746,6 +780,9 @@ impl ComponentWorkspace {
     }
 
     fn apply(&mut self) -> bool {
+        if self.move_tool.active() {
+            return false;
+        }
         if !self.draft_dirty() {
             return true;
         }
@@ -1185,6 +1222,9 @@ impl ComponentWorkspace {
     }
 
     fn command_from_ui(&mut self, ctx: &egui::Context, action: Action) {
+        if self.move_tool.active() {
+            return;
+        }
         #[cfg(not(target_os = "linux"))]
         let _ = ctx;
         #[cfg(target_os = "linux")]
@@ -1204,8 +1244,15 @@ impl ComponentWorkspace {
     }
 
     fn command(&mut self, action: Action) {
+        if self.move_tool.active() {
+            return;
+        }
         let revision = self.session.revision();
         let result = match action {
+            Action::Move => {
+                self.move_tool.enabled = true;
+                return;
+            }
             Action::Open => {
                 #[cfg(unix)]
                 {
@@ -1406,7 +1453,8 @@ impl ComponentWorkspace {
         let playing = frame.is_some() && self.runtime.is_playing();
         self.navigation.player_view = frame.is_some() && scene.player_view.is_some();
         self.navigation.focusable = playing && !self.session.scene().actions.is_empty();
-        self.navigation.enabled = !blocked && !self.runtime.input_owned();
+        self.navigation.enabled =
+            !blocked && !self.runtime.input_owned() && !self.move_tool.active();
         self.navigation.show_editor_grid = frame.is_none();
         let mut surface =
             rot_render::allocate_viewport(ui, scene, selection.as_slice(), &mut self.navigation);
@@ -1432,10 +1480,10 @@ impl ComponentWorkspace {
                 self.error = Some(error);
             }
         }
-        surface.input_owned = hud_owns;
+        surface.input_owned = hud_owns || self.move_tool.active();
         let preview = match &frame {
             Some(frame) => frame.static_preview.as_deref(),
-            None => self.preview.as_ref().ok(),
+            None => self.move_tool.preview().or(self.preview.as_ref().ok()),
         };
         let interaction = if let Some(preview) = preview {
             preview.render(
@@ -1458,9 +1506,23 @@ impl ComponentWorkspace {
             )
         };
         #[cfg(unix)]
-        let painted = self.capture_viewport(ui, frame.as_ref(), &interaction);
+        let save_pending = self.pending_save.is_some();
         #[cfg(not(unix))]
-        let painted = ();
+        let save_pending = false;
+        let moving = frame.is_none()
+            && self.draw_move_tool(
+                ui,
+                &interaction,
+                blocked
+                    || save_pending
+                    || self.palette.is_some()
+                    || self.draft_dirty()
+                    || self.runtime.in_play_mode(),
+            );
+        #[cfg(unix)]
+        let painted = (!moving).then(|| self.capture_viewport(ui, frame.as_ref(), &interaction));
+        #[cfg(not(unix))]
+        let painted = (!moving).then_some(());
         self.runtime.input_control_click(
             &ctx,
             blocked || hud_owns,
@@ -1486,7 +1548,7 @@ impl ComponentWorkspace {
                 };
                 rot_app::hud::paint_hud(ui.painter(), rect, hud, rows, mode);
             }
-        } else if !blocked {
+        } else if !blocked && !moving {
             if let Some(asset) = AssetDrag::released(ui, &interaction.response) {
                 self.place_asset(&asset, None);
             } else if let Some(ids) = interaction.box_selection.filter(|_| self.apply()) {
@@ -1499,7 +1561,64 @@ impl ComponentWorkspace {
             }
         }
         self.runtime.paint_play_border(ui, rect);
-        Some(painted)
+        painted
+    }
+
+    fn move_toolbar(&mut self, ui: &mut egui::Ui, blocked: bool) {
+        ui.add_enabled_ui(!blocked, |ui| {
+            if ui
+                .selectable_label(!self.move_tool.enabled, Text::ComponentSelectTool.plain())
+                .clicked()
+            {
+                self.move_tool.enabled = false;
+                if self.error.as_deref() == Some(Text::ComponentMoveHidden.plain()) {
+                    self.error = None;
+                }
+            }
+            let move_label = Action::Move.label();
+            let tooltip = self.workspace.shortcut_hint(Action::Move);
+            if ui
+                .selectable_label(self.move_tool.enabled, move_label)
+                .on_hover_text(format!("{move_label} {tooltip}"))
+                .clicked()
+            {
+                self.command(Action::Move);
+            }
+            egui::ComboBox::from_id_salt("component_move_space")
+                .width(56.0)
+                .selected_text(if self.move_tool.local {
+                    Text::Local.plain()
+                } else {
+                    Text::World.plain()
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.move_tool.local, false, Text::World.plain());
+                    ui.selectable_value(&mut self.move_tool.local, true, Text::Local.plain());
+                })
+                .response
+                .on_hover_text(Text::SceneEditorHandleOrientationWorldOr.plain());
+            egui::ComboBox::from_id_salt("component_move_snap")
+                .width(64.0)
+                .selected_text(if self.move_tool.snap {
+                    Text::SnapOn.plain()
+                } else {
+                    Text::Snap.plain()
+                })
+                .show_ui(ui, |ui| {
+                    ui.checkbox(&mut self.move_tool.snap, Text::SnapWhileDragging.plain());
+                    crate::ui_kit::property_row(
+                        ui,
+                        Text::ComponentMoveSnapDistance.plain(),
+                        |ui| {
+                            ui.add(
+                                egui::DragValue::new(&mut self.move_tool.snap_distance)
+                                    .speed(0.1)
+                                    .range(0.001..=1000.0),
+                            );
+                        },
+                    );
+                });
+        });
     }
 
     pub(super) fn show(&mut self, ui: &mut egui::Ui) -> Option<OpenedScene> {
@@ -1541,14 +1660,33 @@ impl ComponentWorkspace {
         #[cfg(target_os = "linux")]
         self.asset_import_frame(&ctx, blocked);
         let asset_dialog = self.asset_browser.file_dialog_open();
+        if blocked
+            || asset_dialog
+            || self.runtime.in_play_mode()
+            || ctx.input(|input| {
+                !input.focused
+                    || input.key_pressed(egui::Key::Escape)
+                    || input.viewport().close_requested()
+            })
+        {
+            self.move_tool.cancel();
+        }
+        let move_active = self.move_tool.active();
         self.runtime.input_begin(&ctx, blocked || asset_dialog);
         if let Some(action) = self.workspace.shortcuts(
             &ctx,
-            blocked || asset_dialog || self.runtime.input_owned() || self.palette.is_some(),
+            blocked
+                || asset_dialog
+                || move_active
+                || self.runtime.input_owned()
+                || self.palette.is_some(),
         ) {
             self.command_from_ui(&ctx, action);
         }
         egui::Panel::top("component_menu").show(ui, |ui| {
+            if move_active {
+                ui.disable();
+            }
             egui::MenuBar::new().ui(ui, |ui| {
                 editor_theme::text_menu(ui, Text::ComponentFileMenu.plain(), |ui| {
                     self.menu_action(ui, Action::Open);
@@ -1628,13 +1766,19 @@ impl ComponentWorkspace {
         });
         let assets_loading = self.assets_loading();
         egui::Panel::top("component_play").show(ui, |ui| {
-            self.runtime.controls_for_source(
-                ui,
-                RuntimeSource::Components(&self.session),
-                RUNTIME_GENERATION,
-                blocked || assets_loading || self.draft_dirty(),
-                self.assets.as_ref(),
-            );
+            if move_active {
+                ui.disable();
+            }
+            ui.horizontal(|ui| {
+                self.move_toolbar(ui, blocked || self.runtime.in_play_mode());
+                self.runtime.controls_for_source(
+                    ui,
+                    RuntimeSource::Components(&self.session),
+                    RUNTIME_GENERATION,
+                    blocked || assets_loading || move_active || self.draft_dirty(),
+                    self.assets.as_ref(),
+                );
+            });
         });
         #[cfg(target_os = "linux")]
         let build_status = self.build.status();
@@ -1694,6 +1838,7 @@ impl ComponentWorkspace {
                         action,
                         Action::Open
                             | Action::Save
+                            | Action::Move
                             | Action::Undo
                             | Action::Redo
                             | Action::CreateEmpty
@@ -1729,13 +1874,16 @@ impl ComponentWorkspace {
                 self.command_from_ui(&ctx, action);
             }
         }
-        self.show_assets(ui, blocked);
+        self.show_assets(ui, blocked || move_active);
         let hierarchy_limit = ui.available_width() * 0.26;
         let inspector_limit = ui.available_width() * 0.34;
         egui::Panel::left("component_hierarchy")
             .default_size(self.workspace.prefs.hierarchy_width.min(hierarchy_limit))
             .max_size(hierarchy_limit)
             .show(ui, |ui| {
+                if move_active {
+                    ui.disable();
+                }
                 ui.set_min_width(ui.available_width());
                 ui.heading(Text::ComponentHierarchy.plain());
                 editor_theme::text_menu(ui, Text::ComponentCreate.plain(), |ui| {
@@ -1926,6 +2074,9 @@ impl ComponentWorkspace {
             .default_size(self.workspace.prefs.inspector_width.min(inspector_limit))
             .max_size(inspector_limit)
             .show(ui, |ui| {
+                if move_active {
+                    ui.disable();
+                }
                 ui.set_min_width(ui.available_width());
                 ui.heading(Text::ComponentInspector.plain());
                 if self.asset_browser.selected.is_some() {
@@ -2044,7 +2195,7 @@ impl ComponentWorkspace {
                 }
             });
         #[cfg(target_os = "linux")]
-        self.asset_context_frame(&ctx, blocked);
+        self.asset_context_frame(&ctx, blocked || move_active);
         let viewport = egui::CentralPanel::default()
             .show(ui, |ui| {
                 draw_viewport

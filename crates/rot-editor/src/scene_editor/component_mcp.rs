@@ -83,7 +83,7 @@ impl ComponentWorkspace {
                 ));
             }
             if !matches!(op, "behavior_runtime_stop" | "behavior_runtime_state")
-                && (self.ai_transition_pending() || self.draft_dirty())
+                && (self.ai_transition_pending() || self.authored_edit_pending())
             {
                 return Err(fail(
                     "drafts_pending",
@@ -165,7 +165,7 @@ impl ComponentWorkspace {
                     "composition":"world = parent_world * translation * Rz * Ry * Rx * scale",
                     "example":"For a pitched roof on a turned house, rotate the parent about Y and tilt the roof child about its local X. Do not add the parent's heading to the roof rotation."
                 })),
-                "dirty":self.session.is_dirty(), "drafts_pending":self.draft_dirty(),
+                "dirty":self.session.is_dirty(), "drafts_pending":self.authored_edit_pending(),
             });
             if offset == 0 {
                 if self.light_budget_exceeded() {
@@ -264,7 +264,7 @@ impl ComponentWorkspace {
                 "Inspect the current revision again.".into(),
             ));
         }
-        if self.ai_transition_pending() || self.draft_dirty() {
+        if self.ai_transition_pending() || self.authored_edit_pending() {
             return Err((
                 "drafts_pending",
                 "Finish the pending editor change first.".into(),

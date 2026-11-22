@@ -225,7 +225,7 @@ impl ComponentWorkspace {
             || self.runtime.is_playing()
             || self.runtime.input_owned()
             || self.capture.input_active
-            || self.draft_dirty()
+            || self.authored_edit_pending()
         {
             return Err("view_busy");
         }
@@ -280,6 +280,9 @@ impl ComponentWorkspace {
         args: &Value,
     ) -> CaptureResult {
         let map = args.as_object().ok_or_else(|| fail("invalid_arguments"))?;
+        if self.move_tool.active() && op != "viewport_capture_inspect" {
+            return Err(fail("view_busy"));
+        }
         match op {
             "viewport_inspect" => {
                 if !map.is_empty() {
@@ -490,6 +493,257 @@ impl ComponentWorkspace {
 mod tests {
     use super::*;
     use rot_scene::{component_scene::ComponentScene, Scene, Session};
+
+    #[test]
+    fn viewport_move_handles_preview_descendants_and_cancel_without_mutating_authored_state() {
+        use crate::workspace::Action;
+        use glam::{DMat4, DQuat, DVec3};
+        use rot_scene::component_scene::{
+            Component, ComponentInstance, ComponentSession, ObjectNode,
+        };
+        use rot_scene::{LightKind, Transform};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.objects[0].parent = Some("wrapper".into());
+        scene.objects[0].transform.rotation[2] = 0.45;
+        scene.objects[1].parent = Some(scene.objects[0].id.clone());
+        scene.objects[1].components.push(ComponentInstance {
+            id: "bulb".into(),
+            enabled: true,
+            kind: Component::Light {
+                color: [1.; 3],
+                intensity: 1.,
+                kind: LightKind::Point { range: 5. },
+            },
+        });
+        scene.objects.push(ObjectNode {
+            id: "wrapper".into(),
+            name: "Wrapper".into(),
+            enabled: true,
+            parent: None,
+            transform: Transform {
+                rotation: [0., 0.4, 0.1],
+                scale: [1.8, 0.8, 0.6],
+                ..Default::default()
+            },
+            components: Vec::new(),
+        });
+        let world = scene.world_matrices().unwrap();
+        assert!(Transform::try_from_affine(world[0]).is_err());
+        scene.save_new(&path).unwrap();
+        let saved = std::fs::read(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.selection = scene.objects[..3]
+            .iter()
+            .map(|object| object.id.clone())
+            .collect();
+        editor.selection_anchor = Some(scene.objects[0].id.clone());
+        editor.rebuild_draft();
+        editor.set_view_flag(
+            super::super::Flag::Locked,
+            true,
+            vec![scene.objects[2].id.clone()],
+        );
+        let center = (world[0].w_axis.truncate() + world[2].w_axis.truncate()) / 2.;
+        editor.navigation.camera = Some(rot_render::CameraState {
+            target: center.as_vec3().to_array(),
+            yaw: 0.4,
+            pitch: 0.32,
+            distance: 8.,
+            orthographic: true,
+        });
+        editor.navigation.reset = false;
+        let ctx = egui::Context::default();
+        let authority = Authority::test_approved();
+        let frame = |editor: &mut ComponentWorkspace, focused, events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280., 800.),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    editor.show_workspace(ui, true);
+                },
+            );
+            output.textures_delta.clear();
+        };
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(&mut editor, true, vec![]);
+        frame(&mut editor, true, vec![key(egui::Key::W)]);
+        assert!(editor.move_tool.enabled);
+        let view = editor.capture.view.unwrap();
+        let rect = view.viewport_rect;
+        let projection = DMat4::from_cols_array_2d(&view.matrices.1.map(|c| c.map(f64::from)));
+        let camera = DMat4::from_cols_array_2d(&view.matrices.0.map(|c| c.map(f64::from)));
+        let pixels_to_world = ((projection * camera * center.extend(1.)).w / projection.x_axis.x)
+            * 2.
+            / f64::from(rect.width());
+        let coord = |axis: DVec3, pixels: f64| {
+            let ndc =
+                (projection * camera).project_point3(center + axis * pixels_to_world * pixels);
+            rect.center()
+                + egui::vec2(
+                    ndc.x as f32 * rect.width() / 2.,
+                    -ndc.y as f32 * rect.height() / 2.,
+                )
+        };
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let press = |editor: &mut ComponentWorkspace, start| {
+            frame(editor, true, vec![egui::Event::PointerMoved(start)]);
+            frame(editor, true, vec![button(start, true)]);
+            assert!(
+                editor.move_tool.active(),
+                "failed to press actual Move handle at {start:?}"
+            );
+        };
+        let start = coord(DVec3::X, 42.);
+        let end = coord(DVec3::X, 90.);
+        press(&mut editor, start);
+        frame(&mut editor, true, vec![button(start, false)]);
+        assert_eq!(editor.session.revision(), 0);
+
+        press(&mut editor, start);
+        frame(&mut editor, true, vec![egui::Event::PointerMoved(end)]);
+        let transient = editor.move_tool.preview().unwrap();
+        let base = editor.preview.as_ref().unwrap();
+        let delta =
+            (transient.draw_matrices()[0].w_axis - base.draw_matrices()[0].w_axis).truncate();
+        assert!(delta.x.abs() > 0.1 && delta.y.abs() < 1e-5 && delta.z.abs() < 1e-5);
+        assert_eq!(
+            transient.draw_matrices()[1].w_axis,
+            base.draw_matrices()[1].w_axis + delta.extend(0.)
+        );
+        let light = |preview: &rot_render::component_preview::ComponentPreview| {
+            glam::Vec3::from_array(
+                preview
+                    .scene()
+                    .lighting
+                    .light("bulb")
+                    .unwrap()
+                    .transform
+                    .translation,
+            )
+        };
+        assert_eq!(light(transient), light(base) + delta);
+        #[cfg(target_os = "linux")]
+        {
+            editor.prefab_refresh_pending = true;
+            editor.reconcile_prefabs();
+            assert!(editor.prefab_refresh_pending);
+        }
+        assert!(editor.capture.view.is_none());
+        let report = editor.ai_command("scene", "scene_inspect", &json!({}));
+        assert_eq!(report["result"]["drafts_pending"], true);
+        assert_eq!(
+            report["result"]["objects"][0]["transform"],
+            json!(scene.objects[0].transform)
+        );
+        let inspect =
+            editor.ai_capture_command(&authority, "scene", "viewport_inspect", &json!({}));
+        assert_eq!(inspect["error"]["code"], "view_busy");
+        let edit = editor.ai_command(
+            "scene",
+            "scene_rename",
+            &json!({
+                "expected_session_token":"scene","expected_revision":"0",
+                "object_id":scene.objects[0].id,"name":"Ignored"
+            }),
+        );
+        assert_eq!(edit["error"]["code"], "drafts_pending");
+        editor.command(Action::CreateCube);
+        assert!(!editor.save());
+        assert_eq!(editor.session.scene(), &scene);
+
+        let release = coord(DVec3::X, 110.);
+        frame(&mut editor, true, vec![button(release, false)]);
+        assert!(!editor.move_tool.active());
+        assert!(editor.capture.view.is_none());
+        assert_eq!(editor.session.revision(), 1);
+        let committed = editor.session.scene().world_matrices().unwrap();
+        let final_delta = committed[0].w_axis.truncate() - world[0].w_axis.truncate();
+        assert!(final_delta.x > f64::from(delta.x) + 0.1);
+        for index in 0..3 {
+            assert!(
+                (committed[index].w_axis.truncate() - world[index].w_axis.truncate())
+                    .abs_diff_eq(final_delta, 1e-5)
+            );
+        }
+        assert_eq!(
+            editor.session.scene().objects[1].transform,
+            scene.objects[1].transform
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene(), &scene);
+        assert!(matches!(
+            editor.session.undo(editor.session.revision()),
+            Err(rot_scene::SceneError::NoUndo)
+        ));
+
+        let revision = editor.session.revision();
+        editor.move_tool.local = true;
+        let world_x = (DQuat::from_rotation_z(0.1_f32.into())
+            * DQuat::from_rotation_y(0.4_f32.into())
+            * DQuat::from_rotation_z(0.45_f32.into()))
+            * DVec3::X;
+        let start = coord(world_x, 42.);
+        let end = coord(world_x, 90.);
+        press(&mut editor, start);
+        frame(&mut editor, true, vec![egui::Event::PointerMoved(end)]);
+        let local_displacement = (editor.move_tool.preview().unwrap().draw_matrices()[0].w_axis
+            - editor.preview.as_ref().unwrap().draw_matrices()[0].w_axis)
+            .truncate()
+            .as_dvec3();
+        assert!(
+            local_displacement.length() > 0.1 && local_displacement.cross(world_x).length() < 1e-5
+        );
+        frame(&mut editor, true, vec![key(egui::Key::Escape)]);
+        frame(&mut editor, true, vec![button(end, false)]);
+        assert!(!editor.move_tool.active());
+        assert_eq!(editor.session.revision(), revision);
+        press(&mut editor, start);
+        frame(&mut editor, true, vec![egui::Event::PointerMoved(end)]);
+        frame(&mut editor, false, vec![button(end, false)]);
+        assert!(!editor.move_tool.active());
+        assert_eq!(editor.session.scene(), &scene);
+        assert_eq!(editor.session.revision(), revision);
+        #[cfg(target_os = "linux")]
+        assert!(!editor.prefab_refresh_pending);
+
+        editor.set_view_flag(
+            super::super::Flag::Hidden,
+            true,
+            vec![scene.objects[2].id.clone()],
+        );
+        frame(&mut editor, true, vec![egui::Event::PointerMoved(start)]);
+        assert_eq!(
+            editor.error.as_deref(),
+            Some(crate::strings::Text::ComponentMoveHidden.plain())
+        );
+        frame(&mut editor, true, vec![button(start, true)]);
+        assert!(!editor.move_tool.active());
+        frame(&mut editor, true, vec![button(start, false)]);
+        assert_eq!(editor.session.revision(), revision);
+    }
 
     #[test]
     fn capture_owner_and_expiration_release_the_readback_permit() {

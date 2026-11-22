@@ -3418,6 +3418,7 @@ dependencies = [
  "base64",
  "eframe",
  "egui_tiles",
+ "glam 0.30.10",
  "log",
  "png",
  "rfd",

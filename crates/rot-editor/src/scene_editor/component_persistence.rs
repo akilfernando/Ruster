@@ -88,7 +88,7 @@ impl ComponentWorkspace {
     }
 
     fn save_destination(&self, grant: Option<&SaveGrant>) -> Result<&Path, Failure> {
-        if self.ai_transition_pending() || self.draft_dirty() {
+        if self.ai_transition_pending() || self.authored_edit_pending() {
             return Err(error(
                 "drafts_pending",
                 "Finish the pending editor change before saving.",
@@ -131,7 +131,7 @@ impl ComponentWorkspace {
             "save_block":save.err().map(|(code, message)| json!({"code":code,"message":message})),
             "save_as_block":{"code":"save_as_unsupported","message":IN_PLACE_ONLY},
             "dirty":self.session.is_dirty(),
-            "drafts_pending":self.draft_dirty(),
+            "drafts_pending":self.authored_edit_pending(),
             "last_committed_save":self.last_save,
             "receipt_scope":"Last successful save in this scene incarnation. Inspect the receipt after an unknown outcome before deciding whether to save again.",
         })))

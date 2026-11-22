@@ -5,7 +5,7 @@ use super::{
     ViewportInteraction, ViewportSurface,
 };
 use eframe::egui;
-use glam::{EulerRot, Mat3, Mat4, Quat, Vec3};
+use glam::{DMat4, EulerRot, Mat3, Mat4, Quat, Vec3};
 use rot_scene::component_scene::{self, Component, ComponentScene, Geometry};
 use rot_scene::{
     Light, LightKind, Lighting, Object, Scene, SceneError, Transform, MAX_DIRECTIONAL_LIGHTS,
@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 /// Render-only draw data. The matrices stay aligned with the draw rows even
 /// when several mesh components belong to one object.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ComponentPreview {
     scene: Arc<Scene>,
     matrices: Vec<Mat4>,
@@ -36,6 +36,39 @@ impl ComponentPreview {
 
     pub fn draw_matrices(&self) -> &[Mat4] {
         &self.matrices
+    }
+
+    /// Translate the affected draw rows from the same committed anchor.
+    pub fn translate_from(
+        &mut self,
+        anchor: &Self,
+        draw_rows: &[usize],
+        light_ids: &[String],
+        displacement: Vec3,
+    ) -> Result<(), SceneError> {
+        for &row in draw_rows {
+            let original = anchor.matrices[row];
+            self.matrices[row].w_axis = original.w_axis + displacement.extend(0.0);
+            if !self.matrices[row].w_axis.is_finite() {
+                return Err(SceneError::Invalid(
+                    "world move exceeds renderer precision".into(),
+                ));
+            }
+        }
+        if !light_ids.is_empty() {
+            let Lighting::Authored { lights, .. } = &mut Arc::make_mut(&mut self.scene).lighting
+            else {
+                unreachable!("preview light IDs require authored lighting");
+            };
+            for id in light_ids {
+                let light = lights.get_mut(id).expect("preview light ID");
+                let original = anchor.scene.lighting.light(id).expect("committed light");
+                light.transform.translation =
+                    (Vec3::from_array(original.transform.translation) + displacement).to_array();
+                light.transform.validate()?;
+            }
+        }
+        Ok(())
     }
 
     pub fn light_budget_exceeded(&self) -> bool {
@@ -154,6 +187,15 @@ pub fn project_editor(
     hidden: &BTreeSet<String>,
     unpickable: BTreeSet<String>,
 ) -> Result<ComponentPreview, SceneError> {
+    project_editor_with_world(component_scene, hidden, unpickable).map(|(preview, _)| preview)
+}
+
+/// Return the world poses already evaluated for this projection.
+pub fn project_editor_with_world(
+    component_scene: &ComponentScene,
+    hidden: &BTreeSet<String>,
+    unpickable: BTreeSet<String>,
+) -> Result<(ComponentPreview, Vec<DMat4>), SceneError> {
     let hierarchy = component_scene.validate()?;
     let world = component_scene.world_matrices()?;
     let mut scene = Scene::empty(component_scene.id.clone());
@@ -267,12 +309,15 @@ pub fn project_editor(
         };
     }
     scene.lighting.validate()?;
-    Ok(ComponentPreview {
-        scene: Arc::new(scene),
-        matrices,
-        unpickable,
-        light_budget_exceeded,
-    })
+    Ok((
+        ComponentPreview {
+            scene: Arc::new(scene),
+            matrices,
+            unpickable,
+            light_budget_exceeded,
+        },
+        world,
+    ))
 }
 
 #[cfg(test)]

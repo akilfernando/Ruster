@@ -1,0 +1,380 @@
+//! A pointer drag changes only a disposable draw snapshot until release.
+use super::ComponentWorkspace;
+use crate::{manipulation::paint_gizmo, strings::Text};
+use eframe::egui;
+use glam::{DMat4, DQuat, DVec3};
+use rot_render::{component_preview::ComponentPreview, ViewportInteraction};
+use rot_scene::component_scene::ObjectNode;
+use std::collections::HashSet;
+use transform_gizmo_egui::{
+    math::{
+        DMat4 as GizmoMatrix, DQuat as GizmoRotation, DVec3 as GizmoVector,
+        Transform as GizmoTransform,
+    },
+    prelude::*,
+};
+
+pub(super) struct MoveTool {
+    pub enabled: bool,
+    pub local: bool,
+    pub snap: bool,
+    pub snap_distance: f32,
+    target: Option<Target>,
+    target_dirty: bool,
+    gesture: Option<Gesture>,
+    gizmo: Gizmo,
+    suppress_pointer: bool,
+}
+
+impl Default for MoveTool {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            local: false,
+            snap: false,
+            snap_distance: 0.5,
+            target: None,
+            target_dirty: true,
+            gesture: None,
+            gizmo: Gizmo::default(),
+            suppress_pointer: false,
+        }
+    }
+}
+
+struct Target {
+    proxy: GizmoTransform,
+    roots: Vec<usize>,
+}
+
+struct Gesture {
+    revision: u64,
+    cursor_start: egui::Pos2,
+    proxy: GizmoTransform,
+    roots: Vec<MoveRoot>,
+    preview: ComponentPreview,
+    draw_rows: Vec<usize>,
+    lights: Vec<String>,
+}
+
+struct MoveRoot {
+    index: usize,
+    parent_inverse: DMat4,
+    original: [f32; 3],
+    local: [f32; 3],
+}
+
+impl MoveTool {
+    pub fn active(&self) -> bool {
+        self.gesture.is_some()
+    }
+
+    pub fn preview(&self) -> Option<&ComponentPreview> {
+        self.gesture.as_ref().map(|gesture| &gesture.preview)
+    }
+
+    pub fn invalidate_target(&mut self) {
+        self.target = None;
+        self.target_dirty = true;
+    }
+
+    pub fn cancel(&mut self) {
+        if self.gesture.take().is_some() {
+            self.suppress_pointer = true;
+            self.gizmo = Gizmo::default();
+        }
+    }
+}
+
+impl ComponentWorkspace {
+    fn move_target(&self) -> Result<Option<Target>, Text> {
+        if self.selection.is_empty() {
+            return Ok(None);
+        }
+        let objects = &self.session.scene().objects;
+        let mut roots = Vec::new();
+        let mut included_depth = None;
+        for &(index, depth) in &self.rows {
+            if included_depth.is_some_and(|start| depth <= start) {
+                included_depth = None;
+            }
+            if included_depth.is_none() && self.selection.contains(&objects[index].id) {
+                included_depth = Some(depth);
+                if self.view_flags.get(index).is_some_and(|flags| flags.hidden) {
+                    return Err(Text::ComponentMoveHidden);
+                }
+                // Lock excludes pointer picking. Hierarchy selection stays editable.
+                roots.push(index);
+            }
+        }
+        let Some(&first) = roots.first() else {
+            return Ok(None);
+        };
+        let active = roots
+            .iter()
+            .copied()
+            .find(|&index| self.selection_anchor.as_deref() == Some(&objects[index].id))
+            .unwrap_or(first);
+        let mut orientation = node_rotation(&objects[active]);
+        let mut ancestor = self.parents[active];
+        while let Some(index) = ancestor {
+            orientation = node_rotation(&objects[index]) * orientation;
+            ancestor = self.parents[index];
+        }
+        let center = roots
+            .iter()
+            .map(|&index| self.preview_world[index].w_axis.truncate())
+            .sum::<DVec3>()
+            / roots.len() as f64;
+        Ok(Some(Target {
+            proxy: GizmoTransform {
+                translation: GizmoVector::from_array(center.to_array()).into(),
+                rotation: GizmoRotation::from_array(orientation.normalize().to_array()).into(),
+                scale: GizmoVector::ONE.into(),
+            },
+            roots,
+        }))
+    }
+
+    fn begin_move(&self, cursor_start: egui::Pos2) -> Option<Gesture> {
+        let target = self.move_tool.target.as_ref()?;
+        let objects = &self.session.scene().objects;
+        let preview = self.preview.as_ref().ok()?;
+        let roots: Vec<_> = target
+            .roots
+            .iter()
+            .map(|&index| {
+                let parent_inverse = self.parents[index].map_or(DMat4::IDENTITY, |parent| {
+                    self.preview_world[parent].inverse()
+                });
+                let original = objects[index].transform.translation;
+                MoveRoot {
+                    index,
+                    parent_inverse,
+                    original,
+                    local: original,
+                }
+            })
+            .collect();
+        if roots.iter().any(|root| !root.parent_inverse.is_finite()) {
+            return None;
+        }
+
+        let selected: HashSet<_> = target.roots.iter().copied().collect();
+        let mut moved = HashSet::new();
+        let mut lights = Vec::new();
+        let mut depth = None;
+        for &(index, row_depth) in &self.rows {
+            if depth.is_some_and(|start| row_depth <= start) {
+                depth = None;
+            }
+            if selected.contains(&index) {
+                depth = Some(row_depth);
+            }
+            if depth.is_some() {
+                moved.insert(objects[index].id.as_str());
+                lights.extend(objects[index].components.iter().filter_map(|component| {
+                    preview
+                        .scene()
+                        .lighting
+                        .light(&component.id)
+                        .map(|_| component.id.clone())
+                }));
+            }
+        }
+        let draw_rows = preview
+            .scene()
+            .objects
+            .iter()
+            .enumerate()
+            .filter_map(|(index, object)| moved.contains(object.id.as_str()).then_some(index))
+            .collect();
+        Some(Gesture {
+            revision: self.session.revision(),
+            cursor_start,
+            proxy: target.proxy,
+            roots,
+            preview: preview.clone(),
+            draw_rows,
+            lights,
+        })
+    }
+
+    pub(super) fn draw_move_tool(
+        &mut self,
+        ui: &egui::Ui,
+        viewport: &ViewportInteraction,
+        blocked: bool,
+    ) -> bool {
+        if !self.move_tool.enabled || self.preview.is_err() {
+            return false;
+        }
+        if self.move_tool.target_dirty && self.move_tool.gesture.is_none() {
+            self.move_tool.target_dirty = false;
+            match self.move_target() {
+                Ok(target) => {
+                    self.move_tool.target = target;
+                    if self.error.as_deref() == Some(Text::ComponentMoveHidden.plain()) {
+                        self.error = None;
+                    }
+                }
+                Err(error) => self.error = Some(error.plain().into()),
+            }
+        }
+        let (focused, cursor, pressed, down, escape, snap_modifier) = ui.input(|input| {
+            (
+                input.focused,
+                input.pointer.hover_pos(),
+                input.pointer.button_pressed(egui::PointerButton::Primary),
+                input.pointer.button_down(egui::PointerButton::Primary),
+                input.key_pressed(egui::Key::Escape),
+                input.modifiers.ctrl,
+            )
+        });
+        let owned_before = self.move_tool.active();
+        if owned_before
+            && (blocked
+                || !focused
+                || escape
+                || cursor.is_none()
+                || self
+                    .move_tool
+                    .gesture
+                    .as_ref()
+                    .is_some_and(|gesture| gesture.revision != self.session.revision()))
+        {
+            self.move_tool.cancel();
+            ui.ctx().request_repaint();
+            return true;
+        }
+        let suppressed = self.move_tool.suppress_pointer;
+        if !down && !pressed {
+            self.move_tool.suppress_pointer = false;
+        }
+        let Some(target) = self.move_tool.target.as_ref() else {
+            return owned_before || suppressed;
+        };
+        let proxy = self
+            .move_tool
+            .gesture
+            .as_ref()
+            .map_or(target.proxy, |gesture| gesture.proxy);
+        self.move_tool.gizmo.update_config(GizmoConfig {
+            view_matrix: GizmoMatrix::from_cols_array_2d(
+                &viewport.view.map(|column| column.map(f64::from)),
+            )
+            .into(),
+            projection_matrix: GizmoMatrix::from_cols_array_2d(
+                &viewport
+                    .gizmo_projection
+                    .map(|column| column.map(f64::from)),
+            )
+            .into(),
+            viewport: viewport.rect,
+            pixels_per_point: ui.ctx().pixels_per_point(),
+            modes: GizmoMode::all_translate(),
+            orientation: if self.move_tool.local {
+                GizmoOrientation::Local
+            } else {
+                GizmoOrientation::Global
+            },
+            snapping: self.move_tool.snap || snap_modifier,
+            snap_distance: self.move_tool.snap_distance,
+            ..Default::default()
+        });
+        let cursor = cursor.unwrap_or_default();
+        let permitted = focused && !blocked && !escape && !self.move_tool.suppress_pointer;
+        let hovered = permitted && viewport.response.hovered() && viewport.rect.contains(cursor);
+        let update = self.move_tool.gizmo.update(
+            GizmoInteraction {
+                hovered,
+                drag_started: hovered && pressed,
+                dragging: permitted && (down || pressed || owned_before),
+                cursor_pos: (cursor.x, cursor.y),
+            },
+            &[proxy],
+        );
+        if hovered && pressed && self.move_tool.gizmo.is_focused() && !owned_before {
+            self.move_tool.gesture = self.begin_move(cursor);
+            if self.move_tool.gesture.is_none() {
+                self.move_tool.gizmo = Gizmo::default();
+                self.move_tool.suppress_pointer = true;
+                self.error = Some(Text::ComponentMoveOutsideRange.plain().into());
+                return true;
+            }
+        }
+        if let (Some((_, transforms)), Some(gesture)) = (update, &mut self.move_tool.gesture) {
+            let displacement = if cursor == gesture.cursor_start {
+                DVec3::ZERO
+            } else {
+                DVec3::from_array(GizmoVector::from(transforms[0].translation).to_array())
+                    - DVec3::from_array(GizmoVector::from(target.proxy.translation).to_array())
+            };
+            if !gesture.update(self.preview.as_ref().unwrap(), displacement) {
+                self.move_tool.cancel();
+                self.error = Some(Text::ComponentMoveOutsideRange.plain().into());
+                ui.ctx().request_repaint();
+                return true;
+            }
+            gesture.proxy = transforms[0];
+        }
+
+        paint_gizmo(ui, viewport.rect, &self.move_tool.gizmo);
+        if !down {
+            if let Some(gesture) = self.move_tool.gesture.take() {
+                self.move_tool.gizmo = Gizmo::default();
+                self.commit_move(gesture);
+                ui.ctx().request_repaint();
+                return true;
+            }
+        }
+        if self.move_tool.active() {
+            ui.ctx().request_repaint();
+        }
+        owned_before || self.move_tool.active() || suppressed
+    }
+
+    fn commit_move(&mut self, gesture: Gesture) {
+        let edits: Vec<_> = gesture
+            .roots
+            .into_iter()
+            .filter(|root| root.local != root.original)
+            .map(|root| {
+                let mut object = self.session.scene().objects[root.index].clone();
+                object.transform.translation = root.local;
+                object
+            })
+            .collect();
+        if edits.is_empty() || self.session.revision() != gesture.revision {
+            return;
+        }
+        match self.session.put_objects(gesture.revision, edits) {
+            Ok(_) => {
+                self.error = None;
+                self.refresh();
+            }
+            Err(error) => self.error = Some(error.to_string()),
+        }
+    }
+}
+
+impl Gesture {
+    fn update(&mut self, anchor: &ComponentPreview, delta: DVec3) -> bool {
+        for root in &mut self.roots {
+            let local = DVec3::from_array(root.original.map(f64::from))
+                + root.parent_inverse.transform_vector3(delta);
+            if !local.is_finite() || local.abs().max_element() > 10_000.0 {
+                return false;
+            }
+            root.local = local.as_vec3().to_array();
+        }
+        self.preview
+            .translate_from(anchor, &self.draw_rows, &self.lights, delta.as_vec3())
+            .is_ok()
+    }
+}
+
+fn node_rotation(node: &ObjectNode) -> DQuat {
+    let [x, y, z] = node.transform.rotation.map(f64::from);
+    DQuat::from_rotation_z(z) * DQuat::from_rotation_y(y) * DQuat::from_rotation_x(x)
+}
