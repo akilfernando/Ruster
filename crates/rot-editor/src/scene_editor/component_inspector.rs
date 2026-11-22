@@ -275,8 +275,8 @@ pub(super) fn components(
                             if let Some(error) = diagnostic.filter(|error| {
                                 error.binding_id.as_deref() == Some(component.id.as_str())
                             }) {
-                                let message = error.to_string();
-                                ui.add(egui::Label::new(&message).truncate())
+                                let message = &error.message;
+                                ui.add(egui::Label::new(message).truncate())
                                     .on_hover_text(message);
                             }
                         }

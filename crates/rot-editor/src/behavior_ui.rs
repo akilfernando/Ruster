@@ -2757,6 +2757,17 @@ impl RuntimeUi {
                                 self.stale = self.frame.is_some();
                             }
                             let summary = play_failure(operation).plain();
+                            let file = diagnostic
+                                .source_id
+                                .as_deref()
+                                .filter(|id| id.starts_with("asset-lua-"))
+                                .and_then(|id| self.captured.as_ref()?.sources.get(id))
+                                .and_then(|source| source.label.as_deref())
+                                .filter(|path| path.ends_with(".lua"));
+                            let summary = file.map_or_else(
+                                || summary.to_owned(),
+                                |path| format!("{summary} {path}"),
+                            );
                             self.status = if let Some(run) = last_good {
                                 format!(
                                     "{summary}\n{} {}",
@@ -2764,7 +2775,7 @@ impl RuntimeUi {
                                     run.tick
                                 )
                             } else {
-                                summary.into()
+                                summary
                             };
                             self.diagnostic = Some(diagnostic);
                         }

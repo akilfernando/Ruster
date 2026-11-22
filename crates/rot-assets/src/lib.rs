@@ -13,6 +13,7 @@ use std::{
 
 pub const MAX_SOURCE_BYTES: usize = 1024 * 1024;
 pub const MAX_LUA_SOURCE_BYTES: usize = 16 * 1024;
+const MAX_LUA_RESOLVED_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_TRIANGLES: usize = 32_768;
 pub const MAX_VERTICES: usize = MAX_TRIANGLES * 3;
 const MAX_MODEL_ITEMS: usize = 64;
@@ -967,7 +968,18 @@ impl AssetStore {
                     ));
                 }
             }
-            Payload::Script(_) => {}
+            Payload::Script(text) => {
+                let total = self
+                    .scripts
+                    .iter()
+                    .filter(|(key, _)| key.as_str() != id)
+                    .map(|(_, text)| text.len())
+                    .sum::<usize>()
+                    + text.len();
+                if total > MAX_LUA_RESOLVED_BYTES {
+                    return Err(error("resolved Lua sources exceed 16 MiB project limit"));
+                }
+            }
             Payload::Sound(sound) => {
                 let total = self
                     .sounds
