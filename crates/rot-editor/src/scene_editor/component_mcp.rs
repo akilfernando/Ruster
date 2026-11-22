@@ -209,7 +209,7 @@ impl ComponentWorkspace {
                 result["selected_count"] = json!(self.selection.len());
                 result["selected_object_ids"] = json!(selected_ids);
                 result["assembly_guidance"] = json!("When building repeated structures, use viewport_frame and viewport_screenshot to check one complete assembly from the front, side, and top before making linked copies with scene_prefab.");
-                result["primitive_guidance"] = json!("triangular_prism is 1 unit per axis (local bounds -0.5 to 0.5), with a bounding-box center pivot, +Y up, and its ridge along local Z. With parent_id, position and scale are parent-local.");
+                result["primitive_guidance"] = json!("triangular_prism is 1 unit per axis (local bounds -0.5 to 0.5), with a bounding-box center pivot, +Y up, and its ridge along local Z. With parent_id, the whole transform is parent-local.");
             }
             return Ok(result);
         }
