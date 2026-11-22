@@ -198,13 +198,12 @@ impl Host {
             return;
         }
         self.editor.ai_trust.granted = Some(owner);
-        let Some(project) = self
-            .editor
-            .session
-            .path()
-            .and_then(|p| p.parent())
-            .map(Path::to_path_buf)
-        else {
+        let component = self.editor.component.as_ref();
+        let path = match component {
+            Some(component) => component.saved_association(),
+            None => self.editor.session.path(),
+        };
+        let Some(project) = path.and_then(Path::parent).map(Path::to_path_buf) else {
             return;
         };
         if self.editor.save_grant.is_none() {
@@ -214,6 +213,9 @@ impl Host {
                     self.editor.ai_trust.notice = format!("AI saving is unavailable: {error}")
                 }
             }
+        }
+        if component.is_some() {
+            return;
         }
         // Only a Rot project gets a Builds folder, never a loose scene's
         // folder such as Downloads.

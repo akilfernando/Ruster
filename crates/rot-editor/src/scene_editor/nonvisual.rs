@@ -359,9 +359,7 @@ impl Host {
         #[cfg(unix)]
         self.keep_listening(ctx);
         #[cfg(unix)]
-        if self.editor.component.is_none() {
-            self.grant_trusted_app();
-        }
+        self.grant_trusted_app();
         if self.input.bridge_serviced || self.input.close_requested {
             return;
         }
@@ -381,9 +379,14 @@ impl Host {
             // or automatic client reconnect; a fresh explicit connect is needed.
             let _ = self.connect_adapter(ctx);
         }
-        #[cfg(target_os = "linux")]
+        #[cfg(unix)]
         if let Some(component) = &mut self.editor.component {
+            #[cfg(target_os = "linux")]
             component.poll_asset_write(ctx, self.editor.ai_status.paused);
+            component.poll_save(
+                self.editor.save_grant.as_ref(),
+                self.editor.ai_status.paused,
+            );
         }
         #[cfg(unix)]
         self.dispatch_ai_requests(ctx);
@@ -467,6 +470,15 @@ impl Host {
                 }
                 let token = self.editor.scene_guard_token(nonce);
                 if let Some(component) = &mut self.editor.component {
+                    let grant = self.editor.save_grant.as_ref();
+                    if op == "scene_save" {
+                        component.dispatch_save(ctx, &token, args, grant, lease);
+                        return;
+                    }
+                    if op == "scene_persistence_inspect" {
+                        lease.respond(component.inspect_persistence(&token, &args, grant));
+                        return;
+                    }
                     #[cfg(target_os = "linux")]
                     if super::component_workspace::asset_writes::supported(op) {
                         component.dispatch_asset_write(&token, op, &args, lease);

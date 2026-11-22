@@ -6,7 +6,7 @@ use crate::{BehaviorSource, OpaqueMaterial, SceneError, SceneLock, Transform};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
-use std::io::{self, Read, Seek, Write};
+use std::io::{self, BufWriter, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -19,6 +19,12 @@ pub struct ComponentSession {
     undo: Vec<HistoryEntry>,
     redo: Vec<HistoryEntry>,
     saved: Option<(PathBuf, [u8; 32])>,
+}
+
+/// Identity of the bytes written by a successful scene publication.
+pub struct SavedComponentScene {
+    pub sha256: String,
+    pub bytes: u64,
 }
 
 struct HistoryEntry {
@@ -182,7 +188,7 @@ impl ComponentSession {
         let legacy = crate::Session::from_snapshot_bytes(&bytes)?;
         let scene = ComponentScene::from_legacy(&legacy)?;
         let expected = Sha256::digest(&bytes).into();
-        let hash = Self::publish(&scene, &lock.path, Some(expected))?;
+        let (hash, _) = Self::publish(&scene, &lock.path, Some(expected))?;
         Ok(Self::from_saved(scene, lock.path.clone(), hash))
     }
 
@@ -1049,47 +1055,204 @@ impl ComponentSession {
         Ok(next)
     }
 
+    pub fn path(&self) -> Option<&Path> {
+        self.saved.as_ref().map(|(path, _)| path.as_path())
+    }
+
     /// Write one current scene under the cooperative lock. Saving preserves the
     /// in-memory history. A new destination must not exist.
     pub fn save(&mut self, path: impl AsRef<Path>) -> Result<(), SceneError> {
+        self.save_recorded(path).map(|_| ())
+    }
+
+    pub fn save_recorded(
+        &mut self,
+        path: impl AsRef<Path>,
+    ) -> Result<SavedComponentScene, SceneError> {
         let lock = SceneLock::acquire(path.as_ref())?;
         let baseline = self
             .saved
             .as_ref()
             .filter(|(path, _)| *path == lock.path)
             .map(|(_, digest)| *digest);
-        let digest = Self::publish(&self.scene, &lock.path, baseline)?;
-        self.saved = Some((lock.path.clone(), digest));
+        let (digest, bytes) = Self::publish(&self.scene, &lock.path, baseline)?;
+        Ok(self.record_saved(lock.path.clone(), digest, bytes))
+    }
+
+    /// Capture the current authored state for background save preparation.
+    #[cfg(unix)]
+    pub fn active_save(&self, expected_path: &Path) -> Result<ComponentSave, SceneError> {
+        let (path, digest) = self
+            .saved
+            .as_ref()
+            .filter(|(path, _)| path == expected_path)
+            .ok_or(SceneError::Conflict)?;
+        Ok(ComponentSave {
+            path: path.clone(),
+            baseline: *digest,
+            revision: self.revision,
+            state: self.state,
+            scene: self.scene.clone(),
+        })
+    }
+
+    /// Publish verified, fsynced bytes under the existing cooperative lock.
+    /// Reject changes to the authored state, association or disk baseline.
+    #[cfg(unix)]
+    pub fn publish_active_save(
+        &mut self,
+        prepared: PreparedComponentSave,
+        authorize: impl FnOnce() -> Result<(), SceneError>,
+    ) -> Result<SavedComponentScene, SceneError> {
+        if self.revision != prepared.revision
+            || self.state != prepared.state
+            || self
+                .saved
+                .as_ref()
+                .is_none_or(|(path, digest)| path != &prepared.path || *digest != prepared.baseline)
+        {
+            return Err(SceneError::Conflict);
+        }
+        let lock = SceneLock::acquire(&prepared.path)?;
+        if lock.path != prepared.path {
+            return Err(SceneError::Conflict);
+        }
+        authorize()?;
+        if disk_stamp(&lock.path)? != prepared.stamp {
+            return Err(SceneError::Conflict);
+        }
+        crate::publish_scene_write(prepared.temporary, &lock.path, false)?;
+        Ok(self.record_saved(lock.path.clone(), prepared.digest, prepared.bytes))
+    }
+
+    fn record_saved(&mut self, path: PathBuf, digest: [u8; 32], bytes: u64) -> SavedComponentScene {
+        self.saved = Some((path, digest));
         self.saved_state = Some(self.state);
-        Ok(())
+        SavedComponentScene {
+            sha256: format!("{:x}", sha2::digest::Output::<Sha256>::from(digest)),
+            bytes,
+        }
+    }
+
+    fn write_snapshot(
+        scene: &ComponentScene,
+        writer: &mut File,
+    ) -> Result<([u8; 32], u64), SceneError> {
+        {
+            let mut buffered = BufWriter::new(&mut *writer);
+            scene.write_json(&mut buffered)?;
+            buffered.flush()?;
+        }
+        let bytes = writer.stream_position()?;
+        writer.rewind()?;
+        Ok((digest(writer)?, bytes))
     }
 
     fn publish(
         scene: &ComponentScene,
         path: &Path,
         baseline: Option<[u8; 32]>,
-    ) -> Result<[u8; 32], SceneError> {
-        crate::write_scene_atomically(path, baseline.is_none(), |writer| {
-            scene.write_json(&mut *writer)?;
-            writer.flush()?;
-            writer.rewind()?;
-            let prepared_digest = digest(writer)?;
-            if let Some(saved) = baseline {
-                crate::reject_nonregular(path)?;
-                let current = match File::open(path) {
-                    Ok(file) => file,
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                        return Err(SceneError::Conflict);
-                    }
-                    Err(error) => return Err(error.into()),
-                };
-                if digest(current)? != saved {
+    ) -> Result<([u8; 32], u64), SceneError> {
+        let (temporary, result) =
+            crate::prepare_scene_write(path, |writer| Self::write_snapshot(scene, writer))?;
+        if let Some(saved) = baseline {
+            crate::reject_nonregular(path)?;
+            let current = match File::open(path) {
+                Ok(file) => file,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
                     return Err(SceneError::Conflict);
                 }
+                Err(error) => return Err(error.into()),
+            };
+            if digest(current)? != saved {
+                return Err(SceneError::Conflict);
             }
-            Ok(prepared_digest)
+        }
+        crate::publish_scene_write(temporary, path, baseline.is_none())?;
+        Ok(result)
+    }
+}
+
+#[cfg(unix)]
+pub struct ComponentSave {
+    path: PathBuf,
+    baseline: [u8; 32],
+    revision: u64,
+    state: u64,
+    scene: ComponentScene,
+}
+
+#[cfg(unix)]
+pub struct PreparedComponentSave {
+    path: PathBuf,
+    baseline: [u8; 32],
+    revision: u64,
+    state: u64,
+    stamp: DiskStamp,
+    temporary: tempfile::NamedTempFile,
+    digest: [u8; 32],
+    bytes: u64,
+}
+
+#[cfg(unix)]
+impl ComponentSave {
+    /// Stage and sync the new file, then verify the original bytes. The disk
+    /// stamp lets publication reject later changes without re-reading the file.
+    pub fn prepare(self) -> Result<PreparedComponentSave, SceneError> {
+        let (temporary, (prepared_digest, bytes)) =
+            crate::prepare_scene_write(&self.path, |writer| {
+                ComponentSession::write_snapshot(&self.scene, writer)
+            })?;
+        let stamp = disk_stamp(&self.path)?;
+        let current = File::open(&self.path)?;
+        if DiskStamp::regular(&current.metadata()?)? != stamp
+            || digest(&current)? != self.baseline
+            || DiskStamp::regular(&current.metadata()?)? != stamp
+            || disk_stamp(&self.path)? != stamp
+        {
+            return Err(SceneError::Conflict);
+        }
+        Ok(PreparedComponentSave {
+            path: self.path,
+            baseline: self.baseline,
+            revision: self.revision,
+            state: self.state,
+            stamp,
+            temporary,
+            digest: prepared_digest,
+            bytes,
         })
     }
+}
+
+#[cfg(unix)]
+#[derive(PartialEq, Eq)]
+struct DiskStamp {
+    identity: (u64, u64),
+    bytes: u64,
+    modified: (i64, i64),
+    changed: (i64, i64),
+}
+
+#[cfg(unix)]
+impl DiskStamp {
+    fn regular(metadata: &std::fs::Metadata) -> Result<Self, SceneError> {
+        use std::os::unix::fs::MetadataExt;
+        if !metadata.is_file() {
+            return Err(SceneError::Conflict);
+        }
+        Ok(Self {
+            identity: (metadata.dev(), metadata.ino()),
+            bytes: metadata.len(),
+            modified: (metadata.mtime(), metadata.mtime_nsec()),
+            changed: (metadata.ctime(), metadata.ctime_nsec()),
+        })
+    }
+}
+
+#[cfg(unix)]
+fn disk_stamp(path: &Path) -> Result<DiskStamp, SceneError> {
+    DiskStamp::regular(&path.symlink_metadata()?)
 }
 
 struct SceneInput {

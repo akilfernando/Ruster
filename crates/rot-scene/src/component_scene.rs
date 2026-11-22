@@ -21,7 +21,9 @@ use crate::{
 mod behavior;
 #[path = "component_session.rs"]
 mod session;
-pub use session::{ComponentSession, PrefabFileEdit};
+#[cfg(unix)]
+pub use session::{ComponentSave, PreparedComponentSave};
+pub use session::{ComponentSession, PrefabFileEdit, SavedComponentScene};
 #[path = "component_prefab.rs"]
 mod prefab;
 pub use prefab::{PrefabFields, PrefabInstance, PrefabPart, PrefabProperty, PrefabSource};

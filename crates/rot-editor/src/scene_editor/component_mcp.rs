@@ -918,7 +918,7 @@ fn transform_argument(value: &Value) -> Result<Transform, (&'static str, String)
     })
 }
 
-fn decimal(value: &Value) -> Option<u64> {
+pub(super) fn decimal(value: &Value) -> Option<u64> {
     let value = value.as_str()?;
     if value.is_empty()
         || value.len() > 20

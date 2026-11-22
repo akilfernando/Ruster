@@ -30,6 +30,10 @@ use capture::PaintedViewport;
 #[path = "component_mcp.rs"]
 mod mcp;
 
+#[cfg(unix)]
+#[path = "component_persistence.rs"]
+mod persistence;
+
 #[path = "component_assets.rs"]
 pub(super) mod asset_panel;
 use asset_panel::AssetDrag;
@@ -169,6 +173,14 @@ fn sibling_move_items(
 pub(super) struct ComponentWorkspace {
     session: ComponentSession,
     path: PathBuf,
+    #[cfg(unix)]
+    save_incarnation: u64,
+    #[cfg(unix)]
+    save_sequence: u64,
+    #[cfg(unix)]
+    pending_save: Option<persistence::PendingSave>,
+    #[cfg(unix)]
+    last_save: Option<serde_json::Value>,
     assets: Option<rot_assets::AssetStore>,
     asset_error: Option<String>,
     asset_browser: asset_panel::Browser,
@@ -260,6 +272,14 @@ impl ComponentWorkspace {
             palette: None,
             session,
             path,
+            #[cfg(unix)]
+            save_incarnation: super::GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            #[cfg(unix)]
+            save_sequence: 0,
+            #[cfg(unix)]
+            pending_save: None,
+            #[cfg(unix)]
+            last_save: None,
             assets,
             asset_error,
             asset_browser: Default::default(),
@@ -762,8 +782,18 @@ impl ComponentWorkspace {
         if !self.apply() {
             return false;
         }
-        match self.session.save(&self.path) {
-            Ok(()) => {
+        #[cfg(unix)]
+        let sequence = match self.next_save_sequence() {
+            Ok(sequence) => sequence,
+            Err((_, message)) => {
+                self.error = Some(message);
+                return false;
+            }
+        };
+        match self.session.save_recorded(&self.path) {
+            Ok(_saved) => {
+                #[cfg(unix)]
+                self.record_save(sequence, _saved);
                 self.error = None;
                 true
             }

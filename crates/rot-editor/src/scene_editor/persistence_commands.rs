@@ -17,6 +17,7 @@ pub(super) fn document_hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+#[derive(Clone)]
 pub(super) struct SaveGrant(crate::directory_grant::DirectoryGrant);
 impl SaveGrant {
     pub(super) fn from_environment(enabled: bool) -> std::result::Result<Option<Self>, String> {
@@ -33,7 +34,7 @@ impl SaveGrant {
     pub(super) fn root(&self) -> &Path {
         self.0.root()
     }
-    fn validate(&self) -> Result<&Path> {
+    pub(super) fn validate(&self) -> Result<&Path> {
         self.0.validate().map_err(|_| {
             error(
                 "save_permission_required",
@@ -64,10 +65,10 @@ fn filename(value: &Value) -> Result<&str> {
 }
 /// The real folder holding a file, so a scene opened by another path to the
 /// same folder still matches the save grant.
-fn canonical_parent(path: &Path) -> Option<PathBuf> {
+pub(super) fn canonical_parent(path: &Path) -> Option<PathBuf> {
     path.parent()?.canonicalize().ok()
 }
-fn reject_symlink(path: &Path) -> Result<()> {
+pub(super) fn reject_symlink(path: &Path) -> Result<()> {
     match path.symlink_metadata() {
         Ok(metadata) if !metadata.is_file() => Err(error(
             "invalid_destination",

@@ -1666,6 +1666,15 @@ fn write_scene_atomically<T>(
     create_new: bool,
     write: impl FnOnce(&mut File) -> Result<T, SceneError>,
 ) -> Result<T, SceneError> {
+    let (temporary, result) = prepare_scene_write(path, write)?;
+    publish_scene_write(temporary, path, create_new)?;
+    Ok(result)
+}
+
+fn prepare_scene_write<T>(
+    path: &Path,
+    write: impl FnOnce(&mut File) -> Result<T, SceneError>,
+) -> Result<(tempfile::NamedTempFile, T), SceneError> {
     reject_nonregular(path)?;
     let parent = path
         .parent()
@@ -1675,6 +1684,14 @@ fn write_scene_atomically<T>(
     let result = write(temporary.as_file_mut())?;
     temporary.flush()?;
     temporary.as_file().sync_all()?;
+    Ok((temporary, result))
+}
+
+fn publish_scene_write(
+    temporary: tempfile::NamedTempFile,
+    path: &Path,
+    create_new: bool,
+) -> Result<(), SceneError> {
     if create_new {
         temporary.persist_noclobber(path).map_err(|e| {
             if e.error.kind() == std::io::ErrorKind::AlreadyExists {
@@ -1688,7 +1705,7 @@ fn write_scene_atomically<T>(
             .persist(path)
             .map_err(|e| SceneError::Io(e.error))?;
     }
-    Ok(result)
+    Ok(())
 }
 
 fn reject_pre_v17_hud_panels(value: &serde_json::Value) -> Result<(), SceneError> {
