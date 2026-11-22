@@ -1509,6 +1509,11 @@ impl ComponentWorkspace {
             }
         }
         surface.input_owned = hud_owns || self.transform_tool.active();
+        surface.set_hidden_mesh_renderers(
+            frame
+                .as_ref()
+                .and_then(|frame| frame.hidden_mesh_renderers.clone()),
+        );
         let preview = match &frame {
             Some(frame) => frame.static_preview.as_deref(),
             None => self.transform_tool.preview().or(self.preview.as_ref().ok()),
@@ -3153,7 +3158,15 @@ mod tests {
         scene.save_new(&path).unwrap();
         let mut editor =
             ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
-        editor.draft.as_mut().unwrap().name = "Renamed".into();
+        let draft = editor.draft.as_mut().unwrap();
+        draft.name = "Renamed".into();
+        let owner = draft.id.clone();
+        draft
+            .components
+            .iter_mut()
+            .find(|component| matches!(component.kind, Component::MeshRenderer { .. }))
+            .unwrap()
+            .enabled = false;
         assert!(editor.save());
         let authored = std::fs::read(&path).unwrap();
         let revision = editor.session.revision();
@@ -3173,6 +3186,12 @@ mod tests {
                 .filter(|frame| frame.tick == 1)
             {
                 assert_eq!(frame.key.authored_revision, revision);
+                assert_eq!(frame.scene.objects[0].id, owner);
+                assert!(frame
+                    .hidden_mesh_renderers
+                    .as_ref()
+                    .unwrap()
+                    .contains(&owner));
                 assert_ne!(frame.scene.objects[0].transform, initial_transform);
                 assert_eq!(
                     component_live::transform_values(&frame.scene, &editor.selection).unwrap()[0],

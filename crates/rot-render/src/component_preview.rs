@@ -109,6 +109,7 @@ impl ComponentPreview {
             scene: &self.scene,
             matrices: Some(&self.matrices),
             unpickable: (!self.unpickable.is_empty()).then_some(&self.unpickable),
+            hidden_mesh_renderers: None,
         }
     }
 
@@ -467,6 +468,7 @@ mod tests {
             scene: preview.scene(),
             matrices: Some(&preview.matrices),
             unpickable: None,
+            hidden_mesh_renderers: None,
         };
         let meshes = BTreeMap::new();
         let camera = super::super::Camera::fit_objects(draw.objects(), &meshes, 1.0).unwrap();
@@ -497,6 +499,7 @@ mod tests {
         let locked = ["left".into()].into_iter().collect();
         let draw = DrawScene {
             unpickable: Some(&locked),
+            hidden_mesh_renderers: None,
             ..draw
         };
         let locked_preview = project_editor(&components, &BTreeSet::new(), locked.clone()).unwrap();

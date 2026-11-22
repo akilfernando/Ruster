@@ -43,6 +43,7 @@ pub(super) struct Frame {
     pub authoring: Arc<Authoring>,
     pub scene: Arc<Scene>,
     pub static_preview: Option<Arc<ComponentPreview>>,
+    pub hidden_mesh_renderers: Option<rot_scene::HiddenMeshRenderers>,
     pub state: Arc<rot_behavior::RuntimeState>,
     pub input: Option<Arc<LastConsumedInput>>,
     pub query_observations: Option<Arc<[rot_behavior::QueryObservation]>>,
@@ -152,6 +153,7 @@ pub(super) enum Command {
         key: RunKey,
         scene: Arc<Scene>,
         authoring: Arc<Authoring>,
+        hidden_mesh_renderers: Option<rot_scene::HiddenMeshRenderers>,
         sounds: Sounds,
         clips: Arc<rot_behavior::Clips>,
     },
@@ -1017,6 +1019,7 @@ struct Execution {
     engine: Option<Engine>,
     runtime: Option<Runtime>,
     static_frame: Option<Frame>,
+    hidden_mesh_renderers: Option<rot_scene::HiddenMeshRenderers>,
     key: Option<RunKey>,
     playing: bool,
     due: Option<Instant>,
@@ -1157,6 +1160,7 @@ fn frame(shared: &Shared, execution: &mut Execution, repaint: &Option<Repaint>, 
             authoring: Arc::clone(execution.runtime.as_ref().unwrap().authoring_snapshot()),
             scene,
             static_preview: None,
+            hidden_mesh_renderers: execution.hidden_mesh_renderers.clone(),
             input: execution.last_input.clone(),
             query_observations,
         },
@@ -1215,6 +1219,7 @@ fn process(
                 command_schema_hash: None,
                 scene: preview.scene_snapshot(),
                 static_preview: Some(preview),
+                hidden_mesh_renderers: None,
                 authoring: Arc::default(),
                 state: Arc::default(),
                 input: None,
@@ -1229,6 +1234,7 @@ fn process(
         Command::Reset {
             scene,
             authoring,
+            hidden_mesh_renderers,
             sounds,
             clips,
             ..
@@ -1347,6 +1353,7 @@ fn process(
                         shared.input.clear_poison();
                     }
                     execution.runtime = Some(runtime);
+                    execution.hidden_mesh_renderers = hidden_mesh_renderers;
                     execution.key = Some(key);
                     execution.last_input = None;
                     if audio_enabled {
@@ -1845,6 +1852,7 @@ fn run(
         engine: None,
         runtime: None,
         static_frame: None,
+        hidden_mesh_renderers: None,
         key: None,
         playing: false,
         due: None,
@@ -2260,6 +2268,7 @@ mod tests {
         let key = worker.advance(generation, scene.revision).unwrap();
         worker
             .try_request(Command::Reset {
+                hidden_mesh_renderers: None,
                 key,
                 scene,
                 authoring,
@@ -2904,6 +2913,7 @@ mod tests {
             );
             worker
                 .try_request(Command::Reset {
+                    hidden_mesh_renderers: None,
                     key,
                     scene: scene.clone(),
                     authoring: authoring.clone(),
@@ -3039,6 +3049,7 @@ mod tests {
         let old = worker.advance(1, 0).unwrap();
         worker
             .try_request(Command::Reset {
+                hidden_mesh_renderers: None,
                 key: old,
                 scene: scene.clone(),
                 authoring: authoring.clone(),
@@ -3079,6 +3090,7 @@ mod tests {
         let key = worker.advance(1, 0).unwrap();
         worker
             .try_request(Command::Reset {
+                hidden_mesh_renderers: None,
                 key,
                 scene,
                 authoring,
@@ -3144,6 +3156,7 @@ mod tests {
         let attempted = worker.advance(7, 0).unwrap();
         worker
             .try_request(Command::Reset {
+                hidden_mesh_renderers: None,
                 key: attempted,
                 scene: scene.clone(),
                 authoring: Arc::new(invalid),

@@ -154,3 +154,49 @@ fn assembly_gate_render_consumers_share_the_flattened_world() {
         );
     }
 }
+
+#[test]
+fn hidden_behavior_mesh_keeps_the_owner_pose_and_enabled_child() {
+    use rot_scene::component_scene::ComponentScene;
+
+    let mut original = Scene::empty("runtime-hierarchy");
+    let mut parent = Object::cube("parent", None);
+    parent.transform.translation = [3., 1., -2.];
+    parent.collider = Some(rot_scene::Collider {
+        enabled: true,
+        ..Default::default()
+    });
+    let mut child = Object::cube("child", None);
+    child.transform.translation = [1., 2., 3.];
+    original.objects.extend([parent, child]);
+    original
+        .hierarchy
+        .parents
+        .insert("child".into(), "parent".into());
+    let mut authored =
+        ComponentScene::from_legacy(&rot_scene::Session::new(original).unwrap()).unwrap();
+    authored.objects[0].components[0].enabled = false;
+
+    let runtime = rot_scene::Session::from_component_runtime(&authored).unwrap();
+    let scene = runtime.scene();
+    assert_eq!(scene.objects[0].id, "parent");
+    assert!(scene.objects[0].collider.unwrap().enabled);
+    let poses = scene.resolve_poses().unwrap();
+    let mut resolved = scene.clone();
+    for object in &mut resolved.objects {
+        object.transform = poses.transforms[&object.id].clone();
+    }
+    let draw = DrawScene {
+        hidden_mesh_renderers: runtime.hidden_mesh_renderers().map(Arc::as_ref),
+        ..DrawScene::from(&resolved)
+    };
+    let mut instances = draw.objects();
+    let (child, matrix) = instances.next().unwrap();
+    assert_eq!(child.id, "child");
+    assert_eq!(matrix.transform_point3(Vec3::ZERO), Vec3::new(4., 3., 1.));
+    assert!(instances.next().is_none());
+    assert!(draw
+        .pickable_objects()
+        .all(|(object, _)| object.id == "child"));
+    assert!(!authored.objects[0].components[0].enabled);
+}

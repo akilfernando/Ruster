@@ -22,7 +22,7 @@ mod shadow_lifecycle_probe;
 mod shadow_probe;
 use lighting_gpu::{LightingGpu, LightingPacket, LIGHTING_BYTES};
 use material_gpu::{BindingKey, MaterialGpu};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ops::Range;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Instant;
@@ -875,6 +875,7 @@ struct DrawScene<'a> {
     scene: &'a Scene,
     matrices: Option<&'a [Mat4]>,
     unpickable: Option<&'a BTreeSet<String>>,
+    hidden_mesh_renderers: Option<&'a HashSet<String>>,
 }
 
 impl<'a> From<&'a Scene> for DrawScene<'a> {
@@ -883,6 +884,7 @@ impl<'a> From<&'a Scene> for DrawScene<'a> {
             scene,
             matrices: None,
             unpickable: None,
+            hidden_mesh_renderers: None,
         }
     }
 }
@@ -898,6 +900,10 @@ impl<'a> DrawScene<'a> {
             .objects
             .iter()
             .enumerate()
+            .filter(move |(_, object)| {
+                self.hidden_mesh_renderers
+                    .is_none_or(|ids| !ids.contains(&object.id))
+            })
             .map(move |(index, object)| {
                 let matrix = self
                     .matrices
@@ -1042,14 +1048,13 @@ pub fn viewport_with_navigation(
     viewport_with_materials(ui, scene, selected, meshes, &BTreeMap::new(), navigation)
 }
 
-/// Shared material route. Hosts retain immutable accepted texture snapshots and expose
-/// missing-content diagnostics; faithful runtime content must validate its dependency closure.
 /// Allocated viewport with no borrowed scene data. Hosts register overlay input
 /// after allocation and before camera/picking, then finish the same viewport.
 pub struct ViewportSurface {
     pub rect: egui::Rect,
     pub response: egui::Response,
     pub input_owned: bool,
+    hidden_mesh_renderers: Option<rot_scene::HiddenMeshRenderers>,
     camera_id: egui::Id,
     error_id: egui::Id,
     camera: Camera,
@@ -1276,6 +1281,7 @@ pub fn allocate_viewport(
         rect,
         response,
         input_owned: false,
+        hidden_mesh_renderers: None,
         camera_id,
         error_id,
         camera,
@@ -1544,6 +1550,13 @@ fn objects_in_rect(
         .collect()
 }
 
+impl ViewportSurface {
+    /// Apply the authored renderer visibility of the exact behavior frame being drawn.
+    pub fn set_hidden_mesh_renderers(&mut self, hidden: Option<rot_scene::HiddenMeshRenderers>) {
+        self.hidden_mesh_renderers = hidden;
+    }
+}
+
 /// Finish an allocated viewport after the host has registered overlay ownership.
 pub fn render_viewport_with_materials(
     ui: &mut egui::Ui,
@@ -1552,11 +1565,15 @@ pub fn render_viewport_with_materials(
     meshes: &BTreeMap<String, Arc<rot_assets::Mesh>>,
     textures: &BTreeMap<String, Arc<rot_assets::Texture>>,
     navigation: &mut NavigationOptions,
-    surface: ViewportSurface,
+    mut surface: ViewportSurface,
 ) -> ViewportInteraction {
+    let hidden = surface.hidden_mesh_renderers.take();
     render_draw_scene(
         ui,
-        scene.into(),
+        DrawScene {
+            hidden_mesh_renderers: hidden.as_deref(),
+            ..scene.into()
+        },
         selected,
         meshes,
         textures,
@@ -1660,11 +1677,7 @@ fn render_draw_scene(
         }
         &resolved_input
     };
-    let draw = DrawScene {
-        scene,
-        matrices: draw.matrices,
-        unpickable: draw.unpickable,
-    };
+    let draw = DrawScene { scene, ..draw };
     let selected = if expanded_selection.is_empty() {
         selected
     } else {
@@ -1685,6 +1698,7 @@ fn render_draw_scene(
         overlay_layer,
         gizmo,
         stats_anchor,
+        ..
     } = surface;
     if fitted {
         let fit = Camera::fit_objects(

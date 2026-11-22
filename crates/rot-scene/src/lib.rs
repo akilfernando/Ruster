@@ -9,6 +9,7 @@ use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -2239,9 +2240,13 @@ pub struct SoundAssetReferences {
     pub assets: BTreeSet<String>,
 }
 
+/// Owners whose Mesh Renderer is disabled in a projected behavior run.
+pub type HiddenMeshRenderers = Arc<HashSet<String>>;
+
 /// Authored state with bounded object, name, transform, color and mesh deltas. Runtime state belongs elsewhere.
 #[derive(Clone, Debug)]
 pub struct Session {
+    hidden_mesh_renderers: Option<HiddenMeshRenderers>,
     document: Document,
     path: Option<PathBuf>,
     saved: Option<Document>,
@@ -2259,6 +2264,7 @@ impl Session {
             saved: None,
             loaded_format_version: FORMAT_VERSION,
             history_evictions: 0,
+            hidden_mesh_renderers: None,
         })
     }
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SceneError> {
@@ -2267,6 +2273,7 @@ impl Session {
         Ok(Self {
             loaded_format_version: document.format_version,
             history_evictions: 0,
+            hidden_mesh_renderers: None,
             saved: Some(document.clone()),
             document,
             path: Some(lock.path.clone()),
@@ -2285,8 +2292,13 @@ impl Session {
             path: None,
             saved: None,
             history_evictions: 0,
+            hidden_mesh_renderers: None,
         })
     }
+    pub fn hidden_mesh_renderers(&self) -> Option<&HiddenMeshRenderers> {
+        self.hidden_mesh_renderers.as_ref()
+    }
+
     pub fn scene(&self) -> &Scene {
         &self.document.scene
     }

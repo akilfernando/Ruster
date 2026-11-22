@@ -78,7 +78,8 @@ impl GenericMotionLab {
         if !(Duration::from_millis(1)..=Duration::from_secs(1)).contains(&fixed_dt) {
             return Err("Motion comparison tick duration must be 1 ms..=1 s".into());
         }
-        let content = Content::with_textures(session.scene().clone(), meshes, textures)?;
+        let mut content = Content::with_textures(session.scene().clone(), meshes, textures)?;
+        content.set_hidden_mesh_renderers(session.hidden_mesh_renderers().cloned());
         let selected = session.scene().objects.first().map(|o| o.id.clone());
         let action_keys = KeyEventAccumulator::new(session.authoring().actions.clone())
             .map_err(|e| e.to_string())?;
@@ -443,6 +444,8 @@ impl Application for GenericMotionLab {
         let candidate = self.report(result)?;
         // Engine validated transforms; meshes remain the same immutable Content resources.
         *self.content.scene_mut() = candidate.scene().clone();
+        self.content
+            .set_hidden_mesh_renderers(self.session.hidden_mesh_renderers().cloned());
         self.hud_cache.clear();
         self.runtime = Some(candidate);
         self.audio.reset(self.sounds.clone());

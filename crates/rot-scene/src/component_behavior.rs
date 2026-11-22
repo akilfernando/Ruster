@@ -1,15 +1,30 @@
 //! Temporary input adapter for the legacy behavior runtime.
 use super::{Component, ComponentScene, Geometry, ObjectNode};
 use crate::{
-    Authoring, BindingTarget, Collider, Group, Light, Lighting, Object, Scene, SceneError, Session,
+    Authoring, BindingTarget, Collider, Group, HiddenMeshRenderers, Light, Lighting, Object, Scene,
+    SceneError, Session,
 };
 use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
+
+/// A behavior projection and its runtime-only draw visibility.
+pub struct BehaviorInput {
+    pub scene: Scene,
+    pub authoring: Authoring,
+    pub hidden_mesh_renderers: Option<HiddenMeshRenderers>,
+}
 
 impl ComponentScene {
     /// Extract a fresh behavior runtime input. The projection is fallible because
     /// the old runtime cannot target every object/component combination.
     pub fn behavior_input(&self) -> Result<(Scene, Authoring), SceneError> {
+        let input = self.behavior_projection()?;
+        Ok((input.scene, input.authoring))
+    }
+
+    pub fn behavior_projection(&self) -> Result<BehaviorInput, SceneError> {
         self.validate()?;
+        let mut hidden_mesh_renderers = None;
         let mut scene = Scene::empty(self.id.clone());
         scene.display = self.display;
         scene.materials.clone_from(&self.materials);
@@ -55,9 +70,9 @@ impl ComponentScene {
                     } => {
                         detached_only = false;
                         if !component.enabled {
-                            return Err(unsupported(
-                                "a disabled mesh requires the component runtime",
-                            ));
+                            hidden_mesh_renderers
+                                .get_or_insert_with(HashSet::new)
+                                .insert(object.id.clone());
                         }
                         let mut draw = Object::cube(object.id.clone(), Some(object.name.clone()));
                         draw.transform = object.transform.clone();
@@ -168,7 +183,11 @@ impl ComponentScene {
         }
         scene.validate()?;
         authoring.validate(&scene)?;
-        Ok((scene, authoring))
+        Ok(BehaviorInput {
+            scene,
+            authoring,
+            hidden_mesh_renderers: hidden_mesh_renderers.map(Arc::new),
+        })
     }
 }
 
@@ -189,7 +208,11 @@ impl Session {
 
     /// Project an already decoded component scene into the legacy behavior runtime.
     pub fn from_component_runtime(components: &ComponentScene) -> Result<Self, SceneError> {
-        let (scene, authoring) = components.behavior_input()?;
+        let BehaviorInput {
+            scene,
+            authoring,
+            hidden_mesh_renderers,
+        } = components.behavior_projection()?;
         let mut document = crate::Document::new(scene);
         document.authoring = authoring;
         document.format_version = document.required_version();
@@ -200,6 +223,7 @@ impl Session {
             path: None,
             saved: None,
             history_evictions: 0,
+            hidden_mesh_renderers,
         })
     }
 }

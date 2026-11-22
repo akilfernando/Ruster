@@ -39,6 +39,7 @@ fn checked_texture_bytes(current: usize, additional: usize) -> Result<usize, Str
 /// Construct a new Content to replace meshes; this keeps retained GPU identities stable.
 #[derive(Clone)]
 pub struct Content {
+    hidden_mesh_renderers: Option<rot_scene::HiddenMeshRenderers>,
     scene: ContentScene,
     meshes: MeshMap,
     textures: TextureMap,
@@ -96,6 +97,7 @@ impl Content {
             checked_texture_bytes(bytes, texture.payload_bytes())
         })?;
         let content = Self {
+            hidden_mesh_renderers: None,
             scene,
             meshes,
             textures,
@@ -122,6 +124,10 @@ impl Content {
         };
         scene
     }
+    pub fn set_hidden_mesh_renderers(&mut self, hidden: Option<rot_scene::HiddenMeshRenderers>) {
+        self.hidden_mesh_renderers = hidden;
+    }
+
     pub fn meshes(&self) -> &MeshMap {
         &self.meshes
     }

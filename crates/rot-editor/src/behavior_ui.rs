@@ -2116,6 +2116,7 @@ enum Request {
         key: RunKey,
         scene: Arc<rot_scene::Scene>,
         authoring: Arc<rot_scene::Authoring>,
+        hidden_mesh_renderers: Option<rot_scene::HiddenMeshRenderers>,
         sounds: BTreeMap<String, Arc<rot_assets::AudioClip>>,
         clips: Arc<rot_behavior::Clips>,
     },
@@ -2150,12 +2151,14 @@ impl Request {
                 key,
                 scene,
                 authoring,
+                hidden_mesh_renderers,
                 sounds,
                 clips,
             } => VmCommand::Reset {
                 key: *key,
                 scene: scene.clone(),
                 authoring: authoring.clone(),
+                hidden_mesh_renderers: hidden_mesh_renderers.clone(),
                 sounds: sounds.clone(),
                 clips: clips.clone(),
             },
@@ -2511,14 +2514,19 @@ impl RuntimeUi {
                 return Ok(key);
             }
         }
-        let (mut scene, authoring) = match source {
-            RuntimeSource::Legacy(session) => {
-                (session.scene().clone(), session.authoring().clone())
+        let (mut scene, authoring, hidden_mesh_renderers) = match source {
+            RuntimeSource::Legacy(session) => (
+                session.scene().clone(),
+                session.authoring().clone(),
+                session.hidden_mesh_renderers().cloned(),
+            ),
+            RuntimeSource::Components(session) => {
+                let input = session
+                    .scene()
+                    .behavior_projection()
+                    .map_err(|error| error.to_string())?;
+                (input.scene, input.authoring, input.hidden_mesh_renderers)
             }
-            RuntimeSource::Components(session) => session
-                .scene()
-                .behavior_input()
-                .map_err(|error| error.to_string())?,
         };
         scene.revision = source.revision();
         let sounds = assets
@@ -2542,6 +2550,7 @@ impl RuntimeUi {
             key,
             scene: Arc::new(scene),
             authoring,
+            hidden_mesh_renderers,
             sounds,
             clips,
         });
@@ -4355,6 +4364,7 @@ mod tests {
                 last_step_commit_revision: None,
                 commit_revision_required: false,
                 static_preview: None,
+                hidden_mesh_renderers: None,
                 command_schema_hash: None,
                 authoring: Arc::new(Default::default()),
                 state: std::sync::Arc::new(rot_behavior::RuntimeState::default()),
@@ -4384,6 +4394,7 @@ mod tests {
             last_step_commit_revision: None,
             commit_revision_required: false,
             static_preview: None,
+            hidden_mesh_renderers: None,
             command_schema_hash: None,
             authoring: Arc::new(Default::default()),
             state: std::sync::Arc::new(rot_behavior::RuntimeState::default()),
@@ -4405,6 +4416,7 @@ mod tests {
             last_step_commit_revision: None,
             commit_revision_required: false,
             static_preview: None,
+            hidden_mesh_renderers: None,
             command_schema_hash: None,
             authoring: Arc::new(Default::default()),
             state: std::sync::Arc::new(rot_behavior::RuntimeState::default()),
