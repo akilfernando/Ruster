@@ -3034,6 +3034,12 @@ mod tests {
             )
         };
 
+        tick_editor(&mut editor);
+        assert_eq!(
+            editor.draft.as_ref(),
+            editor.session.scene().objects.first(),
+            "Rendering the Inspector must leave the draft unchanged."
+        );
         editor.command(Action::Play);
         let running = wait(&mut editor, &|report| {
             report["playing"] == true && report["tick"] != "0"

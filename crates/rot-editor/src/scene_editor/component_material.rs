@@ -488,8 +488,14 @@ impl ComponentWorkspace {
                 });
                 draft.value.name = (!name.is_empty()).then_some(name);
                 ui_kit::property_row_with_label(ui, Text::ComponentTint.plain(), |ui, label| {
-                    ui.color_edit_button_rgb(&mut draft.value.tint)
-                        .labelled_by(label);
+                    let mut color = draft.value.tint;
+                    if ui
+                        .color_edit_button_rgb(&mut color)
+                        .labelled_by(label)
+                        .changed()
+                    {
+                        draft.value.tint = color;
+                    }
                 });
                 texture_choice(ui, &mut draft.value.base_color_texture, &draft.base_colors);
                 ui_kit::property_row_with_label(
@@ -896,6 +902,8 @@ mod tests {
             intent: Intent::Create,
         };
         editor.begin_material(request());
+        let tint = [0.24, 0.59, 0.85];
+        editor.material_draft.as_mut().unwrap().value.tint = tint;
         let ctx = egui::Context::default();
         let frame = |editor: &mut ComponentWorkspace, events| {
             ctx.run_ui(
@@ -1009,6 +1017,7 @@ mod tests {
         );
         let committed = editor.session.scene();
         assert_eq!(editor.session.revision(), 1);
+        assert_eq!(committed.materials["material-1"].tint, tint);
         assert_eq!(
             committed.materials["material-1"].name.as_deref(),
             Some("Test Finish")

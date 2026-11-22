@@ -209,8 +209,14 @@ pub(super) fn components(
                             ui,
                             Text::ComponentTint.plain(),
                             |ui, label| {
-                                ui.color_edit_button_rgba_unmultiplied(tint)
-                                    .labelled_by(label);
+                                let mut color = *tint;
+                                if ui
+                                    .color_edit_button_rgba_unmultiplied(&mut color)
+                                    .labelled_by(label)
+                                    .changed()
+                                {
+                                    *tint = color;
+                                }
                             },
                         );
                     }
