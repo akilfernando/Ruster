@@ -243,6 +243,7 @@ impl ComponentWorkspace {
         }
     }
 
+    #[cfg(unix)]
     pub(super) fn changes_textured_binding(
         &self,
         previous: &ObjectNode,
@@ -543,7 +544,11 @@ impl ComponentWorkspace {
                 .inner
             });
         let (apply, cancel) = response.inner;
-        if cancel || response.should_close() {
+        let escape = response.is_top_modal
+            && !response.any_popup_open
+            && !egui::Popup::is_any_open(ctx)
+            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        if cancel || escape {
             return;
         }
         let enter = enter && !popup_open && !egui::Popup::is_any_open(ctx);
@@ -945,6 +950,20 @@ mod tests {
             1
         );
         assert!(!pending.to_string().contains("Test Finish"));
+        let backdrop = egui::pos2(5.0, 5.0);
+        frame(&mut editor, vec![egui::Event::PointerMoved(backdrop)]);
+        for pressed in [true, false] {
+            frame(
+                &mut editor,
+                vec![egui::Event::PointerButton {
+                    pos: backdrop,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+        }
+        assert!(editor.material_draft.is_some());
         assert!(!editor.save());
         let refusal = editor.ai_command(
             "scene",
