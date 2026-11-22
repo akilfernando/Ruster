@@ -150,6 +150,8 @@ still multiplies the shared material color.
 
 Set the material tint, **Base color (sRGB)**, and nonmetallic roughness in
 the dialog. A texture needs the matching import role and a mesh with UVs.
+The built-in Cube samples the full texture on each face. Nonmetallic
+roughness responds to lighting when the scene uses Surface HDR.
 Press Enter to apply or Escape to cancel. Apply or cancel before saving.
 Edits to materials copied from GLB models are saved with the scene.
 
