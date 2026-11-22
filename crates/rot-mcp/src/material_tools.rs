@@ -4,17 +4,17 @@ use serde_json::{json, Map, Value};
 const TOOLS: &[(&str, &str, &[&str])] = &[
     (
         "material_inspect",
-        "Read a bounded page of scene-owned opaque material definitions including authored response/roughness and both texture slots, shared-user counts and separate texture-role/readiness/UV diagnostics, plus authored scene display/exposure and separately labeled last-prepared viewport feedback. Prepared feedback may be stale and does not prove GPU completion or hidden rendering. If a human material edit is pending, pending_material reports its intent, object_id, any known material_id or source_material_id, and affected_object_count. Listed materials show committed settings. Reports scene session/revision and asset_revision (string0 without a catalog); no image bytes, source bodies or filesystem access. Optional canonical-string offset and limit1..16; default limit16.",
+        "Read a bounded page of scene-owned opaque material definitions including authored response/roughness and both texture slots, shared-user counts and separate texture-role/readiness/UV diagnostics, plus authored scene display/exposure. Only legacy scenes include separately labeled last-prepared viewport feedback, which may be stale. If a human material edit is pending, pending_material reports its intent, object_id, any known material_id or source_material_id, and affected_object_count. Listed materials show committed settings. Reports scene session/revision and asset_revision (string0 without a catalog); no image bytes, source bodies or filesystem access. Optional canonical-string offset and limit1..16; default limit16.",
         &[],
     ),
     (
         "scene_material_set",
-        "Create or fully replace a scene-owned opaque material. Shared edits affect every assigned object; object tint remains multiplied into appearance. Optional assign_object_id atomically assigns only a newly created material. Both texture slots require matching accepted import roles and complete UVs for all users, including inactive roughness maps. Omitted or null roughness_texture clears that slot; assignment never changes the scalar or scene display. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry. Source imports/refresh remain outside scene Undo.",
+        "Create or fully replace a scene-owned opaque material. Shared edits affect every assigned object; object tint remains multiplied into appearance. Optional assign_object_id atomically assigns only a newly created material. New or changed texture slots require matching ready import roles and complete UVs for all users, including inactive roughness maps. Unchanged, recoverable references can be retained. In v23, component_id selects an exact Mesh Renderer for assign_object_id. Omitted or null roughness_texture clears that slot; assignment never changes the scalar or scene display. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry. Source imports/refresh remain outside scene Undo.",
         &["material_id", "material"],
     ),
     (
         "scene_material_assign",
-        "Assign a scene-owned material to one object, or null to clear its assignment. Retains object tint; textures require accepted texture content and complete object UVs. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry. Source imports/refresh remain outside scene Undo.",
+        "Assign a scene-owned material to one object, or null to clear its assignment. Retains object tint; new textured assignments require ready texture content and complete UVs. In v23, component_id selects an exact Mesh Renderer. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry. Source imports/refresh remain outside scene Undo.",
         &["object_id", "material_id"],
     ),
     (
