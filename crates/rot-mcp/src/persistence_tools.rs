@@ -15,14 +15,14 @@ pub fn list() -> Vec<Value> {
         }),
         json!({
             "name":"scene_save",
-            "description":"Save committed authored data within an explicitly editor-granted directory. Omit filename to save the current association; supply a fresh leaf filename for Save As. Never applies human drafts or overwrites another destination. Requires inspected session, authored revision and persistence token. A timeout can follow a committed save: inspect before deciding what to do, without automatic retry.",
+            "description":"Save the active v23 scene in place. Legacy scenes save within an explicitly editor-granted directory, with a fresh leaf filename for Save As. Requires all three guards from scene_persistence_inspect. If the outcome is unknown, inspect the last receipt before taking further action.",
             "inputSchema":{
                 "type":"object",
                 "properties":{
                     "expected_session_token":{"type":"string","minLength":1,"maxLength":256},
                     "expected_revision":{"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20},
                     "expected_persistence_token":{"type":"string","minLength":1,"maxLength":256},
-                    "filename":{"type":"string","minLength":1,"maxLength":128,"description":"Fresh ordinary scene filename directly inside the granted directory, never a path. Existing destinations, including the current association, are rejected for Save As."}
+                    "filename":{"type":"string","minLength":1,"maxLength":128,"description":"Legacy Save As only. Fresh ordinary scene filename directly inside the granted directory, never a path. Existing destinations, including the current association, are rejected for Save As."}
                 },
                 "required":["expected_session_token","expected_revision","expected_persistence_token"],
                 "additionalProperties":false

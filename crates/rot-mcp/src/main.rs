@@ -42,7 +42,7 @@ use std::io::{self, BufRead, Write};
 
 const PROTOCOL: &str = "2025-06-18";
 /// The server instructions every client reads once. Keep them short.
-const INSTRUCTIONS: &str = "Rot Engine edits the scene open in the editor; the creator sees every change and shares Undo. Use scene_inspect to find object IDs, then the scene_* tools to change them; scene_* tools apply to the current scene unless you pass expected_session_token and expected_revision from an inspect. viewport_screenshot shows the result. Save in the editor, or use scene_save with legacy scenes. Use rot_tools for additional editor commands. If several editors are open, call project_list and project_connect first.";
+const INSTRUCTIONS: &str = "Rot Engine edits the scene open in the editor; the creator sees every change and shares Undo. Use scene_inspect to find object IDs. Pass expected_session_token and expected_revision from an inspect to pin edits to that scene state. viewport_screenshot shows the result. Use scene_persistence_inspect for scene_save guards. v23 saves the active scene in place. Only legacy Save As takes a filename. If the save outcome is unknown, inspect the receipt before taking further action. Use rot_tools for additional editor commands. If several editors are open, call project_list and project_connect first.";
 const MAX_FRAME: usize = 64 * 1024;
 const MAX_OUTPUT: usize = 256 * 1024;
 
@@ -757,13 +757,15 @@ fn listed() -> Value {
     for tool in listed["tools"].as_array_mut().unwrap() {
         let name = tool["name"].as_str().unwrap().to_owned();
         let schema = &mut tool["inputSchema"];
-        if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
-            for (guard, _) in SCENE_GUARDS {
-                properties.remove(guard);
+        if name != "scene_save" {
+            if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+                for (guard, _) in SCENE_GUARDS {
+                    properties.remove(guard);
+                }
             }
-        }
-        if let Some(required) = schema.get_mut("required").and_then(Value::as_array_mut) {
-            required.retain(|r| !SCENE_GUARDS.iter().any(|(guard, _)| r == *guard));
+            if let Some(required) = schema.get_mut("required").and_then(Value::as_array_mut) {
+                required.retain(|r| !SCENE_GUARDS.iter().any(|(guard, _)| r == *guard));
+            }
         }
         compact(schema);
         let read_only = tool["annotations"]["readOnlyHint"] == true;
@@ -915,6 +917,15 @@ impl Server {
     ) -> Value {
         let schema = tool_definition(name).map_or(&Value::Null, |tool| &tool["inputSchema"]);
         decimals_as_strings(schema, &mut arguments);
+        // Save is pinned to the client's inspected document and writes to disk.
+        // Bypass edit guard inference, cache updates and retries.
+        if name == "scene_save" {
+            return if valid_arguments(name, &arguments) {
+                bridge(name, &arguments)
+            } else {
+                domain_error("invalid_arguments", "Arguments must match the tool schema.")
+            };
+        }
         let pinned = SCENE_GUARDS
             .iter()
             .any(|(guard, _)| arguments.get(*guard).is_some());
@@ -1692,7 +1703,8 @@ mod tests {
         let listed = request(&mut server, "tools/list", json!({}));
         let bytes = listed.to_string().len();
         assert!(bytes < 15_000, "tools/list is {bytes} bytes");
-        for tool in listed["result"]["tools"].as_array().unwrap() {
+        let tools = listed["result"]["tools"].as_array().unwrap();
+        for tool in tools {
             let description = tool["description"].as_str().unwrap();
             assert!(
                 !description.is_empty() && description.len() <= 200,
@@ -1716,6 +1728,27 @@ mod tests {
                 tool["name"]
             );
         }
+
+        let save = tools
+            .iter()
+            .find(|tool| tool["name"] == "scene_save")
+            .unwrap();
+        let schema = &save["inputSchema"];
+        assert_eq!(
+            schema["required"],
+            json!([
+                "expected_session_token",
+                "expected_revision",
+                "expected_persistence_token"
+            ])
+        );
+        for field in schema["required"].as_array().unwrap() {
+            assert_eq!(
+                schema["properties"][field.as_str().unwrap()]["type"],
+                "string"
+            );
+        }
+        assert_eq!(schema["properties"]["filename"]["type"], "string");
     }
 
     // Left-out scene guards come from the open scene; supplied ones are kept.
@@ -1793,6 +1826,51 @@ mod tests {
         });
         assert_eq!(result["error"]["code"], "stale_session");
         assert_eq!(edits, 1);
+    }
+
+    #[test]
+    fn save_requires_explicit_guards_and_never_retargets() {
+        let mut server = ready();
+        let inspected = server.call_tool("scene_persistence_inspect", json!({}), &mut |name, args| {
+            assert_eq!(name, "scene_persistence_inspect");
+            assert_eq!(args, &json!({}));
+            json!({"ok":true,"result":{"session_token":"original","revision":"7","persistence_token":"p"}})
+        });
+        let inspected = &inspected["result"];
+        let save = json!({
+            "expected_session_token": inspected["session_token"],
+            "expected_revision": inspected["revision"],
+            "expected_persistence_token": inspected["persistence_token"],
+        });
+        for field in save.as_object().unwrap().keys() {
+            let mut partial = save.clone();
+            partial.as_object_mut().unwrap().remove(field);
+            let result = server.call_tool("scene_save", partial, &mut |_, _| {
+                panic!("a save without all guards must stay local");
+            });
+            assert_eq!(result["error"]["code"], "invalid_arguments", "{field}");
+        }
+
+        let cached = server.scene_guards.clone();
+        for (code, active_session, active_revision) in [
+            ("stale_session", "replacement", "7"),
+            ("stale_revision", "original", "8"),
+            ("ai_paused", "original", "7"),
+            ("bridge_unavailable", "original", "7"),
+        ] {
+            let mut calls = 0;
+            let result = server.call_tool("scene_save", save.clone(), &mut |name, args| {
+                calls += 1;
+                assert_eq!(name, "scene_save");
+                assert_eq!(args, &save);
+                json!({"ok":false,"error":{
+                    "code":code,"session_token":active_session,"revision":active_revision
+                }})
+            });
+            assert_eq!(calls, 1, "{code}");
+            assert_eq!(result["error"]["code"], code);
+            assert_eq!(server.scene_guards, cached);
+        }
     }
 
     // While the creator has paused AI edits, an edit waits and then lands.
@@ -2272,7 +2350,7 @@ mod tests {
             ),
             (
                 "scene_save",
-                json!({"expected_session_token":"s","expected_revision":"7","expected_persistence_token":"p","filename":"creation.json"}),
+                json!({"expected_session_token":"s","expected_revision":"7","expected_persistence_token":"p","filename":"creation.json","connection":{"project_id":"project","epoch":"ab".repeat(32)}}),
             ),
             (
                 "scene_undo",
