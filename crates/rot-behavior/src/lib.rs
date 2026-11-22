@@ -606,6 +606,11 @@ impl Engine {
             &error.to_string(),
         )
     }
+    /// Check a single source with the sandbox's text compiler without running it.
+    pub fn check_source(&mut self, id: &str, source: &BehaviorSource) -> Result<(), Diagnostic> {
+        self.compile(id, source).map(drop)
+    }
+
     fn compile(&mut self, id: &str, source: &BehaviorSource) -> Result<Function, Diagnostic> {
         if source.language_id != LANGUAGE_ID
             || !matches!(
@@ -987,7 +992,18 @@ impl Engine {
                     "Application command declarations require lua54 host API5",
                 ));
             }
-            let main = self.compile(&binding.source_id, source)?;
+            let main = self
+                .compile(&binding.source_id, source)
+                .map_err(|mut failure| {
+                    if let Some(path) = source.label.as_deref().filter(|path| {
+                        binding.source_id.starts_with("asset-lua-") && path.ends_with(".lua")
+                    }) {
+                        failure.message = bounded_message(&format!("{path}: {}", failure.message));
+                        failure.context(id, binding, Some(source))
+                    } else {
+                        failure
+                    }
+                })?;
             if let Some(session) = self.debugger.borrow_mut().as_mut() {
                 session.context(debug::Context {
                     source_id: binding.source_id.clone(),

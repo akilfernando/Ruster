@@ -896,6 +896,7 @@ impl<'a> WatchTree<'a> {
                             || source.ends_with(".glb")
                             || source.ends_with(".png")
                             || source.ends_with(".wav")
+                            || source.ends_with(".lua")
                             || source.ends_with(".prefab")
                         {
                             changed.insert(directory.join(source));

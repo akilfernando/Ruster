@@ -141,6 +141,7 @@ enum Snapshot {
     Mesh(Arc<Mesh>),
     Texture(Arc<Texture>),
     Sound(Arc<AudioClip>),
+    Script(Arc<str>),
 }
 impl Snapshot {
     fn encode(
@@ -154,7 +155,7 @@ impl Snapshot {
                 encode_mesh_cache(hash, mesh, policy.expect("validated mesh policy"))
             }
             Self::Texture(texture) => texture::encode_cache(hash, texture),
-            Self::Sound(_) => Ok(source),
+            Self::Sound(_) | Self::Script(_) => Ok(source),
         }
     }
 }
@@ -280,6 +281,7 @@ impl AssetStore {
             meshes: self.meshes.clone(),
             textures: self.textures.clone(),
             sounds: self.sounds.clone(),
+            scripts: self.scripts.clone(),
             clips: self.clips.clone(),
             infos: self.infos.clone(),
             identity: self.identity.clone(),
@@ -447,6 +449,16 @@ impl AssetStore {
                     .is_none_or(|old| !Arc::ptr_eq(old, &texture));
                 if changed {
                     self.textures.insert(id.into(), texture);
+                }
+                changed
+            }
+            Snapshot::Script(text) => {
+                let changed = self
+                    .scripts
+                    .get(id)
+                    .is_none_or(|old| !Arc::ptr_eq(old, &text));
+                if changed {
+                    self.scripts.insert(id.into(), text);
                 }
                 changed
             }
@@ -726,6 +738,7 @@ impl AssetRequest {
             .then(|| match kind {
                 AssetKind::Texture => self.store.textures.get(id).cloned().map(Snapshot::Texture),
                 AssetKind::Sound => self.store.sounds.get(id).cloned().map(Snapshot::Sound),
+                AssetKind::Script => self.store.scripts.get(id).cloned().map(Snapshot::Script),
                 AssetKind::Mesh => None,
             })
             .flatten();
@@ -762,6 +775,7 @@ impl AssetRequest {
                         Snapshot::Texture(Arc::new(texture))
                     }
                 }
+                Payload::Script(text) => Snapshot::Script(Arc::from(text)),
                 Payload::Sound(sound) => Snapshot::Sound(
                     self.store
                         .sounds
@@ -957,6 +971,7 @@ fn publish_plan(
                         AssetKind::Mesh => "meshes",
                         AssetKind::Texture => "textures",
                         AssetKind::Sound => "sounds",
+                        AssetKind::Script => "scripts",
                     },
                     true,
                 )?;
@@ -968,6 +983,7 @@ fn publish_plan(
                         .expect("validated texture role")
                         .cache_version(),
                     AssetKind::Sound => SOUND_CACHE_VERSION,
+                    AssetKind::Script => 1,
                 };
                 atomic_write(
                     &directory,

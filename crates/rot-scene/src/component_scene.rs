@@ -123,8 +123,22 @@ impl ComponentScene {
                             }
                         }
                     }
-                    Component::Script { binding } => {
+                    Component::Script {
+                        binding,
+                        source_kind,
+                    } => {
                         binding.validate()?;
+                        if source_kind.is_some()
+                            && (!matches!(binding.target, BindingTarget::Object(_))
+                                || !binding.properties.is_empty()
+                                || !binding.state_defaults.is_empty()
+                                || !binding.commands.is_empty())
+                        {
+                            return Err(SceneError::Invalid(format!(
+                                "file-backed script {} requires an object binding without properties",
+                                component.id
+                            )));
+                        }
                         if binding.enabled != component.enabled
                             || binding
                                 .scene_owner_id()
@@ -334,6 +348,7 @@ impl ComponentScene {
                 id: id.clone(),
                 enabled: binding.enabled,
                 kind: Component::Script {
+                    source_kind: None,
                     binding: binding.clone(),
                 },
             });
@@ -478,6 +493,8 @@ pub enum Component {
     },
     Script {
         binding: BehaviorBinding,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_kind: Option<ScriptSourceKind>,
     },
     MeshRenderer {
         geometry: Geometry,
@@ -495,6 +512,13 @@ pub enum Component {
         offset: [f32; 3],
         shape: ColliderShape,
     },
+}
+
+/// An omitted script source kind keeps the embedded source interpretation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScriptSourceKind {
+    Asset,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -613,7 +637,7 @@ mod tests {
             }
             for (id, old) in &legacy.authoring().bindings {
                 assert!(migrated.objects.iter().flat_map(|object| &object.components).any(|component|
-                    component.id == *id && matches!(&component.kind, Component::Script { binding } if binding == old)));
+                    component.id == *id && matches!(&component.kind, Component::Script { binding, .. } if binding == old)));
             }
             let mut json = Vec::new();
             migrated.write_json(&mut json).unwrap();

@@ -446,12 +446,17 @@ impl PrefabSource {
                             *tint = *previous;
                         }
                     }
-                    Component::Script { binding } => {
-                        binding.source_id = instance
-                            .sources
-                            .get(&binding.source_id)
-                            .ok_or_else(|| invalid("Prefab script source is missing."))?
-                            .clone();
+                    Component::Script {
+                        binding,
+                        source_kind,
+                    } => {
+                        if source_kind.is_none() {
+                            binding.source_id = instance
+                                .sources
+                                .get(&binding.source_id)
+                                .ok_or_else(|| invalid("Prefab script source is missing."))?
+                                .clone();
+                        }
                         match &mut binding.target {
                             BindingTarget::Object(id) | BindingTarget::Group(id) => {
                                 *id = scene_id(id)?
@@ -591,7 +596,10 @@ impl PrefabSource {
                         .entry(id.clone())
                         .or_insert_with(|| material.clone());
                 }
-                Component::Script { binding } => {
+                Component::Script {
+                    binding,
+                    source_kind: None,
+                } => {
                     let id = &binding.source_id;
                     let source = scene.sources.get(id).ok_or_else(|| {
                         SceneError::Invalid(format!("Missing prefab script source {id}."))
@@ -659,13 +667,13 @@ impl PrefabSource {
                         component.id
                     )));
                 }
-                Component::Script { binding } if binding.target == BindingTarget::Application => {
+                Component::Script { binding, .. } if binding.target == BindingTarget::Application => {
                     return Err(SceneError::Invalid(format!(
                         "Application script {} cannot belong to a prefab.",
                         component.id
                     )));
                 }
-                Component::Script { binding } if binding.properties.values().any(|value| {
+                Component::Script { binding, .. } if binding.properties.values().any(|value| {
                     matches!(value, PropertyValue::ObjectRef(Some(id)) if !ids.contains(id.as_str()))
                 }) => {
                     return Err(invalid(format!("Script {} references an object outside the prefab.", component.id)));

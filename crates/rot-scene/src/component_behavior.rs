@@ -1,8 +1,8 @@
 //! Temporary input adapter for the legacy behavior runtime.
 use super::{Component, ComponentScene, Geometry, ObjectNode};
 use crate::{
-    Authoring, BindingTarget, Collider, Group, HiddenMeshRenderers, Light, Lighting, Object, Scene,
-    SceneError, Session,
+    Authoring, BehaviorSource, BindingTarget, Collider, Group, HiddenMeshRenderers, Light,
+    Lighting, Object, Scene, SceneError, Session, MAX_SOURCES,
 };
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
@@ -15,6 +15,74 @@ pub struct BehaviorInput {
 }
 
 impl ComponentScene {
+    /// Project-authored Lua IDs are independent of embedded source IDs.
+    pub fn script_asset_ids(&self) -> std::collections::BTreeSet<&str> {
+        self.objects
+            .iter()
+            .flat_map(|object| &object.components)
+            .filter_map(|component| match &component.kind {
+                Component::Script {
+                    binding,
+                    source_kind: Some(_),
+                } => Some(binding.source_id.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Replace file references on a detached runtime/build copy. The caller
+    /// establishes authority for every distinct accepted source before binding.
+    pub fn bake_script_assets(
+        &mut self,
+        sources: BTreeMap<String, BehaviorSource>,
+    ) -> Result<(), SceneError> {
+        if sources.is_empty() && self.script_asset_ids().is_empty() {
+            return Ok(());
+        }
+        if self.sources.len().saturating_add(sources.len()) > MAX_SOURCES {
+            return Err(SceneError::Invalid("script source limit exceeded".into()));
+        }
+        let mut keys = BTreeMap::new();
+        let mut index = 1;
+        for (asset, source) in sources {
+            source.validate()?;
+            let key = loop {
+                let candidate = format!("asset-lua-{index}");
+                index += 1;
+                if !self.sources.contains_key(&candidate) {
+                    break candidate;
+                }
+            };
+            self.sources.insert(key.clone(), source);
+            keys.insert(asset, key);
+        }
+        for component in self
+            .objects
+            .iter_mut()
+            .flat_map(|object| &mut object.components)
+        {
+            if let Component::Script {
+                binding,
+                source_kind,
+            } = &mut component.kind
+            {
+                if source_kind.is_some() {
+                    binding.source_id = keys
+                        .get(&binding.source_id)
+                        .ok_or_else(|| {
+                            SceneError::Invalid(format!(
+                                "Lua asset {} is unavailable",
+                                binding.source_id
+                            ))
+                        })?
+                        .clone();
+                    *source_kind = None;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Extract a fresh behavior runtime input. The projection is fallible because
     /// the old runtime cannot target every object/component combination.
     pub fn behavior_input(&self) -> Result<(Scene, Authoring), SceneError> {
@@ -146,7 +214,16 @@ impl ComponentScene {
                             scene.player_view = Some(view.clone());
                         }
                     }
-                    Component::Script { binding } => {
+                    Component::Script {
+                        binding,
+                        source_kind,
+                    } => {
+                        if source_kind.is_some() {
+                            return Err(SceneError::Invalid(format!(
+                                "Lua asset {} requires a project snapshot",
+                                binding.source_id
+                            )));
+                        }
                         detached_only &= binding.target == BindingTarget::Application;
                         authoring
                             .bindings

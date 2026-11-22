@@ -13,7 +13,7 @@ use rot_app::creation::{
     NO_ANIMATION_VERSION, NO_AUDIO_VERSION, VERSION,
 };
 use rot_assets::{AssetKind, AssetStore};
-use rot_scene::component_scene::ComponentSession;
+use rot_scene::component_scene::{ComponentScene, ComponentSession};
 use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -123,6 +123,7 @@ impl From<String> for BuildFailure {
 
 struct BuildRequest {
     bytes: Vec<u8>,
+    lua_scene: Option<ComponentScene>,
     scene: RuntimeScene,
     dependencies: DrawDependencies,
     assets: Option<rot_assets::ExportSnapshot>,
@@ -144,7 +145,18 @@ impl BuildRequest {
                 .write_json(&mut bytes)
                 .map_err(|error| error.to_string())?;
         }
-        let scene = RuntimeScene::from_components(Box::new(authored))?;
+        let script_ids = authored
+            .script_asset_ids()
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let resolved = super::script_assets::resolved(&authored, store, false)
+            .map_err(|error| BuildFailureKind::AssetUnavailable.detail(error))?;
+        let (runtime, lua_scene) = match resolved {
+            Some(resolved) => (resolved, Some(authored)),
+            None => (authored, None),
+        };
+        let scene = RuntimeScene::from_components(Box::new(runtime))?;
         let dependencies = scene
             .draw_dependencies()
             .map_err(|error| BuildFailureKind::AssetUnavailable.detail(error))?;
@@ -154,6 +166,7 @@ impl BuildRequest {
             .iter()
             .chain(dependencies.texture_roles.keys())
             .chain(&sounds.assets)
+            .chain(&script_ids)
             .cloned()
             .chain(
                 scene
@@ -175,6 +188,7 @@ impl BuildRequest {
         };
         Ok(Self {
             bytes,
+            lua_scene,
             scene,
             dependencies,
             assets,
@@ -273,13 +287,20 @@ impl BuildRequest {
             tick_nanos: Some(rot_behavior::DEFAULT_FIXED_TICK.as_nanos() as u64),
             initial_camera: None,
         };
-        fs::write(stage.join(&manifest.scene), self.bytes).map_err(|error| error.to_string())?;
+        let mut lua_sources = BTreeMap::new();
         let resource_dir = stage.join("assets");
         if let Some(assets) = self.assets {
             fs::create_dir(&resource_dir).map_err(|error| error.to_string())?;
             let copied = assets.read_verified_sources(|id, bytes| {
                 if cancel.load(Ordering::Relaxed) {
                     return Err(rot_assets::AssetError("Cancelled".into()));
+                }
+                if let Some(path) = assets.script_path(id) {
+                    let text = String::from_utf8(bytes).map_err(|_| {
+                        rot_assets::AssetError(format!("Lua source {path} must be UTF-8."))
+                    })?;
+                    lua_sources.insert(id.to_owned(), super::script_assets::source(path, text));
+                    return Ok(());
                 }
                 let (extension, map) = if mesh_ids.contains(id) {
                     let policy = assets.mesh_normal_policy(id).ok_or_else(|| {
@@ -319,6 +340,29 @@ impl BuildRequest {
                     .ok_or_else(|| "Unexpected animation resource.".to_owned())?
                     .insert(id.clone(), path);
             }
+        }
+        let scene_path = stage.join(&manifest.scene);
+        if let Some(mut authored) = self.lua_scene {
+            let mut engine = rot_behavior::Engine::new(rot_behavior::Limits::default())
+                .map_err(|error| error.to_string())?;
+            for (id, source) in &lua_sources {
+                cancelled()?;
+                engine.check_source(id, source).map_err(|error| {
+                    BuildFailureKind::AssetUnavailable.detail(format!(
+                        "Lua source {}: {error}",
+                        source.label.as_deref().unwrap_or(id)
+                    ))
+                })?;
+            }
+            authored
+                .bake_script_assets(lua_sources)
+                .map_err(|error| error.to_string())?;
+            let file = fs::File::create(scene_path).map_err(|error| error.to_string())?;
+            authored
+                .write_json(std::io::BufWriter::new(file))
+                .map_err(|error| error.to_string())?;
+        } else {
+            fs::write(scene_path, self.bytes).map_err(|error| error.to_string())?;
         }
         manifest.validate()?;
         let resources = rot_app::ResourceRoot::new(stage)?;

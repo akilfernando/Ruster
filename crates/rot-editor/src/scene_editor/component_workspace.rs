@@ -194,6 +194,7 @@ pub(super) struct ComponentWorkspace {
     #[cfg(unix)]
     last_save: Option<serde_json::Value>,
     assets: Option<rot_assets::AssetStore>,
+    runtime_asset_revision: Option<u64>,
     asset_error: Option<String>,
     asset_browser: asset_panel::Browser,
     prefab_files: BTreeMap<String, rot_assets::PrefabFile>,
@@ -309,6 +310,7 @@ impl ComponentWorkspace {
             #[cfg(unix)]
             last_save: None,
             assets,
+            runtime_asset_revision: None,
             asset_error,
             asset_browser: Default::default(),
             prefab_files: BTreeMap::new(),
@@ -389,7 +391,8 @@ impl ComponentWorkspace {
         self.runtime.observe(
             RUNTIME_GENERATION,
             self.session.revision(),
-            self.assets.as_ref().map(rot_assets::AssetStore::revision),
+            self.runtime_asset_revision
+                .or_else(|| self.assets.as_ref().map(rot_assets::AssetStore::revision)),
             0,
         );
     }
@@ -432,6 +435,14 @@ impl ComponentWorkspace {
                     );
                     self.meshes = snapshot.store.mesh_snapshots();
                     self.textures = snapshot.store.texture_snapshots();
+                    if self.runtime_asset_revision.is_none()
+                        || self.assets.as_ref().is_none_or(|previous| {
+                            previous.revision() != snapshot.store.revision()
+                                && !snapshot.store.same_non_script_catalog(previous)
+                        })
+                    {
+                        self.runtime_asset_revision = Some(snapshot.store.revision());
+                    }
                     self.assets = Some(snapshot.store);
                     self.asset_error = snapshot.warning;
                 }
@@ -2287,6 +2298,7 @@ impl ComponentWorkspace {
                                             self.assets.as_ref(),
                                             &self.session.scene().materials,
                                             allow_new,
+                                            self.runtime.diagnostic.as_ref(),
                                         );
                                     submit |= component_submit;
                                     if let Some(request) = material_request {
@@ -2303,7 +2315,9 @@ impl ComponentWorkspace {
                                 {
                                     self.apply();
                                 }
-                                if let Some(kind) = self.component_picker.show(ui) {
+                                if let Some(kind) = self.draft.as_ref().and_then(|draft| {
+                                    self.component_picker.show(ui, draft, self.assets.as_ref())
+                                }) {
                                     self.add_component(kind);
                                 }
                             }

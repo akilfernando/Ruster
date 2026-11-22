@@ -12,6 +12,7 @@ use std::{
 };
 
 pub const MAX_SOURCE_BYTES: usize = 1024 * 1024;
+pub const MAX_LUA_SOURCE_BYTES: usize = 16 * 1024;
 pub const MAX_TRIANGLES: usize = 32_768;
 pub const MAX_VERTICES: usize = MAX_TRIANGLES * 3;
 const MAX_MODEL_ITEMS: usize = 64;
@@ -106,6 +107,7 @@ pub enum AssetKind {
     Mesh,
     Texture,
     Sound,
+    Script,
 }
 impl AssetKind {
     fn from_source(source: &str) -> Result<Self, AssetError> {
@@ -115,9 +117,11 @@ impl AssetKind {
             Ok(Self::Texture)
         } else if source.ends_with(".wav") {
             Ok(Self::Sound)
+        } else if source.ends_with(".lua") {
+            Ok(Self::Script)
         } else {
             Err(error(
-                "source must use a supported .obj, .png or .wav extension",
+                "source must use a supported .obj, .png, .wav or .lua extension",
             ))
         }
     }
@@ -126,6 +130,7 @@ impl AssetKind {
             Self::Mesh => MAX_SOURCE_BYTES,
             Self::Texture => MAX_TEXTURE_SOURCE_BYTES,
             Self::Sound => MAX_SOUND_SOURCE_BYTES,
+            Self::Script => MAX_LUA_SOURCE_BYTES,
         }
     }
 }
@@ -172,7 +177,7 @@ fn error(message: impl Into<String>) -> AssetError {
     AssetError(message.into())
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Record {
     kind: AssetKind,
@@ -394,6 +399,7 @@ enum Payload {
     Mesh(Mesh),
     Texture(Texture),
     Sound(AudioClip),
+    Script(String),
 }
 
 /// A bounded in-memory last-good mesh, texture and sound catalog. Every mutation checks both the
@@ -407,6 +413,7 @@ pub struct AssetStore {
     meshes: BTreeMap<String, Arc<Mesh>>,
     textures: BTreeMap<String, Arc<Texture>>,
     sounds: BTreeMap<String, Arc<AudioClip>>,
+    scripts: BTreeMap<String, Arc<str>>,
     /// Encoded `rot-clip` payloads of accepted model generations.
     clips: BTreeMap<String, Arc<Vec<u8>>>,
     infos: BTreeMap<String, Arc<AssetInfo>>,
@@ -518,6 +525,11 @@ impl ExportSnapshot {
         self.sources.get(id).map(|source| source.kind)
     }
 
+    pub fn script_path(&self, id: &str) -> Option<&str> {
+        let source = self.sources.get(id)?;
+        (source.kind == AssetKind::Script).then_some(source.source.as_str())
+    }
+
     /// Frozen interpretation of an accepted mesh; textures/unknown IDs return None.
     pub fn mesh_normal_policy(&self, id: &str) -> Option<MeshNormalPolicy> {
         self.sources
@@ -587,7 +599,7 @@ impl ExportSnapshot {
             let bytes = read_source_bytes(&self.root, &source.source, source.kind)?;
             if digest(&bytes) != source.hash {
                 return Err(error(format!(
-                    "asset {id:?} source changed since its accepted content; Refresh the asset and retry export"
+                    "asset {id:?} ({}) source changed since its accepted content; Refresh the asset and retry export", source.source,
                 )));
             }
             visit(id, bytes)?;
@@ -640,6 +652,7 @@ impl AssetStore {
             meshes: BTreeMap::new(),
             textures: BTreeMap::new(),
             sounds: BTreeMap::new(),
+            scripts: BTreeMap::new(),
             clips: BTreeMap::new(),
             infos: BTreeMap::new(),
         };
@@ -664,6 +677,9 @@ impl AssetStore {
                     AssetKind::Sound => store
                         .read_sound_cache(hash)
                         .map(|sound| (Payload::Sound(sound), true)),
+                    AssetKind::Script => store
+                        .read_script_cache(hash)
+                        .map(|text| (Payload::Script(text), true)),
                 };
                 if let Ok((payload, current)) = cached {
                     if store.check_payload_budget(&id, &payload).is_ok() {
@@ -681,7 +697,7 @@ impl AssetStore {
                         info.diagnostic = Some(match record.kind {
                             // These bytes are not accepted. Avoid decoding/mip work
                             // whose result would be discarded; Refresh validates them.
-                            AssetKind::Texture | AssetKind::Sound => {
+                            AssetKind::Texture | AssetKind::Sound | AssetKind::Script => {
                                 "Source changed; Refresh to validate and accept".into()
                             }
                             // Preserve the existing mesh-open format diagnostics.
@@ -748,6 +764,21 @@ impl AssetStore {
     pub fn revision(&self) -> u64 {
         self.registry.revision
     }
+    /// A Lua file edit takes effect on the next run, unlike other catalog edits.
+    pub fn same_non_script_catalog(&self, previous: &Self) -> bool {
+        self.registry.models == previous.registry.models
+            && self
+                .registry
+                .assets
+                .iter()
+                .filter(|(_, item)| item.kind != AssetKind::Script)
+                .eq(previous
+                    .registry
+                    .assets
+                    .iter()
+                    .filter(|(_, item)| item.kind != AssetKind::Script))
+    }
+
     pub fn mesh(&self, id: &str) -> Option<&Mesh> {
         self.meshes.get(id).map(Arc::as_ref)
     }
@@ -814,6 +845,12 @@ impl AssetStore {
                 );
                 continue;
             };
+            if record.kind == AssetKind::Script && self.ready_script(id).is_none() {
+                return Err(error(format!(
+                    "Lua source {} is unavailable; repair the file in Assets.",
+                    record.source
+                )));
+            }
             let hash = record.hash.as_ref().ok_or_else(|| {
                 error(format!(
                     "asset {id:?} has no accepted content; Refresh the asset before exporting"
@@ -823,6 +860,12 @@ impl AssetStore {
                 AssetKind::Mesh => self.meshes.contains_key(id),
                 AssetKind::Texture => self.textures.contains_key(id),
                 AssetKind::Sound => self.sounds.contains_key(id),
+                AssetKind::Script => {
+                    self.scripts.contains_key(id)
+                        && self
+                            .asset_info(id)
+                            .is_some_and(|info| info.status == AssetStatus::Ready)
+                }
             } {
                 return Err(error(format!(
                     "asset {id:?} has no accepted content; repair its source and Refresh before exporting"
@@ -924,6 +967,7 @@ impl AssetStore {
                     ));
                 }
             }
+            Payload::Script(_) => {}
             Payload::Sound(sound) => {
                 let total = self
                     .sounds
@@ -955,6 +999,9 @@ impl AssetStore {
                     self.textures.insert(id.into(), Arc::new(texture));
                 }
             }
+            Payload::Script(text) => {
+                self.scripts.insert(id.into(), Arc::from(text));
+            }
             Payload::Sound(sound) => {
                 if self.sounds.get(id).is_none_or(|old| old.as_ref() != &sound) {
                     self.sounds.insert(id.into(), Arc::new(sound));
@@ -974,8 +1021,13 @@ impl AssetStore {
                 self.write_cache(hash, mesh, policy.expect("validated mesh policy"))
             }
             Payload::Texture(texture) => self.write_texture_cache(hash, texture),
-            Payload::Sound(_) => {
-                let directory = self.kind_cache_directory("sounds", true)?;
+            Payload::Sound(_) | Payload::Script(_) => {
+                let kind = if matches!(payload, Payload::Script(_)) {
+                    "scripts"
+                } else {
+                    "sounds"
+                };
+                let directory = self.kind_cache_directory(kind, true)?;
                 atomic_write(
                     &directory,
                     &directory.join(format!("v1-{hash}.bin")),
@@ -983,6 +1035,48 @@ impl AssetStore {
                 )
             }
         }
+    }
+    fn read_script_cache(&self, hash: &str) -> Result<String, AssetError> {
+        let directory = self.kind_cache_directory("scripts", false)?;
+        let cached = read_bounded(
+            &directory.join(format!("v1-{hash}.bin")),
+            MAX_LUA_SOURCE_BYTES,
+        )?;
+        if digest(&cached) != hash {
+            return Err(error("Lua cache source SHA-256 mismatch"));
+        }
+        String::from_utf8(cached).map_err(|_| error("Lua source must be UTF-8"))
+    }
+
+    pub fn script(&self, id: &str) -> Option<&str> {
+        self.scripts.get(id).map(Arc::as_ref)
+    }
+
+    /// Current catalog admission; a last-good snapshot is never runnable when stale.
+    pub fn ready_script(&self, id: &str) -> Option<(&AssetInfo, &Arc<str>)> {
+        let info = self.asset_info(id)?;
+        (info.kind == AssetKind::Script && info.status == AssetStatus::Ready)
+            .then(|| self.scripts.get(id).map(|text| (info, text)))
+            .flatten()
+    }
+
+    /// Check only a referenced source using the same confined and bounded read as import.
+    pub fn verify_script(&self, id: &str) -> Result<(&AssetInfo, &Arc<str>), AssetError> {
+        let (info, text) = self.ready_script(id).ok_or_else(|| {
+            error(format!(
+                "Lua source {} is unavailable; repair the file in Assets.",
+                self.asset_info(id).map_or(id, |info| info.source.as_str())
+            ))
+        })?;
+        let bytes = read_source_bytes(&self.root, &info.source, AssetKind::Script)
+            .map_err(|failure| error(format!("Lua source {}: {failure}", info.source)))?;
+        if bytes.as_slice() != text.as_bytes() {
+            return Err(error(format!(
+                "Lua source {} changed; wait for Assets to refresh.",
+                info.source
+            )));
+        }
+        Ok((info, text))
     }
     // The accepted encoded WAV is already bounded and smaller than decoded PCM.
     // Keep a verified byte copy for last-good preview across catalog reopens.
@@ -1240,6 +1334,9 @@ fn parse_source(
             decode_png_with_role(bytes, role.expect("validated texture role")).map(Payload::Texture)
         }
         AssetKind::Sound => decode_wav(bytes).map(Payload::Sound),
+        AssetKind::Script => std::str::from_utf8(bytes)
+            .map(|text| Payload::Script(text.into()))
+            .map_err(|_| error("Lua source must be UTF-8")),
     }
     .map_err(|e| error(format!("source {source:?}: {e}")))
 }

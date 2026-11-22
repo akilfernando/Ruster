@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::mpsc;
 
 /// File types the importer reads.
-const IMPORTABLE: [&str; 4] = ["glb", "obj", "png", "wav"];
+const IMPORTABLE: [&str; 5] = ["glb", "obj", "png", "wav", "lua"];
 
 pub(super) type TextureThumbnails =
     BTreeMap<String, (std::sync::Weak<rot_assets::Texture>, egui::TextureHandle)>;
@@ -208,7 +208,7 @@ impl SceneEditor {
                     crate::console::Level::Warning,
                     "Assets",
                     format!(
-                        "Not imported: {} (Rot imports .glb, .obj, .png and .wav)",
+                        "Not imported: {} (Rot imports .glb, .obj, .png, .wav and .lua)",
                         path.display()
                     ),
                 );
@@ -336,6 +336,7 @@ impl SceneEditor {
             Item::Resource(i) => match self.content_search.rows[*i].info.kind {
                 rot_assets::AssetKind::Mesh => "Mesh",
                 rot_assets::AssetKind::Sound => "Sound",
+                rot_assets::AssetKind::Script => crate::strings::Text::ComponentScript.plain(),
                 rot_assets::AssetKind::Texture => "Texture",
             },
         }
@@ -713,6 +714,7 @@ impl SceneEditor {
         let kind = match info.kind {
             rot_assets::AssetKind::Mesh => "Mesh",
             rot_assets::AssetKind::Sound => "Sound",
+            rot_assets::AssetKind::Script => crate::strings::Text::ComponentScript.plain(),
             rot_assets::AssetKind::Texture => "Texture",
         };
         ui.label(kind);

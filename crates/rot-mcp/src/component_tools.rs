@@ -24,7 +24,7 @@ pub(super) fn list() -> [Value; 2] {
             "shape":{"type":"object","properties":{
                 "type":{"enum":["box","sphere"]},"radius":{"type":"number"},
                 "half_extents":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3}}},
-            "view":{"type":"object"},"binding":{"type":"object"},
+            "view":{"type":"object"},"binding":{"type":"object"},"source_kind":{"enum":["asset"]},
             "color":{"type":"array","items":{"type":"number"}},"intensity":{"type":"number"},
             "kind":{"type":"object"}
         }

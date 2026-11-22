@@ -319,6 +319,7 @@ impl Browser {
                 AssetKind::Mesh => "Mesh",
                 AssetKind::Texture => "Texture",
                 AssetKind::Sound => "Sound",
+                AssetKind::Script => crate::strings::Text::ComponentScript.plain(),
             };
             let mut row = AssetRow::new(&info.id, &info.source, kind, info.status.clone());
             row.diagnostic = info.diagnostic.as_deref().map(diagnostic);
@@ -380,7 +381,8 @@ impl Browser {
                 row.last_good_available = row.model
                     || assets.mesh(&row.id).is_some()
                     || assets.texture(&row.id).is_some()
-                    || assets.sound(&row.id).is_some();
+                    || assets.sound(&row.id).is_some()
+                    || assets.script(&row.id).is_some();
                 let issue = self
                     .issues
                     .entry(row.source.clone())
@@ -423,6 +425,7 @@ impl Browser {
                     "obj" => "Mesh",
                     "png" => "Texture",
                     "wav" => "Sound",
+                    "lua" => Text::ComponentScript.plain(),
                     "glb" => "Model",
                     "prefab" => "Prefab",
                     "rotmeta" => Text::AssetImportSettings.plain(),

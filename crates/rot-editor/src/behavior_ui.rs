@@ -2521,8 +2521,11 @@ impl RuntimeUi {
                 session.hidden_mesh_renderers().cloned(),
             ),
             RuntimeSource::Components(session) => {
-                let input = session
-                    .scene()
+                let scene = session.scene();
+                let resolved = crate::scene_editor::script_assets::resolved(scene, assets, true)?;
+                let input = resolved
+                    .as_ref()
+                    .unwrap_or(scene)
                     .behavior_projection()
                     .map_err(|error| error.to_string())?;
                 (input.scene, input.authoring, input.hidden_mesh_renderers)

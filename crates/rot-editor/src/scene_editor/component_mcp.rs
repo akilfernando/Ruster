@@ -5,6 +5,7 @@ use crate::scene_editor::{asset_inspection, runtime_commands};
 use crate::strings::Text;
 use rot_scene::component_scene::{
     Component, ComponentInstance, Geometry, ObjectNode, PrefabFields, PrefabProperty,
+    ScriptSourceKind,
 };
 use rot_scene::{Primitive, SceneError, Transform, TransformRequest};
 use serde_json::{json, Value};
@@ -731,9 +732,16 @@ impl ComponentWorkspace {
             .components
             .get(offset..)
             .ok_or_else(invalid_component_arguments)?;
-        let components: Vec<_> = rest.iter().take(16).map(|component| json!({
-            "id":component.id, "type":component_type(&component.kind), "enabled":component.enabled
-        })).collect();
+        let components: Vec<_> = rest.iter().take(16).map(|component| {
+            let mut summary = json!({
+                "id":component.id, "type":component_type(&component.kind), "enabled":component.enabled
+            });
+            if let Component::Script { binding, source_kind: Some(_) } = &component.kind {
+                summary["source_kind"] = json!("asset");
+                summary["source_id"] = json!(&binding.source_id);
+            }
+            summary
+        }).collect();
         Ok(json!({
             "object_id":id, "components":components, "component_count":object.components.len(),
             "next_offset":(rest.len() > components.len()).then(|| (offset + components.len()).to_string())
@@ -789,10 +797,30 @@ impl ComponentWorkspace {
         }
         for object in &changed {
             let before = originals[object.id.as_str()];
-            if self.changes_textured_binding(before, object) {
+            let new_scripts: Vec<_> = object
+                .components
+                .iter()
+                .filter_map(|component| {
+                    let Component::Script {
+                        binding,
+                        source_kind: Some(ScriptSourceKind::Asset),
+                    } = &component.kind
+                    else {
+                        return None;
+                    };
+                    (!before.components.iter().any(|old| {
+                        old.id == component.id
+                            && matches!(&old.kind,
+                        Component::Script { binding: old, source_kind: Some(_) }
+                            if old.source_id == binding.source_id)
+                    }))
+                    .then_some(binding.source_id.as_str())
+                })
+                .collect();
+            if self.changes_textured_binding(before, object) || !new_scripts.is_empty() {
                 let expected = asset_revision.ok_or_else(|| (
                     "asset_revision_required",
-                    "Inspect project assets and pass expected_asset_revision when changing a textured Mesh Renderer.".into(),
+                    "Inspect project assets and pass expected_asset_revision when changing a textured Mesh Renderer or file-backed Script.".into(),
                 ))?;
                 if self.assets_loading() {
                     return Err((
@@ -805,6 +833,24 @@ impl ComponentWorkspace {
                         "stale_asset_revision",
                         "Inspect the project assets again.".into(),
                     ));
+                }
+            }
+            if !new_scripts.is_empty() {
+                if !object
+                    .components
+                    .iter()
+                    .any(|item| matches!(item.kind, Component::MeshRenderer { .. }))
+                {
+                    return Err((
+                        "script_owner_unavailable",
+                        "Add a Mesh Renderer before attaching a Lua file.".into(),
+                    ));
+                }
+                let store = self.assets.as_ref().ok_or_else(assets_unavailable)?;
+                for id in new_scripts {
+                    if store.ready_script(id).is_none() {
+                        return Err(("script_unavailable", format!("Lua asset {id} is unavailable. Inspect Assets and select a ready Lua file.")));
+                    }
                 }
             }
             self.validate_material_bindings(before, object)
@@ -917,7 +963,7 @@ impl ComponentEdit {
                 let index = find(object, &component_id)?;
                 let component = &mut object.components[index];
                 component.enabled = enabled;
-                if let Component::Script { binding } = &mut component.kind {
+                if let Component::Script { binding, .. } = &mut component.kind {
                     binding.enabled = enabled;
                 }
             }

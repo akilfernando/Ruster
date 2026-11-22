@@ -470,7 +470,7 @@ impl SharedComponent {
                     _ => {}
                 }
             }
-            (_, Component::Script { binding }) if self.enabled.edit.is_some() => {
+            (_, Component::Script { binding, .. }) if self.enabled.edit.is_some() => {
                 binding.enabled = component.enabled
             }
             _ => {}

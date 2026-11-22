@@ -403,7 +403,9 @@ impl AssetStore {
             match &resource.payload {
                 Payload::Mesh(mesh) => mesh_bytes += mesh.payload_bytes(),
                 Payload::Texture(texture) => texture_bytes += texture.payload_bytes(),
-                Payload::Sound(_) => return Err(error("GLB cannot own WAV audio")),
+                Payload::Sound(_) | Payload::Script(_) => {
+                    return Err(error("GLB cannot own external source assets"))
+                }
             }
         }
         if mesh_bytes > MAX_RESOLVED_BYTES || texture_bytes > MAX_TEXTURE_RESOLVED_BYTES {

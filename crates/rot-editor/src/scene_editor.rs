@@ -57,6 +57,7 @@ mod recovered_input_ui;
 mod runtime_commands;
 mod runtime_transform_ui;
 mod save_commands;
+pub(crate) mod script_assets;
 mod shadow_feedback;
 mod sidebars;
 mod toolbar_icons;
@@ -391,6 +392,9 @@ impl ContentSearch {
                             let kind = match info.kind {
                                 rot_assets::AssetKind::Mesh => "Mesh",
                                 rot_assets::AssetKind::Sound => "Sound",
+                                rot_assets::AssetKind::Script => {
+                                    crate::strings::Text::ComponentScript.plain()
+                                }
                                 rot_assets::AssetKind::Texture => match info.texture_role {
                                     Some(rot_assets::TextureRole::Roughness) => {
                                         "Roughness (linear)"

@@ -608,7 +608,7 @@ impl AssetStore {
                             source: source.into(),
                             role: role.expect("texture role"),
                         },
-                        AssetKind::Sound => AssetMutation::Import {
+                        AssetKind::Sound | AssetKind::Script => AssetMutation::Import {
                             id: metadata.id,
                             source: source.into(),
                         },

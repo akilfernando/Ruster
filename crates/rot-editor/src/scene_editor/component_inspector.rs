@@ -3,28 +3,31 @@ use crate::strings::Text;
 use crate::ui_kit;
 use crate::workspace::Action;
 use eframe::egui;
-use rot_scene::component_scene::{Component, ComponentInstance, Geometry, ObjectNode};
+use rot_scene::component_scene::{
+    Component, ComponentInstance, Geometry, ObjectNode, ScriptSourceKind,
+};
 use rot_scene::{
-    ColliderRole, ColliderShape, Light, LightKind, OpaqueMaterial, Primitive, ShadowQuality,
-    SunShadow,
+    BehaviorBinding, BindingTarget, ColliderRole, ColliderShape, Light, LightKind, OpaqueMaterial,
+    Primitive, ShadowQuality, SunShadow,
 };
 use std::{collections::BTreeMap, ops::RangeInclusive};
 
-#[derive(Clone, Copy)]
 pub(super) enum AddComponent {
     MeshRenderer,
     Collider,
     Light,
     DirectionalLight,
+    Script { source: String, owner: String },
 }
 
 impl AddComponent {
-    fn label(self) -> Text {
+    fn label(&self) -> Text {
         match self {
             Self::MeshRenderer => Text::ComponentMeshRenderer,
             Self::Collider => Text::ComponentCollider,
             Self::Light => Text::ComponentLight,
             Self::DirectionalLight => Text::LabelCreateDirectionalLight,
+            Self::Script { .. } => Text::ComponentScript,
         }
     }
 
@@ -42,6 +45,17 @@ impl AddComponent {
                     role: ColliderRole::Blocker,
                     offset: [0.0; 3],
                     shape: ColliderShape::default(),
+                },
+                Self::Script { source, owner } => Component::Script {
+                    binding: BehaviorBinding {
+                        target: BindingTarget::Object(owner),
+                        source_id: source,
+                        enabled: true,
+                        properties: BTreeMap::new(),
+                        state_defaults: BTreeMap::new(),
+                        commands: BTreeMap::new(),
+                    },
+                    source_kind: Some(ScriptSourceKind::Asset),
                 },
                 Self::Light | Self::DirectionalLight => {
                     let light = match self {
@@ -149,6 +163,7 @@ pub(super) fn components(
     assets: Option<&rot_assets::AssetStore>,
     materials: &BTreeMap<String, OpaqueMaterial>,
     allow_new_material: bool,
+    diagnostic: Option<&rot_behavior::Diagnostic>,
 ) -> (
     bool,
     Option<super::component_workspace::component_material::Request>,
@@ -161,7 +176,13 @@ pub(super) fn components(
         let label = component_label(&component.kind);
         let editable = matches!(
             component.kind,
-            Component::MeshRenderer { .. } | Component::Collider { .. } | Component::Light { .. }
+            Component::MeshRenderer { .. }
+                | Component::Collider { .. }
+                | Component::Light { .. }
+                | Component::Script {
+                    source_kind: Some(_),
+                    ..
+                }
         );
         let widget = egui::CollapsingHeader::new(label.plain())
             .id_salt((&draft.id, &component.id))
@@ -232,7 +253,34 @@ pub(super) fn components(
                         intensity,
                         kind,
                     } => submit |= light_fields(ui, color, intensity, kind),
-                    Component::Script { binding } => binding.enabled = component.enabled,
+                    Component::Script {
+                        binding,
+                        source_kind,
+                    } => {
+                        binding.enabled = component.enabled;
+                        if source_kind.is_some() {
+                            let id = &binding.source_id;
+                            let info = assets.and_then(|store| store.asset_info(id));
+                            let filename =
+                                info.map_or(id.as_str(), |info| script_filename(&info.source));
+                            ui_kit::property_row(ui, Text::ComponentScriptSource.plain(), |ui| {
+                                let response = ui.label(filename);
+                                if let Some(info) = info {
+                                    response.on_hover_text(&info.source);
+                                }
+                            });
+                            if assets.and_then(|store| store.ready_script(id)).is_none() {
+                                ui.label(Text::ComponentScriptUnavailable.plain());
+                            }
+                            if let Some(error) = diagnostic.filter(|error| {
+                                error.binding_id.as_deref() == Some(component.id.as_str())
+                            }) {
+                                let message = error.to_string();
+                                ui.add(egui::Label::new(&message).truncate())
+                                    .on_hover_text(message);
+                            }
+                        }
+                    }
                     _ => {}
                 }
             });
@@ -517,12 +565,26 @@ fn collider_fields(
 pub(super) struct ComponentPicker {
     search: String,
     open: bool,
+    picking_script: bool,
+}
+
+fn script_filename(source: &str) -> &str {
+    source.rsplit('/').next().unwrap_or(source)
 }
 
 impl ComponentPicker {
-    pub(super) fn show(&mut self, ui: &mut egui::Ui) -> Option<AddComponent> {
+    pub(super) fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        owner: &ObjectNode,
+        assets: Option<&rot_assets::AssetStore>,
+    ) -> Option<AddComponent> {
         let mut add = None;
+        let mut enter_script_picker = false;
         let result = ui.menu_button(Text::ComponentAdd.plain(), |ui| {
+            if self.picking_script {
+                ui.label(Text::ChooseScript.plain());
+            }
             let edit = ui.add(
                 egui::TextEdit::singleline(&mut self.search)
                     .hint_text(Text::ComponentSearch.plain()),
@@ -533,6 +595,41 @@ impl ComponentPicker {
             let submit = (edit.has_focus() || edit.lost_focus())
                 && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
             let search = self.search.trim().to_ascii_lowercase();
+            if self.picking_script {
+                let scripts = assets
+                    .into_iter()
+                    .flat_map(|store| store.infos())
+                    .filter(|info| {
+                        info.kind == rot_assets::AssetKind::Script
+                            && info.status == rot_assets::AssetStatus::Ready
+                    });
+                let mut found = false;
+                egui::ScrollArea::vertical()
+                    .max_height(240.)
+                    .show(ui, |ui| {
+                        for info in scripts
+                            .filter(|info| info.source.to_ascii_lowercase().contains(&search))
+                        {
+                            found = true;
+                            let chosen = ui
+                                .button(script_filename(&info.source))
+                                .on_hover_text(&info.source)
+                                .clicked();
+                            if chosen || (submit && add.is_none()) {
+                                add = Some(AddComponent::Script {
+                                    source: info.id.clone(),
+                                    owner: owner.id.clone(),
+                                });
+                                ui.close();
+                                break;
+                            }
+                        }
+                    });
+                if !found {
+                    ui.label(Text::ComponentNoScriptFiles.plain());
+                }
+                return;
+            }
             for kind in [
                 AddComponent::MeshRenderer,
                 AddComponent::Collider,
@@ -546,10 +643,26 @@ impl ComponentPicker {
                     ui.close();
                 }
             }
+            if owner
+                .components
+                .iter()
+                .any(|component| matches!(component.kind, Component::MeshRenderer { .. }))
+                && Text::ComponentScript
+                    .plain()
+                    .to_ascii_lowercase()
+                    .contains(&search)
+                && (ui.button(Text::ComponentScript.plain()).clicked() || submit && add.is_none())
+            {
+                enter_script_picker = true;
+            }
         });
-        self.open = result.inner.is_some() && add.is_none();
+        let visible = result.inner.is_some() && add.is_none();
+        self.open = visible && !enter_script_picker;
         if !self.open {
             self.search.clear();
+        }
+        if enter_script_picker || !visible {
+            self.picking_script = enter_script_picker;
         }
         add
     }

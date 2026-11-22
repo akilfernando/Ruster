@@ -119,7 +119,7 @@ pub(super) fn show(
     }
     if let Some(object) = selected {
         for component in &object.components {
-            let Component::Script { binding } = &component.kind else {
+            let Component::Script { binding, .. } = &component.kind else {
                 continue;
             };
             let Some(state) = frame.state.binding(&component.id) else {
