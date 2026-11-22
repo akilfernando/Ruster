@@ -31,7 +31,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("scene_collider_set", "Set or remove (null) an object's collider."),
     ("scene_color", "Set an object's color as RGBA from 0 to 1."),
     ("scene_group_create", "Create an empty group. In v23, pass member_ids to group 1–256 objects in one Undo step with world transforms preserved. Omit parent_id and transform when grouping."),
-    ("scene_reparent", "Move an object under a parent object, or to the top level with null, keeping its world position."),
+    ("scene_reparent", "Preserve world transforms. Choose object_id or v23 object_ids (1–256 unique IDs), and one of parent_id (null for root), v23 before_id or v23 after_id. Sibling placement uses request order."),
     ("material_inspect", "List committed materials, textures, users and display settings. A pending_material summary, when present, reports a human edit's intent, IDs and affected object count."),
     ("scene_material_set", "Create or replace a material. Changes apply to every object using it; assign_object_id assigns a new material."),
     ("scene_material_assign", "Assign a material to an object, or null to remove it."),

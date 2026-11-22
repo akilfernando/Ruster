@@ -62,6 +62,20 @@ enum HierarchyDestination {
     Sibling { id: String, before: bool },
 }
 
+impl HierarchyDestination {
+    fn place(
+        &self,
+        session: &mut ComponentSession,
+        revision: u64,
+        ids: &[&str],
+    ) -> Result<u64, SceneError> {
+        match self {
+            Self::Parent(parent) => session.reparent_many(revision, ids, parent.as_deref()),
+            Self::Sibling { id, before } => session.place_many_next_to(revision, ids, id, *before),
+        }
+    }
+}
+
 fn hierarchy_drop(
     ui: &egui::Ui,
     row: &egui::Response,
@@ -947,16 +961,7 @@ impl ComponentWorkspace {
             let ids = self.target_ids(hit);
             let ids: Vec<_> = ids.iter().map(String::as_str).collect();
             let revision = self.session.revision();
-            let result = match destination {
-                HierarchyDestination::Parent(parent) => {
-                    self.session
-                        .reparent_many(revision, &ids, parent.as_deref())
-                }
-                HierarchyDestination::Sibling { id: anchor, before } => self
-                    .session
-                    .place_many_next_to(revision, &ids, &anchor, before),
-            };
-            match result {
+            match destination.place(&mut self.session, revision, &ids) {
                 Ok(_) => {
                     self.error = None;
                     self.refresh();

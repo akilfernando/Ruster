@@ -1,5 +1,6 @@
 //! Structural authoring adapters only; the editor Session owns topology/history.
 use serde_json::{json, Value};
+use std::collections::HashSet;
 pub fn supported(name: &str) -> bool {
     matches!(name, "scene_group_create" | "scene_reparent")
 }
@@ -43,27 +44,21 @@ pub fn valid(name: &str, args: &Value) -> bool {
     let Some(map) = args.as_object() else {
         return false;
     };
-    let field = if name == "scene_group_create" {
-        "name"
-    } else {
-        "parent_id"
-    };
-    supported(name)
+    if name == "scene_reparent" {
+        return valid_reparent(map, args);
+    }
+    name == "scene_group_create"
         && super::exact_keys(
             map,
             &[
                 "expected_session_token",
                 "expected_revision",
                 "object_id",
-                field,
+                "name",
             ],
-            if name == "scene_group_create" {
-                &["parent_id", "transform", "member_ids"]
-            } else {
-                &[]
-            },
+            &["parent_id", "transform", "member_ids"],
         )
-        && (name != "scene_group_create" || valid_creation_options(map))
+        && valid_creation_options(map)
         && map.get("member_ids").is_none_or(|members| {
             !map.contains_key("parent_id")
                 && !map.contains_key("transform")
@@ -84,26 +79,158 @@ pub fn valid(name: &str, args: &Value) -> bool {
                     .as_str()
                     .is_some_and(|s| !s.is_empty() && s.len() <= *max)
             })
-        && ((name == "scene_reparent" && args[field].is_null())
-            || args[field]
-                .as_str()
-                .is_some_and(|s| !s.is_empty() && s.len() <= 128))
+        && args["name"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty() && s.len() <= 128)
 }
+
+fn valid_reparent(map: &serde_json::Map<String, Value>, args: &Value) -> bool {
+    if !super::exact_keys(
+        map,
+        &["expected_session_token", "expected_revision"],
+        &[
+            "object_id",
+            "object_ids",
+            "parent_id",
+            "before_id",
+            "after_id",
+        ],
+    ) || map.len() != 4
+        || !super::canonical_u64(&args["expected_revision"])
+        || args["expected_session_token"]
+            .as_str()
+            .is_none_or(|token| token.is_empty() || token.len() > 256)
+    {
+        return false;
+    }
+
+    // Legacy calls retain the adapter's original wire validation.
+    let bounded_id = |value: &Value| {
+        value
+            .as_str()
+            .is_some_and(|id| !id.is_empty() && id.len() <= 128)
+    };
+    if let (Some(id), Some(parent)) = (map.get("object_id"), map.get("parent_id")) {
+        return bounded_id(id) && (parent.is_null() || bounded_id(parent));
+    }
+
+    let valid_id = |value: &Value| {
+        value
+            .as_str()
+            .is_some_and(|id| rot_scene::validate_id(id).is_ok())
+    };
+    let source = match (map.get("object_id"), map.get("object_ids")) {
+        (Some(id), None) => valid_id(id),
+        (None, Some(ids)) => ids.as_array().is_some_and(|ids| {
+            let mut seen = HashSet::with_capacity(ids.len().min(256));
+            (1..=256).contains(&ids.len())
+                && ids.iter().all(|value| {
+                    value
+                        .as_str()
+                        .is_some_and(|id| rot_scene::validate_id(id).is_ok() && seen.insert(id))
+                })
+        }),
+        _ => false,
+    };
+    source
+        && (map
+            .get("parent_id")
+            .is_some_and(|id| id.is_null() || valid_id(id))
+            || map
+                .get("before_id")
+                .or_else(|| map.get("after_id"))
+                .is_some_and(valid_id))
+}
+
 pub fn list() -> Vec<Value> {
-    ["scene_group_create","scene_reparent"].into_iter().map(|name| {
-        let field=if name=="scene_group_create" {"name"} else {"parent_id"};
-        let mut props=json!({"expected_session_token":{"type":"string","minLength":1,"maxLength":256},"expected_revision":{"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20},"object_id":{"type":"string","minLength":1,"maxLength":128}});
-        props[field]=if name=="scene_group_create" {json!({"type":"string","minLength":1,"maxLength":128})} else {json!({"type":["string","null"],"minLength":1,"maxLength":128,"description":"Group stable ID, or null to detach preserving world pose."})};
-        if name == "scene_group_create" {
-            creation_properties(props.as_object_mut().expect("property map"));
-            props["member_ids"] = json!({"type":"array","items":{"type":"string","minLength":1,"maxLength":128},"minItems":1,"maxItems":256});
-        }
-        json!({"name":name,"description":if name=="scene_group_create" {"Create an empty assembly group, or group existing v23 objects with member_ids."} else {"Reparent one geometry/group/point-light target to a group, or detach with null. Preserve the complete descendant world closure within 2e-6 relative per matrix element or refuse atomically. Legacy authoring combinations reject. Shared guarded history; no implicit save."},"inputSchema":{"type":"object","properties":props,"required":["expected_session_token","expected_revision","object_id",field],"additionalProperties":false},"annotations":{"readOnlyHint":false,"destructiveHint":false,"openWorldHint":false}})
-    }).collect()
+    let id = json!({"type":"string","minLength":1,"maxLength":128});
+    let mut group = json!({
+        "expected_session_token":{"type":"string","minLength":1,"maxLength":256},
+        "expected_revision":{"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20},
+        "object_id":id,
+    });
+    let mut reparent = group.clone();
+    group["name"] = id.clone();
+    creation_properties(group.as_object_mut().expect("property map"));
+    group["member_ids"] = json!({"type":"array","items":id,"minItems":1,"maxItems":256});
+    reparent["object_ids"] =
+        json!({"type":"array","items":id,"minItems":1,"maxItems":256,"uniqueItems":true});
+    reparent["parent_id"] = json!({"type":["string","null"],"minLength":1,"maxLength":128});
+    reparent["before_id"] = id.clone();
+    reparent["after_id"] = id;
+
+    let tool = |name, properties, required: Vec<&str>| {
+        json!({
+            "name":name,
+            "inputSchema":super::object_schema(properties, required),
+            "annotations":{"readOnlyHint":false,"destructiveHint":false,"openWorldHint":false},
+        })
+    };
+    vec![
+        tool(
+            "scene_group_create",
+            group,
+            vec![
+                "expected_session_token",
+                "expected_revision",
+                "object_id",
+                "name",
+            ],
+        ),
+        tool(
+            "scene_reparent",
+            reparent,
+            vec!["expected_session_token", "expected_revision"],
+        ),
+    ]
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reparent_requires_one_source_and_one_destination() {
+        let maximum_ids = (0..256).map(|n| format!("id{n:0126}")).collect::<Vec<_>>();
+        let args = |fields: Value| {
+            let mut args = json!({"expected_session_token":"session","expected_revision":"0"});
+            args.as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            args
+        };
+        for fields in [
+            json!({"object_ids":["roof","roof_child","door"],"before_id":"anchor"}),
+            json!({"object_id":"roof","after_id":"anchor"}),
+            json!({"object_ids":["roof","door"],"parent_id":null}),
+            json!({"object_ids":maximum_ids,"after_id":"anchor"}),
+        ] {
+            let args = args(fields);
+            assert!(valid("scene_reparent", &args));
+            let call = json!({
+                "jsonrpc":"2.0","id":1,"method":"tools/call",
+                "params":{"name":"scene_reparent","arguments":args}
+            });
+            assert!(call.to_string().len() < 64 * 1024);
+        }
+        for fields in [
+            json!({"object_ids":["roof","roof"],"before_id":"anchor"}),
+            json!({"object_ids":["roof","bad id"],"before_id":"anchor"}),
+            json!({"object_ids":[],"before_id":"anchor"}),
+            json!({"object_ids":(0..257).map(|n| format!("id{n}")).collect::<Vec<_>>(),"before_id":"anchor"}),
+            json!({"object_ids":null,"before_id":"anchor"}),
+            json!({"object_ids":["roof"],"before_id":null}),
+            json!({"object_ids":["roof"],"after_id":"bad id"}),
+            json!({"object_id":"roof","object_ids":["door"]}),
+            json!({"object_id":"roof","object_ids":["door"],"parent_id":"cottage"}),
+            json!({"object_id":"roof","parent_id":null,"before_id":"anchor"}),
+            json!({"parent_id":null,"before_id":"anchor"}),
+            json!({"object_id":"roof"}),
+        ] {
+            let args = args(fields);
+            assert!(!valid("scene_reparent", &args), "{args}");
+        }
+    }
+
     #[test]
     fn exact_structural_wire_shapes() {
         for (name, field, value) in [

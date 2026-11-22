@@ -1,5 +1,5 @@
 //! Guarded v23 commands dispatched only under the existing Host request lease.
-use super::{ComponentWorkspace, RUNTIME_GENERATION};
+use super::{ComponentWorkspace, HierarchyDestination, RUNTIME_GENERATION};
 use crate::behavior_ui::RuntimeSource;
 use crate::scene_editor::{asset_inspection, runtime_commands};
 use rot_scene::component_scene::{
@@ -7,7 +7,7 @@ use rot_scene::component_scene::{
 };
 use rot_scene::{Primitive, SceneError, Transform, TransformRequest};
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 impl ComponentWorkspace {
     pub(in crate::scene_editor) fn ai_command(
@@ -471,13 +471,39 @@ impl ComponentWorkspace {
                 self.session.put_object(revision, object)
             }
             "scene_reparent" => {
-                let id = args["object_id"].as_str().ok_or_else(invalid)?;
-                let parent = match args.get("parent_id") {
-                    Some(Value::Null) => None,
-                    Some(Value::String(id)) => Some(id.as_str()),
+                let ids = match (args.get("object_id"), args.get("object_ids")) {
+                    (Some(id), None) => vec![hierarchy_id(id).ok_or_else(invalid)?],
+                    (None, Some(ids)) => {
+                        let ids = batch(ids).ok_or_else(invalid)?;
+                        let mut seen = HashSet::with_capacity(ids.len());
+                        ids.iter()
+                            .map(|value| {
+                                hierarchy_id(value)
+                                    .filter(|id| seen.insert(*id))
+                                    .ok_or_else(invalid)
+                            })
+                            .collect::<Result<Vec<_>, _>>()?
+                    }
                     _ => return Err(invalid()),
                 };
-                self.session.reparent(revision, id, parent)
+                let destination = if let Some(parent) = args.get("parent_id") {
+                    let parent = match parent {
+                        Value::Null => None,
+                        value => Some(hierarchy_id(value).ok_or_else(invalid)?.to_owned()),
+                    };
+                    HierarchyDestination::Parent(parent)
+                } else {
+                    let (id, before) = args
+                        .get("before_id")
+                        .map(|id| (id, true))
+                        .or_else(|| args.get("after_id").map(|id| (id, false)))
+                        .ok_or_else(invalid)?;
+                    HierarchyDestination::Sibling {
+                        id: hierarchy_id(id).ok_or_else(invalid)?.to_owned(),
+                        before,
+                    }
+                };
+                destination.place(&mut self.session, revision, &ids)
             }
             "scene_delete" => {
                 let id = args["object_id"].as_str().ok_or_else(invalid)?;
@@ -856,6 +882,12 @@ fn object_not_found() -> (&'static str, String) {
     )
 }
 
+fn hierarchy_id(value: &Value) -> Option<&str> {
+    value
+        .as_str()
+        .filter(|id| rot_scene::validate_id(id).is_ok())
+}
+
 fn batch(value: &Value) -> Option<&[Value]> {
     value
         .as_array()
@@ -1026,6 +1058,184 @@ mod tests {
         assert!(close(roof.y_axis.truncate().to_array(), [1., 0., 0.]));
         editor.command(Action::Undo);
         assert_eq!(editor.session.scene().objects.len(), 1);
+    }
+
+    #[test]
+    fn hierarchy_placement_orders_roots_and_shares_editor_undo() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("cottage.scene");
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("cottage")).unwrap()).unwrap();
+        scene.objects = [
+            ("cottage", None),
+            ("door", None),
+            ("anchor", Some("cottage")),
+            ("roof_child", Some("roof")),
+            ("roof", None),
+            ("scaled", None),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (id, parent))| ObjectNode {
+            id: id.into(),
+            name: id.into(),
+            parent: parent.map(str::to_owned),
+            enabled: true,
+            transform: Transform {
+                translation: [index as f32 + 1.0, 2.0, -1.0],
+                rotation: match id {
+                    "cottage" | "scaled" => [0.2, 0.6, 0.1],
+                    _ => [0.0; 3],
+                },
+                scale: match id {
+                    "cottage" => [1.5; 3],
+                    "scaled" => [1.0, 2.0, 3.0],
+                    _ => [1.0; 3],
+                },
+            },
+            components: Vec::new(),
+        })
+        .collect();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor
+            .scene_view
+            .locked
+            .extend(["roof".into(), "cottage".into()]);
+        editor.refresh_view();
+
+        let mut args = json!({
+            "expected_session_token":"session","expected_revision":"0",
+            "object_ids":["roof","roof_child","door"],"before_id":"anchor",
+        });
+        let reparent = |editor: &mut ComponentWorkspace, args: &Value| {
+            editor.ai_command("session", "scene_reparent", args)
+        };
+        editor.select(Some("roof".into()));
+        editor.draft.as_mut().unwrap().name = "Pending roof".into();
+        assert_eq!(
+            reparent(&mut editor, &args)["error"]["code"],
+            "drafts_pending"
+        );
+        editor.refresh();
+        let reply = reparent(&mut editor, &args);
+        assert_eq!(reply["result"]["revision"], "1", "{reply}");
+        assert_eq!(reply["result"]["changed"], true);
+        let placed = editor.session.scene().clone();
+        let siblings = placed
+            .objects
+            .iter()
+            .filter(|object| object.parent.as_deref() == Some("cottage"))
+            .map(|object| object.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(siblings, ["roof", "door", "anchor"]);
+        let child = placed
+            .objects
+            .iter()
+            .find(|object| object.id == "roof_child")
+            .unwrap();
+        assert_eq!(child.parent.as_deref(), Some("roof"));
+        let original_world = scene.world_matrices().unwrap();
+        for (object, actual) in placed.objects.iter().zip(placed.world_matrices().unwrap()) {
+            let original = scene
+                .objects
+                .iter()
+                .position(|old| old.id == object.id)
+                .unwrap();
+            assert!(
+                actual.abs_diff_eq(original_world[original], 2e-6),
+                "{}",
+                object.id
+            );
+        }
+
+        assert_eq!(
+            reparent(&mut editor, &args)["error"]["code"],
+            "stale_revision"
+        );
+        args["expected_revision"] = json!("1");
+        assert_eq!(reparent(&mut editor, &args)["result"]["changed"], false);
+        let mut selected_anchor = args.clone();
+        selected_anchor["object_ids"] = json!(["roof", "anchor"]);
+        assert_eq!(
+            reparent(&mut editor, &selected_anchor)["result"]["changed"],
+            false
+        );
+        for (selection, destination, value, code) in [
+            (
+                json!(["roof", "roof"]),
+                "before_id",
+                json!("anchor"),
+                "invalid_arguments",
+            ),
+            (
+                json!(["roof", "missing"]),
+                "before_id",
+                json!("anchor"),
+                "object_not_found",
+            ),
+            (
+                json!(["door"]),
+                "after_id",
+                json!("missing"),
+                "object_not_found",
+            ),
+            (
+                json!(["cottage"]),
+                "before_id",
+                json!("roof_child"),
+                "invalid_arguments",
+            ),
+            (
+                json!(["door", "roof"]),
+                "parent_id",
+                json!("scaled"),
+                "invalid_arguments",
+            ),
+        ] {
+            let mut invalid = json!({
+                "expected_session_token":"session", "expected_revision":"1",
+                "object_ids":selection
+            });
+            invalid[destination] = value;
+            let reply = reparent(&mut editor, &invalid);
+            assert_eq!(reply["error"]["code"], code, "{reply}");
+            assert_eq!(editor.session.scene(), &placed);
+            assert_eq!(editor.session.revision(), 1);
+        }
+
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene(), &scene);
+        let reply = editor.ai_command(
+            "session",
+            "scene_redo",
+            &json!({
+                "expected_session_token":"session","expected_revision":"2",
+            }),
+        );
+        assert_eq!(reply["result"]["revision"], "3", "{reply}");
+        assert_eq!(editor.session.scene(), &placed);
+
+        let reply = reparent(
+            &mut editor,
+            &json!({
+                "expected_session_token":"session","expected_revision":"3",
+                "object_id":"door","parent_id":null,
+            }),
+        );
+        assert_eq!(reply["result"]["revision"], "4", "{reply}");
+        assert_eq!(
+            editor
+                .session
+                .scene()
+                .objects
+                .iter()
+                .find(|object| object.id == "door")
+                .unwrap()
+                .parent,
+            None
+        );
     }
 
     #[test]
