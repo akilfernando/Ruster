@@ -112,6 +112,7 @@ impl ComponentWorkspace {
             if let Err(error) = PrefabSource::read_json(&file.bytes) {
                 issues.push(ProjectFileIssue {
                     asset_id: None,
+                    texture_role: None,
                     path: file.source.clone(),
                     status: AssetStatus::Invalid,
                     message: error.to_string(),

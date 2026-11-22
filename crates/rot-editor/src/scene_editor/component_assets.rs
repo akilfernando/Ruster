@@ -392,7 +392,10 @@ impl Browser {
                     });
                 // Separate interpretations share a source. If one is
                 // unavailable, report that representation before the others.
-                if issue.asset_id.is_none() || issue.last_good_available && !row.last_good_available
+                if issue.asset_id.as_deref().is_some_and(|id| id == row.id) {
+                    issue.last_good_available = row.last_good_available;
+                } else if issue.asset_id.is_none()
+                    || issue.last_good_available && !row.last_good_available
                 {
                     issue.asset_id = Some(row.id.clone());
                     issue.status = row.status.clone();
@@ -402,9 +405,18 @@ impl Browser {
             }
         }
         let known_sources: BTreeSet<_> = self.rows.iter().map(|row| row.source.clone()).collect();
+        let known_ids: BTreeSet<_> = self.rows.iter().map(|row| row.id.clone()).collect();
+        let failed_texture_roles: BTreeMap<_, _> = issues
+            .iter()
+            .filter_map(|issue| issue.asset_id.as_deref().zip(issue.texture_role))
+            .collect();
         self.rows
             .extend(self.issues.iter().filter_map(|(source, issue)| {
-                if known_sources.contains(source) {
+                let represented = issue.asset_id.as_deref().map_or_else(
+                    || known_sources.contains(source),
+                    |id| known_ids.contains(id),
+                );
+                if represented {
                     return None;
                 }
                 let kind = match Path::new(source).extension()?.to_str()? {
@@ -418,6 +430,14 @@ impl Browser {
                 };
                 let mut row = AssetRow::new(source, source, kind, issue.status.clone());
                 row.registered = false;
+                row.settings = issue
+                    .asset_id
+                    .as_deref()
+                    .and_then(|id| failed_texture_roles.get(id))
+                    .map(|role| match role {
+                        TextureRole::BaseColor => Text::BaseColorSrgb.plain(),
+                        TextureRole::Roughness => Text::RoughnessMapLinear.plain(),
+                    });
                 row.diagnostic.clone_from(&issue.diagnostic);
                 Some(row)
             }));
@@ -1133,6 +1153,57 @@ mod tests {
         frame(&mut browser, Vec::new());
         assert!(frame(&mut browser, vec![press(egui::Key::Escape)]).is_none());
         assert!(!browser.file_dialog_open());
+    }
+
+    #[test]
+    fn roughness_alias_keeps_its_ready_tile_and_scoped_issue() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        fs::create_dir(root.join("Assets")).unwrap();
+        let source = "Assets/Gray.png";
+        let mut png = Vec::new();
+        let mut encoder = png::Encoder::new(&mut png, 1, 1);
+        encoder.set_color(png::ColorType::Grayscale);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(&[128])
+            .unwrap();
+        fs::write(root.join(source), png).unwrap();
+        let (mut store, diagnostics) = rot_assets::AssetStore::open_project(root).unwrap();
+        assert_eq!(diagnostics.len(), 1);
+
+        store
+            .interpret_project_texture(source, TextureRole::Roughness, || true)
+            .unwrap();
+        let issues = store.reconcile_project_files(&BTreeSet::from([source.into()]), || true);
+        let roughness = store
+            .infos()
+            .find(|info| info.texture_role == Some(TextureRole::Roughness))
+            .unwrap()
+            .id
+            .clone();
+        let mut browser = Browser::default();
+        browser.refresh(&store, Vec::new(), &issues, &[]);
+        let ready = &browser.rows[browser.by_id[&roughness]];
+        assert_eq!(ready.status, AssetStatus::Ready);
+        assert_eq!(ready.settings, Some(Text::RoughnessMapLinear.plain()));
+        let alias = &browser.rows[browser.by_id[source]];
+        assert_eq!(alias.settings, Some(Text::BaseColorSrgb.plain()));
+        assert_eq!(alias.status, AssetStatus::Invalid);
+        assert!(!browser.issues[source].last_good_available);
+
+        let same_id_failure = rot_assets::ProjectFileIssue {
+            asset_id: Some(roughness.clone()),
+            texture_role: Some(TextureRole::Roughness),
+            path: source.into(),
+            status: AssetStatus::Invalid,
+            message: "Source refresh failed.".into(),
+        };
+        browser.refresh(&store, Vec::new(), &[same_id_failure], &[]);
+        assert!(browser.rows[browser.by_id[&roughness]].last_good_available);
+        assert!(browser.issues[source].last_good_available);
     }
 
     #[test]

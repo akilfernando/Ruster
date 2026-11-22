@@ -10,6 +10,10 @@ use crate::{
 use eframe::egui;
 use rot_scene::{DisplayProfile, SceneError};
 
+fn exposure_id() -> egui::Id {
+    egui::Id::unique("v23_scene_display_exposure")
+}
+
 pub(super) struct Draft {
     value: DisplayDraft,
     opened_frame: Option<u64>,
@@ -67,8 +71,11 @@ impl ComponentWorkspace {
         };
         let popup_open = egui::Popup::is_any_open(ctx);
         let frame = ctx.cumulative_frame_nr();
+        let opening = draft.opened_frame.is_none();
         let enter = draft.opened_frame.is_some_and(|opened| opened != frame)
-            && ctx.input(|input| input.modifiers.is_none() && input.key_pressed(egui::Key::Enter));
+            && ctx.input(|input| input.key_pressed(egui::Key::Enter));
+        let exposure_focused = ctx.memory(|memory| memory.has_focus(exposure_id()));
+        let profile_before = draft.value.profile;
         let response = egui::Modal::new(egui::Id::unique("v23_scene_display"))
             .frame(editor_theme::dialog_frame(ctx))
             .show(ctx, |ui| {
@@ -97,20 +104,24 @@ impl ComponentWorkspace {
                             })
                             .response
                             .labelled_by(label);
-                        if draft.opened_frame.is_none() {
+                        if opening && draft.value.profile == DisplayMode::Legacy {
                             field.request_focus();
-                            draft.opened_frame = Some(frame);
                         }
                     },
                 );
                 if draft.value.profile == DisplayMode::Surface {
                     ui_kit::property_row_with_label(ui, Text::ExposureEv.plain(), |ui, label| {
-                        ui.add(
-                            egui::TextEdit::singleline(&mut draft.value.exposure_stops)
-                                .desired_width(ui.available_width()),
-                        )
-                        .labelled_by(label)
-                        .on_hover_text(Text::DisplayUiAdjustBrightnessInExposure.plain());
+                        let exposure = ui
+                            .add(
+                                egui::TextEdit::singleline(&mut draft.value.exposure_stops)
+                                    .id(exposure_id())
+                                    .desired_width(ui.available_width()),
+                            )
+                            .labelled_by(label)
+                            .on_hover_text(Text::DisplayUiAdjustBrightnessInExposure.plain());
+                        if opening || draft.value.profile != profile_before {
+                            exposure.request_focus();
+                        }
                     });
                 }
                 if let Some(error) = &draft.error {
@@ -124,6 +135,9 @@ impl ComponentWorkspace {
                 })
                 .inner
             });
+        if opening {
+            draft.opened_frame = Some(frame);
+        }
         let (apply, cancel) = response.inner;
         let escape = response.is_top_modal
             && !response.any_popup_open
@@ -132,7 +146,7 @@ impl ComponentWorkspace {
         if cancel || escape {
             return;
         }
-        if apply || enter && !popup_open && !egui::Popup::is_any_open(ctx) {
+        if apply || enter && (exposure_focused || !popup_open && !egui::Popup::is_any_open(ctx)) {
             if self.session.revision() != draft.value.revision {
                 draft.error = Some(Text::ComponentDisplayDraftChanged.plain().into());
             } else {
@@ -200,5 +214,172 @@ impl ComponentWorkspace {
         Ok(json!({
             "display":candidate, "changed":next != revision, "dirty":self.session.is_dirty(),
         }))
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use rot_scene::component_scene::{ComponentScene, ComponentSession};
+    use serde_json::json;
+
+    #[test]
+    fn scene_display_modal_guards_committed_state_and_uses_one_shared_undo() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        let legacy = rot_scene::Session::new(rot_scene::Scene::demo()).unwrap();
+        let scene = ComponentScene::from_legacy(&legacy).unwrap();
+        scene.save_new(&path).unwrap();
+        let authored = std::fs::read(&path).unwrap();
+        assert!(
+            serde_json::from_slice::<serde_json::Value>(&authored).unwrap()["scene"]
+                .get("display")
+                .is_none()
+        );
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.select(None);
+        let original_draw_rows = editor.preview.as_ref().unwrap().draw_matrices().as_ptr();
+        editor.begin_display();
+        assert_eq!(
+            editor.display_draft.as_ref().unwrap().value.exposure_stops,
+            "0"
+        );
+        let ctx = egui::Context::default();
+        let frame = |editor: &mut ComponentWorkspace, events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960., 680.),
+                    )),
+                    ..Default::default()
+                },
+                |ui| editor.show_display_draft(ui.ctx()),
+            );
+            output.textures_delta.clear();
+        };
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        // The Enter which opened the modal may still be in the opening frame.
+        frame(&mut editor, vec![key(egui::Key::Enter)]);
+        assert!(editor.display_draft.is_some());
+        let mut close = egui::RawInput::default();
+        close
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .unwrap()
+            .events
+            .push(egui::ViewportEvent::Close);
+        let mut output = ctx.run_ui(close, |ui| {
+            assert!(editor.defer_display_close(ui.ctx()));
+            editor.show_display_draft(ui.ctx());
+        });
+        assert!(output.viewport_output[&egui::ViewportId::ROOT]
+            .commands
+            .iter()
+            .any(|command| matches!(command, egui::ViewportCommand::CancelClose)));
+        output.textures_delta.clear();
+        let backdrop = egui::pos2(5.0, 5.0);
+        for pressed in [true, false] {
+            frame(
+                &mut editor,
+                vec![
+                    egui::Event::PointerMoved(backdrop),
+                    egui::Event::PointerButton {
+                        pos: backdrop,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+        assert!(editor.display_draft.is_some());
+
+        let draft = &mut editor.display_draft.as_mut().unwrap().value;
+        draft.profile = DisplayMode::Surface;
+        draft.exposure_stops = "8.0000001".to_owned();
+        frame(&mut editor, vec![]);
+        ctx.memory_mut(|memory| memory.request_focus(exposure_id()));
+        frame(&mut editor, vec![key(egui::Key::Enter)]);
+        assert_eq!(
+            editor.display_draft.as_ref().unwrap().error.as_deref(),
+            Some(Text::ComponentDisplayExposureInvalid.plain())
+        );
+
+        assert!(!editor.save());
+        let mut command = json!({
+            "expected_session_token":"scene","expected_revision":"0",
+            "display":{"type":"surface_hdr","exposure_stops":1.0},
+        });
+        let refused = editor.ai_command("scene", "scene_display_set", &command);
+        assert_eq!(refused["error"]["code"], "drafts_pending");
+        let view = editor.ai_capture_command(
+            &crate::bridge::Authority::test_approved(),
+            "scene",
+            "viewport_inspect",
+            &json!({}),
+        );
+        assert_eq!(view["error"]["code"], "view_busy");
+        let inspect = editor.ai_command("scene", "material_inspect", &json!({}));
+        assert_eq!(inspect["result"]["pending_display"], true);
+        assert_eq!(inspect["result"]["display"], json!({"type":"legacy_sdr"}));
+        frame(&mut editor, vec![key(egui::Key::Escape)]);
+        assert!(editor.display_draft.is_none());
+        assert_eq!(editor.session.revision(), 0);
+        command["display"]["exposure_stops"] = json!(8.0000001);
+        assert_eq!(
+            editor.ai_command("scene", "scene_display_set", &command)["error"]["code"],
+            "invalid_arguments"
+        );
+
+        editor.begin_display();
+        editor.display_draft.as_mut().unwrap().value.profile = DisplayMode::Surface;
+        frame(&mut editor, vec![]);
+        assert!(ctx.memory(|memory| memory.has_focus(exposure_id())));
+        frame(&mut editor, vec![key(egui::Key::Enter)]);
+        assert_eq!(editor.session.revision(), 1);
+        assert_eq!(
+            editor.session.scene().display,
+            DisplayProfile::surface_hdr()
+        );
+        assert_eq!(
+            editor.preview.as_ref().unwrap().scene().display,
+            DisplayProfile::surface_hdr()
+        );
+        assert_eq!(
+            editor.preview.as_ref().unwrap().draw_matrices().as_ptr(),
+            original_draw_rows
+        );
+
+        command["expected_revision"] = json!("1");
+        command["display"]["exposure_stops"] = json!(1.5);
+        let changed = editor.ai_command("scene", "scene_display_set", &command);
+        assert_eq!(changed["result"]["display"]["exposure_stops"], 1.5);
+        assert_eq!(editor.session.revision(), 2);
+        assert_eq!(std::fs::read(&path).unwrap(), authored);
+        for revision in ["2", "3"] {
+            let undo = editor.ai_command(
+                "scene",
+                "scene_undo",
+                &json!({
+                    "expected_session_token":"scene","expected_revision":revision,
+                }),
+            );
+            assert_eq!(undo["ok"], true, "{undo}");
+        }
+        assert_eq!(editor.session.scene(), &scene);
+        assert_eq!(
+            editor.preview.as_ref().unwrap().scene().display,
+            DisplayProfile::LegacySdr
+        );
     }
 }

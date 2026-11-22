@@ -930,6 +930,9 @@ mod tests {
         write_base_color(&directory.path().join("color.png"));
         let mut assets = AssetStore::open(directory.path()).unwrap();
         assets.import("color", "color.png").unwrap();
+        assets
+            .import_texture("roughness", "color.png", TextureRole::Roughness)
+            .unwrap();
         editor.textures = assets.texture_snapshots();
         editor.assets = Some(assets);
         editor.select(Some(owner.clone()));
@@ -939,9 +942,18 @@ mod tests {
         };
         editor.begin_material(request());
         let tint = [0.24, 0.59, 0.85];
-        let value = &mut editor.material_draft.as_mut().unwrap().value;
+        let draft = editor.material_draft.as_mut().unwrap();
+        assert_eq!(draft.base_colors.keys().collect::<Vec<_>>(), &["color"]);
+        assert_eq!(
+            draft.roughness_maps.keys().collect::<Vec<_>>(),
+            &["roughness"]
+        );
+        let value = &mut draft.value;
         value.tint = tint;
         value.base_color_texture = Some("color".into());
+        value.roughness_texture = Some("roughness".into());
+        value.response = MaterialResponse::Dielectric { roughness: 0.63 };
+        value.address = rot_scene::TextureAddress::Clamp;
         let ctx = egui::Context::default();
         let frame = |editor: &mut ComponentWorkspace, events| {
             ctx.run_ui(
@@ -1076,6 +1088,41 @@ mod tests {
                 if id == "material-1" && *tint == [0.1, 0.2, 0.3, 1.0]
         ));
 
+        let mut without_map = committed.materials["material-1"].clone();
+        assert_eq!(without_map.roughness_texture.as_deref(), Some("roughness"));
+        without_map.roughness_texture = None;
+        editor.begin_material(Request {
+            component: "second-renderer".into(),
+            intent: Intent::Edit("material-1".into()),
+        });
+        editor
+            .material_draft
+            .as_mut()
+            .unwrap()
+            .value
+            .roughness_texture = None;
+        frame(&mut editor, vec![]);
+        frame(
+            &mut editor,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        assert_eq!(editor.session.scene().materials["material-1"], without_map);
+        assert_eq!(editor.session.revision(), 2);
+        let undo = editor.ai_command(
+            "scene",
+            "scene_undo",
+            &json!({
+                "expected_session_token":"scene","expected_revision":"2",
+            }),
+        );
+        assert_eq!(undo["ok"], true, "{undo}");
+        assert_eq!(
+            editor.session.scene().materials["material-1"]
+                .roughness_texture
+                .as_deref(),
+            Some("roughness")
+        );
+
         editor.begin_material(Request {
             component: "second-renderer".into(),
             intent: Intent::Edit("material-1".into()),
@@ -1086,12 +1133,12 @@ mod tests {
             vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
         );
         assert!(editor.material_draft.is_none());
-        assert_eq!(editor.session.revision(), 1);
+        assert_eq!(editor.session.revision(), 3);
         let undo = editor.ai_command(
             "scene",
             "scene_undo",
             &json!({
-                "expected_session_token":"scene","expected_revision":"1",
+                "expected_session_token":"scene","expected_revision":"3",
             }),
         );
         assert_eq!(undo["ok"], true, "{undo}");

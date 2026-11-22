@@ -21,6 +21,7 @@ pub use prefabs::{publish_project_prefab, PrefabFile};
 pub struct ProjectFileIssue {
     /// The failing interpretation, if other imports can still use this source.
     pub asset_id: Option<String>,
+    pub texture_role: Option<TextureRole>,
     pub path: String,
     pub status: AssetStatus,
     pub message: String,
@@ -30,6 +31,7 @@ impl ProjectFileIssue {
     fn invalid(path: impl Into<String>, error: impl std::fmt::Display) -> Self {
         Self {
             asset_id: None,
+            texture_role: None,
             path: path.into(),
             status: AssetStatus::Invalid,
             message: error.to_string(),
@@ -284,6 +286,7 @@ impl AssetStore {
             if model.source.starts_with("Assets/") && !self.root.join(&model.source).is_file() {
                 diagnostics.push(ProjectFileIssue {
                     asset_id: Some(model.id.clone()),
+                    texture_role: None,
                     path: model.source.clone(),
                     status: AssetStatus::Missing,
                     message: "Source file is missing.".into(),
@@ -358,11 +361,20 @@ impl AssetStore {
                 break;
             }
             let id = interpretation.id.clone();
+            let texture_role = match importer {
+                Importer::Asset(AssetKind::Texture) => Some(
+                    interpretation
+                        .texture_role
+                        .unwrap_or(TextureRole::BaseColor),
+                ),
+                _ => None,
+            };
             if let Err(error) =
                 self.reconcile_interpretation(source, importer, interpretation, refresh, active)
             {
                 let mut issue = ProjectFileIssue::invalid(source, error);
                 issue.asset_id = Some(id);
+                issue.texture_role = texture_role;
                 failures.push(issue);
             }
         }
@@ -408,14 +420,25 @@ impl AssetStore {
             return Err(error("Choose a PNG in the Assets folder."));
         }
         let path = confined_path(&self.root, source, false)?;
-        let sidecar = existing_metadata(&sidecar_path(&path))?.unwrap_or_default();
-        let hash = digest(source.as_bytes());
-        let id = (1..)
-            .map(|suffix| format!("asset-{}-{suffix}", &hash[..24]))
-            .find(|id| {
-                !self.registry.has_asset_id(id) && !sidecar.iter().any(|entry| entry.id == *id)
-            })
-            .expect("finite catalog");
+        let sidecar = sidecar_path(&path);
+        let metadata = existing_metadata(&sidecar)?.unwrap_or_default();
+        let id = if let Some(entry) = metadata
+            .iter()
+            .find(|entry| entry.texture_role == Some(role))
+        {
+            entry.id.clone()
+        } else {
+            let mut reserved: BTreeSet<_> = metadata.into_iter().map(|entry| entry.id).collect();
+            self.visit_other_sidecar_ids(&sidecar, |id| {
+                reserved.insert(id.to_owned());
+                Ok(())
+            })?;
+            let hash = digest(source.as_bytes());
+            (1..)
+                .map(|suffix| format!("asset-{}-{suffix}", &hash[..24]))
+                .find(|id| !self.registry.has_asset_id(id) && !reserved.contains(id))
+                .expect("finite catalog")
+        };
         let request = self.request_at(
             self.revision(),
             AssetMutation::ImportTexture {
@@ -748,6 +771,21 @@ impl AssetStore {
                 "This sidecar belongs to a moved asset. Let the watcher adopt the move first.",
             ));
         }
+        self.visit_other_sidecar_ids(&sidecar, |candidate| {
+            if candidate == id {
+                return Err(error(format!(
+                    "Asset ID {id} is reserved by another sidecar."
+                )));
+            }
+            Ok(())
+        })
+    }
+
+    fn visit_other_sidecar_ids(
+        &self,
+        sidecar: &Path,
+        mut visit: impl FnMut(&str) -> Result<(), AssetError>,
+    ) -> Result<(), AssetError> {
         // Include sidecars whose source is missing. Those IDs are still
         // reserved for the creator's source files.
         let mut dirs = vec![self.root.join("Assets")];
@@ -773,12 +811,12 @@ impl AssetStore {
                     && name
                         .strip_suffix(METADATA_EXTENSION)
                         .is_some_and(|stem| Importer::from_path(stem).is_some())
-                    && load_metadata(&other)
-                        .is_ok_and(|other| other.iter().any(|entry| entry.id == *id))
                 {
-                    return Err(error(format!(
-                        "Asset ID {id} is reserved by another sidecar."
-                    )));
+                    if let Ok(entries) = load_metadata(&other) {
+                        for entry in entries {
+                            visit(&entry.id)?;
+                        }
+                    }
                 }
             }
         }
@@ -937,6 +975,86 @@ mod tests {
     use std::fs::File;
 
     const OBJ: &str = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+
+    #[test]
+    fn roughness_interpretation_preserves_ready_and_reserved_base_color_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let assets = dir.path().join("Assets");
+        fs::create_dir(&assets).unwrap();
+        let gray = "Assets/Gray.png";
+        let rgb = "Assets/Rgb.png";
+        for (path, mode, pixels) in [
+            (gray, png::ColorType::Grayscale, &[128u8][..]),
+            (rgb, png::ColorType::Rgb, &[18u8, 99, 207][..]),
+        ] {
+            let mut png = Vec::new();
+            let mut encoder = png::Encoder::new(&mut png, 1, 1);
+            encoder.set_color(mode);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(pixels)
+                .unwrap();
+            fs::write(dir.path().join(path), png).unwrap();
+        }
+        let hash = digest(gray.as_bytes());
+        let previously_reserved = format!("asset-{}-1", &hash[..24]);
+        write_metadata(
+            &sidecar_path(&assets.join("Missing.png")),
+            None,
+            &[Importer::Asset(AssetKind::Texture).metadata(previously_reserved.clone())],
+        )
+        .unwrap();
+        let (mut store, diagnostics) = AssetStore::open_project(dir.path()).unwrap();
+        assert_eq!(diagnostics.len(), 1);
+        let gray_sidecar = sidecar_path(&dir.path().join(gray));
+        let reservation = load_metadata(&gray_sidecar).unwrap().remove(0);
+        assert_eq!(reservation.texture_role, Some(TextureRole::BaseColor));
+        let color_id = store
+            .infos()
+            .find(|info| info.source == rgb)
+            .unwrap()
+            .id
+            .clone();
+        let original = store.texture_snapshots()[&color_id].clone();
+        let original_bytes = fs::read(dir.path().join(rgb)).unwrap();
+        assert!(store
+            .interpret_project_texture(rgb, TextureRole::Roughness, || false)
+            .is_err());
+        assert_eq!(store.infos().filter(|info| info.source == rgb).count(), 1);
+        for path in [rgb, gray] {
+            store
+                .interpret_project_texture(path, TextureRole::Roughness, || true)
+                .unwrap();
+        }
+        let issues =
+            store.reconcile_project_files(&BTreeSet::from([gray.into(), rgb.into()]), || true);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].asset_id.as_deref(), Some(reservation.id.as_str()));
+        let gray_roles = load_metadata(&gray_sidecar).unwrap();
+        assert!(gray_roles.contains(&reservation));
+        let roughness = gray_roles
+            .iter()
+            .find(|entry| entry.texture_role == Some(TextureRole::Roughness))
+            .unwrap();
+        assert_ne!(roughness.id, reservation.id);
+        assert_ne!(roughness.id, previously_reserved);
+        assert_eq!(store.texture(&roughness.id).unwrap().mips[0].bytes, [128]);
+        assert!(std::sync::Arc::ptr_eq(
+            &store.texture_snapshots()[&color_id],
+            &original
+        ));
+        assert_eq!(fs::read(dir.path().join(rgb)).unwrap(), original_bytes);
+        let (mut reopened, _) = AssetStore::open_project(dir.path()).unwrap();
+        let issues = reopened.reconcile_project_files(&BTreeSet::new(), || true);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].asset_id.as_deref(), Some(reservation.id.as_str()));
+        assert_eq!(
+            reopened.asset_info(&roughness.id).unwrap().status,
+            AssetStatus::Ready
+        );
+    }
 
     #[test]
     fn project_sources_rebuild_with_their_sidecar_identity() {
