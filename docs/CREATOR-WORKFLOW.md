@@ -279,6 +279,7 @@ Renderers, use `scene_components_edit` with the component ID.
 On Linux, save the v23 scene, then use **File → Build…**. Choose a new
 folder and select **Build** or **Build and Run**. The folder contains an
 `application` executable, the saved v23 scene, and its project assets.
+The Linux player accepts v23 scene files larger than 1 MiB.
 Run `application --headless --ticks 16` to check it without opening a window.
 In a supported static scene, Play and Build use the same world transforms and
 lights. Mesh objects can have children and carry lights. A directional light

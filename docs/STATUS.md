@@ -34,8 +34,9 @@ The v23 Inspector shows live Transform and script state during Play and Step.
 The editor and viewer draw, fit and pick from cached world matrices.
 Play and Linux Build share the same render data for supported static hierarchies,
 including shear. Inactive objects and Mesh Renderers stay inactive, and Build
-retains their referenced assets. A relocated player loaded 5,000 objects from
-a compact scene. Build failures offer keyboard-accessible Error Details.
+retains their referenced assets. A relocated Vulkan player loaded a 1.44 MB
+v23 scene with 5,000 objects and an imported textured mesh. Build failures
+offer keyboard-accessible Error Details.
 v23 point and directional lights can be created as objects or attached to meshes.
 The Inspector and approved MCP clients edit the same component. The editor warns
 at the render budget and keeps extra lights editable. Static Linux builds preserve
@@ -93,7 +94,6 @@ The previous build is in `~/.local/share/rot-engine/previous` for `--rollback`.
   legacy restrictions on creating groups and reparenting.
 - Play checks refuse scenes that use groups, so they cannot cover an animated
   model.
-- Linux Build still applies the legacy 1 MiB file limit to v23 scenes.
 - Outside the repository, still using old names: two MCP entries in `~/.codex/config.toml`,
   and the projects in `~/Projects/Ruster-Creations`, which will not load in a
   build from this branch until their files are renamed.
