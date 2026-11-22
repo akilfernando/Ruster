@@ -2831,6 +2831,30 @@ mod tests {
         editor.select(Some(cube.clone()));
         editor.add_component(AddComponent::Light);
         let original = editor.session.scene().objects[0].components.clone();
+        let revision = editor.session.revision();
+        editor.draft.as_mut().unwrap().components[1].enabled = false;
+        assert!(editor.draft_dirty());
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                focused: true,
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| {
+                editor.show_workspace(ui, false);
+            },
+        );
+        output.textures_delta.clear();
+        assert!(!editor.draft_dirty());
+        assert_eq!(editor.session.revision(), revision);
+
         let mut replacement = original[1].clone();
         replacement.kind = Component::Light {
             color: [0.15, 0.4, 0.9],

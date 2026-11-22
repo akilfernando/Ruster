@@ -438,3 +438,57 @@ impl ComponentPicker {
         add
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn point_light_fields_tab_and_submit_numeric_changes() {
+        let ctx = egui::Context::default();
+        let original = [0.13, 0.24, 0.35];
+        let mut color = original;
+        let mut intensity = 1.0;
+        let mut range = 5.0;
+        let mut submissions = 0;
+        let mut frame = |events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    submissions += usize::from(point_light_fields(
+                        ui,
+                        &mut color,
+                        &mut intensity,
+                        &mut range,
+                    ));
+                },
+            );
+            output.textures_delta.clear();
+        };
+        let key = |key| {
+            [true, false].map(|pressed| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            })
+        };
+        frame(vec![]);
+        frame(key(egui::Key::Tab).into()); // Color
+        frame(key(egui::Key::Tab).into()); // Intensity
+        frame(vec![egui::Event::Text("2.5".into())]);
+        frame(key(egui::Key::Tab).into()); // Range, leaving Intensity in the draft
+        frame(vec![egui::Event::Text("7.5".into())]);
+        frame(key(egui::Key::Enter).into());
+        frame(vec![]);
+        assert_eq!(submissions, 1);
+        assert_eq!(intensity, 2.5);
+        assert_eq!(range, 7.5);
+        assert_eq!(color, original);
+    }
+}
