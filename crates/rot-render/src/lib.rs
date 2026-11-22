@@ -1880,22 +1880,7 @@ fn render_draw_scene(
             .material
             .as_ref()
             .and_then(|id| scene.materials.get(id));
-        let has_uvs = material.is_some_and(|material| {
-            material.base_color_texture.is_some() || material.roughness_texture.is_some()
-        }) && draw_mesh_has_complete_uvs(object, mesh);
-        let binding = BindingKey {
-            texture: material.and_then(|material| material.base_color_texture.clone()),
-            roughness: material.and_then(|material| material.roughness_texture.clone()),
-            missing_roughness: material
-                .is_some_and(|material| material.roughness_texture.is_some())
-                && !has_uvs,
-            missing: material.is_some_and(|material| material.base_color_texture.is_some())
-                && !has_uvs,
-            sampling: material.map_or(1, |material| {
-                u8::from(material.filter == rot_scene::TextureFilter::Linear)
-                    | (u8::from(material.address == rot_scene::TextureAddress::Clamp) << 1)
-            }),
-        };
+        let binding = draw_material_binding(object, mesh, material);
         let mut base_color = object.color;
         if let Some(material) = material {
             for (channel, tint) in base_color[..3].iter_mut().zip(material.tint) {
@@ -2083,6 +2068,27 @@ fn object_mesh<'a>(
 // same geometry as a fallback, but must keep its missing-UV diagnostics.
 fn draw_mesh_has_complete_uvs(object: &Object, mesh: Option<&Arc<rot_assets::Mesh>>) -> bool {
     mesh.map_or(object.mesh.is_none(), |mesh| mesh.has_complete_uvs())
+}
+
+fn draw_material_binding(
+    object: &Object,
+    mesh: Option<&Arc<rot_assets::Mesh>>,
+    material: Option<&rot_scene::OpaqueMaterial>,
+) -> BindingKey {
+    let has_uvs = material.is_some_and(|material| {
+        material.base_color_texture.is_some() || material.roughness_texture.is_some()
+    }) && draw_mesh_has_complete_uvs(object, mesh);
+    BindingKey {
+        texture: material.and_then(|material| material.base_color_texture.clone()),
+        roughness: material.and_then(|material| material.roughness_texture.clone()),
+        missing_roughness: material.is_some_and(|material| material.roughness_texture.is_some())
+            && !has_uvs,
+        missing: material.is_some_and(|material| material.base_color_texture.is_some()) && !has_uvs,
+        sampling: material.map_or(1, |material| {
+            u8::from(material.filter == rot_scene::TextureFilter::Linear)
+                | (u8::from(material.address == rot_scene::TextureAddress::Clamp) << 1)
+        }),
+    }
 }
 
 /// Whether the object's authored geometry has complete texture coordinates.
@@ -4879,6 +4885,7 @@ mod tests {
         eprintln!("GPU probe adapter: {:?}", adapter.get_info());
         selection_probe::verify(&device, &queue);
         geometry_probe::verify(&device, &queue);
+        material_probe::verify_cube_material(&device, &queue);
         for samples in [1, 2, 4] {
             if supported_samples(&adapter, &device, samples) != samples {
                 eprintln!("GPU probe: {samples}x unsupported; skipped");

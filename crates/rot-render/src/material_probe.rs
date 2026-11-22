@@ -1582,3 +1582,191 @@ pub(super) fn complete_submitted_assets(
         r.asset_metrics();
     }
 }
+
+/// Default Cube uses the retained GPU cube mesh through the production
+/// material binding, UV streams, lighting and display pipelines.
+pub(super) fn verify_cube_material(device: &wgpu::Device, queue: &wgpu::Queue) {
+    use rot_assets::{Texture, TextureMip, TextureRole};
+    use rot_scene::{Ambient, DisplayProfile, Light, Lighting, MaterialResponse, OpaqueMaterial};
+
+    let red = [255, 0, 0];
+    let green = [0, 255, 0];
+    let blue = [0, 0, 255];
+    let yellow = [255, 255, 0];
+    let texture = Arc::new(Texture {
+        role: TextureRole::BaseColor,
+        width: 2,
+        height: 2,
+        mips: vec![
+            TextureMip {
+                width: 2,
+                height: 2,
+                bytes: [red, green, blue, yellow]
+                    .into_iter()
+                    .flat_map(|[r, g, b]| [r, g, b, 255])
+                    .collect(),
+            },
+            TextureMip {
+                width: 1,
+                height: 1,
+                bytes: vec![188, 188, 137, 255],
+            },
+        ],
+    });
+    let roughness = Arc::new(Texture {
+        role: TextureRole::Roughness,
+        width: 2,
+        height: 2,
+        mips: vec![
+            TextureMip {
+                width: 2,
+                height: 2,
+                bytes: vec![0, 255, 0, 255],
+            },
+            TextureMip {
+                width: 1,
+                height: 1,
+                bytes: vec![128],
+            },
+        ],
+    });
+
+    let mut r = Resources::new(device, queue, COLOR, 1);
+    r.enable_hdr(device, 1);
+    let metrics = r.metrics.clone();
+    let mut resources = egui_wgpu::CallbackResources::default();
+    resources.insert(r);
+    let context = egui::Context::default();
+    let cube = Object::cube("cube", None);
+    let mut surface = OpaqueMaterial {
+        base_color_texture: Some("cube-colors".into()),
+        filter: rot_scene::TextureFilter::Nearest,
+        address: rot_scene::TextureAddress::Clamp,
+        ..Default::default()
+    };
+    assert!(primitives::cube().has_complete_uvs());
+    let mut fallback = cube.clone();
+    fallback.mesh = Some("unavailable".into());
+    let untextured =
+        Arc::new(rot_assets::parse_obj(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap());
+    assert!(draw_material_binding(&fallback, None, Some(&surface)).missing);
+    assert!(draw_material_binding(&fallback, Some(&untextured), Some(&surface)).missing);
+
+    let mut render = |preset, surface: &OpaqueMaterial, light: &Lighting, display| {
+        context
+            .run_pass(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        complete_submitted_assets(device, queue, &context, &mut resources);
+        let mut camera = Camera {
+            distance: 1.6,
+            ..Default::default()
+        };
+        camera.set_preset(preset);
+        let (view, projection, _) = camera.matrices(256. / 192.);
+        let binding = draw_material_binding(&cube, None, Some(surface));
+        assert!(!binding.missing && !binding.missing_roughness);
+        let callback = SceneCallback {
+            show_editor_grid: false,
+            groups: vec![DrawGroup {
+                key: None,
+                primitive: None,
+                texture: binding.texture.as_ref().map(|_| Arc::clone(&texture)),
+                roughness: binding.roughness.as_ref().map(|_| Arc::clone(&roughness)),
+                binding,
+                mesh: None,
+                range: 0..1,
+                instances: vec![Instance {
+                    model: Mat4::IDENTITY.to_cols_array_2d(),
+                    normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
+                    color: [1.; 4],
+                    base_color: [surface.tint[0], surface.tint[1], surface.tint[2], 0.],
+                    response: match surface.response {
+                        MaterialResponse::LegacyDiffuse => [0.; 4],
+                        MaterialResponse::Dielectric { roughness } => [
+                            1.,
+                            roughness,
+                            f32::from(surface.roughness_texture.is_some()),
+                            0.,
+                        ],
+                    },
+                }],
+            }],
+            camera: (projection * view).to_cols_array(),
+            camera_eye_mode: camera.eye_mode(),
+            display,
+            lighting: LightingPacket::try_pack(light).unwrap(),
+            size: egui::vec2(256., 192.),
+            cpu_us: 0.,
+            shadow: None,
+            context: context.clone(),
+            receipt: FrameReceipt::default(),
+            prepared: std::sync::atomic::AtomicBool::new(false),
+        };
+        selection_probe::render(device, queue, &mut resources, &callback, COLOR)
+    };
+    let pixel = |bytes: &[u8], x: usize, y: usize| {
+        let offset = (y * 256 + x) * 4;
+        <[u8; 3]>::try_from(&bytes[offset..offset + 3]).unwrap()
+    };
+    let ambient = Lighting::Authored {
+        ambient: Ambient {
+            color: [1.; 3],
+            intensity: 1.,
+        },
+        lights: BTreeMap::new(),
+    };
+    for (face, order) in [
+        (ViewPreset::Front, [red, green, blue, yellow]),
+        (ViewPreset::Back, [red, green, blue, yellow]),
+        (ViewPreset::Left, [red, green, blue, yellow]),
+        (ViewPreset::Right, [red, green, blue, yellow]),
+        (ViewPreset::Top, [yellow, blue, green, red]),
+        (ViewPreset::Bottom, [red, green, blue, yellow]),
+    ] {
+        let pixels = render(face, &surface, &ambient, DisplayProfile::LegacySdr);
+        for ((x, y), expected) in [(96, 62), (160, 62), (96, 130), (160, 130)]
+            .into_iter()
+            .zip(order)
+        {
+            assert_eq!(
+                pixel(&pixels, x, y),
+                expected,
+                "{face:?} quadrant at {x},{y}"
+            );
+        }
+    }
+    let uploaded = metrics.lock().unwrap().clone();
+    assert_eq!(uploaded.mesh_uploads, 3);
+    assert_eq!(uploaded.texture_uploads, 1);
+
+    let mut sun = Light::directional(None);
+    sun.transform.rotation = [0.; 3];
+    sun.color = [1.; 3];
+    sun.intensity = 1.;
+    let lighting = Lighting::Authored {
+        ambient: Ambient {
+            color: [0.; 3],
+            intensity: 0.,
+        },
+        lights: BTreeMap::from([("sun".into(), sun)]),
+    };
+    surface.base_color_texture = None;
+    surface.roughness_texture = Some("cube-roughness".into());
+    surface.tint = [0.05; 3];
+    surface.response = MaterialResponse::Dielectric { roughness: 0.9 };
+    let hdr = DisplayProfile::SurfaceHdr { exposure_stops: 0. };
+    let mapped = render(ViewPreset::Front, &surface, &lighting, hdr);
+    assert!(
+        pixel(&mapped, 96, 96)[0] > pixel(&mapped, 160, 96)[0] + 25,
+        "dark roughness texels produce a tighter and brighter frontal highlight"
+    );
+    let first = metrics.lock().unwrap().clone();
+    assert!(first.display_applied_hdr);
+    assert_eq!(render(ViewPreset::Front, &surface, &lighting, hdr), mapped);
+    let second = metrics.lock().unwrap();
+    assert_eq!(second.mesh_uploads, uploaded.mesh_uploads);
+    assert_eq!(first.texture_uploads, uploaded.texture_uploads + 1);
+    assert_eq!(second.texture_uploads, first.texture_uploads);
+    assert_eq!(second.target_allocations, first.target_allocations);
+    eprintln!("GPU probe: built-in Cube six-face PNG orientation, split roughness and stable mesh/texture uploads passed");
+}

@@ -172,7 +172,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue) {
     eprintln!("GPU selection: Rot-red contour on white/black/mint surfaces, HDR exposure extremes, output transfer, occlusion, interior/clear equivalence and zero selection resource uploads passed");
 }
 
-fn render(
+pub(super) fn render(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     resources: &mut egui_wgpu::CallbackResources,
@@ -215,7 +215,7 @@ fn render(
     {
         let mut pass = encoder
             .begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("production selection composite"),
+                label: Some("production probe composite"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,

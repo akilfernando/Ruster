@@ -874,6 +874,19 @@ mod tests {
     use rot_scene::component_scene::{ComponentInstance, ComponentSession};
     use serde_json::json;
 
+    fn write_base_color(path: &std::path::Path) {
+        let mut png = Vec::new();
+        let mut encoder = png::Encoder::new(&mut png, 1, 1);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(&[255, 128, 0])
+            .unwrap();
+        std::fs::write(path, png).unwrap();
+    }
+
     #[test]
     fn material_modal_enter_creates_one_exact_assignment_and_shares_undo() {
         let directory = tempfile::tempdir().unwrap();
@@ -893,7 +906,11 @@ mod tests {
         scene.save_new(&path).unwrap();
         let mut editor =
             ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
-        editor.assets = Some(AssetStore::open(directory.path()).unwrap());
+        write_base_color(&directory.path().join("color.png"));
+        let mut assets = AssetStore::open(directory.path()).unwrap();
+        assets.import("color", "color.png").unwrap();
+        editor.textures = assets.texture_snapshots();
+        editor.assets = Some(assets);
         editor.select(Some(owner.clone()));
         let request = || Request {
             component: "second-renderer".into(),
@@ -901,7 +918,9 @@ mod tests {
         };
         editor.begin_material(request());
         let tint = [0.24, 0.59, 0.85];
-        editor.material_draft.as_mut().unwrap().value.tint = tint;
+        let value = &mut editor.material_draft.as_mut().unwrap().value;
+        value.tint = tint;
+        value.base_color_texture = Some("color".into());
         let ctx = egui::Context::default();
         let frame = |editor: &mut ComponentWorkspace, events| {
             ctx.run_ui(
@@ -1017,6 +1036,12 @@ mod tests {
         assert_eq!(editor.session.revision(), 1);
         assert_eq!(committed.materials["material-1"].tint, tint);
         assert_eq!(
+            committed.materials["material-1"]
+                .base_color_texture
+                .as_deref(),
+            Some("color")
+        );
+        assert_eq!(
             committed.materials["material-1"].name.as_deref(),
             Some("Test Finish")
         );
@@ -1061,18 +1086,7 @@ mod tests {
             b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
         )
         .unwrap();
-        let mut png = Vec::new();
-        {
-            let mut encoder = png::Encoder::new(&mut png, 1, 1);
-            encoder.set_color(png::ColorType::Rgb);
-            encoder.set_depth(png::BitDepth::Eight);
-            encoder
-                .write_header()
-                .unwrap()
-                .write_image_data(&[255, 128, 0])
-                .unwrap();
-        }
-        std::fs::write(root.join("color.png"), png).unwrap();
+        write_base_color(&root.join("color.png"));
         let mut store = AssetStore::open(root).unwrap();
         store.import("bare", "bare.obj").unwrap();
         store.import("color", "color.png").unwrap();
