@@ -1,12 +1,12 @@
 //! A pointer drag changes only a disposable draw snapshot until release.
 use super::ComponentWorkspace;
 use crate::{
-    manipulation::{nearby_euler, paint_gizmo, Pivot, Tool},
+    manipulation::{Pivot, Tool, nearby_euler, paint_gizmo},
     strings::Text,
 };
 use eframe::egui;
 use glam::{DMat3, DMat4, DQuat, DVec3, EulerRot};
-use rot_render::{component_preview::ComponentPreview, ViewportInteraction};
+use rot_render::{ViewportInteraction, component_preview::ComponentPreview};
 use rot_scene::Transform;
 use std::collections::HashMap;
 use transform_gizmo_egui::{
@@ -570,12 +570,7 @@ impl TransformRoot {
         let local_individual = settings.local && settings.pivot == Pivot::Individual;
         let linear = match delta {
             Delta::Move(displacement) => {
-                let requested = local_pos + self.parent_inverse * displacement;
-                if !requested.is_finite() || requested.abs().max_element() > 10_000.0 {
-                    return None;
-                }
-                candidate.translation = requested.as_vec3().to_array();
-                candidate.validate().ok()?;
+                candidate.translation = self.stored_translation(local_pos, displacement)?;
                 return Some(candidate);
             }
             Delta::Rotate {
@@ -611,21 +606,7 @@ impl TransformRoot {
                         .to_array();
                     if !local_individual {
                         let displacement = (self.origin - pivot) * (factors.x - 1.0);
-                        let translation = local_pos + self.parent_inverse * displacement;
-                        if !translation.is_finite() || translation.abs().max_element() > 10_000.0 {
-                            return None;
-                        }
-                        candidate.translation = translation.as_vec3().to_array();
-                        if !close_vector(
-                            self.origin
-                                + self.parent_basis
-                                    * (DVec3::from_array(candidate.translation.map(f64::from))
-                                        - local_pos),
-                            self.origin + displacement,
-                            1.0,
-                        ) {
-                            return None;
-                        }
+                        candidate.translation = self.stored_translation(local_pos, displacement)?;
                     }
                     candidate.validate().ok()?;
                     return Some(candidate);
@@ -640,10 +621,6 @@ impl TransformRoot {
         // coordinates twice and preserve an unchanged local position exactly.
         let offset = self.origin - pivot;
         let displacement = linear * offset - offset;
-        let translation = local_pos + self.parent_inverse * displacement;
-        if !translation.is_finite() || translation.abs().max_element() > 10_000.0 {
-            return None;
-        }
         let original = DMat3::from_mat4(candidate.affine_matrix());
         let world_axes = linear * (self.parent_basis * original);
         let axes = self.parent_inverse * world_axes;
@@ -664,25 +641,34 @@ impl TransformRoot {
             return None;
         }
 
-        candidate.translation = translation.as_vec3().to_array();
+        candidate.translation = self.stored_translation(local_pos, displacement)?;
         candidate.rotation =
             authored_rotation(DQuat::from_mat3(&normalized).normalize(), &candidate)?;
         candidate.scale = lengths.as_vec3().to_array();
         candidate.validate().ok()?;
         let stored = candidate.affine_matrix();
         let stored_axes = DMat3::from_mat4(stored);
-        if !close_vector(stored.w_axis.truncate(), translation, 1.0)
-            || !close_basis(stored_axes, axes)
+        if !close_basis(stored_axes, axes)
             || !close_basis(self.parent_basis * stored_axes, world_axes)
-            || !close_vector(
-                self.origin + self.parent_basis * (stored.w_axis.truncate() - local_pos),
-                self.origin + displacement,
-                1.0,
-            )
         {
             return None;
         }
         Some(candidate)
+    }
+
+    fn stored_translation(&self, local: DVec3, displacement: DVec3) -> Option<[f32; 3]> {
+        let requested = local + self.parent_inverse * displacement;
+        if !requested.is_finite() || requested.abs().max_element() > 10_000.0 {
+            return None;
+        }
+        let stored = requested.as_vec3().as_dvec3();
+        let world = self
+            .parent_world
+            .map_or(stored, |parent| parent.transform_point3(stored));
+        if !close_vector(stored, requested) || !close_vector(world, self.origin + displacement) {
+            return None;
+        }
+        Some(stored.as_vec3().to_array())
     }
 
     fn stage(&mut self, preview: &mut ComponentPreview, delta: Delta) -> bool {
@@ -727,15 +713,18 @@ impl TransformRoot {
     }
 }
 
-fn close_vector(stored: DVec3, requested: DVec3, minimum: f64) -> bool {
-    let magnitude = requested.abs().max_element().max(minimum);
-    magnitude.is_finite() && (stored - requested).abs().max_element() <= 2e-6 * magnitude
+fn close_vector(stored: DVec3, requested: DVec3) -> bool {
+    requested.is_finite()
+        && (stored - requested)
+            .abs()
+            .cmple(requested.abs().max(DVec3::ONE) * 2e-6)
+            .all()
 }
 
 fn close_basis(stored: DMat3, requested: DMat3) -> bool {
-    close_vector(stored.x_axis, requested.x_axis, 0.0)
-        && close_vector(stored.y_axis, requested.y_axis, 0.0)
-        && close_vector(stored.z_axis, requested.z_axis, 0.0)
+    close_vector(stored.x_axis, requested.x_axis)
+        && close_vector(stored.y_axis, requested.y_axis)
+        && close_vector(stored.z_axis, requested.z_axis)
 }
 
 fn position(proxy: GizmoTransform) -> DVec3 {
@@ -896,6 +885,8 @@ mod tests {
         scene.objects[1].parent = Some(parent);
         scene.objects[1].transform.rotation = [0.2, 0.5, 0.3];
         scene.objects[1].transform.scale = [0.8, 1.2, 2.4];
+        scene.objects[2].parent = Some(scene.objects[1].id.clone());
+        scene.objects[2].transform.translation = [0., 9999., 0.];
         assert!(Transform::try_from_affine(scene.world_matrices().unwrap()[1]).is_err());
         let mut editor =
             ComponentWorkspace::new(path, ComponentSession::new(scene.clone()).unwrap());
@@ -918,8 +909,60 @@ mod tests {
         assert_eq!(after.translation, before.translation);
         assert_eq!(after.scale, before.scale);
 
+        // A long lever arm magnifies ordinary f32 Euler quantization. Draw
+        // this descendant from the pose we can actually save.
+        let mut authored = scene.clone();
+        authored.objects[1].transform.clone_from(after);
+        assert_eq!(
+            gesture.preview.draw_matrices()[2],
+            authored.world_matrices().unwrap()[2].as_mat4()
+        );
+
         assert!(gesture.stage(delta(std::f64::consts::TAU)));
         assert_eq!(gesture.roots[0].local, *before);
+        editor.commit_transform(gesture);
+        assert_eq!(editor.session.revision(), 0);
+        assert_eq!(editor.session.scene(), &scene);
+    }
+
+    #[test]
+    fn viewport_transform_checks_roundtrip_per_world_axis() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("precision.scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.objects[0].parent = Some("wrapper".into());
+        scene.objects[0].transform.translation = [0., 9999., 0.];
+        scene.objects[1].transform.translation = [9000., 0.0008, 0.];
+        scene.objects.push(ObjectNode {
+            id: "wrapper".into(),
+            name: "Wrapper".into(),
+            enabled: true,
+            parent: None,
+            transform: Transform {
+                translation: [9000., -9999., 0.],
+                ..Default::default()
+            },
+            components: Vec::new(),
+        });
+        let mut editor =
+            ComponentWorkspace::new(path, ComponentSession::new(scene.clone()).unwrap());
+        editor.selection = scene.objects[..2]
+            .iter()
+            .map(|object| object.id.clone())
+            .collect();
+        editor.transform_tool.target = editor.transform_target().unwrap();
+        editor.transform_tool.tool = Tool::Scale;
+        let mut gesture = editor.begin_transform(egui::Pos2::ZERO).unwrap();
+
+        // The shared center is (9000, 0.0004, 0). A 2x scale asks the
+        // child for world y = -0.0004, which local y = 9999 cannot store.
+        assert!(!gesture.stage(Delta::Scale(DVec3::splat(2.))));
+        assert!(gesture.roots.iter().all(|root| root.local == root.original));
+        editor.commit_transform(gesture);
+        editor.transform_tool.tool = Tool::Translate;
+        let mut gesture = editor.begin_transform(egui::Pos2::ZERO).unwrap();
+        assert!(!gesture.stage(Delta::Move(DVec3::new(0., -0.0004, 0.))));
+        assert!(gesture.roots.iter().all(|root| root.local == root.original));
         editor.commit_transform(gesture);
         assert_eq!(editor.session.revision(), 0);
         assert_eq!(editor.session.scene(), &scene);
