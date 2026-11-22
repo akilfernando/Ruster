@@ -481,10 +481,16 @@ impl<A: Application> Host<A> {
                     let app = self.runtime.app();
                     let content = app.content();
                     let selected = app.selected();
-                    rot_render::render_viewport_with_materials(
-                        ui, content.scene(), selected.as_slice(), content.meshes(),
-                        content.textures(), &mut self.navigation, surface,
-                    )
+                    match &content.scene {
+                        crate::ContentScene::Behavior(scene) => rot_render::render_viewport_with_materials(
+                            ui, scene, selected.as_slice(), content.meshes(),
+                            content.textures(), &mut self.navigation, surface,
+                        ),
+                        crate::ContentScene::StaticHierarchy(preview) => preview.render(
+                            ui, selected.as_slice(), content.meshes(), content.textures(),
+                            &mut self.navigation, surface,
+                        ),
+                    }
                 };
                 if self.runtime.app().keyboard_actions().is_some() {
                     self.action_surface = Some(viewport.response.id);

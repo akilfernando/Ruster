@@ -3,8 +3,8 @@ use std::{
     time::Duration,
 };
 
-use rot_app::creation::{CreationManifest, DESCRIPTOR_NAME};
-use rot_app::{Application, HostOptions, MeshMap, ResourceRoot, Runtime};
+use rot_app::creation::{CreationManifest, RuntimeScene, DESCRIPTOR_NAME};
+use rot_app::{Application, Content, HostOptions, MeshMap, ResourceRoot, Runtime, Step};
 use rot_motion_lab::generic::{self, GenericMotionLab};
 use rot_motion_lab::{read_source, MotionLab, DEFAULT_SOURCE};
 use rot_scene::input::{ActionFrame, ActionMap};
@@ -557,12 +557,17 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
     let root = ResourceRoot::new(parent)?;
     let manifest = CreationManifest::load(&root)?;
     let tick_duration = manifest.tick_duration();
-    let mut app = GenericMotionLab::with_textures(
-        manifest.load_session(&root)?,
-        manifest.load_meshes(&root)?,
-        manifest.load_textures(&root)?,
-        tick_duration,
-    )?;
+    let scene = manifest.load_runtime_scene(&root)?;
+    let meshes = manifest.load_meshes(&root)?;
+    let textures = manifest.load_textures(&root)?;
+    let session = match scene {
+        RuntimeScene::Behavior(session) => session,
+        RuntimeScene::StaticHierarchy { scene, preview } => {
+            let content = Content::with_component_preview(preview, meshes, textures)?;
+            return execute_static_hierarchy(options, manifest, &scene, content);
+        }
+    };
+    let mut app = GenericMotionLab::with_textures(*session, meshes, textures, tick_duration)?;
     app.set_sounds(manifest.load_sounds(&root)?);
     app.set_clips(rot_behavior::decode_clips(
         &manifest.load_animations(&root)?,
@@ -647,6 +652,82 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
         // The host preserves callers' reset policy. Validate authored behavior at dt0 before
         // opening a running creation; its new host Runtime and behavior both begin at tick0.
         app.reset()?;
+        rot_app::run(
+            app,
+            HostOptions {
+                title: manifest.title,
+                app_id: "rot-creation".into(),
+                tick_duration,
+                max_frames: options.frames,
+                start_running: true,
+                initial_camera: manifest
+                    .initial_camera
+                    .map(|camera| camera.camera_state())
+                    .transpose()?,
+            },
+        )
+    }
+}
+
+struct StaticHierarchyApp(Content);
+
+impl Application for StaticHierarchyApp {
+    fn content(&self) -> &Content {
+        &self.0
+    }
+
+    fn tick(&mut self, _step: Step) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn reset(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+fn execute_static_hierarchy(
+    options: Options,
+    manifest: CreationManifest,
+    scene: &rot_scene::component_scene::ComponentScene,
+    content: Content,
+) -> Result<(), String> {
+    let tick_duration = manifest.tick_duration();
+    let app = StaticHierarchyApp(content);
+    if options.headless {
+        if options.input_frames.is_some()
+            || options.commands.is_some()
+            || options.hud_activations.is_some()
+        {
+            return Err("Static component hierarchies do not execute behavior input".into());
+        }
+        let mut runtime = Runtime::new(app, tick_duration)?;
+        runtime.reset()?;
+        for _ in 0..options.ticks.unwrap_or(10) {
+            runtime.step()?;
+        }
+        let matrices = scene.world_matrices().map_err(|error| error.to_string())?;
+        let world_matrices = scene
+            .objects
+            .iter()
+            .zip(matrices)
+            .map(|(object, matrix)| (&object.id, matrix.to_cols_array_2d()))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let output = serde_json::json!({
+            "mode": "creation",
+            "title": manifest.title,
+            "scene_id": scene.id,
+            "tick": runtime.tick().to_string(),
+            "fixed_dt": tick_duration.as_secs_f64(),
+            "authored_scene": scene,
+            "runtime_scene": scene,
+            "world_matrices": world_matrices,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&output).map_err(|error| error.to_string())?
+        );
+        Ok(())
+    } else {
         rot_app::run(
             app,
             HostOptions {

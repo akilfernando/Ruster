@@ -181,21 +181,26 @@ impl Session {
             Err(SceneError::UnsupportedVersion(version))
                 if version == u64::from(super::FORMAT_VERSION) =>
             {
-                let (scene, authoring) = ComponentScene::read_json(bytes)?.behavior_input()?;
-                let mut document = crate::Document::new(scene);
-                document.authoring = authoring;
-                document.format_version = document.required_version();
-                document.validate()?;
-                Ok(Self {
-                    loaded_format_version: document.format_version,
-                    document,
-                    path: None,
-                    saved: None,
-                    history_evictions: 0,
-                })
+                Self::from_component_runtime(&ComponentScene::read_json(bytes)?)
             }
             result => result,
         }
+    }
+
+    /// Project an already decoded component scene into the legacy behavior runtime.
+    pub fn from_component_runtime(components: &ComponentScene) -> Result<Self, SceneError> {
+        let (scene, authoring) = components.behavior_input()?;
+        let mut document = crate::Document::new(scene);
+        document.authoring = authoring;
+        document.format_version = document.required_version();
+        document.validate()?;
+        Ok(Self {
+            loaded_format_version: document.format_version,
+            document,
+            path: None,
+            saved: None,
+            history_evictions: 0,
+        })
     }
 }
 

@@ -69,6 +69,12 @@ pub(crate) fn scene_dependencies(
     scene: &rot_scene::Scene,
 ) -> Result<(BTreeSet<String>, BTreeSet<String>), String> {
     scene.validate().map_err(|e| e.to_string())?;
+    draw_dependencies(scene)
+}
+
+pub(crate) fn draw_dependencies(
+    scene: &rot_scene::Scene,
+) -> Result<(BTreeSet<String>, BTreeSet<String>), String> {
     let meshes: BTreeSet<_> = scene
         .objects
         .iter()

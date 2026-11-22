@@ -1240,3 +1240,92 @@ fn relocated_creation_plays_imported_clip_and_pins_it_for_play_checks() {
         .unwrap()
         .contains("require a flat scene"));
 }
+
+#[test]
+fn packaged_component_hierarchy_runs_with_authored_parents_and_shear() {
+    use rot_scene::{
+        component_scene::{ComponentScene, ObjectNode},
+        Scene, Transform,
+    };
+    use serde_json::{json, Value};
+
+    let directory = tempfile::tempdir().unwrap();
+    let package = directory.path().join("package");
+    fs::create_dir(&package).unwrap();
+    let session = Session::new(Scene::demo()).unwrap();
+    let mut scene = ComponentScene::from_legacy(&session).unwrap();
+    scene.objects[0].transform.scale = [2.0, 0.5, 1.0];
+    scene.objects[1].transform.rotation[2] = std::f32::consts::FRAC_PI_4;
+    scene.objects[1].parent = Some("nested".into());
+    scene.objects.push(ObjectNode {
+        id: "nested".into(),
+        name: "Nested".into(),
+        enabled: true,
+        parent: Some("left".into()),
+        transform: Transform {
+            translation: [2.0, 0.0, 0.0],
+            ..Transform::default()
+        },
+        components: Vec::new(),
+    });
+    let mut authored = Vec::new();
+    scene.write_json(&mut authored).unwrap();
+    fs::write(package.join("scene.json"), &authored).unwrap();
+    fs::write(
+        package.join("app.json"),
+        serde_json::to_vec(&json!({
+            "format": "rot-application", "version": 5, "title": "Nested",
+            "scene": "scene.json", "tick_nanos": 16_666_667,
+            "meshes": {}, "texture_roles": {},
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let relocated = directory.path().join("relocated");
+    fs::rename(&package, &relocated).unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_rot-motion-lab"))
+            .current_dir(directory.path())
+            .arg("--creation")
+            .arg(relocated.join("app.json"))
+            .args(["--headless", "--ticks", "3"])
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let output = run(&[]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["tick"], "3");
+    assert_eq!(result["runtime_scene"]["objects"][1]["parent"], "nested");
+    assert_eq!(result["runtime_scene"]["objects"][3]["parent"], "left");
+    let matrix = &result["world_matrices"]["center"];
+    let root_two = 2.0_f64.sqrt();
+    for (column, row, expected) in [
+        (0, 0, root_two),
+        (1, 0, -root_two),
+        (0, 1, root_two * 0.25),
+        (1, 1, root_two * 0.25),
+        (3, 0, 2.0),
+    ] {
+        assert!((matrix[column][row].as_f64().unwrap() - expected).abs() < 1e-6);
+    }
+    let path = relocated.join("scene.json");
+    assert_eq!(fs::read(&path).unwrap(), authored);
+
+    let input = run(&["--input-frames", "input.json"]);
+    assert!(!input.status.success());
+    assert!(String::from_utf8_lossy(&input.stderr).contains("do not execute behavior input"));
+
+    let mut invalid: Value = serde_json::from_slice(&authored).unwrap();
+    invalid["scene"]["objects"][1]["parent"] = json!("missing");
+    fs::write(&path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+    let bad_parent = run(&[]);
+    assert!(!bad_parent.status.success());
+    assert!(String::from_utf8_lossy(&bad_parent.stderr).contains("missing"));
+}

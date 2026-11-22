@@ -1,6 +1,10 @@
 //! A small read-only launch descriptor for exported creator content.
 //! The supported scene document owns authored state; this is not a second project editor.
 use crate::{MeshMap, ResourceRoot, TextureMap};
+use rot_scene::{
+    component_scene::{self, Component, ComponentScene},
+    Scene, SceneError, Session, SoundAssetReferences,
+};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
 
@@ -11,6 +15,76 @@ pub const NO_AUDIO_VERSION: u32 = 5;
 pub const NO_ANIMATION_VERSION: u32 = 6;
 pub const VERSION: u32 = 7;
 pub const MAX_DESCRIPTOR_BYTES: usize = 8 * 1024 * 1024;
+
+/// Launch data for an application. Static hierarchies outside the behavior
+/// adapter's capabilities retain their component objects and draw matrices.
+pub enum RuntimeScene {
+    Behavior(Box<Session>),
+    StaticHierarchy {
+        scene: Box<ComponentScene>,
+        preview: Arc<rot_render::component_preview::ComponentPreview>,
+    },
+}
+
+impl RuntimeScene {
+    pub fn from_snapshot(bytes: &[u8]) -> Result<Self, String> {
+        let behavior = |session| Ok(Self::Behavior(Box::new(session)));
+        let error = |error: SceneError| error.to_string();
+        match Session::from_snapshot_bytes(bytes) {
+            Ok(session) => behavior(session),
+            Err(SceneError::UnsupportedVersion(version))
+                if version == u64::from(component_scene::FORMAT_VERSION) =>
+            {
+                let scene = ComponentScene::read_json(bytes).map_err(error)?;
+                match Session::from_component_runtime(&scene) {
+                    Ok(session) => behavior(session),
+                    Err(_) if is_static_hierarchy(&scene) => {
+                        let preview =
+                            rot_render::component_preview::project(&scene).map_err(error)?;
+                        Ok(Self::StaticHierarchy {
+                            scene: Box::new(scene),
+                            preview: Arc::new(preview),
+                        })
+                    }
+                    Err(err) => Err(error(err)),
+                }
+            }
+            Err(err) => Err(error(err)),
+        }
+    }
+
+    /// Current draw references, for dependency capture and package validation.
+    pub fn draw_scene(&self) -> &Scene {
+        match self {
+            Self::Behavior(session) => session.scene(),
+            Self::StaticHierarchy { preview, .. } => preview.scene(),
+        }
+    }
+
+    pub fn sound_asset_references(&self) -> SoundAssetReferences {
+        match self {
+            Self::Behavior(session) => session.sound_asset_references(),
+            Self::StaticHierarchy { .. } => SoundAssetReferences::default(),
+        }
+    }
+}
+
+fn is_static_hierarchy(scene: &ComponentScene) -> bool {
+    scene.sources.is_empty()
+        && scene.actions == Default::default()
+        && scene.hud.is_default()
+        && scene.gameplay_camera.is_none()
+        && scene.objects.iter().any(|object| object.parent.is_some())
+        // Keep every authored mesh dependency in the preview's asset closure.
+        && scene.objects.iter().all(|object| {
+            object.enabled
+                && object.components.iter().all(|component| match component.kind {
+                    Component::Script { .. } | Component::Animator { .. } => false,
+                    Component::MeshRenderer { .. } => component.enabled,
+                    _ => true,
+                })
+        })
+}
 
 /// Explicit launch framing. Navigation remains interactive after initialization.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -323,11 +397,30 @@ impl CreationManifest {
         }
     }
 
-    pub fn load_session(&self, root: &ResourceRoot) -> Result<rot_scene::Session, String> {
+    pub fn load_runtime_scene(&self, root: &ResourceRoot) -> Result<RuntimeScene, String> {
         self.validate()?;
         let bytes = root.read(&self.scene, rot_scene::MAX_FILE_BYTES as usize)?;
-        let session =
-            rot_scene::Session::from_runtime_snapshot(&bytes).map_err(|error| error.to_string())?;
+        let scene = RuntimeScene::from_snapshot(&bytes)?;
+        match &scene {
+            RuntimeScene::Behavior(session) => self.validate_behavior_scene(session)?,
+            RuntimeScene::StaticHierarchy { .. } => {
+                if self.version != NO_AUDIO_VERSION {
+                    return Err("Static component hierarchies require descriptor version 5".into());
+                }
+            }
+        }
+        Ok(scene)
+    }
+
+    pub fn load_session(&self, root: &ResourceRoot) -> Result<Session, String> {
+        self.validate()?;
+        let bytes = root.read(&self.scene, rot_scene::MAX_FILE_BYTES as usize)?;
+        let session = Session::from_runtime_snapshot(&bytes).map_err(|error| error.to_string())?;
+        self.validate_behavior_scene(&session)?;
+        Ok(session)
+    }
+
+    fn validate_behavior_scene(&self, session: &Session) -> Result<(), String> {
         let animated = session.loaded_format_version() >= rot_scene::ANIMATION_FORMAT_VERSION;
         if animated != (self.version >= VERSION) {
             return Err("Scene22 imported_transform_animation requires descriptor version 7, and descriptor7 requires Scene22".into());
@@ -386,7 +479,7 @@ impl CreationManifest {
         if session.loaded_format_version() >= 10 && self.version < 4 {
             return Err("Scene10 roughness_maps requires descriptor version 4".into());
         }
-        Ok(session)
+        Ok(())
     }
 
     pub fn load_sounds(

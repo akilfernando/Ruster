@@ -14,6 +14,7 @@ pub use host::{run, HostOptions};
 pub use resources::ResourceRoot;
 
 use rot_assets::Mesh;
+use rot_render::component_preview::ComponentPreview;
 use rot_scene::Scene;
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
@@ -38,9 +39,15 @@ fn checked_texture_bytes(current: usize, additional: usize) -> Result<usize, Str
 /// Construct a new Content to replace meshes; this keeps retained GPU identities stable.
 #[derive(Clone)]
 pub struct Content {
-    scene: Scene,
+    scene: ContentScene,
     meshes: MeshMap,
     textures: TextureMap,
+}
+
+#[derive(Clone)]
+enum ContentScene {
+    Behavior(Box<Scene>),
+    StaticHierarchy(Arc<ComponentPreview>),
 }
 
 impl Content {
@@ -52,6 +59,22 @@ impl Content {
     /// revalidate authored references, not every pixel or vertex on each UI pass.
     pub fn with_textures(
         scene: Scene,
+        meshes: MeshMap,
+        textures: TextureMap,
+    ) -> Result<Self, String> {
+        Self::with_scene(ContentScene::Behavior(Box::new(scene)), meshes, textures)
+    }
+
+    pub fn with_component_preview(
+        preview: Arc<ComponentPreview>,
+        meshes: MeshMap,
+        textures: TextureMap,
+    ) -> Result<Self, String> {
+        Self::with_scene(ContentScene::StaticHierarchy(preview), meshes, textures)
+    }
+
+    fn with_scene(
+        scene: ContentScene,
         meshes: MeshMap,
         textures: TextureMap,
     ) -> Result<Self, String> {
@@ -77,15 +100,27 @@ impl Content {
             meshes,
             textures,
         };
-        content.validate()?;
+        if let ContentScene::Behavior(scene) = &content.scene {
+            scene
+                .validate()
+                .map_err(|e| format!("application scene: {e}"))?;
+        }
+        content.validate_references()?;
         Ok(content)
     }
 
     pub fn scene(&self) -> &Scene {
-        &self.scene
+        match &self.scene {
+            ContentScene::Behavior(scene) => scene,
+            ContentScene::StaticHierarchy(preview) => preview.scene(),
+        }
     }
+    /// Edit legacy behavior scene data. Panics for immutable component content.
     pub fn scene_mut(&mut self) -> &mut Scene {
-        &mut self.scene
+        let ContentScene::Behavior(scene) = &mut self.scene else {
+            panic!("component preview content is immutable");
+        };
+        scene
     }
     pub fn meshes(&self) -> &MeshMap {
         &self.meshes
@@ -97,14 +132,23 @@ impl Content {
 
     /// Check runtime scene mutations without scanning the immutable mesh payload again.
     pub fn validate(&self) -> Result<(), String> {
-        self.scene
+        let ContentScene::Behavior(scene) = &self.scene else {
+            // The component preview and its decoded resources stay immutable.
+            return Ok(());
+        };
+        scene
             .validate()
             .map_err(|e| format!("application scene: {e}"))?;
-        for object in &self.scene.objects {
+        self.validate_references()
+    }
+
+    fn validate_references(&self) -> Result<(), String> {
+        let scene = self.scene();
+        for object in &scene.objects {
             if let Some(material) = object
                 .material
                 .as_ref()
-                .and_then(|id| self.scene.materials.get(id))
+                .and_then(|id| scene.materials.get(id))
             {
                 for (texture, role) in [
                     (

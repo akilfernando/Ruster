@@ -1,5 +1,5 @@
 //! Stage a runnable v23 creation and publish the entire directory atomically.
-use crate::creation_export::{scene_dependencies, scene_texture_roles};
+use crate::creation_export::{draw_dependencies, scene_texture_roles};
 use crate::{
     editor_theme,
     strings::Text,
@@ -10,10 +10,11 @@ use crate::{
 };
 use eframe::egui;
 use rot_app::creation::{
-    CreationManifest, DESCRIPTOR_NAME, FORMAT, NO_ANIMATION_VERSION, NO_AUDIO_VERSION, VERSION,
+    CreationManifest, RuntimeScene, DESCRIPTOR_NAME, FORMAT, NO_ANIMATION_VERSION,
+    NO_AUDIO_VERSION, VERSION,
 };
 use rot_assets::{AssetKind, AssetStore};
-use rot_scene::{component_scene::ComponentSession, Session};
+use rot_scene::component_scene::ComponentSession;
 use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -123,7 +124,7 @@ impl From<String> for BuildFailure {
 
 struct BuildRequest {
     bytes: Vec<u8>,
-    scene: Session,
+    scene: RuntimeScene,
     assets: Option<rot_assets::ExportSnapshot>,
 }
 
@@ -144,8 +145,8 @@ impl BuildRequest {
                 .write_json(&mut bytes)
                 .map_err(|error| error.to_string())?;
         }
-        let scene = Session::from_runtime_snapshot(&bytes).map_err(|e| e.to_string())?;
-        let (meshes, textures) = scene_dependencies(scene.scene())
+        let scene = RuntimeScene::from_snapshot(&bytes)?;
+        let (meshes, textures) = draw_dependencies(scene.draw_scene())
             .map_err(|error| BuildFailureKind::AssetUnavailable.detail(error))?;
         let sounds = scene.sound_asset_references();
         let ids = meshes
@@ -155,7 +156,7 @@ impl BuildRequest {
             .cloned()
             .chain(
                 scene
-                    .scene()
+                    .draw_scene()
                     .animations
                     .values()
                     .map(|animation| animation.clip.clone()),
@@ -243,9 +244,10 @@ impl BuildRequest {
             .map_err(|error| BuildFailureKind::ParentUnavailable.detail(error))?;
         let stage = staging.path();
         let sound = self.scene.sound_asset_references();
-        let (mesh_ids, _) = scene_dependencies(self.scene.scene())?;
-        let roles = scene_texture_roles(self.scene.scene())?;
-        let animated = self.scene.loaded_format_version() >= rot_scene::ANIMATION_FORMAT_VERSION;
+        let draw = self.scene.draw_scene();
+        let (mesh_ids, _) = draw_dependencies(draw)?;
+        let roles = scene_texture_roles(draw)?;
+        let animated = !draw.animations.is_empty();
         let mut manifest = CreationManifest {
             format: FORMAT.into(),
             version: if animated {
@@ -255,7 +257,7 @@ impl BuildRequest {
             } else {
                 NO_AUDIO_VERSION
             },
-            title: self.scene.scene().id.clone(),
+            title: draw.id.clone(),
             scene: "scene.json".into(),
             meshes: BTreeMap::new(),
             mesh_normal_policies: BTreeMap::new(),
@@ -316,13 +318,18 @@ impl BuildRequest {
         }
         manifest.validate()?;
         let resources = rot_app::ResourceRoot::new(stage)?;
-        let scene = manifest.load_session(&resources)?;
+        let scene = manifest.load_runtime_scene(&resources)?;
         let asset_error = |error| BuildFailureKind::AssetUnavailable.detail(error);
-        rot_app::Content::with_textures(
-            scene.scene().clone(),
-            manifest.load_meshes(&resources).map_err(asset_error)?,
-            manifest.load_textures(&resources).map_err(asset_error)?,
-        )
+        let meshes = manifest.load_meshes(&resources).map_err(asset_error)?;
+        let textures = manifest.load_textures(&resources).map_err(asset_error)?;
+        match scene {
+            RuntimeScene::Behavior(session) => {
+                rot_app::Content::with_textures(session.scene().clone(), meshes, textures)
+            }
+            RuntimeScene::StaticHierarchy { preview, .. } => {
+                rot_app::Content::with_component_preview(preview, meshes, textures)
+            }
+        }
         .map_err(asset_error)?;
         manifest.load_sounds(&resources).map_err(asset_error)?;
         manifest.load_animations(&resources).map_err(asset_error)?;
@@ -692,7 +699,10 @@ impl BuildUi {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rot_scene::{component_scene::ComponentScene, Scene};
+    use rot_scene::{
+        component_scene::{ComponentScene, ObjectNode},
+        Scene, Session, Transform,
+    };
     use serde_json::json;
 
     #[test]
@@ -715,13 +725,49 @@ mod tests {
         let mut scene = Scene::demo();
         scene.objects[0].mesh = Some("triangle".into());
         let legacy = Session::new(scene).unwrap();
-        ComponentScene::from_legacy(&legacy)
-            .unwrap()
-            .save_new(&input)
-            .unwrap();
+        let mut authored = ComponentScene::from_legacy(&legacy).unwrap();
+        authored.objects[1].parent = Some("nested".into());
+        authored.objects[1].transform.translation = [1.5, 0.5, 0.0];
+        authored.objects[1].transform.rotation = [0.0, 0.0, 0.6];
+        authored.objects[0].parent = Some("root".into());
+        authored.objects.extend([
+            ObjectNode {
+                id: "nested".into(),
+                name: "Nested".into(),
+                enabled: true,
+                parent: Some("left".into()),
+                transform: Transform {
+                    translation: [1.0, 2.0, 0.0],
+                    ..Transform::default()
+                },
+                components: Vec::new(),
+            },
+            ObjectNode {
+                id: "root".into(),
+                name: "Root".into(),
+                enabled: true,
+                parent: None,
+                transform: Transform {
+                    translation: [8.0, 5.0, 2.0],
+                    rotation: [0.0, 0.4, 0.0],
+                    scale: [2.0, 0.5, 3.0],
+                },
+                components: Vec::new(),
+            },
+        ]);
+        let world = authored.world_matrices().unwrap()[1];
+        assert!(Transform::try_from_affine(world).is_err());
+        authored.save_new(&input).unwrap();
         let session = ComponentSession::open(&input).unwrap();
         let original = fs::read(&input).unwrap();
 
+        assert!(matches!(
+            BuildRequest::capture(&session, None),
+            Err(BuildFailure {
+                kind: BuildFailureKind::AssetUnavailable,
+                ..
+            }),
+        ));
         let capture = || BuildRequest::capture(&session, Some(&assets)).unwrap();
         assert!(matches!(
             capture().publish(&destination, &player, &AtomicBool::new(true)),
@@ -756,13 +802,21 @@ mod tests {
         assert_eq!(fs::read(destination.join("scene.json")).unwrap(), original);
         let resources = rot_app::ResourceRoot::new(&destination).unwrap();
         let manifest = CreationManifest::load(&resources).unwrap();
-        assert_eq!(
-            manifest.load_session(&resources).unwrap().scene().objects[0]
-                .mesh
-                .as_deref(),
-            Some("triangle")
-        );
-        assert_eq!(manifest.load_meshes(&resources).unwrap().len(), 1);
+        let RuntimeScene::StaticHierarchy { scene, preview } =
+            manifest.load_runtime_scene(&resources).unwrap()
+        else {
+            panic!("expected a native component hierarchy");
+        };
+        assert_eq!(*scene, authored);
+        assert_eq!(preview.scene().objects[0].mesh.as_deref(), Some("triangle"));
+        let meshes = manifest.load_meshes(&resources).unwrap();
+        assert_eq!(meshes.len(), 1);
+        let fitted = preview
+            .framed_camera(&["center"].into(), &meshes, 1.0, None, None)
+            .unwrap();
+        for (actual, expected) in fitted.target.into_iter().zip(world.w_axis.to_array()) {
+            assert!((f64::from(actual) - expected).abs() < 1e-5);
+        }
         fs::write(destination.join("sentinel"), b"keep this").unwrap();
         assert_issue(
             capture().publish(&destination, &player, &not_cancelled),
