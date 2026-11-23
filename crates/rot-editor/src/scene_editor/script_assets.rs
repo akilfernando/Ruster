@@ -80,7 +80,7 @@ mod tests {
                 update = function(object, properties, dt, host)
                     object.translation[1] = object.translation[1] + 6 * host.axis("move") * dt
                     if host.button("fire").pressed then
-                        object.rotation[2] = object.rotation[2] + math.pi / 6
+                        object.rotation[2] = object.rotation[2] + 0.5235987756
                     end
                     return object
                 end
