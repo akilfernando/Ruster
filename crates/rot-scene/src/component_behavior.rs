@@ -342,14 +342,16 @@ impl ComponentScene {
             None => None,
         };
         let mut positional_audio = false;
-        let mut named_sensors = false;
+        let mut named_sensors = HashSet::new();
         for (index, object) in self.objects.iter().enumerate() {
             for component in &object.components {
                 let Component::Script { binding, .. } = &component.kind else {
                     continue;
                 };
                 for (name, property) in &binding.properties {
-                    named_sensors |= matches!(property, crate::PropertyValue::SensorRef(_));
+                    if let crate::PropertyValue::SensorRef(id) = property {
+                        named_sensors.insert(id.as_str());
+                    }
                     let crate::PropertyValue::SoundRef(cue) = property else {
                         continue;
                     };
@@ -554,6 +556,27 @@ impl ComponentScene {
                 (_, Some((component, _)), Some(_)) => return Err(unsupported(&format!(
                     "Light {component}: remove the Collider from the light owner for behavior Play and Build"
                 ))),
+                (None, None, Some(collider))
+                    if named_sensors.contains(object.id.as_str())
+                        && object.parent.is_none()
+                        && !parents.contains(object.id.as_str())
+                        && collider.enabled
+                        && collider.role == crate::ColliderRole::Sensor
+                        && matches!(collider.shape, crate::ColliderShape::Box { .. })
+                        && !object.components.iter().any(|component| {
+                            component.enabled
+                                && matches!(component.kind, Component::Script { .. } | Component::Animator { .. })
+                        }) =>
+                {
+                    // Give the behavior collision engine an owner without submitting a mesh.
+                    let mut proxy = Object::cube(object.id.clone(), Some(object.name.clone()));
+                    proxy.transform = object.transform.clone();
+                    proxy.collider = Some(collider);
+                    hidden_mesh_renderers
+                        .get_or_insert_with(HashSet::new)
+                        .insert(object.id.clone());
+                    scene.objects.push(proxy);
+                }
                 (None, None, None) => insert_group(&mut scene, object),
                 _ => return Err(unsupported("this combination of mesh, light and collider is unsupported by the behavior runtime")),
             }
@@ -579,7 +602,7 @@ impl ComponentScene {
         scene.validate()?;
         let projection = RuntimeProjection {
             positional_audio,
-            named_sensors,
+            named_sensors: !named_sensors.is_empty(),
             local_leaf_scripts: !scene.hierarchy.is_empty()
                 && authoring.group_creation_blockers(&scene).next().is_some(),
             attached_lights: (!attached.is_empty()).then(|| Arc::new(AttachedLights(attached))),

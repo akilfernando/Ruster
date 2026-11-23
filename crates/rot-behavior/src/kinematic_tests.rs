@@ -367,3 +367,122 @@ fn touching_sphere_permits_tangent_and_observes_mid_query_cancellation() {
         .unwrap_err();
     assert!(failure.contains("cancelled"), "{failure}");
 }
+
+#[test]
+fn named_box_sensor_uses_committed_endpoints_and_rolls_back_rejected_cues() {
+    use rot_scene::component_scene::{Component, ComponentInstance, ComponentScene};
+
+    let (mut scene, mut authoring) = course(0.);
+    scene.objects.truncate(1);
+    let mut sensor = collider_object(
+        "gate",
+        [1., 0., 0.],
+        ColliderShape::Box {
+            half_extents: [0.5; 3],
+        },
+    );
+    sensor.collider.as_mut().unwrap().role = rot_scene::ColliderRole::Sensor;
+    scene.objects.push(sensor);
+    let binding = authoring.bindings.get_mut("control").unwrap();
+    binding
+        .properties
+        .insert("checkpoint".into(), PropertyValue::SensorRef("gate".into()));
+    binding.properties.insert(
+        "chime".into(),
+        PropertyValue::SoundRef(rot_scene::SoundRef {
+            asset_id: Some("bell".into()),
+            gain: 1.,
+            playback: Default::default(),
+        }),
+    );
+    authoring.sources.get_mut("controller").unwrap().text = r#"
+return {update=function(o,p,dt,h)
+    local steps = h.state("steps")
+    if dt == 0 then return {transform=o,state={steps=steps}} end
+    local a = h.axis("move")
+    local slide = h.move_and_slide({a == -1 and -.5 or a * .25,0,0})
+    o.translation = slide.suggested_translation
+    if p.checkpoint ~= "gate" then return false end
+    local hit = h.sensor_crossing("checkpoint")
+    if hit.sensor_id ~= "gate" then return false end
+    if hit.state == "entered" then h.play_sound("chime") end
+    if steps == 4 then o.translation[1] = 5 end
+    return {transform=o,state={steps=steps+1}}
+end}
+"#
+    .into();
+
+    let mut authored =
+        ComponentScene::from_legacy(&rot_scene::Session::new(scene).unwrap()).unwrap();
+    authored.sources = authoring.sources;
+    authored.actions = authoring.actions;
+    authored.objects[0].components.push(ComponentInstance {
+        id: "controller-component".into(),
+        enabled: true,
+        kind: Component::Script {
+            binding: authoring.bindings.remove("control").unwrap(),
+            source_kind: None,
+            movement: Default::default(),
+        },
+    });
+    authored.objects[1]
+        .components
+        .retain(|component| !matches!(component.kind, Component::MeshRenderer { .. }));
+    let projected = authored.behavior_projection().unwrap();
+    assert!(projected
+        .hidden_mesh_renderers
+        .as_ref()
+        .unwrap()
+        .contains("gate"));
+    let mut engine = Engine::new(Limits::default()).unwrap();
+    let mut runtime = engine
+        .reset_projected(
+            &projected.scene,
+            &projected.authoring,
+            projected.transform_camera.clone(),
+            projected.projection.clone(),
+        )
+        .unwrap();
+    assert!(runtime.query_observations().is_empty());
+    for (axis, x, expected_state, was, is) in [
+        (1, 0.25, "entered", false, true), // Sphere tangent to the box.
+        (1, 0.5, "inside", true, true),
+        (-1, 0., "exited", true, false),
+        (0, 0., "outside", false, false),
+    ] {
+        engine.step_with_input(&mut runtime, &input(axis)).unwrap();
+        assert_eq!(runtime.scene().objects[0].transform.translation[0], x);
+        let observations = runtime.query_observations();
+        assert!(matches!(
+            observations[1].query,
+            QueryResult::SensorCrossing { state, was_inside, is_inside, .. }
+                if state == expected_state && was_inside == was && is_inside == is
+        ));
+        assert_eq!(
+            runtime
+                .audio_batch()
+                .is_some_and(|batch| !batch.cues.is_empty()),
+            expected_state == "entered"
+        );
+    }
+    let committed = runtime.query_observations().to_vec();
+    let audio = runtime.audio_batch().cloned();
+    assert!(engine.step_with_input(&mut runtime, &input(1)).is_err());
+    assert_eq!(runtime.tick(), 4);
+    assert_eq!(runtime.scene().objects[0].transform.translation, [0.; 3]);
+    assert_eq!(runtime.query_observations(), committed);
+    assert_eq!(runtime.audio_batch(), audio.as_ref());
+
+    let mut missing = projected.scene.clone();
+    missing.objects.retain(|object| object.id != "gate");
+    let error = engine
+        .reset_projected(
+            &missing,
+            &projected.authoring,
+            projected.transform_camera,
+            projected.projection,
+        )
+        .err()
+        .expect("stale sensor binding fails Reset");
+    assert!(error.to_string().contains("checkpoint"));
+}

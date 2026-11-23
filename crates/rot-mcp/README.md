@@ -270,6 +270,16 @@ connected project.
   flat, with one enabled mover using an enabled uniformly scaled Blocker Sphere
   and stationary blockers. Inspect `behavior_runtime_inspect.query_observations`
   for committed `move_and_slide` results.
+- On a Kinematic Sphere Script, keep the exact component and binding in a
+  guarded `scene_components_edit` replacement and add
+  `binding.properties.checkpoint = {"type":"sensor_ref","value":"sensor-object-id"}`.
+  Use `scene_components_inspect` to verify the exact stationary owner with an
+  enabled Box Collider Sensor. A sensor-only change
+  keeps the accepted file binding and needs the scene token and revision.
+  After `host.move_and_slide`, `host.sensor_crossing("checkpoint")` reports
+  `state`, `sensor_id`, `was_inside`, and `is_inside` from committed and
+  accepted endpoints. Read committed results in
+  `behavior_runtime_inspect.query_observations`.
 - File-backed Object Lua can use `host.play_sound("confirm")` after a named
   Sound Cue is assigned to the exact Script component. Find a ready
   `kind: "sound"` WAV and its stable ID in `asset_inspect`. Read the exact

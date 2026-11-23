@@ -1,4 +1,6 @@
 //! Named stationary Box Sensor bindings on file-backed Kinematic Sphere scripts.
+use std::collections::HashSet;
+
 use super::ComponentWorkspace;
 use crate::{editor_theme, strings::Text};
 use eframe::egui;
@@ -24,8 +26,12 @@ pub(super) struct Draft {
     error: Option<String>,
 }
 
-fn eligible(object: &ObjectNode, owner: &str) -> bool {
-    if object.id == owner || !object.enabled || object.parent.is_some() {
+fn eligible(object: &ObjectNode, owner: &str, parents: &HashSet<&str>) -> bool {
+    if object.id == owner
+        || !object.enabled
+        || object.parent.is_some()
+        || parents.contains(object.id.as_str())
+    {
         return false;
     }
     let mut renderers = 0;
@@ -38,14 +44,21 @@ fn eligible(object: &ObjectNode, owner: &str) -> bool {
                 shape: ColliderShape::Box { .. },
                 ..
             } if component.enabled => colliders += 1,
-            Component::Collider { .. } => return false,
+            Component::Collider { .. } | Component::Light { .. } => return false,
             Component::Script { .. } | Component::Animator { .. } if component.enabled => {
                 return false
             }
             _ => {}
         }
     }
-    renderers == 1 && colliders == 1
+    renderers <= 1 && colliders == 1
+}
+
+pub(super) fn parent_ids(objects: &[ObjectNode]) -> HashSet<&str> {
+    objects
+        .iter()
+        .filter_map(|object| object.parent.as_deref())
+        .collect()
 }
 
 pub(super) fn validate(
@@ -53,12 +66,13 @@ pub(super) fn validate(
     name: &str,
     target: &str,
     object: Option<&ObjectNode>,
+    parents: &HashSet<&str>,
 ) -> Result<(), String> {
     rot_scene::validate_id(name).map_err(|error| error.to_string())?;
-    if object.is_some_and(|object| eligible(object, owner)) {
+    if object.is_some_and(|object| eligible(object, owner, parents)) {
         Ok(())
     } else {
-        Err(format!("Sensor {name:?} targets {target:?}. Choose an enabled, stationary Box Collider Sensor on an object with one Mesh Renderer."))
+        Err(format!("Sensor {name:?} targets {target:?}. Choose an enabled, stationary Box Collider Sensor."))
     }
 }
 
@@ -105,12 +119,13 @@ impl ComponentWorkspace {
             Some(PropertyValue::SensorRef(id)) => Some(id.clone()),
             _ => None,
         };
+        let parents = parent_ids(objects);
         let candidates = self
             .rows
             .iter()
             .filter_map(|&(index, _)| {
                 let object = &objects[index];
-                eligible(object, &owner.id).then(|| {
+                eligible(object, &owner.id, &parents).then(|| {
                     (
                         object.id.clone(),
                         format!("{} · {}", object.name, object.id),
@@ -265,6 +280,7 @@ impl ComponentWorkspace {
                 name,
                 target,
                 objects.iter().find(|object| object.id == target),
+                &parent_ids(objects),
             )?;
             if binding.properties.contains_key(name) {
                 return Err("This script already uses that name.".into());

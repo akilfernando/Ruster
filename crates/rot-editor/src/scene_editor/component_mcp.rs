@@ -1416,6 +1416,9 @@ impl ComponentWorkspace {
             let movement_explicit = edit["component"].get("movement").is_some();
             action.apply(&mut changed[index], movement_explicit)?;
         }
+        let parents = std::cell::LazyCell::new(|| {
+            super::component_sensor::parent_ids(&self.session.scene().objects)
+        });
         for object in &changed {
             let before = originals[object.id.as_str()];
             let new_scripts: Vec<_> = object
@@ -1463,7 +1466,7 @@ impl ComponentWorkspace {
                         .get(id.as_str())
                         .map(|&i| &changed[i])
                         .or_else(|| originals.get(id.as_str()).copied());
-                    super::component_sensor::validate(&object.id, name, id, target)
+                    super::component_sensor::validate(&object.id, name, id, target, &parents)
                         .map_err(|message| ("sensor_unavailable", message))?;
                 }
             }

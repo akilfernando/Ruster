@@ -125,7 +125,7 @@ editor_text! {
     SensorRemove => "Remove Sensor",
     SensorTarget => "Sensor",
     SensorChoose => "Choose a Box Sensor",
-    SensorNoTargets => "Add an enabled Box Collider Sensor to a stationary mesh object first.",
+    SensorNoTargets => "Add an enabled Box Collider Sensor to a stationary object first.",
     ScriptKinematicRequirements => "Use one uniform Blocker Sphere. Keep the scene flat and other blockers still.",
     ComponentScriptSource => "Source",
     ComponentScriptUnavailable => "Script file unavailable.",

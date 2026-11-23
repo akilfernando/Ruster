@@ -473,6 +473,29 @@ Use the solver translation as returned and call it once per Step. **Ordinary**
 keeps the normal transform-return API, and each Script chooses its own mode
 even when several components use the same file.
 
+### Detect a named checkpoint
+
+On a Kinematic Sphere **Script**, open **Sensor Crossings** and choose **Add
+Sensor**. Enter a name such as `checkpoint`, choose an enabled stationary
+object with one Box Collider set to **Sensor**, and choose **Apply**. To change or remove the binding, open **Edit Sensor**.
+Bindings belong to the Script component. Two scripts using the same Lua file
+can name different sensors.
+
+After `host.move_and_slide`, query the accepted endpoint. A sphere touching
+the box counts as inside. The starting pose is used as the first comparison
+after Reset. Passing all the way through a box between two outside endpoints
+returns `outside`.
+
+```lua
+local hit = host.sensor_crossing("checkpoint")
+if hit.state == "entered" then
+    host.play_sound("chime") -- Bind this Sound Cue on the same Script.
+end
+```
+
+The other states are `inside`, `exited`, and `outside`. A rejected Step
+leaves the previous result in place and does not play its cue.
+
 ## Play one-shot sounds from a Script
 
 Import a WAV into **Assets**. On the file-backed **Script** component, choose
