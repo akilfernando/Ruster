@@ -238,6 +238,14 @@ connected project.
   Use `remove:true` to remove the Animator. Loop-only and removal
   requests work with the scene guards alone. Legacy keeps its
   `clip_id`/optional `looping` or `remove:true` contract.
+- Preview a v23 transform clip using `rot_tools` and the existing
+  `scene_animation_set` command. Pass the exact `owner_id`, `component_id`,
+  scene and asset revision guards, and `preview_seconds` from zero through
+  the reported duration. Pass `preview_seconds:null` to exit that preview.
+  Preview updates Scene view only. Exact Animator detail and rendered viewport
+  captures report `animation_preview` with owner, component, clip, time,
+  accepted model hash and asset revision. After a seek or asset refresh, wait
+  for the next rendered frame if capture reports an unavailable or stale view.
 - Inspect an Animator through `scene_components_inspect` using its
   component ID. The response includes accepted clip metadata when
   available. `scene_components_edit` uses the same asset revision and

@@ -94,6 +94,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn preview_has_an_exact_guarded_shape_and_is_additional() {
+        let first = json!({"expected_session_token":"session","expected_revision":"3",
+            "expected_asset_revision":"4","owner_id":"model","component_id":"animator",
+            "preview_seconds":2.0});
+        assert!(valid("scene_animation_set", &first));
+        let mut clear = first.clone();
+        clear["preview_seconds"] = Value::Null;
+        assert!(valid("scene_animation_set", &clear));
+        for (key, bad) in [
+            ("preview_seconds", json!("2")),
+            ("preview_seconds", json!(-1)),
+            ("clip_id", json!("clip")),
+            ("expected_asset_revision", json!("04")),
+        ] {
+            let mut args = first.clone();
+            args[key] = bad;
+            assert!(!valid("scene_animation_set", &args), "{args}");
+        }
+        let mut missing = first;
+        missing.as_object_mut().unwrap().remove("component_id");
+        assert!(!valid("scene_animation_set", &missing));
+        assert!(!crate::tool_catalog::advertised("scene_animation_set"));
+    }
+
+    #[test]
     fn requires_guards_and_exactly_one_of_clip_or_remove() {
         let mut args = json!({"expected_session_token":"session","expected_revision":"0",
             "owner_id":"group-1","clip_id":"rig#Swing","looping":false});

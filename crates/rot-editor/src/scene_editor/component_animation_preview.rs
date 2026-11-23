@@ -241,6 +241,12 @@ impl AnimationPreview {
                         (parent.world, parent.rotation)
                     });
             let world = parent_world * node.local.affine_matrix();
+            if !world.is_finite() {
+                return Err((
+                    "preview_unavailable",
+                    "The sampled world transform exceeds renderer precision.".into(),
+                ));
+            }
             let rotation = if self.has_spots {
                 (parent_rotation * euler(&node.local)).normalize()
             } else {

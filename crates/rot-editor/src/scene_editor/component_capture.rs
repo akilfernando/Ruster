@@ -27,6 +27,7 @@ struct View {
     camera: Option<rot_render::CameraState>,
     player_content: Option<egui::Rect>,
     transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
+    animation_preview: bool,
     scene_revision: u64,
     asset_revision: Option<u64>,
     epoch: u64,
@@ -127,6 +128,7 @@ impl ComponentWorkspace {
                     .filter(|_| !self.navigation.player_view),
                 player_content: viewport.player_content,
                 transform_camera: frame.and_then(Frame::transform_camera),
+                animation_preview: frame.is_none() && self.current_animation_preview().is_some(),
                 scene_revision: self.session.revision(),
                 asset_revision: self.assets.as_ref().map(rot_assets::AssetStore::revision),
                 epoch: self.capture.epoch,
@@ -300,6 +302,11 @@ impl ComponentWorkspace {
                     return Err(fail("invalid_arguments"));
                 }
                 let view = self.capture_view().map_err(fail)?;
+                if view.animation_preview != self.current_animation_preview().is_some()
+                    || (view.animation_preview && view.epoch != self.capture.epoch)
+                {
+                    return Err(fail("stale_view"));
+                }
                 Ok(Value::Object(self.capture_metadata(view, &Value::Null)))
             }
             "viewport_frame" => {
@@ -500,7 +507,7 @@ impl ComponentWorkspace {
         };
         if let Some(preview) = self
             .current_animation_preview()
-            .filter(|_| view.runtime_frame.is_none())
+            .filter(|_| view.animation_preview)
         {
             fields.insert("animation_preview".into(), preview.observation());
             fields.insert("display_mode".into(), json!("animation_preview"));
@@ -531,6 +538,175 @@ impl ComponentWorkspace {
 mod tests {
     use super::*;
     use rot_scene::{component_scene::ComponentScene, Scene, Session};
+
+    #[test]
+    fn animator_preview_samples_loop_endpoint_and_does_not_relabel_a_stale_view() {
+        use rot_assets::fixtures::{animated_glb, AnimatedFixture};
+        use rot_scene::component_scene::{Component, ComponentScene, ComponentSession};
+        use rot_scene::{Scene, Session};
+
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("scene.json");
+        let model_path = folder.path().join("rig.glb");
+        ComponentScene::from_legacy(&Session::new(Scene::empty("preview")).unwrap())
+            .unwrap()
+            .save_new(&path)
+            .unwrap();
+        std::fs::write(&model_path, animated_glb(AnimatedFixture::default())).unwrap();
+        let mut assets = rot_assets::AssetStore::open(folder.path()).unwrap();
+        assets.import_glb_at(0, "rig", "rig.glb").unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.meshes = assets.mesh_snapshots();
+        editor.textures = assets.texture_snapshots();
+        editor.assets = Some(assets.project_snapshot());
+        let first = editor.place_model("rig", Some("First"), None).unwrap();
+        let second = editor.place_model("rig", Some("Second"), None).unwrap();
+        editor.save();
+        let original = editor.session.scene().clone();
+        let file = std::fs::read(&path).unwrap();
+        let animator = |owner: &str| {
+            let object = original
+                .objects
+                .iter()
+                .find(|object| object.id == owner)
+                .unwrap();
+            let component = object
+                .components
+                .iter()
+                .find(|component| matches!(component.kind, Component::Animator { .. }))
+                .unwrap();
+            let Component::Animator { binding } = &component.kind else {
+                unreachable!()
+            };
+            assert!(binding.looping);
+            (component.id.clone(), binding.targets["Rig/Arm"].clone())
+        };
+        let (component, arm) = animator(&first);
+        let (_, other_arm) = animator(&second);
+        let projection = editor.preview.as_ref().unwrap();
+        let draw_for = |id: &str| {
+            projection
+                .scene()
+                .objects
+                .iter()
+                .position(|object| object.id == id)
+                .unwrap()
+        };
+        let first_draw = draw_for(&arm);
+        let second_draw = draw_for(&other_arm);
+        let committed = projection.draw_matrices().to_vec();
+        let mut request = json!({"expected_session_token":"scene", "expected_revision":"2",
+            "expected_asset_revision":"1", "owner_id":first, "component_id":component,
+            "preview_seconds":2.0});
+        let reply = editor.ai_command("scene", "scene_animation_set", &request);
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["result"]["revision"], "2");
+        assert_eq!(reply["result"]["animation_preview"]["seconds"], 2.0);
+        let preview = editor.current_animation_preview().unwrap();
+        let matrices = preview.projection.draw_matrices();
+        assert_eq!(
+            matrices[first_draw].w_axis.x - committed[first_draw].w_axis.x,
+            2.0
+        );
+        assert_eq!(matrices[second_draw], committed[second_draw]);
+        assert_eq!(editor.session.scene(), &original);
+        assert_eq!(std::fs::read(&path).unwrap(), file);
+        let detail = editor.ai_command(
+            "scene",
+            "scene_components_inspect",
+            &json!({
+                "object_id":first, "component_id":component
+            }),
+        );
+        assert_eq!(
+            detail["result"]["animation_preview"],
+            reply["result"]["animation_preview"]
+        );
+
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320., 200.));
+        let painted = View {
+            rect,
+            viewport_rect: rect,
+            screen: rect,
+            dpi: 1.0,
+            matrices: Default::default(),
+            camera: None,
+            player_content: None,
+            transform_camera: None,
+            animation_preview: true,
+            scene_revision: editor.session.revision(),
+            asset_revision: Some(1),
+            epoch: editor.capture.epoch,
+            runtime_frame: None,
+            runtime_stale: false,
+            player_view: false,
+        };
+        editor.capture.view = Some(painted);
+        let authority = Authority::test_approved();
+        let viewport = |editor: &mut ComponentWorkspace| {
+            editor.ai_capture_command(&authority, "scene", "viewport_inspect", &json!({}))
+        };
+        assert_eq!(
+            viewport(&mut editor)["result"]["display_mode"],
+            "animation_preview"
+        );
+
+        request["preview_seconds"] = json!(3.0);
+        assert_eq!(
+            editor.ai_command("scene", "scene_animation_set", &request)["ok"],
+            false
+        );
+        assert_eq!(editor.current_animation_preview().unwrap().seconds, 2.0);
+        let epoch = editor.capture.epoch;
+        request["preview_seconds"] = json!(2.0);
+        assert_eq!(
+            editor.ai_command("scene", "scene_animation_set", &request)["result"]["changed"],
+            false
+        );
+        assert_eq!(editor.capture.epoch, epoch);
+
+        std::fs::write(
+            &model_path,
+            animated_glb(AnimatedFixture {
+                end_x: 6.0,
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        assets.refresh_glb_at(1, "rig").unwrap();
+        editor.assets = Some(assets.project_snapshot());
+        assert_eq!(viewport(&mut editor)["error"]["code"], "stale_view");
+        assert_eq!(
+            editor.ai_command("scene", "scene_animation_set", &request)["error"]["code"],
+            "stale_asset_revision"
+        );
+        editor.validate_animation_preview();
+        request["expected_asset_revision"] = json!("2");
+        let reply = editor.ai_command("scene", "scene_animation_set", &request);
+        assert_eq!(reply["ok"], true, "{reply}");
+        let matrices = editor
+            .current_animation_preview()
+            .unwrap()
+            .projection
+            .draw_matrices();
+        assert_eq!(
+            matrices[first_draw].w_axis.x - committed[first_draw].w_axis.x,
+            6.0
+        );
+        assert_eq!(matrices[second_draw], committed[second_draw]);
+        editor.select(Some(second));
+        assert!(editor.current_animation_preview().is_none());
+        request["preview_seconds"] = json!(1.0);
+        assert_eq!(
+            editor.ai_command("scene", "scene_animation_set", &request)["ok"],
+            true
+        );
+        editor.command(crate::workspace::Action::Undo);
+        assert!(editor.current_animation_preview().is_none());
+        assert_eq!(editor.session.revision(), 3);
+        assert_eq!(std::fs::read(&path).unwrap(), file);
+    }
 
     #[test]
     fn collider_face_drag_owns_the_viewport_and_commits_one_exact_component() {
@@ -1166,6 +1342,7 @@ mod tests {
             camera: None,
             player_content: None,
             transform_camera: None,
+            animation_preview: false,
             scene_revision: workspace.session.revision(),
             asset_revision: workspace
                 .assets

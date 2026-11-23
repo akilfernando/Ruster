@@ -780,6 +780,14 @@ and loop controls. A target the clip animates cannot also carry a
 transform-writing behavior, and deleting it requires removing the
 animation first.
 
+Choose **Preview** in the v23 Animator to scrub its transform clip in the
+Scene view. Use **Preview Time** or enter an exact **Time (seconds)**. The
+end of the slider shows the final pose even when **Loop** is on.
+**Exit Preview** or Escape restores the authored pose. Selecting another
+object, changing the scene, starting Play, or accepting refreshed assets
+clears preview. The scene camera, saved scene, Undo history and other
+placements are retained.
+
 After changing keys in Blender, overwrite the source and use **Refresh**.
 The placement keeps its binding. Renaming a clip, or animating a
 different set of nodes or properties, needs a fresh import and Place.
