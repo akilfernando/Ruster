@@ -44,8 +44,9 @@ including shear. Set Game Camera from View captures a fixed v23 perspective
 shot for Play and Linux Build, including large static hierarchies. A Transform
 Perspective Camera follows its object's position and authored rotation, including
 roll and overhead views under scaled parents. Native and approved MCP edits share
-Undo, and the static editor and packaged projections agree at multiple aspect ratios.
-Scripted scenes can use Fixed or Follow cameras. Stop restores editor navigation.
+Undo. In supported animated or scripted scenes, the editor, MCP and packaged
+player use the pose committed with the same scene tick. A failed Lua Step keeps
+the preceding camera and scene together. Stop restores editor navigation.
 A disabled Mesh Renderer in supported scripted v23 scenes
 hides its mesh and shadow while its Lua behavior and collider keep running.
 Build retains assets referenced by disabled geometry. A relocated Vulkan
