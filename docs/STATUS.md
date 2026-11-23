@@ -44,6 +44,14 @@ keystroke-to-results p95 was 49–50 ms, and reveal took 53–65 ms through
 the native accessibility round trip. With the query field focused,
 later idle intervals used 20–25 editor CPU ms/s versus 0–10 with search
 closed. The first interval after typing used 70–75 CPU ms/s.
+Hierarchy branches fold locally. Arrow keys and Shift selection follow the
+visible rows. Search and Find Uses open the ancestors needed for the reveal.
+The station fixture verified selection and draft retention with identical
+saved bytes and scene revision. Approved Claude inspected a folded renderer
+and copied the seven-object wing. Native Undo restored it. The disclosure
+focus ring was verified in Rot and Plain. At 5,000 objects, release action
+to updated accessibility tree p95 was 46 ms for collapse and 54 ms for
+expand across three runs. Idle editor CPU remained about 7 ms/s in both states.
 File → New Scene and the command palette create a named, saved v23 sibling.
 The new scene has its own history and MCP session. Same-project switches keep
 Assets and the startup setting. Competing files and cancelled creation leave
