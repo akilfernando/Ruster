@@ -221,7 +221,10 @@ connected project.
   such as `unsupported_shear`. Its `effective_enabled` includes the
   component, owner and ancestors. Apply local changes with a guarded
   `scene_components_edit` Replace that preserves the ID, role and enabled
-  flag. Center and half extents can change together in one shared Undo.
+  flag. Copy `session_token` and `revision` from component inspection to
+  `expected_session_token` and `expected_revision` to pin the edit to that
+  scene. If a creator changes it meanwhile, inspect again before editing.
+  Center and half extents can change together in one shared Undo.
 - For v23 keyboard actions, call `behavior_inspect` with `kind: "actions"`
   to find stable IDs and the current session token and revision. To read or
   remove one action, send those guards as `expected_session_token` and

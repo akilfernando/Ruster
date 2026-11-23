@@ -775,9 +775,13 @@ fn listed() -> Value {
         let name = tool["name"].as_str().unwrap().to_owned();
         let schema = &mut tool["inputSchema"];
         if name != "scene_save" {
-            if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
-                for (guard, _) in SCENE_GUARDS {
-                    properties.remove(guard);
+            if name != "scene_components_edit" {
+                if let Some(properties) =
+                    schema.get_mut("properties").and_then(Value::as_object_mut)
+                {
+                    for (guard, _) in SCENE_GUARDS {
+                        properties.remove(guard);
+                    }
                 }
             }
             if let Some(required) = schema.get_mut("required").and_then(Value::as_array_mut) {
@@ -1766,6 +1770,17 @@ mod tests {
             );
         }
         assert_eq!(schema["properties"]["filename"]["type"], "string");
+
+        let component_edit = tools
+            .iter()
+            .find(|tool| tool["name"] == "scene_components_edit")
+            .unwrap();
+        let schema = &component_edit["inputSchema"];
+        let required = schema["required"].as_array().unwrap();
+        for (guard, _) in SCENE_GUARDS {
+            assert_eq!(schema["properties"][guard]["type"], "string");
+            assert!(!required.contains(&json!(guard)));
+        }
     }
 
     // Left-out scene guards come from the open scene; supplied ones are kept.

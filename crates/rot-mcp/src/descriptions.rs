@@ -19,7 +19,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("scene_rename", "Rename an object. Its ID stays the same."),
     ("scene_duplicate", "Duplicate an object under a new ID and name."),
     ("scene_components_inspect", "List v23 components by object_id. Add component_id for exact fields and collider_world geometry or its unavailable reason. Collider offset and half extents are local."),
-    ("scene_components_edit", "Edit v23 components in one Undo. Pin expected_asset_revision for clip, texture and file-backed Script changes. Scripts use source_kind asset and the asset ID as binding.source_id."),
+    ("scene_components_edit", "Edit v23 components in one Undo. Pin scene guards from inspection for an exact edit. Pin asset revision for assets. File-backed Scripts use source_kind asset and the asset ID as binding.source_id."),
     ("scene_delete", "Delete an object. In v23, also delete its descendants."),
     ("scene_transform_many", "Set the position, rotation (radians) and scale of up to 256 objects as one Undo step."),
     ("scene_duplicate_many", "Duplicate up to 256 objects under new IDs as one Undo step."),
