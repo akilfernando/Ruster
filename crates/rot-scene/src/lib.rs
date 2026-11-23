@@ -3957,6 +3957,16 @@ impl SceneLock {
         Ok(Self { path, _file: file })
     }
 }
+/// Serialize an adjacent file's publication with the same cooperative
+/// regular-file lock used by saved documents.
+pub fn with_publication_lock<T>(
+    path: &Path,
+    operation: impl FnOnce(&Path) -> T,
+) -> Result<T, SceneError> {
+    let lock = SceneLock::acquire(path)?;
+    Ok(operation(&lock.path))
+}
+
 fn reject_nonregular(path: &Path) -> Result<(), SceneError> {
     match path.symlink_metadata() {
         Ok(m) if !m.is_file() => Err(SceneError::Invalid(

@@ -223,6 +223,7 @@ impl ComponentWorkspace {
                 "dirty":self.session.is_dirty(), "drafts_pending":self.authored_edit_pending(),
             });
             if offset == 0 {
+                result["project_startup"] = self.startup_context();
                 if self.light_budget_exceeded() {
                     result["lighting_warning"] = json!(Text::ViewportLightLimitDetail.plain());
                 }
@@ -272,7 +273,9 @@ impl ComponentWorkspace {
             if !map.is_empty() {
                 return Err(invalid());
             }
-            return Ok(json!({"build":self.build.inspect()}));
+            return Ok(
+                json!({"build":self.build.inspect(), "project_startup": self.startup_context()}),
+            );
         }
         let creation = matches!(op, "scene_create" | "scene_group_create");
         let prefab_fields: &[&str] = match args["action"].as_str() {
@@ -1042,6 +1045,14 @@ impl ComponentWorkspace {
         let details = json!({"asset_revision":revision.to_string(),"object_id":id,
             "component_id":component_id,"before":before,"after":asset_id});
         Ok((object, details))
+    }
+
+    fn startup_context(&self) -> Value {
+        super::super::project_startup::context(
+            super::project_directory(&self.path),
+            &self.path,
+            &self.session,
+        )
     }
 
     fn inspect_components(&self, args: &Value) -> Result<Value, CommandError> {

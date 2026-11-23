@@ -1,4 +1,4 @@
-//! The project hub. A project is a folder; its scene is `scene.json` inside.
+//! The project hub. Open a configured startup, a recent scene, or a chosen file.
 use super::*;
 use crate::strings::Text;
 use std::{fs, path::Path};
@@ -197,7 +197,10 @@ impl ProjectPicker {
                                             }
                                         });
                                         if response.clicked() {
-                                            match OpenedScene::open(path) {
+                                            match open_from_folder(
+                                                path.parent().unwrap_or(path),
+                                                path,
+                                            ) {
                                                 Ok(session) => chosen = Some(session),
                                                 Err(error) => {
                                                     self.error = format!(
@@ -726,12 +729,25 @@ fn open_project(path: &Path) -> Result<OpenedScene, String> {
     if !path.is_absolute() {
         return Err("Enter an absolute path to a scene file or project folder.".into());
     }
-    let scene = if path.is_dir() {
-        path.join("scene.json")
-    } else {
-        path.to_path_buf()
-    };
-    OpenedScene::open(&scene).map_err(|error| format!("Couldn't open {}. {error}", scene.display()))
+    if path.is_dir() {
+        return open_from_folder(path, &path.join("scene.json"));
+    }
+    OpenedScene::open(path).map_err(|error| format!("Couldn't open {}. {error}", path.display()))
+}
+
+fn open_from_folder(root: &Path, fallback: &Path) -> Result<OpenedScene, String> {
+    let observation = super::project_startup::Observation::read(root)?;
+    if observation.choice().map_err(str::to_owned)?.is_some() {
+        return observation.with_source(|selected| {
+            let (path, session) = selected.expect("observed configured startup");
+            Ok(OpenedScene::Components(
+                path.to_path_buf(),
+                Box::new(session),
+            ))
+        });
+    }
+    OpenedScene::open(fallback)
+        .map_err(|error| format!("Couldn't open {}. {error}", fallback.display()))
 }
 
 fn create_project(location: &Path, name: &str, template: Template) -> Result<OpenedScene, String> {

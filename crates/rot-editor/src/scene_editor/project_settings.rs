@@ -92,20 +92,26 @@ impl SceneEditor {
 }
 
 pub(super) fn project_page(ui: &mut egui::Ui, path: Option<&Path>) {
-    let folder = path
-        .as_ref()
-        .and_then(|p| p.parent())
-        .map(Path::to_path_buf);
-    let name = folder
-        .as_ref()
-        .and_then(|f| f.file_name())
-        .map_or_else(|| "Untitled".into(), |n| n.to_string_lossy().into_owned());
-    let location = folder
-        .as_ref()
-        .map_or_else(|| "Not saved yet".into(), |f| f.display().to_string());
-    let startup = path.as_ref().and_then(|p| p.file_name()).map_or_else(
+    project_identity(ui, path);
+    let startup = path.and_then(Path::file_name).map_or_else(
         || "Not saved yet".into(),
-        |n| n.to_string_lossy().into_owned(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    crate::ui_kit::property_row(ui, Text::StartupScene.plain(), |ui| {
+        ui.label(startup)
+            .on_hover_text(Text::StartupSceneHint.plain());
+    });
+}
+
+pub(super) fn project_identity(ui: &mut egui::Ui, path: Option<&Path>) {
+    let folder = path.and_then(Path::parent);
+    let name = folder.and_then(Path::file_name).map_or_else(
+        || "Untitled".into(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let location = folder.map_or_else(
+        || "Not saved yet".into(),
+        |folder| folder.display().to_string(),
     );
     crate::ui_kit::property_row(ui, Text::ComponentName.plain(), |ui| {
         ui.label(name)
@@ -114,10 +120,6 @@ pub(super) fn project_page(ui: &mut egui::Ui, path: Option<&Path>) {
     crate::ui_kit::property_row(ui, Text::Location.plain(), |ui| {
         ui.add(egui::Label::new(&location).truncate())
             .on_hover_text(&location);
-    });
-    crate::ui_kit::property_row(ui, Text::StartupScene.plain(), |ui| {
-        ui.label(startup)
-            .on_hover_text(Text::StartupSceneHint.plain());
     });
 }
 

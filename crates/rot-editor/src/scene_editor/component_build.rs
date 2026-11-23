@@ -418,6 +418,7 @@ enum BuildOutcome {
 #[derive(Default)]
 pub(super) struct BuildUi {
     path: Option<String>,
+    startup: Option<Result<super::project_startup::Observation, String>>,
     focus: bool,
     worker: Option<BuildWorker>,
     outcome: Option<BuildOutcome>,
@@ -439,6 +440,14 @@ impl Drop for BuildWorker {
 
 impl BuildUi {
     pub(super) fn open(&mut self, path: &Path, id: &str) {
+        let root = super::component_workspace::project_directory(path);
+        self.startup = Some(super::project_startup::Observation::validated(root));
+        let id = self
+            .startup
+            .as_ref()
+            .and_then(|startup| startup.as_ref().ok())
+            .and_then(|startup| startup.choice().ok().flatten())
+            .map_or(id, |(_, id)| id);
         let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         self.path = Some(
             path.parent()
@@ -602,10 +611,34 @@ impl BuildUi {
                 if std::mem::take(&mut self.focus) {
                     edit.request_focus();
                 }
-                let saved = !draft_dirty && !session.is_dirty();
-                if !saved {
-                    ui.label(Text::ComponentSaveBeforeBuild.plain());
-                }
+                let selection = self
+                    .startup
+                    .as_ref()
+                    .expect("opened Build")
+                    .as_ref()
+                    .map_err(String::as_str)
+                    .and_then(super::project_startup::Observation::choice);
+                let saved = match selection {
+                    Ok(Some((file, _))) => {
+                        ui.label(format!("{}  {file}", Text::StartupScene.plain()));
+                        true
+                    }
+                    Ok(None) => {
+                        let saved = !draft_dirty && !session.is_dirty();
+                        if !saved {
+                            ui.label(Text::ComponentSaveBeforeBuild.plain());
+                        }
+                        saved
+                    }
+                    Err(reason) => {
+                        ui.colored_label(
+                            editor_theme::colors(ui).error,
+                            Text::StartupInvalid.plain(),
+                        )
+                        .on_hover_text(reason);
+                        false
+                    }
+                };
                 let enter = (edit.has_focus() || edit.lost_focus())
                     && ui.input_mut(|input| {
                         input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
@@ -668,7 +701,7 @@ impl BuildUi {
             self.show_failure = false;
             self.outcome = None;
             let path = self.path.as_deref().expect("open build dialog").trim();
-            match Self::start(ctx, session, assets, PathBuf::from(path), run) {
+            match self.start(ctx, session, assets, PathBuf::from(path), run) {
                 Ok(worker) => {
                     self.worker = Some(worker);
                     self.focus = true;
@@ -710,13 +743,28 @@ impl BuildUi {
     }
 
     fn start(
+        &self,
         ctx: &egui::Context,
         session: &ComponentSession,
         assets: Option<&AssetStore>,
         destination: PathBuf,
         run: bool,
     ) -> Result<BuildWorker, BuildFailure> {
-        let request = BuildRequest::capture(session, assets)?;
+        let observation = self
+            .startup
+            .as_ref()
+            .expect("opened Build")
+            .as_ref()
+            .map_err(|error| BuildFailureKind::SceneUnavailable.detail(error))?;
+        // Keep typed build asset failures distinct from settings conflicts.
+        let request = observation
+            .with_source(|selected| {
+                Ok(match selected {
+                    Some((_, startup)) => BuildRequest::capture(&startup, assets),
+                    None => BuildRequest::capture(session, assets),
+                })
+            })
+            .map_err(|error| BuildFailureKind::SceneUnavailable.detail(error))??;
         let executable = std::env::current_exe()
             .map_err(|error| BuildFailureKind::PlayerUnavailable.detail(error))?;
         let player = executable

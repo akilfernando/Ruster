@@ -229,6 +229,7 @@ pub(super) struct ComponentWorkspace {
     workspace: Workspace,
     palette: Option<palette::Palette>,
     project_settings: Option<ProjectPage>,
+    startup_settings: Option<Result<super::project_startup::Observation, String>>,
     input_actions: crate::input_ui::InputUi,
     meshes: rot_app::MeshMap,
     textures: rot_app::TextureMap,
@@ -271,7 +272,7 @@ pub(super) struct ComponentWorkspace {
     pub(super) revoke_ai_connection: bool,
 }
 
-fn project_directory(scene_path: &std::path::Path) -> &std::path::Path {
+pub(super) fn project_directory(scene_path: &std::path::Path) -> &std::path::Path {
     scene_path
         .parent()
         .filter(|path| !path.as_os_str().is_empty())
@@ -316,6 +317,7 @@ impl ComponentWorkspace {
             view_flags: Vec::new(),
             palette: None,
             project_settings: None,
+            startup_settings: None,
             input_actions: Default::default(),
             session,
             path,
@@ -1861,6 +1863,75 @@ impl ComponentWorkspace {
             && !self.draft_dirty()
     }
 
+    fn show_startup_settings(&mut self, ui: &mut egui::Ui) {
+        use super::project_startup::Observation;
+        project_settings::project_identity(ui, Some(&self.path));
+        let can_set = !self.authored_edit_pending()
+            && !self.session.is_dirty()
+            && !self.runtime.in_play_mode()
+            && !self.ai_transition_pending();
+        let observation = self
+            .startup_settings
+            .get_or_insert_with(|| Observation::validated(project_directory(&self.path)));
+        let selection = observation
+            .as_ref()
+            .map_err(String::as_str)
+            .and_then(Observation::choice);
+        crate::ui_kit::property_row(ui, Text::StartupScene.plain(), |ui| match selection {
+            Ok(Some((file, _))) => {
+                ui.add(egui::Label::new(file).truncate())
+                    .on_hover_text(file);
+            }
+            Ok(None) => {
+                ui.label(Text::StartupDefault.plain());
+            }
+            Err(reason) => {
+                ui.colored_label(editor_theme::colors(ui).error, Text::StartupInvalid.plain())
+                    .on_hover_text(reason);
+            }
+        });
+        ui.weak(Text::StartupBehaviorHint.plain());
+        let mut choose = false;
+        let mut reset = false;
+        ui.horizontal_wrapped(|ui| {
+            choose = ui
+                .add_enabled(
+                    can_set && observation.is_ok(),
+                    egui::Button::new(Text::StartupUseSaved.plain()),
+                )
+                .on_disabled_hover_text(Text::StartupSaveFirst.plain())
+                .clicked();
+            reset = ui
+                .add_enabled(
+                    !self.runtime.in_play_mode()
+                        && observation.as_ref().is_ok_and(Observation::exists),
+                    egui::Button::new(Text::StartupReset.plain()),
+                )
+                .clicked();
+        });
+        if let Some(error) = &self.error {
+            ui.colored_label(editor_theme::colors(ui).error, error);
+        }
+        if let Ok(observation) = observation {
+            let result = if choose {
+                Some(observation.use_saved(&self.path, &self.session))
+            } else if reset {
+                Some(observation.reset())
+            } else {
+                None
+            };
+            match result {
+                Some(Ok(())) => {
+                    self.startup_settings =
+                        Some(Observation::validated(project_directory(&self.path)));
+                    self.error = None;
+                }
+                Some(Err(error)) => self.error = Some(error),
+                None => {}
+            }
+        }
+    }
+
     fn show_project_settings(&mut self, ctx: &egui::Context) {
         let Some(mut page) = self.project_settings else {
             return;
@@ -1873,6 +1944,7 @@ impl ComponentWorkspace {
             && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
             self.project_settings = None;
+            self.startup_settings = None;
             return;
         }
         let editable = self.input_action_editable();
@@ -1886,7 +1958,7 @@ impl ComponentWorkspace {
             &mut open,
             pending,
             |ui, page| match page {
-                ProjectPage::Project => project_settings::project_page(ui, Some(&self.path)),
+                ProjectPage::Project => self.show_startup_settings(ui),
                 ProjectPage::InputActions => {
                     if !editable {
                         ui.weak(Text::InputActionsStopPlay.plain());
@@ -1929,6 +2001,9 @@ impl ComponentWorkspace {
             self.error = Some(Text::InputActionsCloseDraft.plain().into());
         }
         self.project_settings = (open || self.input_actions.pending()).then_some(page);
+        if self.project_settings != Some(ProjectPage::Project) {
+            self.startup_settings = None;
+        }
         #[cfg(target_os = "linux")]
         if build {
             self.project_settings = None;
