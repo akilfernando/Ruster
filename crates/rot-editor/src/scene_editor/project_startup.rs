@@ -316,6 +316,7 @@ pub(crate) struct Observation {
     directory: File,
     settings: Option<ObservedFile>,
     target: Result<Option<(Startup, Stamp)>, String>,
+    startup_locator: Option<Startup>,
     validation_error: Option<String>,
     transition: Option<(StartupTransition, Result<Stamp, String>)>,
     transition_error: Option<String>,
@@ -410,6 +411,7 @@ impl Observation {
             directory: parent,
             settings: None,
             target: Ok(None),
+            startup_locator: None,
             validation_error: None,
             transition: None,
             transition_error: None,
@@ -420,6 +422,7 @@ impl Observation {
             match serde_json::from_slice::<Settings>(&file.bytes) {
                 Ok(settings) => {
                     let startup = settings.startup_scene;
+                    observed.startup_locator = Some(startup.clone());
                     observed.target = (|| {
                         validate_filename(&startup.file)?;
                         rot_scene::validate_id(&startup.scene_id).map_err(error)?;
@@ -629,7 +632,7 @@ impl Observation {
         active: &Path,
         scene: &ComponentScene,
     ) -> Option<(String, String, Result<TransitionInput, String>)> {
-        let (startup, _) = self.target.as_ref().ok()?.as_ref()?;
+        let startup = self.startup_locator.as_ref()?;
         let (transition, _) = self.transition.as_ref()?;
         if active.file_name().and_then(|name| name.to_str()) != Some(&startup.file)
             || scene.id != startup.scene_id
@@ -1014,7 +1017,7 @@ pub(super) fn context(
             result["transition"] = json!({
                 "status":if reason.is_some() {"invalid"} else {"configured"},
                 "action_id":transition.action_id,
-                "source":result["startup_scene"],
+                "source":observed.startup_locator,
                 "target":transition.target_scene,
                 "reason":reason.map(|message|message.chars().take(240).collect::<String>()),
             });
@@ -1078,6 +1081,15 @@ mod tests {
         fs::remove_file(&target_path).unwrap();
         symlink(&source_path, &target_path).unwrap();
         assert!(configured.load_transition(source.scene()).is_err());
+        fs::remove_file(&source_path).unwrap();
+        let (_, file, result) = project
+            .observe()
+            .unwrap()
+            .active_transition(&source_path, source.scene())
+            .unwrap();
+        assert_eq!(file, "Rail.scene.json");
+        assert!(result.is_err());
+        source.scene().save_new(&source_path).unwrap();
         project.validated().unwrap().clear_transition().unwrap();
         let cleared = project.validated().unwrap();
         assert_eq!(cleared.choice(), Ok(Some(("Title.scene.json", "title"))));
