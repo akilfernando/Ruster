@@ -421,12 +421,7 @@ mod tests {
         }
 
         let diagnostic_source = provenance.values().next().unwrap();
-        std::fs::rename(
-            root.join("Assets/drive.lua"),
-            root.join("Assets/drive renamed.lua"),
-        )
-        .unwrap();
-        assets.import("drive", "Assets/drive renamed.lua").unwrap();
+        assets.rename("drive", "Assets/drive renamed.lua").unwrap();
         let renamed = diagnostic_source.observe(Some(&assets));
         assert_eq!(renamed.current_source, Some("Assets/drive renamed.lua"));
         assert!(renamed.status == SourceStatus::Ready);
@@ -435,7 +430,7 @@ mod tests {
             "return { other = true }",
         )
         .unwrap();
-        assets.import("drive", "Assets/drive renamed.lua").unwrap();
+        assets.refresh("drive").unwrap();
         assert!(diagnostic_source.observe(Some(&assets)).status == SourceStatus::Changed);
         assert!(diagnostic_source.observe(None).status == SourceStatus::Unavailable);
     }
