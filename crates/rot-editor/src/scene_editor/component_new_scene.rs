@@ -135,11 +135,12 @@ impl ComponentWorkspace {
                         (ui.button(Text::ComponentCancel.plain()).clicked(), create)
                     })
                     .inner;
-                if path.is_err() && !draft.name.trim().is_empty() && draft.error.is_none() {
-                    ui.colored_label(
-                        editor_theme::colors(ui).error,
-                        path.as_ref().unwrap_err().to_string(),
-                    );
+                let name_error = path
+                    .as_ref()
+                    .err()
+                    .filter(|_| !draft.name.trim().is_empty() && draft.error.is_none());
+                if let Some(error) = name_error {
+                    ui.colored_label(editor_theme::colors(ui).error, *error);
                 }
                 (
                     cancel,
