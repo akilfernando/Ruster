@@ -70,6 +70,13 @@ Actions in Project Settings and approved MCP share Button and 1D Axis
 bindings and Undo. File-backed Object Lua reads the map captured for that
 run. Focus loss releases held keys. A cube moved and turned on named
 actions through editor Play, guarded Steps and a relocated Linux build.
+File-backed Object Lua offers Kinematic Sphere movement for one mover in a
+flat scene with stationary blockers. Native Rot and Plain and approved Claude
+verified wall sliding and corner stops. Editor and relocated Linux playback
+matched committed poses and contact IDs. Another binding kept Ordinary
+movement while using the same file. With 128 stationary blockers, warmed
+release Step p95 was 29 µs ordinary, 299 µs in free travel and 273 µs in
+sustained wall contact. Paused screenshots kept the committed tick and poses.
 File-backed Object Lua can bind imported WAVs as named Sound Cues in the
 Inspector and through approved MCP. Two Script components sharing a Lua
 file kept separate WAVs and gain. Editor capture verified silence after a
