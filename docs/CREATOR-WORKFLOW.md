@@ -91,13 +91,23 @@ saved scene by filename and update or reset the setting. If another editor
 changes the setting while a dialog is open, close and reopen the dialog
 before retrying.
 
+## Open a project scene
+
+Choose **File → Open Scene…**, press **Ctrl+O**, or run **Open Scene** from the
+command palette. **Project Scenes** lists saved scenes in the current project
+folder and marks the open scene, startup scene and Start destination. Search
+by name, use the arrow keys and Enter, or double-click a row. **Browse…**
+opens a scene by its explicit path, including one outside the project.
+Refresh the list after changing files outside the editor. Unsaved work still
+offers **Save and Open**, **Discard and Open**, and **Cancel**.
+
 ## Enter another scene from the startup screen
 
 Save the startup scene and its destination in the project folder. Create a
 named **Button** Input Action in the startup scene and bind a key such as
 Enter. In **Edit → Project Settings… → Project**, find **Start Transition**.
-Choose the **Start Button**, enter the destination's saved filename, and
-choose **Set Transition**. **Clear Transition** keeps the startup scene and
+Choose the **Start Button**, use **Choose Scene…** to select the saved
+destination, and choose **Set Transition**. **Clear Transition** keeps the startup scene and
 removes the route.
 
 In Play, open the startup scene and claim the Game view's controls. Press

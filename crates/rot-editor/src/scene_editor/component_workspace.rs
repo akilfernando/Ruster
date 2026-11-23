@@ -1,5 +1,8 @@
 //! The editor owns v23 scenes through ComponentSession. The viewport receives
 //! a disposable projection and cannot change the authored document.
+use super::project_scenes::{
+    Outcome as SceneChoice, Picker as ScenesPicker, Purpose as ScenePickerPurpose,
+};
 use super::{
     component_inspector, component_live,
     component_multi::MultiInspector,
@@ -235,7 +238,8 @@ pub(super) struct ComponentWorkspace {
     project_settings: Option<ProjectPage>,
     startup_settings: Option<Result<super::project_startup::Observation, String>>,
     start_action_choice: String,
-    start_target_file: String,
+    start_target: Option<(super::project_startup::ScenePin, String)>,
+    scene_picker: Option<ScenesPicker>,
     startup_project: Result<super::project_startup::ProjectDirectory, String>,
     #[cfg(unix)]
     startup_context_cache: std::cell::RefCell<Option<super::project_startup::Observation>>,
@@ -365,7 +369,8 @@ impl ComponentWorkspace {
             project_settings: None,
             startup_settings: None,
             start_action_choice: String::new(),
-            start_target_file: String::new(),
+            start_target: None,
+            scene_picker: None,
             startup_project,
             #[cfg(unix)]
             startup_context_cache: Default::default(),
@@ -638,6 +643,7 @@ impl ComponentWorkspace {
         self.close_pending
             || self.close_approved
             || self.open_path.is_some()
+            || self.scene_picker.is_some()
             || self.new_scene.is_some()
             || self.asset_browser.file_dialog_open()
     }
@@ -658,6 +664,10 @@ impl ComponentWorkspace {
 
     pub(super) fn take_workspace(&mut self) -> Workspace {
         std::mem::replace(&mut self.workspace, Workspace::detached())
+    }
+
+    pub(super) fn report_scene_open_error(&mut self, error: String) {
+        self.error = Some(error);
     }
 
     fn open_document(&mut self, path: &std::path::Path, save: bool) -> Option<OpenedScene> {
@@ -1446,7 +1456,11 @@ impl ComponentWorkspace {
                 {
                     self.revoke_ai_connection = true;
                 }
-                self.open_path = Some(String::new());
+                self.scene_picker = Some(ScenesPicker::new(
+                    ScenePickerPurpose::Open,
+                    self.startup_project.clone(),
+                    &self.path,
+                ));
                 self.open_focused = false;
                 self.error = None;
                 return;
@@ -1993,7 +2007,10 @@ impl ComponentWorkspace {
                 .ok()
                 .and_then(Observation::transition_value);
             self.start_action_choice = route.map_or_else(String::new, |(id, _, _)| id.to_owned());
-            self.start_target_file = route.map_or_else(String::new, |(_, file, _)| file.to_owned());
+            self.start_target = observed
+                .as_ref()
+                .ok()
+                .and_then(Observation::pinned_destination);
             self.startup_settings = Some(observed);
         }
         let observation = self
@@ -2037,6 +2054,7 @@ impl ComponentWorkspace {
                 .clicked();
         });
         let mut set_transition = false;
+        let mut choose_destination = false;
         let mut clear_transition = false;
         if let Ok(observation) = observation {
             if selection.is_ok_and(|choice| choice.is_some()) || observation.has_transition() {
@@ -2077,21 +2095,22 @@ impl ComponentWorkspace {
                 } else {
                     ui.weak(Text::StartupNoButtons.plain());
                 }
-                let target = crate::ui_kit::property_row_with_label(
+                crate::ui_kit::property_row_with_label(
                     ui,
                     Text::StartupDestination.plain(),
                     |ui, label| {
-                        ui.add_enabled(
-                            ready,
-                            egui::TextEdit::singleline(&mut self.start_target_file)
-                                .char_limit(255)
-                                .hint_text("Scene Name.scene.json"),
-                        )
-                        .labelled_by(label)
+                        if let Some((pin, _)) = &self.start_target {
+                            ui.add(egui::Label::new(pin.filename()).truncate())
+                                .on_hover_text(pin.filename());
+                        }
+                        choose_destination = ui
+                            .add_enabled(ready, egui::Button::new("Choose Scene…"))
+                            .labelled_by(label)
+                            .clicked();
                     },
                 );
                 let can_set = ready
-                    && !self.start_target_file.trim().is_empty()
+                    && self.start_target.is_some()
                     && buttons
                         .iter()
                         .any(|(id, _)| id == &self.start_action_choice);
@@ -2101,12 +2120,7 @@ impl ComponentWorkspace {
                             can_set,
                             egui::Button::new(Text::StartupSetTransition.plain()),
                         )
-                        .clicked()
-                        || can_set
-                            && (target.has_focus() || target.lost_focus())
-                            && ui.input_mut(|input| {
-                                input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
-                            });
+                        .clicked();
                     clear_transition = ui
                         .add_enabled(
                             ready && observation.has_transition(),
@@ -2125,10 +2139,9 @@ impl ComponentWorkspace {
             } else if reset {
                 Some(observation.reset())
             } else if set_transition {
-                Some(
-                    observation
-                        .set_transition(&self.start_action_choice, self.start_target_file.trim()),
-                )
+                self.start_target.as_ref().map(|(pin, id)| {
+                    observation.set_picked_transition(&self.start_action_choice, pin, id)
+                })
             } else if clear_transition {
                 Some(observation.clear_transition())
             } else {
@@ -2143,6 +2156,13 @@ impl ComponentWorkspace {
                 None => {}
             }
         }
+        if choose_destination {
+            self.scene_picker = Some(ScenesPicker::new(
+                ScenePickerPurpose::Destination,
+                self.startup_project.clone(),
+                &self.path,
+            ));
+        }
     }
 
     fn show_project_settings(&mut self, ctx: &egui::Context) {
@@ -2152,6 +2172,7 @@ impl ComponentWorkspace {
         self.runtime.release_input(ctx);
         let pending = self.input_actions.pending();
         if !pending
+            && self.scene_picker.is_none()
             && !self.input_actions.capturing()
             && !egui::Popup::is_any_open(ctx)
             && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
@@ -2257,11 +2278,13 @@ impl ComponentWorkspace {
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.open_path = None;
+            self.scene_picker = None;
             self.close_pending = true;
         }
         self.poll_runtime(&ctx);
         let blocked = self.close_pending
             || self.open_path.is_some()
+            || self.scene_picker.is_some()
             || self.new_scene.is_some()
             || build_open
             || publishing
@@ -2864,6 +2887,7 @@ impl ComponentWorkspace {
                     && !asset_dialog
                     && !self.close_pending
                     && self.open_path.is_none()
+                    && self.scene_picker.is_none()
                     && self.new_scene.is_none()
                     && !self.surface_edit_pending()
                     && self.project_settings.is_none()
@@ -2904,6 +2928,42 @@ impl ComponentWorkspace {
         self.show_spot_aim(&ctx);
         if let Some(document) = self.show_new_scene(&ctx) {
             return Some(document);
+        }
+        if let Some(mut picker) = self.scene_picker.take() {
+            let dirty = self.session.is_dirty() || self.draft_dirty();
+            match picker.show(&ctx, dirty) {
+                Some(SceneChoice::Browse) => {
+                    self.open_path = Some(String::new());
+                    self.open_focused = false;
+                    self.error = None;
+                }
+                Some(SceneChoice::Choose(pin, scene_id)) => {
+                    self.start_target = Some((pin, scene_id));
+                    self.error = None;
+                }
+                Some(SceneChoice::Cancel) => {}
+                Some(SceneChoice::Open(pin, document, save)) => match pin.verify() {
+                    Ok(path) => {
+                        if !save || self.save() {
+                            if !save || path != self.path {
+                                #[cfg(unix)]
+                                self.finish_capture_frame(&ctx, None);
+                                return Some(OpenedScene::Picked(pin, document));
+                            }
+                        } else if let Some(error) = &self.error {
+                            picker.problem(error.clone());
+                            self.scene_picker = Some(picker);
+                        }
+                    }
+                    Err(error) => {
+                        picker.problem(error);
+                        self.scene_picker = Some(picker);
+                    }
+                },
+                None => {
+                    self.scene_picker = Some(picker);
+                }
+            }
         }
         if let Some(mut path) = self.open_path.take() {
             let mut cancel = false;

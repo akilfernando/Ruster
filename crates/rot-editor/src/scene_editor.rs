@@ -53,6 +53,7 @@ mod preview_probe;
 #[cfg(target_os = "linux")]
 mod project_assets;
 mod project_picker;
+mod project_scenes;
 mod project_settings;
 pub(crate) mod project_startup;
 mod recovered_input_ui;
@@ -432,10 +433,15 @@ impl ContentSearch {
 }
 
 static GENERATION: AtomicU64 = AtomicU64::new(1);
+enum ReplacementTarget {
+    Prepared(Box<SceneEditor>),
+    Picked(project_startup::ScenePin, Box<OpenedScene>),
+}
+
 enum RecoveryTransition {
     Replace {
         request: u64,
-        next: Box<SceneEditor>,
+        target: ReplacementTarget,
         clipboard: bool,
         shader: bool,
     },
@@ -448,6 +454,7 @@ enum RecoveryTransition {
 enum OpenedScene {
     Legacy(Box<Session>),
     Components(PathBuf, Box<rot_scene::component_scene::ComponentSession>),
+    Picked(project_startup::ScenePin, Box<OpenedScene>),
 }
 
 impl OpenedScene {
@@ -1780,6 +1787,21 @@ impl SceneEditor {
         clipboard: bool,
         shader: bool,
     ) {
+        self.queue_replacement(
+            ReplacementTarget::Prepared(Box::new(next)),
+            adopt,
+            clipboard,
+            shader,
+        );
+    }
+
+    fn queue_replacement(
+        &mut self,
+        target: ReplacementTarget,
+        adopt: Option<crate::recovery::Journal>,
+        clipboard: bool,
+        shader: bool,
+    ) {
         self.revoke_connection();
         self.creation_export.scene_replaced();
         self.play_checks.scene_replaced();
@@ -1796,7 +1818,7 @@ impl SceneEditor {
         };
         self.recovery_transition = Some(RecoveryTransition::Replace {
             request,
-            next: Box::new(next),
+            target,
             clipboard,
             shader,
         });
@@ -1822,10 +1844,32 @@ impl SceneEditor {
         match transition {
             RecoveryTransition::Replace {
                 request,
-                mut next,
+                target,
                 clipboard,
                 shader,
             } if request == id => {
+                let mut next = match target {
+                    ReplacementTarget::Prepared(next) => next,
+                    ReplacementTarget::Picked(pin, document) => {
+                        let result = pin.verify().and_then(|_| self.prepare_document(*document));
+                        match result {
+                            Ok(next) => Box::new(next),
+                            Err(error) => {
+                                self.recovery.reschedule();
+                                if let Some(component) = &mut self.component {
+                                    component.adopt_workspace(std::mem::replace(
+                                        &mut self.workspace,
+                                        Workspace::detached(),
+                                    ));
+                                    component.report_scene_open_error(error);
+                                } else {
+                                    self.error = error;
+                                }
+                                return;
+                            }
+                        }
+                    }
+                };
                 // Destination grants are revoked at initiation, never inherited.
                 // Old publications/adoption have drained before this boundary.
                 next.connection_incarnation = self.connection_incarnation.clone();
@@ -4587,24 +4631,21 @@ impl SceneEditor {
             self.close_approved = true;
         }
     }
-    fn open_document(&mut self, document: OpenedScene) {
+    fn prepare_document(&mut self, document: OpenedScene) -> Result<Self, String> {
+        let render = self.render.clone();
+        if self.shader_revision > 0 {
+            if let Some(render) = &render {
+                rot_render::refresh_shader(render, rot_render::default_shader())?;
+            }
+        }
         match document {
             OpenedScene::Legacy(session) => {
                 self.component = None;
-                self.open_saved_session(*session);
+                let mut next = Self::with_workspace(*session, Workspace::detached());
+                next.render = render;
+                Ok(next)
             }
             OpenedScene::Components(path, session) => {
-                let render = self.render.clone();
-                if self.shader_revision > 0 {
-                    if let Some(render) = &render {
-                        if let Err(error) =
-                            rot_render::refresh_shader(render, rot_render::default_shader())
-                        {
-                            self.error = error;
-                            return;
-                        }
-                    }
-                }
                 let empty = Session::new(Scene::authored_empty("untitled"))
                     .expect("empty placeholder scene");
                 let mut next = Self::with_workspace(empty, Workspace::detached());
@@ -4617,25 +4658,28 @@ impl SceneEditor {
                         previous.as_deref_mut(),
                     ),
                 ));
-                self.begin_replacement(next, None, false, false);
+                Ok(next)
             }
+            OpenedScene::Picked(..) => unreachable!("picked scenes unwrap at handoff"),
         }
     }
 
-    fn open_saved_session(&mut self, session: Session) {
-        let render = self.render.clone();
-        if self.shader_revision > 0 {
-            if let Some(render) = &render {
-                if let Err(error) = rot_render::refresh_shader(render, rot_render::default_shader())
-                {
-                    self.error = error;
-                    return;
-                }
-            }
+    fn open_document(&mut self, document: OpenedScene) {
+        if let OpenedScene::Picked(pin, document) = document {
+            let clipboard = matches!(*document, OpenedScene::Legacy(_));
+            self.queue_replacement(
+                ReplacementTarget::Picked(pin, document),
+                None,
+                clipboard,
+                false,
+            );
+            return;
         }
-        let mut next = Self::with_workspace(session, Workspace::detached());
-        next.render = render;
-        self.begin_replacement(next, None, true, false);
+        let clipboard = matches!(document, OpenedScene::Legacy(_));
+        match self.prepare_document(document) {
+            Ok(next) => self.begin_replacement(next, None, clipboard, false),
+            Err(error) => self.error = error,
+        }
     }
 
     fn request_new(&mut self) {
@@ -5994,6 +6038,7 @@ pub fn run(path: PathBuf) -> Result<(), String> {
                 .map_err(|error| error.to_string())?;
             run_session(empty, false, Some((path, session)))
         }
+        OpenedScene::Picked(..) => unreachable!("an explicit path does not use Project Scenes"),
     }
 }
 

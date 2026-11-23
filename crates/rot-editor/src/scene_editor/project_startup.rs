@@ -100,6 +100,67 @@ pub(crate) struct ProjectDirectory {
     identity: Identity,
 }
 
+pub(super) struct SceneRow {
+    pub filename: String,
+    pub markers: &'static str,
+    stamp: Stamp,
+}
+
+pub(super) struct ScenePin {
+    project: ProjectDirectory,
+    filename: String,
+    stamp: Stamp,
+}
+
+impl ScenePin {
+    pub fn filename(&self) -> &str {
+        &self.filename
+    }
+
+    pub fn verify(&self) -> Result<PathBuf, String> {
+        let observed = self.project.observe()?;
+        self.verify_in(&observed)
+    }
+
+    fn verify_in(&self, observed: &Observation) -> Result<PathBuf, String> {
+        if observed.root != self.project.root
+            || observed.identity != self.project.identity
+            || observed.child_stamp(&self.filename).as_ref() != Ok(&self.stamp)
+        {
+            return Err(format!(
+                "{} changed. Refresh Project Scenes and choose it again.",
+                self.filename
+            ));
+        }
+        observed.verify_root()?;
+        Ok(observed.root.join(&self.filename))
+    }
+
+    pub fn load(&self, destination: bool) -> Result<super::OpenedScene, String> {
+        let observed = self.project.observe()?;
+        let path = self.verify_in(&observed)?;
+        let file = observed.open_regular(&self.filename).map_err(error)?;
+        if stamp(&file)? != self.stamp {
+            return Err(CHANGED.into());
+        }
+        let document = match ComponentSession::from_open_file(&path, file) {
+            Ok(session) => super::OpenedScene::Components(path.clone(), Box::new(session)),
+            Err(rot_scene::SceneError::UnsupportedVersion(version))
+                if !destination
+                    && version < u64::from(rot_scene::component_scene::FORMAT_VERSION) =>
+            {
+                rot_scene::Session::open(&path)
+                    .map(Box::new)
+                    .map(super::OpenedScene::Legacy)
+                    .map_err(error)?
+            }
+            Err(failure) => return Err(format!("Couldn't open {}. {failure}", self.filename)),
+        };
+        self.verify_in(&observed)?;
+        Ok(document)
+    }
+}
+
 impl ProjectDirectory {
     pub(super) fn capture(root: &Path) -> Result<Self, String> {
         let (root, identity) = directory(root)?;
@@ -176,6 +237,77 @@ impl ProjectDirectory {
             stamp,
             staged,
         })
+    }
+
+    pub(super) fn scene_rows(
+        &self,
+        active: &str,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<Vec<SceneRow>, String> {
+        const MAX_ENTRIES: usize = 32_768;
+        const MAX_SCENES: usize = 4_096;
+        use std::sync::atomic::Ordering::Relaxed;
+        let observed = self.observe()?;
+        let startup = observed
+            .startup_locator
+            .as_ref()
+            .map(|startup| startup.file.as_str());
+        let destination = observed.transition_value().map(|(_, target, _)| target);
+        let mut rows = Vec::new();
+        for (index, entry) in std::fs::read_dir(&self.root).map_err(error)?.enumerate() {
+            if cancelled.load(Relaxed) {
+                return Ok(Vec::new());
+            }
+            if index == MAX_ENTRIES || rows.len() == MAX_SCENES {
+                return Err(
+                    "This project folder has too many entries to list. Use Browse to open a scene."
+                        .into(),
+                );
+            }
+            let entry = entry.map_err(error)?;
+            let Ok(filename) = entry.file_name().into_string() else {
+                continue;
+            };
+            if validate_filename(&filename).is_err() {
+                continue;
+            }
+            let startup = startup == Some(filename.as_str());
+            let destination = destination == Some(filename.as_str());
+            let active = active == filename;
+            if !startup && !active && !destination {
+                let folded = filename.to_ascii_lowercase();
+                if folded != "scene.json" && !folded.ends_with(".scene.json") {
+                    continue;
+                }
+            }
+            let Ok(stamp) = observed.child_stamp(&filename) else {
+                continue;
+            };
+            let markers = match (active, startup, destination) {
+                (true, true, _) => "Open · Startup",
+                (true, _, true) => "Open · Start destination",
+                (true, _, _) => "Open",
+                (_, true, _) => "Startup",
+                (_, _, true) => "Start destination",
+                _ => "",
+            };
+            rows.push(SceneRow {
+                filename,
+                markers,
+                stamp,
+            });
+        }
+        observed.verify_root()?;
+        rows.sort_by_cached_key(|row| (row.filename.to_lowercase(), row.filename.clone()));
+        Ok(rows)
+    }
+
+    pub(super) fn pin_scene(&self, row: &SceneRow) -> ScenePin {
+        ScenePin {
+            project: self.clone(),
+            filename: row.filename.clone(),
+            stamp: row.stamp.clone(),
+        }
     }
 
     pub(crate) fn observe(&self) -> Result<Observation, String> {
@@ -673,6 +805,24 @@ impl Observation {
         ))
     }
 
+    pub(super) fn pinned_destination(&self) -> Option<(ScenePin, String)> {
+        let (route, stamp) = self.transition.as_ref()?;
+        if self.validation_error.is_some() || self.transition_error.is_some() {
+            return None;
+        }
+        Some((
+            ScenePin {
+                project: ProjectDirectory {
+                    root: self.root.clone(),
+                    identity: self.identity.clone(),
+                },
+                filename: route.target_scene.file.clone(),
+                stamp: stamp.as_ref().ok()?.clone(),
+            },
+            route.target_scene.scene_id.clone(),
+        ))
+    }
+
     pub(super) fn buttons(&self) -> &[(String, String)] {
         &self.buttons
     }
@@ -706,6 +856,7 @@ impl Observation {
         }))
     }
 
+    #[cfg(test)]
     pub(super) fn set_transition(&self, action_id: &str, filename: &str) -> Result<(), String> {
         validate_filename(filename)?;
         let (startup, startup_stamp) = self
@@ -726,12 +877,46 @@ impl Observation {
             return Err(CHANGED.into());
         }
         let session = ComponentSession::from_open_file(&path, target).map_err(error)?;
-        if session.scene().id == startup.scene_id {
-            return Err("Choose a different saved scene ID for the Start Transition.".into());
+        self.publish_transition(
+            action_id,
+            filename,
+            session.scene().id.as_str(),
+            &target_stamp,
+        )
+    }
+
+    pub(super) fn set_picked_transition(
+        &self,
+        action_id: &str,
+        pin: &ScenePin,
+        scene_id: &str,
+    ) -> Result<(), String> {
+        pin.verify_in(self)?;
+        if !self.buttons.iter().any(|(id, _)| id == action_id) {
+            return Err("Choose a named Start Button from the saved Startup Scene.".into());
+        }
+        self.publish_transition(action_id, pin.filename(), scene_id, &pin.stamp)
+    }
+
+    fn publish_transition(
+        &self,
+        action_id: &str,
+        filename: &str,
+        scene_id: &str,
+        target_stamp: &Stamp,
+    ) -> Result<(), String> {
+        let (startup, startup_stamp) = self
+            .target
+            .as_ref()
+            .map_err(Clone::clone)?
+            .as_ref()
+            .ok_or("Choose a saved Startup Scene first.")?;
+        if filename == startup.file || scene_id == startup.scene_id {
+            return Err("Choose a different saved scene for the Start Transition.".into());
         }
         let target = Startup {
             file: filename.into(),
-            scene_id: session.scene().id.clone(),
+            scene_id: scene_id.into(),
         };
         let transition = StartupTransition {
             action_id: action_id.into(),
@@ -744,7 +929,7 @@ impl Observation {
         .map_err(error)?;
         self.with_lock(|| {
             self.verify_target(startup, startup_stamp)?;
-            self.verify_target(&target, &target_stamp)?;
+            self.verify_target(&target, target_stamp)?;
             if self
                 .transition
                 .as_ref()
@@ -755,7 +940,7 @@ impl Observation {
             self.publish(&bytes, || {
                 self.verify_settings()?;
                 self.verify_target(startup, startup_stamp)?;
-                self.verify_target(&target, &target_stamp)?;
+                self.verify_target(&target, target_stamp)?;
                 Ok(())
             })
         })
@@ -1049,6 +1234,46 @@ mod tests {
     }
 
     #[test]
+    fn project_scene_picker_lists_names_without_decoding_and_pins_handoff() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let good = root.join("Étage.SCENE.JSON");
+        let active = root.join("current.json");
+        let malformed = root.join("Broken.scene.json");
+        scene(&good, "stage");
+        scene(&active, "current");
+        fs::write(&malformed, "broken scene").unwrap();
+        fs::create_dir(root.join("nested.scene.json")).unwrap();
+        fs::write(root.join("notes.json"), "{}").unwrap();
+        symlink(&good, root.join("alias.scene.json")).unwrap();
+        let project = ProjectDirectory::capture(root).unwrap();
+        let rows = project
+            .scene_rows("current.json", &Default::default())
+            .unwrap();
+        assert_eq!(
+            rows.iter()
+                .map(|row| (row.filename.as_str(), row.markers))
+                .collect::<Vec<_>>(),
+            [
+                ("Broken.scene.json", ""),
+                ("current.json", "Open"),
+                ("Étage.SCENE.JSON", "")
+            ]
+        );
+        assert!(project.pin_scene(&rows[0]).load(false).is_err());
+        let pin = project.pin_scene(&rows[2]);
+        assert!(matches!(
+            pin.load(false),
+            Ok(super::super::OpenedScene::Components(..))
+        ));
+        let replacement = root.join("replacement");
+        fs::copy(&good, &replacement).unwrap();
+        fs::rename(replacement, &good).unwrap();
+        assert!(pin.verify().unwrap_err().contains("changed"));
+        assert!(pin.load(true).is_err());
+    }
+
+    #[test]
     fn transition_pins_saved_button_and_distinct_sibling() {
         let dir = tempfile::tempdir().unwrap();
         let source_path = dir.path().join("Title.scene.json");
@@ -1078,8 +1303,16 @@ mod tests {
         let before = project.validated().unwrap();
         assert!(before.set_transition("missing", "Rail.scene.json").is_err());
         assert!(before.set_transition("start", "Title.scene.json").is_err());
-        before.set_transition("start", "Rail.scene.json").unwrap();
-        assert!(before.set_transition("start", "Rail.scene.json").is_err());
+        let rows = project
+            .scene_rows("Title.scene.json", &Default::default())
+            .unwrap();
+        let rail = rows
+            .iter()
+            .find(|row| row.filename == "Rail.scene.json")
+            .unwrap();
+        let pin = project.pin_scene(rail);
+        before.set_picked_transition("start", &pin, "rail").unwrap();
+        assert!(before.set_picked_transition("start", &pin, "rail").is_err());
         let configured = project.validated().unwrap();
         let route = configured.load_transition(source.scene()).unwrap().unwrap();
         assert_eq!(route.action_id, "start");
