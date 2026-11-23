@@ -80,6 +80,17 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+**Linux archive (.tar.gz)** packages an ordinary Linux Build as one
+file. Folder stays the default and can launch through **Build and Run**.
+System tar extracted the same 11 files and modes as the folder build.
+The relocated player started the rail yard, ran Lua movement and played
+one WAV cue. Cancel during compression cleaned staging and a collision
+preserved the existing file. Approved Claude read the result. In three
+warmed release runs per format, median Build time was 0.309 s for the
+50.90 MiB folder and 0.609 s for the 24.45 MiB archive. Sampled RSS
+increased by 40–49 MiB across both formats. The editor inspection
+round-trip p95 ranges overlapped.
+
 The built-in **Cylinder** is centered, 2 units tall along local Y and
 0.5 units in radius. A numbered conveyor roller verified the side wrap,
 both flat cap textures, end-on cap picking and its cast shadow. An
