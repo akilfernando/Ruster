@@ -809,9 +809,9 @@ impl Engine {
             validate_player_view_commit(&trial)?;
         }
         trial_state.validate_total()?;
-        self.check_cancelled()?;
         let transform_camera =
             resolve_transform_camera(transform_camera_binding.as_deref(), scene, Phase::Setup)?;
+        self.check_cancelled()?;
         Ok(Runtime {
             scene: scene.clone(),
             authoring: Arc::new(authoring.clone()),
@@ -962,12 +962,12 @@ impl Engine {
         }
         validate_player_view_commit(&staged)?;
         staged_state.validate_total()?;
-        self.check_cancelled()?;
         let transform_camera = resolve_transform_camera(
             runtime.transform_camera_binding.as_deref(),
             &staged,
             Phase::Commit,
         )?;
+        self.check_cancelled()?;
         let observations =
             queries.map_or_else(Vec::new, |queries| queries.observations.into_inner());
         let cues = audio.into_inner();

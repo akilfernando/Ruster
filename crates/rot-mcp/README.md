@@ -115,8 +115,12 @@ connected project.
   forward, up and lens. Game viewport captures include the same pose in
   `player_camera`. Local −Z is forward and +Y is up. Parent scale affects
   the world eye position. The camera uses composed authored rotations for its
-  orientation. Transform Perspective uses static Play and Build. For behavior
-  scenes, activate Fixed or Follow or clear the designation.
+  orientation. Supported animation on the camera or its ancestors drives
+  the lens in Play and Linux builds. The first page of
+  `behavior_runtime_inspect` returns `player_camera` using the same
+  resolved pose and reference matrices as `player_view_inspect.runtime.camera`.
+  They describe the committed runtime tick. A failed Step preserves the
+  previous shot.
 - To replace a calibrated Transform Perspective lens through guarded
   `scene_components_edit`, use
   `{"type":"transform_perspective","vertical_fov_degrees":49,"aspect_ratio":1.5,"clip":{"near":0.35,"far":21}}`

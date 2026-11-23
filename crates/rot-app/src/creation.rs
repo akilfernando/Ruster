@@ -940,23 +940,48 @@ mod tests {
                 text: "return {}".into(),
             },
         );
-        scene.objects[0].components.push(ComponentInstance {
-            id: "lens".into(),
+        scene.objects.push(rot_scene::component_scene::ObjectNode {
+            id: "detached-camera".into(),
+            name: "Detached Camera".into(),
             enabled: true,
-            kind: Component::Camera {
-                view: CameraView::transform_perspective(45.),
+            parent: None,
+            transform: rot_scene::Transform {
+                translation: [1., 2., 3.],
+                ..Default::default()
             },
+            components: vec![ComponentInstance {
+                id: "lens".into(),
+                enabled: true,
+                kind: Component::Camera {
+                    view: CameraView::transform_perspective(45.),
+                },
+            }],
         });
         assert!(matches!(
             RuntimeScene::from_components(Box::new(scene.clone())).unwrap(),
-            RuntimeScene::Behavior(_)
+            RuntimeScene::Behavior(session) if !session.scene().hierarchy.groups.contains_key("detached-camera")
         ));
         scene.gameplay_camera = Some("lens".into());
-        assert!(matches!(
-            RuntimeScene::from_components(Box::new(scene.clone())).unwrap(),
-            RuntimeScene::Behavior(session) if session.transform_camera_binding().is_some()
-        ));
-        scene.objects[0].components.last_mut().unwrap().enabled = false;
+        let RuntimeScene::Behavior(session) =
+            RuntimeScene::from_components(Box::new(scene.clone())).unwrap()
+        else {
+            panic!("expected behavior scene");
+        };
+        assert_eq!(
+            session
+                .transform_camera_binding()
+                .unwrap()
+                .resolve(session.scene())
+                .unwrap()
+                .eye,
+            [1., 2., 3.]
+        );
+        assert!(session
+            .scene()
+            .hierarchy
+            .groups
+            .contains_key("detached-camera"));
+        scene.objects.last_mut().unwrap().components[0].enabled = false;
         assert!(
             matches!(RuntimeScene::from_components(Box::new(scene)).unwrap(),
             RuntimeScene::Behavior(session) if session.transform_camera_binding().is_none() && session.scene().player_view.is_none())

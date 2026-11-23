@@ -162,3 +162,153 @@ fn reset_refuses_missing_clips_unmapped_nodes_and_second_writers() {
         conflict.message
     );
 }
+
+#[test]
+fn transform_camera_pose_commits_with_animated_parent_owner_and_rejected_step() {
+    use rot_scene::component_scene::{
+        CameraClip, CameraView, Component, ComponentInstance, ComponentScene,
+    };
+    use rot_scene::Session;
+
+    let mut scene = Scene::empty("animated-camera");
+    scene.objects.push(Object::cube("fault", None));
+    for (id, transform) in [
+        ("rig", Transform::default()),
+        (
+            "dolly",
+            Transform {
+                scale: [2., 1., 1.],
+                ..Default::default()
+            },
+        ),
+        (
+            "camera",
+            Transform {
+                translation: [1., 0., 0.],
+                ..Default::default()
+            },
+        ),
+    ] {
+        scene.hierarchy.groups.insert(
+            id.into(),
+            Group {
+                name: None,
+                transform,
+            },
+        );
+    }
+    scene.hierarchy.parents.insert("dolly".into(), "rig".into());
+    scene
+        .hierarchy
+        .parents
+        .insert("camera".into(), "dolly".into());
+    scene.animations.insert(
+        "rig".into(),
+        AnimationBinding {
+            clip: "motion".into(),
+            looping: false,
+            targets: BTreeMap::from([
+                ("Dolly".into(), "dolly".into()),
+                ("Camera".into(), "camera".into()),
+            ]),
+        },
+    );
+    let mut authored = ComponentScene::from_legacy(&Session::new(scene).unwrap()).unwrap();
+    authored
+        .objects
+        .iter_mut()
+        .find(|object| object.id == "camera")
+        .unwrap()
+        .components
+        .push(ComponentInstance {
+            id: "lens".into(),
+            enabled: true,
+            kind: Component::Camera {
+                view: CameraView::transform_perspective_with_lens(
+                    49.,
+                    Some(1.5),
+                    Some(CameraClip {
+                        near: 0.35,
+                        far: Some(21.),
+                    }),
+                ),
+            },
+        });
+    authored.gameplay_camera = Some("lens".into());
+    authored.sources.insert("fault".into(), BehaviorSource {
+        label: None, language_id: LANGUAGE_ID.into(), host_api_version: HOST_API_VERSION,
+        text: "return {update=function(o,p,dt) if o.translation[1]>0 then error('reject') end o.translation[1]=dt; return o end}".into(),
+    });
+    authored
+        .objects
+        .iter_mut()
+        .find(|object| object.id == "fault")
+        .unwrap()
+        .components
+        .push(ComponentInstance {
+            id: "fault-script".into(),
+            enabled: true,
+            kind: Component::Script {
+                source_kind: None,
+                binding: BehaviorBinding {
+                    target: BindingTarget::Object("fault".into()),
+                    source_id: "fault".into(),
+                    enabled: true,
+                    properties: BTreeMap::new(),
+                    state_defaults: StateFields::new(),
+                    commands: BTreeMap::new(),
+                },
+            },
+        });
+    let projected = authored.behavior_projection().unwrap();
+    let mut engine = Engine::new(Limits {
+        fixed_dt: 0.25,
+        ..Limits::default()
+    })
+    .unwrap();
+    engine.set_clips(BTreeMap::from([(
+        "motion".into(),
+        Arc::new(Clip::decode(br#"{"format":"rot-clip","version":1,"duration":0.5,"tracks":[
+          {"node":"Dolly","property":"translation","interpolation":"linear","times":[0.0,0.5],"values":[[3.0,0.0,0.0],[7.0,0.0,0.0]]},
+          {"node":"Camera","property":"rotation","interpolation":"linear","times":[0.0,0.5],"values":[[0.0,0.0,0.0,1.0],[0.0,0.0,1.0,0.0]]}]}"#).unwrap()),
+    )]));
+    let mut runtime = engine
+        .reset_with_transform_camera(
+            &projected.scene,
+            &projected.authoring,
+            projected.transform_camera,
+        )
+        .unwrap();
+    let first = runtime.transform_camera().unwrap();
+    assert_eq!(
+        first.eye,
+        [5., 0., 0.],
+        "camera uses the clip's time-zero parent"
+    );
+    assert_eq!(first.up, [0., 1., 0.]);
+    assert_eq!(first.aspect_ratio, Some(1.5));
+    assert_eq!(
+        first.clip,
+        Some(CameraClip {
+            near: 0.35,
+            far: Some(21.)
+        })
+    );
+    engine.step(&mut runtime).unwrap();
+    let committed = runtime.transform_camera().unwrap();
+    assert_eq!(committed.eye, [7., 0., 0.]);
+    assert!(committed.up[0] < -0.999_99);
+    assert_eq!(committed.forward, [0., 0., -1.]);
+    let last_scene = runtime.scene().clone();
+    let commit = runtime.commit_revision();
+    assert!(engine.step(&mut runtime).is_err());
+    assert_eq!((runtime.tick(), runtime.commit_revision()), (1, commit));
+    assert_eq!(runtime.scene(), &last_scene);
+    assert_eq!(runtime.transform_camera(), Some(committed));
+    assert_eq!(
+        projected.scene.hierarchy.groups["dolly"]
+            .transform
+            .translation,
+        [0.; 3]
+    );
+}

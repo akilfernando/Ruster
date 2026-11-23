@@ -231,11 +231,12 @@ lens follows the output size. An authored aspect fits the shot in the
 center with black bars where needed. **Infinity** means the lens has
 no far clip plane. Edit **Vertical FOV** in the Camera Inspector.
 
-Static Play and Linux builds use the same camera. Disabling the Camera, its
-object, or an ancestor suspends the designation until it is enabled again.
-**Clear Game Camera** keeps the component and its lens settings. For scenes
-that execute behavior, activate a Fixed or Follow camera or clear the
-designation before Play or Build.
+Play and Linux builds use the active camera. A supported transform clip can
+move either the camera or its parent. **Pause** holds the last committed
+shot, **Step** advances it with the simulation, and **Stop** returns to
+the creator’s Scene view. Disabling the Camera, its object, or an ancestor
+suspends the designation until it is enabled again. **Clear Game Camera**
+keeps the component and its lens settings.
 
 ## Edit a material in a legacy scene
 
