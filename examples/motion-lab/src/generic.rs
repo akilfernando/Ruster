@@ -15,7 +15,7 @@ use rot_app::{egui, Application, Content, MeshMap, Step, TextureMap};
 use rot_behavior::{Diagnostic, Engine, Limits, Runtime};
 use rot_scene::hud::{resolve_hud, HudCache, ResolvedHud};
 use rot_scene::input::{
-    ActionFrame, ActionKind, ActionMap, ActionValue, InputKey, KeyEventAccumulator,
+    ActionFrame, ActionKind, ActionMap, ActionValue, InputKey, KeyEventAccumulator, PhysicalInput,
 };
 use rot_scene::{PropertyValue, Session};
 mod commands;
@@ -401,6 +401,21 @@ impl GenericMotionLab {
             .map(|(tick, frame, origin)| (*tick, frame, *origin))
     }
 
+    fn latch_physical_input(
+        &mut self,
+        events: impl IntoIterator<Item = (PhysicalInput, bool)>,
+    ) -> Result<(), String> {
+        if self.needs_reset || self.pending_input.is_some() {
+            self.cancel_action_input();
+            return Err("Reset or finish the supplied step before claiming input".into());
+        }
+        self.physical_input_owned = true;
+        for (input, pressed) in events {
+            self.action_keys.physical_event(input, pressed);
+        }
+        Ok(())
+    }
+
     fn action_help(&self, ui: &mut egui::Ui) {
         if self.session.authoring().actions.is_empty() {
             return;
@@ -428,7 +443,14 @@ impl GenericMotionLab {
             .show(ui, |ui| {
                 for (id, definition) in &self.session.authoring().actions {
                     let hint = match &definition.kind {
-                        ActionKind::Button { keys: bound } => keys(bound),
+                        ActionKind::Button {
+                            keys: bound,
+                            primary_mouse,
+                        } => match (bound.is_empty(), primary_mouse) {
+                            (true, true) => "Primary Mouse".into(),
+                            (false, true) => format!("{} / Primary Mouse", keys(bound)),
+                            (_, false) => keys(bound),
+                        },
                         ActionKind::Axis1d { negative, positive } => {
                             format!("− {}   + {}", keys(negative), keys(positive))
                         }
@@ -729,15 +751,15 @@ impl Application for GenericMotionLab {
             self.cancel_action_input();
             return Ok(());
         }
-        if self.needs_reset || self.pending_input.is_some() {
-            self.cancel_action_input();
-            return Err("Reset or finish the supplied step before claiming input".into());
-        }
-        self.physical_input_owned = true;
-        for &(key, pressed) in events {
-            self.action_keys.key_event(key, pressed);
-        }
-        Ok(())
+        self.latch_physical_input(
+            events
+                .iter()
+                .map(|&(key, pressed)| (PhysicalInput::Key(key), pressed)),
+        )
+    }
+
+    fn action_physical_input(&mut self, events: &[(PhysicalInput, bool)]) -> Result<(), String> {
+        self.latch_physical_input(events.iter().copied())
     }
     fn cancel_action_input(&mut self) {
         self.action_keys.cancel();
@@ -943,6 +965,7 @@ mod tests {
                 label: None,
                 kind: ActionKind::Button {
                     keys: vec![InputKey::Enter],
+                    primary_mouse: false,
                 },
             },
         );

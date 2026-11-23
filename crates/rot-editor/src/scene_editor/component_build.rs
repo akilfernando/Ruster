@@ -1394,6 +1394,7 @@ mod tests {
                     label: Some("Start".into()),
                     kind: ActionKind::Button {
                         keys: vec![InputKey::Enter],
+                        primary_mouse: false,
                     },
                 }),
             )

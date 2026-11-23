@@ -1233,6 +1233,7 @@ mod tests {
             label: Some("Jump".into()),
             kind: ActionKind::Button {
                 keys: vec![InputKey::Space],
+                primary_mouse: false,
             },
         };
         let revision = session.set_action(0, "jump", Some(action.clone())).unwrap();

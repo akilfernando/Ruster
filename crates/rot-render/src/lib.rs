@@ -612,7 +612,7 @@ pub fn transform_camera_output_projection(
     ))
 }
 
-fn transform_camera_viewport(
+pub fn transform_camera_viewport(
     rect: egui::Rect,
     dpi: f32,
     aspect: f32,

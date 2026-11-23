@@ -380,7 +380,10 @@ mod tests {
                 "confirm",
                 Some(rot_scene::input::ActionDefinition {
                     label: None,
-                    kind: rot_scene::input::ActionKind::Button { keys: vec![] },
+                    kind: rot_scene::input::ActionKind::Button {
+                        keys: vec![],
+                        primary_mouse: false,
+                    },
                 }),
             )
             .unwrap();

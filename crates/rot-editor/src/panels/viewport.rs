@@ -230,7 +230,7 @@ impl SceneEditor {
             playing_view && viewport.response.clicked(),
         );
         self.runtime
-            .input_finish(&ctx, &viewport.response, blocked || hud_owns);
+            .input_finish(&ctx, &viewport.response, blocked || hud_owns, None);
         self.captures.rect = Some(viewport.rect);
         self.captures.visible_crop = Some(hud_rect);
         self.captures.view = Some(viewport.view);

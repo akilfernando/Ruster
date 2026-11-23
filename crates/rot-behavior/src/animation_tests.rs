@@ -349,7 +349,10 @@ fn button_animators_wait_restart_per_placement_and_keep_the_clock_on_rejection()
             action.into(),
             ActionDefinition {
                 label: None,
-                kind: ActionKind::Button { keys: vec![key] },
+                kind: ActionKind::Button {
+                    keys: vec![key],
+                    primary_mouse: false,
+                },
             },
         );
         let owner = authored

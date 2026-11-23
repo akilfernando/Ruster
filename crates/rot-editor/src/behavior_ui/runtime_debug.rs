@@ -1018,6 +1018,7 @@ mod tests {
                     label: None,
                     kind: rot_scene::input::ActionKind::Button {
                         keys: vec![rot_scene::input::InputKey::A],
+                        primary_mouse: false,
                     },
                 }),
             )

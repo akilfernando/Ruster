@@ -15,6 +15,7 @@ fn fixture(late: &str) -> (Scene, Authoring) {
             label: None,
             kind: ActionKind::Button {
                 keys: vec![InputKey::A],
+                primary_mouse: false,
             },
         },
     );

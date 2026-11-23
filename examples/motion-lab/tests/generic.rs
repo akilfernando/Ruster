@@ -810,6 +810,7 @@ fn authored_actions_cross_catchup_pause_supplied_step_and_remapped_reset() {
                 label: None,
                 kind: ActionKind::Button {
                     keys: vec![InputKey::H],
+                    primary_mouse: false,
                 },
             }),
         )

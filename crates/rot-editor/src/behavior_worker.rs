@@ -16,7 +16,9 @@ use rot_behavior::debug::{
 };
 use rot_behavior::{Diagnostic, Engine, Limits, Runtime};
 use rot_render::component_preview::ComponentPreview;
-use rot_scene::input::{ActionFrame, ActionMap, ActionValue, InputKey, KeyEventAccumulator};
+#[cfg(test)]
+use rot_scene::input::InputKey;
+use rot_scene::input::{ActionFrame, ActionMap, ActionValue, KeyEventAccumulator, PhysicalInput};
 use rot_scene::{Authoring, Scene};
 use sha2::{Digest, Sha256};
 
@@ -671,10 +673,20 @@ impl Worker {
         })
     }
     /// A busy slot revokes atomically, so a skipped key-up cannot stick as held.
+    #[cfg(test)]
     pub fn publish_key_event(
         &self,
         lease: InputLease,
         key: InputKey,
+        pressed: bool,
+    ) -> Result<(), InputError> {
+        self.publish_physical_event(lease, PhysicalInput::Key(key), pressed)
+    }
+
+    pub fn publish_physical_event(
+        &self,
+        lease: InputLease,
+        input_event: PhysicalInput,
         pressed: bool,
     ) -> Result<(), InputError> {
         if !self.accepts(lease.key) {
@@ -700,7 +712,7 @@ impl Worker {
         if !self.shared.input_enabled.load(Ordering::SeqCst) {
             return Err(InputError::NotPlaying);
         }
-        slot.keys.key_event(key, pressed);
+        slot.keys.physical_event(input_event, pressed);
         if self.shared.input_epoch()? != epoch || !self.shared.input_enabled.load(Ordering::SeqCst)
         {
             slot.keys.cancel();
@@ -2511,6 +2523,7 @@ mod tests {
                 label: None,
                 kind: rot_scene::input::ActionKind::Button {
                     keys: vec![InputKey::A],
+                    primary_mouse: false,
                 },
             },
         );

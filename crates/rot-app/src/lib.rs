@@ -5,6 +5,9 @@ pub mod creation;
 pub use rot_render::{
     player_view_projection, transform_camera_output_projection, transform_camera_projection,
 };
+mod native_actions;
+pub use native_actions::NativeActionInput;
+
 mod host;
 pub mod hud;
 mod resources;
@@ -344,6 +347,20 @@ pub trait Application: 'static {
         _events: &[(rot_scene::input::InputKey, bool)],
     ) -> Result<(), String> {
         Ok(())
+    }
+    /// Ordered keyboard and optional pointer transitions for authored actions.
+    fn action_physical_input(
+        &mut self,
+        events: &[(rot_scene::input::PhysicalInput, bool)],
+    ) -> Result<(), String> {
+        let keys = events
+            .iter()
+            .filter_map(|(input, pressed)| match input {
+                rot_scene::input::PhysicalInput::Key(key) => Some((*key, *pressed)),
+                rot_scene::input::PhysicalInput::PrimaryMouse => None,
+            })
+            .collect::<Vec<_>>();
+        self.action_input(true, &keys)
     }
     /// Must not evaluate scripts or block. Pause/error/reset revoke pending input.
     fn cancel_action_input(&mut self) {}

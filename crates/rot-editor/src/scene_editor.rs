@@ -9878,6 +9878,7 @@ mod tests {
             label: Some("Jump".into()),
             kind: ActionKind::Button {
                 keys: vec![InputKey::Space],
+                primary_mouse: false,
             },
         };
         session.set_action(0, "jump", Some(jump.clone())).unwrap();
@@ -11677,6 +11678,7 @@ mod tests {
             label: Some("Home".into()),
             kind: ActionKind::Button {
                 keys: vec![InputKey::H],
+                primary_mouse: false,
             },
         };
         session

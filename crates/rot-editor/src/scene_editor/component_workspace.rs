@@ -2142,16 +2142,36 @@ impl ComponentWorkspace {
         let painted = (!moving).then(|| self.capture_viewport(ui, frame.as_ref(), &interaction));
         #[cfg(not(unix))]
         let painted = (!moving).then_some(());
+        let primary_content = frame
+            .as_ref()
+            .filter(|frame| {
+                playing
+                    && interaction.fit_error.is_none()
+                    && rot_scene::input::has_primary_mouse(&frame.authoring.actions)
+            })
+            .map(|_| interaction.player_content.unwrap_or(interaction.rect));
+        let claim_click = playing
+            && interaction.response.clicked()
+            && primary_content.is_none_or(|rect| {
+                interaction
+                    .response
+                    .interact_pointer_pos()
+                    .is_some_and(|position| rect.contains(position))
+            });
         self.runtime.input_control_click(
             &ctx,
             blocked || hud_owns,
             frame
                 .as_ref()
                 .is_some_and(|frame| !frame.authoring.actions.is_empty()),
-            playing && interaction.response.clicked(),
+            claim_click,
         );
-        self.runtime
-            .input_finish(&ctx, &interaction.response, blocked || hud_owns);
+        self.runtime.input_finish(
+            &ctx,
+            &interaction.response,
+            blocked || hud_owns,
+            primary_content,
+        );
         if let Some(frame) = &frame {
             let hud = &frame.authoring.hud;
             let mode = if self.runtime.stale {

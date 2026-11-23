@@ -16,7 +16,7 @@ const TOOLS: &[(&str,&str,&[&str])] = &[
     ("behavior_command","Read one complete authored command definition or null for absent; binding summaries expose IDs and argument counts only.",&["binding_id","command_id"]),
     ("behavior_command_set","Set/remove one Application command definition through shared Undo. Up to16 commands,16 typed arguments and16KiB normalized argument payload per command. Null removes. Clean drafts required.",&["binding_id","command_id","definition"]),
     ("behavior_action","Read one complete authored action definition under current scene session/revision authority; no live key state.",&["action_id"]),
-    ("behavior_action_set","Replace/upsert a complete authored action definition. At most32 actions including unbound definitions; at most4 total logical keys per action. Cross-action key sharing is allowed; repeated/opposite keys and reserved Escape/Tab reject. Shared Undo, clean human drafts required; live runtime map stays immutable until Reset.",&["action_id","definition"]),
+    ("behavior_action_set","Replace/upsert a complete authored action definition. At most32 actions including unbound definitions; at most4 total logical keys per action. Cross-action key sharing is allowed; v23 Buttons may also bind primary_mouse (boolean); repeated/opposite keys and reserved Escape/Tab reject. Shared Undo, clean human drafts required; live runtime map stays immutable until Reset.",&["action_id","definition"]),
     ("behavior_action_remove","Remove one authored action definition through shared Undo. Reversible action IDs remain reserved; Undo restores them. Existing script references remain available for repair; no live runtime map mutation.",&["action_id"]),
 ];
 pub fn supported(name: &str) -> bool {
@@ -46,7 +46,7 @@ fn action_definition_schema() -> Value {
             "label":{"type":["string","null"],"minLength":1,"maxLength":128,
                 "description":"Optional display label;1..128 UTF-8 bytes without surrounding whitespace or controls."},
             "kind":{"oneOf":[
-                super::object_schema(json!({"type":{"const":"button"},"keys":action_keys_schema()}), vec!["type","keys"]),
+                super::object_schema(json!({"type":{"const":"button"},"keys":action_keys_schema(),"primary_mouse":{"type":"boolean","description":"v23: Primary Mouse in the owned Game view."}}), vec!["type","keys"]),
                 super::object_schema(json!({"type":{"const":"axis1d"},"negative":action_keys_schema(),"positive":action_keys_schema()}), vec!["type","negative","positive"])
             ],"description":"Complete typed binding; present arrays are required. Axis directions share a total4-key limit; opposite held directions resolve to zero."}
         }),
@@ -81,7 +81,8 @@ fn valid_action_definition(value: &Value) -> bool {
         definition["kind"].as_object().is_some_and(|kind| {
             match kind.get("type").and_then(Value::as_str) {
                 Some("button") => {
-                    super::exact_keys(kind, &["type", "keys"], &[])
+                    super::exact_keys(kind, &["type", "keys"], &["primary_mouse"])
+                        && kind.get("primary_mouse").is_none_or(Value::is_boolean)
                         && valid_action_keys(&kind["keys"])
                 }
                 Some("axis1d") => {

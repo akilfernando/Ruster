@@ -29,6 +29,8 @@ pub struct ActionDefinition {
 pub enum ActionKind {
     Button {
         keys: Vec<InputKey>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        primary_mouse: bool,
     },
     Axis1d {
         negative: Vec<InputKey>,
@@ -38,14 +40,17 @@ pub enum ActionKind {
 
 impl Default for ActionKind {
     fn default() -> Self {
-        Self::Button { keys: Vec::new() }
+        Self::Button {
+            keys: Vec::new(),
+            primary_mouse: false,
+        }
     }
 }
 
 impl ActionKind {
     fn keys(&self) -> impl Iterator<Item = InputKey> + '_ {
         let (first, second) = match self {
-            Self::Button { keys } => (keys.as_slice(), &[][..]),
+            Self::Button { keys, .. } => (keys.as_slice(), &[][..]),
             Self::Axis1d { negative, positive } => (negative.as_slice(), positive.as_slice()),
         };
         first.iter().chain(second).copied()
@@ -336,10 +341,30 @@ struct ButtonEdges {
 /// Pure bounded event accumulator. Hosts must cancel on ownership/focus loss,
 /// pause/reset/stop or map invalidation, and admit fresh events after resuming.
 /// Replacing a map requires a newly validated accumulator, not live remapping.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PhysicalInput {
+    Key(InputKey),
+    PrimaryMouse,
+}
+
+pub fn has_primary_mouse(actions: &ActionMap) -> bool {
+    actions.values().any(|action| {
+        matches!(
+            action.kind,
+            ActionKind::Button {
+                primary_mouse: true,
+                ..
+            }
+        )
+    })
+}
+
 #[derive(Debug)]
 pub struct KeyEventAccumulator {
     actions: ActionMap,
     held: BTreeSet<InputKey>,
+    primary_mouse: bool,
+    suppress_primary_mouse: bool,
     suppress_until_release: BTreeSet<InputKey>,
     // Exactly the Button IDs from the immutable actions map, in the same
     // BTreeMap order. Both traversals below assert this private invariant.
@@ -357,6 +382,8 @@ impl KeyEventAccumulator {
         Ok(Self {
             actions,
             held: BTreeSet::new(),
+            primary_mouse: false,
+            suppress_primary_mouse: false,
             suppress_until_release: BTreeSet::new(),
             edges,
         })
@@ -372,6 +399,7 @@ impl KeyEventAccumulator {
         next.suppress_until_release
             .append(&mut self.suppress_until_release);
         next.suppress_until_release.append(&mut self.held);
+        next.suppress_primary_mouse |= self.primary_mouse || self.suppress_primary_mouse;
         *self = next;
     }
 
@@ -380,6 +408,17 @@ impl KeyEventAccumulator {
     /// held. Hosts must discard backend repeat events, especially after cancel:
     /// a repeated down is not fresh physical admission to a new ownership epoch.
     pub fn key_event(&mut self, key: InputKey, pressed: bool) {
+        self.physical_event(PhysicalInput::Key(key), pressed);
+    }
+
+    pub fn physical_event(&mut self, input: PhysicalInput, pressed: bool) {
+        let key = match input {
+            PhysicalInput::Key(key) => key,
+            PhysicalInput::PrimaryMouse => {
+                self.primary_event(pressed);
+                return;
+            }
+        };
         if self.suppress_until_release.contains(&key) {
             if !pressed {
                 self.suppress_until_release.remove(&key);
@@ -395,17 +434,20 @@ impl KeyEventAccumulator {
             return;
         }
         let mut edge_entries = self.edges.iter_mut();
-        for (id, keys) in self
-            .actions
-            .iter()
-            .filter_map(|(id, action)| match &action.kind {
-                ActionKind::Button { keys } => Some((id, keys)),
-                ActionKind::Axis1d { .. } => None,
-            })
+        for (id, keys, primary_mouse) in
+            self.actions
+                .iter()
+                .filter_map(|(id, action)| match &action.kind {
+                    ActionKind::Button {
+                        keys,
+                        primary_mouse,
+                    } => Some((id, keys, *primary_mouse)),
+                    ActionKind::Axis1d { .. } => None,
+                })
         {
             let (edge_id, edges) = edge_entries.next().expect("every Button has an edge entry");
             assert_eq!(id, edge_id, "Button/edge maps preserve identical ID order");
-            if !keys.contains(&key) {
+            if !keys.contains(&key) || primary_mouse && self.primary_mouse {
                 continue;
             }
             let before = keys.iter().any(|bound| self.held.contains(bound));
@@ -430,6 +472,33 @@ impl KeyEventAccumulator {
         }
     }
 
+    fn primary_event(&mut self, pressed: bool) {
+        if self.suppress_primary_mouse {
+            if !pressed {
+                self.suppress_primary_mouse = false;
+            }
+            return;
+        }
+        if self.primary_mouse == pressed {
+            return;
+        }
+        let mut edge_entries = self.edges.values_mut();
+        for action in self.actions.values() {
+            if let ActionKind::Button {
+                keys,
+                primary_mouse,
+            } = &action.kind
+            {
+                let edges = edge_entries.next().expect("every Button has an edge entry");
+                if *primary_mouse && !keys.iter().any(|key| self.held.contains(key)) {
+                    edges.pressed |= pressed;
+                    edges.released |= !pressed;
+                }
+            }
+        }
+        self.primary_mouse = pressed;
+    }
+
     /// Admit one immutable snapshot, clearing only pending edges. Held keys
     /// survive catch-up ticks; any later event belongs to the next snapshot.
     pub fn take_snapshot(&mut self) -> ValidatedActionFrame {
@@ -439,13 +508,17 @@ impl KeyEventAccumulator {
             .iter()
             .map(|(id, action)| {
                 let value = match &action.kind {
-                    ActionKind::Button { keys } => {
+                    ActionKind::Button {
+                        keys,
+                        primary_mouse,
+                    } => {
                         let (edge_id, edges) =
                             edge_entries.next().expect("every Button has an edge entry");
                         assert_eq!(id, edge_id, "Button/edge maps preserve identical ID order");
                         let edges = std::mem::take(edges);
                         ActionValue::Button(ButtonState {
-                            held: keys.iter().any(|key| self.held.contains(key)),
+                            held: *primary_mouse && self.primary_mouse
+                                || keys.iter().any(|key| self.held.contains(key)),
                             pressed: edges.pressed,
                             released: edges.released,
                         })
@@ -471,6 +544,8 @@ impl KeyEventAccumulator {
     /// Drop held state and pending edges without synthesizing release actions.
     pub fn cancel(&mut self) {
         self.held.clear();
+        self.primary_mouse = false;
+        self.suppress_primary_mouse = false;
         self.suppress_until_release.clear();
         for edges in self.edges.values_mut() {
             *edges = ButtonEdges::default();
@@ -486,7 +561,10 @@ mod tests {
     fn button(keys: Vec<InputKey>) -> ActionDefinition {
         ActionDefinition {
             label: None,
-            kind: ActionKind::Button { keys },
+            kind: ActionKind::Button {
+                keys,
+                primary_mouse: false,
+            },
         }
     }
 

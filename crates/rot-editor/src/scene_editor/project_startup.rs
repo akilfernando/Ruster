@@ -1488,6 +1488,7 @@ mod tests {
                     label: Some("Start".into()),
                     kind: rot_scene::input::ActionKind::Button {
                         keys: vec![rot_scene::input::InputKey::Enter],
+                        primary_mouse: false,
                     },
                 }),
             )

@@ -98,6 +98,8 @@ pub fn run<A: Application>(app: A, options: HostOptions) -> Result<(), String> {
         Ok(Box::new(Host {
             action_surface: None,
             action_surface_rect: None,
+            action_content_rect: None,
+            native_action_input: Default::default(),
             action_control_owned: false,
             action_claim_frame: None,
             last_control_frame: None,
@@ -130,6 +132,8 @@ struct Host<A: Application> {
     navigation: rot_render::NavigationOptions,
     action_surface: Option<egui::Id>,
     action_surface_rect: Option<egui::Rect>,
+    action_content_rect: Option<egui::Rect>,
+    native_action_input: crate::NativeActionInput,
     action_control_owned: bool,
     action_claim_frame: Option<u64>,
     last_control_frame: Option<u64>,
@@ -200,6 +204,7 @@ impl<A: Application> Host<A> {
         }
     }
     fn revoke_action_control(&mut self) {
+        self.native_action_input.clear();
         self.action_control_owned = false;
         self.action_claim_frame = None;
         self.runtime.app_mut().cancel_action_input();
@@ -213,7 +218,17 @@ impl<A: Application> Host<A> {
     fn route_action_keyboard(&mut self, ctx: &egui::Context) {
         let frame = ctx.cumulative_frame_nr();
         let focused = ctx.input(|i| i.focused);
-        if self.error.is_some() || !focused {
+        let focus_lost = !focused
+            || ctx.input(|input| {
+                input
+                    .events
+                    .iter()
+                    .any(|event| matches!(event, egui::Event::WindowFocused(false)))
+            });
+        if self.error.is_some()
+            || focus_lost
+            || ctx.memory(|memory| memory.top_modal_layer().is_some())
+        {
             self.release_action_control(ctx);
             self.last_action_frame = Some(frame);
             return;
@@ -274,14 +289,15 @@ impl<A: Application> Host<A> {
         // The current viewport Response is built after routing. Egui will
         // surrender its focus on outside clicks then, so reject that interaction
         // now, before a held key could advance a same-frame tick.
-        let outside_pointer = ctx
-            .input(|input| input.pointer.any_pressed() || input.pointer.any_click())
-            && ctx
-                .input(|input| input.pointer.interact_pos())
-                .is_none_or(|position| {
-                    self.action_surface_rect
-                        .is_none_or(|rect| !rect.contains(position))
-                });
+        let outside_pointer = ctx.input(|input| {
+            (input.pointer.any_pressed() || input.pointer.any_click())
+                && !self.native_action_input.preserves_release(&input.events)
+        }) && ctx.input(|input| input.pointer.interact_pos()).is_none_or(
+            |position| {
+                self.action_surface_rect
+                    .is_none_or(|rect| !rect.contains(position))
+            },
+        );
         if outside_pointer {
             self.release_action_control(ctx);
             self.last_action_frame = Some(frame);
@@ -302,30 +318,18 @@ impl<A: Application> Host<A> {
             return;
         }
         self.last_action_frame = Some(frame);
-        let events: Vec<_> = ctx.input(|i| {
-            i.events
-                .iter()
-                .filter_map(|event| match event {
-                    egui::Event::Key {
-                        key,
-                        pressed,
-                        repeat,
-                        ..
-                    } if !repeat => rot_scene::input::InputKey::from_logical_name(key.name())
-                        .map(|key| (key, *pressed)),
-                    _ => None,
-                })
-                .take(257)
-                .collect()
+        let events = ctx.input(|input| {
+            self.native_action_input
+                .events(&input.events, self.action_content_rect)
         });
         if events.len() > 256 {
             self.release_action_control(ctx);
             self.report(Err(
-                "Keyboard input overflow; input suspended. Reset to recover.".into(),
+                "Input overflow; controls suspended. Reset to recover.".into()
             ));
             return;
         }
-        let result = self.runtime.app_mut().action_input(true, &events);
+        let result = self.runtime.app_mut().action_physical_input(&events);
         self.report(result);
     }
 
@@ -423,7 +427,12 @@ impl<A: Application> Host<A> {
         if self.runtime.app_mut().take_reset_request() {
             self.reset();
         }
-        let buffered = self.runtime.app().buffered_viewport_input();
+        let native_pointer = self
+            .runtime
+            .app()
+            .keyboard_actions()
+            .is_some_and(rot_scene::input::has_primary_mouse);
+        let buffered = native_pointer || self.runtime.app().buffered_viewport_input();
         let first_buffered_pass =
             !buffered || self.last_buffered_frame != Some(ctx.cumulative_frame_nr());
         if buffered && first_buffered_pass {
@@ -441,7 +450,7 @@ impl<A: Application> Host<A> {
         if !buffered {
             self.route_keyboard(&ctx);
         }
-        if first_buffered_pass {
+        if first_buffered_pass && !native_pointer {
             if let Some(elapsed) = input_time {
                 let advanced = self.runtime.advance(elapsed).map(|_| ());
                 self.report(advanced);
@@ -473,6 +482,16 @@ impl<A: Application> Host<A> {
                     }
                 };
                 surface.input_owned = ownership.pointer || ownership.keyboard;
+                self.action_content_rect = if native_pointer {
+                    let camera = self.runtime.app().content().transform_camera();
+                    match camera.and_then(|camera| camera.aspect_ratio) {
+                        Some(aspect) => rot_render::transform_camera_viewport(surface.rect, ctx.pixels_per_point(), aspect)
+                            .map(|(rect, _)| rect.intersect(ui.clip_rect())),
+                        None => Some(surface.rect.intersect(ui.clip_rect())),
+                    }
+                } else {
+                    None
+                };
                 if buffered {
                     let frame = ctx.cumulative_frame_nr();
                     if surface.input_owned {
@@ -481,6 +500,12 @@ impl<A: Application> Host<A> {
                         self.route_keyboard(&ctx);
                     }
                     self.last_buffered_input_frame = Some(frame);
+                }
+                if native_pointer && first_buffered_pass {
+                    if let Some(elapsed) = input_time {
+                        let advanced = self.runtime.advance(elapsed).map(|_| ());
+                        self.report(advanced);
+                    }
                 }
                 let viewport = {
                     let app = self.runtime.app();
@@ -717,6 +742,8 @@ mod tests {
             let mut host = Host {
                 action_surface: None,
                 action_surface_rect: None,
+                action_content_rect: None,
+                native_action_input: Default::default(),
                 action_control_owned: false,
                 action_claim_frame: None,
                 last_control_frame: None,
@@ -892,6 +919,7 @@ mod tests {
                         label: None,
                         kind: ActionKind::Button {
                             keys: vec![InputKey::Space],
+                            primary_mouse: false,
                         },
                     },
                 ),
@@ -926,6 +954,8 @@ mod tests {
         let mut host = Host {
             action_surface: None,
             action_surface_rect: None,
+            action_content_rect: None,
+            native_action_input: Default::default(),
             action_control_owned: false,
             action_claim_frame: None,
             last_control_frame: None,
@@ -1279,6 +1309,8 @@ mod tests {
         let mut host = Host {
             action_surface: None,
             action_surface_rect: None,
+            action_content_rect: None,
+            native_action_input: Default::default(),
             action_control_owned: false,
             action_claim_frame: None,
             last_control_frame: None,

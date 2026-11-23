@@ -5821,6 +5821,7 @@ mod tests {
         let mut invalid = action;
         invalid.kind = ActionKind::Button {
             keys: vec![InputKey::Escape],
+            primary_mouse: false,
         };
         let before = session.document.clone();
         assert!(session

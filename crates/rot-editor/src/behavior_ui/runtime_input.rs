@@ -14,6 +14,7 @@ fn focus_lost(focused: bool, events: &[egui::Event]) -> bool {
 #[derive(Default)]
 pub(super) struct InputControl {
     lease: Option<InputLease>,
+    native: rot_app::NativeActionInput,
     intent: Option<InputMeta>,
     surface: Option<(egui::Id, egui::Rect)>,
     activation_frame: Option<u64>,
@@ -44,6 +45,7 @@ impl RuntimeUi {
         }
     }
     fn revoke_input_control(&mut self) {
+        self.input_control.native.clear();
         if self.input_control.lease.take().is_some() || self.input_control.intent.take().is_some() {
             self.input_control.intent = None;
             if let Some(worker) = &self.worker {
@@ -60,6 +62,7 @@ impl RuntimeUi {
         let frame = ctx.cumulative_frame_nr();
         let outside_pointer = ctx.input(|input| {
             (input.pointer.any_pressed() || input.pointer.any_click())
+                && !self.input_control.native.preserves_release(&input.events)
                 && input.pointer.interact_pos().is_none_or(|position| {
                     self.input_control
                         .surface
@@ -86,13 +89,7 @@ impl RuntimeUi {
             || ctx.input(|input| {
                 input.pointer.button_down(egui::PointerButton::Secondary)
                     || input.pointer.button_down(egui::PointerButton::Middle)
-                    || ((self.input_control.activation_frame != Some(frame))
-                        && (input.pointer.any_pressed() || input.pointer.any_click())
-                        && input.pointer.interact_pos().is_none_or(|position| {
-                            self.input_control
-                                .surface
-                                .is_none_or(|(_, rect)| !rect.contains(position))
-                        }))
+                    || (self.input_control.activation_frame != Some(frame) && outside_pointer)
             });
         let escape =
             ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
@@ -417,6 +414,7 @@ impl RuntimeUi {
         ctx: &egui::Context,
         response: &egui::Response,
         blocked: bool,
+        primary_content: Option<egui::Rect>,
     ) {
         self.input_control.surface = Some((response.id, response.rect));
         if !self.input_owned() {
@@ -505,21 +503,10 @@ impl RuntimeUi {
             return;
         }
         self.input_control.last_frame = Some(frame);
-        let events: Vec<_> = ctx.input(|input| {
-            input
-                .events
-                .iter()
-                .filter_map(|event| match event {
-                    egui::Event::Key {
-                        key,
-                        pressed,
-                        repeat: false,
-                        ..
-                    } => InputKey::from_logical_name(key.name()).map(|key| (key, *pressed)),
-                    _ => None,
-                })
-                .take(257)
-                .collect()
+        let events = ctx.input(|input| {
+            self.input_control
+                .native
+                .events(&input.events, primary_content)
         });
         if events.len() > 256 {
             self.release_input(ctx);
@@ -542,14 +529,14 @@ impl RuntimeUi {
             let mut lease = lease;
             lease.map_identity = meta.map_identity;
             for (key, pressed) in events {
-                let mut result = worker.publish_key_event(lease, key, pressed);
+                let mut result = worker.publish_physical_event(lease, key, pressed);
                 if result == Err(crate::behavior_worker::InputError::StaleMap) {
                     let current = worker
                         .current_input_meta(lease.key)
                         .map_err(|error| format!("{error:?}"))?;
                     if current.epoch == lease.epoch && current.enabled && current.claimed {
                         lease.map_identity = current.map_identity;
-                        result = worker.publish_key_event(lease, key, pressed);
+                        result = worker.publish_physical_event(lease, key, pressed);
                     }
                 }
                 result.map_err(|error| format!("{error:?}"))?;
@@ -576,7 +563,14 @@ fn action_hint(kind: &ActionKind) -> String {
         }
     }
     match kind {
-        ActionKind::Button { keys } => format!("Button · {}", names(keys)),
+        ActionKind::Button {
+            keys,
+            primary_mouse,
+        } => match (keys.is_empty(), primary_mouse) {
+            (true, true) => "Button · Primary Mouse".into(),
+            (false, true) => format!("Button · {} / Primary Mouse", names(keys)),
+            (_, false) => format!("Button · {}", names(keys)),
+        },
         ActionKind::Axis1d { negative, positive } => {
             format!("Axis · − {} · + {}", names(negative), names(positive))
         }
@@ -812,6 +806,7 @@ mod tests {
                     label: None,
                     kind: ActionKind::Button {
                         keys: vec![InputKey::Space],
+                        primary_mouse: false,
                     },
                 }),
             )
@@ -899,7 +894,7 @@ mod tests {
                     surface_center.set(surface.rect.center());
                     // S-05: clicking the running game view claims the keyboard.
                     runtime.input_control_click(&ctx, false, true, surface.clicked());
-                    runtime.input_finish(&ctx, &surface, false);
+                    runtime.input_finish(&ctx, &surface, false, None);
                     if discard && ctx.current_pass_index() == 0 {
                         ctx.request_discard("control activation replay");
                     }

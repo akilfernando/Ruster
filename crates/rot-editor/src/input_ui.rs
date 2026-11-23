@@ -9,6 +9,9 @@ use sha2::{Digest, Sha256};
 
 pub(super) trait ActionDocument {
     fn action_scene_id(&self) -> &str;
+    fn supports_primary_mouse(&self) -> bool {
+        false
+    }
     fn action_revision(&self) -> u64;
     fn action_map(&self) -> &ActionMap;
     fn contains_action_id(&self, id: &str) -> bool;
@@ -38,6 +41,9 @@ impl ActionDocument for Session {
 }
 
 impl ActionDocument for ComponentSession {
+    fn supports_primary_mouse(&self) -> bool {
+        true
+    }
     fn action_scene_id(&self) -> &str {
         &self.scene().id
     }
@@ -66,7 +72,7 @@ fn fingerprint(value: Option<&ActionDefinition>) -> String {
 
 fn keys(kind: &ActionKind) -> impl Iterator<Item = InputKey> + '_ {
     let (first, second): (&[InputKey], &[InputKey]) = match kind {
-        ActionKind::Button { keys } => (keys, &[]),
+        ActionKind::Button { keys, .. } => (keys, &[]),
         ActionKind::Axis1d { negative, positive } => (negative, positive),
     };
     first.iter().chain(second).copied()
@@ -74,7 +80,10 @@ fn keys(kind: &ActionKind) -> impl Iterator<Item = InputKey> + '_ {
 
 fn unbound(kind: &ActionKind) -> ActionKind {
     match kind {
-        ActionKind::Button { .. } => ActionKind::Button { keys: Vec::new() },
+        ActionKind::Button { .. } => ActionKind::Button {
+            keys: Vec::new(),
+            primary_mouse: false,
+        },
         ActionKind::Axis1d { .. } => ActionKind::Axis1d {
             negative: Vec::new(),
             positive: Vec::new(),
@@ -526,7 +535,7 @@ impl InputUi {
         }
         let key = key.expect("checked supported key");
         let current = match (&draft.kind, capture.side) {
-            (ActionKind::Button { keys }, Side::Button) => keys.get(capture.index),
+            (ActionKind::Button { keys, .. }, Side::Button) => keys.get(capture.index),
             (ActionKind::Axis1d { negative, .. }, Side::Negative) => negative.get(capture.index),
             (ActionKind::Axis1d { positive, .. }, Side::Positive) => positive.get(capture.index),
             _ => None,
@@ -537,7 +546,7 @@ impl InputUi {
             return;
         }
         let slot = match (&mut draft.kind, capture.side) {
-            (ActionKind::Button { keys }, Side::Button) => keys.get_mut(capture.index),
+            (ActionKind::Button { keys, .. }, Side::Button) => keys.get_mut(capture.index),
             (ActionKind::Axis1d { negative, .. }, Side::Negative) => {
                 negative.get_mut(capture.index)
             }
@@ -931,16 +940,30 @@ impl InputUi {
                                 positive: all,
                             }
                         } else {
-                            ActionKind::Button { keys: all }
+                            ActionKind::Button {
+                                keys: all,
+                                primary_mouse: false,
+                            }
                         };
                         changed = true;
                     }
                     let mut rows = Vec::new();
                     match &mut draft.kind {
-                        ActionKind::Button { keys } => {
+                        ActionKind::Button {
+                            keys,
+                            primary_mouse,
+                        } => {
                             ui.strong(Text::ButtonKeys.plain());
                             let used = keys.clone();
                             rows.push(key_rows(ui, Side::Button, keys, &used, admit));
+                            if session.supports_primary_mouse() {
+                                let response = ui.add_enabled(
+                                    admit,
+                                    egui::Checkbox::new(primary_mouse, "Primary Mouse"),
+                                );
+                                changed |= response.changed();
+                                owned_ids.push(response.id);
+                            }
                         }
                         ActionKind::Axis1d { negative, positive } => {
                             ui.strong(Text::NegativeKeys1.plain());
@@ -1110,7 +1133,14 @@ fn hint(kind: &ActionKind) -> String {
         }
     }
     match kind {
-        ActionKind::Button { keys } => format!("Button · {}", names(keys)),
+        ActionKind::Button {
+            keys,
+            primary_mouse,
+        } => match (keys.is_empty(), primary_mouse) {
+            (true, true) => "Button · Primary Mouse".into(),
+            (false, true) => format!("Button · {} / Primary Mouse", names(keys)),
+            (_, false) => format!("Button · {}", names(keys)),
+        },
         ActionKind::Axis1d { negative, positive } => {
             format!("Axis · − {} · + {}", names(negative), names(positive))
         }
@@ -1338,6 +1368,7 @@ mod tests {
                     "home",
                     ActionKind::Button {
                         keys: vec![InputKey::Space, InputKey::Home],
+                        primary_mouse: false,
                     },
                 ),
                 (
@@ -1976,6 +2007,7 @@ mod tests {
         let mut invalid = draft.clone();
         invalid.kind = ActionKind::Button {
             keys: vec![InputKey::Escape],
+            primary_mouse: false,
         };
         assert!(ui.restore_drafts(Some(invalid), &session).is_err());
         invalid = draft.clone();
@@ -1987,6 +2019,7 @@ mod tests {
                 InputKey::D,
                 InputKey::E,
             ],
+            primary_mouse: false,
         };
         assert!(ui.restore_drafts(Some(invalid), &session).is_err());
         session
