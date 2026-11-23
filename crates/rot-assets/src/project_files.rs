@@ -74,6 +74,13 @@ enum Importer {
     Model,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reconcile {
+    Discover,
+    Changed,
+    Reimport,
+}
+
 impl Importer {
     fn from_path(path: &str) -> Option<Self> {
         if path.ends_with(".glb") {
@@ -132,6 +139,17 @@ impl AssetStore {
     pub fn reconcile_project_files(
         &mut self,
         changed: &BTreeSet<PathBuf>,
+        active: impl Fn() -> bool,
+    ) -> Vec<ProjectFileIssue> {
+        self.reconcile_project_files_with_reimport(changed, None, active)
+    }
+
+    /// A creator's explicit reimport can adopt a new model interpretation
+    /// even when the source hash and accepted dependency IDs are unchanged.
+    pub fn reconcile_project_files_with_reimport(
+        &mut self,
+        changed: &BTreeSet<PathBuf>,
+        reimport: Option<&Path>,
         active: impl Fn() -> bool,
     ) -> Vec<ProjectFileIssue> {
         let changed = |source: &str| {
@@ -251,9 +269,14 @@ impl AssetStore {
             if !active() {
                 return diagnostics;
             }
-            let refresh = changed(&source);
-            match self.reconcile_source(&source, importer, metadata, &sidecar_ids, refresh, &active)
-            {
+            let mode = if reimport == Some(Path::new(&source)) {
+                Reconcile::Reimport
+            } else if changed(&source) {
+                Reconcile::Changed
+            } else {
+                Reconcile::Discover
+            };
+            match self.reconcile_source(&source, importer, metadata, &sidecar_ids, mode, &active) {
                 Ok(issues) => diagnostics.extend(issues),
                 Err(err) => diagnostics.push(ProjectFileIssue::invalid(source, err)),
             }
@@ -302,7 +325,7 @@ impl AssetStore {
         importer: Importer,
         metadata: Option<Vec<Metadata>>,
         sidecar_ids: &BTreeMap<String, usize>,
-        refresh: bool,
+        mode: Reconcile,
         active: &impl Fn() -> bool,
     ) -> Result<Vec<ProjectFileIssue>, AssetError> {
         let registered = self.registered_interpretations(source);
@@ -350,10 +373,16 @@ impl AssetStore {
                 write_metadata(&sidecar, old_metadata.as_deref(), &metadata)
             })?;
         }
-        let refresh = refresh || previous.is_some();
-        if let Some(previous) = previous {
+        let mode = if let Some(previous) = previous {
             self.relocate_source(&previous, source, importer, &metadata, active)?;
-        }
+            if mode == Reconcile::Discover {
+                Reconcile::Changed
+            } else {
+                mode
+            }
+        } else {
+            mode
+        };
 
         let mut failures = Vec::new();
         for interpretation in metadata {
@@ -370,7 +399,7 @@ impl AssetStore {
                 _ => None,
             };
             if let Err(error) =
-                self.reconcile_interpretation(source, importer, interpretation, refresh, active)
+                self.reconcile_interpretation(source, importer, interpretation, mode, active)
             {
                 let mut issue = ProjectFileIssue::invalid(source, error);
                 issue.asset_id = Some(id);
@@ -578,7 +607,7 @@ impl AssetStore {
         source: &str,
         importer: Importer,
         metadata: Metadata,
-        refresh: bool,
+        mode: Reconcile,
         active: &impl Fn() -> bool,
     ) -> Result<(), AssetError> {
         let mutation = match importer {
@@ -587,7 +616,7 @@ impl AssetStore {
                 if let Some(record) = self.registry.assets.get(&metadata.id) {
                     let ready = self.infos[&metadata.id].status == AssetStatus::Ready;
                     if ready
-                        && (!refresh
+                        && (mode == Reconcile::Discover
                             || record.hash.as_ref().is_some_and(|hash| {
                                 super::read_source_bytes(&self.root, source, kind)
                                     .is_ok_and(|bytes| digest(&bytes) == *hash)
@@ -617,8 +646,9 @@ impl AssetStore {
             }
             Importer::Model => {
                 if let Some(model) = self.registry.models.get(&metadata.id) {
-                    if digest(&super::glb_catalog::read_candidate(&self.root, source)?)
-                        == model.hash
+                    if mode != Reconcile::Reimport
+                        && digest(&super::glb_catalog::read_candidate(&self.root, source)?)
+                            == model.hash
                     {
                         return Ok(());
                     }

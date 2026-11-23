@@ -263,6 +263,7 @@ fn run(
         }
         let mut import = None;
         let mut asset_write = None;
+        let mut reimport = None;
         match queued.try_recv() {
             Ok(Job::ImportFiles(batch)) => {
                 let mut failures = Vec::new();
@@ -280,6 +281,7 @@ fn run(
                 import = Some((batch.result, failures));
             }
             Ok(Job::FileAction(job)) => {
+                let explicit_reimport = matches!(&job.action, FileAction::Reimport(_));
                 let outcome = if store.matches_identity(&job.catalog) && active() {
                     file_action(&mut store, &held_root, &mut watcher, job.action, active)
                 } else {
@@ -287,6 +289,9 @@ fn run(
                 };
                 let failures = match outcome {
                     Ok(path) => {
+                        if explicit_reimport {
+                            reimport = Some(path.clone());
+                        }
                         paths.insert(path);
                         Vec::new()
                     }
@@ -326,7 +331,8 @@ fn run(
                 .as_ref()
                 .is_some_and(|(_, outcome)| outcome.is_ok())
         {
-            let mut issues = store.reconcile_project_files(&paths, active);
+            let mut issues =
+                store.reconcile_project_files_with_reimport(&paths, reimport.as_deref(), active);
             let (prefabs, prefab_issues) = store.read_project_prefabs();
             issues.extend(prefab_issues);
             (issues, prefabs)
@@ -919,6 +925,61 @@ impl<'a> WatchTree<'a> {
 mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
+
+    #[test]
+    fn reimport_recovers_spot_from_same_bytes_without_auto_upgrading_catalog() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        fs::create_dir(root.join("Assets")).unwrap();
+        let source = "Assets/Lantern.glb";
+        let bytes = rot_assets::fixtures::punctual_glb(|_| {});
+        fs::write(root.join(source), &bytes).unwrap();
+
+        let mut store = AssetStore::open(root).unwrap();
+        let admitted = store.import_glb_at(0, "lantern", source).unwrap();
+        let catalog = root.join(".rot-assets.json");
+        let mut prior: serde_json::Value =
+            serde_json::from_slice(&fs::read(&catalog).unwrap()).unwrap();
+        let model = &mut prior["models"]["lantern"];
+        model["nodes"]["Rig/Spot"]
+            .as_object_mut()
+            .unwrap()
+            .remove("light");
+        model["warnings"][2] =
+            serde_json::json!("Light \"Edge Lamp\": Skipped spot light. Its node is kept.");
+        fs::write(catalog, serde_json::to_vec(&prior).unwrap()).unwrap();
+
+        let ctx = Context::default();
+        let worker = ProjectAssets::start(root.to_owned(), &ctx).unwrap();
+        let next = || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Some(update) = worker.take_update() {
+                    break update.unwrap();
+                }
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        let old = next();
+        assert!(old.store.model("lantern").unwrap().nodes["Rig/Spot"]
+            .light
+            .is_none());
+        let errors = worker
+            .file_action(
+                FileAction::Reimport(source.into()),
+                old.store.state_identity(),
+            )
+            .unwrap()
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        assert!(errors.is_empty(), "{errors:?}");
+        let current = next();
+        assert!(current.issues.is_empty(), "{:?}", current.issues);
+        assert!(current.store.revision() > old.store.revision());
+        assert_eq!(current.store.model("lantern"), Some(&admitted));
+        assert_eq!(fs::read(root.join(source)).unwrap(), bytes);
+    }
 
     #[test]
     fn source_actions_preserve_identity_settings_and_recoverable_files() {
