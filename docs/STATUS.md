@@ -110,6 +110,13 @@ matched committed poses and contact IDs. Another binding kept Ordinary
 movement while using the same file. With 128 stationary blockers, warmed
 release Step p95 was 29 µs ordinary, 299 µs in free travel and 273 µs in
 sustained wall contact. Paused screenshots kept the committed tick and poses.
+Named Box Sensor crossings compare the Kinematic Sphere's previous
+committed center and accepted endpoint. Native authoring and approved
+Claude verified entry at geometric contact, dwell, exit and re-entry.
+A wall kept the sealed sensor outside, and a failed Step preserved the
+previous pose and cue history. The relocated player sounded two entries.
+Warmed release Step p95 added about 2 µs on fixtures with 1 and 32
+stationary colliders. At 128, the measured ranges overlapped at 283–292 µs.
 File-backed Object Lua can bind imported WAVs as named Sound Cues in the
 Inspector and through approved MCP. Two Script components sharing a Lua
 file kept separate WAVs and gain. Editor capture verified silence after a
