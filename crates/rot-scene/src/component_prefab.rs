@@ -48,6 +48,8 @@ pub enum PrefabProperty {
     Transform(PrefabFields),
     /// Stable component ID from the scene instance.
     Tint(String),
+    /// Stable Mesh Renderer ID from the scene instance.
+    Material(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -59,6 +61,8 @@ pub struct PrefabPart {
     pub transform_overrides: BTreeSet<PrefabFields>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub tint_overrides: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub material_overrides: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -164,6 +168,17 @@ impl PrefabInstance {
                 }
                 PrefabProperty::Tint(source.clone())
             }
+            PrefabProperty::Material(id) => {
+                let source = part
+                    .components
+                    .iter()
+                    .find_map(|(source, actual)| (actual == id).then_some(source))
+                    .ok_or_else(|| invalid("The prefab renderer is missing."))?;
+                part.material_overrides
+                    .remove(source)
+                    .ok_or_else(|| invalid("This prefab property has no override."))?;
+                PrefabProperty::Material(source.clone())
+            }
             _ => return Err(invalid("This prefab property has no override.")),
         };
         Ok((source.clone(), source_property))
@@ -181,6 +196,11 @@ pub(super) fn validate_instances(
     if scene.prefabs.is_empty() {
         return Ok(());
     }
+    let inherited_materials: HashSet<_> = scene
+        .prefabs
+        .values()
+        .flat_map(|instance| instance.materials.values().map(String::as_str))
+        .collect();
     let mut owners = HashMap::new();
     for (root, instance) in &scene.prefabs {
         validate_id(&instance.asset)?;
@@ -228,6 +248,18 @@ pub(super) fn validate_instances(
                     "Invalid prefab membership on {}.",
                     part.object
                 )));
+            }
+            for (source, material) in &part.material_overrides {
+                validate_id(material)?;
+                if inherited_materials.contains(material.as_str())
+                    || !scene.materials.contains_key(material)
+                    || !part.components.get(source).is_some_and(|id| object.components.iter().any(|component| {
+                        &component.id == id && matches!(&component.kind,
+                           Component::MeshRenderer { material: Some(bound), .. } if bound == material)
+                    }))
+                {
+                    return Err(invalid(format!("Invalid prefab material override on {}.", part.object)));
+                }
             }
             for id in part.components.keys() {
                 validate_id(id)?;
@@ -293,6 +325,7 @@ impl PrefabSource {
                             .collect(),
                         transform_overrides: BTreeSet::new(),
                         tint_overrides: BTreeSet::new(),
+                        material_overrides: BTreeMap::new(),
                     },
                 );
             }
@@ -304,6 +337,7 @@ impl PrefabSource {
                     components: BTreeMap::new(),
                     transform_overrides: BTreeSet::new(),
                     tint_overrides: BTreeSet::new(),
+                    material_overrides: BTreeMap::new(),
                 },
             );
         }
@@ -335,7 +369,9 @@ impl PrefabSource {
             .collect();
         if instance.parts.iter().any(|(id, part)| {
             !object_ids.contains(id.as_str())
-                && (!part.transform_overrides.is_empty() || !part.tint_overrides.is_empty())
+                && (!part.transform_overrides.is_empty()
+                    || !part.tint_overrides.is_empty()
+                    || !part.material_overrides.is_empty())
         }) {
             return Err(invalid(
                 "A removed prefab part still has instance overrides.",
@@ -353,6 +389,7 @@ impl PrefabSource {
                     components: BTreeMap::new(),
                     transform_overrides: BTreeSet::new(),
                     tint_overrides: BTreeSet::new(),
+                    material_overrides: BTreeMap::new(),
                 });
             let live: HashSet<_> = object
                 .components
@@ -366,6 +403,15 @@ impl PrefabSource {
             {
                 return Err(invalid(
                     "A removed prefab renderer still has an instance override.",
+                ));
+            }
+            if part.material_overrides.keys().any(|id| {
+                !object.components.iter().any(|component| {
+                    &component.id == id && matches!(component.kind, Component::MeshRenderer { .. })
+                })
+            }) {
+                return Err(invalid(
+                    "A removed or changed prefab renderer still has a material override.",
                 ));
             }
             part.components.retain(|id, _| live.contains(id.as_str()));
@@ -426,7 +472,9 @@ impl PrefabSource {
                 component.id.clone_from(&part.components[&source_id]);
                 match &mut component.kind {
                     Component::MeshRenderer { material, tint, .. } => {
-                        if let Some(id) = material {
+                        if let Some(local) = part.material_overrides.get(&source_id) {
+                            *material = Some(local.clone());
+                        } else if let Some(id) = material {
                             *id = instance.materials[id].clone();
                         }
                         if part.tint_overrides.contains(&source_id) {
@@ -516,6 +564,7 @@ impl PrefabSource {
         source_property: PrefabProperty,
         instance: &ObjectNode,
         property: &PrefabProperty,
+        materials: &BTreeMap<String, OpaqueMaterial>,
     ) -> Result<Self, SceneError> {
         let mut edited = self.clone();
         let object = edited
@@ -550,6 +599,33 @@ impl PrefabSource {
                     return Err(invalid("The prefab renderer is missing."));
                 };
                 *value = selected;
+            }
+            (PrefabProperty::Material(source), PrefabProperty::Material(id)) => {
+                let target = object
+                    .components
+                    .iter_mut()
+                    .find(|component| component.id == source)
+                    .map(|component| &mut component.kind);
+                let local = instance
+                    .components
+                    .iter()
+                    .find(|component| component.id == *id)
+                    .and_then(|component| match &component.kind {
+                        Component::MeshRenderer {
+                            material: Some(id), ..
+                        } => materials.get(id),
+                        _ => None,
+                    })
+                    .ok_or_else(|| invalid("The prefab material is missing."))?;
+                let Some(Component::MeshRenderer { material, .. }) = target else {
+                    return Err(invalid("The prefab renderer is missing."));
+                };
+                let next = (1..)
+                    .map(|index| format!("finish-{index}"))
+                    .find(|id| !edited.scene.materials.contains_key(id))
+                    .expect("bounded prefab materials");
+                *material = Some(next.clone());
+                edited.scene.materials.insert(next, local.clone());
             }
             _ => return Err(invalid("Incompatible prefab property.")),
         }

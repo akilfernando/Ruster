@@ -277,14 +277,10 @@ pub(super) fn components(
                             }
                             if ui
                                 .add_enabled(
-                                    allow_new_material && material.is_some(),
+                                    material.is_some(),
                                     egui::Button::new(Text::MaterialMakeUnique.plain()),
                                 )
-                                .on_disabled_hover_text(if !allow_new_material {
-                                    Text::ComponentPrefabMaterialSource.plain()
-                                } else {
-                                    Text::MaterialAssignBeforeCopy.plain()
-                                })
+                                .on_disabled_hover_text(Text::MaterialAssignBeforeCopy.plain())
                                 .clicked()
                             {
                                 material_request = material.clone().map(|id| Request {

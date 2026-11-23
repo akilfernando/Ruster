@@ -240,6 +240,12 @@ impl ComponentWorkspace {
         let prefab_fields: &[&str] = match args["action"].as_str() {
             Some("save") => &["object_id", "source"],
             Some("place") => &["asset_id", "object_id", "parent_id", "transform"],
+            Some("apply" | "revert") if args["property"] == "material" => &[
+                "object_id",
+                "property",
+                "component_id",
+                "expected_source_hash",
+            ],
             Some("apply" | "revert") => &["object_id", "property", "component_id"],
             _ => &[],
         };
@@ -384,9 +390,23 @@ impl ComponentWorkspace {
                             PrefabProperty::Transform(PrefabFields::Scale)
                         }
                         "tint" => PrefabProperty::Tint(string("component_id")?.into()),
+                        "material" => PrefabProperty::Material(string("component_id")?.into()),
                         _ => return Err(invalid()),
                     };
-                    self.change_prefab_override(object, &property, action == "apply")
+                    let expected = if matches!(property, PrefabProperty::Material(_)) {
+                        let hash = string("expected_source_hash")?;
+                        if hash.len() != 64
+                            || !hash
+                                .bytes()
+                                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                        {
+                            return Err(invalid());
+                        }
+                        Some(hash)
+                    } else {
+                        None
+                    };
+                    self.change_prefab_override(object, &property, action == "apply", expected)
                         .map(|()| json!({"object_id":object,"property":args["property"]}))
                 }
                 _ => return Err(invalid()),
@@ -396,7 +416,16 @@ impl ComponentWorkspace {
                     response["dirty"] = json!(self.session.is_dirty());
                     response
                 })
-                .map_err(|error| ("prefab_edit_failed", error.to_string()));
+                .map_err(|error| {
+                    if args["property"] == "material" && matches!(error, SceneError::Conflict) {
+                        (
+                            "stale_source_hash",
+                            "Inspect the prefab renderer and current source again.".into(),
+                        )
+                    } else {
+                        ("prefab_edit_failed", error.to_string())
+                    }
+                });
         }
 
         if op == "scene_model_place" {
@@ -967,6 +996,27 @@ impl ComponentWorkspace {
             let mut response = json!({"object_id":id,"component":component});
             if let Component::Animator { binding } = &component.kind {
                 response["animation"] = component_animation::observe(self.assets.as_ref(), binding);
+            }
+            if let Component::MeshRenderer { material, .. } = &component.kind {
+                if let Some((root, link, part, source)) = self
+                    .session
+                    .scene()
+                    .prefabs
+                    .iter()
+                    .find_map(|(root, link)| {
+                        let part = link.parts.values().find(|part| part.object == id)?;
+                        let source = part.components.iter().find_map(|(source, actual)| {
+                            (actual == component_id).then_some(source)
+                        })?;
+                        Some((root, link, part, source))
+                    })
+                {
+                    response["prefab_material"] = json!({
+                        "state": if part.material_overrides.contains_key(source) { "local" } else { "inherited" },
+                        "source_component_id":source, "source_hash":link.source_hash, "asset_id":link.asset,
+                        "instance_root_id":root, "material_id":material,
+                    });
+                }
             }
             return Ok(response);
         }

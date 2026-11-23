@@ -142,6 +142,42 @@ fn prefab_metadata(entries: &[Metadata]) -> Result<&Metadata, AssetError> {
 
 /// Compare the source and its stable sidecar before publishing an authoring
 /// command or its inverse. The caller has already validated the prefab data.
+/// Compare an accepted prefab source and sidecar without writing either file.
+pub fn verify_project_prefab(
+    project_root: &Path,
+    source: &str,
+    id: &str,
+    expected: &[u8],
+) -> Result<(), AssetError> {
+    if !source.starts_with("Assets/")
+        || !source.ends_with(".prefab")
+        || source.split('/').any(|part| part.starts_with('.'))
+    {
+        return Err(error("Choose a .prefab file in Assets."));
+    }
+    validate_id(id)?;
+    let root = fs::canonicalize(project_root)?;
+    let _lock = super::super::lock(&root)?;
+    let path = confined_path(&root, source, false)?;
+    verify_prefab_bytes(&path, &sidecar_path(&path), &metadata(id.into()), expected)
+}
+
+fn verify_prefab_bytes(
+    path: &Path,
+    sidecar: &Path,
+    entry: &Metadata,
+    expected: &[u8],
+) -> Result<(), AssetError> {
+    if existing_metadata(sidecar)?.as_deref() != Some(std::slice::from_ref(entry))
+        || read_bounded(path, MAX_PREFAB_BYTES)? != expected
+    {
+        return Err(error(
+            "The prefab source or its sidecar changed. Reopen or reload it first.",
+        ));
+    }
+    Ok(())
+}
+
 pub fn publish_project_prefab(
     project_root: &Path,
     source: &str,
@@ -163,13 +199,7 @@ pub fn publish_project_prefab(
     let parent = path.parent().expect("validated project directory");
     let entry = metadata(id.into());
     if let Some(expected) = before {
-        if existing_metadata(&sidecar)?.as_deref() != Some(std::slice::from_ref(&entry))
-            || read_bounded(&path, MAX_PREFAB_BYTES)? != expected
-        {
-            return Err(error(
-                "The prefab source or its sidecar changed. Reopen or reload it first.",
-            ));
-        }
+        verify_prefab_bytes(&path, &sidecar, &entry, expected)?;
     } else if !is_missing(&path)? || !is_missing(&sidecar)? {
         return Err(error("A prefab or sidecar with this name already exists."));
     }

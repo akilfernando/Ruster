@@ -280,6 +280,7 @@ impl ComponentWorkspace {
         object: &str,
         property: &PrefabProperty,
         apply: bool,
+        expected_source_hash: Option<&str>,
     ) -> Result<(), SceneError> {
         let (instance, link) = self
             .session
@@ -293,6 +294,20 @@ impl ComponentWorkspace {
             .get(&link.asset)
             .ok_or_else(|| invalid("The prefab source is unavailable."))?
             .clone();
+        if expected_source_hash
+            .is_some_and(|expected| expected != link.source_hash || expected != file.hash)
+        {
+            return Err(SceneError::Conflict);
+        }
+        if !apply && matches!(property, PrefabProperty::Material(_)) {
+            rot_assets::verify_project_prefab(
+                project_directory(&self.path),
+                &file.source,
+                &link.asset,
+                &file.bytes,
+            )
+            .map_err(|error| invalid(error.to_string()))?;
+        }
         let instance = instance.clone();
         let revision = self.session.revision();
         if apply {
@@ -386,9 +401,54 @@ impl ComponentWorkspace {
                 }
             });
         }
+        let renderers = object.components.iter().filter(|component| {
+            matches!(
+                component.kind,
+                rot_scene::component_scene::Component::MeshRenderer { .. }
+            )
+        });
+        let multiple = renderers.clone().take(2).count() == 2;
+        for (index, renderer) in renderers.enumerate() {
+            let local = part.components.iter().any(|(source, id)| {
+                id == &renderer.id && part.material_overrides.contains_key(source)
+            });
+            let heading = crate::scene_editor::component_inspector::mesh_renderer_heading(
+                multiple.then_some(index + 1),
+            );
+            let state = if local {
+                Text::PrefabLocalMaterial
+            } else {
+                Text::PrefabInheritedMaterial
+            };
+            ui.horizontal_wrapped(|ui| {
+                ui.label(format!("{heading} · {}", state.plain()));
+                if local {
+                    if ui
+                        .add_enabled(
+                            can_edit,
+                            egui::Button::new(Text::PrefabApplyToSource.plain()),
+                        )
+                        .clicked()
+                    {
+                        action = Some((PrefabProperty::Material(renderer.id.clone()), true));
+                    }
+                    if ui
+                        .add_enabled(
+                            can_edit,
+                            egui::Button::new(Text::PrefabRevertMaterial.plain()),
+                        )
+                        .clicked()
+                    {
+                        action = Some((PrefabProperty::Material(renderer.id.clone()), false));
+                    }
+                }
+            });
+        }
         if let Some((property, apply)) = action {
             let object = object.id.clone();
-            let result = self.change_prefab_override(&object, &property, apply);
+            let hash =
+                matches!(property, PrefabProperty::Material(_)).then(|| link.source_hash.clone());
+            let result = self.change_prefab_override(&object, &property, apply, hash.as_deref());
             let label = if apply {
                 Text::PrefabApply
             } else {

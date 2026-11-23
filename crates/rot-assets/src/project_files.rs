@@ -15,7 +15,7 @@ const METADATA_EXTENSION: &str = ".rotmeta";
 
 #[path = "project_prefabs.rs"]
 mod prefabs;
-pub use prefabs::{publish_project_prefab, PrefabFile};
+pub use prefabs::{publish_project_prefab, verify_project_prefab, PrefabFile};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjectFileIssue {

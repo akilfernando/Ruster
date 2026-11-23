@@ -436,6 +436,30 @@ impl ComponentSession {
         value: OpaqueMaterial,
         assign: Option<(&str, &str)>,
     ) -> Result<u64, SceneError> {
+        self.set_material_binding(expected, id, value, assign, false)
+    }
+
+    /// Create and assign a unique definition, recording exact prefab renderer
+    /// ownership when the destination is a linked part.
+    pub fn set_unique_material(
+        &mut self,
+        expected: u64,
+        id: &str,
+        value: OpaqueMaterial,
+        owner: &str,
+        component: &str,
+    ) -> Result<u64, SceneError> {
+        self.set_material_binding(expected, id, value, Some((owner, component)), true)
+    }
+
+    fn set_material_binding(
+        &mut self,
+        expected: u64,
+        id: &str,
+        value: OpaqueMaterial,
+        assign: Option<(&str, &str)>,
+        unique: bool,
+    ) -> Result<u64, SceneError> {
         self.check_revision(expected)?;
         let previous = self.scene.materials.get(id);
         if assign.is_none() && previous == Some(&value) {
@@ -472,6 +496,33 @@ impl ComponentSession {
                 }
             }
             changes.push(SceneChange::Replace { index, object });
+            if unique {
+                if let Some((root, instance)) = self.scene.prefabs.iter().find(|(_, instance)| {
+                    instance.parts.values().any(|part| part.object == object_id)
+                }) {
+                    let mut instance = instance.clone();
+                    let part = instance
+                        .parts
+                        .values_mut()
+                        .find(|part| part.object == object_id)
+                        .expect("instance owns the renderer");
+                    let source = part
+                        .components
+                        .iter()
+                        .find_map(|(source, actual)| {
+                            (actual == component_id).then_some(source.clone())
+                        })
+                        .ok_or_else(|| {
+                            SceneError::Invalid("The prefab renderer is missing.".into())
+                        })?;
+                    part.material_overrides.insert(source, id.to_owned());
+                    changes.push(SceneChange::Prefab {
+                        root: root.clone(),
+                        value: Some(instance),
+                    });
+                    return self.commit_with_file(changes, None, no_prefab_publisher);
+                }
+            }
         }
         self.commit(changes)
     }
@@ -941,7 +992,13 @@ impl ComponentSession {
         let source = PrefabSource::read_json(&source_bytes)?;
         let (source_id, source_property) = instance.take_override(object, property)?;
         let object = &self.scene.objects[self.object_index(object)?];
-        let edited = source.with_override(&source_id, source_property, object, property)?;
+        let edited = source.with_override(
+            &source_id,
+            source_property,
+            object,
+            property,
+            &self.scene.materials,
+        )?;
         let bytes = edited.bytes()?;
         let digest = prefab_hash(&bytes);
         let asset = instance.asset.clone();
@@ -1143,6 +1200,48 @@ impl ComponentSession {
             .checked_add(1)
             .ok_or(SceneError::RevisionOverflow)?;
         let mut inverse = apply_changes(changes, &mut self.scene);
+        let mut released: HashSet<_> = inverse
+            .iter()
+            .flat_map(|change| match change {
+                SceneChange::Prefab {
+                    value: Some(instance),
+                    ..
+                } => Some(instance),
+                _ => None,
+            })
+            .flat_map(|instance| {
+                instance
+                    .parts
+                    .values()
+                    .flat_map(|part| part.material_overrides.values().cloned())
+            })
+            .collect();
+        if !released.is_empty() {
+            for id in self
+                .scene
+                .objects
+                .iter()
+                .flat_map(|object| &object.components)
+                .filter_map(|component| match &component.kind {
+                    Component::MeshRenderer { material, .. } => material.as_ref(),
+                    _ => None,
+                })
+                .chain(self.scene.prefabs.values().flat_map(|instance| {
+                    instance
+                        .parts
+                        .values()
+                        .flat_map(|part| part.material_overrides.values())
+                }))
+            {
+                released.remove(id);
+            }
+            let cleanup = released
+                .into_iter()
+                .filter(|id| self.scene.materials.contains_key(id))
+                .map(|id| SceneChange::Material { id, value: None })
+                .collect::<Vec<_>>();
+            inverse.splice(..0, apply_changes(cleanup, &mut self.scene));
+        }
         if self.scene.gameplay_camera.as_deref().is_some_and(|id| {
             !inverse
                 .iter()

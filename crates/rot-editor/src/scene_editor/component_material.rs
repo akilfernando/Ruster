@@ -305,11 +305,6 @@ impl ComponentWorkspace {
         let scene = self.session.scene();
         let previous = if let Some(source) = inherited_from {
             let (owner, component) = assign.expect("copy has an exact destination");
-            if self.material_usage.prefab_objects.contains(owner) {
-                return Err(SceneError::Invalid(
-                    Text::ComponentPrefabMaterialSource.plain().into(),
-                ));
-            }
             if scene.materials.contains_key(id) {
                 return Err(SceneError::Invalid(
                     "Choose a new material ID to create and assign.".into(),
@@ -353,7 +348,12 @@ impl ComponentWorkspace {
                 }
             }
         }
-        let next = self.session.set_material(revision, id, value, assign)?;
+        let next = if let (Some((owner, component)), Some(_)) = (assign, inherited_from) {
+            self.session
+                .set_unique_material(revision, id, value, owner, component)?
+        } else {
+            self.session.set_material(revision, id, value, assign)?
+        };
         if next != revision {
             self.refresh();
         }
@@ -400,10 +400,6 @@ impl ComponentWorkspace {
                 )
             }
             Intent::MakeUnique(source) => {
-                if self.material_usage.prefab_objects.contains(object) {
-                    self.error = Some(Text::ComponentPrefabMaterialSource.plain().into());
-                    return;
-                }
                 let Ok(value) = bound_copy_source(scene, object, &request.component, source) else {
                     self.error = Some(Text::MaterialTargetChanged.plain().into());
                     return;

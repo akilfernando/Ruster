@@ -423,7 +423,16 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
                         && hierarchy_tools::valid_creation_options(args)
                 }
                 "apply" | "revert" => {
-                    if args["property"] == "tint" {
+                    if args["property"] == "material" {
+                        keys(&["property", "component_id", "expected_source_hash"], &[])
+                            && bounded("component_id", 128)
+                            && args["expected_source_hash"].as_str().is_some_and(|hash| {
+                                hash.len() == 64
+                                    && hash.bytes().all(|byte| {
+                                        byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
+                                    })
+                            })
+                    } else if args["property"] == "tint" {
                         keys(&["property", "component_id"], &[]) && bounded("component_id", 128)
                     } else {
                         keys(&["property"], &[])
@@ -634,8 +643,9 @@ fn tools() -> Value {
             properties.insert("object_id".into(), json!({"type":"string","minLength":1,"maxLength":128,"description":"Selection or override target, or the new instance root ID for place."}));
             properties.insert("asset_id".into(), id.clone());
             properties.insert("source".into(), json!({"type":"string","maxLength":256,"description":"Optional new Assets/*.prefab path for save."}));
-            properties.insert("property".into(), json!({"enum":["position","rotation","scale","tint"]}));
+            properties.insert("property".into(), json!({"enum":["position","rotation","scale","tint","material"]}));
             properties.insert("component_id".into(), id);
+            properties.insert("expected_source_hash".into(), json!({"type":"string","pattern":"^[0-9a-f]{64}$","description":"Required for material Apply/Revert. Read from prefab_material in scene_components_inspect."}));
             hierarchy_tools::creation_properties(&mut properties);
             required.extend(["action","object_id"]);
         }
