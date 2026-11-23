@@ -236,6 +236,7 @@ pub(super) struct ComponentWorkspace {
     selection_anchor: Option<String>,
     selected_index: Option<usize>,
     draft: Option<ObjectNode>,
+    animator_draft_revision: Option<u64>,
     multi_draft: Option<MultiInspector>,
     material_draft: Option<component_material::Draft>,
     display_draft: Option<component_display::Draft>,
@@ -351,6 +352,7 @@ impl ComponentWorkspace {
             selection: HashSet::new(),
             selection_anchor: None,
             draft: None,
+            animator_draft_revision: None,
             multi_draft: None,
             material_draft: None,
             display_draft: None,
@@ -624,6 +626,7 @@ impl ComponentWorkspace {
         } else {
             None
         };
+        self.animator_draft_revision = None;
         self.draft = self.selected_index.map(|index| objects[index].clone());
         self.multi_draft = if self.selection.len() > 1 {
             MultiInspector::new(
@@ -824,7 +827,26 @@ impl ComponentWorkspace {
         let result = if let Some(draft) = self.draft.clone() {
             let prior = &self.session.scene().objects
                 [self.selected_index.expect("draft requires selection")];
-            self.validate_material_bindings(prior, &draft)
+            let check_animation = || {
+                for (old, binding) in super::component_animation::changed_bindings(prior, &draft) {
+                    if self.assets_loading()
+                        || self.animator_draft_revision != Some(self.material_asset_revision())
+                    {
+                        return Err(SceneError::Invalid(
+                            Text::AnimatorAssetsChanged.plain().into(),
+                        ));
+                    }
+                    super::component_animation::validate_binding(
+                        self.assets.as_ref(),
+                        old,
+                        binding,
+                    )
+                    .map_err(|(_, message)| SceneError::Invalid(message))?;
+                }
+                Ok(())
+            };
+            check_animation()
+                .and_then(|()| self.validate_material_bindings(prior, &draft))
                 .and_then(|()| self.session.put_object(revision, draft))
         } else if let Some(draft) = &self.multi_draft {
             let edits = self
@@ -2337,6 +2359,7 @@ impl ComponentWorkspace {
                                             &self.session.scene().materials,
                                             allow_new,
                                             self.runtime.diagnostic.as_ref(),
+                                            &mut self.animator_draft_revision,
                                         );
                                     submit |= component_submit;
                                     self.camera_controls(ui);

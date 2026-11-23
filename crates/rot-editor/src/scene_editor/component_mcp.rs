@@ -1,7 +1,7 @@
 //! Guarded v23 commands dispatched only under the existing Host request lease.
 use super::{ComponentWorkspace, HierarchyDestination, RUNTIME_GENERATION};
 use crate::behavior_ui::RuntimeSource;
-use crate::scene_editor::{asset_inspection, runtime_commands};
+use crate::scene_editor::{asset_inspection, component_animation, runtime_commands};
 use crate::strings::Text;
 use rot_scene::component_scene::{
     Component, ComponentInstance, Geometry, ObjectNode, PrefabFields, PrefabProperty,
@@ -264,6 +264,12 @@ impl ComponentWorkspace {
             "scene_transform" | "scene_rename" | "scene_reparent" | "scene_primitive" => 4,
             "scene_transform_many" | "scene_delete" | "scene_delete_many" => 3,
             "scene_components_edit" => 3 + usize::from(map.contains_key("expected_asset_revision")),
+            "scene_animation_set" => {
+                3 + ["expected_asset_revision", "clip_id", "looping", "remove"]
+                    .iter()
+                    .filter(|key| map.contains_key(**key))
+                    .count()
+            }
             "scene_undo" | "scene_redo" => 2,
             _ => {
                 return Err((
@@ -289,6 +295,10 @@ impl ComponentWorkspace {
                 "drafts_pending",
                 "Finish the pending editor change first.".into(),
             ));
+        }
+
+        if op == "scene_animation_set" {
+            return self.edit_animation(args, revision);
         }
 
         if op == "scene_player_view_set" {
@@ -633,6 +643,111 @@ impl ComponentWorkspace {
         Ok(payload)
     }
 
+    fn edit_animation(&mut self, args: &Value, revision: u64) -> Result<Value, CommandError> {
+        use component_animation::{observe, validate_binding};
+
+        let invalid = || {
+            (
+                "invalid_arguments",
+                "Pass owner_id and a clip_id, looping, or remove:true.".into(),
+            )
+        };
+        let clip = args
+            .get("clip_id")
+            .map(|value| value.as_str().ok_or_else(invalid))
+            .transpose()?;
+        let looping = args
+            .get("looping")
+            .map(|value| value.as_bool().ok_or_else(invalid))
+            .transpose()?;
+        let remove = args.get("remove");
+        let asset_revision = args
+            .get("expected_asset_revision")
+            .map(|value| decimal(value).ok_or_else(invalid))
+            .transpose()?;
+        if (remove.is_some()
+            && (remove != Some(&Value::Bool(true)) || clip.is_some() || looping.is_some()))
+            || (remove.is_none() && clip.is_none() && looping.is_none())
+        {
+            return Err(invalid());
+        }
+        let owner = args["owner_id"].as_str().ok_or_else(invalid)?;
+        let mut object = self
+            .session
+            .scene()
+            .objects
+            .iter()
+            .find(|object| object.id == owner)
+            .ok_or_else(object_not_found)?
+            .clone();
+        let mut animators = object
+            .components
+            .iter()
+            .enumerate()
+            .filter(|(_, component)| matches!(component.kind, Component::Animator { .. }));
+        let (index, component) = animators.next().ok_or((
+            "animation_unbound",
+            "Place an imported animated model to create an Animator.".into(),
+        ))?;
+        if animators.next().is_some() {
+            return Err((
+                "ambiguous_animator",
+                "Use scene_components_edit with the specific Animator component ID.".into(),
+            ));
+        }
+        let mut animation = Value::Null;
+        let component_id = component.id.clone();
+        if remove.is_some() {
+            object.components.remove(index);
+        } else {
+            let Component::Animator { binding } = &mut object.components[index].kind else {
+                unreachable!()
+            };
+            if let Some(clip) = clip {
+                self.require_component_asset_revision(asset_revision)?;
+                let mut replacement = binding.clone();
+                replacement.clip = clip.to_owned();
+                validate_binding(self.assets.as_ref(), Some(binding), &replacement)?;
+                *binding = replacement;
+            }
+            if let Some(looping) = looping {
+                binding.looping = looping;
+            }
+            animation = observe(self.assets.as_ref(), binding);
+        }
+        let next = self
+            .session
+            .put_object(revision, object)
+            .map_err(|error| ("invalid_animation", error.to_string()))?;
+        if next != revision {
+            self.refresh();
+        }
+        Ok(json!({
+            "owner_id":owner,"component_id":component_id,"animation":animation,
+            "changed":next != revision,"dirty":self.session.is_dirty()
+        }))
+    }
+
+    fn require_component_asset_revision(&self, expected: Option<u64>) -> Result<(), CommandError> {
+        let expected = expected.ok_or((
+            "asset_revision_required",
+            "Inspect project assets and pass expected_asset_revision when changing an Animator clip, textured Mesh Renderer or file-backed Script.".into(),
+        ))?;
+        if self.assets_loading() {
+            return Err((
+                "assets_loading",
+                "Wait for the project assets to load.".into(),
+            ));
+        }
+        if expected != self.material_asset_revision() {
+            return Err((
+                "stale_asset_revision",
+                "Inspect the project assets again.".into(),
+            ));
+        }
+        Ok(())
+    }
+
     fn inspect_assets(&self, args: &Value) -> Result<Value, CommandError> {
         let invalid = || ("invalid_arguments", "Check the asset page offsets.".into());
         let map = args.as_object().ok_or_else(invalid)?;
@@ -845,7 +960,11 @@ impl ComponentWorkspace {
                     "This component exceeds the detail response limit.".into(),
                 ));
             }
-            return Ok(json!({"object_id":id,"component":component}));
+            let mut response = json!({"object_id":id,"component":component});
+            if let Component::Animator { binding } = &component.kind {
+                response["animation"] = component_animation::observe(self.assets.as_ref(), binding);
+            }
+            return Ok(response);
         }
         let offset = args
             .get("offset")
@@ -941,23 +1060,15 @@ impl ComponentWorkspace {
                     .then_some(binding.source_id.as_str())
                 })
                 .collect();
-            if self.changes_textured_binding(before, object) || !new_scripts.is_empty() {
-                let expected = asset_revision.ok_or_else(|| (
-                    "asset_revision_required",
-                    "Inspect project assets and pass expected_asset_revision when changing a textured Mesh Renderer or file-backed Script.".into(),
-                ))?;
-                if self.assets_loading() {
-                    return Err((
-                        "assets_loading",
-                        "Wait for the project assets to load.".into(),
-                    ));
-                }
-                if expected != self.material_asset_revision() {
-                    return Err((
-                        "stale_asset_revision",
-                        "Inspect the project assets again.".into(),
-                    ));
-                }
+            let mut animations = component_animation::changed_bindings(before, object).peekable();
+            if self.changes_textured_binding(before, object)
+                || !new_scripts.is_empty()
+                || animations.peek().is_some()
+            {
+                self.require_component_asset_revision(asset_revision)?;
+            }
+            for (old, binding) in animations {
+                component_animation::validate_binding(self.assets.as_ref(), old, binding)?;
             }
             if !new_scripts.is_empty() {
                 if !object

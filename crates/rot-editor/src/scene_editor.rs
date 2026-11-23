@@ -18,6 +18,7 @@ mod collider_ui;
 mod collider_viewport;
 mod color_commands;
 mod combo_focus;
+mod component_animation;
 #[cfg(target_os = "linux")]
 mod component_build;
 mod component_inspector;

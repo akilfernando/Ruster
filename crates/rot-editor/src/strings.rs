@@ -108,6 +108,9 @@ editor_text! {
     CameraFinishEdit => "Stop Play and finish the current edit to set the Game Camera.",
     CameraOnlyFixed => "This command takes a fixed perspective shot.",
     CameraDestinationMissing => "Camera unavailable. Reopen the camera picker.",
+    AnimatorAssetsChanged => "Animation assets changed. Select the clip again.",
+    AnimatorClipUnavailable => "Clip unavailable. Refresh the source model.",
+    AnimatorMissingTargets => "This clip needs additional nodes. Place the model again.",
     ComponentAnimator => "Animator",
     ComponentScript => "Script",
     ComponentScriptSource => "Source",
@@ -666,6 +669,7 @@ editor_text! {
     AnimationRepeatTheClipOtherwise => "Repeat the clip; otherwise hold its last pose.",
     AnimationStopAnimatingThisPlacement => "Stop animating this placement. One Undo restores it.",
     Clip => "Clip",
+    Loop => "Loop",
     RemoveAnimation => "Remove Animation",
 
     // Asset Commands

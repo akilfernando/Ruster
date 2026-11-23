@@ -8,13 +8,14 @@ pub fn supported(name: &str) -> bool {
 pub fn list() -> Vec<Value> {
     let id = json!({"type":"string","minLength":1,"maxLength":128});
     vec![json!({"name":"scene_animation_set",
-        "description":"Change or remove the imported-clip animation on a placement root Group as one undoable scene edit. Use the current scene token and revision. Supply exactly one of clip_id (a clip of the same model, from asset_inspect model clips) with optional looping, or remove:true without looping. Only roots created by scene_model_place have a binding; to animate another copy, place the model. Runtime motion uses the new clip after preview Reset.",
+        "description":"Change or remove animation on an imported model root as one Undo. Pick a same-model clip_id from asset_inspect; v23 requires expected_asset_revision for clip selection and allows looping alone. Restart Play to use changes.",
         "inputSchema":{"type":"object","additionalProperties":false,
             "required":["expected_session_token","expected_revision","owner_id"],
             "properties":{
                 "expected_session_token":{"type":"string","minLength":1,"maxLength":256},
                 "expected_revision":{"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20},
                 "owner_id":id,
+                "expected_asset_revision":{"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20},
                 "clip_id":{"type":"string","minLength":1,"maxLength":256},
                 "looping":{"type":"boolean"},
                 "remove":{"const":true}
@@ -30,7 +31,7 @@ pub fn valid(name: &str, args: &Value) -> bool {
         || !super::exact_keys(
             map,
             &["expected_session_token", "expected_revision", "owner_id"],
-            &["clip_id", "looping", "remove"],
+            &["clip_id", "looping", "remove", "expected_asset_revision"],
         )
     {
         return false;
@@ -44,6 +45,9 @@ pub fn valid(name: &str, args: &Value) -> bool {
         && args["owner_id"]
             .as_str()
             .is_some_and(|id| id.len() <= 128 && rot_scene::validate_id(id).is_ok())
+        && map
+            .get("expected_asset_revision")
+            .is_none_or(super::canonical_u64)
         && match (clip, remove) {
             (Some(clip), None) => {
                 clip.as_str()
@@ -51,6 +55,7 @@ pub fn valid(name: &str, args: &Value) -> bool {
                     && map.get("looping").is_none_or(Value::is_boolean)
             }
             (None, Some(remove)) => *remove == json!(true) && !map.contains_key("looping"),
+            (None, None) => map.get("looping").is_some_and(Value::is_boolean),
             _ => false,
         }
 }

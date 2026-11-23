@@ -190,6 +190,7 @@ pub(super) fn components(
     materials: &BTreeMap<String, OpaqueMaterial>,
     allow_new_material: bool,
     diagnostic: Option<&rot_behavior::Diagnostic>,
+    animator_draft_revision: &mut Option<u64>,
 ) -> (
     bool,
     Option<super::component_workspace::component_material::Request>,
@@ -206,6 +207,7 @@ pub(super) fn components(
                 | Component::Collider { .. }
                 | Component::Camera { .. }
                 | Component::Light { .. }
+                | Component::Animator { .. }
                 | Component::Script {
                     source_kind: Some(_),
                     ..
@@ -353,6 +355,12 @@ pub(super) fn components(
                             });
                         }
                     }
+                    Component::Animator { binding } => {
+                        animator_fields(ui, binding, assets, animator_draft_revision);
+                        if ui.button(Text::ComponentRemove.plain()).clicked() {
+                            remove = Some(index);
+                        }
+                    }
                     Component::Script {
                         binding,
                         source_kind,
@@ -381,7 +389,6 @@ pub(super) fn components(
                             }
                         }
                     }
-                    _ => {}
                 }
             });
         if editable {
@@ -398,6 +405,57 @@ pub(super) fn components(
         submit = true;
     }
     (submit, material_request)
+}
+
+fn animator_fields(
+    ui: &mut egui::Ui,
+    binding: &mut rot_scene::AnimationBinding,
+    assets: Option<&rot_assets::AssetStore>,
+    draft_revision: &mut Option<u64>,
+) {
+    let source = assets.and_then(|store| store.clip_owner(&binding.clip));
+    if let Some((model, name)) = source {
+        let duration = model.clips[name].duration;
+        ui_kit::property_row_with_label(ui, Text::Clip.plain(), |ui, label| {
+            let focus = super::combo_focus::ComboFocus::capture(ui, "animator_clip");
+            let mut selected = false;
+            let response = egui::ComboBox::from_id_salt("animator_clip")
+                .selected_text(format!("{name} ({duration:.2} s)"))
+                .show_ui(ui, |ui| {
+                    for (name, clip) in &model.clips {
+                        let covered = clip
+                            .targets
+                            .iter()
+                            .all(|target| binding.targets.contains_key(&target.node));
+                        let row = egui::Button::selectable(
+                            binding.clip == clip.id,
+                            format!("{name} ({:.2} s)", clip.duration),
+                        );
+                        if ui
+                            .add_enabled(covered, row)
+                            .on_disabled_hover_text(Text::AnimatorMissingTargets.plain())
+                            .clicked()
+                        {
+                            if binding.clip != clip.id {
+                                binding.clip.clone_from(&clip.id);
+                            }
+                            *draft_revision = assets.map(rot_assets::AssetStore::revision);
+                            selected = true;
+                            ui.close();
+                        }
+                    }
+                });
+            focus.restore(ui, &response.response, selected);
+            response.response.labelled_by(label);
+        });
+    } else {
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            Text::AnimatorClipUnavailable.plain(),
+        );
+    }
+    ui.checkbox(&mut binding.looping, Text::Loop.plain())
+        .on_hover_text(Text::AnimationRepeatTheClipOtherwise.plain());
 }
 
 pub(super) fn geometry_name<'a>(
