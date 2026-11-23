@@ -260,6 +260,7 @@ fn scene_for(delivery: &Delivery) -> Scene {
     Scene {
         hierarchy: Default::default(),
         display: Default::default(),
+        background: None,
         player_view: None,
         animations: Default::default(),
         lighting: Default::default(),
