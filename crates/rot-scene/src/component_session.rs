@@ -1,9 +1,12 @@
 use super::{
-    prefab::Materialization, Component, ComponentScene, ObjectHierarchy, ObjectNode,
+    prefab::Materialization, CameraView, Component, ComponentScene, ObjectHierarchy, ObjectNode,
     PrefabInstance, PrefabProperty, PrefabSource,
 };
 use crate::input::{self, ActionDefinition};
-use crate::{BehaviorSource, DisplayProfile, OpaqueMaterial, SceneError, SceneLock, Transform};
+use crate::{
+    BehaviorSource, BindingTarget, DisplayProfile, OpaqueMaterial, PlayerAnchor, PropertyValue,
+    SceneError, SceneLock, Transform,
+};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
@@ -28,6 +31,13 @@ struct SavedDocument {
     path: PathBuf,
     digest: [u8; 32],
     bytes: u64,
+}
+
+/// Stable identities assigned in one duplicate transaction.
+pub struct DuplicatedObjects {
+    pub root_ids: Vec<String>,
+    pub object_ids: BTreeMap<String, String>,
+    pub component_ids: BTreeMap<String, String>,
 }
 
 /// Identity of the bytes written by a successful scene publication.
@@ -83,6 +93,8 @@ enum SceneChange {
         index: usize,
         object: ObjectNode,
     },
+    InsertCopies(Vec<(usize, ObjectNode)>),
+    RemoveCopies(Vec<usize>),
     Display(DisplayProfile),
     Hud(crate::hud::Hud),
     GameplayCamera(Option<String>),
@@ -120,6 +132,33 @@ impl SceneChange {
                 index,
                 object: std::mem::replace(&mut objects[index], object),
             },
+            Self::InsertCopies(copies) => {
+                let mut original = std::mem::take(objects).into_iter();
+                let mut removed = Vec::with_capacity(copies.len());
+                objects.reserve(original.len() + copies.len());
+                let mut consumed = 0;
+                for (index, object) in copies {
+                    objects.extend(original.by_ref().take(index + 1 - consumed));
+                    consumed = index + 1;
+                    removed.push(objects.len());
+                    objects.push(object);
+                }
+                objects.extend(original);
+                Self::RemoveCopies(removed)
+            }
+            Self::RemoveCopies(indices) => {
+                let mut original = std::mem::take(objects).into_iter();
+                let mut copies = Vec::with_capacity(indices.len());
+                objects.reserve(original.len() - indices.len());
+                let mut consumed = 0;
+                for index in indices {
+                    objects.extend(original.by_ref().take(index - consumed));
+                    consumed = index + 1;
+                    copies.push((objects.len() - 1, original.next().expect("copied object")));
+                }
+                objects.extend(original);
+                Self::InsertCopies(copies)
+            }
             Self::Hud(value) => Self::Hud(std::mem::replace(&mut scene.hud, value)),
             Self::Display(value) => Self::Display(std::mem::replace(&mut scene.display, value)),
             Self::GameplayCamera(value) => {
@@ -689,6 +728,160 @@ impl ComponentSession {
             }
         }
         self.commit(changes)
+    }
+
+    /// Copy selected subtrees as siblings in one history entry.
+    pub fn duplicate_selection(
+        &mut self,
+        expected: u64,
+        ids: &[&str],
+    ) -> Result<DuplicatedObjects, SceneError> {
+        self.check_revision(expected)?;
+        if ids.is_empty() {
+            return Err(SceneError::Invalid("Select an object to duplicate.".into()));
+        }
+        let objects = &self.scene.objects;
+        let hierarchy = ObjectHierarchy::build(objects)?;
+        let requested: HashSet<_> = ids.iter().copied().collect();
+        let mut copied = vec![false; objects.len()];
+        let mut roots = vec![false; objects.len()];
+        let mut found = 0;
+        for index in hierarchy.order {
+            let selected = requested.contains(objects[index].id.as_str());
+            found += usize::from(selected);
+            let inherited = hierarchy.parents[index].is_some_and(|parent| copied[parent]);
+            copied[index] = selected || inherited;
+            roots[index] = selected && !inherited;
+        }
+        if found < requested.len() {
+            let present: HashSet<_> = objects.iter().map(|object| object.id.as_str()).collect();
+            let id = ids
+                .iter()
+                .find(|id| !present.contains(**id))
+                .expect("missing selection");
+            return Err(SceneError::ObjectNotFound((*id).into()));
+        }
+        let members: HashSet<_> = self
+            .scene
+            .prefabs
+            .values()
+            .flat_map(|instance| instance.parts.values().map(|part| part.object.as_str()))
+            .collect();
+        for (index, object) in objects
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| copied[*index])
+        {
+            if members.contains(object.id.as_str())
+                || (roots[index]
+                    && object
+                        .parent
+                        .as_deref()
+                        .is_some_and(|id| members.contains(id)))
+            {
+                return Err(SceneError::Invalid(
+                    "Linked prefab parts cannot be duplicated. Place another instance from Assets."
+                        .into(),
+                ));
+            }
+            if object.components.iter().any(|component| {
+                matches!(&component.kind,
+                Component::Script { binding, .. } if binding.target == BindingTarget::Application)
+            }) {
+                return Err(SceneError::Invalid(
+                    "An Application script cannot be duplicated with an object.".into(),
+                ));
+            }
+        }
+
+        let mut used = HashSet::new();
+        for object in objects {
+            used.insert(object.id.as_str());
+            for component in &object.components {
+                used.insert(component.id.as_str());
+                if let Component::Script { binding, .. } = &component.kind {
+                    // Authoring permits an unresolved script reference. Do not
+                    // accidentally give an existing dangling reference meaning.
+                    used.extend(binding.properties.values().filter_map(|value| match value {
+                        PropertyValue::ObjectRef(id) => id.as_deref(),
+                        _ => None,
+                    }));
+                }
+            }
+        }
+        let mut fresh = (1_u64..)
+            .map(|n| format!("duplicate-{n}"))
+            .filter(|id| !used.contains(id.as_str()));
+        let mut result = DuplicatedObjects {
+            root_ids: Vec::new(),
+            object_ids: BTreeMap::new(),
+            component_ids: BTreeMap::new(),
+        };
+        for (index, object) in objects
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| copied[*index])
+        {
+            let id = fresh.next().expect("finite scene IDs");
+            if roots[index] {
+                result.root_ids.push(id.clone());
+            }
+            result.object_ids.insert(object.id.clone(), id);
+            for component in &object.components {
+                result.component_ids.insert(
+                    component.id.clone(),
+                    fresh.next().expect("finite scene IDs"),
+                );
+            }
+        }
+        let remap = |id: &mut String| {
+            if let Some(copy_id) = result.object_ids.get(id) {
+                id.clone_from(copy_id);
+            }
+        };
+        let copies = objects
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| copied[*index])
+            .map(|(index, object)| {
+                let mut copy = object.clone();
+                copy.id.clone_from(&result.object_ids[&object.id]);
+                if let Some(parent) = &mut copy.parent {
+                    remap(parent);
+                }
+                for component in &mut copy.components {
+                    component.id = result.component_ids[&component.id].clone();
+                    match &mut component.kind {
+                        Component::Camera {
+                            view: CameraView::Orbit(view),
+                        } => {
+                            if let PlayerAnchor::Follow { target_id, .. } = &mut view.anchor {
+                                remap(target_id);
+                            }
+                        }
+                        Component::Script { binding, .. } => {
+                            if let BindingTarget::Object(id) | BindingTarget::Group(id) =
+                                &mut binding.target
+                            {
+                                remap(id);
+                            }
+                            for value in binding.properties.values_mut() {
+                                if let PropertyValue::ObjectRef(Some(id)) = value {
+                                    remap(id);
+                                }
+                            }
+                        }
+                        Component::Animator { binding } => {
+                            binding.targets.values_mut().for_each(remap)
+                        }
+                        _ => {}
+                    }
+                }
+                (index, copy)
+            })
+            .collect();
+        self.commit([SceneChange::InsertCopies(copies)])?;
+        Ok(result)
     }
 
     /// Move an object while keeping its world matrix. Reject a move whose
@@ -1731,6 +1924,158 @@ fn digest(mut input: impl Read) -> io::Result<[u8; 32]> {
 mod tests {
     use super::*;
     use crate::{hierarchy::close, Scene, Session};
+
+    #[test]
+    fn duplicate_selection_remaps_a_whole_assembly_and_keeps_independent_history() {
+        use crate::{AnimationBinding, PlayerView};
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("shot")).unwrap()).unwrap();
+        // File order need not be topological. Both copies must keep sibling order.
+        for (id, parent) in [
+            ("wheel", Some("rig")),
+            ("sign", Some("rig")),
+            ("rig", Some("stage")),
+            ("marker", Some("stage")),
+            ("stage", None),
+        ] {
+            scene.objects.push(ObjectNode {
+                id: id.into(),
+                name: id.into(),
+                enabled: true,
+                parent: parent.map(str::to_owned),
+                transform: Transform {
+                    translation: [1., 2., 3.],
+                    ..Default::default()
+                },
+                components: Vec::new(),
+            });
+        }
+        let component = |id: &str, kind| crate::component_scene::ComponentInstance {
+            id: id.into(),
+            enabled: true,
+            kind,
+        };
+        scene.objects[2].components = vec![
+            component(
+                "rig-animator",
+                Component::Animator {
+                    binding: AnimationBinding {
+                        clip: "bridge-lift".into(),
+                        looping: true,
+                        targets: BTreeMap::from([("Rig/Wheel".into(), "wheel".into())]),
+                    },
+                },
+            ),
+            component(
+                "rig-camera",
+                Component::Camera {
+                    view: CameraView::Orbit(PlayerView {
+                        anchor: PlayerAnchor::Follow {
+                            target_id: "marker".into(),
+                            offset: [0.; 3],
+                        },
+                        yaw: 0.,
+                        pitch: 0.,
+                        distance: 5.,
+                        vertical_fov_degrees: 45.,
+                    }),
+                },
+            ),
+            component(
+                "rig-script",
+                Component::Script {
+                    binding: crate::BehaviorBinding {
+                        target: BindingTarget::Object("rig".into()),
+                        source_id: "script".into(),
+                        enabled: true,
+                        properties: BTreeMap::from([
+                            ("self".into(), PropertyValue::ObjectRef(Some("rig".into()))),
+                            (
+                                "outside".into(),
+                                PropertyValue::ObjectRef(Some("stage".into())),
+                            ),
+                            (
+                                "missing".into(),
+                                PropertyValue::ObjectRef(Some("duplicate-1".into())),
+                            ),
+                        ]),
+                        state_defaults: Default::default(),
+                        commands: Default::default(),
+                    },
+                    source_kind: None,
+                    movement: Default::default(),
+                },
+            ),
+        ];
+        scene.gameplay_camera = Some("rig-camera".into());
+        let mut session = ComponentSession::new(scene.clone()).unwrap();
+        assert!(session.duplicate_selection(0, &["rig", "missing"]).is_err());
+        assert_eq!(session.scene(), &scene);
+        let result = session
+            .duplicate_selection(0, &["marker", "wheel", "rig"])
+            .unwrap();
+        let ids = &result.object_ids;
+        assert_eq!(result.root_ids, [ids["rig"].clone(), ids["marker"].clone()]);
+        assert_eq!(ids.len(), 4);
+        assert!(!ids.values().any(|id| id == "duplicate-1"));
+        let objects = &session.scene().objects;
+        assert_eq!(
+            objects
+                .iter()
+                .map(|object| object.id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "wheel",
+                &ids["wheel"],
+                "sign",
+                &ids["sign"],
+                "rig",
+                &ids["rig"],
+                "marker",
+                &ids["marker"],
+                "stage"
+            ]
+        );
+        assert_eq!(objects[1].parent.as_deref(), Some(ids["rig"].as_str()));
+        assert_eq!(objects[5].transform, scene.objects[2].transform);
+        assert_eq!(objects[5].parent.as_deref(), Some("stage"));
+        let [animator, camera, script] = objects[5].components.as_slice() else {
+            panic!("copied components")
+        };
+        assert_eq!(animator.id, result.component_ids["rig-animator"]);
+        let Component::Animator { binding } = &animator.kind else {
+            panic!("copied animator")
+        };
+        assert_eq!(binding.targets["Rig/Wheel"], ids["wheel"]);
+        assert!(matches!(&camera.kind, Component::Camera { view }
+            if view.followed_target() == Some(ids["marker"].as_str())));
+        assert_eq!(
+            session.scene().gameplay_camera.as_deref(),
+            Some("rig-camera")
+        );
+        let Component::Script { binding, .. } = &script.kind else {
+            panic!("copied script")
+        };
+        assert_eq!(binding.target, BindingTarget::Object(ids["rig"].clone()));
+        assert_eq!(
+            binding.properties["self"],
+            PropertyValue::ObjectRef(Some(ids["rig"].clone()))
+        );
+        assert_eq!(
+            binding.properties["outside"],
+            PropertyValue::ObjectRef(Some("stage".into()))
+        );
+        let copied = session.scene().clone();
+        assert_eq!(session.undo(1).unwrap(), 2);
+        assert_eq!(session.scene(), &scene);
+        assert_eq!(session.redo(2).unwrap(), 3);
+        assert_eq!(session.scene(), &copied);
+        let mut edited = copied.objects[1].clone();
+        edited.transform.translation[0] = 9.;
+        session.put_object(3, edited).unwrap();
+        assert_eq!(session.scene().objects[0], scene.objects[0]);
+        assert_eq!(session.scene().objects[1].transform.translation[0], 9.);
+    }
 
     #[test]
     fn game_camera_designation_is_atomic_and_survives_suspension_and_undo() {

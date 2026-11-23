@@ -315,6 +315,25 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
             }),
         });
     }
+    if name == "scene_duplicate" && args.contains_key("object_ids") {
+        return exact_keys(
+            args,
+            &["expected_session_token", "expected_revision", "object_ids"],
+            &[],
+        ) && canonical_u64(&args["expected_revision"])
+            && args["expected_session_token"]
+                .as_str()
+                .is_some_and(|token| !token.is_empty() && token.len() <= 256)
+            && args["object_ids"].as_array().is_some_and(|ids| {
+                let mut seen = std::collections::HashSet::new();
+                (1..=256).contains(&ids.len())
+                    && ids.iter().all(|value| {
+                        value
+                            .as_str()
+                            .is_some_and(|id| rot_scene::validate_id(id).is_ok() && seen.insert(id))
+                    })
+            });
+    }
     if matches!(
         name,
         "scene_create" | "scene_rename" | "scene_duplicate" | "scene_delete"
@@ -661,7 +680,8 @@ fn tools() -> Value {
             }
             if name == "scene_duplicate" {
                 properties.insert("new_object_id".into(), json!({"type":"string","minLength":1,"maxLength":128}));
-                required.push("new_object_id");
+                properties.insert("object_ids".into(), json!({"type":"array","items":{"type":"string","minLength":1,"maxLength":128},"minItems":1,"maxItems":256,"uniqueItems":true,"description":"v23 only. Selected object IDs. Copies their topmost subtrees and assigns fresh IDs."}));
+                required.retain(|key| !matches!(*key, "object_id" | "name"));
             }
         }
         if matches!(name, "scene_create" | "scene_primitive") {
@@ -699,6 +719,12 @@ fn tools() -> Value {
             required.push("ticks");
         }
         let mut input_schema = object_schema(Value::Object(properties),required);
+        if name == "scene_duplicate" {
+            input_schema["oneOf"] = json!([
+                {"required":["object_ids"],"not":{"anyOf":[{"required":["object_id"]},{"required":["new_object_id"]},{"required":["name"]}]}},
+                {"required":["object_id","new_object_id","name"],"not":{"required":["object_ids"]}}
+            ]);
+        }
         if name == "asset_import" {
             input_schema["allOf"] = json!([
                 {"not":{"required":["normal_policy","texture_role"]}},
@@ -1716,6 +1742,29 @@ mod tests {
             tool_result(json!({"ok":true,"result":{"status":"pending","capture_id":"2"}}));
         assert_eq!(pending["content"].as_array().unwrap().len(), 1);
         assert_eq!(pending["content"][0]["type"], "text");
+    }
+
+    #[test]
+    fn duplicate_accepts_exact_v23_selection_and_preserves_legacy_wire() {
+        let args = json!({"expected_session_token":"s","expected_revision":"0","object_ids":["rig","camera"]});
+        assert!(valid_arguments("scene_duplicate", &args));
+        assert!(!tool_catalog::advertised("scene_duplicate"));
+        let definition = tool_definition("scene_duplicate").unwrap();
+        assert_eq!(
+            definition["inputSchema"]["properties"]["object_ids"]["uniqueItems"],
+            true
+        );
+        let mut invalid = args.clone();
+        invalid["object_ids"] = json!(["rig", "rig"]);
+        assert!(!valid_arguments("scene_duplicate", &invalid));
+        let mut invalid = args;
+        invalid["object_id"] = json!("rig");
+        assert!(!valid_arguments("scene_duplicate", &invalid));
+        assert!(valid_arguments(
+            "scene_duplicate",
+            &json!({"expected_session_token":"s","expected_revision":"0",
+            "object_id":"rig","new_object_id":"copy","name":"Copy"})
+        ));
     }
 
     #[test]

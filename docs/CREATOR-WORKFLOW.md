@@ -549,6 +549,15 @@ its child are selected, the child stays attached to the ancestor. Finish pending
 Inspector edits and unlock the affected objects before grouping. You can undo or
 redo the entire group in one step.
 
+Press **Ctrl+D** to duplicate the selection, or choose **Duplicate** in
+**Object**, the Hierarchy row menu, or the command palette. Each selected
+root is copied beside its original, and the copies become selected. A selected
+child is copied with its selected ancestor. Local transforms, materials, and
+assets are preserved. Internal object references point to the copies, and
+external references retain their original targets. Place another instance
+from **Assets** to duplicate a linked prefab. The entire duplicate is one
+Undo step.
+
 Use **Move Tool** (W), **Rotate Tool** (E), and **Scale Tool** (R) in the
 viewport toolbar. **World** uses scene axes and **Local** uses the active
 root's orientation. **Center** uses the selection center, **Active** uses

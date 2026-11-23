@@ -17,7 +17,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("scene_create", "Create a cube, sphere, capsule or triangular prism. In v23, parent_id and transform place a part using its parent’s local axes and units."),
     ("scene_primitive", "Set built-in geometry: sphere, capsule, triangular_prism or null (cube). Prism: 1 unit per axis, centered pivot, +Y up, ridge along local Z."),
     ("scene_rename", "Rename an object. Its ID stays the same."),
-    ("scene_duplicate", "Duplicate an object under a new ID and name."),
+    ("scene_duplicate", "In v23 pass object_ids to duplicate selected subtrees as siblings in one Undo. Returns old-to-new IDs. Legacy uses object_id, new_object_id, and name."),
     ("scene_components_inspect", "List v23 components by object_id and optional component_id. Exact Box Collider replies include collider_world; offset and half extents are local. Spot Light detail includes spot_world."),
     ("scene_components_edit", "Edit v23 components in one Undo. Aim with one aim_spot_at_object edit using object_id, component_id, target_object_id. File Lua uses source_kind asset and binding.source_id. Pin scene/asset guards."),
     ("scene_delete", "Delete an object. In v23, also delete its descendants."),

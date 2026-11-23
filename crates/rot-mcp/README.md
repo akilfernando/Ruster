@@ -324,6 +324,17 @@ connected project.
 - Changes stay unsaved until `scene_save` (read its token with
   `scene_persistence_inspect`). Asset imports are saved to the project at
   once.
+- In v23, use `scene_inspect` for exact object IDs, `session_token` and
+  `revision`. Call `rot_tools` with
+  `{"action":"call","name":"scene_duplicate","arguments":{"object_ids":["rig","marker"],"expected_session_token":"<session_token>","expected_revision":"<revision>"}}`.
+  Each topmost subtree is copied beside its source in one Undo step. The
+  response gives the copied `root_ids`, total `object_count` and
+  `component_count`, and old-to-new `object_ids` and `component_ids` maps.
+  Each map returns up to 256 entries, with every selected root included in
+  the object map. Inspect the copied roots for more. Assets and materials are
+  shared, references within the copied selection are remapped, and the active
+  Camera stays assigned. Linked prefab selections are refused. The legacy
+  `object_id`, `new_object_id`, and `name` arguments still copy one legacy object.
 
 `tools/list` advertises the main project, object, component, asset, Play and
 screenshot controls in under 15 KB. To find earlier or less common commands,

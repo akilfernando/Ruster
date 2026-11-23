@@ -19,7 +19,8 @@ use crate::ui_kit::tokens::{ROW_HEIGHT, SPACE_XS};
 use crate::workspace::{Action, SceneViewState, SettingsPage, Workspace};
 use eframe::egui;
 use rot_scene::component_scene::{
-    Component, ComponentInstance, ComponentSession, Geometry, ObjectHierarchy, ObjectNode,
+    Component, ComponentInstance, ComponentSession, DuplicatedObjects, Geometry, ObjectHierarchy,
+    ObjectNode,
 };
 use rot_scene::{Primitive, SceneError, Transform};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -1159,6 +1160,52 @@ impl ComponentWorkspace {
         Ok((requested_id.map_or(generated_id, str::to_owned), mesh_id))
     }
 
+    fn duplicate_selection(
+        &mut self,
+        revision: u64,
+        ids: &[&str],
+    ) -> Result<DuplicatedObjects, (&'static str, String)> {
+        if self.runtime.in_play_mode() {
+            return Err((
+                "play_active",
+                "Stop Play before duplicating objects.".into(),
+            ));
+        }
+        if self.authored_edit_pending() {
+            return Err((
+                "drafts_pending",
+                "Apply or cancel the pending edit before duplicating objects.".into(),
+            ));
+        }
+        let copies = self
+            .session
+            .duplicate_selection(revision, ids)
+            .map_err(|error| {
+                let code = match error {
+                    SceneError::ObjectNotFound(_) => "object_not_found",
+                    SceneError::StaleRevision { .. } => "stale_revision",
+                    _ => "invalid_arguments",
+                };
+                (code, error.to_string())
+            })?;
+        self.asset_browser.selected = None;
+        self.selection = copies.root_ids.iter().cloned().collect();
+        self.selection_anchor = copies.root_ids.first().cloned();
+        self.refresh();
+        Ok(copies)
+    }
+
+    fn duplicate_from_ui(&mut self, hit: Option<&str>) {
+        let targets = self.target_ids(hit);
+        if !targets.is_empty() {
+            let ids: Vec<_> = targets.iter().map(String::as_str).collect();
+            self.error = self
+                .duplicate_selection(self.session.revision(), &ids)
+                .err()
+                .map(|(_, message)| message);
+        }
+    }
+
     fn group_selection(
         &mut self,
         expected: u64,
@@ -1534,6 +1581,10 @@ impl ComponentWorkspace {
             | Action::CreateDirectionalLight
             | Action::CreateSpotLight => {
                 self.create(action, None);
+                return;
+            }
+            Action::Duplicate => {
+                self.duplicate_from_ui(None);
                 return;
             }
             Action::Delete => {
@@ -2376,6 +2427,7 @@ impl ComponentWorkspace {
                     ui.separator();
                     ui.add_enabled_ui(!blocked && !self.selection.is_empty(), |ui| {
                         self.menu_action(ui, Action::GroupSelection);
+                        self.menu_action(ui, Action::Duplicate);
                     });
                     ui.add_enabled_ui(!self.selection.is_empty(), |ui| {
                         self.menu_action(ui, Action::Delete)
@@ -2547,6 +2599,7 @@ impl ComponentWorkspace {
                             | Action::CreateDirectionalLight
                             | Action::CreateSpotLight
                             | Action::GroupSelection
+                            | Action::Duplicate
                             | Action::Delete
                             | Action::Frame
                             | Action::SetGameCameraFromView
@@ -2565,7 +2618,10 @@ impl ComponentWorkspace {
                     !blocked
                         && (!matches!(
                             action,
-                            Action::GroupSelection | Action::Delete | Action::Frame
+                            Action::GroupSelection
+                                | Action::Duplicate
+                                | Action::Delete
+                                | Action::Frame
                         ) || !self.selection.is_empty())
                 },
             );
@@ -2602,6 +2658,7 @@ impl ComponentWorkspace {
                 let mut child = None;
                 let mut framed = None;
                 let mut grouped = None;
+                let mut duplicated = None;
                 let mut prefab = None;
                 let mut view_change = None;
                 let revision = self.session.revision();
@@ -2714,6 +2771,14 @@ impl ComponentWorkspace {
                                     ) {
                                         grouped = Some(object.id.clone());
                                     }
+                                    if action_menu_item(
+                                        ui,
+                                        &self.workspace,
+                                        Action::Duplicate,
+                                        !blocked,
+                                    ) {
+                                        duplicated = Some(object.id.clone());
+                                    }
                                     if ui
                                         .add(
                                             egui::Button::new(Action::Frame.label()).shortcut_text(
@@ -2760,6 +2825,8 @@ impl ComponentWorkspace {
                     self.create(action, Some(parent));
                 } else if let Some(id) = grouped {
                     self.group_selection_from_ui(Some(&id));
+                } else if let Some(id) = duplicated {
+                    self.duplicate_from_ui(Some(&id));
                 } else if let Some(id) = framed {
                     self.error = self.frame_objects(Some(&id), None).err().map(str::to_owned);
                 } else if let Some(id) = prefab.filter(|_| self.apply()) {
@@ -3119,6 +3186,55 @@ impl ComponentWorkspace {
 mod tests {
     use super::*;
     use rot_scene::{component_scene::ComponentScene, Scene, Session};
+
+    #[cfg(unix)]
+    #[test]
+    fn duplicate_shares_selection_and_undo_between_editor_and_mcp() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let root = scene.objects[0].id.clone();
+        let child = scene.objects[1].id.clone();
+        scene.objects[1].parent = Some(root.clone());
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.adopt_workspace(Workspace::at_for_test(folder.path().join("editor.json")));
+        editor.select(Some(root.clone()));
+        editor.draft.as_mut().unwrap().name = "Pending name".into();
+        editor.command(Action::Duplicate);
+        assert_eq!(editor.session.scene(), &scene);
+        let command = |editor: &mut ComponentWorkspace, revision: &str| {
+            editor.ai_command("s", "scene_duplicate", &serde_json::json!({
+                "expected_session_token":"s","expected_revision":revision,"object_ids":[root,child],
+            }))
+        };
+        assert_eq!(command(&mut editor, "0")["error"]["code"], "drafts_pending");
+        editor.command(Action::Undo); // Discard the pending Inspector change.
+        editor.command(Action::Duplicate);
+        let copied_root = editor.selection.iter().next().unwrap().clone();
+        assert_ne!(copied_root, root);
+        assert_eq!(command(&mut editor, "0")["error"]["code"], "stale_revision");
+        let undo = editor.ai_command(
+            "s",
+            "scene_undo",
+            &serde_json::json!({
+                "expected_session_token":"s","expected_revision":"1",
+            }),
+        );
+        assert_eq!(undo["ok"], true, "{undo}");
+        assert_eq!(editor.session.scene(), &scene);
+        let reply = command(&mut editor, "2");
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(
+            reply["result"]["root_ids"],
+            serde_json::json!([copied_root])
+        );
+        assert_eq!(reply["result"]["object_count"], 2);
+        assert_eq!(editor.selection, BTreeSet::from([copied_root]));
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene(), &scene);
+    }
 
     #[cfg(unix)]
     #[test]

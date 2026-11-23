@@ -9,7 +9,7 @@ use rot_scene::component_scene::{
 };
 use rot_scene::{Primitive, SceneError, Transform, TransformRequest};
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 impl ComponentWorkspace {
     pub(in crate::scene_editor) fn ai_command(
@@ -330,7 +330,7 @@ impl ComponentWorkspace {
                     .count()
             }
             "scene_transform" | "scene_rename" | "scene_reparent" | "scene_primitive" => 4,
-            "scene_transform_many" | "scene_delete" | "scene_delete_many" => 3,
+            "scene_transform_many" | "scene_delete" | "scene_delete_many" | "scene_duplicate" => 3,
             "scene_components_edit" => 3 + usize::from(map.contains_key("expected_asset_revision")),
             "scene_animation_set" => {
                 3 + ["expected_asset_revision", "clip_id", "looping", "remove"]
@@ -636,6 +636,46 @@ impl ComponentWorkspace {
             return Ok(json!({"object_id":id, "changed":true, "dirty":self.session.is_dirty()}));
         }
 
+        if op == "scene_duplicate" {
+            let ids = batch(&args["object_ids"]).ok_or_else(invalid)?;
+            let mut seen = HashSet::with_capacity(ids.len());
+            let ids = ids
+                .iter()
+                .map(|value| {
+                    hierarchy_id(value)
+                        .filter(|id| seen.insert(*id))
+                        .ok_or_else(invalid)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let copies = self.duplicate_selection(revision, &ids)?;
+            // Keep large subtree receipts below the adapter's wire limit.
+            // The selected roots always have mappings in the receipt.
+            const MAX_MAPPINGS: usize = 256;
+            let roots: HashSet<_> = copies.root_ids.iter().map(String::as_str).collect();
+            let mut object_ids: BTreeMap<_, _> = copies
+                .object_ids
+                .iter()
+                .filter(|(_, id)| roots.contains(id.as_str()))
+                .collect();
+            object_ids.extend(
+                copies
+                    .object_ids
+                    .iter()
+                    .filter(|(_, id)| !roots.contains(id.as_str()))
+                    .take(MAX_MAPPINGS - roots.len()),
+            );
+            let component_ids: BTreeMap<_, _> =
+                copies.component_ids.iter().take(MAX_MAPPINGS).collect();
+            return Ok(json!({
+                "root_ids": copies.root_ids,
+                "object_ids": object_ids,
+                "component_ids": component_ids,
+                "object_count": copies.object_ids.len(),
+                "component_count": copies.component_ids.len(),
+                "changed": true,
+                "dirty": self.session.is_dirty()
+            }));
+        }
         let mut payload = json!({});
         let result = match op {
             "scene_mesh" => {
