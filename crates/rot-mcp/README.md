@@ -76,6 +76,16 @@ connected project.
   from `asset_inspect`. Use a separate asset ID if the source is also used
   as Base Color. When the import is ready, set `roughness_texture` on the
   shared material, keeping the existing response and scalar roughness.
+- To make a v23 material unique, inspect `material_inspect` for the
+  session, scene revision and asset revision. Read the exact Mesh
+  Renderer with `scene_components_inspect` to get its component ID and
+  current material ID. Call `scene_material_copy` with both revision
+  guards and the session token, set `source_id` to the renderer’s
+  current material, choose a fresh `new_material_id`, and pass
+  `assign_object_id` and `component_id` for that renderer. An optional
+  `name` replaces the generated Copy name. One Undo removes the copy
+  and restores the renderer’s original assignment. Legacy calls omit
+  the two assignment fields.
 - In v23, `material_inspect` also reports committed `display` and whether
   a native `pending_display` draft is open. Use `scene_display_set` through
   `rot_tools` with the current session token and revision. The display

@@ -187,6 +187,14 @@ step. To change an existing definition, choose **Edit Material** and check
 the affected object count before applying. The renderer's own **Tint**
 still multiplies the shared material color.
 
+Choose **Make Unique** beside the assigned material to make a variation
+for that Mesh Renderer. The draft starts with the shared material’s
+settings and texture references. **Apply** creates the copy and assigns it
+to that renderer in one Undo step. Other renderers, including ones on the
+same object, retain their assignments. The default name adds **Copy** so
+you can find the new definition in the material picker. This action is
+available on standalone renderers.
+
 Set the material tint, **Base color (sRGB)**, and nonmetallic roughness in
 the dialog. To use a loose PNG as a roughness map, put it in the project's
 Assets folder, right-click its tile, and choose **Import as Roughness**.

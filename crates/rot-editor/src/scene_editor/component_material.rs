@@ -81,6 +81,7 @@ pub(super) struct Draft {
     intent: Intent,
     value: OpaqueMaterial,
     affected: usize,
+    copy_scope: Option<String>,
     base_colors: BTreeMap<String, String>,
     roughness_maps: BTreeMap<String, String>,
     opened_frame: Option<u64>,
@@ -378,7 +379,8 @@ impl ComponentWorkspace {
             self.ensure_material_usage();
         }
         let scene = self.session.scene();
-        let object = &scene.objects[index].id;
+        let selected = &scene.objects[index];
+        let object = &selected.id;
         let Ok((_, renderer)) = material_target(scene, object, Some(&request.component)) else {
             return;
         };
@@ -425,6 +427,20 @@ impl ComponentWorkspace {
                 (self.material_usage.users(id).len(), value.clone())
             }
         };
+        let copy_scope = matches!(request.intent, Intent::MakeUnique(_)).then(|| {
+            let mut renderers = selected
+                .components
+                .iter()
+                .filter(|component| matches!(component.kind, Component::MeshRenderer { .. }));
+            let ordinal = (renderers.clone().take(2).count() == 2).then(|| {
+                renderers
+                    .position(|component| component.id == request.component)
+                    .expect("selected renderer")
+                    + 1
+            });
+            let heading = crate::scene_editor::component_inspector::mesh_renderer_heading(ordinal);
+            format!("{heading} · {}", selected.name)
+        });
         self.material_draft = Some(Draft {
             revision: self.session.revision(),
             asset_revision: self.material_asset_revision(),
@@ -433,6 +449,7 @@ impl ComponentWorkspace {
             intent: request.intent,
             value,
             affected,
+            copy_scope,
             base_colors: ready_texture_choices(self.assets.as_ref(), TextureRole::BaseColor),
             roughness_maps: ready_texture_choices(self.assets.as_ref(), TextureRole::Roughness),
             opened_frame: None,
@@ -503,14 +520,18 @@ impl ComponentWorkspace {
                     Intent::Edit(_) => Text::MaterialEdit.plain(),
                     Intent::MakeUnique(_) => Text::MaterialMakeUnique.plain(),
                 });
-                let affected = draft.affected.to_string();
-                ui.label(if draft.affected == 1 {
-                    Text::MaterialAffectsOne.plain().to_owned()
+                if let Some(scope) = &draft.copy_scope {
+                    ui.add(egui::Label::new(scope).truncate())
+                        .on_hover_text(scope);
                 } else {
-                    Text::MaterialAffectsMany
-                        .plain()
-                        .replace("{count}", &affected)
-                });
+                    ui.label(if draft.affected == 1 {
+                        Text::MaterialAffectsOne.plain().to_owned()
+                    } else {
+                        Text::MaterialAffectsMany
+                            .plain()
+                            .replace("{count}", &draft.affected.to_string())
+                    });
+                }
                 let mut name = draft.value.name.clone().unwrap_or_default();
                 ui_kit::property_row_with_label(ui, Text::ComponentName.plain(), |ui, label| {
                     let edit = ui
@@ -1029,6 +1050,143 @@ mod tests {
             .write_image_data(&[255, 128, 0])
             .unwrap();
         std::fs::write(path, png).unwrap();
+    }
+
+    #[test]
+    fn make_unique_binds_only_the_exact_renderer_and_inherits_its_slots() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        std::fs::write(
+            root.join("bare.obj"),
+            b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+        )
+        .unwrap();
+        write_base_color(&root.join("color.png"));
+        let mut assets = AssetStore::open(root).unwrap();
+        assets.import("bare", "bare.obj").unwrap();
+        assets.import("ready-color", "color.png").unwrap();
+        let assets_revision = assets.revision().to_string();
+
+        let base = rot_scene::Session::new(rot_scene::Scene::demo()).unwrap();
+        let mut scene = ComponentScene::from_legacy(&base).unwrap();
+        let owner = scene.objects[0].id.clone();
+        let source = OpaqueMaterial {
+            name: Some("Varnish".into()),
+            tint: [0.21, 0.37, 0.59],
+            base_color_texture: Some("missing-color".into()),
+            roughness_texture: Some("ready-color".into()),
+            filter: rot_scene::TextureFilter::Nearest,
+            address: rot_scene::TextureAddress::Clamp,
+            response: MaterialResponse::Dielectric { roughness: 0.73 },
+        };
+        scene.materials.insert("varnish".into(), source.clone());
+        let Component::MeshRenderer { material, .. } = &mut scene.objects[0].components[0].kind
+        else {
+            unreachable!()
+        };
+        *material = Some("varnish".into());
+        scene.objects[0].components.push(ComponentInstance {
+            id: "target-renderer".into(),
+            enabled: true,
+            kind: Component::MeshRenderer {
+                geometry: Geometry::Imported {
+                    asset: "bare".into(),
+                },
+                tint: [0.2, 0.4, 0.6, 1.],
+                material: Some("varnish".into()),
+            },
+        });
+        let path = root.join("studio.scene.json");
+        let initial = scene.clone();
+        let mut editor = ComponentWorkspace::new(path, ComponentSession::new(scene).unwrap());
+        editor.meshes = assets.mesh_snapshots();
+        editor.textures = assets.texture_snapshots();
+        editor.assets = Some(assets);
+        editor.select(Some(owner.clone()));
+        let mut args = json!({
+            "expected_session_token":"scene","expected_revision":"0","expected_asset_revision":assets_revision,
+            "source_id":"varnish","new_material_id":"copy","assign_object_id":owner,
+            "component_id":"target-renderer",
+        });
+        for (field, value, error) in [
+            ("source_id", "unbound", "material_unavailable"),
+            ("new_material_id", "varnish", "material_unavailable"),
+            ("expected_asset_revision", "0", "stale_asset_revision"),
+        ] {
+            let mut refused = args.clone();
+            refused[field] = json!(value);
+            let reply = editor.ai_command("scene", "scene_material_copy", &refused);
+            assert_eq!(reply["error"]["code"], error, "{reply}");
+            assert_eq!(editor.session.scene(), &initial);
+        }
+        editor.begin_material(Request {
+            component: "target-renderer".into(),
+            intent: Intent::MakeUnique("varnish".into()),
+        });
+        let inspected = editor.ai_command("scene", "material_inspect", &json!({}));
+        assert_eq!(
+            inspected["result"]["pending_material"],
+            json!({
+                "intent":"make_unique","source_material_id":"varnish","object_id":owner,
+                "component_id":"target-renderer","affected_object_count":1
+            })
+        );
+        assert_eq!(inspected["result"]["material_count"], 1);
+        assert_eq!(
+            editor.ai_command("scene", "scene_material_copy", &args)["error"]["code"],
+            "drafts_pending"
+        );
+        let mut draft = editor.material_draft.take().unwrap();
+        assert_eq!(
+            draft.copy_scope.as_deref(),
+            Some(format!("Mesh Renderer 2 · {}", initial.objects[0].name).as_str())
+        );
+        let original = draft.value.clone();
+        draft.value.base_color_texture = Some("ready-color".into());
+        assert!(
+            editor.apply_material(&draft).is_err(),
+            "new ready map still needs UVs"
+        );
+        draft.value.base_color_texture = Some("different-missing-color".into());
+        assert!(
+            editor.apply_material(&draft).is_err(),
+            "a new missing map cannot inherit the exception"
+        );
+        assert_eq!(editor.session.revision(), 0);
+        assert_eq!(editor.session.scene(), &initial);
+        draft.value = original;
+        editor.apply_material(&draft).unwrap();
+        let copied = editor.session.scene();
+        let mut renamed = source.clone();
+        renamed.name = Some("Varnish Copy".into());
+        assert_eq!(copied.materials["material-1"], renamed);
+        assert_eq!(copied.materials["varnish"], source);
+        assert_eq!(
+            copied.objects[0].components[0],
+            initial.objects[0].components[0]
+        );
+        let mut expected_target = initial.objects[0].components[1].clone();
+        let Component::MeshRenderer { material, .. } = &mut expected_target.kind else {
+            unreachable!()
+        };
+        *material = Some("material-1".into());
+        assert_eq!(copied.objects[0].components[1], expected_target);
+        let undo = editor.ai_command(
+            "scene",
+            "scene_undo",
+            &json!({
+                "expected_session_token":"scene","expected_revision":"1",
+            }),
+        );
+        assert_eq!(undo["ok"], true, "{undo}");
+        assert_eq!(editor.session.scene(), &initial);
+
+        args["expected_revision"] = json!("2");
+        let reply = editor.ai_command("scene", "scene_material_copy", &args);
+        assert_eq!(reply["result"]["material_id"], "copy", "{reply}");
+        assert_eq!(editor.session.scene().materials["copy"], renamed);
+        editor.session.undo(3).unwrap();
+        assert_eq!(editor.session.scene(), &initial);
     }
 
     #[test]

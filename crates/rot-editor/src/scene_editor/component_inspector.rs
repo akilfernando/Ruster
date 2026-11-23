@@ -182,6 +182,11 @@ pub(super) fn component_label(component: &Component) -> Text {
     }
 }
 
+pub(super) fn mesh_renderer_heading(ordinal: Option<usize>) -> std::borrow::Cow<'static, str> {
+    let label = Text::ComponentMeshRenderer.plain();
+    ordinal.map_or_else(|| label.into(), |index| format!("{label} {index}").into())
+}
+
 pub(super) fn components(
     ui: &mut egui::Ui,
     draft: &mut ObjectNode,
@@ -200,8 +205,23 @@ pub(super) fn components(
     let mut animator_revision = None;
     let mut submit = false;
     let mut remove = None;
+    let multiple_renderers = draft
+        .components
+        .iter()
+        .filter(|component| matches!(component.kind, Component::MeshRenderer { .. }))
+        .take(2)
+        .count()
+        == 2;
+    let mut renderer_count = 0;
     for (index, component) in draft.components.iter_mut().enumerate() {
         let label = component_label(&component.kind);
+        let heading =
+            if multiple_renderers && matches!(component.kind, Component::MeshRenderer { .. }) {
+                renderer_count += 1;
+                mesh_renderer_heading(Some(renderer_count))
+            } else {
+                label.plain().into()
+            };
         let editable = matches!(
             component.kind,
             Component::MeshRenderer { .. }
@@ -214,13 +234,13 @@ pub(super) fn components(
                     ..
                 }
         );
-        let widget = egui::CollapsingHeader::new(label.plain())
+        let widget = egui::CollapsingHeader::new(heading.as_ref())
             .id_salt((&draft.id, &component.id))
             .default_open(editable)
             .show(ui, |ui| {
                 ui.checkbox(
                     &mut component.enabled,
-                    format!("{} {}", Text::ComponentEnable.plain(), label.plain()),
+                    format!("{} {heading}", Text::ComponentEnable.plain()),
                 );
                 match &mut component.kind {
                     Component::MeshRenderer {
