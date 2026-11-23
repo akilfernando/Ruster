@@ -121,7 +121,7 @@ editor_text! {
     ComponentShadowNormalOffset => "Normal Offset",
     ComponentShadowTexels => "0 to 4 world shadow texels.",
     ViewportLightLimit => "Some lights are outside the render budget.",
-    ViewportLightLimitDetail => "First 4 visible, enabled Point or Spot Lights and 1 Directional Light in scene order.",
+    ViewportLightLimitDetail => "Scene order: first 4 visible, enabled Point/Spot Lights and 1 Directional.",
     EditCollider => "Edit Collider",
     ColliderEditHint => "Drag a face in Scene view. Escape cancels.",
     ColliderShear => "Sheared box. Adjust the parent scale or rotation to show face handles.",

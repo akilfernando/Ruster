@@ -286,7 +286,7 @@ mod tests {
                 .iter()
                 .map(|node| node.name.as_str())
                 .collect::<Vec<_>>(),
-            ["Arm", "Base", "Sun"]
+            ["Arm", "Base", "Spot", "Sun"]
         );
         for owner in &owners[..2] {
             assert!(!owner
@@ -302,6 +302,27 @@ mod tests {
                 2
             );
         }
+        let spot = owners[2];
+        let rig = placed
+            .objects
+            .iter()
+            .find(|node| node.name == "Rig")
+            .unwrap();
+        assert_eq!(spot.parent.as_deref(), Some(rig.id.as_str()));
+        assert_eq!(spot.transform.translation, [1., 2., 3.]);
+        assert_eq!(spot.components.len(), 1);
+        assert_eq!(
+            spot.components[0].kind,
+            Component::Light {
+                color: [1.; 3],
+                intensity: 0.01,
+                kind: LightKind::Spot {
+                    range: 5.,
+                    inner_degrees: 0.,
+                    outer_degrees: 45.
+                }
+            }
+        );
         assert_eq!(
             rot_app::creation::static_component_preview(&placed)
                 .unwrap()
@@ -309,20 +330,26 @@ mod tests {
                 .scene()
                 .lighting
                 .light_count(),
-            3
+            4
         );
-        let mut edited = owners[0].clone();
-        let Component::Light { intensity, .. } = &mut edited.components[0].kind else {
+        let mut edited = spot.clone();
+        let Component::Light {
+            intensity,
+            kind: LightKind::Spot { inner_degrees, .. },
+            ..
+        } = &mut edited.components[0].kind
+        else {
             panic!("expected placed light");
         };
         *intensity = 2.5;
+        *inner_degrees = 18.;
         workspace.session.put_object(1, edited).unwrap();
         let placed = workspace.session.scene().clone();
         let store = workspace.assets.as_mut().unwrap();
         fs::write(
             &source,
             punctual_glb(|value| {
-                value["extensions"]["KHR_lights_punctual"]["lights"][0]["intensity"] = json!(75);
+                value["extensions"]["KHR_lights_punctual"]["lights"][2]["intensity"] = json!(75);
             }),
         )
         .unwrap();
@@ -333,6 +360,22 @@ mod tests {
         assert_eq!(
             &workspace.session.scene().objects[..placed.objects.len()],
             &placed.objects
+        );
+        let new_spot = workspace.session.scene().objects[placed.objects.len()..]
+            .iter()
+            .find(|node| node.name == "Spot")
+            .unwrap();
+        assert_eq!(
+            new_spot.components[0].kind,
+            Component::Light {
+                color: [1.; 3],
+                intensity: 0.75,
+                kind: LightKind::Spot {
+                    range: 5.,
+                    inner_degrees: 0.,
+                    outer_degrees: 45.
+                }
+            }
         );
         workspace.session.undo(3).unwrap();
         assert_eq!(workspace.session.scene(), &placed);
