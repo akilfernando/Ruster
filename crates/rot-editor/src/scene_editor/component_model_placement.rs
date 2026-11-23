@@ -221,6 +221,90 @@ mod tests {
     use std::fs;
 
     #[test]
+    fn v23_places_punctual_lights_on_original_nodes_and_retains_edits_on_refresh() {
+        use rot_assets::fixtures::punctual_glb;
+        use serde_json::json;
+
+        let project = tempfile::tempdir().unwrap();
+        let path = project.path().join("scene.json");
+        let source = project.path().join("Lantern.glb");
+        fs::write(&source, punctual_glb(|_| {})).unwrap();
+        let mut store = AssetStore::open(project.path()).unwrap();
+        let model = store.import_glb_at(0, "lantern", "Lantern.glb").unwrap();
+        let initial =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("placement")).unwrap()).unwrap();
+        let mut workspace = ComponentWorkspace::new(path, ComponentSession::new(initial).unwrap());
+        workspace.meshes = store.mesh_snapshots();
+        workspace.assets = Some(store);
+        workspace.place_model(&model.id, None, None).unwrap();
+        let placed = workspace.session.scene().clone();
+        let owners: Vec<_> = placed
+            .objects
+            .iter()
+            .filter(|node| {
+                node.components
+                    .iter()
+                    .any(|component| matches!(component.kind, Component::Light { .. }))
+            })
+            .collect();
+        assert_eq!(
+            owners
+                .iter()
+                .map(|node| node.name.as_str())
+                .collect::<Vec<_>>(),
+            ["Arm", "Base", "Sun"]
+        );
+        for owner in &owners[..2] {
+            assert!(!owner
+                .components
+                .iter()
+                .any(|component| matches!(component.kind, Component::MeshRenderer { .. })));
+            assert_eq!(
+                placed
+                    .objects
+                    .iter()
+                    .filter(|node| node.parent.as_ref() == Some(&owner.id))
+                    .count(),
+                2
+            );
+        }
+        assert_eq!(
+            rot_app::creation::static_component_preview(&placed)
+                .unwrap()
+                .unwrap()
+                .scene()
+                .lighting
+                .light_count(),
+            3
+        );
+        let mut edited = owners[0].clone();
+        let Component::Light { intensity, .. } = &mut edited.components[0].kind else {
+            panic!("expected placed light");
+        };
+        *intensity = 2.5;
+        workspace.session.put_object(1, edited).unwrap();
+        let placed = workspace.session.scene().clone();
+        let store = workspace.assets.as_mut().unwrap();
+        fs::write(
+            &source,
+            punctual_glb(|value| {
+                value["extensions"]["KHR_lights_punctual"]["lights"][0]["intensity"] = json!(75);
+            }),
+        )
+        .unwrap();
+        store.refresh_glb_at(store.revision(), "lantern").unwrap();
+        workspace
+            .place_model(&model.id, Some("Second lantern"), None)
+            .unwrap();
+        assert_eq!(
+            &workspace.session.scene().objects[..placed.objects.len()],
+            &placed.objects
+        );
+        workspace.session.undo(3).unwrap();
+        assert_eq!(workspace.session.scene(), &placed);
+    }
+
+    #[test]
     fn v23_model_placement_preserves_materials_and_animator_in_one_undo() {
         let project = tempfile::tempdir().unwrap();
         let path = project.path().join("scene.json");

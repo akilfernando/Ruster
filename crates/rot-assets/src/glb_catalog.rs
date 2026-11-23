@@ -434,6 +434,155 @@ mod tests {
     use super::*;
 
     #[test]
+    fn punctual_refresh_keeps_last_good_and_reuses_model_paths() {
+        use crate::fixtures::punctual_glb;
+        use crate::ModelLight;
+        use serde_json::json;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("lantern.glb");
+        fs::write(&path, punctual_glb(|_| {})).unwrap();
+        let mut store = AssetStore::open(root.path()).unwrap();
+        let first = store.import_glb_at(0, "lantern", "lantern.glb").unwrap();
+        assert_eq!(first.nodes["Rig/Arm"].light, first.nodes["Rig/Base"].light);
+        assert_eq!(
+            first.nodes["Rig/Arm"].light,
+            Some(ModelLight::Point {
+                color: [0.25, 0.5, 1.],
+                intensity: 16.,
+                range: 0.1
+            })
+        );
+        assert_eq!(
+            first.nodes["Rig/Sun"].light,
+            Some(ModelLight::Directional {
+                color: [1.; 3],
+                intensity: 0.5
+            })
+        );
+        assert_eq!(first.nodes["Rig/Spot"].translation, [1., 2., 3.]);
+        assert!(first.nodes["Rig/Spot"].light.is_none());
+        assert!(first
+            .nodes
+            .iter()
+            .filter(|(path, _)| ModelInfo::is_primitive_path(path))
+            .all(|(_, node)| node.light.is_none()));
+        assert_eq!(
+            first
+                .warnings
+                .iter()
+                .filter(|warning| warning.contains("approximate"))
+                .count(),
+            1
+        );
+        assert!(first.warnings[1].contains("intensity clamped to 16, range clamped to 0.1"));
+        assert!(first.warnings[2].contains("Skipped spot light"));
+
+        for (path_segments, invalid) in [
+            (
+                &["nodes", "1", "extensions", "KHR_lights_punctual", "light"][..],
+                json!(0.5),
+            ),
+            (
+                &["nodes", "1", "extensions", "KHR_lights_punctual", "light"],
+                json!(4),
+            ),
+            (&["extensionsUsed"], json!([])),
+            (
+                &["extensionsUsed"],
+                json!(["KHR_lights_punctual", "KHR_lights_punctual"]),
+            ),
+            (
+                &["extensionsRequired"],
+                json!(["KHR_lights_punctual", "KHR_lights_punctual"]),
+            ),
+            (&["extensionsRequired"], json!(["NOT_supported"])),
+            (
+                &[
+                    "extensions",
+                    "KHR_lights_punctual",
+                    "lights",
+                    "0",
+                    "intensity",
+                ],
+                json!(-1),
+            ),
+            (
+                &["extensions", "KHR_lights_punctual", "lights", "0", "range"],
+                json!(0),
+            ),
+            (
+                &["extensions", "KHR_lights_punctual", "lights", "0", "color"],
+                json!([1, 1, 2]),
+            ),
+            (
+                &[
+                    "extensions",
+                    "KHR_lights_punctual",
+                    "lights",
+                    "2",
+                    "spot",
+                    "outerConeAngle",
+                ],
+                json!(2),
+            ),
+        ] {
+            fs::write(
+                &path,
+                punctual_glb(|value| {
+                    let mut field = value;
+                    for segment in path_segments {
+                        field = if let Ok(index) = segment.parse::<usize>() {
+                            &mut field[index]
+                        } else {
+                            &mut field[*segment]
+                        };
+                    }
+                    *field = invalid;
+                }),
+            )
+            .unwrap();
+            let refusal = store.refresh_glb_at(store.revision(), "lantern");
+            assert!(
+                refusal.is_err(),
+                "accepted invalid value at {path_segments:?}"
+            );
+            assert_eq!(store.model("lantern"), Some(&first));
+        }
+        let reopened = AssetStore::open(root.path()).unwrap();
+        assert_eq!(reopened.model("lantern"), Some(&first));
+        fs::write(
+            &path,
+            punctual_glb(|value| {
+                let point = &mut value["extensions"]["KHR_lights_punctual"]["lights"][0];
+                point["intensity"] = json!(75);
+                point.as_object_mut().unwrap().remove("range");
+            }),
+        )
+        .unwrap();
+        let refreshed = store.refresh_glb_at(store.revision(), "lantern").unwrap();
+        assert_ne!(first.hash, refreshed.hash);
+        assert!(first
+            .nodes
+            .iter()
+            .zip(&refreshed.nodes)
+            .all(|((path, old), (next_path, next))| path == next_path
+                && old.same_placement_structure(next)));
+        assert_eq!(
+            refreshed.nodes["Rig/Arm"].light,
+            Some(ModelLight::Point {
+                color: [0.25, 0.5, 1.],
+                intensity: 0.75,
+                range: 5.
+            })
+        );
+        assert!(refreshed.warnings[1].contains("range omitted"));
+        assert_eq!(
+            AssetStore::open(root.path()).unwrap().model("lantern"),
+            Some(&refreshed)
+        );
+    }
+
+    #[test]
     #[ignore = "requires pinned Blender GLB A/B fixtures; injects failure after real generation staging"]
     fn registry_replacement_failure_after_generation_staging_preserves_active_model() {
         let fixture = PathBuf::from(std::env::var_os("ROT_TEST_GLB_FIXTURES").unwrap());

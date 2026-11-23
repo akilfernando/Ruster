@@ -127,7 +127,40 @@ pub fn animated_glb(fixture: AnimatedFixture) -> Vec<u8> {
             .unwrap()
             .reverse();
     }
-    let mut document = serde_json::to_vec(&document).expect("fixture JSON");
+    pack_glb(&document, &bin)
+}
+
+/// Static split mesh nodes sharing one point, plus a directional and a spot.
+pub fn punctual_glb(edit: impl FnOnce(&mut serde_json::Value)) -> Vec<u8> {
+    let template = animated_glb(AnimatedFixture {
+        split_materials: true,
+        ..Default::default()
+    });
+    let json_length = u32::from_le_bytes(template[12..16].try_into().unwrap()) as usize;
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&template[20..20 + json_length]).unwrap();
+    document.as_object_mut().unwrap().remove("animations");
+    document["extensionsUsed"] = json!(["KHR_lights_punctual"]);
+    document["extensionsRequired"] = json!(["KHR_lights_punctual"]);
+    document["extensions"] = json!({"KHR_lights_punctual":{"lights":[
+        {"type":"point","name":"Paint Lamp","intensity":2000,"range":0.04,"color":[0.25,0.5,1.0]},
+        {"type":"directional","intensity":500},
+        {"type":"spot","name":"Edge Lamp","spot":{}},
+    ]}});
+    let node_extension = |index| json!({"KHR_lights_punctual":{"light":index}});
+    document["nodes"][1]["extensions"] = node_extension(0);
+    document["nodes"][2]["extensions"] = node_extension(0);
+    let nodes = document["nodes"].as_array_mut().unwrap();
+    nodes.push(json!({"name":"Sun","extensions":node_extension(1),
+        "rotation":[-0.7071067811865475,0,0,0.7071067811865476]}));
+    nodes.push(json!({"name":"Spot","extensions":node_extension(2),"translation":[1,2,3]}));
+    document["nodes"][0]["children"] = json!([1, 2, 3, 4]);
+    edit(&mut document);
+    pack_glb(&document, &template[28 + json_length..])
+}
+
+fn pack_glb(document: &serde_json::Value, bin: &[u8]) -> Vec<u8> {
+    let mut document = serde_json::to_vec(document).expect("fixture JSON");
     document.resize(document.len().next_multiple_of(4), b' ');
     let total = 28 + document.len() + bin.len();
     let mut bytes = b"glTF".to_vec();
@@ -138,6 +171,6 @@ pub fn animated_glb(fixture: AnimatedFixture) -> Vec<u8> {
     bytes.extend(document);
     bytes.extend((bin.len() as u32).to_le_bytes());
     bytes.extend(b"BIN\0");
-    bytes.extend(bin);
+    bytes.extend_from_slice(bin);
     bytes
 }
