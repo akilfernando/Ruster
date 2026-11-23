@@ -239,6 +239,14 @@ connected project.
   A new Play run uses the latest accepted file. Build embeds the accepted
   source. File-backed object scripts use Lua host API 2 with the same
   object transform return contract and `host.button(id)` / `host.axis(id)`.
+- File-backed Object Lua can use `host.play_sound("confirm")` after a named
+  Sound Cue is assigned to the exact Script component. Find a ready
+  `kind: "sound"` WAV and its stable ID in `asset_inspect`. Read the exact
+  Script with `scene_components_inspect`, then use a `replace` edit with the
+  scene token, revision and current `expected_asset_revision`. Preserve the
+  component and binding fields and set
+  `binding.properties.confirm = {"type":"sound_ref","value":{"asset_id":"wav-id","gain":0.8}}`.
+  Gain is 0–1. Remove the property to remove the cue.
 - In v23, `scene_inspect` on its first page and `creation_export_inspect`
   on Linux report `project_startup`. It identifies the active scene,
   startup choice (default/configured/invalid), and the sources used by

@@ -1134,6 +1134,11 @@ impl ComponentWorkspace {
                 ));
             }
             let mut response = json!({"object_id":id,"component":component});
+            if super::component_sound::sound_script(component).is_some() {
+                response["sound_cue_guidance"] = json!(
+                    r#"File-backed Object Lua calls host.play_sound("cue-name"). Use binding.properties with type sound_ref and value {asset_id,gain}. Find ready kind sound via asset_inspect; pin expected_asset_revision when setting a cue."#
+                );
+            }
             if let Component::Light {
                 kind:
                     rot_scene::LightKind::Spot {
@@ -1293,12 +1298,18 @@ impl ComponentWorkspace {
                     .then_some(binding.source_id.as_str())
                 })
                 .collect();
+            let mut cues = super::component_sound::changed_cues(before, object).peekable();
             let mut animations = component_animation::changed_bindings(before, object).peekable();
             if self.changes_textured_binding(before, object)
                 || !new_scripts.is_empty()
                 || animations.peek().is_some()
+                || cues.peek().is_some()
             {
                 self.require_component_asset_revision(asset_revision)?;
+            }
+            for (name, cue) in cues {
+                super::component_sound::validate_cue(name, cue, self.assets.as_ref())
+                    .map_err(|error| ("sound_cue_unavailable", error))?;
             }
             for (_, old, binding) in animations {
                 component_animation::validate_binding(self.assets.as_ref(), old, binding)?;

@@ -197,6 +197,7 @@ pub(super) fn mesh_renderer_heading(ordinal: Option<usize>) -> std::borrow::Cow<
 pub(super) struct ComponentControls<'a> {
     pub(super) allow_new_material: bool,
     pub(super) allow_spot_aim: bool,
+    pub(super) allow_sound_cues: bool,
     pub(super) diagnostic: Option<&'a rot_behavior::Diagnostic>,
     pub(super) collider_edit: &'a super::component_workspace::component_collider::InspectorState,
 }
@@ -207,6 +208,7 @@ pub(super) struct ComponentEdits {
     pub(super) animator_revision: Option<(String, u64)>,
     pub(super) collider: Option<String>,
     pub(super) spot_aim: Option<String>,
+    pub(super) sound_cue: Option<super::component_workspace::component_sound::Request>,
 }
 
 pub(super) fn components(
@@ -220,10 +222,13 @@ pub(super) fn components(
     let ComponentControls {
         allow_new_material,
         allow_spot_aim,
+        allow_sound_cues,
         diagnostic,
         collider_edit,
     } = controls;
     use super::component_workspace::component_material::{Intent, Request};
+    use super::component_workspace::component_sound::Request as SoundCueRequest;
+    let mut sound_cue = None;
     let mut material_request = None;
     let mut collider_request = None;
     let mut spot_aim = None;
@@ -475,6 +480,50 @@ pub(super) fn components(
                             if assets.and_then(|store| store.ready_script(id)).is_none() {
                                 ui.label(Text::ComponentScriptUnavailable.plain());
                             }
+                            ui.separator();
+                            ui.strong("Sound Cues");
+                            for (name, property) in &binding.properties {
+                                let rot_scene::PropertyValue::SoundRef(cue) = property else {
+                                    continue;
+                                };
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.monospace(format!("host.play_sound({name:?})"));
+                                    if let Some(wav) = cue.asset_id.as_ref() {
+                                        let file = assets
+                                            .and_then(|store| store.asset_info(wav))
+                                            .map_or(wav.as_str(), |info| {
+                                                script_filename(&info.source)
+                                            });
+                                        ui.label(file);
+                                    }
+                                    if ui
+                                        .add_enabled(
+                                            allow_sound_cues,
+                                            egui::Button::new("Edit Cue"),
+                                        )
+                                        .on_hover_text(name)
+                                        .clicked()
+                                    {
+                                        sound_cue = Some(SoundCueRequest {
+                                            component: component.id.clone(),
+                                            name: Some(name.clone()),
+                                        });
+                                    }
+                                });
+                            }
+                            if ui
+                                .add_enabled(
+                                    allow_sound_cues
+                                        && binding.properties.len() < rot_scene::MAX_PROPERTIES,
+                                    egui::Button::new("Add Sound Cue"),
+                                )
+                                .clicked()
+                            {
+                                sound_cue = Some(SoundCueRequest {
+                                    component: component.id.clone(),
+                                    name: None,
+                                });
+                            }
                             if let Some(error) = diagnostic.filter(|error| {
                                 error.binding_id.as_deref() == Some(component.id.as_str())
                             }) {
@@ -505,6 +554,7 @@ pub(super) fn components(
         animator_revision,
         collider: collider_request,
         spot_aim,
+        sound_cue,
     }
 }
 

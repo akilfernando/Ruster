@@ -309,12 +309,14 @@ impl ComponentScene {
                         binding.validate()?;
                         if source_kind.is_some()
                             && (!matches!(binding.target, BindingTarget::Object(_))
-                                || !binding.properties.is_empty()
+                                || binding.properties.values().any(|property| {
+                                    !matches!(property, crate::PropertyValue::SoundRef(sound) if sound.asset_id.is_some())
+                                })
                                 || !binding.state_defaults.is_empty()
                                 || !binding.commands.is_empty())
                         {
                             return Err(SceneError::Invalid(format!(
-                                "file-backed script {} requires an object binding without properties",
+                                "file-backed script {} requires an object binding with assigned sound cues only",
                                 component.id
                             )));
                         }

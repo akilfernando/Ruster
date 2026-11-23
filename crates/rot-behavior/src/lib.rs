@@ -1352,7 +1352,7 @@ impl Engine {
                         .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
                     if let Some(cues) = host_input.audio.filter(|_| {
                         matches!(host_input.api_version,
-                            STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION | KINEMATIC_HOST_API_VERSION)
+                            INPUT_HOST_API_VERSION | STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION | KINEMATIC_HOST_API_VERSION)
                     }) {
                         audio::install_sound_host(scope, &host, host_input.binding_id, properties, cues)
                             .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;

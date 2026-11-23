@@ -41,6 +41,9 @@ mod component_spot;
 #[path = "component_material.rs"]
 pub(super) mod component_material;
 
+#[path = "component_sound.rs"]
+pub(super) mod component_sound;
+
 #[path = "component_transform.rs"]
 mod viewport_transform;
 use glam::DMat4;
@@ -263,6 +266,7 @@ pub(super) struct ComponentWorkspace {
     animator_draft_revisions: BTreeMap<String, u64>,
     multi_draft: Option<MultiInspector>,
     material_draft: Option<component_material::Draft>,
+    sound_cue: Option<component_sound::Draft>,
     display_draft: Option<component_display::Draft>,
     camera_authoring: component_camera::Authoring,
     spot_aim: Option<component_spot::AimPicker>,
@@ -426,6 +430,7 @@ impl ComponentWorkspace {
             animator_draft_revisions: BTreeMap::new(),
             multi_draft: None,
             material_draft: None,
+            sound_cue: None,
             display_draft: None,
             spot_aim: None,
             camera_authoring: Default::default(),
@@ -778,6 +783,7 @@ impl ComponentWorkspace {
 
     pub(super) fn surface_edit_pending(&self) -> bool {
         self.material_draft.is_some()
+            || self.sound_cue.is_some()
             || self.display_draft.is_some()
             || self.input_actions.pending()
             || self.camera_authoring.pending()
@@ -2841,6 +2847,7 @@ impl ComponentWorkspace {
                                         component_inspector::ComponentControls {
                                             allow_new_material: allow_new,
                                             allow_spot_aim,
+                                            allow_sound_cues: allow_spot_aim,
                                             diagnostic: self.runtime.diagnostic.as_ref(),
                                             collider_edit: &collider_edit,
                                         },
@@ -2857,6 +2864,9 @@ impl ComponentWorkspace {
                                         self.begin_spot_aim(id);
                                     }
                                     self.camera_controls(ui);
+                                    if let Some(request) = edits.sound_cue {
+                                        self.begin_sound_cue(request);
+                                    }
                                     if let Some(request) = edits.material {
                                         self.begin_material(request);
                                     }
@@ -2919,6 +2929,7 @@ impl ComponentWorkspace {
         }
         self.show_project_settings(&ctx);
         self.show_material_draft(&ctx);
+        self.show_sound_cue(&ctx);
         self.show_display_draft(&ctx);
         self.show_camera_draft(&ctx);
         self.show_spot_aim(&ctx);

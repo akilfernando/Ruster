@@ -36,6 +36,34 @@ pub(crate) fn resolved(
         return Ok(None);
     }
     let store = assets.ok_or_else(|| "Lua sources need a ready Assets catalog.".to_owned())?;
+    if verify {
+        for object in &scene.objects {
+            for component in &object.components {
+                let properties = match &component.kind {
+                    rot_scene::component_scene::Component::Script {
+                        binding,
+                        source_kind: Some(_),
+                    } if component.enabled => &binding.properties,
+                    _ => continue,
+                };
+                for (name, value) in properties {
+                    if let rot_scene::PropertyValue::SoundRef(cue) = value {
+                        let asset = cue.asset_id.as_deref().unwrap_or("");
+                        if store
+                            .asset_info(asset)
+                            .is_none_or(|info| info.status != rot_assets::AssetStatus::Ready)
+                            || store.sound(asset).is_none()
+                        {
+                            return Err(format!(
+                                "Sound cue {name:?} on {} needs a ready WAV ({asset}).",
+                                object.name
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
     let mut sources = BTreeMap::new();
     for id in ids {
         let (info, text) = if verify {
@@ -64,6 +92,98 @@ mod tests {
     use super::*;
     use rot_scene::component_scene::{Component, ComponentInstance, ScriptSourceKind};
     use rot_scene::{BehaviorBinding, BindingTarget, Scene, Session};
+
+    #[test]
+    fn file_script_cues_are_independent_and_bake_into_the_sound_closure() {
+        use rot_scene::input::{ActionFrame, ActionValue, ButtonState};
+        use rot_scene::{PropertyValue, SoundRef};
+
+        let dir = tempfile::tempdir().unwrap();
+        let assets_dir = dir.path().join("Assets");
+        std::fs::create_dir(&assets_dir).unwrap();
+        std::fs::write(
+            assets_dir.join("shared.lua"),
+            r#"
+            return {update=function(transform, properties, dt, host)
+                if host.button("fire").pressed then host.play_sound("confirm") end
+                return transform
+            end}
+        "#,
+        )
+        .unwrap();
+        let wav = b"RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\x02\0\0\0\0\0";
+        let mut store = AssetStore::open(dir.path()).unwrap();
+        store.import("shared", "Assets/shared.lua").unwrap();
+        for id in ["near", "far"] {
+            std::fs::write(assets_dir.join(format!("{id}.wav")), wav).unwrap();
+            store.import(id, &format!("Assets/{id}.wav")).unwrap();
+        }
+
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.actions = serde_json::from_value(serde_json::json!({
+            "fire":{"kind":{"type":"button","keys":["space"]}}
+        }))
+        .unwrap();
+        for (object, (asset, gain)) in scene
+            .objects
+            .iter_mut()
+            .zip([("near", 0.25), ("far", 0.75)])
+        {
+            object.components.push(ComponentInstance {
+                id: format!("cue-{asset}"),
+                enabled: true,
+                kind: Component::Script {
+                    source_kind: Some(ScriptSourceKind::Asset),
+                    binding: BehaviorBinding {
+                        target: BindingTarget::Object(object.id.clone()),
+                        source_id: "shared".into(),
+                        enabled: true,
+                        properties: BTreeMap::from([(
+                            "confirm".into(),
+                            PropertyValue::SoundRef(SoundRef {
+                                asset_id: Some(asset.into()),
+                                gain,
+                            }),
+                        )]),
+                        state_defaults: Default::default(),
+                        commands: Default::default(),
+                    },
+                },
+            });
+        }
+        scene.validate().unwrap();
+        let baked = resolved(&scene, Some(&store), true).unwrap().unwrap();
+        assert_eq!(baked.sources.len(), 1);
+        let session = Session::from_component_runtime(&baked).unwrap();
+        assert_eq!(
+            session.sound_asset_references().assets,
+            ["far".into(), "near".into()].into()
+        );
+        let mut engine = rot_behavior::Engine::new(Default::default()).unwrap();
+        let mut runtime = engine.reset(session.scene(), session.authoring()).unwrap();
+        assert!(runtime.audio_batch().is_none());
+        engine
+            .step_with_input(
+                &mut runtime,
+                &ActionFrame(BTreeMap::from([(
+                    "fire".into(),
+                    ActionValue::Button(ButtonState {
+                        held: true,
+                        pressed: true,
+                        released: false,
+                    }),
+                )])),
+            )
+            .unwrap();
+        let cues = &runtime.audio_batch().unwrap().cues;
+        assert_eq!(cues.len(), 2);
+        assert!(cues
+            .iter()
+            .any(|cue| cue.binding_id == "cue-near" && cue.asset_id == "near" && cue.gain == 0.25));
+        assert!(cues
+            .iter()
+            .any(|cue| cue.binding_id == "cue-far" && cue.asset_id == "far" && cue.gain == 0.75));
+    }
 
     #[test]
     fn verified_file_uses_button_edges_and_signed_axis_in_play() {

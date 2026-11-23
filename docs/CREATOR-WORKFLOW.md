@@ -407,6 +407,20 @@ object’s local transform. The parent determines how a local movement appears
 in the world. If a step would move a child outside the world limits, Play
 keeps the previous committed frame and reports the error.
 
+## Play one-shot sounds from a Script
+
+Import a WAV into **Assets**. On the file-backed **Script** component, choose
+**Add Sound Cue**. Name the cue, choose the WAV, set **Gain** from 0 to 1,
+and choose **Apply**. Use the `host.play_sound("cue-name")` call shown in the
+Inspector from the fourth `update` argument. For example, call the cue when
+`host.button("fire").pressed` is true to play it once per press.
+
+Each Script component owns its cues. Two objects can use the same Lua file
+with different WAVs or gains. **Edit Cue** changes or removes the selected cue.
+Changes share Undo. Save before Linux Build, which verifies and packages the
+referenced WAVs. Play emits sounds when a simulation step succeeds.
+Paused Step exposes the committed cue without playing it.
+
 ## Edit a Box Collider in Scene view
 
 Select an object with an enabled Box Collider and choose **Edit Collider**
