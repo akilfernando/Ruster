@@ -671,6 +671,9 @@ impl ComponentWorkspace {
         {
             return Err(invalid());
         }
+        if clip.is_some() || asset_revision.is_some() {
+            self.require_component_asset_revision(asset_revision)?;
+        }
         let owner = args["owner_id"].as_str().ok_or_else(invalid)?;
         let mut object = self
             .session
@@ -704,7 +707,6 @@ impl ComponentWorkspace {
                 unreachable!()
             };
             if let Some(clip) = clip {
-                self.require_component_asset_revision(asset_revision)?;
                 let mut replacement = binding.clone();
                 replacement.clip = clip.to_owned();
                 validate_binding(self.assets.as_ref(), Some(binding), &replacement)?;

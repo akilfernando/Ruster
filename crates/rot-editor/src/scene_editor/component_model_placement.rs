@@ -383,6 +383,12 @@ mod tests {
         assert_eq!(reply["error"]["code"], "invalid_clip", "{reply}");
         assert_eq!(workspace.session.revision(), 1);
 
+        let stale_loop = workspace.ai_command("session", "scene_animation_set", &json!({
+            "expected_session_token":"session","expected_revision":"1","expected_asset_revision":"1",
+            "owner_id":owner,"looping":false
+        }));
+        assert_eq!(stale_loop["error"]["code"], "stale_asset_revision");
+        assert_eq!(workspace.session.scene(), &placed);
         request["clip_id"] = json!(model.clips["Raise"].id);
         let reply = workspace.ai_command("session", "scene_animation_set", &request);
         assert_eq!(reply["ok"], true, "{reply}");
