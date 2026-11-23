@@ -29,6 +29,13 @@ Hub's Empty template creates v23. The editor can inspect objects, edit name,
 enabled state and Transform, add Mesh Renderers and Colliders, create,
 move or delete objects together, and save. Inspector edits shared Transform
 and component values. Viewport settings stay local. Automatic upgrades remain open.
+Hierarchy search finds names or stable IDs, shows parent paths, and reveals
+the exact object. Approved MCP provides revision-pinned pages. In two
+5,000-object release runs, first results appeared in 21–23 ms, warmed
+keystroke-to-results p95 was 49–50 ms, and reveal took 53–65 ms through
+the native accessibility round trip. With the query field focused,
+later idle intervals used 20–25 editor CPU ms/s versus 0–10 with search
+closed. The first interval after typing used 70–75 CPU ms/s.
 File → New Scene and the command palette create a named, saved v23 sibling.
 The new scene has its own history and MCP session. Same-project switches keep
 Assets and the startup setting. Competing files and cancelled creation leave

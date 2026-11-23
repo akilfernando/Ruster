@@ -577,11 +577,12 @@ redo the entire group in one step.
 
 In a v23 scene, type in **Search Hierarchy** or press **Ctrl+F** to focus
 it. Search matches part of an object name or stable ID, regardless of case.
-Results include hidden and disabled objects. Parent breadcrumbs distinguish
-repeated names, and hovering shows the exact ID. Use the arrow keys and
-Enter, or click a result, to select and reveal it in the tree. Escape
-restores the tree and leaves the selection where it was. The usual
-Inspector validation still applies when you select a result.
+Results include hidden and disabled objects. Parent breadcrumbs and stable
+IDs distinguish repeated names. Use the arrow keys and Enter, or click
+anywhere on a result, to select and reveal it in the tree. Escape restores
+the tree and keeps the existing selection. **Clear Search** clears the
+query and keeps focus in the field. Inspector validation still applies
+when you select a result.
 
 Press **Ctrl+D** to duplicate the selection, or choose **Duplicate** in
 **Object**, the Hierarchy row menu, or the command palette. Each selected
