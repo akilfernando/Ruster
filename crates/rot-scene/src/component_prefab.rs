@@ -196,11 +196,13 @@ pub(super) fn validate_instances(
     if scene.prefabs.is_empty() {
         return Ok(());
     }
-    let inherited_materials: HashSet<_> = scene
-        .prefabs
-        .values()
-        .flat_map(|instance| instance.materials.values().map(String::as_str))
-        .collect();
+    let inherited_materials = std::cell::LazyCell::new(|| {
+        scene
+            .prefabs
+            .values()
+            .flat_map(|instance| instance.materials.values().map(String::as_str))
+            .collect::<HashSet<_>>()
+    });
     let mut owners = HashMap::new();
     for (root, instance) in &scene.prefabs {
         validate_id(&instance.asset)?;
