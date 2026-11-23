@@ -57,6 +57,25 @@ Presets**. An approved MCP client can call `viewport_frame` with the parent
 ID and `front`, `side`, or `top`, then call `viewport_screenshot` for each
 view. Inspect one assembly from multiple angles before copying it.
 
+## Choose a project startup scene
+
+Save a v23 scene directly in the project folder. Open **Edit → Project
+Settings… → Project** and choose **Use Current Saved Scene**. The Hub opens
+that scene when you open the project folder or its recent project row.
+**File → Open** still opens the file you choose, and **Play** runs the scene
+currently open.
+
+**Build Application…** identifies the startup file. When one is configured,
+Build uses its saved content and assets. You can keep working in another
+scene with unsaved changes. Build leaves the open scene and its edits in
+place. Choose **Reset to Default** to restore the Hub's folder fallback
+to `scene.json` and have Build use the active saved scene again.
+
+If the startup file disappears or a different scene replaces it, open a
+saved scene by filename and update or reset the setting. If another editor
+changes the setting while a dialog is open, close and reopen the dialog
+before retrying.
+
 ## Create an empty group in a legacy scene
 
 Choose **New Group** in the Hierarchy or **Create Empty** in the Create menu

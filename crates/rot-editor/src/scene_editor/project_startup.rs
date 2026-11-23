@@ -562,3 +562,55 @@ pub(super) fn context(
     *cached = observed.ok();
     result
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    fn scene(path: &Path, id: &str) -> ComponentSession {
+        ComponentScene::from_legacy(&rot_scene::Session::new(rot_scene::Scene::empty(id)).unwrap())
+            .unwrap()
+            .save_new(path)
+            .unwrap();
+        ComponentSession::open(path).unwrap()
+    }
+
+    #[test]
+    fn exact_startup_observation_guards_other_editor_replacement_and_project_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        fs::create_dir(&root).unwrap();
+        let path = root.join("welcome.scene.json");
+        let original = scene(&path, "welcome");
+        let project = ProjectDirectory::capture(&root).unwrap();
+        let first = project.validated().unwrap();
+        let stale = project.validated().unwrap();
+        first.use_saved(&path, &original).unwrap();
+        assert!(stale.reset().is_err());
+        assert!(stale.use_saved(&path, &original).is_err());
+        let live = project.validated().unwrap();
+        assert_eq!(live.choice(), Ok(Some(("welcome.scene.json", "welcome"))));
+
+        let outside = dir.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        let foreign_path = outside.join("welcome.scene.json");
+        let foreign = scene(&foreign_path, "foreign");
+        assert!(live.use_saved(&foreign_path, &foreign).is_err());
+        let bytes = fs::read(root.join(SETTINGS)).unwrap();
+        fs::remove_file(&path).unwrap();
+        symlink(&foreign_path, &path).unwrap();
+        assert!(project.validated().unwrap().choice().is_err());
+        assert!(live.with_source(|_| Ok(())).is_err());
+        assert_eq!(fs::read(root.join(SETTINGS)).unwrap(), bytes);
+
+        let archived = dir.path().join("archived");
+        fs::rename(&root, &archived).unwrap();
+        fs::create_dir(&root).unwrap();
+        assert!(project.validated().is_err());
+        assert!(live.reset().is_err());
+        assert!(!root.join(SETTINGS).exists());
+        assert_eq!(fs::read(archived.join(SETTINGS)).unwrap(), bytes);
+    }
+}

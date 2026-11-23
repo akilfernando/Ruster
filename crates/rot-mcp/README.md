@@ -214,6 +214,12 @@ connected project.
   A new Play run uses the latest accepted file. Build embeds the accepted
   source. File-backed object scripts use Lua host API 2 with the same
   object transform return contract and `host.button(id)` / `host.axis(id)`.
+- In v23, `scene_inspect` on its first page and `creation_export_inspect`
+  on Linux report `project_startup`. It identifies the active scene,
+  startup choice (default/configured/invalid), and the sources used by
+  Hub, Play and native Build. Project Settings is the creator's write
+  surface. The existing registered connection remains pinned to its
+  approved scene path, regardless of the startup selection.
 - For a v23 Box Collider, use `scene_components_inspect` with the exact
   `object_id` and `component_id`. The component's `offset` and
   `shape.half_extents` are local. `collider_world` reports its resolved

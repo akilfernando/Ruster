@@ -746,6 +746,28 @@ impl BuildUi {
         }
     }
 
+    fn capture_project_request(
+        &self,
+        session: &ComponentSession,
+        assets: Option<&AssetStore>,
+    ) -> Result<BuildRequest, BuildFailure> {
+        let observation = self
+            .startup
+            .as_ref()
+            .expect("opened Build")
+            .as_ref()
+            .map_err(|error| BuildFailureKind::SceneUnavailable.detail(error))?;
+        // Keep typed build asset failures distinct from settings conflicts.
+        observation
+            .with_source(|selected| {
+                Ok(match selected {
+                    Some((_, startup)) => BuildRequest::capture(&startup, assets),
+                    None => BuildRequest::capture(session, assets),
+                })
+            })
+            .map_err(|error| BuildFailureKind::SceneUnavailable.detail(error))?
+    }
+
     fn start(
         &self,
         ctx: &egui::Context,
@@ -754,21 +776,7 @@ impl BuildUi {
         destination: PathBuf,
         run: bool,
     ) -> Result<BuildWorker, BuildFailure> {
-        let observation = self
-            .startup
-            .as_ref()
-            .expect("opened Build")
-            .as_ref()
-            .map_err(|error| BuildFailureKind::SceneUnavailable.detail(error))?;
-        // Keep typed build asset failures distinct from settings conflicts.
-        let request = observation
-            .with_source(|selected| {
-                Ok(match selected {
-                    Some((_, startup)) => BuildRequest::capture(&startup, assets),
-                    None => BuildRequest::capture(session, assets),
-                })
-            })
-            .map_err(|error| BuildFailureKind::SceneUnavailable.detail(error))??;
+        let request = self.capture_project_request(session, assets)?;
         let executable = std::env::current_exe()
             .map_err(|error| BuildFailureKind::PlayerUnavailable.detail(error))?;
         let player = executable
@@ -805,6 +813,102 @@ mod tests {
         Scene, Session, Transform,
     };
     use serde_json::json;
+
+    #[test]
+    fn configured_build_pins_sibling_dependencies_without_saving_live_scene() {
+        use super::super::project_startup::ProjectDirectory;
+        use rot_scene::component_scene::Geometry;
+
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let active_file = root.join("scene.json");
+        let target_file = root.join("title.scene.json");
+        let authored = |id| {
+            ComponentScene::from_legacy(
+                &rot_scene::Session::new(rot_scene::Scene::empty(id)).unwrap(),
+            )
+            .unwrap()
+        };
+        authored("active").save_new(&active_file).unwrap();
+        let mut startup = authored("title");
+        startup.objects.push(ObjectNode {
+            id: "title-object".into(),
+            name: "Title Object".into(),
+            enabled: true,
+            parent: None,
+            transform: Default::default(),
+            components: vec![rot_scene::component_scene::ComponentInstance {
+                id: "title-renderer".into(),
+                enabled: true,
+                kind: rot_scene::component_scene::Component::MeshRenderer {
+                    geometry: Geometry::Imported {
+                        asset: "startup-mesh".into(),
+                    },
+                    tint: [1.; 4],
+                    material: None,
+                },
+            }],
+        });
+        startup.save_new(&target_file).unwrap();
+        let project = ProjectDirectory::capture(root).unwrap();
+        let target = ComponentSession::open(&target_file).unwrap();
+        project
+            .validated()
+            .unwrap()
+            .use_saved(&target_file, &target)
+            .unwrap();
+        fs::create_dir(root.join("Assets")).unwrap();
+        fs::write(
+            root.join("Assets/title.obj"),
+            b"v 0 0 0
+v 1 0 0
+v 0 1 0
+f 1 2 3
+",
+        )
+        .unwrap();
+        let mut assets = AssetStore::open(root).unwrap();
+        assets.import("startup-mesh", "Assets/title.obj").unwrap();
+        let mut active = ComponentSession::open(&active_file).unwrap();
+        active
+            .put_object(
+                0,
+                ObjectNode {
+                    id: "draft".into(),
+                    name: "Draft".into(),
+                    enabled: true,
+                    parent: None,
+                    transform: Default::default(),
+                    components: Vec::new(),
+                },
+            )
+            .unwrap();
+        let active_bytes = fs::read(&active_file).unwrap();
+        let title_bytes = fs::read(&target_file).unwrap();
+        let mut build = BuildUi::default();
+        build.open(&active_file, "active", project.validated());
+        let request = build
+            .capture_project_request(&active, Some(&assets))
+            .unwrap();
+        assert_eq!(request.scene.draw_scene().id, "title");
+        assert_eq!(request.bytes, title_bytes);
+        assert_eq!(
+            request.dependencies.meshes,
+            ["startup-mesh".to_string()].into()
+        );
+        assert!(request.assets.is_some());
+        assert!(active.is_dirty());
+        assert_eq!(fs::read(&active_file).unwrap(), active_bytes);
+
+        let mut replacement = tempfile::NamedTempFile::new_in(root).unwrap();
+        use std::io::Write as _;
+        replacement.write_all(&title_bytes).unwrap();
+        replacement.persist(&target_file).unwrap();
+        assert!(build
+            .capture_project_request(&active, Some(&assets))
+            .is_err());
+        assert!(active.is_dirty());
+    }
 
     #[test]
     fn file_backed_script_build_pins_bytes_and_bakes_one_source() {
