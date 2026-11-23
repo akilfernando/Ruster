@@ -484,6 +484,15 @@ zero at **Outer Half-Angle**. The fields are in degrees. Set the inner value fro
 Parent scale affects the light's position. Spot angles stay in degrees and range stays in world units. Spot Lights render in the Scene view and in static Play and
 Linux builds.
 
+To make a moving headlamp, attach one **Point Light** or **Spot Light** to
+the object that carries the Mesh Renderer and an Object Lua API 1 or 2
+script. Use a leaf object and its supported transform-only parent groups.
+The beam follows the same committed world pose as the mesh in Play and
+Linux Build. The two component **Enabled** controls work independently.
+A scripted scene can contain up to four point or spot lights, including
+disabled lights. Approved MCP clients can read the committed world light
+transforms by owner ID on the first page of `behavior_runtime_inspect`.
+
 Use **Shadows** and **Quality** to configure a directional light's shadow.
 **Advanced Shadows** exposes depth bias and normal offset in shadow texels.
 Turning shadows off keeps those settings. Approved AI clients can inspect
