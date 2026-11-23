@@ -81,7 +81,8 @@ impl ComponentScene {
 
     pub fn effective_camera(&self, hierarchy: &ObjectHierarchy) -> Option<&PlayerView> {
         let (index, component, view) = self.designated_camera()?;
-        (component.enabled && hierarchy.effectively_enabled[index]).then_some(view)
+        (component.enabled && hierarchy.effectively_enabled.get(index) == Some(&true))
+            .then_some(view)
     }
 
     pub fn validate(&self) -> Result<ObjectHierarchy, SceneError> {

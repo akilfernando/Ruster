@@ -1143,12 +1143,20 @@ impl ComponentSession {
             .checked_add(1)
             .ok_or(SceneError::RevisionOverflow)?;
         let mut inverse = apply_changes(changes, &mut self.scene);
-        if self.scene.gameplay_camera.is_some()
-            && !inverse
+        if self.scene.gameplay_camera.as_deref().is_some_and(|id| {
+            !inverse
                 .iter()
                 .any(|change| matches!(change, SceneChange::GameplayCamera(_)))
-            && self.scene.designated_camera().is_none()
-        {
+                && inverse.iter().any(|change| match change {
+                    SceneChange::Insert { object, .. } | SceneChange::Replace { object, .. } => {
+                        object.components.iter().any(|component| {
+                            component.id == id && matches!(component.kind, Component::Camera { .. })
+                        })
+                    }
+                    _ => false,
+                })
+                && self.scene.designated_camera().is_none()
+        }) {
             inverse.insert(
                 0,
                 SceneChange::GameplayCamera(self.scene.gameplay_camera.take()),
@@ -1445,6 +1453,89 @@ fn digest(mut input: impl Read) -> io::Result<[u8; 32]> {
 mod tests {
     use super::*;
     use crate::{hierarchy::close, Scene, Session};
+
+    #[test]
+    fn game_camera_designation_is_atomic_and_survives_suspension_and_undo() {
+        use crate::component_scene::{Component, ComponentInstance};
+        use crate::{PlayerAnchor, PlayerView};
+        let root = ObjectNode {
+            id: "rig".into(),
+            name: "Rig".into(),
+            enabled: true,
+            parent: None,
+            transform: Transform::default(),
+            components: Vec::new(),
+        };
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("shot")).unwrap()).unwrap();
+        scene.objects.push(root.clone());
+        let mut session = ComponentSession::new(scene).unwrap();
+        let view = PlayerView {
+            anchor: PlayerAnchor::Fixed {
+                position: [3., 2., 1.],
+            },
+            yaw: 0.2,
+            pitch: 0.12,
+            distance: 9.,
+            vertical_fov_degrees: 45.,
+        };
+        let camera = ObjectNode {
+            id: "camera-owner".into(),
+            name: "Camera".into(),
+            parent: Some(root.id.clone()),
+            enabled: true,
+            transform: Transform::default(),
+            components: vec![ComponentInstance {
+                id: "shot".into(),
+                enabled: true,
+                kind: Component::Camera { view: view.clone() },
+            }],
+        };
+        assert_eq!(
+            session
+                .put_gameplay_camera(0, "shot".into(), camera.clone())
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            session
+                .put_gameplay_camera(1, "shot".into(), camera.clone())
+                .unwrap(),
+            1
+        );
+        let active = |session: &ComponentSession, expected: bool| {
+            let scene = session.scene();
+            assert_eq!(scene.gameplay_camera.as_deref(), Some("shot"));
+            assert_eq!(
+                scene.effective_camera(&scene.validate().unwrap()),
+                expected.then_some(&view)
+            );
+        };
+        active(&session, true);
+        let mut disabled = root.clone();
+        disabled.enabled = false;
+        session.put_object(1, disabled).unwrap();
+        active(&session, false);
+        session.undo(2).unwrap();
+        active(&session, true);
+        session.remove_subtree(3, "rig").unwrap();
+        assert!(session.scene().gameplay_camera.is_none());
+        session.undo(4).unwrap();
+        active(&session, true);
+        let mut changed = camera.clone();
+        changed.components[0].kind = Component::Collider {
+            role: crate::ColliderRole::Blocker,
+            offset: [0.; 3],
+            shape: crate::ColliderShape::default(),
+        };
+        session.put_object(5, changed).unwrap();
+        assert!(session.scene().gameplay_camera.is_none());
+        session.undo(6).unwrap();
+        active(&session, true);
+        session.set_gameplay_camera(7, None).unwrap();
+        assert!(session.scene().gameplay_camera.is_none());
+        assert_eq!(session.scene().objects, [root, camera]);
+    }
 
     #[test]
     fn group_selection_preserves_hierarchy_world_pose_and_history() {

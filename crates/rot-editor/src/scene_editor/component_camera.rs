@@ -5,6 +5,7 @@ use rot_scene::{
     component_scene::{Component, ComponentInstance, ObjectNode},
     PlayerAnchor, PlayerView, SceneError, Transform,
 };
+use std::collections::HashMap;
 
 #[derive(Default)]
 pub(super) struct Authoring {
@@ -25,8 +26,38 @@ struct Draft {
     view: PlayerView,
     revision: u64,
     destination: Option<String>,
+    choices: Vec<CameraChoice>,
     opened_frame: Option<u64>,
     error: Option<String>,
+}
+
+struct CameraChoice {
+    id: String,
+    label: String,
+}
+
+fn camera_choices(objects: &[ObjectNode]) -> Vec<CameraChoice> {
+    let mut names = HashMap::new();
+    let mut choices = Vec::new();
+    for object in objects {
+        for component in &object.components {
+            if let Component::Camera { view } = &component.kind {
+                *names.entry(object.name.as_str()).or_insert(0usize) += 1;
+                choices.push((&object.name, component.id.as_str(), camera_mode(view)));
+            }
+        }
+    }
+    choices
+        .into_iter()
+        .map(|(name, id, mode)| CameraChoice {
+            id: id.to_owned(),
+            label: if names[name.as_str()] > 1 {
+                format!("{name} · {mode} · {id}")
+            } else {
+                format!("{name} · {mode}")
+            },
+        })
+        .collect()
 }
 
 fn fixed_shot(
@@ -151,6 +182,7 @@ impl ComponentWorkspace {
             view,
             revision: self.session.revision(),
             destination: self.default_camera_destination(),
+            choices: camera_choices(&self.session.scene().objects),
             opened_frame: None,
             error: None,
         });
@@ -259,16 +291,15 @@ impl ComponentWorkspace {
         let popup_open = egui::Popup::is_any_open(ctx);
         let enter = draft.opened_frame.is_some_and(|opened| opened != frame)
             && ctx.input(|input| input.key_pressed(egui::Key::Enter));
-        let scene = self.session.scene();
         let label = draft
             .destination
             .as_deref()
             .and_then(|id| {
-                scene
-                    .objects
+                draft
+                    .choices
                     .iter()
-                    .find(|object| object.components.iter().any(|component| component.id == id))
-                    .map(|object| object.name.as_str())
+                    .find(|choice| choice.id == id)
+                    .map(|choice| choice.label.as_str())
             })
             .unwrap_or(Text::CameraNew.plain());
         let response = egui::Modal::new(egui::Id::unique("v23_game_camera"))
@@ -285,17 +316,13 @@ impl ComponentWorkspace {
                                 None,
                                 Text::CameraNew.plain(),
                             );
-                            for object in &scene.objects {
-                                for component in &object.components {
-                                    if let Component::Camera { view } = &component.kind {
-                                        ui.selectable_value(
-                                            &mut draft.destination,
-                                            Some(component.id.clone()),
-                                            format!("{} · {}", object.name, camera_mode(view)),
-                                        )
-                                        .on_hover_text(&component.id);
-                                    }
-                                }
+                            for choice in &draft.choices {
+                                ui.selectable_value(
+                                    &mut draft.destination,
+                                    Some(choice.id.clone()),
+                                    choice.label.as_str(),
+                                )
+                                .on_hover_text(&choice.id);
                             }
                         })
                         .response
@@ -330,6 +357,10 @@ impl ComponentWorkspace {
                 draft.view.clone(),
             ) {
                 Ok(_) => {
+                    let scene = self.session.scene();
+                    if let Some((index, _, _)) = scene.designated_camera() {
+                        self.select(Some(scene.objects[index].id.clone()));
+                    }
                     self.error = None;
                     return;
                 }
@@ -405,5 +436,49 @@ pub(in crate::scene_editor) fn camera_mode(view: &PlayerView) -> &'static str {
         Text::CameraFollow.plain()
     } else {
         Text::CameraFixed.plain()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capture_uses_the_rendered_perspective_and_checks_both_matrices() {
+        let state = rot_render::CameraState {
+            target: [3., 2., -8.],
+            yaw: 0.81,
+            pitch: -0.4,
+            distance: 7.2,
+            orthographic: false,
+        };
+        for aspect in [4. / 3., 16. / 9.] {
+            let matrices = state.matrices(aspect).unwrap();
+            let view = fixed_shot(state, matrices, aspect).unwrap();
+            assert_eq!(
+                view.anchor,
+                PlayerAnchor::Fixed {
+                    position: state.target
+                }
+            );
+            assert_eq!(view.vertical_fov_degrees, 45.);
+            assert!(fixed_shot(state, matrices, aspect + 0.1).is_err());
+            let orthographic = rot_render::CameraState {
+                orthographic: true,
+                ..state
+            };
+            assert_eq!(
+                fixed_shot(orthographic, orthographic.matrices(aspect).unwrap(), aspect),
+                Err(Text::CameraCapturePerspective.plain())
+            );
+            let overhead = rot_render::CameraState {
+                pitch: 88.9_f32.to_radians(),
+                ..state
+            };
+            assert_eq!(
+                fixed_shot(overhead, overhead.matrices(aspect).unwrap(), aspect),
+                Err(Text::CameraCaptureBounds.plain())
+            );
+        }
     }
 }

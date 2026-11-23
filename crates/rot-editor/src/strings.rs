@@ -95,7 +95,7 @@ editor_text! {
     CameraVerticalFov => "Vertical FOV",
     CameraCapturePerspective => "Switch to Perspective before setting the Game Camera.",
     CameraCaptureUnavailable => "Open the Scene view and let it draw before setting the camera.",
-    CameraCaptureBounds => "Reframe the Scene view closer to the scene to set the Game Camera.",
+    CameraCaptureBounds => "Tilt away from overhead or reframe closer to set the Game Camera.",
     CameraFinishEdit => "Stop Play and finish the current edit to set the Game Camera.",
     CameraOnlyFixed => "This command takes a fixed perspective shot.",
     CameraDestinationMissing => "Camera unavailable. Reopen the camera picker.",

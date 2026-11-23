@@ -271,29 +271,32 @@ fn snapshot_error(error: SceneError) -> String {
 pub fn static_component_preview(
     scene: &ComponentScene,
 ) -> Result<Option<Arc<rot_render::component_preview::ComponentPreview>>, SceneError> {
-    let fixed_or_unset = match scene.designated_camera() {
-        Some((index, component, view)) if component.enabled && view.followed_target().is_some() => {
-            !rot_scene::component_scene::ObjectHierarchy::build(&scene.objects)?.effectively_enabled
-                [index]
+    if !supports_static_preview(scene) {
+        return Ok(None);
+    }
+    if let Some((index, component, view)) = scene.designated_camera() {
+        if component.enabled
+            && view.followed_target().is_some()
+            && rot_scene::component_scene::ObjectHierarchy::build(&scene.objects)?
+                .effectively_enabled[index]
+        {
+            return Ok(None);
         }
-        _ => true,
-    };
-    if fixed_or_unset
-        && supports_static_preview(scene)
-        && (scene.gameplay_camera.is_some()
-            || scene.objects.len() > rot_scene::MAX_OBJECTS
-            || scene.objects.iter().any(|object| {
-                !object.enabled
-                    || object.parent.is_some()
-                    || object
-                        .components
-                        .iter()
-                        .any(|component| match component.kind {
-                            Component::Light { .. } => true,
-                            Component::MeshRenderer { .. } => !component.enabled,
-                            _ => false,
-                        })
-            }))
+    }
+    if scene.gameplay_camera.is_some()
+        || scene.objects.len() > rot_scene::MAX_OBJECTS
+        || scene.objects.iter().any(|object| {
+            !object.enabled
+                || object.parent.is_some()
+                || object
+                    .components
+                    .iter()
+                    .any(|component| match component.kind {
+                        Component::Light { .. } => true,
+                        Component::MeshRenderer { .. } => !component.enabled,
+                        _ => false,
+                    })
+        })
     {
         return rot_render::component_preview::project(scene)
             .map(Arc::new)
