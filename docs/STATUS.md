@@ -55,6 +55,14 @@ and axis input examples. Grouped runtime draws share the committed world
 matrices, lights and camera across unchanged frames. The depth-eight
 release test cut paused CPU extraction p95 from 0.762 to 0.012 ms on
 256 targets. Vulkan GPU scene p95 stayed at 0.128 ms in the same fixture.
+A supported scripted Mesh Renderer leaf can also carry one Point or Spot
+Light. The mesh and light have separate Enabled settings and share one
+committed pose. Approved MCP reads the committed light transform in world
+space. A Blender trolley moved its beam between two plates and aimed
+in place in Play and a relocated Linux startup build. A rejected Step
+preserved the preceding geometry and beam. For matched moving-lamp
+scenes, Step plus viewport CPU extraction was 0.097 ms p95 for the
+attached lamp and 1.847 ms for a Group driving a separate lamp.
 The editor and viewer draw, fit and pick from cached world matrices.
 Play and Linux Build share the same render data for supported static hierarchies,
 including shear. Set Game Camera from View captures a fixed v23 perspective
@@ -69,7 +77,7 @@ hides its mesh and shadow while its Lua behavior and collider keep running.
 Build retains assets referenced by disabled geometry. A relocated Vulkan
 player loaded a 1.44 MB v23 scene with 5,000 objects and an imported mesh. Build failures
 offer keyboard-accessible Error Details.
-v23 point and directional lights can be created as objects or attached to meshes.
+v23 point, spot, and directional lights can be created as objects or attached to meshes.
 The Inspector and approved MCP clients edit the same component. The editor warns
 at the render budget and keeps extra lights editable. Static Linux builds preserve
 attached lights and a parented sun's direction and shadow settings.
