@@ -29,6 +29,11 @@ Hub's Empty template creates v23. The editor can inspect objects, edit name,
 enabled state and Transform, add Mesh Renderers and Colliders, create,
 move or delete objects together, and save. Inspector edits shared Transform
 and component values. Viewport settings stay local. Automatic upgrades remain open.
+Project Settings can designate a saved v23 sibling as the startup scene.
+The Hub opens it and Linux Build packages its saved dependency closure.
+Explicit file Open uses the chosen document, and Play runs the active scene.
+Approved MCP reports each route. A relocated Title build retained its texture
+while an unsaved Rail Yard remained open in the editor.
 
 The v23 Inspector shows live Transform and script state during Play and Step.
 An imported model's Animator lists same-model clips and their durations.
