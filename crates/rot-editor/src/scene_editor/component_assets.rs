@@ -22,13 +22,25 @@ enum ContextAction {
     Reveal(PathBuf),
     CreateFolder(PathBuf),
     Rename(PathBuf),
+    Move { id: String, source: PathBuf },
     Delete(PathBuf),
 }
 
 #[cfg(target_os = "linux")]
 enum FileDialog {
-    Folder { parent: PathBuf, name: String },
-    Rename { source: PathBuf, stem: String },
+    Folder {
+        parent: PathBuf,
+        name: String,
+    },
+    Rename {
+        source: PathBuf,
+        stem: String,
+    },
+    Move {
+        id: String,
+        source: PathBuf,
+        folder: Option<PathBuf>,
+    },
     Delete(PathBuf),
 }
 
@@ -213,10 +225,90 @@ impl Browser {
     ) -> Option<(AssetStateIdentity, FileAction)> {
         let (catalog, mut dialog) = self.file_dialog.take()?;
         let focus_name = std::mem::take(&mut self.focus_file_name);
-        let escaped =
-            ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        let popup_owns_escape =
+            matches!(&dialog, FileDialog::Move { .. }) && egui::Popup::is_any_open(ctx);
+        let escaped = !popup_owns_escape
+            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
         let mut cancel = escaped;
         let mut submit = false;
+        if let FileDialog::Move { id, source, folder } = &mut dialog {
+            egui::Modal::new(egui::Id::unique("asset_move_folder"))
+                .frame(editor_theme::dialog_frame(ctx))
+                .show(ctx, |ui| {
+                    ui.set_width((ctx.content_rect().width() - 48.0).clamp(220.0, 430.0));
+                    ui.heading(Text::AssetMoveFolderTitle.plain());
+                    let label = ui.label(Text::AssetMoveFolderLabel.plain());
+                    let focus = super::super::combo_focus::ComboFocus::capture(
+                        ui,
+                        "asset_move_destination",
+                    );
+                    let response = egui::ComboBox::from_id_salt("asset_move_destination")
+                        .selected_text(folder.as_ref().map_or_else(
+                            || Text::AssetMoveChooseFolder.plain().to_owned(),
+                            |folder| folder.display().to_string(),
+                        ))
+                        .show_ui(ui, |ui| {
+                            let mut selected = false;
+                            egui::ScrollArea::vertical()
+                                .max_height(240.0)
+                                .show(ui, |ui| {
+                                    for candidate in &self.folders {
+                                        if candidate.starts_with("Assets")
+                                            && source.parent() != Some(candidate)
+                                            && ui
+                                                .selectable_label(
+                                                    folder.as_ref() == Some(candidate),
+                                                    candidate.display().to_string(),
+                                                )
+                                                .clicked()
+                                        {
+                                            *folder = Some(candidate.clone());
+                                            selected = true;
+                                            ui.close();
+                                        }
+                                    }
+                                });
+                            selected
+                        });
+                    focus.restore(ui, &response.response, response.inner.unwrap_or(false));
+                    let response = response.response.labelled_by(label.id);
+                    if focus_name {
+                        response.request_focus();
+                    }
+                    if let (Some(folder), Some(leaf)) = (folder.as_ref(), source.file_name()) {
+                        ui.label(Text::AssetMoveDestination.plain());
+                        ui.add(
+                            egui::Label::new(folder.join(leaf).display().to_string())
+                                .wrap()
+                                .selectable(true),
+                        );
+                    }
+                    ui.horizontal(|ui| {
+                        submit = ui
+                            .add_enabled_ui(folder.is_some(), |ui| {
+                                editor_theme::primary_button(ui, Text::AssetMoveSubmit.plain())
+                            })
+                            .inner
+                            .clicked();
+                        cancel |= ui.button(Text::ComponentCancel.plain()).clicked();
+                    });
+                });
+            if cancel {
+                return None;
+            }
+            if submit {
+                return Some((
+                    catalog,
+                    FileAction::Move {
+                        id: id.clone(),
+                        source: source.clone(),
+                        folder: folder.take()?,
+                    },
+                ));
+            }
+            self.file_dialog = Some((catalog, dialog));
+            return None;
+        }
         egui::Modal::new(egui::Id::unique("asset_file_dialog"))
             .frame(editor_theme::dialog_frame(ctx))
             .show(ctx, |ui| {
@@ -231,6 +323,7 @@ impl Browser {
                         Text::AssetRename.plain(),
                         Some(stem),
                     ),
+                    FileDialog::Move { .. } => unreachable!("separate folder picker"),
                     FileDialog::Delete(_) => (
                         Text::AssetDeleteHeading.plain(),
                         Text::AssetMoveToTrash.plain(),
@@ -288,6 +381,7 @@ impl Browser {
                 stem: stem.trim().to_owned(),
             },
             FileDialog::Delete(source) => FileAction::Trash(source),
+            FileDialog::Move { .. } => unreachable!("separate folder picker"),
         };
         Some((catalog, action))
     }
@@ -825,6 +919,13 @@ fn file_actions(ui: &mut egui::Ui, row: &AssetRow) -> Option<ContextAction> {
     let supported = rot_assets::AssetStore::project_source_limit(&row.source).is_ok();
     let duplicate = supported && row.status != AssetStatus::Missing;
     let can_move = duplicate && source.starts_with("Assets");
+    let can_move_folder = can_move
+        && row.registered
+        && row.status == AssetStatus::Ready
+        && source
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| matches!(extension, "obj" | "lua" | "wav"));
     let action =
         if row.can_import_roughness && ui.button(Text::AssetImportAsRoughness.plain()).clicked() {
             Some(ContextAction::File(FileAction::InterpretRoughness(
@@ -838,6 +939,18 @@ fn file_actions(ui: &mut egui::Ui, row: &AssetRow) -> Option<ContextAction> {
             .clicked()
         {
             Some(ContextAction::Rename(source.to_owned()))
+        } else if ui
+            .add_enabled(
+                can_move_folder,
+                egui::Button::new(Text::AssetMoveFolderCommand.plain()),
+            )
+            .on_disabled_hover_text(Text::AssetMoveFolderUnsupported.plain())
+            .clicked()
+        {
+            Some(ContextAction::Move {
+                id: row.id.clone(),
+                source: source.to_owned(),
+            })
         } else if ui
             .add_enabled(
                 duplicate,
@@ -1021,6 +1134,14 @@ impl ComponentWorkspace {
                     .start_file_dialog(FileDialog::Rename { source, stem });
                 ctx.request_repaint();
             }
+            Some(ContextAction::Move { id, source }) => {
+                self.asset_browser.start_file_dialog(FileDialog::Move {
+                    id,
+                    source,
+                    folder: None,
+                });
+                ctx.request_repaint();
+            }
             Some(ContextAction::Delete(source)) => {
                 self.asset_browser
                     .start_file_dialog(FileDialog::Delete(source));
@@ -1065,6 +1186,12 @@ impl ComponentWorkspace {
             self.asset_import_error = Some(Text::AssetOperationBusy.plain().into());
             return;
         }
+        let expected_move = match &action {
+            FileAction::Move { id, source, folder } => source
+                .file_name()
+                .map(|leaf| (id.clone(), folder.join(leaf))),
+            _ => None,
+        };
         let result = self
             .asset_watcher
             .as_ref()
@@ -1073,9 +1200,30 @@ impl ComponentWorkspace {
         match result {
             Ok(reply) => {
                 self.asset_import = Some(reply);
+                self.asset_move = expected_move;
                 self.asset_import_error = None;
             }
             Err(error) => self.asset_import_error = Some(error),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn follow_asset_move(&mut self, id: String, destination: &Path) {
+        if self
+            .assets
+            .as_ref()
+            .and_then(|assets| assets.asset_info(&id))
+            .is_some_and(|info| {
+                Path::new(&info.source) == destination && info.status == AssetStatus::Ready
+            })
+        {
+            if let Some(parent) = destination.parent() {
+                self.asset_browser.folder = parent.to_owned();
+                self.asset_browser.filter();
+            }
+            self.asset_browser.selected = Some(id);
+        } else {
+            self.asset_import_error = Some(Text::AssetMoveCatalogChanged.plain().into());
         }
     }
 

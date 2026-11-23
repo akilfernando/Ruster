@@ -1,6 +1,6 @@
 //! Watch the open Linux project's Assets tree without polling the filesystem.
 use eframe::egui::Context;
-use rot_assets::{AssetStore, PrefabFile, ProjectFileIssue};
+use rot_assets::{AssetKind, AssetStatus, AssetStore, PrefabFile, ProjectFileIssue};
 use rustix::event::{poll, PollFd, PollFlags};
 use rustix::fd::OwnedFd;
 use rustix::fs::{
@@ -8,6 +8,7 @@ use rustix::fs::{
     inotify::{self, ReadFlags, WatchFlags},
 };
 use rustix::io::Errno;
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Read, Write};
@@ -66,9 +67,20 @@ pub(super) enum FileAction {
     Reimport(PathBuf),
     InterpretRoughness(PathBuf),
     Duplicate(PathBuf),
-    Rename { source: PathBuf, stem: String },
+    Rename {
+        source: PathBuf,
+        stem: String,
+    },
+    Move {
+        id: String,
+        source: PathBuf,
+        folder: PathBuf,
+    },
     Trash(PathBuf),
-    CreateFolder { parent: PathBuf, name: String },
+    CreateFolder {
+        parent: PathBuf,
+        name: String,
+    },
 }
 
 struct FileJob {
@@ -264,6 +276,7 @@ fn run(
         let mut import = None;
         let mut asset_write = None;
         let mut reimport = None;
+        let mut moved = None;
         match queued.try_recv() {
             Ok(Job::ImportFiles(batch)) => {
                 let mut failures = Vec::new();
@@ -282,6 +295,13 @@ fn run(
             }
             Ok(Job::FileAction(job)) => {
                 let explicit_reimport = matches!(&job.action, FileAction::Reimport(_));
+                let move_source = match &job.action {
+                    FileAction::Move { id, source, .. } => {
+                        let hash = store.asset_info(id).and_then(|info| info.hash.clone());
+                        Some((id.clone(), source.clone(), hash))
+                    }
+                    _ => None,
+                };
                 let outcome = if store.matches_identity(&job.catalog) && active() {
                     file_action(&mut store, &held_root, &mut watcher, job.action, active)
                 } else {
@@ -291,6 +311,10 @@ fn run(
                     Ok(path) => {
                         if explicit_reimport {
                             reimport = Some(path.clone());
+                        }
+                        if let Some((id, source, hash)) = move_source {
+                            paths.insert(source);
+                            moved = Some((id, path.clone(), hash));
                         }
                         paths.insert(path);
                         Vec::new()
@@ -375,7 +399,19 @@ fn run(
             }));
             delivered = Some((state, issues, warning, folders, prefabs));
         }
-        if let Some((result, failures)) = import {
+        if let Some((result, mut failures)) = import {
+            if let Some((id, path, hash)) = moved {
+                if !store.asset_info(&id).is_some_and(|info| {
+                    Path::new(&info.source) == path
+                        && info.status == AssetStatus::Ready
+                        && info.hash == hash
+                }) {
+                    failures.push(format!(
+                        "Files moved to {}, but the catalog could not confirm asset {id}. Check Assets.",
+                        path.display()
+                    ));
+                }
+            }
             let _ = result.try_send(failures);
             context.request_repaint();
         }
@@ -508,6 +544,94 @@ fn file_action(
                     })
                     .map_err(|error| error.to_string())?;
             }
+            Ok(destination)
+        }
+        FileAction::Move { id, source, folder } => {
+            let info = store.asset_info(&id).filter(|info| Path::new(&info.source) == source
+                && info.status == AssetStatus::Ready
+                && matches!(info.kind, AssetKind::Mesh | AssetKind::Script | AssetKind::Sound))
+                .ok_or("Choose a ready, registered OBJ, Lua or WAV in Assets. The asset may have changed.")?;
+            if !folder.starts_with("Assets") || source.parent() == Some(folder.as_path())
+                || folder.components().any(|part| !matches!(part, std::path::Component::Normal(name) if !name.to_string_lossy().starts_with('.')))
+            {
+                return Err("Choose a different existing folder inside Assets.".into());
+            }
+            let (origin, leaf) = open_source_folder(held_root, &source)?;
+            let destination = folder.join(leaf);
+            let limit = AssetStore::project_source_limit(destination.to_str().unwrap_or_default())
+                .map_err(|error| error.to_string())?;
+            let target = open_folder(held_root, &folder).map_err(|error| {
+                format!("Destination must be an existing folder without symlinks: {error}")
+            })?;
+            store
+                .with_current_catalog(|| {
+                    let failure = rot_assets::AssetError;
+                    let sidecar = format!("{leaf}.rotmeta");
+                    for name in [leaf, sidecar.as_str()] {
+                        match at::statat(&target, name, at::AtFlags::SYMLINK_NOFOLLOW) {
+                            Ok(_) => {
+                                return Err(failure(format!(
+                                    "Destination already contains {name}."
+                                )))
+                            }
+                            Err(Errno::NOENT) => {}
+                            Err(error) => return Err(failure(error.to_string())),
+                        }
+                    }
+                    let input = fs::File::from(
+                        at::openat(
+                            &origin,
+                            leaf,
+                            at::OFlags::RDONLY
+                                | at::OFlags::NOFOLLOW
+                                | at::OFlags::NONBLOCK
+                                | at::OFlags::CLOEXEC,
+                            at::Mode::empty(),
+                        )
+                        .map_err(|error| failure(error.to_string()))?,
+                    );
+                    let source_changed = || {
+                        failure(
+                            "Source changed since it was imported. Reimport and try again.".into(),
+                        )
+                    };
+                    let original = at::fstat(&input).map_err(|error| failure(error.to_string()))?;
+                    if at::FileType::from_raw_mode(original.st_mode) != at::FileType::RegularFile
+                        || original.st_size < 0
+                        || original.st_size as u64 > limit as u64
+                    {
+                        return Err(source_changed());
+                    }
+                    let mut hash = Sha256::new();
+                    let bytes = io::copy(&mut input.take(limit as u64 + 1), &mut hash)
+                        .map_err(|error| failure(error.to_string()))?;
+                    if bytes != original.st_size as u64
+                        || info.hash.as_deref() != Some(format!("{:x}", hash.finalize()).as_str())
+                    {
+                        return Err(source_changed());
+                    }
+                    let identity = |stat: at::Stat| {
+                        (
+                            stat.st_ino,
+                            stat.st_dev,
+                            stat.st_ctime,
+                            stat.st_ctime_nsec,
+                            stat.st_size,
+                        )
+                    };
+                    let stat = |name: &str| {
+                        at::statat(&origin, name, at::AtFlags::SYMLINK_NOFOLLOW)
+                            .map(identity)
+                            .map_err(|_| source_changed())
+                    };
+                    let original_sidecar = stat(&sidecar)?;
+                    store.validate_movable_sidecar(&info.source)?;
+                    if stat(leaf)? != identity(original) || stat(&sidecar)? != original_sidecar {
+                        return Err(source_changed());
+                    }
+                    move_asset_pair(&origin, leaf, &target, leaf, &active).map_err(failure)
+                })
+                .map_err(|error| error.to_string())?;
             Ok(destination)
         }
         FileAction::Trash(source) => {

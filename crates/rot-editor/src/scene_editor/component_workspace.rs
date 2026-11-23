@@ -243,6 +243,8 @@ pub(super) struct ComponentWorkspace {
     #[cfg(target_os = "linux")]
     asset_import: Option<std::sync::mpsc::Receiver<Vec<String>>>,
     #[cfg(target_os = "linux")]
+    asset_move: Option<(String, PathBuf)>,
+    #[cfg(target_os = "linux")]
     asset_import_error: Option<String>,
     #[cfg(target_os = "linux")]
     ai_asset_write: Option<asset_writes::PendingWrite>,
@@ -433,6 +435,8 @@ impl ComponentWorkspace {
             #[cfg(target_os = "linux")]
             asset_import: None,
             #[cfg(target_os = "linux")]
+            asset_move: None,
+            #[cfg(target_os = "linux")]
             asset_import_error: None,
             #[cfg(target_os = "linux")]
             ai_asset_write: None,
@@ -579,6 +583,7 @@ impl ComponentWorkspace {
             match import.try_recv() {
                 Ok(errors) => {
                     self.asset_import = None;
+                    let moved = self.asset_move.take();
                     self.asset_import_error = match errors.as_slice() {
                         [] => None,
                         [first] => Some(first.clone()),
@@ -586,9 +591,14 @@ impl ComponentWorkspace {
                             Some(format!("{first} ({} more import errors)", rest.len()))
                         }
                     };
+                    if let Some((id, destination)) = moved.filter(|_| errors.is_empty()) {
+                        self.poll_assets(ctx);
+                        self.follow_asset_move(id, &destination);
+                    }
                 }
                 Err(TryRecvError::Disconnected) => {
                     self.asset_import = None;
+                    self.asset_move = None;
                     self.asset_import_error = Some("The project asset worker stopped.".into());
                 }
                 Err(TryRecvError::Empty) => {}
