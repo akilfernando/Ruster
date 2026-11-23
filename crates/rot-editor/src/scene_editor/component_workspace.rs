@@ -2979,7 +2979,7 @@ impl ComponentWorkspace {
                 let mut prefab = None;
                 let mut view_change = None;
                 let mut toggle = None;
-                let mut keyboard_target = None;
+                let mut selection_focus = None;
                 let revision = self.session.revision();
                 let mut moved = hierarchy_drop(ui, &root, None, revision, &self.selection);
                 let mut scroll = egui::ScrollArea::vertical().id_salt("hierarchy_tree");
@@ -3038,6 +3038,7 @@ impl ComponentWorkspace {
                                     let disclosure =
                                         hierarchy_disclosure(ui, &object.name, collapsed);
                                     if disclosure.clicked() {
+                                        disclosure.request_focus();
                                         toggle = Some(index);
                                     }
                                     disclosure.has_focus().then_some(disclosure.id)
@@ -3090,7 +3091,7 @@ impl ComponentWorkspace {
                                         _ => None,
                                     };
                                     if let Some(target) = target {
-                                        keyboard_target =
+                                        selection_focus =
                                             Some((self.row_at(target).0, !range.contains(&target)));
                                         selected = Some(Some((target, modifiers)));
                                     }
@@ -3114,6 +3115,8 @@ impl ComponentWorkspace {
                                     moved = Some(drop);
                                 }
                                 if response.clicked() {
+                                    response.request_focus();
+                                    selection_focus = Some((index, false));
                                     let modifiers = ui.input(|input| {
                                         input
                                             .events
@@ -3243,7 +3246,7 @@ impl ComponentWorkspace {
                     match selected {
                         Some((row, modifiers)) => {
                             self.select_row(row, modifiers);
-                            if let Some(target) = keyboard_target {
+                            if let Some(target) = selection_focus {
                                 self.hierarchy_focus = Some(target);
                                 ui.ctx().request_repaint();
                             }
