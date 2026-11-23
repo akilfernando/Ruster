@@ -945,6 +945,128 @@ mod tests {
     }
 
     #[test]
+    fn accepted_orthographic_omission_reopens_until_an_explicit_same_byte_refresh() {
+        use crate::fixtures::punctual_glb;
+        use serde_json::json;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("paired.glb");
+        let fixture = |change: &dyn Fn(&mut serde_json::Value)| {
+            punctual_glb(|doc| {
+                doc["cameras"] = json!([
+                    {"type":"orthographic","orthographic":{"xmag":6.0,"ymag":4.0,"znear":0.5,"zfar":25.0}},
+                    {"type":"perspective","perspective":{"yfov":std::f64::consts::FRAC_PI_4,"znear":1.0}},
+                ]);
+                for (node, camera) in [(1, 0), (2, 0), (3, 1)] {
+                    doc["nodes"][node]["camera"] = json!(camera);
+                }
+                change(doc);
+            })
+        };
+        let bytes = fixture(&|_| {});
+        fs::write(&path, &bytes).unwrap();
+        let decoded = glb::decode_accepted(
+            "paired",
+            "paired.glb",
+            &bytes,
+            glb::ImportFeatures {
+                packed_roughness: true,
+                place_spots: true,
+                place_orthographic: false,
+                emission: true,
+                double_sided: true,
+                uv_transforms: true,
+            },
+        )
+        .unwrap();
+        let old = decoded.info.clone();
+        assert!(old
+            .warnings
+            .iter()
+            .any(|warning| warning.ends_with(": skipped orthographic lens.")));
+        assert!(old.nodes["Rig/Arm"].camera.is_none());
+        let perspective = old.nodes["Rig/Sun"].camera.unwrap();
+        assert_eq!(
+            serde_json::to_value(perspective).unwrap(),
+            json!({"vertical_fov_degrees":45.0, "near":1.0})
+        );
+        let mut store = AssetStore::open(root.path()).unwrap();
+        let mut registry = store.registry.clone();
+        registry.models.insert("paired".into(), old.clone());
+        let mut published = false;
+        store
+            .publish_model_if(
+                PreparedModel {
+                    bytes: bytes.clone(),
+                    decoded,
+                    registry: Some(mutations::encode_registry(registry).unwrap()),
+                },
+                &mut published,
+                || true,
+            )
+            .unwrap();
+        assert!(published);
+        let mut reopened = AssetStore::open(root.path()).unwrap();
+        assert_eq!(reopened.model("paired"), Some(&old));
+        let upgraded = reopened
+            .refresh_glb_at(reopened.revision(), "paired")
+            .unwrap();
+        assert_eq!(upgraded.hash, old.hash);
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        let lens = Some(crate::ModelCamera::Orthographic(
+            crate::ModelOrthographicCamera {
+                vertical_size: 8.0,
+                aspect_ratio: 1.5,
+                near: 0.5,
+                far: 25.0,
+            },
+        ));
+        assert_eq!(upgraded.nodes["Rig/Arm"].camera, lens);
+        assert_eq!(upgraded.nodes["Rig/Base"].camera, lens);
+        assert_eq!(upgraded.nodes["Rig/Sun"].camera, Some(perspective));
+
+        for (field, value, reason) in [
+            ("xmag", -6., "positive X and Y"),
+            ("ymag", 12000., "representable clip depths"),
+            ("znear", 0., "positive near clip"),
+        ] {
+            let warning = glb::decode(
+                "paired",
+                "paired.glb",
+                &fixture(&|doc| {
+                    doc["cameras"][0]["orthographic"][field] = json!(value);
+                }),
+            )
+            .unwrap()
+            .info;
+            assert!(
+                warning
+                    .warnings
+                    .iter()
+                    .any(|warning| warning.contains(reason)),
+                "{reason}"
+            );
+            assert!(warning.nodes["Rig/Arm"].camera.is_none());
+            assert_eq!(warning.nodes["Rig/Sun"].camera, Some(perspective));
+        }
+
+        fs::write(
+            &path,
+            fixture(&|doc| {
+                doc["cameras"][0]["orthographic"]["zfar"] = json!(0.25);
+            }),
+        )
+        .unwrap();
+        assert!(reopened
+            .refresh_glb_at(reopened.revision(), "paired")
+            .is_err());
+        assert_eq!(reopened.model("paired"), Some(&upgraded));
+        assert_eq!(
+            AssetStore::open(root.path()).unwrap().model("paired"),
+            Some(&upgraded)
+        );
+    }
+
+    #[test]
     fn accepted_spot_omission_reopens_and_same_byte_refresh_admits_spot() {
         let root = tempfile::tempdir().unwrap();
         let bytes = crate::fixtures::punctual_glb(|_| {});

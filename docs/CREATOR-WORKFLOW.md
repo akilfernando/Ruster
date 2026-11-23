@@ -256,15 +256,17 @@ clamps. If an older catalog skipped a spot, choose **Asset Actions → Reimport*
 place the model again to use that light. Objects already placed keep their components.
 GLBs with both transform clips and lights carry a static playback warning.
 
-A placed GLB in a v23 scene adds a **Transform Perspective** Camera to
-each source node that references a supported perspective lens. Shared
-lenses become independently editable Camera components. Choose **Make
-Active** on the desired Camera to use it in Game view. Refresh leaves
-existing placed lens settings intact. Place the refreshed model again
-to use the new lens. **Import Warnings** identifies skipped orthographic
-cameras and perspective lenses outside Rot's supported range. Their
-nodes and geometry still place. Import requires a supported model with
-geometry.
+A placed GLB in a v23 scene adds a **Transform Perspective** or
+**Transform Orthographic** Camera to each source node with a supported lens.
+Shared lenses become independently editable Camera components. The
+orthographic lens keeps its full vertical frame size, fixed aspect and
+clip planes. Choose **Make Active** on a Camera to use it in Game view.
+For a model imported by an older Rot version, choose **Asset Actions →
+Reimport** and place it again to import a supported orthographic lens.
+Existing placed lens settings stay as they are. **Import Warnings** explains
+when a lens needs positive magnification, a positive near clip, or values
+within Rot's supported ranges. Its node and geometry still place. Import
+requires a supported model with geometry.
 
 Keep any PNG files a GLB references beside the model or in their original
 subfolder. Rot imports them with the model and refreshes the model when a

@@ -272,6 +272,68 @@ mod tests {
     use std::fs;
 
     #[test]
+    fn v23_places_shared_orthographic_lens_once_per_original_node() {
+        use rot_assets::fixtures::punctual_glb;
+        use serde_json::json;
+        let project = tempfile::tempdir().unwrap();
+        let path = project.path().join("scene.json");
+        fs::write(
+            project.path().join("Studio.glb"),
+            punctual_glb(|doc| {
+                doc["cameras"] = json!([{
+                    "type":"orthographic",
+                    "orthographic":{"xmag":6.0,"ymag":4.0,"znear":0.5,"zfar":25.0},
+                }]);
+                doc["nodes"][1]["camera"] = json!(0);
+                doc["nodes"][2]["camera"] = json!(0);
+            }),
+        )
+        .unwrap();
+        let mut assets = AssetStore::open(project.path()).unwrap();
+        let model = assets.import_glb_at(0, "studio", "Studio.glb").unwrap();
+        let scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("stage")).unwrap()).unwrap();
+        let mut workspace = ComponentWorkspace::new(path, ComponentSession::new(scene).unwrap());
+        workspace.meshes = assets.mesh_snapshots();
+        workspace.assets = Some(assets);
+        workspace.place_model(&model.id, None, None).unwrap();
+        let placed = workspace.session.scene();
+        assert!(placed.gameplay_camera.is_none());
+        let cameras: Vec<_> = placed
+            .objects
+            .iter()
+            .flat_map(|object| {
+                object.components.iter().filter_map(move |component| {
+                    let Component::Camera { view } = &component.kind else {
+                        return None;
+                    };
+                    Some((object, component, view))
+                })
+            })
+            .collect();
+        assert_eq!(cameras.len(), 2);
+        assert_ne!(cameras[0].1.id, cameras[1].1.id);
+        let expected = json!({"type":"transform_orthographic", "vertical_size":8.0,
+            "aspect_ratio":1.5, "clip":{"near":0.5, "far":25.0}});
+        for (object, _, view) in cameras {
+            let source = &model.nodes[&format!("Rig/{}", object.name)];
+            assert_eq!(object.transform.translation, source.translation);
+            assert_eq!(object.transform.rotation, source.rotation);
+            assert_eq!(serde_json::to_value(view).unwrap(), expected);
+            assert_eq!(
+                placed
+                    .objects
+                    .iter()
+                    .filter(|child| child.parent.as_ref() == Some(&object.id))
+                    .count(),
+                2
+            );
+        }
+        workspace.session.undo(1).unwrap();
+        assert!(workspace.session.scene().objects.is_empty());
+    }
+
+    #[test]
     fn v23_places_punctual_lights_on_original_nodes_and_retains_edits_on_refresh() {
         use rot_assets::fixtures::punctual_glb;
         use serde_json::json;

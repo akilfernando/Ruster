@@ -196,6 +196,10 @@ connected project.
   (0.01–10,000). Both clip distances are finite and `0 < near < far`.
   Omit `aspect_ratio` to follow the output ratio. A fixed ratio can add bars.
   The existing activation command and pose axes are shared with Perspective.
+  GLB placement creates inactive Cameras on the original nodes.
+  `asset_inspect` model summaries count imported orthographic nodes under
+  `orthographic_camera_count`; inspect a placed Camera to read its editable
+  lens. Reimport can add support for newly placed copies of old models.
   Inspect the authored mode and runtime matrices through `player_view_inspect`,
   or use `viewport_screenshot` for the normalized content rectangle.
 - To replace a calibrated Transform Perspective lens through guarded
