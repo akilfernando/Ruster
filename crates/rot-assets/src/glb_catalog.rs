@@ -760,6 +760,10 @@ mod tests {
             roughness
         );
         assert_eq!(export.read_sources().unwrap(), sources);
+        assert_eq!(
+            AssetStore::open(root.path()).unwrap().model("paint"),
+            Some(&accepted)
+        );
         let newer = [1, 80, 122, 2, 60, 123, 3, 40, 124, 4, 20, 125];
         fs::write(
             &source,
@@ -770,7 +774,10 @@ mod tests {
         .unwrap();
         let refreshed = store.refresh_glb_at(2, "paint").unwrap();
         let mut expected = accepted.materials;
-        expected.get_mut("Paint").unwrap().double_sided = false;
+        let paint = expected.get_mut("Paint").unwrap();
+        paint.double_sided = false;
+        paint.uv_tiling = [1.0; 2];
+        paint.uv_offset = [0.0; 2];
         assert_eq!(refreshed.materials, expected);
         assert_eq!(
             store.texture(&roughness_id).unwrap().mips[0].bytes,

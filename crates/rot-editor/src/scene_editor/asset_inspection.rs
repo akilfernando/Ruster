@@ -131,6 +131,14 @@ pub(super) fn model_summary(model: &rot_assets::ModelInfo) -> Value {
     if roughness_map_count != 0 {
         result["roughness_map_count"] = json!(roughness_map_count);
     }
+    let transformed_material_count = model
+        .materials
+        .values()
+        .filter(|material| material.uv_tiling != [1.0; 2] || material.uv_offset != [0.0; 2])
+        .count();
+    if transformed_material_count != 0 {
+        result["transformed_material_count"] = json!(transformed_material_count);
+    }
     let camera_count = model
         .nodes
         .values()
@@ -149,16 +157,16 @@ pub(super) fn model_summary(model: &rot_assets::ModelInfo) -> Value {
     }
     if !model.warnings.is_empty() {
         const PREVIEW_WARNINGS: usize = 4;
+        let priority = |message: &str| {
+            message.contains("roughness map")
+                || message.contains("Base Color UV transform")
+                || message.contains("Base Color map omitted")
+        };
         let warnings: Vec<String> = model
             .warnings
             .iter()
-            .filter(|message| message.contains("roughness map"))
-            .chain(
-                model
-                    .warnings
-                    .iter()
-                    .filter(|message| !message.contains("roughness map")),
-            )
+            .filter(|message| priority(message))
+            .chain(model.warnings.iter().filter(|message| !priority(message)))
             .take(PREVIEW_WARNINGS)
             .map(|message| message.chars().take(DIAGNOSTIC_CHARS).collect())
             .collect();

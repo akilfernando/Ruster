@@ -90,6 +90,7 @@ fn verify_case(
                 roughness: None,
                 mesh: Some(mesh),
                 instances: vec![Instance {
+                    uv_transform: [1.0, 1.0, 0.0, 0.0],
                     emission_color: [0.0; 3],
                     model: matrix.to_cols_array_2d(),
                     normal: [

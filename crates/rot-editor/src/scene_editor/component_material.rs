@@ -1114,6 +1114,8 @@ mod tests {
             tint: [0.21, 0.37, 0.59],
             emission_color: [0.11, 0.0, 0.35],
             double_sided: true,
+            uv_tiling: [2.0, -3.0],
+            uv_offset: [0.2, -0.1],
             base_color_texture: Some("missing-color".into()),
             roughness_texture: Some("ready-color".into()),
             filter: rot_scene::TextureFilter::Nearest,

@@ -47,6 +47,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
     let identity = Mat4::IDENTITY.to_cols_array();
     queue.write_buffer(&r.camera, 0, bytemuck::cast_slice(&identity));
     let instance = Instance {
+        uv_transform: [1.0, 1.0, 0.0, 0.0],
         emission_color: [0.0; 3],
         model: Mat4::IDENTITY.to_cols_array_2d(),
         normal: [
@@ -791,6 +792,7 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
                 roughness: None,
                 mesh: Some(source.clone()),
                 instances: vec![Instance {
+                    uv_transform: [1.0, 1.0, 0.0, 0.0],
                     emission_color: [0.0; 3],
                     model: matrix.to_cols_array_2d(),
                     normal: normal.to_cols_array_2d().map(|c| [c[0], c[1], c[2], 0.]),
@@ -1259,6 +1261,7 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
                         mesh: Some(mesh.clone()),
                         range: index..index + 1,
                         instances: vec![Instance {
+                            uv_transform: [1.0, 1.0, 0.0, 0.0],
                             emission_color: [0.0; 3],
                             model: if mapped_case {
                                 Mat4::from_scale_rotation_translation(
@@ -1744,6 +1747,7 @@ pub(super) fn verify_cube_material(device: &wgpu::Device, queue: &wgpu::Queue) {
                 mesh: None,
                 range: 0..1,
                 instances: vec![Instance {
+                    uv_transform: [1.0, 1.0, 0.0, 0.0],
                     emission_color: [0.0; 3],
                     model: Mat4::IDENTITY.to_cols_array_2d(),
                     normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
