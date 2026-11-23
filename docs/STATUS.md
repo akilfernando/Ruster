@@ -70,6 +70,11 @@ Actions in Project Settings and approved MCP share Button and 1D Axis
 bindings and Undo. File-backed Object Lua reads the map captured for that
 run. Focus loss releases held keys. A cube moved and turned on named
 actions through editor Play, guarded Steps and a relocated Linux build.
+File-backed Object Lua can bind imported WAVs as named Sound Cues in the
+Inspector and through approved MCP. Two Script components sharing a Lua
+file kept separate WAVs and gain. Editor capture verified silence after a
+rejected Step. A relocated Vulkan build played two horn presses through
+one audio stream and opened the packaged WAV only during startup.
 Object Lua API1/2 can drive a child under transform-only, positive-uniform
 groups. A trolley moved along a rotated rail without moving the markers.
 World-pose and camera checks run before the tick commits. A rejected Step
