@@ -88,6 +88,22 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+**Sphere Collider radius fitting** extends Scene view Edit Collider. The
+parented robot shell grew from 0.55 to 0.90 in perspective and orthographic,
+with its local offset and resolved center intact. Escape preserved the prior
+radius, and one Undo reversed a committed drag. A nonuniform parent made the
+sphere unavailable in exact MCP inspection. Approved Claude adjusted the
+flat kinematic robot from 0.5 to 1.0. At the same wall, two deterministic
+Steps moved its stop from 0.850100 to 1.350100. The saved scene reopened with
+the same result, and the relocated Vulkan player reproduced the stop. The
+guide stayed in Scene view. Focus and handle contrast were checked in
+Rot Dark and Plain Light. At 5,000 objects, median release CPU p95 through
+tessellation was 0.719 ms with the sphere guide off, 0.742 ms visible and
+0.777 ms while dragging. The previous Box path measured 0.724/0.753/0.778 ms,
+and the current Box path measured 0.719/0.752/0.780 ms. The offscreen Vulkan
+test held one target and four scene draws, with zero further mesh or texture
+uploads over 120 warmed frames in each sphere state.
+
 **Lua error navigation** connects v23 Game Error Details to the configured
 editor. Two same-named files reproduced a Step error at line 8 with the
 previous committed poses intact and a startup syntax error at line 4. Isolated
