@@ -14,13 +14,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[cfg(target_os = "linux")]
-use super::super::project_assets::FileAction;
+use super::super::project_assets::{script_filename, FileAction};
 
 #[cfg(target_os = "linux")]
 enum ContextAction {
     File(FileAction),
     Reveal(PathBuf),
     CreateFolder(PathBuf),
+    CreateScript(PathBuf),
+    OpenScript { id: String, source: PathBuf },
     Rename(PathBuf),
     Move { id: String, source: PathBuf },
     Delete(PathBuf),
@@ -28,6 +30,10 @@ enum ContextAction {
 
 #[cfg(target_os = "linux")]
 enum FileDialog {
+    Script {
+        parent: PathBuf,
+        name: String,
+    },
     Folder {
         parent: PathBuf,
         name: String,
@@ -210,6 +216,15 @@ impl Browser {
     }
 
     #[cfg(target_os = "linux")]
+    pub(super) fn open_new_script(&mut self, parent: PathBuf) {
+        self.open = true;
+        self.start_file_dialog(FileDialog::Script {
+            parent,
+            name: String::new(),
+        });
+    }
+
+    #[cfg(target_os = "linux")]
     fn start_file_dialog(&mut self, dialog: FileDialog) {
         self.file_dialog = self.catalog.clone().map(|catalog| (catalog, dialog));
         self.focus_file_name = true;
@@ -323,7 +338,16 @@ impl Browser {
         egui::Modal::new(egui::Id::unique("asset_file_dialog"))
             .frame(editor_theme::dialog_frame(ctx))
             .show(ctx, |ui| {
+                let script_parent = match &dialog {
+                    FileDialog::Script { parent, .. } => Some(parent.clone()),
+                    _ => None,
+                };
                 let (heading, action, name) = match &mut dialog {
+                    FileDialog::Script { name, .. } => (
+                        Text::AssetCreateLuaScript.plain(),
+                        Text::ComponentCreate.plain(),
+                        Some(name),
+                    ),
                     FileDialog::Folder { name, .. } => (
                         Text::AssetNewFolder.plain(),
                         Text::AssetCreateFolder.plain(),
@@ -358,7 +382,22 @@ impl Browser {
                             state.store(ctx, text.id);
                         }
                     }
-                    let valid = !name.trim().is_empty();
+                    let valid = if let Some(parent) = script_parent {
+                        match script_filename(name) {
+                            Ok(filename) => {
+                                ui.label(parent.join(filename).display().to_string());
+                                true
+                            }
+                            Err(error) => {
+                                if !name.trim().is_empty() {
+                                    ui.colored_label(ui.visuals().error_fg_color, error);
+                                }
+                                false
+                            }
+                        }
+                    } else {
+                        !name.trim().is_empty()
+                    };
                     submit = valid
                         && text.lost_focus()
                         && ui.input(|input| input.key_pressed(egui::Key::Enter));
@@ -383,6 +422,10 @@ impl Browser {
             return None;
         }
         let action = match dialog {
+            FileDialog::Script { parent, name } => FileAction::CreateScript {
+                parent,
+                name: name.trim().to_owned(),
+            },
             FileDialog::Folder { parent, name } => FileAction::CreateFolder {
                 parent,
                 name: name.trim().to_owned(),
@@ -722,6 +765,17 @@ impl Browser {
                                             Some(ContextAction::CreateFolder(folder.clone()));
                                         ui.close();
                                     }
+                                    if ui
+                                        .add_enabled(
+                                            folder.starts_with("Assets"),
+                                            egui::Button::new(Text::AssetNewLuaScript.plain()),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.context_action =
+                                            Some(ContextAction::CreateScript(folder.clone()));
+                                        ui.close();
+                                    }
                                     if ui.button(Text::AssetShowInFileManager.plain()).clicked() {
                                         self.context_action =
                                             Some(ContextAction::Reveal(folder.clone()));
@@ -945,59 +999,72 @@ fn file_actions(ui: &mut egui::Ui, row: &AssetRow) -> Option<ContextAction> {
             .extension()
             .and_then(|extension| extension.to_str())
             .is_some_and(|extension| matches!(extension, "obj" | "lua" | "wav"));
-    let action =
-        if row.can_import_roughness && ui.button(Text::AssetImportAsRoughness.plain()).clicked() {
-            Some(ContextAction::File(FileAction::InterpretRoughness(
-                source.to_owned(),
-            )))
-        } else if ui
+    let action = if row.registered
+        && row.kind == Text::ComponentScript.plain()
+        && ui
             .add_enabled(
                 can_move,
-                egui::Button::new(Text::AssetRenameCommand.plain()),
+                egui::Button::new(Text::AssetOpenCodeEditor.plain()),
             )
             .clicked()
-        {
-            Some(ContextAction::Rename(source.to_owned()))
-        } else if ui
-            .add_enabled(
-                can_move_folder,
-                egui::Button::new(Text::AssetMoveFolderCommand.plain()),
-            )
-            .on_disabled_hover_text(Text::AssetMoveFolderUnsupported.plain())
-            .clicked()
-        {
-            Some(ContextAction::Move {
-                id: row.id.clone(),
-                source: source.to_owned(),
-            })
-        } else if ui
-            .add_enabled(
-                duplicate,
-                egui::Button::new(crate::workspace::Action::Duplicate.label()),
-            )
-            .clicked()
-        {
-            Some(ContextAction::File(FileAction::Duplicate(
-                source.to_owned(),
-            )))
-        } else if ui
-            .add_enabled(supported, egui::Button::new(Text::AssetReimport.plain()))
-            .clicked()
-        {
-            Some(ContextAction::File(FileAction::Reimport(source.to_owned())))
-        } else if ui
-            .add_enabled(
-                can_move,
-                egui::Button::new(Text::AssetDeleteCommand.plain()),
-            )
-            .clicked()
-        {
-            Some(ContextAction::Delete(source.to_owned()))
-        } else if ui.button(Text::AssetShowInFileManager.plain()).clicked() {
-            Some(ContextAction::Reveal(row.folder.clone()))
-        } else {
-            None
-        };
+    {
+        Some(ContextAction::OpenScript {
+            id: row.id.clone(),
+            source: source.to_owned(),
+        })
+    } else if row.can_import_roughness && ui.button(Text::AssetImportAsRoughness.plain()).clicked()
+    {
+        Some(ContextAction::File(FileAction::InterpretRoughness(
+            source.to_owned(),
+        )))
+    } else if ui
+        .add_enabled(
+            can_move,
+            egui::Button::new(Text::AssetRenameCommand.plain()),
+        )
+        .clicked()
+    {
+        Some(ContextAction::Rename(source.to_owned()))
+    } else if ui
+        .add_enabled(
+            can_move_folder,
+            egui::Button::new(Text::AssetMoveFolderCommand.plain()),
+        )
+        .on_disabled_hover_text(Text::AssetMoveFolderUnsupported.plain())
+        .clicked()
+    {
+        Some(ContextAction::Move {
+            id: row.id.clone(),
+            source: source.to_owned(),
+        })
+    } else if ui
+        .add_enabled(
+            duplicate,
+            egui::Button::new(crate::workspace::Action::Duplicate.label()),
+        )
+        .clicked()
+    {
+        Some(ContextAction::File(FileAction::Duplicate(
+            source.to_owned(),
+        )))
+    } else if ui
+        .add_enabled(supported, egui::Button::new(Text::AssetReimport.plain()))
+        .clicked()
+    {
+        Some(ContextAction::File(FileAction::Reimport(source.to_owned())))
+    } else if ui
+        .add_enabled(
+            can_move,
+            egui::Button::new(Text::AssetDeleteCommand.plain()),
+        )
+        .clicked()
+    {
+        Some(ContextAction::Delete(source.to_owned()))
+    } else if ui.button(Text::AssetShowInFileManager.plain()).clicked() {
+        Some(ContextAction::Reveal(row.folder.clone()))
+    } else {
+        None
+    };
     if action.is_some() {
         ui.close();
     }
@@ -1144,6 +1211,22 @@ impl ComponentWorkspace {
                 });
                 ctx.request_repaint();
             }
+            Some(ContextAction::CreateScript(parent)) => {
+                self.asset_browser.open_new_script(parent);
+                ctx.request_repaint();
+            }
+            Some(ContextAction::OpenScript { id, source }) => {
+                if let Some(catalog) = self.asset_browser.catalog.clone() {
+                    self.submit_asset_action(
+                        catalog,
+                        FileAction::OpenScript {
+                            id,
+                            source,
+                            launch: self.workspace.prefs.external_editor.clone(),
+                        },
+                    );
+                }
+            }
             Some(ContextAction::Rename(source)) => {
                 let stem = source
                     .file_stem()
@@ -1227,7 +1310,7 @@ impl ComponentWorkspace {
     }
 
     #[cfg(target_os = "linux")]
-    pub(super) fn follow_asset_move(&mut self, id: String, destination: &Path) {
+    pub(super) fn select_published_asset(&mut self, id: String, destination: &Path, created: bool) {
         if self
             .assets
             .as_ref()
@@ -1236,13 +1319,24 @@ impl ComponentWorkspace {
                 Path::new(&info.source) == destination && info.status == AssetStatus::Ready
             })
         {
+            if created {
+                self.asset_browser.query.clear();
+            }
             if let Some(parent) = destination.parent() {
                 self.asset_browser.folder = parent.to_owned();
                 self.asset_browser.filter();
             }
             self.asset_browser.selected = Some(id);
         } else {
-            self.asset_import_error = Some(Text::AssetMoveCatalogChanged.plain().into());
+            self.asset_import_error = Some(
+                if created {
+                    Text::AssetLuaNotReady
+                } else {
+                    Text::AssetMoveCatalogChanged
+                }
+                .plain()
+                .into(),
+            );
         }
     }
 

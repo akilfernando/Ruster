@@ -244,7 +244,7 @@ pub(super) struct ComponentWorkspace {
     #[cfg(target_os = "linux")]
     asset_picker: Option<(PathBuf, std::sync::mpsc::Receiver<Vec<PathBuf>>)>,
     #[cfg(target_os = "linux")]
-    asset_import: Option<std::sync::mpsc::Receiver<Vec<String>>>,
+    asset_import: Option<std::sync::mpsc::Receiver<super::project_assets::ImportResult>>,
     #[cfg(target_os = "linux")]
     asset_move: Option<(String, PathBuf)>,
     #[cfg(target_os = "linux")]
@@ -586,7 +586,10 @@ impl ComponentWorkspace {
 
         if let Some(import) = &self.asset_import {
             match import.try_recv() {
-                Ok(errors) => {
+                Ok(super::project_assets::ImportResult {
+                    errors,
+                    created_script,
+                }) => {
                     self.asset_import = None;
                     let moved = self.asset_move.take();
                     self.asset_import_error = match errors.as_slice() {
@@ -596,9 +599,14 @@ impl ComponentWorkspace {
                             Some(format!("{first} ({} more import errors)", rest.len()))
                         }
                     };
-                    if let Some((id, destination)) = moved.filter(|_| errors.is_empty()) {
-                        self.poll_assets(ctx);
-                        self.follow_asset_move(id, &destination);
+                    if errors.is_empty() {
+                        if let Some((id, destination)) = created_script {
+                            self.poll_assets(ctx);
+                            self.select_published_asset(id, &destination, true);
+                        } else if let Some((id, destination)) = moved {
+                            self.poll_assets(ctx);
+                            self.select_published_asset(id, &destination, false);
+                        }
                     }
                 }
                 Err(TryRecvError::Disconnected) => {
@@ -2564,6 +2572,19 @@ impl ComponentWorkspace {
                         self.asset_browser.open_new_folder();
                         ui.close();
                     }
+                    #[cfg(target_os = "linux")]
+                    ui.add_enabled_ui(
+                        !blocked && self.asset_import.is_none() && self.ai_asset_write.is_none(),
+                        |ui| {
+                            ui.menu_button(Text::ComponentCreate.plain(), |ui| {
+                                if ui.button(Text::AssetNewLuaScript.plain()).clicked() {
+                                    self.asset_browser
+                                        .open_new_script(self.asset_browser.import_folder());
+                                    ui.close();
+                                }
+                            });
+                        },
+                    );
                     self.menu_action(ui, Action::FindContent);
                 });
                 editor_theme::text_menu(ui, "Window", |ui| {

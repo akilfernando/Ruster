@@ -1,4 +1,5 @@
 //! Watch the open Linux project's Assets tree without polling the filesystem.
+use crate::behavior_files::LaunchSpec;
 use eframe::egui::Context;
 use rot_assets::{AssetKind, AssetStatus, AssetStore, PrefabFile, ProjectFileIssue};
 use rustix::event::{poll, PollFd, PollFlags};
@@ -36,10 +37,16 @@ pub(super) struct Snapshot {
 type Update = Result<Snapshot, String>;
 type Mailbox = Arc<Mutex<Option<Update>>>;
 
+#[derive(Debug)]
+pub(super) struct ImportResult {
+    pub(super) errors: Vec<String>,
+    pub(super) created_script: Option<(String, PathBuf)>,
+}
+
 struct ImportBatch {
     folder: PathBuf,
     files: Vec<PathBuf>,
-    result: SyncSender<Vec<String>>,
+    result: SyncSender<ImportResult>,
 }
 
 pub(super) struct PublishedAsset {
@@ -81,12 +88,21 @@ pub(super) enum FileAction {
         parent: PathBuf,
         name: String,
     },
+    CreateScript {
+        parent: PathBuf,
+        name: String,
+    },
+    OpenScript {
+        id: String,
+        source: PathBuf,
+        launch: LaunchSpec,
+    },
 }
 
 struct FileJob {
     action: FileAction,
     catalog: rot_assets::AssetStateIdentity,
-    result: SyncSender<Vec<String>>,
+    result: SyncSender<ImportResult>,
 }
 
 enum Job {
@@ -139,7 +155,7 @@ impl ProjectAssets {
         &self,
         folder: PathBuf,
         files: Vec<PathBuf>,
-    ) -> Result<Receiver<Vec<String>>, String> {
+    ) -> Result<Receiver<ImportResult>, String> {
         let (result, reply) = mpsc::sync_channel(1);
         self.submit(Job::ImportFiles(ImportBatch {
             folder,
@@ -153,7 +169,7 @@ impl ProjectAssets {
         &self,
         action: FileAction,
         catalog: rot_assets::AssetStateIdentity,
-    ) -> Result<Receiver<Vec<String>>, String> {
+    ) -> Result<Receiver<ImportResult>, String> {
         let (result, reply) = mpsc::sync_channel(1);
         self.submit(Job::FileAction(FileJob {
             action,
@@ -277,6 +293,7 @@ fn run(
         let mut asset_write = None;
         let mut reimport = None;
         let mut moved = None;
+        let mut created_script = None;
         match queued.try_recv() {
             Ok(Job::ImportFiles(batch)) => {
                 let mut failures = Vec::new();
@@ -294,6 +311,8 @@ fn run(
                 import = Some((batch.result, failures));
             }
             Ok(Job::FileAction(job)) => {
+                let is_create_script = matches!(&job.action, FileAction::CreateScript { .. });
+                let is_launch = matches!(&job.action, FileAction::OpenScript { .. });
                 let explicit_reimport = matches!(&job.action, FileAction::Reimport(_));
                 let move_source = match &job.action {
                     FileAction::Move { id, source, .. } => {
@@ -316,7 +335,12 @@ fn run(
                             paths.insert(source);
                             moved = Some((id, path.clone(), hash));
                         }
-                        paths.insert(path);
+                        if is_create_script {
+                            created_script = Some(path.clone());
+                        }
+                        if !is_launch {
+                            paths.insert(path);
+                        }
                         Vec::new()
                     }
                     Err(error) => vec![error],
@@ -412,7 +436,24 @@ fn run(
                     ));
                 }
             }
-            let _ = result.try_send(failures);
+            let created_script = created_script.and_then(|path| {
+                let ready = store.infos().find(|info| {
+                    info.kind == AssetKind::Script
+                        && Path::new(&info.source) == path
+                        && info.status == AssetStatus::Ready
+                        && store.script(&info.id) == Some(OBJECT_LUA_TEMPLATE)
+                });
+                if let Some(info) = ready {
+                    Some((info.id.clone(), path))
+                } else {
+                    failures.push(format!("Created {}, but Assets could not confirm the new script. Check its import status.", path.display()));
+                    None
+                }
+            });
+            let _ = result.try_send(ImportResult {
+                errors: failures,
+                created_script,
+            });
             context.request_repaint();
         }
         if let Some((result, outcome)) = asset_write {
@@ -669,6 +710,29 @@ fn file_action(
                 .map_err(|error| error.to_string())?;
             Ok(source)
         }
+        FileAction::CreateScript { parent, name } => {
+            create_script(store, held_root, &parent, &name, active)
+        }
+        FileAction::OpenScript { id, source, launch } => {
+            store
+                .with_current_catalog(|| {
+                    let failure = |reason: String| {
+                        rot_assets::AssetError(format!(
+                            "Couldn't open {} in the code editor: {reason}",
+                            source.display()
+                        ))
+                    };
+                    let mut command =
+                        project_script_command(store, held_root, &id, &source, &launch, active)
+                            .map_err(failure)?;
+                    command
+                        .spawn()
+                        .map_err(|error| failure(error.to_string()))?;
+                    Ok(())
+                })
+                .map_err(|error| error.to_string())?;
+            Ok(source)
+        }
         FileAction::CreateFolder { parent, name } => {
             validate_leaf(&name)?;
             if !parent.starts_with("Assets") {
@@ -689,6 +753,128 @@ fn file_action(
             Ok(folder)
         }
     }
+}
+
+const OBJECT_LUA_TEMPLATE: &str = r#"-- Attach this script to an object with a Mesh Renderer.
+-- update runs each simulation step. Return the object's transform.
+return {
+    update = function(object, properties, dt, host)
+        -- Change object.translation, object.rotation or object.scale here.
+        return object
+    end,
+}
+"#;
+
+pub(super) fn script_filename(input: &str) -> Result<String, String> {
+    let input = input.trim();
+    let stem = input.strip_suffix(".lua").unwrap_or(input);
+    validate_leaf(stem)?;
+    if stem.chars().any(char::is_control) || stem.len() > 120 {
+        return Err("Use a name up to 120 UTF-8 bytes without control characters.".into());
+    }
+    Ok(format!("{stem}.lua"))
+}
+
+fn create_script(
+    store: &AssetStore,
+    root: &fs::File,
+    folder: &Path,
+    name: &str,
+    active: impl Fn() -> bool,
+) -> Result<PathBuf, String> {
+    let name = script_filename(name)?;
+    if !folder.starts_with("Assets") {
+        return Err("Choose a folder inside Assets.".into());
+    }
+    let source = folder.join(&name);
+    let relative = source.to_str().ok_or("Script path must be Unicode.")?;
+    AssetStore::project_source_limit(relative).map_err(|error| error.to_string())?;
+    if !active() {
+        return Err("Project closed before the script was created.".into());
+    }
+    ensure_assets(root, folder)?;
+    let destination = open_folder(root, folder).map_err(|error| error.to_string())?;
+    let identity = at::fstat(&destination).map_err(|error| error.to_string())?;
+    let directory = PathBuf::from(format!("/proc/self/fd/{}", destination.as_raw_fd()));
+    let mut scratch =
+        tempfile::NamedTempFile::new_in(&directory).map_err(|error| error.to_string())?;
+    scratch
+        .write_all(OBJECT_LUA_TEMPLATE.as_bytes())
+        .map_err(|error| error.to_string())?;
+    scratch
+        .as_file()
+        .sync_all()
+        .map_err(|error| error.to_string())?;
+    store
+        .with_current_catalog(|| {
+            let error = |message: String| {
+                rot_assets::AssetError(format!("Couldn't create {relative}: {message}"))
+            };
+            if !active()
+                || !open_folder(root, folder)
+                    .and_then(at::fstat)
+                    .is_ok_and(|now| now.st_ino == identity.st_ino && now.st_dev == identity.st_dev)
+            {
+                return Err(error("The project or folder changed. Try again.".into()));
+            }
+            match at::statat(
+                &destination,
+                format!("{name}.rotmeta"),
+                at::AtFlags::SYMLINK_NOFOLLOW,
+            ) {
+                Ok(_) => return Err(error("That name already has an import sidecar.".into())),
+                Err(Errno::NOENT) => {}
+                Err(reason) => return Err(error(reason.to_string())),
+            }
+            scratch
+                .persist_noclobber(directory.join(&name))
+                .map_err(|failure| {
+                    error(if failure.error.kind() == io::ErrorKind::AlreadyExists {
+                        "A file with that name already exists.".into()
+                    } else {
+                        failure.error.to_string()
+                    })
+                })?;
+            Ok(())
+        })
+        .map_err(|error| error.to_string())?;
+    Ok(source)
+}
+
+fn project_script_command(
+    store: &AssetStore,
+    root: &fs::File,
+    id: &str,
+    source: &Path,
+    launch: &LaunchSpec,
+    active: impl Fn() -> bool,
+) -> Result<std::process::Command, String> {
+    if !store
+        .asset_info(id)
+        .is_some_and(|info| info.kind == AssetKind::Script && Path::new(&info.source) == source)
+    {
+        return Err(
+            "The selected script moved or is no longer registered. Select it again.".into(),
+        );
+    }
+    let (folder, leaf) = open_source_folder(root, source)?;
+    let stat = at::statat(&folder, leaf, at::AtFlags::SYMLINK_NOFOLLOW)
+        .map_err(|error| error.to_string())?;
+    if at::FileType::from_raw_mode(stat.st_mode) != at::FileType::RegularFile {
+        return Err("Expected a regular Lua file in Assets.".into());
+    }
+    let absolute = store.root().join(source);
+    let command = launch
+        .project_command(store.root(), &absolute)
+        .map_err(|error| error.to_string())?;
+    if !active()
+        || !fs::symlink_metadata(&absolute).is_ok_and(|current| {
+            current.is_file() && current.ino() == stat.st_ino && current.dev() == stat.st_dev
+        })
+    {
+        return Err("The project or script path changed. Try again.".into());
+    }
+    Ok(command)
 }
 
 fn validate_leaf(name: &str) -> Result<(), String> {
@@ -1096,7 +1282,8 @@ mod tests {
             )
             .unwrap()
             .recv_timeout(Duration::from_secs(5))
-            .unwrap();
+            .unwrap()
+            .errors;
         assert!(errors.is_empty(), "{errors:?}");
         let current = next();
         assert!(current.issues.is_empty(), "{:?}", current.issues);
@@ -1146,6 +1333,7 @@ mod tests {
                 .unwrap()
                 .recv_timeout(Duration::from_secs(5))
                 .unwrap()
+                .errors
         };
         assert!(run(Path::new("Assets/Link"))[0].contains("without symlinks"));
         assert!(
@@ -1207,6 +1395,7 @@ mod tests {
                 .unwrap()
                 .recv_timeout(Duration::from_secs(5))
                 .unwrap()
+                .errors
         };
         let command = |snapshot: &mut Snapshot, action| {
             let errors = run(snapshot, action);
@@ -1324,7 +1513,7 @@ mod tests {
         let result = worker
             .import_files(folder.clone(), vec![input.clone(), unsupported, oversized])
             .unwrap();
-        let failures = result.recv_timeout(Duration::from_secs(5)).unwrap();
+        let failures = result.recv_timeout(Duration::from_secs(5)).unwrap().errors;
         assert_eq!(failures.len(), 2, "{failures:?}");
         assert!(failures[0].contains("Rot imports OBJ"));
         assert!(failures[1].contains("import limit"));
@@ -1355,6 +1544,7 @@ mod tests {
         assert!(result
             .recv_timeout(Duration::from_secs(5))
             .unwrap()
+            .errors
             .is_empty());
         assert!(!destination.join("Crate 3 2.obj").exists());
 
@@ -1364,7 +1554,11 @@ mod tests {
             .import_files(PathBuf::from("Assets/Link"), vec![another])
             .unwrap();
         assert_eq!(
-            result.recv_timeout(Duration::from_secs(5)).unwrap().len(),
+            result
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap()
+                .errors
+                .len(),
             1
         );
         assert!(!external.path().join("Another 2.obj").exists());

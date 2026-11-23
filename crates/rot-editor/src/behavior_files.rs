@@ -1357,6 +1357,40 @@ impl LaunchSpec {
         command.args(args);
         Ok(command)
     }
+    /// The project asset worker verifies source identity before calling this.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn project_command(
+        &self,
+        project: &Path,
+        file: &Path,
+    ) -> Result<Command, FilesError> {
+        let path = |value: &Path| {
+            value.to_str().map(str::to_owned).ok_or_else(|| {
+                error(
+                    ErrorKind::Invalid,
+                    "The project and script paths must be Unicode.",
+                )
+            })
+        };
+        let file_args: Vec<_> = self
+            .args
+            .iter()
+            .filter(|arg| arg.contains("{file}"))
+            .collect();
+        if !file.is_absolute()
+            || file_args.len() != 1
+            || !matches!(file_args[0].as_str(), "{file}" | "{file}:{line}")
+        {
+            return Err(error(
+                ErrorKind::Invalid,
+                "In External Editor preferences use {file} or {file}:{line} as one argument.",
+            ));
+        }
+        let mut command = Command::new(&self.executable);
+        command.args(self.arguments(&path(file)?, 1, &path(project)?)?);
+        Ok(command)
+    }
+
     pub fn validate(&self) -> Result<(), FilesError> {
         self.arguments("/file", 1, "/workspace").map(|_| ())
     }
