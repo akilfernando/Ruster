@@ -66,6 +66,103 @@ mod tests {
     use rot_scene::{BehaviorBinding, BindingTarget, Scene, Session};
 
     #[test]
+    fn verified_file_uses_button_edges_and_signed_axis_in_play() {
+        use rot_scene::component_scene::{Geometry, ObjectNode};
+        use rot_scene::input::{ActionFrame, ActionValue, ButtonState};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Assets/move.lua");
+        std::fs::create_dir(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            r#"
+            return {
+                update = function(object, properties, dt, host)
+                    object.translation[1] = object.translation[1] + 6 * host.axis("move") * dt
+                    if host.button("fire").pressed then
+                        object.rotation[2] = object.rotation[2] + math.pi / 6
+                    end
+                    return object
+                end
+            }
+        "#,
+        )
+        .unwrap();
+        let mut assets = AssetStore::open(dir.path()).unwrap();
+        assets.import("mover", "Assets/move.lua").unwrap();
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("keys")).unwrap()).unwrap();
+        scene.actions = serde_json::from_value(serde_json::json!({
+            "move":{"kind":{"type":"axis1d","negative":["a"],"positive":["d"]}},
+            "fire":{"kind":{"type":"button","keys":["space"]}}
+        }))
+        .unwrap();
+        scene.objects.push(ObjectNode {
+            id: "cube".into(),
+            name: "Cube".into(),
+            parent: None,
+            enabled: true,
+            transform: Default::default(),
+            components: vec![
+                ComponentInstance {
+                    id: "mesh".into(),
+                    enabled: true,
+                    kind: Component::MeshRenderer {
+                        geometry: Geometry::Cube,
+                        tint: [1.; 4],
+                        material: None,
+                    },
+                },
+                ComponentInstance {
+                    id: "script".into(),
+                    enabled: true,
+                    kind: Component::Script {
+                        binding: BehaviorBinding {
+                            target: BindingTarget::Object("cube".into()),
+                            source_id: "mover".into(),
+                            enabled: true,
+                            properties: BTreeMap::new(),
+                            commands: BTreeMap::new(),
+                            state_defaults: BTreeMap::new(),
+                        },
+                        source_kind: Some(ScriptSourceKind::Asset),
+                    },
+                },
+            ],
+        });
+        let projected = resolved(&scene, Some(&assets), true)
+            .unwrap()
+            .unwrap()
+            .behavior_projection()
+            .unwrap();
+        let mut engine = rot_behavior::Engine::new(rot_behavior::Limits::default()).unwrap();
+        let mut runtime = engine
+            .reset(&projected.scene, &projected.authoring)
+            .unwrap();
+        for (value, pressed) in [(1, true), (-1, false), (1, false)] {
+            let frame = ActionFrame(
+                [
+                    ("move".into(), ActionValue::Axis1d { value }),
+                    (
+                        "fire".into(),
+                        ActionValue::Button(ButtonState {
+                            held: true,
+                            pressed,
+                            released: false,
+                        }),
+                    ),
+                ]
+                .into(),
+            );
+            engine.step_with_input(&mut runtime, &frame).unwrap();
+        }
+        let pose = &runtime.scene().objects[0].transform;
+        assert!((pose.translation[0] - 0.1).abs() < 0.000001);
+        assert!((pose.rotation[1] - std::f32::consts::FRAC_PI_6).abs() < 0.000001);
+        assert!(scene.sources.is_empty());
+    }
+
+    #[test]
     fn resolved_script_never_heals_an_unrelated_dangling_embedded_binding() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("Assets/spin.lua");
