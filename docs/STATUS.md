@@ -37,7 +37,11 @@ A drawbridge held its final pose or looped as authored through Play and Linux
 Build, after a source refresh retained the selected clip's ID.
 Assets watches Lua files. Add Component → Script and approved MCP
 attach the same stable file reference. New Play runs pick up accepted
-edits, and Linux Build embeds a verified copy of the source.
+edits, and Linux Build embeds a verified copy of the source. v23 Input
+Actions in Project Settings and approved MCP share Button and 1D Axis
+bindings and Undo. File-backed Object Lua reads the map captured for that
+run. Focus loss releases held keys. A cube moved and turned on named
+actions through editor Play, guarded Steps and a relocated Linux build.
 The editor and viewer draw, fit and pick from cached world matrices.
 Play and Linux Build share the same render data for supported static hierarchies,
 including shear. Set Game Camera from View captures a fixed v23 perspective
