@@ -86,6 +86,19 @@ connected project.
   `name` replaces the generated Copy name. One Undo removes the copy
   and restores the renderer’s original assignment. Legacy calls omit
   the two assignment fields.
+
+  ```json
+  {
+    "expected_session_token": "current-session-token",
+    "expected_revision": "7",
+    "expected_asset_revision": "3",
+    "source_id": "oak",
+    "new_material_id": "oak-door",
+    "assign_object_id": "door",
+    "component_id": "door-front-mesh"
+  }
+  ```
+
 - In v23, `material_inspect` also reports committed `display` and whether
   a native `pending_display` draft is open. Use `scene_display_set` through
   `rot_tools` with the current session token and revision. The display

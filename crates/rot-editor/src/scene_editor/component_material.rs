@@ -514,7 +514,12 @@ impl ComponentWorkspace {
         let response = egui::Modal::new(egui::Id::unique("component_material"))
             .frame(editor_theme::dialog_frame(ctx))
             .show(ctx, |ui| {
-                ui.set_width(ui.available_width().min(360.));
+                let width = if matches!(draft.intent, Intent::MakeUnique(_)) {
+                    460.
+                } else {
+                    360.
+                };
+                ui.set_width(ui.available_width().min(width));
                 ui.heading(match draft.intent {
                     Intent::Create => Text::MaterialNew.plain(),
                     Intent::Edit(_) => Text::MaterialEdit.plain(),

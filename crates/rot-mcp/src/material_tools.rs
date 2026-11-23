@@ -260,6 +260,13 @@ mod tests {
         copy["source_id"] = json!("surface-1");
         copy["new_material_id"] = json!("surface_2");
         copy["name"] = Value::Null;
+        let mut unique = copy.clone();
+        unique["assign_object_id"] = json!("object.1");
+        assert!(
+            !valid("scene_material_copy", &unique),
+            "exact renderer required"
+        );
+        unique["component_id"] = json!("renderer.2");
         let mut remove = guards;
         remove["material_id"] = json!("surface_2");
 
@@ -273,6 +280,7 @@ mod tests {
             ("scene_material_set", set.clone()),
             ("scene_material_assign", assign.clone()),
             ("scene_material_copy", copy),
+            ("scene_material_copy", unique),
             ("scene_material_remove", remove),
         ];
         assert_eq!(advertised.len(), 5);
