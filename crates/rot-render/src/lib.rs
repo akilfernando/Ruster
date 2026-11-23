@@ -2397,8 +2397,8 @@ fn pick<'a>(
         return None;
     }
     let direction = (far - near) / length;
-    draw.into()
-        .pickable_objects()
+    let draw = draw.into();
+    draw.pickable_objects()
         .filter_map(|(object, matrix)| {
             let matrix = matrix.as_dmat4();
             if !matrix.is_finite() || matrix.determinant() == 0.0 {
@@ -2413,6 +2413,11 @@ fn pick<'a>(
                 return None;
             }
             if let Some(mesh) = object_mesh(object, meshes) {
+                let double_sided = object
+                    .material
+                    .as_ref()
+                    .and_then(|id| draw.scene.materials.get(id))
+                    .is_some_and(|material| material.double_sided);
                 return mesh
                     .indices
                     .as_chunks::<3>()
@@ -2425,7 +2430,7 @@ fn pick<'a>(
                             .as_dvec3();
                         let c = Vec3::from(mesh.vertices.get(triangle[2] as usize)?.position)
                             .as_dvec3();
-                        ray_triangle(origin, ray, a, b, c)
+                        ray_triangle(origin, ray, a, b, c, double_sided)
                     })
                     .filter(|distance| *distance <= length)
                     .min_by(f64::total_cmp)
@@ -2452,7 +2457,14 @@ fn pick<'a>(
 }
 
 // Match the renderer's backface culling; positive model scales preserve winding.
-fn ray_triangle(origin: DVec3, direction: DVec3, a: DVec3, b: DVec3, c: DVec3) -> Option<f64> {
+fn ray_triangle(
+    origin: DVec3,
+    direction: DVec3,
+    a: DVec3,
+    b: DVec3,
+    c: DVec3,
+    double_sided: bool,
+) -> Option<f64> {
     let e1 = b - a;
     let e2 = c - a;
     let p = direction.cross(e2);
@@ -2465,7 +2477,12 @@ fn ray_triangle(origin: DVec3, direction: DVec3, a: DVec3, b: DVec3, c: DVec3) -
         + e1.z.abs() * ((direction.x * e2.y).abs() + (direction.y * e2.x).abs());
     let unit_roundoff = f64::EPSILON * 0.5;
     let gamma8 = 8.0 * unit_roundoff / (1.0 - 8.0 * unit_roundoff);
-    if !determinant.is_finite() || !permanent.is_finite() || determinant <= gamma8 * permanent {
+    let facing = if double_sided {
+        determinant.abs()
+    } else {
+        determinant
+    };
+    if !facing.is_finite() || !permanent.is_finite() || facing <= gamma8 * permanent {
         return None;
     }
     let t = origin - a;
@@ -5074,7 +5091,7 @@ mod tests {
             }
         }
         assert!(
-            ray_triangle(DVec3::Z, DVec3::X, DVec3::ZERO, DVec3::X, DVec3::Y).is_none(),
+            ray_triangle(DVec3::Z, DVec3::X, DVec3::ZERO, DVec3::X, DVec3::Y, false).is_none(),
             "parallel rays have no front-facing intersection"
         );
         assert!(
@@ -5083,11 +5100,26 @@ mod tests {
                 DVec3::NEG_Z,
                 DVec3::ZERO,
                 DVec3::X,
-                DVec3::X * 2.0
+                DVec3::X * 2.0,
+                true,
             )
             .is_none(),
             "degenerate triangles remain unpickable"
         );
+        let back_origin = DVec3::new(0.25, 0.25, -1.0);
+        for double_sided in [false, true] {
+            assert_eq!(
+                ray_triangle(
+                    back_origin,
+                    DVec3::Z,
+                    DVec3::ZERO,
+                    DVec3::X,
+                    DVec3::Y,
+                    double_sided
+                ),
+                double_sided.then_some(1.0),
+            );
+        }
         let b = DVec3::new(1.0, 1.0, 0.0);
         let c = DVec3::new(0.0, 1.0, 1.0);
         for delta in [f64::EPSILON, 1.0e-10] {
@@ -5096,7 +5128,14 @@ mod tests {
                 b.dot(direction.cross(c)) > 0.0,
                 "fixture has a positive determinant"
             );
-            let hit = ray_triangle((b + c) / 3.0 - direction, direction, DVec3::ZERO, b, c);
+            let hit = ray_triangle(
+                (b + c) / 3.0 - direction,
+                direction,
+                DVec3::ZERO,
+                b,
+                c,
+                false,
+            );
             if delta == f64::EPSILON {
                 assert!(
                     hit.is_none(),
