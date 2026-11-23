@@ -36,7 +36,9 @@ attach the same stable file reference. New Play runs pick up accepted
 edits, and Linux Build embeds a verified copy of the source.
 The editor and viewer draw, fit and pick from cached world matrices.
 Play and Linux Build share the same render data for supported static hierarchies,
-including shear. A disabled Mesh Renderer in supported scripted v23 scenes
+including shear. Set Game Camera from View captures a fixed v23 perspective
+shot for Play and Linux Build, including large static hierarchies. Stop restores
+editor navigation. A disabled Mesh Renderer in supported scripted v23 scenes
 hides its mesh and shadow while its Lua behavior and collider keep running.
 Build retains assets referenced by disabled geometry. A relocated Vulkan
 player loaded a 1.44 MB v23 scene with 5,000 objects and an imported mesh. Build failures

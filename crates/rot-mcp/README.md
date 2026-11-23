@@ -97,6 +97,16 @@ connected project.
   disappear while the object's Lua and enabled collider stay active.
   When changing a textured Mesh Renderer binding, include
   `expected_asset_revision` from the current asset inspection.
+- In v23, use `player_view_inspect` through `rot_tools` to read the
+  designated Camera's object ID, component ID, effective state, and
+  committed shot. Use `scene_player_view_set` with current scene guards
+  and a fixed `player_view` to update the active fixed Camera or create
+  one. An existing `component_id` by itself activates that Camera
+  without editing its shot. Supply it with a fixed view to replace its
+  shot. Supply `component_id: null` with a fixed view to create a new
+  Camera. Use `player_view: null` to clear the designation. Yaw and
+  pitch use radians. Vertical FOV uses degrees. Each accepted change
+  shares Undo with the editor.
 - A static GLB with punctual lights can be placed in v23 using
   `scene_model_place`. `asset_inspect` reports `light_count`, bounded
   warnings and `warnings_truncated`. Point and directional lights are

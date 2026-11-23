@@ -186,6 +186,24 @@ stops. HDR starts at zero stops when enabled from Legacy SDR. Apply saves
 the change to shared Undo history. Cancel discards the draft. Save the
 scene to retain the display settings for the next open and for builds.
 
+## Set the Game Camera from the Scene view
+
+Frame the shot in the v23 **Perspective** Scene view. In **View Presets**,
+choose **Set Game Camera from View**, or find it with Ctrl+K. Choose a
+Camera and select **Set Camera**. The active fixed Camera is the default
+destination. **New Camera** creates and activates a separate shot, and
+is the default when no Camera is active or the active Camera follows an
+object. The capture keeps the rendered target, yaw, pitch, distance,
+and 45-degree vertical lens. It takes one Undo step.
+
+The Camera Inspector shows its saved world-space shot and active status.
+Use **Make Active** to designate another Camera. **Clear Game Camera**
+leaves its shot available for reuse. Disabling the Camera suspends its
+shot. Static scenes also suspend the shot when its owner or an ancestor
+is disabled. **Play** and Linux Build use the active shot. **Stop** returns
+to your independent Scene view. Existing Follow cameras keep their target
+behavior.
+
 ## Edit a material in a legacy scene
 
 Select an object and find **Material** in the Inspector. Editing a material
