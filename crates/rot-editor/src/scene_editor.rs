@@ -5842,28 +5842,15 @@ impl eframe::App for Host {
         #[cfg(feature = "inspection")]
         asset_timing::install_pass_marker(ctx);
         self.input.observe(raw, ctx);
-        if self.editor.component.is_some() {
+        if let Some(component) = &mut self.editor.component {
+            component.input_raw_focus(ctx, raw);
             #[cfg(unix)]
-            if raw.viewport().close_requested()
-                && !self
-                    .editor
-                    .component
-                    .as_ref()
-                    .is_some_and(|component| component.surface_edit_pending())
-            {
+            if raw.viewport().close_requested() && !component.surface_edit_pending() {
                 self.disconnect_adapter();
             }
             return;
         }
-        if !raw.focused
-            || raw
-                .events
-                .iter()
-                .any(|event| matches!(event, egui::Event::WindowFocused(false)))
-        {
-            self.editor.runtime.release_input(ctx);
-            self.editor.runtime.cancel_control_focus();
-        }
+        self.editor.runtime.input_raw_focus(ctx, raw);
     }
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Some(component) = &mut self.editor.component {

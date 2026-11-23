@@ -4,6 +4,13 @@ use crate::behavior_worker::{InputLease, InputMeta, InputOrigin};
 use crate::strings::Text;
 use rot_scene::input::{ActionKind, ActionValue, InputKey};
 
+fn focus_lost(focused: bool, events: &[egui::Event]) -> bool {
+    !focused
+        || events
+            .iter()
+            .any(|event| matches!(event, egui::Event::WindowFocused(false)))
+}
+
 #[derive(Default)]
 pub(super) struct InputControl {
     lease: Option<InputLease>,
@@ -23,6 +30,13 @@ impl RuntimeUi {
     pub(crate) fn input_owned(&self) -> bool {
         self.input_control.lease.is_some() || self.input_control.intent.is_some()
     }
+    pub(crate) fn input_raw_focus(&mut self, ctx: &egui::Context, raw: &egui::RawInput) {
+        if focus_lost(raw.focused, &raw.events) {
+            self.release_input(ctx);
+            self.cancel_control_focus();
+        }
+    }
+
     pub(crate) fn release_input(&mut self, ctx: &egui::Context) {
         self.revoke_input_control();
         if let Some((id, _)) = self.input_control.surface {
@@ -58,7 +72,7 @@ impl RuntimeUi {
             || !self.visible
             || self.stale
             || self.shutdown
-            || !ctx.input(|input| input.focused)
+            || ctx.input(|input| focus_lost(input.focused, &input.events))
             || self.debug_snapshot().is_some()
             || ctx.input(|input| {
                 modifier(input.modifiers)
@@ -128,6 +142,7 @@ impl RuntimeUi {
         let owned = self.input_owned();
         if clicked
             && (enabled || owned)
+            && !ctx.input(|input| focus_lost(input.focused, &input.events))
             && self.input_control.last_button_frame != Some(ui.cumulative_frame_nr())
         {
             self.input_control.last_button_frame = Some(ui.cumulative_frame_nr());

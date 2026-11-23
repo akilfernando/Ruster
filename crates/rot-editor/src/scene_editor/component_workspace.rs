@@ -1817,6 +1817,10 @@ impl ComponentWorkspace {
         }
     }
 
+    pub(super) fn input_raw_focus(&mut self, ctx: &egui::Context, raw: &egui::RawInput) {
+        self.runtime.input_raw_focus(ctx, raw);
+    }
+
     pub(super) fn show(&mut self, ui: &mut egui::Ui) -> Option<OpenedScene> {
         self.show_workspace(ui, true)
     }
