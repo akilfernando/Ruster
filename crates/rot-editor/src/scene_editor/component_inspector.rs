@@ -196,6 +196,7 @@ pub(super) fn mesh_renderer_heading(ordinal: Option<usize>) -> std::borrow::Cow<
 
 pub(super) struct ComponentControls<'a> {
     pub(super) allow_new_material: bool,
+    pub(super) allow_spot_aim: bool,
     pub(super) diagnostic: Option<&'a rot_behavior::Diagnostic>,
     pub(super) collider_edit: &'a super::component_workspace::component_collider::InspectorState,
 }
@@ -205,6 +206,7 @@ pub(super) struct ComponentEdits {
     pub(super) material: Option<super::component_workspace::component_material::Request>,
     pub(super) animator_revision: Option<(String, u64)>,
     pub(super) collider: Option<String>,
+    pub(super) spot_aim: Option<String>,
 }
 
 pub(super) fn components(
@@ -217,12 +219,14 @@ pub(super) fn components(
 ) -> ComponentEdits {
     let ComponentControls {
         allow_new_material,
+        allow_spot_aim,
         diagnostic,
         collider_edit,
     } = controls;
     use super::component_workspace::component_material::{Intent, Request};
     let mut material_request = None;
     let mut collider_request = None;
+    let mut spot_aim = None;
     let mut animator_revision = None;
     let mut submit = false;
     let mut remove = None;
@@ -357,7 +361,20 @@ pub(super) fn components(
                         color,
                         intensity,
                         kind,
-                    } => submit |= light_fields(ui, color, intensity, kind),
+                    } => {
+                        submit |= light_fields(ui, color, intensity, kind);
+                        if matches!(kind, LightKind::Spot { .. })
+                            && ui
+                                .add_enabled(
+                                    allow_spot_aim,
+                                    egui::Button::new(Text::SpotAim.plain()),
+                                )
+                                .on_hover_text(Text::SpotAimOwnerEffect.plain())
+                                .clicked()
+                        {
+                            spot_aim = Some(component.id.clone());
+                        }
+                    }
                     Component::Camera { view } => {
                         if let CameraView::Transform(lens) = view {
                             ui_kit::property_row(ui, Text::ComponentCamera.plain(), |ui| {
@@ -487,6 +504,7 @@ pub(super) fn components(
         material: material_request,
         animator_revision,
         collider: collider_request,
+        spot_aim,
     }
 }
 

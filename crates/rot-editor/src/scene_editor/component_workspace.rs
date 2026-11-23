@@ -30,6 +30,8 @@ pub(super) mod component_collider;
 
 #[path = "component_display.rs"]
 mod component_display;
+#[path = "component_spot.rs"]
+mod component_spot;
 
 #[path = "component_material.rs"]
 pub(super) mod component_material;
@@ -255,6 +257,7 @@ pub(super) struct ComponentWorkspace {
     material_draft: Option<component_material::Draft>,
     display_draft: Option<component_display::Draft>,
     camera_authoring: component_camera::Authoring,
+    spot_aim: Option<component_spot::AimPicker>,
     material_usage: component_material::Usage,
     edit_scene_during_play: bool,
     component_picker: component_inspector::ComponentPicker,
@@ -379,6 +382,7 @@ impl ComponentWorkspace {
             multi_draft: None,
             material_draft: None,
             display_draft: None,
+            spot_aim: None,
             camera_authoring: Default::default(),
             material_usage: component_material::Usage::default(),
             edit_scene_during_play: false,
@@ -725,6 +729,7 @@ impl ComponentWorkspace {
             || self.display_draft.is_some()
             || self.input_actions.pending()
             || self.camera_authoring.pending()
+            || self.spot_aim.is_some()
     }
 
     fn viewport_edit_active(&self) -> bool {
@@ -1671,6 +1676,28 @@ impl ComponentWorkspace {
                 surface,
             )
         };
+        if frame.is_none() {
+            if let Some(object) = self
+                .selected_index
+                .and_then(|index| self.session.scene().objects.get(index))
+            {
+                if let Some(preview) = preview {
+                    for component in &object.components {
+                        if matches!(
+                            component.kind,
+                            Component::Light {
+                                kind: rot_scene::LightKind::Spot { .. },
+                                ..
+                            }
+                        ) {
+                            if let Some(light) = preview.scene().lighting.light(&component.id) {
+                                super::lighting_viewport::spot_guide(ui, &interaction, light);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         #[cfg(unix)]
         let save_pending = self.pending_save.is_some();
         #[cfg(not(unix))]
@@ -2612,6 +2639,8 @@ impl ComponentWorkspace {
                                 if self.draft.is_some() {
                                     let allow_new = self.material_controls();
                                     let collider_edit = self.collider_inspector_state();
+                                    let allow_spot_aim = !self.authored_edit_pending()
+                                        && !self.runtime.in_play_mode();
                                     let edits = component_inspector::components(
                                         ui,
                                         self.draft.as_mut().expect("selected draft"),
@@ -2620,6 +2649,7 @@ impl ComponentWorkspace {
                                         &self.session.scene().materials,
                                         component_inspector::ComponentControls {
                                             allow_new_material: allow_new,
+                                            allow_spot_aim,
                                             diagnostic: self.runtime.diagnostic.as_ref(),
                                             collider_edit: &collider_edit,
                                         },
@@ -2631,6 +2661,9 @@ impl ComponentWorkspace {
                                     }
                                     if let Some((id, revision)) = edits.animator_revision {
                                         self.animator_draft_revisions.insert(id, revision);
+                                    }
+                                    if let Some(id) = edits.spot_aim {
+                                        self.begin_spot_aim(id);
                                     }
                                     self.camera_controls(ui);
                                     if let Some(request) = edits.material {
@@ -2695,6 +2728,7 @@ impl ComponentWorkspace {
         self.show_material_draft(&ctx);
         self.show_display_draft(&ctx);
         self.show_camera_draft(&ctx);
+        self.show_spot_aim(&ctx);
         if let Some(mut path) = self.open_path.take() {
             let mut cancel = false;
             let mut opened = None;

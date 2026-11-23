@@ -397,6 +397,39 @@ impl ComponentWorkspace {
             );
         }
 
+        if op == "scene_components_edit" {
+            if let Some(edits) = args["edits"].as_array() {
+                if edits
+                    .iter()
+                    .any(|edit| edit["operation"] == "aim_spot_at_object")
+                {
+                    let [edit] = edits.as_slice() else {
+                        return Err((
+                            "invalid_arguments",
+                            "Aim a Spot Light in its own component edit.".into(),
+                        ));
+                    };
+                    if edit.as_object().is_none_or(|entry| entry.len() != 4) {
+                        return Err(invalid());
+                    }
+                    let id = |key| {
+                        edit[key]
+                            .as_str()
+                            .filter(|id| rot_scene::validate_id(id).is_ok())
+                            .ok_or_else(invalid)
+                    };
+                    let object = id("object_id")?;
+                    let component = id("component_id")?;
+                    let target = id("target_object_id")?;
+                    let changed = self.aim_spot(revision, object, component, target)?;
+                    return Ok(
+                        json!({"object_id":object,"component_id":component,"target_object_id":target,
+                        "changed":changed,"dirty":self.session.is_dirty()}),
+                    );
+                }
+            }
+        }
+
         if op == "scene_animation_set" {
             return self.edit_animation(args, revision);
         }
@@ -1095,6 +1128,27 @@ impl ComponentWorkspace {
                 ));
             }
             let mut response = json!({"object_id":id,"component":component});
+            if let Component::Light {
+                kind:
+                    rot_scene::LightKind::Spot {
+                        range,
+                        inner_degrees,
+                        outer_degrees,
+                    },
+                ..
+            } = component.kind
+            {
+                response["spot_world"] = self.spot_origin(row).map_or(
+                    json!({"status":"unavailable"}),
+                    |origin| {
+                        let orientation = self.session.scene().world_rotation(row, &self.parents).normalize();
+                        json!({"status":"resolved","origin":origin.to_array(),
+                            "forward":(orientation * -glam::DVec3::Z).to_array(),
+                            "range":range,"inner_degrees":inner_degrees,"outer_degrees":outer_degrees,
+                            "pose_source":"authored_world_pivot_and_rotation_chain"})
+                    }
+                );
+            }
             if let Some(collider) = super::component_collider::box_component(component) {
                 let enabled = self.collider_effective(row, collider.enabled);
                 response["collider_world"] = match self.collider_for_viewport(row, collider) {

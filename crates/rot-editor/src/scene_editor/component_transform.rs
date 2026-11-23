@@ -801,7 +801,7 @@ fn rotation(transform: &Transform) -> DQuat {
     euler_rotation(transform.rotation)
 }
 
-fn authored_rotation(next: DQuat, original: &Transform) -> Option<[f32; 3]> {
+pub(super) fn authored_rotation(next: DQuat, original: &Transform) -> Option<[f32; 3]> {
     let nearby = nearby_euler(
         GizmoRotation::from_array(next.to_array()),
         original.rotation,

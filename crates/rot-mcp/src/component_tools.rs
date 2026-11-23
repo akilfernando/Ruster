@@ -32,6 +32,7 @@ pub(super) fn list() -> [Value; 2] {
     let edit = json!({"oneOf":[
         object_schema(json!({"operation":{"enum":["add","replace"]},"object_id":id,"component":component}),vec!["operation","object_id","component"]),
         object_schema(json!({"operation":{"const":"remove"},"object_id":id,"component_id":id}),vec!["operation","object_id","component_id"]),
+        object_schema(json!({"operation":{"const":"aim_spot_at_object"},"object_id":id,"component_id":id,"target_object_id":id}),vec!["operation","object_id","component_id","target_object_id"]),
         object_schema(json!({"operation":{"const":"set_enabled"},"object_id":id,"component_id":id,"enabled":{"type":"boolean"}}),vec!["operation","object_id","component_id","enabled"])
     ]});
     [
@@ -93,6 +94,21 @@ pub(super) fn valid(name: &str, args: &Value) -> bool {
                                 Some("remove") => {
                                     exact_keys(op, &["operation", "object_id", "component_id"], &[])
                                         && id(&edit["component_id"])
+                                }
+                                Some("aim_spot_at_object") => {
+                                    edits.len() == 1
+                                        && exact_keys(
+                                            op,
+                                            &[
+                                                "operation",
+                                                "object_id",
+                                                "component_id",
+                                                "target_object_id",
+                                            ],
+                                            &[],
+                                        )
+                                        && id(&edit["component_id"])
+                                        && id(&edit["target_object_id"])
                                 }
                                 Some("set_enabled") => {
                                     exact_keys(

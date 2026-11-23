@@ -97,6 +97,53 @@ pub(super) fn segment(rect: egui::Rect, vp: DMat4, a: DVec3, b: DVec3) -> Option
         .then(|| [screen(rect, clipped_a), screen(rect, clipped_b)])
 }
 
+pub(super) fn spot_guide(ui: &egui::Ui, viewport: &rot_render::ViewportInteraction, light: &Light) {
+    let LightKind::Spot {
+        range,
+        inner_degrees,
+        outer_degrees,
+    } = light.kind
+    else {
+        return;
+    };
+    let vp = view_projection(viewport);
+    let painter = ui.painter().with_clip_rect(viewport.rect);
+    let color = ui.visuals().selection.stroke.color;
+    let origin = position(light);
+    let basis = rotation(&light.transform).normalize();
+    let end = origin + basis * (-DVec3::Z * f64::from(range));
+    let draw = |start, end, stroke| {
+        if let Some(points) = segment(viewport.rect, vp, start, end) {
+            painter.line_segment(points, stroke);
+        }
+    };
+    draw(origin, end, egui::Stroke::new(1.5, color));
+    for (angle, inner) in [(outer_degrees, false), (inner_degrees, true)] {
+        if angle == 0. {
+            continue;
+        }
+        let stroke = if inner {
+            egui::Stroke::new(1., color.gamma_multiply(0.7))
+        } else {
+            egui::Stroke::new(1.5, color)
+        };
+        let (radial, axial) = f64::from(angle).to_radians().sin_cos();
+        let point = |i| {
+            let phase = i as f64 * std::f64::consts::TAU / RANGE_SEGMENTS as f64;
+            let (y, x) = phase.sin_cos();
+            origin + basis * (DVec3::new(radial * x, radial * y, -axial) * f64::from(range))
+        };
+        let mut last = point(0);
+        for index in 1..=RANGE_SEGMENTS {
+            let next = point(index);
+            if !inner || index % 2 == 0 {
+                draw(last, next, stroke);
+            }
+            last = next;
+        }
+    }
+}
+
 struct Marker<'a> {
     id: &'a str,
     light: &'a Light,
