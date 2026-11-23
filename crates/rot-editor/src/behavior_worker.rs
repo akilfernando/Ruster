@@ -164,6 +164,7 @@ pub(super) enum Command {
         scene: Arc<Scene>,
         authoring: Arc<Authoring>,
         hidden_mesh_renderers: Option<rot_scene::HiddenMeshRenderers>,
+        projection: rot_scene::component_scene::RuntimeProjection,
         transform_camera: Option<Arc<rot_scene::component_scene::TransformCameraBinding>>,
         sounds: Sounds,
         clips: Arc<rot_behavior::Clips>,
@@ -1249,6 +1250,7 @@ fn process(
             scene,
             authoring,
             hidden_mesh_renderers,
+            projection,
             transform_camera,
             sounds,
             clips,
@@ -1348,7 +1350,7 @@ fn process(
                 handle.map(|handle| (key, handle));
             let engine = execution.engine.as_mut().expect("engine constructed above");
             engine.set_clips((*clips).clone());
-            match engine.reset_with_transform_camera(&scene, &authoring, transform_camera) {
+            match engine.reset_projected(&scene, &authoring, transform_camera, projection) {
                 Ok(runtime) if active(shared, key) && !shared.cancel.load(Ordering::SeqCst) => {
                     let keys = KeyEventAccumulator::new(authoring.actions.clone())
                         .expect("Reset validated the immutable action map");
@@ -2283,6 +2285,7 @@ mod tests {
         let key = worker.advance(generation, scene.revision).unwrap();
         worker
             .try_request(Command::Reset {
+                projection: Default::default(),
                 transform_camera: None,
                 hidden_mesh_renderers: None,
                 key,
@@ -2929,6 +2932,7 @@ mod tests {
             );
             worker
                 .try_request(Command::Reset {
+                    projection: Default::default(),
                     transform_camera: None,
                     hidden_mesh_renderers: None,
                     key,
@@ -3066,6 +3070,7 @@ mod tests {
         let old = worker.advance(1, 0).unwrap();
         worker
             .try_request(Command::Reset {
+                projection: Default::default(),
                 transform_camera: None,
                 hidden_mesh_renderers: None,
                 key: old,
@@ -3108,6 +3113,7 @@ mod tests {
         let key = worker.advance(1, 0).unwrap();
         worker
             .try_request(Command::Reset {
+                projection: Default::default(),
                 transform_camera: None,
                 hidden_mesh_renderers: None,
                 key,
@@ -3175,6 +3181,7 @@ mod tests {
         let attempted = worker.advance(7, 0).unwrap();
         worker
             .try_request(Command::Reset {
+                projection: Default::default(),
                 transform_camera: None,
                 hidden_mesh_renderers: None,
                 key: attempted,

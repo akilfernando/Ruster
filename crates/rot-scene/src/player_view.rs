@@ -136,10 +136,7 @@ impl Scene {
         }
     }
 
-    pub(crate) fn validate_player_view_with_poses(
-        &self,
-        poses: &ResolvedPoses,
-    ) -> Result<(), SceneError> {
+    pub fn validate_player_view_with_poses(&self, poses: &ResolvedPoses) -> Result<(), SceneError> {
         if let Some(view) = &self.player_view {
             view.resolve(self, Some(poses))?;
         }

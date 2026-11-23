@@ -426,8 +426,35 @@ impl Authoring {
     }
 
     pub fn validate(&self, scene: &Scene) -> Result<(), SceneError> {
-        if !scene.hierarchy.is_empty() && self.group_creation_blockers(scene).next().is_some() {
-            return Err(SceneError::HierarchyAuthoringConflict);
+        self.validate_for_runtime(scene, Default::default())
+    }
+
+    pub(crate) fn validate_for_runtime(
+        &self,
+        scene: &Scene,
+        projection: crate::component_scene::RuntimeProjection,
+    ) -> Result<(), SceneError> {
+        if !scene.hierarchy.is_empty() {
+            if projection.allows_local_leaf_scripts() {
+                if !self.hud.is_default()
+                    || self.sources.values().any(|source| {
+                        !matches!(
+                            source.host_api_version,
+                            1 | 2 | GROUP_ROTATION_HOST_API_VERSION
+                        )
+                    })
+                    || self
+                        .bindings
+                        .values()
+                        .any(|binding| binding.target == BindingTarget::Application)
+                {
+                    return Err(SceneError::Invalid(
+                        "v23 behavior hierarchy supports Object Lua API1/2, Group Lua API6 and keyboard actions; Application scripts, other script APIs and HUD require a flat scene".into(),
+                    ));
+                }
+            } else if self.group_creation_blockers(scene).next().is_some() {
+                return Err(SceneError::HierarchyAuthoringConflict);
+            }
         }
         crate::input::validate_action_map(&self.actions)?;
         self.hud.validate()?;

@@ -25,7 +25,7 @@ pub const MAX_MATERIALS: usize = 64;
 mod imported;
 pub use imported::ImportedPlacement;
 mod hierarchy;
-pub use hierarchy::{Group, Hierarchy, ResolvedPoses, TransformRequest};
+pub use hierarchy::{Group, Hierarchy, LeafParentPath, ResolvedPoses, TransformRequest};
 mod animation;
 mod authoring;
 mod collider;
@@ -1487,8 +1487,14 @@ impl Document {
         }
     }
     fn validate(&self) -> Result<(), SceneError> {
+        self.validate_for_runtime(Default::default())
+    }
+    fn validate_for_runtime(
+        &self,
+        projection: component_scene::RuntimeProjection,
+    ) -> Result<(), SceneError> {
         self.scene.validate()?;
-        self.authoring.validate(&self.scene)?;
+        projection.validate_authoring(&self.scene, &self.authoring)?;
         if self.undo.len() + self.redo.len() > HISTORY_LIMIT {
             return Err(SceneError::Invalid(format!(
                 "history exceeds {HISTORY_LIMIT} changes"
@@ -2250,6 +2256,7 @@ pub type HiddenMeshRenderers = Arc<HashSet<String>>;
 /// Authored state with bounded object, name, transform, color and mesh deltas. Runtime state belongs elsewhere.
 #[derive(Clone, Debug)]
 pub struct Session {
+    runtime_projection: component_scene::RuntimeProjection,
     hidden_mesh_renderers: Option<HiddenMeshRenderers>,
     transform_camera: Option<std::sync::Arc<component_scene::TransformCameraBinding>>,
     document: Document,
@@ -2271,6 +2278,7 @@ impl Session {
             history_evictions: 0,
             hidden_mesh_renderers: None,
             transform_camera: None,
+            runtime_projection: Default::default(),
         })
     }
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SceneError> {
@@ -2281,6 +2289,7 @@ impl Session {
             history_evictions: 0,
             hidden_mesh_renderers: None,
             transform_camera: None,
+            runtime_projection: Default::default(),
             saved: Some(document.clone()),
             document,
             path: Some(lock.path.clone()),
@@ -2301,8 +2310,13 @@ impl Session {
             history_evictions: 0,
             hidden_mesh_renderers: None,
             transform_camera: None,
+            runtime_projection: Default::default(),
         })
     }
+    pub fn runtime_projection(&self) -> component_scene::RuntimeProjection {
+        self.runtime_projection
+    }
+
     pub fn transform_camera_binding(
         &self,
     ) -> Option<&std::sync::Arc<component_scene::TransformCameraBinding>> {

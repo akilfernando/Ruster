@@ -440,10 +440,11 @@ impl Application for GenericMotionLab {
         }
         let engine = self.engine.as_mut().expect("initialized engine");
         engine.set_clips(self.clips.clone());
-        let result = engine.reset_with_transform_camera(
+        let result = engine.reset_projected(
             self.session.scene(),
             &authoring,
             self.session.transform_camera_binding().cloned(),
+            self.session.runtime_projection(),
         );
         let candidate = self.report(result)?;
         // Engine validated transforms; meshes remain the same immutable Content resources.

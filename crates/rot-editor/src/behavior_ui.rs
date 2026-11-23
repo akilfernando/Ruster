@@ -2117,6 +2117,7 @@ enum Request {
         scene: Arc<rot_scene::Scene>,
         authoring: Arc<rot_scene::Authoring>,
         hidden_mesh_renderers: Option<rot_scene::HiddenMeshRenderers>,
+        projection: rot_scene::component_scene::RuntimeProjection,
         transform_camera: Option<Arc<rot_scene::component_scene::TransformCameraBinding>>,
         sounds: BTreeMap<String, Arc<rot_assets::AudioClip>>,
         clips: Arc<rot_behavior::Clips>,
@@ -2153,6 +2154,7 @@ impl Request {
                 scene,
                 authoring,
                 hidden_mesh_renderers,
+                projection,
                 transform_camera,
                 sounds,
                 clips,
@@ -2161,6 +2163,7 @@ impl Request {
                 scene: scene.clone(),
                 authoring: authoring.clone(),
                 hidden_mesh_renderers: hidden_mesh_renderers.clone(),
+                projection: *projection,
                 transform_camera: transform_camera.clone(),
                 sounds: sounds.clone(),
                 clips: clips.clone(),
@@ -2517,29 +2520,33 @@ impl RuntimeUi {
                 return Ok(key);
             }
         }
-        let (mut scene, authoring, hidden_mesh_renderers, transform_camera) = match source {
-            RuntimeSource::Legacy(session) => (
-                session.scene().clone(),
-                session.authoring().clone(),
-                session.hidden_mesh_renderers().cloned(),
-                session.transform_camera_binding().cloned(),
-            ),
-            RuntimeSource::Components(session) => {
-                let scene = session.scene();
-                let resolved = crate::scene_editor::script_assets::resolved(scene, assets, true)?;
-                let input = resolved
-                    .as_ref()
-                    .unwrap_or(scene)
-                    .behavior_projection()
-                    .map_err(|error| error.to_string())?;
-                (
-                    input.scene,
-                    input.authoring,
-                    input.hidden_mesh_renderers,
-                    input.transform_camera,
-                )
-            }
-        };
+        let (mut scene, authoring, hidden_mesh_renderers, projection, transform_camera) =
+            match source {
+                RuntimeSource::Legacy(session) => (
+                    session.scene().clone(),
+                    session.authoring().clone(),
+                    session.hidden_mesh_renderers().cloned(),
+                    session.runtime_projection(),
+                    session.transform_camera_binding().cloned(),
+                ),
+                RuntimeSource::Components(session) => {
+                    let scene = session.scene();
+                    let resolved =
+                        crate::scene_editor::script_assets::resolved(scene, assets, true)?;
+                    let input = resolved
+                        .as_ref()
+                        .unwrap_or(scene)
+                        .behavior_projection()
+                        .map_err(|error| error.to_string())?;
+                    (
+                        input.scene,
+                        input.authoring,
+                        input.hidden_mesh_renderers,
+                        input.projection,
+                        input.transform_camera,
+                    )
+                }
+            };
         scene.revision = source.revision();
         let sounds = assets
             .map(rot_assets::AssetStore::sound_snapshots)
@@ -2563,6 +2570,7 @@ impl RuntimeUi {
             scene: Arc::new(scene),
             authoring,
             hidden_mesh_renderers,
+            projection,
             transform_camera,
             sounds,
             clips,

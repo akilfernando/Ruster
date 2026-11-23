@@ -12,7 +12,7 @@ use std::sync::{
 use mlua::chunk::ChunkMode;
 use mlua::debug::DebugEvent;
 use mlua::{Function, HookTriggers, Lua, LuaOptions, StdLib, Table, Value, VmState};
-use rot_scene::component_scene::{TransformCameraBinding, TransformCameraPose};
+use rot_scene::component_scene::{RuntimeProjection, TransformCameraBinding, TransformCameraPose};
 use rot_scene::input::{ActionFrame, ActionValue, ValidatedActionFrame};
 use rot_scene::{
     AnimationBinding, Authoring, BehaviorBinding, BehaviorSource, Clip, PropertyValue, Scene,
@@ -256,6 +256,7 @@ pub struct Runtime {
     query_observations: Vec<QueryObservation>,
     audio_batch: Option<AudioBatch>,
     has_sound_binding: bool,
+    leaf_parents: Option<Arc<BTreeMap<String, rot_scene::LeafParentPath>>>,
     kinematic_owner: Option<KinematicOwner>,
     /// Clip bindings resolved at Reset; fixed for this Runtime.
     animations: Arc<Vec<(AnimationBinding, Arc<Clip>)>>,
@@ -692,9 +693,24 @@ impl Engine {
         authoring: &Authoring,
         transform_camera_binding: Option<Arc<TransformCameraBinding>>,
     ) -> Result<Runtime, Diagnostic> {
+        self.reset_projected(
+            scene,
+            authoring,
+            transform_camera_binding,
+            RuntimeProjection::default(),
+        )
+    }
+
+    pub fn reset_projected(
+        &mut self,
+        scene: &Scene,
+        authoring: &Authoring,
+        transform_camera_binding: Option<Arc<TransformCameraBinding>>,
+        projection: RuntimeProjection,
+    ) -> Result<Runtime, Diagnostic> {
         scene
             .validate()
-            .and_then(|()| authoring.validate(scene))
+            .and_then(|()| projection.validate_authoring(scene, authoring))
             .map_err(|e| {
                 Diagnostic::plain(
                     DiagnosticCode::InvalidAuthoring,
@@ -715,7 +731,6 @@ impl Engine {
             let mut staged = scene.clone();
             Self::apply_animations(&animations, 0.0, &mut staged, Phase::Setup)?;
             validate_group_commit(&staged)?;
-            validate_player_view_commit(&staged)?;
             posed = staged;
             &posed
         };
@@ -786,7 +801,10 @@ impl Engine {
                             .expect("validated Group owner")
                             .transform = transform;
                     }
-                    rot_scene::BindingTarget::Object(object_id) if scene.player_view.is_some() => {
+                    rot_scene::BindingTarget::Object(object_id)
+                        if scene.player_view.is_some()
+                            || projection.allows_local_leaf_scripts() =>
+                    {
                         trial_scene
                             .get_or_insert_with(|| scene.clone())
                             .objects
@@ -805,10 +823,26 @@ impl Engine {
         if let Some(trial) = trial_scene {
             if !trial.hierarchy.is_empty() {
                 validate_group_commit(&trial)?;
+            } else {
+                validate_player_view_commit(&trial)?;
             }
-            validate_player_view_commit(&trial)?;
         }
         trial_state.validate_total()?;
+        let leaf_parents =
+            (projection.allows_local_leaf_scripts() && animations.is_empty()).then(|| {
+                Arc::new(
+                    authoring
+                        .bindings
+                        .values()
+                        .filter_map(|binding| {
+                            let rot_scene::BindingTarget::Object(id) = &binding.target else {
+                                return None;
+                            };
+                            scene.leaf_parent_path(id).map(|path| (id.clone(), path))
+                        })
+                        .collect(),
+                )
+            });
         let transform_camera =
             resolve_transform_camera(transform_camera_binding.as_deref(), scene, Phase::Setup)?;
         self.check_cancelled()?;
@@ -830,6 +864,7 @@ impl Engine {
             query_observations: Vec::new(),
             audio_batch: None,
             has_sound_binding,
+            leaf_parents,
             kinematic_owner,
             animations,
             transform_camera_binding,
@@ -886,6 +921,7 @@ impl Engine {
             runtime.kinematic_owner.as_ref(),
         )?;
         let mut group_changed = !runtime.animations.is_empty();
+        let mut changed_leaves = Vec::new();
         Self::apply_animations(
             &runtime.animations,
             next as f64 * self.limits.fixed_dt,
@@ -913,21 +949,26 @@ impl Engine {
             if let Some(transform) = output.transform {
                 match &binding.target {
                     rot_scene::BindingTarget::Object(object_id) => {
-                        staged
+                        let (index, object) = staged
                             .objects
                             .iter_mut()
-                            .find(|object| object.id == *object_id)
-                            .expect("validated runtime owner")
-                            .transform = transform;
+                            .enumerate()
+                            .find(|(_, object)| object.id == *object_id)
+                            .expect("validated runtime owner");
+                        if runtime.leaf_parents.is_some() && object.transform != transform {
+                            changed_leaves.push((index, id, binding));
+                        }
+                        object.transform = transform;
                     }
                     rot_scene::BindingTarget::Group(group_id) => {
-                        staged
+                        let group = staged
                             .hierarchy
                             .groups
                             .get_mut(group_id)
-                            .expect("validated Group owner")
-                            .transform = transform;
-                        group_changed = true;
+                            .expect("validated Group owner");
+                        group_changed |=
+                            runtime.leaf_parents.is_none() || group.transform != transform;
+                        group.transform = transform;
                     }
                     rot_scene::BindingTarget::Application => {
                         unreachable!("Application output cannot include a transform")
@@ -947,6 +988,32 @@ impl Engine {
         // enabled colliders skip collider resolution.
         if group_changed {
             validate_group_commit(&staged)?;
+        } else if let Some(paths) = &runtime.leaf_parents {
+            for (index, id, binding) in changed_leaves {
+                let object = &staged.objects[index];
+                let validate = || {
+                    let world = paths
+                        .get(&object.id)
+                        .map(|path| path.resolve(&staged, &object.transform))
+                        .transpose()?;
+                    if let Some(collider) = object.collider {
+                        collider.resolve(world.as_ref().unwrap_or(&object.transform))?;
+                    }
+                    Ok::<_, rot_scene::SceneError>(())
+                };
+                validate().map_err(|error| {
+                    Diagnostic::plain(
+                        DiagnosticCode::InvalidOutput,
+                        Phase::Commit,
+                        &format!("{} world transform: {error}", object.id),
+                    )
+                    .context(
+                        id,
+                        binding,
+                        runtime.authoring.sources.get(&binding.source_id),
+                    )
+                })?;
+            }
         } else {
             for object in &staged.objects {
                 if let Some(collider) = object.collider.filter(|collider| collider.enabled) {
@@ -960,7 +1027,9 @@ impl Engine {
                 }
             }
         }
-        validate_player_view_commit(&staged)?;
+        if !group_changed {
+            validate_player_view_commit(&staged)?;
+        }
         staged_state.validate_total()?;
         let transform_camera = resolve_transform_camera(
             runtime.transform_camera_binding.as_deref(),
@@ -1282,13 +1351,16 @@ fn validate_player_view_commit(scene: &Scene) -> Result<(), Diagnostic> {
 }
 
 fn validate_group_commit(scene: &Scene) -> Result<(), Diagnostic> {
-    scene.resolve_poses().map(|_| ()).map_err(|error| {
-        Diagnostic::plain(
-            DiagnosticCode::InvalidOutput,
-            Phase::Commit,
-            &error.to_string(),
-        )
-    })
+    scene
+        .resolve_poses()
+        .and_then(|poses| scene.validate_player_view_with_poses(&poses))
+        .map_err(|error| {
+            Diagnostic::plain(
+                DiagnosticCode::InvalidOutput,
+                Phase::Commit,
+                &error.to_string(),
+            )
+        })
 }
 
 fn read_group_rotation(output: &Table, input: &Transform) -> mlua::Result<BindingOutput> {

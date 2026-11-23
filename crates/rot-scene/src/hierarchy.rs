@@ -42,6 +42,25 @@ pub(crate) struct Pose {
     rotation: DQuat,
     scale: DVec3,
 }
+/// Parent IDs for a leaf of an already validated runtime hierarchy.
+#[derive(Clone, Debug)]
+pub struct LeafParentPath(Vec<String>);
+
+impl LeafParentPath {
+    pub fn resolve(&self, scene: &Scene, local: &Transform) -> Result<Transform, SceneError> {
+        let mut pose = Pose::from_local(local);
+        for id in &self.0 {
+            let parent = scene
+                .hierarchy
+                .groups
+                .get(id)
+                .ok_or_else(|| invalid("missing runtime Group parent"))?;
+            pose = Pose::from_local(&parent.transform).compose(pose);
+        }
+        pose.stored()
+    }
+}
+
 fn invalid(message: &str) -> SceneError {
     SceneError::Invalid(message.into())
 }
@@ -250,6 +269,20 @@ impl Scene {
         }
         Ok(())
     }
+    /// Capture nearest-parent-first IDs for one leaf after scene validation.
+    pub fn leaf_parent_path(&self, id: &str) -> Option<LeafParentPath> {
+        let mut parents = Vec::new();
+        let mut current = id;
+        while let Some(parent) = self.hierarchy.parents.get(current) {
+            if parents.len() == 8 {
+                return None;
+            }
+            parents.push(parent.clone());
+            current = parent;
+        }
+        (!parents.is_empty()).then_some(LeafParentPath(parents))
+    }
+
     /// Resolve after topology admission. No persistent cache and no Scene clone.
     pub fn resolve_poses(&self) -> Result<ResolvedPoses, SceneError> {
         self.resolve_requested(&BTreeMap::new())

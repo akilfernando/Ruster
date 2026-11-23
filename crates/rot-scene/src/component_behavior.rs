@@ -114,8 +114,29 @@ fn missing_camera_transform() -> SceneError {
     SceneError::Invalid("Game Camera transform is missing from the behavior scene.".into())
 }
 
+/// Runtime admission for an authored legacy scene or a detached v23 projection.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RuntimeProjection {
+    local_leaf_scripts: bool,
+}
+
+impl RuntimeProjection {
+    pub fn allows_local_leaf_scripts(self) -> bool {
+        self.local_leaf_scripts
+    }
+
+    pub fn validate_authoring(
+        self,
+        scene: &Scene,
+        authoring: &Authoring,
+    ) -> Result<(), SceneError> {
+        authoring.validate_for_runtime(scene, self)
+    }
+}
+
 /// A behavior projection and its runtime-only draw visibility.
 pub struct BehaviorInput {
+    pub projection: RuntimeProjection,
     pub scene: Scene,
     pub authoring: Authoring,
     pub hidden_mesh_renderers: Option<HiddenMeshRenderers>,
@@ -390,11 +411,16 @@ impl ComponentScene {
             };
         }
         scene.validate()?;
-        authoring.validate(&scene)?;
+        let projection = RuntimeProjection {
+            local_leaf_scripts: !scene.hierarchy.is_empty()
+                && authoring.group_creation_blockers(&scene).next().is_some(),
+        };
+        projection.validate_authoring(&scene, &authoring)?;
         let transform_camera = transform_camera
             .map(|(owner, lens)| TransformCameraBinding::bind(&scene, owner, lens).map(Arc::new))
             .transpose()?;
         Ok(BehaviorInput {
+            projection,
             scene,
             authoring,
             hidden_mesh_renderers: hidden_mesh_renderers.map(Arc::new),
@@ -421,6 +447,7 @@ impl Session {
     /// Project an already decoded component scene into the legacy behavior runtime.
     pub fn from_component_runtime(components: &ComponentScene) -> Result<Self, SceneError> {
         let BehaviorInput {
+            projection,
             scene,
             authoring,
             hidden_mesh_renderers,
@@ -429,9 +456,10 @@ impl Session {
         let mut document = crate::Document::new(scene);
         document.authoring = authoring;
         document.format_version = document.required_version();
-        document.validate()?;
+        document.validate_for_runtime(projection)?;
         Ok(Self {
             loaded_format_version: document.format_version,
+            runtime_projection: projection,
             document,
             path: None,
             saved: None,

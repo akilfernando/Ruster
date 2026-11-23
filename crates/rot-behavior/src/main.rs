@@ -56,22 +56,34 @@ fn run(args: &[String]) -> Result<Option<Value>, Failure> {
     let file = Path::new(path);
     let component_input;
     let legacy_session;
-    let (scene, authoring) = match ComponentScene::open(file) {
+    let (scene, authoring, camera, projection) = match ComponentScene::open(file) {
         Ok(components) => {
             component_input = components
-                .behavior_input()
+                .behavior_projection()
                 .map_err(|e| input(&e.to_string()))?;
-            (&component_input.0, &component_input.1)
+            (
+                &component_input.scene,
+                &component_input.authoring,
+                component_input.transform_camera.clone(),
+                component_input.projection,
+            )
         }
         Err(SceneError::UnsupportedVersion(version))
             if version < u64::from(component_scene::FORMAT_VERSION) =>
         {
             legacy_session = Session::open(file).map_err(|e| input(&e.to_string()))?;
-            (legacy_session.scene(), legacy_session.authoring())
+            (
+                legacy_session.scene(),
+                legacy_session.authoring(),
+                None,
+                Default::default(),
+            )
         }
         Err(error) => return Err(input(&error.to_string())),
     };
-    let mut runtime = engine.reset(scene, authoring).map_err(Failure::Behavior)?;
+    let mut runtime = engine
+        .reset_projected(scene, authoring, camera, projection)
+        .map_err(Failure::Behavior)?;
     for _ in 0..ticks {
         engine.step(&mut runtime).map_err(Failure::Behavior)?;
     }
