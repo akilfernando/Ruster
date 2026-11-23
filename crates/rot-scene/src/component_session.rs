@@ -283,6 +283,24 @@ impl ComponentSession {
         })
     }
 
+    /// A private editable copy of the current authored scene with no file or history.
+    pub fn detached_copy(&self) -> Self {
+        Self {
+            scene: Arc::clone(&self.scene),
+            revision: 0,
+            state: 0,
+            save_generation: 0,
+            saved_state: None,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            saved: None,
+        }
+    }
+
+    pub fn into_scene(self) -> ComponentScene {
+        Arc::unwrap_or_clone(self.scene)
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SceneError> {
         let lock = SceneLock::acquire(path.as_ref())?;
         Self::from_open_file(&lock.path, File::open(&lock.path)?)

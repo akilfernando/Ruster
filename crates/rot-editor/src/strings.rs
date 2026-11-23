@@ -559,6 +559,7 @@ editor_text! {
     LabelLayoutSideBySide => "Side by Side",
     LabelLeft => "Left View",
     LabelMove => "Move Tool",
+    SceneVariantCurrentEdits => "The new scene includes your current edits.",
     NewSceneName => "Scene Name",
     NewSceneCreate => "Create",
     NewSceneSaveCreate => "Save and Create",

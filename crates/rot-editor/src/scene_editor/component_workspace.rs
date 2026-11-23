@@ -1703,6 +1703,10 @@ impl ComponentWorkspace {
                 self.begin_new_scene();
                 return;
             }
+            Action::SaveAs => {
+                self.begin_save_scene_as();
+                return;
+            }
             Action::Open => {
                 self.scene_picker = Some(ScenesPicker::new(
                     ScenePickerPurpose::Open,
@@ -2743,6 +2747,7 @@ impl ComponentWorkspace {
                     self.menu_action(ui, Action::New);
                     self.menu_action(ui, Action::Open);
                     self.menu_action(ui, Action::Save);
+                    self.menu_action(ui, Action::SaveAs);
                     self.menu_action(ui, Action::RecoveryCheckpoints);
                     #[cfg(target_os = "linux")]
                     self.menu_action(ui, Action::Export);
@@ -2958,6 +2963,7 @@ impl ComponentWorkspace {
                         Action::New
                             | Action::Open
                             | Action::Save
+                            | Action::SaveAs
                             | Action::RecoveryCheckpoints
                             | Action::Move
                             | Action::Rotate

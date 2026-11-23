@@ -1497,14 +1497,19 @@ impl Workspace {
             let focus_search = component_hierarchy
                 && binding.action == Action::FindObjects
                 && (!text_focused || binding.ctrl || binding.alt);
+            let save_variant = component_hierarchy
+                && binding.action == Action::SaveAs
+                && (!text_focused || binding.ctrl || binding.alt);
             if text_focused
                 && !focus_search
+                && !save_variant
                 && !matches!(binding.action, Action::NextPanel | Action::PreviousPanel)
             {
                 return None;
             }
             if widget_focused
                 && !focus_search
+                && !save_variant
                 && !matches!(
                     binding.action,
                     Action::FocusRuntime

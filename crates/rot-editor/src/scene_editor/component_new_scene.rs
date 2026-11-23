@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[derive(Default)]
 pub(super) struct NewScene {
     name: String,
+    save_as: bool,
     focused: bool,
     error: Option<String>,
 }
@@ -58,6 +59,14 @@ pub(in crate::scene_editor) fn new_scene_id() -> String {
 
 impl ComponentWorkspace {
     pub(super) fn begin_new_scene(&mut self) {
+        self.begin_scene_sibling(false);
+    }
+
+    pub(super) fn begin_save_scene_as(&mut self) {
+        self.begin_scene_sibling(true);
+    }
+
+    fn begin_scene_sibling(&mut self, save_as: bool) {
         #[cfg(unix)]
         if self.pending_save.is_some() {
             return;
@@ -65,19 +74,29 @@ impl ComponentWorkspace {
         if self.ai_transition_pending() || self.surface_edit_pending() {
             return;
         }
-        self.new_scene = Some(NewScene::default());
+        self.new_scene = Some(NewScene {
+            save_as,
+            ..NewScene::default()
+        });
         self.error = None;
     }
 
     pub(super) fn show_new_scene(&mut self, ctx: &egui::Context) -> Option<OpenedScene> {
         let mut draft = self.new_scene.take()?;
-        let dirty = self.session.is_dirty() || self.draft_dirty();
+        let dirty = !draft.save_as && (self.session.is_dirty() || self.draft_dirty());
         let enter = ctx.input(|input| input.key_pressed(egui::Key::Enter));
         let response = egui::Modal::new(egui::Id::unique("component_new_scene"))
             .frame(editor_theme::dialog_frame(ctx))
             .show(ctx, |ui| {
                 ui.set_width(ui.available_width().min(440.0));
-                ui.heading(Text::LabelNew.plain());
+                ui.heading(
+                    if draft.save_as {
+                        Text::SaveSceneAs
+                    } else {
+                        Text::LabelNew
+                    }
+                    .plain(),
+                );
                 let label = ui.label(Text::NewSceneName.plain());
                 let edit = ui
                     .add(
@@ -97,7 +116,9 @@ impl ComponentWorkspace {
                 if let Ok(path) = &path {
                     ui.label(format!("{}  {path}", Text::NewSceneFilename.plain()));
                 }
-                if dirty {
+                if draft.save_as {
+                    ui.weak(Text::SceneVariantCurrentEdits.plain());
+                } else if dirty {
                     ui.weak(Text::NewSceneUnsaved.plain());
                 }
                 if let Some(error) = draft.error.as_ref() {
@@ -107,7 +128,9 @@ impl ComponentWorkspace {
                     .horizontal_wrapped(|ui| {
                         let mut create = None;
                         let ready = path.is_ok();
-                        let action = if dirty {
+                        let action = if draft.save_as {
+                            Text::SaveSceneAs
+                        } else if dirty {
                             Text::NewSceneSaveCreate
                         } else {
                             Text::NewSceneCreate
@@ -155,13 +178,31 @@ impl ComponentWorkspace {
             return None;
         }
         if let Some((filename, save)) = response.inner.1 {
-            match self.create_sibling(&filename, save) {
+            let result = if draft.save_as {
+                self.save_variant(&filename)
+            } else {
+                self.create_sibling(&filename, save)
+            };
+            match result {
                 Ok(document) => return Some(document),
                 Err(error) => draft.error = Some(error),
             }
         }
         self.new_scene = Some(draft);
         None
+    }
+
+    fn save_variant(&mut self, filename: &str) -> Result<OpenedScene, String> {
+        let project = self.startup_project.as_ref().map_err(Clone::clone)?;
+        let mut candidate = self.session.detached_copy();
+        if self.draft_dirty() {
+            let edits = self.draft_objects().map_err(|error| error.to_string())?;
+            Self::put_draft(&mut candidate, edits).map_err(|error| error.to_string())?;
+        }
+        let mut scene = candidate.into_scene();
+        scene.id = new_scene_id();
+        let (path, session) = project.prepare_scene(filename, &scene)?.publish()?;
+        Ok(self.open_published_sibling(path, session))
     }
 
     fn create_sibling(&mut self, filename: &str, save: bool) -> Result<OpenedScene, String> {
@@ -182,12 +223,21 @@ impl ComponentWorkspace {
             }
             Err(error) => return Err(error),
         };
+        Ok(self.open_published_sibling(path, session))
+    }
+
+    fn open_published_sibling(
+        &mut self,
+        path: std::path::PathBuf,
+        session: rot_scene::component_scene::ComponentSession,
+    ) -> OpenedScene {
         #[cfg(unix)]
         {
             self.revoke_ai_connection = true;
         }
-        Ok(OpenedScene::Components(path, Box::new(session)))
+        OpenedScene::Components(path, Box::new(session))
     }
+
     fn save_before_new_scene(&mut self) -> Result<(), String> {
         #[cfg(unix)]
         let sequence = self.next_save_sequence().map_err(|(_, message)| message)?;
