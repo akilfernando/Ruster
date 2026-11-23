@@ -2947,7 +2947,10 @@ impl ComponentWorkspace {
                         if !save || self.save() {
                             if !save || path != self.path {
                                 #[cfg(unix)]
-                                self.finish_capture_frame(&ctx, None);
+                                {
+                                    self.finish_capture_frame(&ctx, None);
+                                    self.revoke_ai_connection = true;
+                                }
                                 return Some(OpenedScene::Picked(pin, document));
                             }
                         } else if let Some(error) = &self.error {
