@@ -1031,6 +1031,95 @@ mod tests {
     use crate::Content;
 
     #[test]
+    fn grouped_object_lua_preserves_static_hud_and_refuses_state_labels() {
+        use rot_scene::component_scene::{ComponentInstance, Geometry, ObjectNode};
+        use rot_scene::hud::{HudLabel, HudPanel, HudSource, HudValueType};
+        use rot_scene::{BehaviorBinding, BehaviorSource, BindingTarget};
+
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("rail")).unwrap()).unwrap();
+        scene.objects = vec![
+            ObjectNode {
+                id: "track".into(),
+                name: "Track".into(),
+                enabled: true,
+                parent: None,
+                transform: Default::default(),
+                components: Vec::new(),
+            },
+            ObjectNode {
+                id: "trolley".into(),
+                name: "Trolley".into(),
+                enabled: true,
+                parent: Some("track".into()),
+                transform: Default::default(),
+                components: vec![
+                    ComponentInstance {
+                        id: "mesh".into(),
+                        enabled: true,
+                        kind: Component::MeshRenderer {
+                            geometry: Geometry::Cube,
+                            tint: [1.0; 4],
+                            material: None,
+                        },
+                    },
+                    ComponentInstance {
+                        id: "driver".into(),
+                        enabled: true,
+                        kind: Component::Script {
+                            source_kind: None,
+                            binding: BehaviorBinding {
+                                target: BindingTarget::Object("trolley".into()),
+                                source_id: "drive".into(),
+                                enabled: true,
+                                commands: BTreeMap::new(),
+                                properties: BTreeMap::new(),
+                                state_defaults: BTreeMap::new(),
+                            },
+                        },
+                    },
+                ],
+            },
+        ];
+        scene.sources.insert(
+            "drive".into(),
+            BehaviorSource {
+                label: None,
+                language_id: "lua54".into(),
+                host_api_version: 2,
+                text: "return {update=function(t) return t end}".into(),
+            },
+        );
+        scene.hud.enabled = true;
+        scene.hud.panels.push(HudPanel {
+            elements: vec![HudLabel {
+                id: "notice".into(),
+                source: HudSource::Static {
+                    text: "Rail Service".into(),
+                },
+                enabled_when: None,
+            }],
+            ..HudPanel::default()
+        });
+        let RuntimeScene::Behavior(runtime) =
+            RuntimeScene::from_components(Box::new(scene.clone())).unwrap()
+        else {
+            panic!("the trolley must use scripted Play");
+        };
+        assert_eq!(runtime.authoring().hud, scene.hud);
+        scene.hud.panels[0].elements[0].source = HudSource::State {
+            binding_id: "driver".into(),
+            field: "speed".into(),
+            value_type: HudValueType::Number,
+            prefix: String::new(),
+            suffix: String::new(),
+            precision: 0,
+        };
+        assert!(matches!(RuntimeScene::from_components(Box::new(scene)),
+            Err(error) if error.contains("require a flat scene")));
+    }
+
+    #[test]
     fn dense_static_label_hud_keeps_the_component_preview() {
         use rot_scene::component_scene::{ComponentInstance, Geometry, ObjectNode};
         use rot_scene::hud::{Hud, HudAnchor, HudLabel, HudPanel, HudSource};
