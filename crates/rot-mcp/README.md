@@ -246,6 +246,16 @@ connected project.
   surface. The existing registered connection remains pinned to its
   approved scene path, regardless of the startup selection. During startup
   preparation, the Linux build status is `preparing`.
+- For a configured Start Transition, read `project_startup.transition`
+  for the action ID and exact source and destination identities.
+  A guarded `behavior_runtime_step` sends the Button press under that
+  action ID in `input_frame`. For a press, use
+  `{"type":"button","held":true,"pressed":true,"released":false}`.
+  After activation, `behavior_runtime_inspect` reports the destination
+  in `runtime_scene_id` with `transition_phase: "destination"`, tick zero
+  and fresh run and input guards. `scene_inspect` continues to describe
+  the authored editor scene. Use `viewport_screenshot` to inspect the
+  committed Game view.
 - For a v23 Box Collider, use `scene_components_inspect` with the exact
   `object_id` and `component_id`. The component's `offset` and
   `shape.half_extents` are local. `collider_world` reports its resolved
