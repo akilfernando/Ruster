@@ -475,6 +475,13 @@ and choose **Apply**. Use the `host.play_sound("cue-name")` call shown in the
 Inspector from the fourth `update` argument. For example, call the cue when
 `host.button("fire").pressed` is true to play it once per press.
 
+In the Sound Cue dialog, **Playback** defaults to **2D**. Choose
+**Positional** and set a positive **Range** in scene units to hear it
+from the script owner's position relative to the active **Transform
+Perspective** Game Camera. The cue fades linearly to silence at Range
+and pans with the camera's orientation. Each one-shot keeps the position
+and camera sampled when its Step commits. The Lua call is the same.
+
 Each Script component owns its cues. Two objects can use the same Lua file
 with different WAVs or gains. **Edit Cue** changes or removes the selected cue.
 Changes share Undo. Save before Linux Build, which verifies and packages the

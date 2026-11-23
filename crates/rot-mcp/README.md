@@ -278,6 +278,13 @@ connected project.
   component and binding fields and set
   `binding.properties.confirm = {"type":"sound_ref","value":{"asset_id":"wav-id","gain":0.8}}`.
   Gain is 0–1. Remove the property to remove the cue.
+  Omit `value.playback` for 2D. In v23, add
+  `"playback":{"type":"positional","range":10}` to the cue value for
+  camera-relative sound from the script owner. Range is finite and positive
+  in scene units. Enable and activate a Transform Perspective Game Camera
+  before Play or Linux Build. Committed positional cues report effective
+  `gain` and `pan` (−1 left, 0 center, +1 right). At or beyond Range gain
+  is zero and no voice starts. Paused Step can report cues silently.
 - In v23, `scene_inspect` on its first page and `creation_export_inspect`
   on Linux report `project_startup`. It identifies the active scene,
   startup choice (default/configured/invalid), and the sources used by

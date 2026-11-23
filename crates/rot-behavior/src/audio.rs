@@ -43,7 +43,7 @@ pub(super) struct Emitter {
 pub(super) fn emitters(
     scene: &Scene,
     authoring: &Authoring,
-    listener: Option<TransformCameraPose>,
+    has_listener: bool,
 ) -> Result<BTreeMap<String, Emitter>, Diagnostic> {
     authoring.bindings.iter().filter(|(_, binding)| binding.enabled).filter_map(|(id, binding)| {
         let (name, _) = binding.properties.iter().find(|(_, property)|
@@ -51,7 +51,7 @@ pub(super) fn emitters(
         )?;
         let emitter = binding.object_id().and_then(|owner| {
             let index = scene.objects.iter().position(|object| object.id == owner)?;
-            listener.map(|_| Emitter { index, parents: scene.parent_path(owner) })
+            has_listener.then(|| Emitter { index, parents: scene.parent_path(owner) })
         });
         Some(emitter.map(|emitter| (id.clone(), emitter)).ok_or_else(|| {
             Diagnostic::plain(DiagnosticCode::InvalidAuthoring, Phase::Setup,
@@ -68,7 +68,7 @@ pub(super) fn resolve_cues(
     scene: &Scene,
     authoring: &Authoring,
 ) -> Result<(), Diagnostic> {
-    if emitters.is_empty() || !cues.iter().any(|cue| cue.range.is_some()) {
+    if !cues.iter().any(|cue| cue.range.is_some()) {
         return Ok(());
     }
     let listener = listener.expect("validated positional listener");

@@ -150,3 +150,117 @@ fn cue_admission_refuses_overflow_unknown_and_unassigned_names() {
         assert_eq!(runtime.tick(), 0);
     }
 }
+
+#[test]
+fn positional_cue_uses_same_commit_grouped_emitter_and_moving_camera() {
+    use rot_scene::component_scene::{
+        CameraView, Component, ComponentInstance, ComponentScene, ObjectNode,
+    };
+    use rot_scene::{SoundPlayback, Transform};
+
+    let (scene, mut authoring) = fixture(
+        r#"return {update=function(o,p,dt,h)
+            if dt==0 then return o end
+            if o.translation[1] > 0 then return 5 end
+            o.translation={4,1,0}
+            o.rotation[2]=1.5707963267948966
+            return o
+        end}"#,
+    );
+    authoring.sources.get_mut("speaker").unwrap().text = r#"return {update=function(o,p,dt,h)
+        if dt>0 then
+            o.translation[1]=2
+            h.play_sound("confirm")
+            h.play_sound("short")
+        end
+        return o
+    end}"#
+        .into();
+    for source in authoring.sources.values_mut() {
+        source.host_api_version = INPUT_HOST_API_VERSION;
+    }
+    let properties = &mut authoring.bindings.get_mut("speaker").unwrap().properties;
+    if let PropertyValue::SoundRef(cue) = properties.get_mut("confirm").unwrap() {
+        cue.playback = SoundPlayback::Positional { range: 8. };
+    }
+    properties.insert(
+        "short".into(),
+        PropertyValue::SoundRef(SoundRef {
+            asset_id: Some("confirm-sound".into()),
+            gain: 1.0,
+            playback: SoundPlayback::Positional { range: 3. },
+        }),
+    );
+    let session = rot_scene::Session::new(scene).unwrap();
+    let mut authored = ComponentScene::from_legacy(&session).unwrap();
+    authored.sources = authoring.sources;
+    authored.actions = authoring.actions;
+    for (id, binding) in authoring.bindings {
+        let owner = authored
+            .objects
+            .iter_mut()
+            .find(|object| Some(object.id.as_str()) == binding.object_id())
+            .unwrap();
+        owner.components.push(ComponentInstance {
+            id,
+            enabled: true,
+            kind: Component::Script {
+                binding,
+                source_kind: None,
+                movement: Default::default(),
+            },
+        });
+    }
+    authored.objects[0].parent = Some("rig".into());
+    authored.objects[1].components.push(ComponentInstance {
+        id: "camera".into(),
+        enabled: true,
+        kind: Component::Camera {
+            view: CameraView::transform_perspective(45.),
+        },
+    });
+    authored.objects.push(ObjectNode {
+        id: "rig".into(),
+        name: "Rig".into(),
+        parent: None,
+        enabled: true,
+        transform: Transform {
+            translation: [4., 1., 0.],
+            rotation: [0., std::f32::consts::FRAC_PI_2, 0.],
+            scale: [2.; 3],
+        },
+        components: Vec::new(),
+    });
+    let err = authored
+        .behavior_projection()
+        .err()
+        .expect("no active Camera");
+    assert!(err.to_string().contains("Binding speaker, cue confirm"));
+    authored.gameplay_camera = Some("camera".into());
+    let projected = authored.behavior_projection().unwrap();
+    let mut engine = Engine::new(Limits::default()).unwrap();
+    let mut runtime = engine
+        .reset_projected(
+            &projected.scene,
+            &projected.authoring,
+            projected.transform_camera,
+            projected.projection,
+        )
+        .unwrap();
+    assert!(runtime.audio_batch().is_none());
+    engine.step(&mut runtime).unwrap();
+    let batch = runtime.audio_batch().unwrap().clone();
+    assert_eq!(batch.tick, 1);
+    let [cue, silent] = batch.cues.as_slice() else {
+        panic!("two staged cues")
+    };
+    assert!((cue.gain - 0.125).abs() < 1e-6, "{cue:?}");
+    assert!((cue.pan.unwrap() - 1.0).abs() < 1e-6, "{cue:?}");
+    assert_eq!(silent.gain, 0.0);
+    let scene = runtime.scene().clone();
+    let camera = runtime.transform_camera();
+    assert!(engine.step(&mut runtime).is_err());
+    assert_eq!(runtime.scene(), &scene);
+    assert_eq!(runtime.transform_camera(), camera);
+    assert_eq!(runtime.audio_batch(), Some(&batch));
+}

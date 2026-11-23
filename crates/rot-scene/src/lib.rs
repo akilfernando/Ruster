@@ -1637,6 +1637,9 @@ impl Document {
         if (1..17).contains(&version) {
             migrate_legacy_document_huds(&mut value)?;
         }
+        if (1..=u64::from(ANIMATION_FORMAT_VERSION)).contains(&version) {
+            reject_legacy_sound_playback_fields(&value)?;
+        }
         let document: Self = match version {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
@@ -1868,6 +1871,31 @@ fn reject_pre_v14_command_fields(value: &serde_json::Value) -> Result<(), SceneE
     if found {
         Err(SceneError::Invalid(
             "application commands require scene v14".into(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn reject_legacy_sound_playback_fields(value: &serde_json::Value) -> Result<(), SceneError> {
+    let has_playback = |binding: &serde_json::Value| {
+        binding["properties"].as_object().is_some_and(|properties| {
+            properties.values().any(|property| {
+                property["type"] == "sound_ref" && property["value"].get("playback").is_some()
+            })
+        })
+    };
+    let current = value["authoring"]["bindings"]
+        .as_object()
+        .is_some_and(|bindings| bindings.values().any(has_playback));
+    let historical = ["undo", "redo"]
+        .into_iter()
+        .flat_map(|stack| value[stack].as_array().into_iter().flatten())
+        .flat_map(|change| change["bindings"].as_array().into_iter().flatten())
+        .any(|delta| has_playback(&delta["before"]) || has_playback(&delta["after"]));
+    if current || historical {
+        Err(SceneError::Invalid(
+            "Sound playback mode requires a v23 component scene.".into(),
         ))
     } else {
         Ok(())

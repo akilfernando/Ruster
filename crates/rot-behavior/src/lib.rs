@@ -262,7 +262,7 @@ pub struct Runtime {
     query_observations: Vec<QueryObservation>,
     audio_batch: Option<AudioBatch>,
     has_sound_binding: bool,
-    positional_emitters: Arc<BTreeMap<String, audio::Emitter>>,
+    positional_emitters: Option<Arc<BTreeMap<String, audio::Emitter>>>,
     leaf_parents: Option<Arc<BTreeMap<String, rot_scene::ParentPath>>>,
     attached_lights: Option<Arc<AttachedLights>>,
     follow_parent: Option<rot_scene::ParentPath>,
@@ -785,6 +785,12 @@ impl Engine {
                     .values()
                     .any(|property| matches!(property, PropertyValue::SoundRef(_)))
         });
+        let positional_emitters = if has_sound_binding {
+            let emitters = audio::emitters(scene, authoring, transform_camera_binding.is_some())?;
+            (!emitters.is_empty()).then(|| Arc::new(emitters))
+        } else {
+            None
+        };
         let mut trial_scene = None;
         let audio = RefCell::new(Vec::new());
         for (id, binding) in &authoring.bindings {
@@ -868,11 +874,6 @@ impl Engine {
         });
         let transform_camera =
             resolve_transform_camera(transform_camera_binding.as_deref(), scene, Phase::Setup)?;
-        let positional_emitters = if has_sound_binding {
-            audio::emitters(scene, authoring, transform_camera)?
-        } else {
-            BTreeMap::new()
-        };
         let hierarchy_draw = if scene.hierarchy.is_empty() && attached_lights.is_none() {
             None
         } else {
@@ -913,7 +914,7 @@ impl Engine {
             query_observations: Vec::new(),
             audio_batch: None,
             has_sound_binding,
-            positional_emitters: Arc::new(positional_emitters),
+            positional_emitters,
             leaf_parents,
             attached_lights,
             follow_parent,
@@ -1147,13 +1148,15 @@ impl Engine {
             None => runtime.transform_camera(),
         };
         let mut cues = audio.into_inner();
-        audio::resolve_cues(
-            &mut cues,
-            &runtime.positional_emitters,
-            transform_camera,
-            staged.as_ref().unwrap_or(&snapshot),
-            &runtime.authoring,
-        )?;
+        if let Some(emitters) = &runtime.positional_emitters {
+            audio::resolve_cues(
+                &mut cues,
+                emitters,
+                transform_camera,
+                staged.as_ref().unwrap_or(&snapshot),
+                &runtime.authoring,
+            )?;
+        }
         self.check_cancelled()?;
         let observations =
             queries.map_or_else(Vec::new, |queries| queries.observations.into_inner());

@@ -145,6 +145,7 @@ mod tests {
                             PropertyValue::SoundRef(SoundRef {
                                 asset_id: Some(asset.into()),
                                 gain,
+                                playback: Default::default(),
                             }),
                         )]),
                         state_defaults: Default::default(),
