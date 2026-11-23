@@ -122,7 +122,7 @@ impl Registry {
                 || &model.id != id
                 || !ids.insert(id)
                 || !sources.insert(&model.source)
-                || model.warnings.len() > MAX_MODEL_ITEMS * 2 + 2
+                || model.warnings.len() > MAX_MODEL_ITEMS * 2 + 3
                 || model.warnings.iter().any(|message| {
                     message.is_empty()
                         || message.len() > 512

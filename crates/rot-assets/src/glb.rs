@@ -1697,11 +1697,17 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
             }
         ));
     }
-    decoder.model.info.warnings.extend(punctual::warnings(
-        &decoder.light_definitions,
-        &decoder.used_lights,
-    ));
+    let mut light_warnings = punctual::warnings(&decoder.light_definitions, &decoder.used_lights);
+    if !decoder.model.info.clips.is_empty()
+        && decoder
+            .used_lights
+            .iter()
+            .any(|&index| decoder.light_definitions[index].placement.is_some())
+    {
+        light_warnings.push("GLB lights are supported in static playback. Transform clips with lights may be unavailable in Play or Build.".into());
+    }
     decoder.model.info.warnings.sort_unstable();
+    decoder.model.info.warnings.splice(..0, light_warnings);
     Ok(decoder.model)
 }
 
