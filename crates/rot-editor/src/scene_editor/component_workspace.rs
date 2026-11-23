@@ -2547,10 +2547,13 @@ impl ComponentWorkspace {
                     && self.open_path.is_none()
                     && !self.surface_edit_pending()
                     && self.project_settings.is_none()
-                    && self.collider_tool.mode().is_none()
                     && !egui::Popup::is_any_open(&ctx)
                     && ui.input_mut(|input| {
-                        input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                        (self.collider_tool.mode().is_none()
+                            || input.key_pressed(egui::Key::Escape)
+                                && !self.collider_tool.active()
+                                && self.draft_dirty())
+                            && input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
                     })
                 {
                     self.rebuild_draft();

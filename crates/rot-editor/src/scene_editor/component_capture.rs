@@ -680,6 +680,38 @@ mod tests {
         assert!(editor.selection.contains(&object_id));
         assert_eq!(editor.collider_tool.mode(), Some("edited-box"));
 
+        let Component::Collider { offset, shape, .. } =
+            &mut editor.draft.as_mut().unwrap().components[1].kind
+        else {
+            unreachable!()
+        };
+        offset[0] = 0.9;
+        *shape = ColliderShape::Box {
+            half_extents: [0.8; 3],
+        };
+        assert!(editor.draft_dirty());
+        draw(
+            &mut editor,
+            vec![
+                egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        assert!(!editor.draft_dirty());
+        assert_eq!(editor.collider_tool.mode(), Some("edited-box"));
+
         press(&mut editor);
         draw(&mut editor, vec![button(pos(0.0), false)]);
         assert_eq!(editor.session.revision(), 2);
