@@ -51,8 +51,14 @@ impl ComponentPreview {
     }
 
     /// A display-only edit leaves draw rows, poses and asset bindings intact.
-    pub fn set_display(&mut self, display: rot_scene::DisplayProfile) {
-        Arc::make_mut(&mut self.scene).display = display;
+    pub fn set_display(
+        &mut self,
+        display: rot_scene::DisplayProfile,
+        background: Option<rot_scene::BackgroundColor>,
+    ) {
+        let scene = Arc::make_mut(&mut self.scene);
+        scene.display = display;
+        scene.background = background;
     }
 
     pub fn draw_matrices(&self) -> &[Mat4] {
@@ -329,6 +335,7 @@ pub fn project_editor_with_world(
     let mut scene = Scene::empty(component_scene.id.clone());
     scene.materials.clone_from(&component_scene.materials);
     scene.display = component_scene.display;
+    scene.background = component_scene.background;
     let transform_camera = match component_scene.effective_camera(&hierarchy) {
         Some((index, CameraView::Transform(lens))) => {
             Some(component_scene.transform_camera_pose(index, &hierarchy, &world, lens)?)

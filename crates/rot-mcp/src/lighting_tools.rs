@@ -24,8 +24,8 @@ const TOOLS: &[(&str, &str, &[&str])] = &[
     ),
     (
         "scene_display_set",
-        "Replace the authored scene display profile globally, without an asset revision or filesystem authority. Legacy SDR preserves the legacy display route; Surface HDR selects internal linear HDR, a fixed SDR display transform and bounded manual exposure in stops, not HDR-monitor support. Requires current scene session/revision and clean human drafts. Unsaved, one shared Undo entry; runtime snapshot unchanged until Reset. Inspect material_inspect for authored display and separately labeled last-prepared feedback, which may be stale and is not GPU completion.",
-        &["display"],
+        "Set Scene Display using the current session and revision. Supply display, background, or both in v23. Background is finite linear RGB in [0,1], or null for Engine Default. Omitted fields stay unchanged. Use material_inspect to read committed values. Legacy scenes support display only. This is one unsaved shared Undo edit. Surface HDR uses internal HDR plus an SDR tone map; exposure is in stops.",
+        &[],
     ),
 ];
 
@@ -133,6 +133,8 @@ fn shape(field: &str) -> Value {
         "light" => light_schema(),
         "ambient" => ambient_schema(),
         "display" => display_schema(),
+        "background" => json!({"anyOf":[vector_schema(0.0, 1.0), {"type":"null"}],
+            "description":"v23 linear RGB clear, or null to restore Engine Default. Omission preserves the existing background."}),
         _ => unreachable!("fixed lighting tool field"),
     }
 }
@@ -140,10 +142,17 @@ fn shape(field: &str) -> Value {
 pub fn list() -> Vec<Value> {
     TOOLS.iter().map(|(name, description, _)| {
         let required = fields(name).unwrap();
-        let properties: Map<String, Value> = required.iter()
+        let mut properties: Map<String, Value> = required.iter()
             .map(|field| ((*field).into(), shape(field))).collect();
+        if *name == "scene_display_set" {
+            properties.extend(["display", "background"].map(|field| (field.into(), shape(field))));
+        }
+        let mut schema = super::object_schema(Value::Object(properties), required);
+        if *name == "scene_display_set" {
+            schema["anyOf"] = json!([{"required":["display"]}, {"required":["background"]}]);
+        }
         json!({"name":name,"description":description,
-            "inputSchema":super::object_schema(Value::Object(properties), required),
+            "inputSchema":schema,
             "annotations":{"readOnlyHint":*name=="lighting_inspect","destructiveHint":false,"openWorldHint":false}})
     }).collect()
 }
@@ -248,7 +257,15 @@ pub fn valid(name: &str, arguments: &Value) -> bool {
     let Some(args) = arguments.as_object() else {
         return false;
     };
-    super::exact_keys(args, &required, &[])
+    let optional: &[&str] = if name == "scene_display_set" {
+        if !args.contains_key("display") && !args.contains_key("background") {
+            return false;
+        }
+        &["display", "background"]
+    } else {
+        &[]
+    };
+    super::exact_keys(args, &required, optional)
         && args.iter().all(|(field, value)| match field.as_str() {
             "expected_revision" => super::canonical_u64(value),
             "expected_session_token" => value
@@ -264,6 +281,7 @@ pub fn valid(name: &str, arguments: &Value) -> bool {
             "light" => valid_light(value),
             "ambient" => valid_ambient(value),
             "display" => valid_display(value),
+            "background" => value.is_null() || vector(value, 0.0, 1.0),
             _ => false,
         })
 }

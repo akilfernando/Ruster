@@ -12,9 +12,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     hud::Hud,
     input::{validate_action_map, ActionMap},
-    strict_json, validate_id, validate_name, Ambient, AnimationBinding, BehaviorBinding,
-    BehaviorSource, BindingTarget, Collider, ColliderRole, ColliderShape, DisplayProfile, Light,
-    LightKind, Lighting, OpaqueMaterial, PlayerView, Primitive, SceneError, Session, Transform,
+    strict_json, validate_id, validate_name, Ambient, AnimationBinding, BackgroundColor,
+    BehaviorBinding, BehaviorSource, BindingTarget, Collider, ColliderRole, ColliderShape,
+    DisplayProfile, Light, LightKind, Lighting, OpaqueMaterial, PlayerView, Primitive, SceneError,
+    Session, Transform,
 };
 
 #[path = "component_behavior.rs"]
@@ -44,6 +45,12 @@ pub struct ComponentScene {
     pub materials: BTreeMap<String, OpaqueMaterial>,
     #[serde(default, skip_serializing_if = "DisplayProfile::is_legacy")]
     pub display: DisplayProfile,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_lens_value"
+    )]
+    pub background: Option<BackgroundColor>,
     /// None preserves the implicit lighting used by legacy scenes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ambient: Option<Ambient>,
@@ -708,6 +715,7 @@ impl ComponentScene {
             prefabs: BTreeMap::new(),
             materials: scene.materials.clone(),
             display: scene.display,
+            background: None,
             ambient,
             sources: authoring.sources.clone(),
             actions: authoring.actions.clone(),
@@ -1317,6 +1325,7 @@ mod tests {
             prefabs: BTreeMap::new(),
             materials: BTreeMap::new(),
             display: DisplayProfile::default(),
+            background: None,
             ambient: None,
             sources: BTreeMap::new(),
             actions: ActionMap::new(),
@@ -1379,6 +1388,7 @@ mod tests {
             prefabs: BTreeMap::new(),
             materials: BTreeMap::new(),
             display: DisplayProfile::default(),
+            background: None,
             ambient: None,
             sources: BTreeMap::new(),
             actions: ActionMap::new(),

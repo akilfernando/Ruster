@@ -49,6 +49,32 @@ impl DisplayProfile {
     }
 }
 
+/// Opaque linear RGB clear color for an authored v23 scene.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct BackgroundColor([f32; 3]);
+
+impl BackgroundColor {
+    pub fn new(linear: [f64; 3]) -> Result<Self, SceneError> {
+        if !linear.iter().all(|channel| (0.0..=1.0).contains(channel)) {
+            return Err(SceneError::Invalid(
+                "scene background must be finite linear RGB in 0..=1".into(),
+            ));
+        }
+        Ok(Self(linear.map(|channel| channel as f32)))
+    }
+
+    pub fn linear(self) -> [f32; 3] {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for BackgroundColor {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Self::new(<[f64; 3]>::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
 /// Scalar opaque dielectric response; ambient/environment policy is not data.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]

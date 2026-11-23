@@ -2258,6 +2258,7 @@ fn render_draw_scene(
             show_editor_grid: navigation.show_editor_grid && !navigation.player_view,
             camera_eye_mode,
             display: scene.display,
+            background: scene.background,
             lighting,
             size: draw_rect.size(),
             cpu_us: start.elapsed().as_secs_f64() * 1.0e6,
@@ -2695,13 +2696,20 @@ struct RetiringTarget {
     completed: Arc<std::sync::atomic::AtomicBool>,
 }
 impl Target {
-    fn color_attachment(&self, editor_grid: bool) -> wgpu::RenderPassColorAttachment<'_> {
+    fn color_attachment(
+        &self,
+        editor_grid: bool,
+        background: Option<rot_scene::BackgroundColor>,
+    ) -> wgpu::RenderPassColorAttachment<'_> {
         wgpu::RenderPassColorAttachment {
             view: self.multisample.as_ref().unwrap_or(&self.color),
             resolve_target: self.multisample.as_ref().map(|_| &self.color),
             depth_slice: None,
             ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(if editor_grid {
+                load: wgpu::LoadOp::Clear(if let Some(background) = background {
+                    let [r, g, b] = background.linear().map(f64::from);
+                    wgpu::Color { r, g, b, a: 1.0 }
+                } else if editor_grid {
                     wgpu::Color {
                         r: 0.016,
                         g: 0.016,
@@ -3435,6 +3443,7 @@ struct SceneCallback {
     show_editor_grid: bool,
     camera_eye_mode: [f32; 4],
     display: rot_scene::DisplayProfile,
+    background: Option<rot_scene::BackgroundColor>,
     lighting: LightingPacket,
     size: egui::Vec2,
     cpu_us: f64,
@@ -3650,7 +3659,9 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Rot Engine 3D scene"),
-                color_attachments: &[Some(target.color_attachment(self.show_editor_grid))],
+                color_attachments: &[Some(
+                    target.color_attachment(self.show_editor_grid, self.background),
+                )],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &target.depth,
                     depth_ops: Some(wgpu::Operations {
@@ -5413,7 +5424,7 @@ mod tests {
                 {
                     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("post-rejection render and resize"),
-                        color_attachments: &[Some(target.color_attachment(false))],
+                        color_attachments: &[Some(target.color_attachment(false, None))],
                         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                             view: &target.depth,
                             depth_ops: Some(wgpu::Operations {

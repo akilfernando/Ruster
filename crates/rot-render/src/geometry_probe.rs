@@ -130,6 +130,8 @@ fn verify_case(
     let mut resources = egui_wgpu::CallbackResources::default();
     resources.insert(r);
     let callback = SceneCallback {
+        background: None,
+
         show_editor_grid: false,
         groups,
         camera: Mat4::IDENTITY.to_cols_array(),

@@ -4,8 +4,8 @@ use super::{
 };
 use crate::input::{self, ActionDefinition};
 use crate::{
-    BehaviorSource, BindingTarget, DisplayProfile, OpaqueMaterial, PlayerAnchor, PropertyValue,
-    SceneError, SceneLock, Transform,
+    BackgroundColor, BehaviorSource, BindingTarget, DisplayProfile, OpaqueMaterial, PlayerAnchor,
+    PropertyValue, SceneError, SceneLock, Transform,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -143,7 +143,7 @@ enum SceneChange {
     },
     InsertCopies(Vec<(usize, ObjectNode)>),
     RemoveCopies(Vec<usize>),
-    Display(DisplayProfile),
+    Display(DisplayProfile, Option<BackgroundColor>),
     Hud(crate::hud::Hud),
     GameplayCamera(Option<String>),
     Action {
@@ -208,7 +208,10 @@ impl SceneChange {
                 Self::InsertCopies(copies)
             }
             Self::Hud(value) => Self::Hud(std::mem::replace(&mut scene.hud, value)),
-            Self::Display(value) => Self::Display(std::mem::replace(&mut scene.display, value)),
+            Self::Display(value, background) => Self::Display(
+                std::mem::replace(&mut scene.display, value),
+                std::mem::replace(&mut scene.background, background),
+            ),
             Self::GameplayCamera(value) => {
                 Self::GameplayCamera(std::mem::replace(&mut scene.gameplay_camera, value))
             }
@@ -681,13 +684,14 @@ impl ComponentSession {
         &mut self,
         expected: u64,
         display: DisplayProfile,
+        background: Option<BackgroundColor>,
     ) -> Result<u64, SceneError> {
         self.check_revision(expected)?;
         display.validate()?;
-        if display == self.scene.display {
+        if display == self.scene.display && background == self.scene.background {
             return Ok(self.revision);
         }
-        self.commit([SceneChange::Display(display)])
+        self.commit([SceneChange::Display(display, background)])
     }
 
     /// Create or replace a scene-owned material, optionally assigning a new

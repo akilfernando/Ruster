@@ -365,6 +365,7 @@ impl ComponentScene {
         let mut hidden_mesh_renderers = None;
         let mut scene = Scene::empty(self.id.clone());
         scene.display = self.display;
+        scene.background = self.background;
         let mut transform_camera = None;
         scene.player_view = match self.effective_camera(&hierarchy) {
             Some((_, CameraView::Orbit(view))) => Some(view.clone()),

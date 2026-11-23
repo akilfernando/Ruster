@@ -41,7 +41,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("scene_light_create", "Create a directional or point light. A scene has at most one directional and four point lights."),
     ("scene_light_set", "Replace an existing light's settings. Its kind cannot change."),
     ("scene_ambient_set", "Set the scene's ambient light."),
-    ("scene_display_set", "Set the scene's display settings: SDR or HDR, exposure and tone mapping."),
+    ("scene_display_set", "Set scene SDR/HDR and exposure, or v23 background (linear RGB or null)."),
     ("viewport_inspect", "Read the Scene view camera, the selection and whether the Scene or Game view is showing."),
     ("viewport_camera", "Move the Scene view camera: target, yaw and pitch in radians, distance and projection."),
     ("viewport_player_view", "Show the Scene view or the Game view."),

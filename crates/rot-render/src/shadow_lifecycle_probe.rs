@@ -480,6 +480,8 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
         response: [0.; 4],
     };
     let first = SceneCallback {
+        background: None,
+
         show_editor_grid: false,
         groups: vec![DrawGroup {
             double_sided: false,
@@ -507,6 +509,8 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
         prepared: AtomicBool::new(false),
     };
     let second = SceneCallback {
+        background: None,
+
         show_editor_grid: false,
         groups: Vec::new(),
         camera: Mat4::from_scale(Vec3::splat(0.5)).to_cols_array(),
@@ -914,6 +918,8 @@ fn verify_asset_submission_backpressure(
             }],
         });
         SceneCallback {
+            background: None,
+
             show_editor_grid: false,
             groups: vec![DrawGroup {
                 double_sided: false,

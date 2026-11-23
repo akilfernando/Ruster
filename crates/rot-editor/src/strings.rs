@@ -864,6 +864,11 @@ editor_text! {
     DisplayUiDisplayUi8To8Stops => "-8 to 8 stops. Zero is neutral; +1 doubles exposure and -1 halves it.",
     ExposureEv => "Exposure (EV)",
     Profile => "Profile",
+    SceneBackground => "Background",
+    SceneBackgroundDefault => "Engine Default",
+    SceneBackgroundSolid => "Solid Color",
+    SceneBackgroundHex => "Hex (sRGB)",
+    SceneBackgroundHexInvalid => "Enter a color as #RRGGBB.",
     SceneDisplay => "Scene Display",
 
     // Export Commands

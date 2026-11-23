@@ -699,6 +699,7 @@ impl PrefabSource {
             prefabs: BTreeMap::new(),
             materials,
             display: Default::default(),
+            background: None,
             ambient: None,
             sources,
             actions: BTreeMap::new(),
@@ -712,6 +713,7 @@ impl PrefabSource {
             return Err(invalid("Nested prefabs are unavailable."));
         }
         if scene.display != Default::default()
+            || scene.background.is_some()
             || scene.ambient.is_some()
             || !scene.actions.is_empty()
             || scene.hud != Default::default()

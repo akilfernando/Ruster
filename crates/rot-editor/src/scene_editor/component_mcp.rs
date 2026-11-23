@@ -255,6 +255,8 @@ impl ComponentWorkspace {
             });
             if offset == 0 {
                 result["project_startup"] = self.startup_context();
+                result["display"] = json!(scene.display);
+                result["background"] = json!(scene.background);
                 if self.light_budget_exceeded() {
                     result["lighting_warning"] = json!(Text::ViewportLightLimitDetail.plain());
                 }

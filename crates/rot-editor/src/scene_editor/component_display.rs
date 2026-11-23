@@ -8,14 +8,117 @@ use crate::{
     ui_kit,
 };
 use eframe::egui;
-use rot_scene::{DisplayProfile, SceneError};
+use rot_scene::{BackgroundColor, DisplayProfile, SceneError};
 
 fn exposure_id() -> egui::Id {
     egui::Id::unique("v23_scene_display_exposure")
 }
 
+struct BackgroundDraft {
+    solid: bool,
+    color: BackgroundColor,
+    hex: String,
+    invalid_hex: bool,
+}
+
+impl BackgroundDraft {
+    fn new(value: Option<BackgroundColor>) -> Self {
+        let color = value.unwrap_or_else(|| BackgroundColor::new([0.025, 0.035, 0.055]).unwrap());
+        Self {
+            solid: value.is_some(),
+            color,
+            hex: srgb_hex(color),
+            invalid_hex: false,
+        }
+    }
+
+    fn value(&self) -> Result<Option<BackgroundColor>, Text> {
+        if self.solid && self.invalid_hex {
+            return Err(Text::SceneBackgroundHexInvalid);
+        }
+        Ok(self.solid.then_some(self.color))
+    }
+}
+
+fn srgb_hex(color: BackgroundColor) -> String {
+    let [r, g, b] = color.linear();
+    let [r, g, b, _] = egui::Rgba::from_rgb(r, g, b).to_srgba_unmultiplied();
+    format!("#{r:02X}{g:02X}{b:02X}")
+}
+
+fn from_srgb_hex(value: &str) -> Option<BackgroundColor> {
+    let hex = value.strip_prefix('#')?;
+    if hex.len() != 6 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let rgb = u32::from_str_radix(hex, 16).ok()?;
+    let [_, r, g, b] = rgb.to_be_bytes();
+    let rgba = egui::Rgba::from(egui::Color32::from_rgb(r, g, b));
+    BackgroundColor::new([rgba[0], rgba[1], rgba[2]].map(f64::from)).ok()
+}
+
+fn edit_background(ui: &mut egui::Ui, draft: &mut BackgroundDraft) {
+    ui_kit::property_row_with_label(ui, Text::SceneBackground.plain(), |ui, label| {
+        egui::ComboBox::from_id_salt("background")
+            .selected_text(
+                if draft.solid {
+                    Text::SceneBackgroundSolid
+                } else {
+                    Text::SceneBackgroundDefault
+                }
+                .plain(),
+            )
+            .show_ui(ui, |ui| {
+                ui.selectable_value(
+                    &mut draft.solid,
+                    false,
+                    Text::SceneBackgroundDefault.plain(),
+                );
+                ui.selectable_value(&mut draft.solid, true, Text::SceneBackgroundSolid.plain());
+            })
+            .response
+            .labelled_by(label);
+    });
+    if !draft.solid {
+        return;
+    }
+    ui_kit::property_row_with_label(ui, Text::Color.plain(), |ui, label| {
+        let mut rgb = draft.color.linear();
+        if ui
+            .color_edit_button_rgb(&mut rgb)
+            .labelled_by(label)
+            .changed()
+        {
+            if let Ok(color) = BackgroundColor::new(rgb.map(f64::from)) {
+                draft.color = color;
+                draft.hex = srgb_hex(color);
+                draft.invalid_hex = false;
+            }
+        }
+    });
+    ui_kit::property_row_with_label(ui, Text::SceneBackgroundHex.plain(), |ui, label| {
+        if ui
+            .add(
+                egui::TextEdit::singleline(&mut draft.hex)
+                    .char_limit(7)
+                    .desired_width(ui.available_width())
+                    .hint_text("#RRGGBB"),
+            )
+            .labelled_by(label)
+            .changed()
+        {
+            let parsed = from_srgb_hex(&draft.hex);
+            draft.invalid_hex = parsed.is_none();
+            if let Some(parsed) = parsed {
+                draft.color = parsed;
+            }
+        }
+    });
+}
+
 pub(super) struct Draft {
     value: DisplayDraft,
+    background: BackgroundDraft,
     opened_frame: Option<u64>,
     error: Option<String>,
 }
@@ -30,6 +133,7 @@ impl ComponentWorkspace {
                 self.session.revision(),
                 self.session.scene().display,
             ),
+            background: BackgroundDraft::new(self.session.scene().background),
             opened_frame: None,
             error: None,
         });
@@ -41,11 +145,12 @@ impl ComponentWorkspace {
         &mut self,
         revision: u64,
         display: DisplayProfile,
+        background: Option<BackgroundColor>,
     ) -> Result<u64, SceneError> {
-        let next = self.session.set_display(revision, display)?;
+        let next = self.session.set_display(revision, display, background)?;
         if revision != next {
             if let Ok(preview) = &mut self.preview {
-                preview.set_display(display);
+                preview.set_display(display, background);
             }
             #[cfg(unix)]
             self.invalidate_display_capture();
@@ -124,6 +229,7 @@ impl ComponentWorkspace {
                         }
                     });
                 }
+                edit_background(ui, &mut draft.background);
                 if let Some(error) = &draft.error {
                     ui.colored_label(editor_theme::colors(ui).error, error);
                 }
@@ -150,15 +256,20 @@ impl ComponentWorkspace {
             if self.session.revision() != draft.value.revision {
                 draft.error = Some(Text::ComponentDisplayDraftChanged.plain().into());
             } else {
-                match draft.value.value() {
-                    Ok(display) => match self.commit_display(draft.value.revision, display) {
-                        Ok(_) => return,
-                        Err(error) => draft.error = Some(error.to_string()),
-                    },
-                    Err(_) => {
-                        draft.error = Some(Text::ComponentDisplayExposureInvalid.plain().into())
+                let candidate = draft
+                    .value
+                    .value()
+                    .map_err(|_| Text::ComponentDisplayExposureInvalid)
+                    .and_then(|display| Ok((display, draft.background.value()?)));
+                draft.error = Some(match candidate {
+                    Ok((display, background)) => {
+                        match self.commit_display(draft.value.revision, display, background) {
+                            Ok(_) => return,
+                            Err(error) => error.to_string(),
+                        }
                     }
-                }
+                    Err(text) => text.plain().to_owned(),
+                });
             }
         }
         self.display_draft = Some(draft);
@@ -177,9 +288,9 @@ impl ComponentWorkspace {
         if !args.as_object().is_some_and(|map| {
             exact_keys(
                 map,
-                &["expected_session_token", "expected_revision", "display"],
-                &[],
-            )
+                &["expected_session_token", "expected_revision"],
+                &["display", "background"],
+            ) && (map.contains_key("display") || map.contains_key("background"))
         }) {
             return Err(fail("invalid_arguments", "Check the Scene Display fields."));
         }
@@ -202,17 +313,32 @@ impl ComponentWorkspace {
         if self.runtime.in_play_mode() {
             return Err(fail("play_active", "Stop Play to change Scene Display."));
         }
-        let candidate: DisplayProfile = serde_json::from_value(args["display"].clone())
-            .map_err(|error| ("invalid_arguments".into(), error.to_string()))?;
-        let next = self.commit_display(revision, candidate).map_err(|error| {
-            let code = match error {
-                SceneError::RevisionOverflow => "revision_exhausted",
-                _ => "invalid_arguments",
-            };
-            (code.into(), error.to_string())
-        })?;
+        let scene = self.session.scene();
+        let candidate = args
+            .get("display")
+            .map(|value| serde_json::from_value(value.clone()))
+            .transpose()
+            .map_err(|error| ("invalid_arguments".into(), error.to_string()))?
+            .unwrap_or(scene.display);
+        let background = match args.get("background") {
+            None => scene.background,
+            Some(value) if value.is_null() => None,
+            Some(value) => Some(
+                serde_json::from_value(value.clone())
+                    .map_err(|error| ("invalid_arguments".into(), error.to_string()))?,
+            ),
+        };
+        let next = self
+            .commit_display(revision, candidate, background)
+            .map_err(|error| {
+                let code = match error {
+                    SceneError::RevisionOverflow => "revision_exhausted",
+                    _ => "invalid_arguments",
+                };
+                (code.into(), error.to_string())
+            })?;
         Ok(json!({
-            "display":candidate, "changed":next != revision, "dirty":self.session.is_dirty(),
+            "display":candidate, "background":background, "changed":next != revision, "dirty":self.session.is_dirty(),
         }))
     }
 }

@@ -92,6 +92,8 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue) {
                 })
                 .collect();
             let callback = SceneCallback {
+                background: None,
+
                 show_editor_grid: false,
                 groups,
                 camera: Mat4::IDENTITY.to_cols_array(),
