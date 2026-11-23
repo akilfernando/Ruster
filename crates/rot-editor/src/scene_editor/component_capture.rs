@@ -25,6 +25,7 @@ struct View {
     dpi: f32,
     matrices: rot_render::CameraMatrices,
     camera: Option<rot_render::CameraState>,
+    player_content: Option<egui::Rect>,
     transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
     scene_revision: u64,
     asset_revision: Option<u64>,
@@ -124,6 +125,7 @@ impl ComponentWorkspace {
                     .navigation
                     .camera
                     .filter(|_| !self.navigation.player_view),
+                player_content: viewport.player_content,
                 transform_camera: frame
                     .and_then(|frame| frame.static_preview.as_ref())
                     .and_then(|preview| preview.transform_camera()),
@@ -300,7 +302,7 @@ impl ComponentWorkspace {
                     return Err(fail("invalid_arguments"));
                 }
                 let view = self.capture_view().map_err(fail)?;
-                Ok(Value::Object(self.capture_metadata(view)))
+                Ok(Value::Object(self.capture_metadata(view, &Value::Null)))
             }
             "viewport_frame" => {
                 if map.len() != 4
@@ -421,11 +423,12 @@ impl ComponentWorkspace {
                 match &request.state {
                     State::Finished(Ok(image)) => {
                         let view = self.capture.view.expect("checked capture view");
+                        let metadata = self.capture_metadata(view, &image["source_pixel_rect"]);
                         let mut image = image.clone();
                         image
                             .as_object_mut()
                             .expect("thumbnail object")
-                            .extend(self.capture_metadata(view));
+                            .extend(metadata);
                         image["capture_id"] = json!(id.to_string());
                         if let Some((u, v)) = coordinates {
                             if let Some(reason) = view.grounding_refusal() {
@@ -467,7 +470,7 @@ impl ComponentWorkspace {
         }
     }
 
-    fn capture_metadata(&self, view: View) -> serde_json::Map<String, Value> {
+    fn capture_metadata(&self, view: View, source: &Value) -> serde_json::Map<String, Value> {
         let camera = view.camera.map(|state| {
             json!({
                 "target":state.target,"yaw":state.yaw,"pitch":state.pitch,
@@ -496,14 +499,23 @@ impl ComponentWorkspace {
         }) else {
             unreachable!()
         };
-        if let Some(camera) = view.transform_camera {
-            fields.insert(
-                "player_camera".into(),
-                json!({
-                    "type":"transform_perspective", "eye":camera.eye, "forward":camera.forward,
-                    "up":camera.up, "vertical_fov_degrees":camera.vertical_fov_degrees,
-                }),
-            );
+        if let (Some(camera), Some(content)) = (view.transform_camera, view.player_content) {
+            let crop_axis = |origin: &str, extent: &str, min: f32, max: f32| {
+                let origin = source[origin].as_u64().unwrap_or(0) as f32;
+                let size = source[extent].as_u64().unwrap_or(1).max(1) as f32;
+                let edge =
+                    |point: f32| (((point * view.dpi).round() - origin) / size).clamp(0., 1.);
+                let start = edge(min);
+                (start, edge(max) - start)
+            };
+            let (x, w) = crop_axis("x", "width", content.min.x, content.max.x);
+            let (y, h) = crop_axis("y", "height", content.min.y, content.max.y);
+            let mut observed = json!(camera);
+            observed["type"] = json!("transform_perspective");
+            if !source.is_null() {
+                observed["content_rect"] = json!([x, y, w, h]);
+            }
+            fields.insert("player_camera".into(), observed);
         }
         fields
     }
@@ -953,6 +965,7 @@ mod tests {
             dpi: 1.,
             matrices: Default::default(),
             camera: None,
+            player_content: None,
             transform_camera: None,
             scene_revision: workspace.session.revision(),
             asset_revision: workspace

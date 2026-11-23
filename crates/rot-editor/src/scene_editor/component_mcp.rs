@@ -1005,9 +1005,10 @@ fn single_renderer_geometry(
 }
 
 fn transform_camera_observation(camera: rot_scene::component_scene::TransformCameraPose) -> Value {
-    let matrices: Vec<_> = [4. / 3., 16. / 9.].into_iter()
-        .filter_map(|aspect| rot_render::transform_camera_projection(camera, aspect).map(|projection|
-            json!({"aspect": aspect, "eye":projection.eye, "view":projection.view, "projection":projection.projection})))
+    let matrices: Vec<_> = [[960, 720], [1280, 720]].into_iter()
+        .filter_map(|output| rot_render::transform_camera_output_projection(camera, output)
+            .map(|(projection, content)|
+                json!({"aspect": output[0] as f32 / output[1] as f32, "output_pixels":output, "content_rect":content, "eye":projection.eye, "view":projection.view, "projection":projection.projection})))
         .collect();
     json!({"resolved":camera, "matrices":matrices})
 }

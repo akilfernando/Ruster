@@ -2,7 +2,9 @@
 #[cfg(feature = "audio-output")]
 pub mod audio;
 pub mod creation;
-pub use rot_render::{player_view_projection, transform_camera_projection};
+pub use rot_render::{
+    player_view_projection, transform_camera_output_projection, transform_camera_projection,
+};
 mod host;
 pub mod hud;
 mod resources;

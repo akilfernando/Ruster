@@ -293,6 +293,28 @@ pub(super) fn components(
                                 10.0..=120.0,
                                 Text::CameraTransformFovHint,
                             );
+                            ui_kit::property_row(ui, Text::CameraAspectRatio.plain(), |ui| {
+                                if let Some(ratio) = lens.aspect_ratio {
+                                    ui.label(format!("{ratio}"));
+                                } else {
+                                    ui.label(Text::CameraViewportAdaptive.plain());
+                                }
+                            });
+                            let clip =
+                                lens.clip.unwrap_or(rot_scene::component_scene::CameraClip {
+                                    near: 0.1,
+                                    far: Some(1000.),
+                                });
+                            ui_kit::property_row(ui, Text::CameraNearClip.plain(), |ui| {
+                                ui.label(format!("{}", clip.near));
+                            });
+                            ui_kit::property_row(ui, Text::CameraFarClip.plain(), |ui| {
+                                if let Some(far) = clip.far {
+                                    ui.label(format!("{far}"));
+                                } else {
+                                    ui.label(Text::CameraInfinity.plain());
+                                }
+                            });
                             return;
                         }
                         let CameraView::Orbit(view) = view else {

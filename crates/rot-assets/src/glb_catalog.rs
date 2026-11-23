@@ -122,7 +122,7 @@ impl Registry {
                 || &model.id != id
                 || !ids.insert(id)
                 || !sources.insert(&model.source)
-                || model.warnings.len() > MAX_MODEL_ITEMS * 2 + 3
+                || model.warnings.len() > MAX_MODEL_ITEMS * 3 + 3
                 || model.warnings.iter().any(|message| {
                     message.is_empty()
                         || message.len() > 512
@@ -139,6 +139,12 @@ impl Registry {
                     .is_some_and(|light| ModelInfo::is_primitive_path(path) || !light.is_valid())
             }) {
                 return Err(error("invalid static model light catalog entry"));
+            }
+            if model.nodes.iter().any(|(path, node)| {
+                node.camera
+                    .is_some_and(|camera| ModelInfo::is_primitive_path(path) || !camera.is_valid())
+            }) {
+                return Err(error("invalid static model camera catalog entry"));
             }
             for (resource, _) in model.resources() {
                 validate_id(resource)?;

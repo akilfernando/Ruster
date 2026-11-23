@@ -2333,6 +2333,7 @@ mod tests {
                         outcome = m.draw(
                             ui,
                             &rot_render::ViewportInteraction {
+                                player_content: None,
                                 receipt: Default::default(),
                                 rect,
                                 response,

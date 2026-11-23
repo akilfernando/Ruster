@@ -123,6 +123,14 @@ pub(super) fn model_summary(model: &rot_assets::ModelInfo) -> Value {
     let mut result = json!({"id":model.id,"source":source,"source_truncated":source.len()!=model.source.len(),
         "hash":model.hash,"status":"accepted","node_count":model.nodes.len(),"material_count":model.materials.len(),
         "clips":clips});
+    let camera_count = model
+        .nodes
+        .values()
+        .filter(|node| node.camera.is_some())
+        .count();
+    if camera_count != 0 {
+        result["camera_count"] = json!(camera_count);
+    }
     let light_count = model
         .nodes
         .values()

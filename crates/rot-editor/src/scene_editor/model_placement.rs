@@ -202,6 +202,7 @@ impl super::SceneEditor {
                 );
             }
         }
+        let has_cameras = model.nodes.values().any(|node| node.camera.is_some());
         let has_lights = model.nodes.values().any(|node| node.light.is_some());
         let placement = model_placement(&self.session, model, name.unwrap_or(id).into())
             .map_err(|error| error.to_string())?;
@@ -211,7 +212,15 @@ impl super::SceneEditor {
             .map_err(|error| error.to_string())?;
         self.select_object(Some(root.clone()), false);
         self.error.clear();
-        self.notice = if has_lights {
+        self.notice = if has_cameras && has_lights {
+            crate::strings::Text::LegacyModelPlacedWithoutCamerasAndLights
+                .plain()
+                .into()
+        } else if has_cameras {
+            crate::strings::Text::LegacyModelPlacedWithoutCameras
+                .plain()
+                .into()
+        } else if has_lights {
             crate::strings::Text::LegacyModelPlacedWithoutLights
                 .plain()
                 .into()

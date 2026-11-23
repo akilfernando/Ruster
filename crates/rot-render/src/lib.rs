@@ -478,11 +478,34 @@ fn transform_camera_matrices(
     {
         return None;
     }
+    let aspect = camera.aspect_ratio.unwrap_or(aspect);
     let fov = camera.vertical_fov_degrees.to_radians();
     let view = Mat4::look_to_rh(eye, forward, up);
-    let projection = Mat4::perspective_rh(fov, aspect, 0.1, 1000.0);
-    let overlay = Mat4::perspective_rh_gl(fov, aspect, 0.1, 1000.0);
-    view.is_finite().then_some((view, projection, overlay))
+    let (projection, overlay) = match camera.clip {
+        None => (
+            Mat4::perspective_rh(fov, aspect, 0.1, 1000.0),
+            Mat4::perspective_rh_gl(fov, aspect, 0.1, 1000.0),
+        ),
+        Some(clip) => {
+            let near = f64::from(clip.near);
+            let fov = f64::from(camera.vertical_fov_degrees).to_radians();
+            let aspect = f64::from(aspect);
+            if let Some(far) = clip.far {
+                let far = f64::from(far);
+                (
+                    glam::DMat4::perspective_rh(fov, aspect, near, far).as_mat4(),
+                    glam::DMat4::perspective_rh_gl(fov, aspect, near, far).as_mat4(),
+                )
+            } else {
+                let projection = glam::DMat4::perspective_infinite_rh(fov, aspect, near).as_mat4();
+                let mut overlay = projection;
+                overlay.w_axis.z *= 2.;
+                (projection, overlay)
+            }
+        }
+    };
+    (view.is_finite() && projection.is_finite() && overlay.is_finite())
+        .then_some((view, projection, overlay))
 }
 
 pub fn transform_camera_projection(
@@ -495,6 +518,62 @@ pub fn transform_camera_projection(
         view: view.to_cols_array_2d(),
         projection: projection.to_cols_array_2d(),
     })
+}
+
+/// Largest centered content rectangle in physical pixels. An odd spare pixel
+/// falls on the right or bottom edge.
+fn camera_content_pixels(size: [u32; 2], aspect: Option<f32>) -> [u32; 4] {
+    let [width, height] = size;
+    let (mut w, mut h) = (width, height);
+    if let Some(aspect) = aspect {
+        let aspect = f64::from(aspect);
+        if f64::from(width) > f64::from(height) * aspect {
+            w = ((f64::from(height) * aspect).round() as u32).clamp(1, width);
+        } else {
+            h = ((f64::from(width) / aspect).round() as u32).clamp(1, height);
+        }
+    }
+    [(width - w) / 2, (height - h) / 2, w, h]
+}
+
+/// Observe the same transform camera matrices and normalized content rectangle
+/// painted by the player for an output of this physical size.
+pub fn transform_camera_output_projection(
+    camera: rot_scene::component_scene::TransformCameraPose,
+    output: [u32; 2],
+) -> Option<(PlayerViewProjection, [f32; 4])> {
+    let [width, height] = output;
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let projection = transform_camera_projection(camera, width as f32 / height as f32)?;
+    let [x, y, w, h] = camera_content_pixels(output, camera.aspect_ratio);
+    Some((
+        projection,
+        [
+            x as f32 / width as f32,
+            y as f32 / height as f32,
+            w as f32 / width as f32,
+            h as f32 / height as f32,
+        ],
+    ))
+}
+
+fn transform_camera_viewport(
+    rect: egui::Rect,
+    dpi: f32,
+    aspect: Option<f32>,
+) -> Option<egui::Rect> {
+    let pixel_min = (rect.min.to_vec2() * dpi).round();
+    let size = (rect.max.to_vec2() * dpi).round() - pixel_min;
+    let output = [size.x as u32, size.y as u32];
+    if output.contains(&0) {
+        return None;
+    }
+    let [x, y, w, h] = camera_content_pixels(output, aspect);
+    let min = ((pixel_min + egui::vec2(x as f32, y as f32)) / dpi).to_pos2();
+    let max = ((pixel_min + egui::vec2((x + w) as f32, (y + h) as f32)) / dpi).to_pos2();
+    Some(egui::Rect::from_min_max(min, max))
 }
 
 #[cfg(test)]
@@ -1039,6 +1118,7 @@ impl FrameReceipt {
 pub struct ViewportInteraction {
     pub receipt: FrameReceipt,
     pub rect: egui::Rect,
+    pub player_content: Option<egui::Rect>,
     pub response: egui::Response,
     /// Newly clicked surface; the host decides whether an overlay consumes the click.
     pub picked: Option<String>,
@@ -1645,10 +1725,25 @@ fn render_draw_scene(
     surface: ViewportSurface,
 ) -> ViewportInteraction {
     let scene = draw.scene;
+    let mut player_content = None;
     let player_view = if navigation.player_view {
         let aspect = surface.rect.aspect_ratio();
         let camera = if let Some(camera) = draw.transform_camera {
-            transform_camera_matrices(camera, aspect)
+            let content = if camera.aspect_ratio.is_some() {
+                transform_camera_viewport(
+                    surface.rect,
+                    ui.ctx().pixels_per_point(),
+                    camera.aspect_ratio,
+                )
+                .map(|(_, rect)| rect)
+            } else {
+                Some(surface.rect)
+            };
+            content
+                .and_then(|content| {
+                    player_content = Some(content);
+                    transform_camera_matrices(camera, aspect)
+                })
                 .map(|matrices| (matrices, Vec3::from_array(camera.eye).extend(1.).to_array()))
         } else {
             scene.resolve_player_view().ok().flatten().and_then(|view| {
@@ -1664,6 +1759,7 @@ fn render_draw_scene(
                 return ViewportInteraction {
                     receipt: FrameReceipt::default(),
                     rect: surface.rect,
+                    player_content: None,
                     response: surface.response,
                     picked: None,
                     fit_attempted: false,
@@ -1697,6 +1793,7 @@ fn render_draw_scene(
                 return ViewportInteraction {
                     receipt: FrameReceipt::default(),
                     rect: surface.rect,
+                    player_content: None,
                     response: surface.response,
                     picked: None,
                     fit_attempted: false,
@@ -2035,8 +2132,16 @@ fn render_draw_scene(
         })
         .collect();
     let receipt = FrameReceipt::default();
+    let draw_rect = player_content.unwrap_or(rect);
+    if draw
+        .transform_camera
+        .is_some_and(|camera| camera.aspect_ratio.is_some())
+        && player_content.is_some()
+    {
+        ui.painter().rect_filled(rect, 0., egui::Color32::BLACK);
+    }
     ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-        rect,
+        draw_rect,
         SceneCallback {
             receipt: receipt.clone(),
             groups,
@@ -2045,7 +2150,7 @@ fn render_draw_scene(
             camera_eye_mode,
             display: scene.display,
             lighting,
-            size: rect.size(),
+            size: draw_rect.size(),
             cpu_us: start.elapsed().as_secs_f64() * 1.0e6,
             shadow: if invalid_lighting {
                 None
@@ -2115,6 +2220,7 @@ fn render_draw_scene(
     ViewportInteraction {
         receipt,
         rect,
+        player_content,
         response,
         picked,
         box_selection,

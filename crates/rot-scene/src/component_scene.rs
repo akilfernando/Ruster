@@ -76,6 +76,36 @@ pub struct TransformPerspective {
     #[serde(rename = "type")]
     kind: PerspectiveKind,
     pub vertical_fov_degrees: f32,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_lens_value"
+    )]
+    pub aspect_ratio: Option<f32>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_lens_value"
+    )]
+    pub clip: Option<CameraClip>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CameraClip {
+    pub near: f32,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_lens_value"
+    )]
+    pub far: Option<f32>,
+}
+
+fn present_lens_value<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    value: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(value).map(Some)
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -90,6 +120,10 @@ pub struct TransformCameraPose {
     pub forward: [f32; 3],
     pub up: [f32; 3],
     pub vertical_fov_degrees: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aspect_ratio: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clip: Option<CameraClip>,
 }
 
 impl From<PlayerView> for CameraView {
@@ -100,9 +134,19 @@ impl From<PlayerView> for CameraView {
 
 impl CameraView {
     pub fn transform_perspective(vertical_fov_degrees: f32) -> Self {
+        Self::transform_perspective_with_lens(vertical_fov_degrees, None, None)
+    }
+
+    pub fn transform_perspective_with_lens(
+        vertical_fov_degrees: f32,
+        aspect_ratio: Option<f32>,
+        clip: Option<CameraClip>,
+    ) -> Self {
         Self::Transform(TransformPerspective {
             kind: PerspectiveKind::TransformPerspective,
             vertical_fov_degrees,
+            aspect_ratio,
+            clip,
         })
     }
 
@@ -120,10 +164,32 @@ impl CameraView {
     pub fn validate_settings(&self) -> Result<(), SceneError> {
         match self {
             Self::Orbit(view) => view.validate_settings(),
-            Self::Transform(lens) if (10. ..=120.).contains(&lens.vertical_fov_degrees) => Ok(()),
-            Self::Transform(_) => Err(SceneError::Invalid(
-                "Transform Perspective requires vertical FOV 10..120 degrees.".into(),
-            )),
+            Self::Transform(lens) => {
+                let valid = (10. ..=120.).contains(&lens.vertical_fov_degrees)
+                    && lens
+                        .aspect_ratio
+                        .is_none_or(|ratio| (0.01..=100.0).contains(&ratio))
+                    && lens.clip.is_none_or(|clip| {
+                        clip.near.is_finite()
+                            && clip.near > 0.
+                            && clip
+                                .far
+                                .is_none_or(|far| far.is_finite() && far > clip.near)
+                            && clip.near <= f32::MAX / 4.
+                            && clip.far.is_none_or(|far| {
+                                let near = f64::from(clip.near);
+                                let far = f64::from(far);
+                                (2. * near * far / (far - near)) <= f64::from(f32::MAX)
+                            })
+                    });
+                if valid {
+                    Ok(())
+                } else {
+                    Err(SceneError::Invalid(
+                        "Transform Perspective requires FOV 10..120 degrees, optional aspect 0.01..100, and positive ordered clip planes.".into(),
+                    ))
+                }
+            }
         }
     }
 }
@@ -540,6 +606,8 @@ impl ComponentScene {
             forward: (rotation * -DVec3::Z).as_vec3().to_array(),
             up: (rotation * DVec3::Y).as_vec3().to_array(),
             vertical_fov_degrees: lens.vertical_fov_degrees,
+            aspect_ratio: lens.aspect_ratio,
+            clip: lens.clip,
         })
     }
 

@@ -7,6 +7,9 @@ use std::borrow::Cow;
 #[path = "glb_punctual.rs"]
 mod punctual;
 pub use punctual::ModelLight;
+#[path = "glb_camera.rs"]
+mod camera;
+pub use camera::ModelCamera;
 
 pub const MAX_GLB_SOURCE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_JSON_BYTES: usize = 2 * 1024 * 1024;
@@ -94,6 +97,12 @@ pub struct ModelNode {
         deserialize_with = "present"
     )]
     pub light: Option<ModelLight>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub camera: Option<ModelCamera>,
 }
 
 impl ModelNode {
@@ -247,6 +256,8 @@ struct Document<'a> {
     #[serde(borrow)]
     nodes: Vec<Node<'a>>,
     meshes: Vec<SourceMesh>,
+    #[serde(default)]
+    cameras: Vec<camera::SourceCamera>,
     buffers: Vec<Buffer>,
     buffer_views: Vec<BufferView>,
     accessors: Vec<Accessor>,
@@ -286,6 +297,8 @@ struct Node<'a> {
     #[serde(default)]
     name: String,
     mesh: Option<usize>,
+    #[serde(default, deserialize_with = "present")]
+    camera: Option<usize>,
     #[serde(default, deserialize_with = "present")]
     extensions: Option<punctual::NodeExtensions>,
     #[serde(default)]
@@ -762,6 +775,7 @@ impl Node<'_> {
             mesh_id: None,
             material: None,
             light: None,
+            camera: None,
         };
         if let Some(matrix) = matrix {
             if !matrix_close(matrix, PlacementPose::from_local(&definition).matrix()) {
@@ -897,6 +911,8 @@ struct Decoder<'a> {
     skipped_triangles: usize,
     light_definitions: Vec<punctual::AdmittedLight>,
     used_lights: BTreeSet<usize>,
+    camera_definitions: Vec<camera::AdmittedCamera>,
+    used_cameras: BTreeSet<usize>,
     /// Source node index to named path, and which paths place as Groups.
     paths: BTreeMap<usize, String>,
     group_paths: BTreeSet<String>,
@@ -1350,6 +1366,10 @@ impl Decoder<'_> {
             definition.light = self.light_definitions[index].placement;
             self.used_lights.insert(index);
         }
+        if let Some(index) = node.camera {
+            definition.camera = self.camera_definitions[index].lens;
+            self.used_cameras.insert(index);
+        }
         let local = PlacementPose::from_local(&definition);
         let world = ancestors
             .iter()
@@ -1383,6 +1403,7 @@ impl Decoder<'_> {
                     mesh_id: None,
                     material: None,
                     light: None,
+                    camera: None,
                 };
                 self.attach_primitive(&mut child, &child_path, primitive, material)?;
                 self.model.info.nodes.insert(child_path, child);
@@ -1622,6 +1643,7 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
         || doc.scene.unwrap_or(0) != 0
         || doc.nodes.is_empty()
         || doc.nodes.len() > MAX_MODEL_ITEMS
+        || doc.cameras.len() > MAX_MODEL_ITEMS
         || doc.accessors.len() > MAX_MODEL_ITEMS * 4
         || doc.buffer_views.len() > MAX_MODEL_ITEMS * 5
         || [
@@ -1648,6 +1670,23 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
         doc.extensions.as_ref(),
         doc.nodes.iter().map(|node| node.extensions.as_ref()),
     )?;
+    for (index, node) in doc.nodes.iter().enumerate() {
+        if node
+            .camera
+            .is_some_and(|camera| camera >= doc.cameras.len())
+        {
+            return Err(error(format!(
+                "GLB node #{index} {:?} references a missing camera",
+                node.name
+            )));
+        }
+    }
+    let camera_definitions = doc
+        .cameras
+        .iter()
+        .enumerate()
+        .map(|(index, camera)| camera.admit(index))
+        .collect::<Result<Vec<_>, _>>()?;
     let bin = &bin[..buffer.byte_length];
     let roots = doc.scenes[0].nodes.clone();
     let mut decoder = Decoder {
@@ -1660,6 +1699,8 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
         skipped_triangles: 0,
         light_definitions,
         used_lights: BTreeSet::new(),
+        camera_definitions,
+        used_cameras: BTreeSet::new(),
         paths: BTreeMap::new(),
         group_paths: BTreeSet::new(),
         model: DecodedModel {
@@ -1711,6 +1752,11 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
     }
     decoder.model.info.warnings.sort_unstable();
     decoder.model.info.warnings.splice(..0, light_warnings);
+    let camera_warnings = decoder
+        .used_cameras
+        .iter()
+        .filter_map(|&index| decoder.camera_definitions[index].warning.take());
+    decoder.model.info.warnings.splice(..0, camera_warnings);
     Ok(decoder.model)
 }
 

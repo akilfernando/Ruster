@@ -28,8 +28,8 @@ pub use audio::{
     decode_wav, AudioClip, MAX_SOUND_RESOLVED_BYTES, MAX_SOUND_SECONDS, MAX_SOUND_SOURCE_BYTES,
 };
 pub use glb::{
-    ClipProperty, ClipTarget, ModelClip, ModelInfo, ModelLight, ModelMaterial, ModelNode,
-    MAX_CLIP_BYTES, MAX_GLB_SOURCE_BYTES, MAX_MODEL_CLIPS,
+    ClipProperty, ClipTarget, ModelCamera, ModelClip, ModelInfo, ModelLight, ModelMaterial,
+    ModelNode, MAX_CLIP_BYTES, MAX_GLB_SOURCE_BYTES, MAX_MODEL_CLIPS,
 };
 #[doc(hidden)]
 pub mod fixtures;
