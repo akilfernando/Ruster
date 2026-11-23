@@ -61,7 +61,10 @@ on rename and preserve sources in project trash. GLB imports support
 representable node matrices, unnamed or repeated names, and relative PNG
 textures. Base-color textures support indexed PNG. Import reports sampler
 approximations, other material fallbacks and skipped triangles in the Assets
-Inspector and MCP. Failed imports show the source path, recovery, last working
+Inspector and MCP. Static GLBs import point and directional lights as
+editable v23 components on their source nodes. Diagnostics report
+photometric approximations, defaults, clamps, and skipped spots. Failed
+imports show the source path, recovery, last working
 version availability and separate Error Details in the Inspector. Approved MCP
 clients can page the same issues, including sources with no asset ID. A
 relocated build loaded 80 meshes.

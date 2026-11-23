@@ -97,6 +97,14 @@ connected project.
   disappear while the object's Lua and enabled collider stay active.
   When changing a textured Mesh Renderer binding, include
   `expected_asset_revision` from the current asset inspection.
+- A static GLB with punctual lights can be placed in v23 using
+  `scene_model_place`. `asset_inspect` reports `light_count`, bounded
+  warnings and `warnings_truncated`. Point and directional lights are
+  editable on their original nodes. Point brightness uses candela
+  divided by 100 and directional brightness uses lux divided by 1,000,
+  clamped to a relative 0–16. Point range defaults to 5 units when
+  omitted. Inspect the placed lighting and use shared Undo to remove
+  the hierarchy and its lights together.
 - For a v23 Lua file, find a ready asset with `kind: "script"` in
   `asset_inspect`. In `scene_components_edit`, add a component with
   `type: "script"`, `source_kind: "asset"`, a unique component ID and

@@ -113,6 +113,17 @@ transform clip. Place, Undo, and Redo operate on the hierarchy and its
 materials together. An approved MCP client can use `scene_model_place` with
 the model ID and current asset revision.
 
+For a static GLB with **KHR_lights_punctual**, point and directional
+lights become editable v23 Light components on their source nodes.
+They keep their linear colors and follow the imported hierarchy. Rot
+divides point intensity in candela by 100 and directional intensity in
+lux by 1,000, then clamps the relative result to 0–16. Point range keeps
+the source distance within 0.1–10,000 units. An unspecified range uses
+5 units. Inspect the built-in Light fields to adjust the result. Skipped
+spots keep their nodes and geometry. **Import Warnings** reports the
+approximation, range substitutions, clamps, and skipped spots. GLBs
+with both transform clips and lights carry a static playback warning.
+
 Keep any PNG files a GLB references beside the model or in their original
 subfolder. Rot imports them with the model and refreshes the model when a
 referenced PNG in `Assets/` changes. Base-color textures support 8-bit
@@ -121,7 +132,7 @@ chooses the filter that matches the most explicitly requested sampling
 stages. Select a GLB and look under **Import Warnings** in the Inspector for
 sampler approximations, other material fallbacks, or skipped faces.
 You can still place the model. `asset_inspect` reports
-the warning count and up to two warnings per model.
+the light count when present, the warning count, and up to four warnings per model.
 
 When a file fails to import, select its marked tile under **Assets**. The
 Inspector shows its project-relative path and how to recover. Open **Error
