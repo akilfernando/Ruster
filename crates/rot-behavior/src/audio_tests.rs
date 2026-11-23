@@ -102,7 +102,8 @@ fn cue_batch_commits_at_most_once_per_successful_tick_and_rolls_back_late_failur
             }],
         }
     );
-    println!("{}", serde_json::to_string(&batch).unwrap());
+    let old_wire = serde_json::to_value(&batch).unwrap();
+    assert!(old_wire["cues"][0].get("pan").is_none());
     let committed_scene = runtime.scene().clone();
     assert!(engine.step_with_input(&mut runtime, &trigger()).is_err());
     assert_eq!(runtime.scene(), &committed_scene);

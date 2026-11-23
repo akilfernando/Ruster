@@ -4117,7 +4117,8 @@ mod tests {
         };
         assert!(PropertyValue::SoundRef(SoundRef {
             asset_id: None,
-            gain: 1.1
+            gain: 1.1,
+            playback: SoundPlayback::TwoD,
         })
         .validate()
         .is_err());
