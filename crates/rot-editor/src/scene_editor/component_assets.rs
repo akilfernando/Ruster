@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[cfg(target_os = "linux")]
-use super::super::project_assets::{script_filename, FileAction};
+use super::super::project_assets::{script_filename, FileAction, ScriptLocation};
 
 #[cfg(target_os = "linux")]
 enum ContextAction {
@@ -1223,6 +1223,7 @@ impl ComponentWorkspace {
                             id,
                             source,
                             launch: self.workspace.prefs.external_editor.clone(),
+                            diagnostic: None,
                         },
                     );
                 }
@@ -1280,6 +1281,34 @@ impl ComponentWorkspace {
             }
             None => {}
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn open_project_error_source(
+        &mut self,
+        id: String,
+        hash: String,
+        line: Option<u32>,
+    ) {
+        let (Some(catalog), Some(info)) = (
+            self.asset_browser.catalog.clone(),
+            self.assets.as_ref().and_then(|store| store.asset_info(&id)),
+        ) else {
+            self.asset_import_error = Some(Text::LuaErrorSourceUnavailable.plain().into());
+            return;
+        };
+        self.submit_asset_action(
+            catalog,
+            FileAction::OpenScript {
+                id,
+                source: PathBuf::from(&info.source),
+                launch: self.workspace.prefs.external_editor.clone(),
+                diagnostic: Some(ScriptLocation {
+                    expected_hash: hash,
+                    line,
+                }),
+            },
+        );
     }
 
     #[cfg(target_os = "linux")]

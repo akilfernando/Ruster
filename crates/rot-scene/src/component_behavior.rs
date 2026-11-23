@@ -257,8 +257,16 @@ impl ComponentScene {
     /// establishes authority for every distinct accepted source before binding.
     pub fn bake_script_assets(
         &mut self,
-        mut sources: BTreeMap<String, BehaviorSource>,
+        sources: BTreeMap<String, BehaviorSource>,
     ) -> Result<(), SceneError> {
+        self.bake_script_assets_with_keys(sources).map(drop)
+    }
+
+    /// The baked source IDs for each authored asset and movement mode.
+    pub fn bake_script_assets_with_keys(
+        &mut self,
+        mut sources: BTreeMap<String, BehaviorSource>,
+    ) -> Result<BTreeMap<String, BTreeMap<ScriptMovement, String>>, SceneError> {
         let required = self.script_asset_ids();
         if let Some(id) = required.iter().find(|id| !sources.contains_key(**id)) {
             return Err(SceneError::Invalid(format!(
@@ -271,7 +279,7 @@ impl ComponentScene {
             ));
         }
         if sources.is_empty() {
-            return Ok(());
+            return Ok(BTreeMap::new());
         }
         let variants: BTreeSet<_> = self
             .objects
@@ -349,7 +357,7 @@ impl ComponentScene {
                 }
             }
         }
-        Ok(())
+        Ok(keys)
     }
 
     /// Extract a fresh behavior runtime input. The projection is fallible because

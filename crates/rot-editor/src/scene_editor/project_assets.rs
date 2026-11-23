@@ -96,7 +96,13 @@ pub(super) enum FileAction {
         id: String,
         source: PathBuf,
         launch: LaunchSpec,
+        diagnostic: Option<ScriptLocation>,
     },
+}
+
+pub(super) struct ScriptLocation {
+    pub expected_hash: String,
+    pub line: Option<u32>,
 }
 
 struct FileJob {
@@ -713,12 +719,24 @@ fn file_action(
         FileAction::CreateScript { parent, name } => {
             create_script(store, held_root, &parent, &name, active)
         }
-        FileAction::OpenScript { id, source, launch } => {
+        FileAction::OpenScript {
+            id,
+            source,
+            launch,
+            diagnostic,
+        } => {
             let mut child = store
                 .with_current_catalog(|| {
-                    let mut command =
-                        project_script_command(store, held_root, &id, &source, &launch, active)
-                            .map_err(rot_assets::AssetError)?;
+                    let mut command = project_script_command(
+                        store,
+                        held_root,
+                        &id,
+                        &source,
+                        &launch,
+                        diagnostic.as_ref(),
+                        active,
+                    )
+                    .map_err(rot_assets::AssetError)?;
                     command
                         .spawn()
                         .map_err(|error| rot_assets::AssetError(error.to_string()))
@@ -855,6 +873,7 @@ fn project_script_command(
     id: &str,
     source: &Path,
     launch: &LaunchSpec,
+    diagnostic: Option<&ScriptLocation>,
     active: impl Fn() -> bool,
 ) -> Result<std::process::Command, String> {
     if !store
@@ -871,9 +890,44 @@ fn project_script_command(
     if at::FileType::from_raw_mode(stat.st_mode) != at::FileType::RegularFile {
         return Err("Expected a regular Lua file in Assets.".into());
     }
+    if let Some(location) = diagnostic {
+        let changed =
+            "The Lua source changed since this error. Run Play again for a current location.";
+        let info = store.asset_info(id).expect("registered Lua asset");
+        if info.status != AssetStatus::Ready
+            || info.hash.as_deref() != Some(&location.expected_hash)
+        {
+            return Err(changed.into());
+        }
+        let file = at::openat(
+            &folder,
+            leaf,
+            at::OFlags::RDONLY | at::OFlags::NOFOLLOW | at::OFlags::NONBLOCK,
+            at::Mode::empty(),
+        )
+        .map(fs::File::from)
+        .map_err(|error| error.to_string())?;
+        let opened = file.metadata().map_err(|error| error.to_string())?;
+        if !opened.is_file() || opened.ino() != stat.st_ino || opened.dev() != stat.st_dev {
+            return Err(changed.into());
+        }
+        let mut bytes = Vec::new();
+        file.take((rot_assets::MAX_LUA_SOURCE_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|error| error.to_string())?;
+        if bytes.len() > rot_assets::MAX_LUA_SOURCE_BYTES
+            || format!("{:x}", Sha256::digest(&bytes)) != location.expected_hash
+        {
+            return Err(changed.into());
+        }
+    }
     let absolute = store.root().join(source);
     let command = launch
-        .project_command(store.root(), &absolute)
+        .project_command(
+            store.root(),
+            &absolute,
+            diagnostic.map_or(Some(1), |location| location.line),
+        )
         .map_err(|error| error.to_string())?;
     if !active()
         || !fs::symlink_metadata(&absolute).is_ok_and(|current| {
@@ -1370,18 +1424,31 @@ mod tests {
             executable: "example-editor".into(),
             args: vec!["--new".into(), "{workspace}".into(), "{file}:{line}".into()],
         };
-        let command =
-            project_script_command(&snapshot.store, &held, &id, &relative, &launch, || true)
-                .unwrap();
+        let command = project_script_command(
+            &snapshot.store,
+            &held,
+            &id,
+            &relative,
+            &launch,
+            None,
+            || true,
+        )
+        .unwrap();
         let expected = format!("{}:1", root.join(&relative).display());
         let args: Vec<_> = command.get_args().collect();
         assert_eq!(args, ["--new", root.to_str().unwrap(), expected.as_str()]);
         fs::rename(root.join(&relative), directory.join("backup.lua")).unwrap();
         symlink(directory.join("Saved.lua"), root.join(&relative)).unwrap();
-        assert!(
-            project_script_command(&snapshot.store, &held, &id, &relative, &launch, || true)
-                .is_err()
-        );
+        assert!(project_script_command(
+            &snapshot.store,
+            &held,
+            &id,
+            &relative,
+            &launch,
+            None,
+            || true
+        )
+        .is_err());
     }
 
     #[test]

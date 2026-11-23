@@ -26,10 +26,37 @@ pub(super) fn source(path: &str, text: String) -> BehaviorSource {
     }
 }
 
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct ProjectSource {
+    pub asset_id: String,
+    pub source: String,
+    pub accepted_hash: String,
+}
+
+pub(crate) type ProjectSources = BTreeMap<String, ProjectSource>;
+
 pub(crate) fn resolved(
     scene: &ComponentScene,
     assets: Option<&AssetStore>,
     verify: bool,
+) -> Result<Option<ComponentScene>, String> {
+    resolve(scene, assets, verify, None)
+}
+
+pub(crate) fn resolved_for_play(
+    scene: &ComponentScene,
+    assets: Option<&AssetStore>,
+) -> Result<(Option<ComponentScene>, ProjectSources), String> {
+    let mut provenance = BTreeMap::new();
+    let scene = resolve(scene, assets, true, Some(&mut provenance))?;
+    Ok((scene, provenance))
+}
+
+fn resolve(
+    scene: &ComponentScene,
+    assets: Option<&AssetStore>,
+    verify: bool,
+    provenance: Option<&mut ProjectSources>,
 ) -> Result<Option<ComponentScene>, String> {
     let ids = scene.script_asset_ids();
     if ids.is_empty() {
@@ -82,9 +109,25 @@ pub(crate) fn resolved(
         sources.insert(id.to_owned(), source(&info.source, text.to_string()));
     }
     let mut resolved = scene.clone();
-    resolved
-        .bake_script_assets(sources)
+    let keys = resolved
+        .bake_script_assets_with_keys(sources)
         .map_err(|failure| failure.to_string())?;
+    if let Some(provenance) = provenance {
+        for (asset_id, variants) in keys {
+            let info = store.asset_info(&asset_id).expect("resolved Lua asset");
+            let accepted_hash = info.hash.as_ref().expect("accepted Lua hash");
+            for key in variants.into_values() {
+                provenance.insert(
+                    key,
+                    ProjectSource {
+                        asset_id: asset_id.clone(),
+                        source: info.source.clone(),
+                        accepted_hash: accepted_hash.clone(),
+                    },
+                );
+            }
+        }
+    }
     Ok(Some(resolved))
 }
 

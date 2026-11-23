@@ -2889,9 +2889,14 @@ impl ComponentWorkspace {
                     RUNTIME_GENERATION,
                     blocked || assets_loading || transform_active || self.draft_dirty(),
                     self.assets.as_ref(),
+                    Some(&self.workspace.prefs.external_editor),
                 );
             });
         });
+        #[cfg(target_os = "linux")]
+        if let Some((asset_id, expected_hash, line)) = self.runtime.open_project_error.take() {
+            self.open_project_error_source(asset_id, expected_hash, line);
+        }
         #[cfg(target_os = "linux")]
         let build_status = self.build.status();
         #[cfg(not(target_os = "linux"))]

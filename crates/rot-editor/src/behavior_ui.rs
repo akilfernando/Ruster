@@ -2223,6 +2223,10 @@ pub(super) struct RuntimeUi {
     debug: runtime_debug::DebugUi,
     input_control: runtime_input::InputControl,
     transition_source: Option<String>,
+    project_sources: crate::scene_editor::script_assets::ProjectSources,
+    transition_project_sources: crate::scene_editor::script_assets::ProjectSources,
+    #[cfg(target_os = "linux")]
+    pub(super) open_project_error: Option<(String, String, Option<u32>)>,
     hud_activation: hud_activation::HudActivationControl,
     spatial_feedback_index: usize,
     invocation: InvocationDraft,
@@ -2304,8 +2308,15 @@ impl<'a> RuntimeSource<'a> {
 fn prepare_start_target(
     scene: &rot_scene::component_scene::ComponentScene,
     assets: Option<&rot_assets::AssetStore>,
-) -> Result<crate::behavior_worker::StartTarget, String> {
-    let resolved = crate::scene_editor::script_assets::resolved(scene, assets, true)?;
+) -> Result<
+    (
+        crate::behavior_worker::StartTarget,
+        crate::scene_editor::script_assets::ProjectSources,
+    ),
+    String,
+> {
+    let (resolved, provenance) =
+        crate::scene_editor::script_assets::resolved_for_play(scene, assets)?;
     let runtime = rot_app::creation::RuntimeScene::from_components(Box::new(
         resolved.unwrap_or_else(|| scene.clone()),
     ))?;
@@ -2347,14 +2358,25 @@ fn prepare_start_target(
             .clip_snapshots();
         rot_behavior::decode_clips(&accepted)?
     };
-    Ok(crate::behavior_worker::StartTarget {
-        runtime,
-        sounds: sound_snapshots,
-        clips,
-    })
+    Ok((
+        crate::behavior_worker::StartTarget {
+            runtime,
+            sounds: sound_snapshots,
+            clips,
+        },
+        provenance,
+    ))
 }
 
 impl RuntimeUi {
+    pub(super) fn project_error_source(
+        &self,
+    ) -> Option<&crate::scene_editor::script_assets::ProjectSource> {
+        let diagnostic = self.diagnostic.as_ref()?;
+        let source = self.project_sources.get(diagnostic.source_id.as_deref()?)?;
+        (diagnostic.source_hash.as_deref()? == source.accepted_hash).then_some(source)
+    }
+
     pub fn queue_shortcut(&mut self, shortcut: PlayShortcut) {
         self.shortcut = Some(shortcut);
     }
@@ -2544,6 +2566,8 @@ impl RuntimeUi {
             self.frame = None;
             self.captured = None;
             self.diagnostic = None;
+            self.project_sources.clear();
+            self.transition_project_sources.clear();
         }
     }
     fn ensure_worker(&mut self, ctx: &egui::Context) -> Result<(), String> {
@@ -2579,12 +2603,15 @@ impl RuntimeUi {
             {
                 let key = self.new_run(ctx, generation, source.revision())?;
                 self.captured = None;
+                self.project_sources.clear();
+                self.transition_project_sources.clear();
                 self.transition_source = None;
                 self.pending = Some(Request::ResetStatic { key, preview });
                 self.finish_reset_submission(key);
                 return Ok(key);
             }
         }
+        let mut project_sources = Default::default();
         let (mut scene, authoring, hidden_mesh_renderers, projection, transform_camera) =
             match source {
                 RuntimeSource::Legacy(session) => (
@@ -2596,8 +2623,9 @@ impl RuntimeUi {
                 ),
                 RuntimeSource::Components(session, _) => {
                     let scene = session.scene();
-                    let resolved =
-                        crate::scene_editor::script_assets::resolved(scene, assets, true)?;
+                    let (resolved, sources) =
+                        crate::scene_editor::script_assets::resolved_for_play(scene, assets)?;
+                    project_sources = sources;
                     let input = resolved
                         .as_ref()
                         .unwrap_or(scene)
@@ -2624,6 +2652,8 @@ impl RuntimeUi {
             _ => Arc::default(),
         };
         let key = self.new_run(ctx, generation, source.revision())?;
+        self.project_sources = project_sources;
+        self.transition_project_sources.clear();
         let route = match source {
             RuntimeSource::Components(session, Some((project, path))) => {
                 project.observe().ok().and_then(|observation| {
@@ -2633,7 +2663,12 @@ impl RuntimeUi {
                         action_id,
                         destination_file,
                         target: target.and_then(|target| {
-                            prepare_start_target(target.session.scene(), assets)
+                            prepare_start_target(target.session.scene(), assets).map(
+                                |(target, sources)| {
+                                    self.transition_project_sources = sources;
+                                    target
+                                },
+                            )
                         }),
                         observation: Some(observation),
                     })
@@ -2725,6 +2760,8 @@ impl RuntimeUi {
                     .is_some_and(|old| old.scene.id != frame.scene.id)
                 {
                     self.status = format!("Started {}.", frame.scene.id);
+                    self.project_sources = std::mem::take(&mut self.transition_project_sources);
+                    self.diagnostic = None;
                 }
                 self.captured = Some(frame.authoring.clone());
             }
@@ -3029,9 +3066,11 @@ impl RuntimeUi {
             generation,
             blocked,
             assets,
+            None,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn controls_for_source(
         &mut self,
         ui: &mut egui::Ui,
@@ -3039,6 +3078,9 @@ impl RuntimeUi {
         generation: u64,
         blocked: bool,
         assets: Option<&rot_assets::AssetStore>,
+        #[cfg_attr(not(target_os = "linux"), allow(unused_variables))] code_editor: Option<
+            &crate::behavior_files::LaunchSpec,
+        >,
     ) -> Option<RunKey> {
         let mut reset = None;
         let focus_controls = std::mem::take(&mut self.focus_controls);
@@ -3209,8 +3251,35 @@ impl RuntimeUi {
                             .on_hover_text(&self.status);
                     }
                     if let Some(diagnostic) = &self.diagnostic {
+                        #[cfg(target_os = "linux")]
+                        let mut open = None;
                         ui.collapsing(Text::ErrorDetails.plain(), |ui| {
                             ui.set_max_width(360.0);
+                            if let Some(project) = self.project_error_source() {
+                                ui.label(&project.source);
+                                #[cfg(target_os = "linux")]
+                                if let Some(launch) = code_editor {
+                                    let line =
+                                        diagnostic.line.filter(|_| launch.has_line_argument());
+                                    if ui
+                                        .add_enabled(
+                                            !blocked,
+                                            egui::Button::new(if line.is_some() {
+                                                Text::OpenErrorLine.plain()
+                                            } else {
+                                                Text::OpenFile.plain()
+                                            }),
+                                        )
+                                        .clicked()
+                                    {
+                                        open = Some((
+                                            project.asset_id.clone(),
+                                            project.accepted_hash.clone(),
+                                            line,
+                                        ));
+                                    }
+                                }
+                            }
                             egui::ScrollArea::vertical()
                                 .id_salt("runtime_diagnostic_details")
                                 .max_height(160.0)
@@ -3233,6 +3302,10 @@ impl RuntimeUi {
                                     ));
                                 });
                         });
+                        #[cfg(target_os = "linux")]
+                        if open.is_some() {
+                            self.open_project_error = open;
+                        }
                     }
                 });
             self.input_help_menu_response(&runtime_menu);

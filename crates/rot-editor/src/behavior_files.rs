@@ -1357,12 +1357,18 @@ impl LaunchSpec {
         command.args(args);
         Ok(command)
     }
+    #[cfg(target_os = "linux")]
+    pub(crate) fn has_line_argument(&self) -> bool {
+        self.args.iter().any(|arg| arg.contains("{line}"))
+    }
+
     /// The project asset worker verifies source identity before calling this.
     #[cfg(target_os = "linux")]
     pub(crate) fn project_command(
         &self,
         project: &Path,
         file: &Path,
+        line: Option<u32>,
     ) -> Result<Command, FilesError> {
         let path = |value: &Path| {
             value.to_str().map(str::to_owned).ok_or_else(|| {
@@ -1387,7 +1393,21 @@ impl LaunchSpec {
             ));
         }
         let mut command = Command::new(&self.executable);
-        command.args(self.arguments(&path(file)?, 1, &path(project)?)?);
+        let file = path(file)?;
+        let project = path(project)?;
+        if let Some(line) = line {
+            command.args(self.arguments(&file, line, &project)?);
+        } else {
+            // File-only diagnostics have no verified location to pass.
+            let mut file_only = self.clone();
+            file_only.args.retain_mut(|arg| {
+                if arg == "{file}:{line}" {
+                    *arg = "{file}".into();
+                }
+                !arg.contains("{line}")
+            });
+            command.args(file_only.arguments(&file, 1, &project)?);
+        }
         Ok(command)
     }
 
