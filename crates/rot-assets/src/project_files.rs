@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 const METADATA_EXTENSION: &str = ".rotmeta";
+pub const MAX_PROJECT_SIDECAR_BYTES: usize = 4096;
 
 #[path = "project_prefabs.rs"]
 mod prefabs;
@@ -408,6 +409,74 @@ impl AssetStore {
             }
         }
         Ok(failures)
+    }
+
+    /// Catalog-only hint. A candidate still needs its exact cache and sidecar verified.
+    pub fn missing_source_restore_available(&self, id: &str) -> Option<bool> {
+        let info = self.asset_info(id)?;
+        if info.status != AssetStatus::Missing
+            || info.hash.is_none()
+            || !Path::new(&info.source).starts_with("Assets")
+            || validate_project_relative(&info.source).is_err()
+        {
+            return None;
+        }
+        match info.kind {
+            AssetKind::Script => Some(self.script(id).is_some()),
+            AssetKind::Sound => Some(self.sound(id).is_some()),
+            _ => None,
+        }
+    }
+
+    /// Root-relative location and byte limit for the accepted original encoding.
+    pub fn missing_source_restore_cache(&self, id: &str) -> Result<(PathBuf, usize), AssetError> {
+        if self.missing_source_restore_available(id) != Some(true) {
+            return Err(error(
+                "No accepted source bytes are available for this missing asset.",
+            ));
+        }
+        let info = self.asset_info(id).expect("missing asset");
+        let hash = info.hash.as_ref().expect("accepted asset hash");
+        let (directory, version) = match info.kind {
+            AssetKind::Script => ("scripts", 1),
+            AssetKind::Sound => ("sounds", super::SOUND_CACHE_VERSION),
+            _ => unreachable!("restorable source kind"),
+        };
+        Ok((
+            Path::new(".rot-cache")
+                .join(directory)
+                .join(format!("v{version}-{hash}.bin")),
+            info.kind.source_limit(),
+        ))
+    }
+
+    /// Validate bytes from descriptor-pinned reads before restoring a source.
+    pub fn verify_missing_source_restore(
+        &self,
+        id: &str,
+        sidecar: &[u8],
+        source: &[u8],
+    ) -> Result<(), AssetError> {
+        if self.missing_source_restore_available(id) != Some(true) {
+            return Err(error(
+                "No accepted source bytes are available for this missing asset.",
+            ));
+        }
+        let info = self.asset_info(id).expect("accepted missing asset");
+        let imports = parse_metadata(sidecar)?;
+        if !matches!(&imports[..], [metadata] if metadata.id == id && metadata.mesh_normal_policy.is_none() && metadata.texture_role.is_none())
+        {
+            return Err(error(
+                "The asset sidecar does not match the accepted catalog identity.",
+            ));
+        }
+        if source.len() > info.kind.source_limit() || info.hash.as_deref() != Some(&digest(source))
+        {
+            return Err(error(
+                "The cached source failed its accepted SHA-256 check. Restore a backup.",
+            ));
+        }
+        Ok(())
     }
 
     /// Validate the interpretation identities before moving a registered source.
@@ -949,7 +1018,14 @@ fn existing_metadata(path: &Path) -> Result<Option<Vec<Metadata>>, AssetError> {
 }
 
 fn load_metadata(path: &Path) -> Result<Vec<Metadata>, AssetError> {
-    let imports = match serde_json::from_slice(&read_bounded(path, 4096)?)? {
+    parse_metadata(&read_bounded(path, MAX_PROJECT_SIDECAR_BYTES)?)
+}
+
+fn parse_metadata(bytes: &[u8]) -> Result<Vec<Metadata>, AssetError> {
+    if bytes.len() > MAX_PROJECT_SIDECAR_BYTES {
+        return Err(error("The asset sidecar exceeds its size limit."));
+    }
+    let imports = match serde_json::from_slice(bytes)? {
         Sidecar::Single(metadata) => vec![metadata],
         Sidecar::Multiple(list) => list.imports,
     };

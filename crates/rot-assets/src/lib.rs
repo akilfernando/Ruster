@@ -40,6 +40,7 @@ pub use mutations::{
 };
 pub use project_files::{
     publish_project_prefab, verify_project_prefab, PrefabFile, ProjectFileIssue,
+    MAX_PROJECT_SIDECAR_BYTES,
 };
 pub use texture::{
     decode_png, decode_png_with_role, validate_texture, Texture, TextureMip, TextureRole,

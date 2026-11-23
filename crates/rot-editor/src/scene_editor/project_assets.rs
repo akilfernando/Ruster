@@ -92,6 +92,9 @@ pub(super) enum FileAction {
         parent: PathBuf,
         name: String,
     },
+    RestoreMissingSource {
+        id: String,
+    },
     OpenScript {
         id: String,
         source: PathBuf,
@@ -299,6 +302,7 @@ fn run(
         let mut asset_write = None;
         let mut reimport = None;
         let mut moved = None;
+        let mut restored = None;
         let mut created_script = None;
         match queued.try_recv() {
             Ok(Job::ImportFiles(batch)) => {
@@ -327,6 +331,12 @@ fn run(
                     }
                     _ => None,
                 };
+                let restore_id = match &job.action {
+                    FileAction::RestoreMissingSource { id } => store
+                        .asset_info(id)
+                        .map(|info| (id.clone(), info.hash.clone())),
+                    _ => None,
+                };
                 let outcome = if store.matches_identity(&job.catalog) && active() {
                     file_action(&mut store, &held_root, &mut watcher, job.action, active)
                 } else {
@@ -340,6 +350,9 @@ fn run(
                         if let Some((id, source, hash)) = move_source {
                             paths.insert(source);
                             moved = Some((id, path.clone(), hash));
+                        }
+                        if let Some((id, hash)) = restore_id {
+                            restored = Some((id, path.clone(), hash));
                         }
                         if is_create_script {
                             created_script = Some(path.clone());
@@ -438,6 +451,18 @@ fn run(
                 }) {
                     failures.push(format!(
                         "Files moved to {}, but the catalog could not confirm asset {id}. Check Assets.",
+                        path.display()
+                    ));
+                }
+            }
+            if let Some((id, path, hash)) = restored {
+                if !store.asset_info(&id).is_some_and(|info| {
+                    Path::new(&info.source) == path
+                        && info.status == AssetStatus::Ready
+                        && info.hash == hash
+                }) {
+                    failures.push(format!(
+                        "Published {}, but Assets could not confirm the restored source. Check its import status.",
                         path.display()
                     ));
                 }
@@ -719,6 +744,9 @@ fn file_action(
         FileAction::CreateScript { parent, name } => {
             create_script(store, held_root, &parent, &name, active)
         }
+        FileAction::RestoreMissingSource { id } => {
+            restore_missing_source(store, held_root, &id, active)
+        }
         FileAction::OpenScript {
             id,
             source,
@@ -865,6 +893,135 @@ fn create_script(
         })
         .map_err(|error| error.to_string())?;
     Ok(source)
+}
+
+// Read one bounded file under an already verified directory, retaining the
+// opened file's identity and change timestamps for the publication check.
+fn read_restore_input(
+    parent: &OwnedFd,
+    leaf: &str,
+    limit: usize,
+) -> Result<(Vec<u8>, at::Stat), String> {
+    let file = at::openat(
+        parent,
+        leaf,
+        at::OFlags::RDONLY | at::OFlags::NOFOLLOW | at::OFlags::NONBLOCK | at::OFlags::CLOEXEC,
+        at::Mode::empty(),
+    )
+    .map(fs::File::from)
+    .map_err(|error| error.to_string())?;
+    let before = at::fstat(&file).map_err(|error| error.to_string())?;
+    if at::FileType::from_raw_mode(before.st_mode) != at::FileType::RegularFile {
+        return Err("Expected a regular file.".into());
+    }
+    let mut bytes = Vec::new();
+    (&file)
+        .take((limit + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() > limit {
+        return Err("The file exceeds its size limit.".into());
+    }
+    let after = at::fstat(&file).map_err(|error| error.to_string())?;
+    if !same_restore_input(&before, &after) {
+        return Err("The file changed during verification. Try again.".into());
+    }
+    Ok((bytes, after))
+}
+
+fn same_restore_input(before: &at::Stat, now: &at::Stat) -> bool {
+    before.st_ino == now.st_ino
+        && before.st_dev == now.st_dev
+        && before.st_size == now.st_size
+        && before.st_mtime == now.st_mtime
+        && before.st_mtime_nsec == now.st_mtime_nsec
+        && before.st_ctime == now.st_ctime
+        && before.st_ctime_nsec == now.st_ctime_nsec
+}
+
+fn restore_missing_source(
+    store: &AssetStore,
+    root: &fs::File,
+    id: &str,
+    active: impl Fn() -> bool,
+) -> Result<PathBuf, String> {
+    let (cache, limit) = store
+        .missing_source_restore_cache(id)
+        .map_err(|error| error.to_string())?;
+    let info = store.asset_info(id).expect("accepted missing asset");
+    let source = Path::new(&info.source);
+    let (destination, leaf) = open_source_folder(root, source)?;
+    let identity = at::fstat(&destination).map_err(|error| error.to_string())?;
+    let sidecar = format!("{leaf}.rotmeta");
+    let (sidecar_bytes, sidecar_stat) = read_restore_input(
+        &destination,
+        &sidecar,
+        rot_assets::MAX_PROJECT_SIDECAR_BYTES,
+    )
+    .map_err(|reason| {
+        format!(
+            "Check the original import sidecar for {}: {reason}",
+            info.source
+        )
+    })?;
+    let cached_folder = open_folder(root, cache.parent().expect("cache directory"))
+        .map_err(|error| format!("Accepted source cache is unavailable: {error}"))?;
+    let (bytes, _) = read_restore_input(
+        &cached_folder,
+        cache
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("ASCII cache name"),
+        limit,
+    )
+    .map_err(|reason| format!("Accepted source cache is unavailable: {reason}"))?;
+    store
+        .verify_missing_source_restore(id, &sidecar_bytes, &bytes)
+        .map_err(|error| error.to_string())?;
+    let directory = PathBuf::from(format!("/proc/self/fd/{}", destination.as_raw_fd()));
+    let mut staged =
+        tempfile::NamedTempFile::new_in(&directory).map_err(|error| error.to_string())?;
+    staged
+        .write_all(&bytes)
+        .map_err(|error| error.to_string())?;
+    staged
+        .as_file()
+        .sync_all()
+        .map_err(|error| error.to_string())?;
+    store
+        .with_current_catalog(|| {
+            let error = |reason: &str| {
+                rot_assets::AssetError(format!("Couldn't restore {}: {reason}", info.source))
+            };
+            if !active()
+                || !open_source_folder(root, source)
+                    .and_then(|(folder, _)| at::fstat(folder).map_err(|error| error.to_string()))
+                    .is_ok_and(|now| now.st_ino == identity.st_ino && now.st_dev == identity.st_dev)
+            {
+                return Err(error("The project or asset folder changed. Try again."));
+            }
+            if !at::statat(
+                &destination,
+                sidecar.as_str(),
+                at::AtFlags::SYMLINK_NOFOLLOW,
+            )
+            .is_ok_and(|now| same_restore_input(&sidecar_stat, &now))
+            {
+                return Err(error("The import sidecar changed. Check Assets and retry."));
+            }
+            staged
+                .persist_noclobber(directory.join(leaf))
+                .map_err(|failure| {
+                    if failure.error.kind() == io::ErrorKind::AlreadyExists {
+                        error("A source file already exists. Inspect it in Assets.")
+                    } else {
+                        error(&failure.error.to_string())
+                    }
+                })?;
+            Ok(())
+        })
+        .map_err(|error| error.to_string())?;
+    Ok(source.to_owned())
 }
 
 fn project_script_command(

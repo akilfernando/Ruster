@@ -61,6 +61,7 @@ struct AssetRow {
     kind: &'static str,
     settings: Option<&'static str>,
     can_import_roughness: bool,
+    source_restore: Option<bool>,
     model: bool,
     registered: bool,
     status: AssetStatus,
@@ -85,6 +86,7 @@ impl AssetRow {
             kind,
             settings: None,
             can_import_roughness: false,
+            source_restore: None,
             model: false,
             registered: true,
             status,
@@ -471,6 +473,10 @@ impl Browser {
             };
             let mut row = AssetRow::new(&info.id, &info.source, kind, info.status.clone());
             row.diagnostic = info.diagnostic.as_deref().map(diagnostic);
+            #[cfg(target_os = "linux")]
+            {
+                row.source_restore = assets.missing_source_restore_available(&info.id);
+            }
             row.settings = match (info.mesh_normal_policy, info.texture_role) {
                 (Some(MeshNormalPolicy::Flat), _) => Some("Normals: Flat"),
                 (Some(MeshNormalPolicy::AuthoredWhenComplete), _) => Some("Normals: From the file"),
@@ -919,7 +925,14 @@ impl Browser {
                 message
             };
             ui.colored_label(editor_theme::colors(ui).error, message.plain());
-            ui.label(recovery.plain());
+            ui.label(
+                match row.source_restore {
+                    Some(true) => Text::AssetRestoreMissingGuide,
+                    Some(false) => Text::AssetRestoreCacheUnavailable,
+                    None => recovery,
+                }
+                .plain(),
+            );
             if row.registered {
                 let fallback = if row.last_good_available {
                     Text::AssetLastGoodAvailable
@@ -999,7 +1012,13 @@ fn file_actions(ui: &mut egui::Ui, row: &AssetRow) -> Option<ContextAction> {
             .extension()
             .and_then(|extension| extension.to_str())
             .is_some_and(|extension| matches!(extension, "obj" | "lua" | "wav"));
-    let action = if row.registered
+    let action = if row.source_restore == Some(true)
+        && ui.button(Text::AssetRestoreMissingSource.plain()).clicked()
+    {
+        Some(ContextAction::File(FileAction::RestoreMissingSource {
+            id: row.id.clone(),
+        }))
+    } else if row.registered
         && row.kind == Text::ComponentScript.plain()
         && ui
             .add_enabled(

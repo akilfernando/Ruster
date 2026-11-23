@@ -1115,6 +1115,21 @@ impl ComponentWorkspace {
         let mut result =
             asset_inspection::page_with_models(store, offset("offset")?, offset("model_offset")?)
                 .map_err(|message| ("invalid_arguments", message.into()))?;
+        #[cfg(target_os = "linux")]
+        if let Some(items) = result["assets"].as_array_mut() {
+            for item in items {
+                if let Some(available) = item["id"]
+                    .as_str()
+                    .and_then(|id| store.missing_source_restore_available(id))
+                {
+                    item["source_restore"] = if available {
+                        json!({"status":"candidate", "message":Text::AssetRestoreMissingGuide.plain()})
+                    } else {
+                        json!({"status":"unavailable", "message":Text::AssetRestoreCacheUnavailable.plain()})
+                    };
+                }
+            }
+        }
         let prefab_offset = offset("prefab_offset")?;
         if prefab_offset > self.prefab_files.len() {
             return Err(invalid());
