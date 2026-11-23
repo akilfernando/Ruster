@@ -140,8 +140,8 @@ in lux by 1,000, then clamps the relative result to 0–16. Point and spot
 range keeps the source distance within 0.1–10,000 units. An unspecified range
 uses 5 units. Spot cone angles convert from radians to degrees. **Import
 Warnings** reports the brightness approximation, range substitutions and
-clamps. If an older catalog skipped a spot, choose **Refresh** and place the
-model again to use that light. Objects already placed keep their components.
+clamps. If an older catalog skipped a spot, choose **Asset Actions → Reimport** and
+place the model again to use that light. Objects already placed keep their components.
 GLBs with both transform clips and lights carry a static playback warning.
 
 A placed GLB in a v23 scene adds a **Transform Perspective** Camera to
@@ -478,8 +478,8 @@ Component** to attach a light to an existing object. Edit **Color** and
 **Intensity**, or **Range** for point and spot lights, then choose **Apply**.
 
 Rotate a spot or directional light or its parent to aim it along local −Z.
-A spot reaches full brightness inside **Inner Half-Angle** and fades to zero
-at **Outer Half-Angle**. The fields are in degrees. Set the inner value from
+The cone applies its full strength inside **Inner Half-Angle** and fades to
+zero at **Outer Half-Angle**. The fields are in degrees. Set the inner value from
 0° up to the outer value and keep the outer value at or below 90°.
 Parent scale affects the light's position. Spot angles stay in degrees and range stays in world units. Spot Lights render in the Scene view and in static Play and
 Linux builds.

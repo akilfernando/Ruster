@@ -94,10 +94,17 @@ on rename and preserve sources in project trash. GLB imports support
 representable node matrices, unnamed or repeated names, and relative PNG
 textures. Base-color textures support indexed PNG. Import reports sampler
 approximations, other material fallbacks and skipped triangles in the Assets
-Inspector and MCP. Static GLBs import point and directional lights as
-editable v23 components on their source nodes. Diagnostics report
-photometric approximations, defaults, clamps, and skipped spots. GLB
-perspective cameras retain parented rotation, vertical lens, finite or
+Inspector and MCP. Static GLBs import point, spot, and directional lights
+as editable v23 components on their source nodes. Native Create and Add
+Component support Spot Lights with degree half-angles and world-unit range.
+The beam follows the object's authored rotation chain, and four active
+Point and Spot Lights share the local light budget. Diagnostics report
+photometric approximations, defaults and clamps. Explicit Reimport can
+adopt a spot from an older accepted catalog using the same source bytes.
+Blender beam center, penumbra and cutoff matched editor and relocated
+Vulkan in SDR and HDR. Approved Claude edited a spot using its exact
+scene revision, and native Undo restored the imported angles.
+GLB perspective cameras retain parented rotation, vertical lens, finite or
 infinite clipping, and authored framing through editor Play and Linux
 Build. Native placement keeps the current Game Camera active. Asset
 inspection and MCP explain when a lens is skipped. Packed glTF
