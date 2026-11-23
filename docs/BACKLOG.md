@@ -12,6 +12,8 @@ package in your lane under **Now**. How to work is in the
 - File references were checked on 2026-11-17 and drift; search if a line
   number is off.
 
+**C-20 Restore Missing Source** — in progress — Sol, 2026-11-24.
+
 ## Needs the user
 
 - **Vetoes.** The [architecture decisions](PARITY-PLAN.md#4-architecture-decisions)
