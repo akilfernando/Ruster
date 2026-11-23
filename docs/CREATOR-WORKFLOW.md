@@ -268,6 +268,12 @@ Choose it under **Roughness map (linear)** in the material dialog. Choose
 **None** to clear the map. The scalar roughness stays available, and
 existing Base Color assignments keep their sRGB interpretation. Textures
 need meshes with UVs. The built-in Cube samples each face.
+**Emission Color** sets how much linear RGB light the surface emits on screen.
+Black keeps the material's reflected appearance. Emission contributes only
+to the color of that surface. GLB imports use a
+constant emissive factor. Materials with an emissive texture stay black in
+the emission slot and report an import warning. Reimport an older GLB to
+pick up its factor for new placements. Existing placed materials keep their edits.
 Press Enter to apply or Escape to cancel. Apply or cancel before saving.
 Edits to materials copied from GLB models are saved with the scene.
 

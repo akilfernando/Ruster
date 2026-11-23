@@ -121,6 +121,8 @@ impl ModelNode {
 #[serde(deny_unknown_fields)]
 pub struct ModelMaterial {
     pub base_color_factor: [f32; 3],
+    #[serde(default, skip_serializing_if = "black_emission")]
+    pub emission_color: [f32; 3],
     pub roughness: f32,
     pub base_color_texture: Option<String>,
     #[serde(
@@ -131,6 +133,10 @@ pub struct ModelMaterial {
     pub roughness_texture: Option<String>,
     pub linear: bool,
     pub repeat: bool,
+}
+
+fn black_emission(color: &[f32; 3]) -> bool {
+    *color == [0.0; 3]
 }
 
 impl ModelMaterial {
@@ -426,7 +432,7 @@ struct Material {
     normal_texture: Option<TextureBinding>,
     occlusion_texture: Option<TextureBinding>,
     emissive_texture: Option<TextureBinding>,
-    emissive_factor: Option<[f32; 3]>,
+    emissive_factor: Option<[f64; 3]>,
 }
 
 #[derive(Default, Deserialize)]
@@ -937,6 +943,7 @@ struct Decoder<'a> {
     seen: BTreeSet<usize>,
     used_materials: BTreeMap<String, usize>,
     packed_roughness: bool,
+    emission: bool,
     mesh_bytes: usize,
     texture_bytes: usize,
     skipped_triangles: usize,
@@ -1221,7 +1228,14 @@ impl Decoder<'_> {
         for (texture, warning) in [
             (material.normal_texture.as_ref(), "normal map omitted"),
             (material.occlusion_texture.as_ref(), "occlusion map omitted"),
-            (material.emissive_texture.as_ref(), "emissive map omitted"),
+            (
+                material.emissive_texture.as_ref(),
+                if self.emission {
+                    "emissive texture unsupported (black fallback)"
+                } else {
+                    "emissive map omitted"
+                },
+            ),
             (
                 (!self.packed_roughness)
                     .then_some(surface.metallic_roughness_texture.as_ref())
@@ -1236,15 +1250,24 @@ impl Decoder<'_> {
                 fallbacks.push(warning);
             }
         }
-        if material
-            .emissive_factor
-            .is_some_and(|color| color != [0.; 3])
+        if !self.emission
+            && material
+                .emissive_factor
+                .is_some_and(|color| color != [0.; 3])
         {
             fallbacks.push("emissive factor omitted");
         }
         let mut sampler_warning = None;
         let mut definition = ModelMaterial {
             base_color_factor: [rgba[0], rgba[1], rgba[2]],
+            emission_color: if self.emission && material.emissive_texture.is_none() {
+                material
+                    .emissive_factor
+                    .unwrap_or_default()
+                    .map(|value| value as f32)
+            } else {
+                [0.0; 3]
+            },
             roughness: roughness.max(MIN_DIELECTRIC_ROUGHNESS),
             base_color_texture: None,
             roughness_texture: None,
@@ -1731,7 +1754,7 @@ impl Decoder<'_> {
 }
 
 pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedModel, AssetError> {
-    decode_model(id, source, bytes, true, true)
+    decode_model(id, source, bytes, true, true, true)
 }
 
 pub(super) fn decode_accepted(
@@ -1740,8 +1763,9 @@ pub(super) fn decode_accepted(
     bytes: &[u8],
     packed_roughness: bool,
     place_spots: bool,
+    emission: bool,
 ) -> Result<DecodedModel, AssetError> {
-    decode_model(id, source, bytes, packed_roughness, place_spots)
+    decode_model(id, source, bytes, packed_roughness, place_spots, emission)
 }
 
 fn decode_model(
@@ -1750,6 +1774,7 @@ fn decode_model(
     bytes: &[u8],
     packed_roughness: bool,
     place_spots: bool,
+    emission: bool,
 ) -> Result<DecodedModel, AssetError> {
     let (json, bin) = chunks(bytes)?;
     let doc: Document<'_> = serde_json::from_slice(json)
@@ -1815,6 +1840,7 @@ fn decode_model(
         seen: BTreeSet::new(),
         used_materials: BTreeMap::new(),
         packed_roughness,
+        emission,
         mesh_bytes: 0,
         texture_bytes: 0,
         skipped_triangles: 0,

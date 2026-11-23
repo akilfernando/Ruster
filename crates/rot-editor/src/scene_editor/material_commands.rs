@@ -64,14 +64,43 @@ pub(super) fn optional_name(value: Option<&Value>) -> Result<Option<String>, Com
     }
 }
 
-pub(super) fn material(value: &Value) -> Result<OpaqueMaterial, CommandError> {
+fn rgb(value: &Value, label: &str) -> Result<[f32; 3], CommandError> {
+    let tint = value
+        .as_array()
+        .filter(|tint| tint.len() == 3)
+        .ok_or_else(|| {
+            error(
+                "invalid_arguments",
+                format!("{label} requires three numeric channels"),
+            )
+        })?;
+    let mut channels = [0.0; 3];
+    for (channel, value) in channels.iter_mut().zip(tint) {
+        // Validate the wire number before f32 narrowing can round into range.
+        *channel = value
+            .as_f64()
+            .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+            .ok_or_else(|| {
+                error(
+                    "invalid_arguments",
+                    format!("{label} must be finite in 0..=1"),
+                )
+            })? as f32;
+    }
+    Ok(channels)
+}
+
+pub(super) fn material(
+    value: &Value,
+    prior: Option<&OpaqueMaterial>,
+) -> Result<OpaqueMaterial, CommandError> {
     let map = value
         .as_object()
         .filter(|map| {
             exact_keys(
                 map,
                 &["tint", "base_color_texture", "filter", "address"],
-                &["name", "response", "roughness_texture"],
+                &["name", "response", "roughness_texture", "emission_color"],
             )
         })
         .ok_or_else(|| {
@@ -80,19 +109,6 @@ pub(super) fn material(value: &Value) -> Result<OpaqueMaterial, CommandError> {
                 "Expected the complete opaque material shape",
             )
         })?;
-    let tint = map["tint"]
-        .as_array()
-        .filter(|tint| tint.len() == 3)
-        .ok_or_else(|| error("invalid_arguments", "Tint requires three numeric channels"))?;
-    let mut channels = [0.0; 3];
-    for (channel, value) in channels.iter_mut().zip(tint) {
-        // Validate the wire number before f32 narrowing can round into range.
-        *channel = value
-            .as_f64()
-            .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
-            .ok_or_else(|| error("invalid_arguments", "Tint must be finite and within0..1"))?
-            as f32;
-    }
     let candidate = OpaqueMaterial {
         name: optional_name(map.get("name"))?,
         response: map
@@ -106,7 +122,11 @@ pub(super) fn material(value: &Value) -> Result<OpaqueMaterial, CommandError> {
                 )
             })?
             .unwrap_or_default(),
-        tint: channels,
+        tint: rgb(&map["tint"], "Tint")?,
+        emission_color: match map.get("emission_color") {
+            Some(value) => rgb(value, "Emission Color")?,
+            None => prior.map_or([0.0; 3], |prior| prior.emission_color),
+        },
         base_color_texture: if map["base_color_texture"].is_null() {
             None
         } else {
@@ -320,7 +340,7 @@ impl SceneEditor {
                     "material":{
                         "name":value.name, "tint":value.tint,
                         "base_color_texture":value.base_color_texture,
-                        "roughness_texture":value.roughness_texture,
+                        "emission_color":value.emission_color,"roughness_texture":value.roughness_texture,
                         "filter":value.filter, "address":value.address, "response":value.response
                     },
                     "assigned_count":users.len(),
@@ -435,7 +455,10 @@ impl SceneEditor {
         let result = match op {
             "scene_material_set" => {
                 material_id = id(&args["material_id"])?.into();
-                let candidate = material(&args["material"])?;
+                let candidate = material(
+                    &args["material"],
+                    self.session.scene().materials.get(&material_id),
+                )?;
                 self.validate_material_candidate(&material_id, &candidate)
                     .map_err(|message| error("material_unavailable", message))?;
                 if let Some(assign) = map.get("assign_object_id") {

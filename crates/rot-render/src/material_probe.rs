@@ -47,6 +47,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
     let identity = Mat4::IDENTITY.to_cols_array();
     queue.write_buffer(&r.camera, 0, bytemuck::cast_slice(&identity));
     let instance = Instance {
+        emission_color: [0.0; 3],
         model: Mat4::IDENTITY.to_cols_array_2d(),
         normal: [
             [1.0, 0.0, 0.0, 0.0],
@@ -77,6 +78,15 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
         assert_pixel(&bytes, x, y, expected);
     }
     capture(&bytes, false);
+    let emitting = Instance {
+        base_color: [0.0; 4],
+        emission_color: [0.25, 0.5, 0.0],
+        ..instance
+    };
+    queue.write_buffer(&r.instances, 0, bytemuck::bytes_of(&emitting));
+    assert_pixel(&render(device, queue, r, &key), 16, 16, [137, 188, 0]);
+    queue.write_buffer(&r.instances, 0, bytemuck::bytes_of(&instance));
+    assert_eq!(render(device, queue, r, &key), bytes);
 
     // Both values change under the same stable IDs: geometry now covers only
     // the left half and a new one-pixel texture is green. Observe both changes.
@@ -779,6 +789,7 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
                 roughness: None,
                 mesh: Some(source.clone()),
                 instances: vec![Instance {
+                    emission_color: [0.0; 3],
                     model: matrix.to_cols_array_2d(),
                     normal: normal.to_cols_array_2d().map(|c| [c[0], c[1], c[2], 0.]),
                     color: [1.; 4],
@@ -1245,6 +1256,7 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
                         mesh: Some(mesh.clone()),
                         range: index..index + 1,
                         instances: vec![Instance {
+                            emission_color: [0.0; 3],
                             model: if mapped_case {
                                 Mat4::from_scale_rotation_translation(
                                     Vec3::new(0.5, 1., 1.),
@@ -1728,6 +1740,7 @@ pub(super) fn verify_cube_material(device: &wgpu::Device, queue: &wgpu::Queue) {
                 mesh: None,
                 range: 0..1,
                 instances: vec![Instance {
+                    emission_color: [0.0; 3],
                     model: Mat4::IDENTITY.to_cols_array_2d(),
                     normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
                     color: [1.; 4],

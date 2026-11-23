@@ -2152,6 +2152,7 @@ fn render_draw_scene(
             normal: normal.to_cols_array_2d().map(|c| [c[0], c[1], c[2], 0.0]),
             color,
             base_color,
+            emission_color: material.map_or([0.0; 3], |material| material.emission_color),
             response: match material.map(|material| material.response) {
                 Some(rot_scene::MaterialResponse::Dielectric { roughness }) => [
                     1.,
@@ -2493,6 +2494,7 @@ struct Instance {
     color: [f32; 4],
     base_color: [f32; 4],
     response: [f32; 4],
+    emission_color: [f32; 3],
 }
 fn choose_samples(
     color: wgpu::TextureFormatFeatureFlags,
@@ -3128,7 +3130,7 @@ fn scene_pipeline_format(
     let mesh_attributes = used(&wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3]);
     let uv_attributes = used(&wgpu::vertex_attr_array![10=>Float32x2]);
     let instance_attributes = used(
-        &wgpu::vertex_attr_array![2=>Float32x4,3=>Float32x4,4=>Float32x4,5=>Float32x4,6=>Float32x4,7=>Float32x4,8=>Float32x4,9=>Float32x4,11=>Float32x4,12=>Float32x4],
+        &wgpu::vertex_attr_array![2=>Float32x4,3=>Float32x4,4=>Float32x4,5=>Float32x4,6=>Float32x4,7=>Float32x4,8=>Float32x4,9=>Float32x4,11=>Float32x4,12=>Float32x4,13=>Float32x3],
     );
     let create = |uv_stride| {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -5238,6 +5240,7 @@ mod tests {
                 color: [1.0; 4],
                 base_color: [1.0, 1.0, 1.0, 0.0],
                 response: [0.; 4],
+                emission_color: [0.; 3],
             };
             queue.write_buffer(&r.instances, 0, bytemuck::bytes_of(&object));
             // The second submission replaces attachments while prior work may be pending.

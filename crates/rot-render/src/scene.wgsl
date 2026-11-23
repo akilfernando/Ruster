@@ -30,6 +30,7 @@ struct Vertex {
     @location(10) uv: vec2<f32>,
     @location(11) base_color: vec4<f32>,
     @location(12) response: vec4<f32>,
+    @location(13) emission_color: vec3<f32>,
 };
 struct Output {
     @builtin(position) position: vec4<f32>,
@@ -39,6 +40,7 @@ struct Output {
     @location(3) base_color: vec4<f32>,
     @location(4) world_position: vec3<f32>,
     @location(5) @interpolate(flat) editor_selection: f32,
+    @location(6) @interpolate(flat) emission_color: vec3<f32>,
 };
 @vertex fn vs(v: Vertex) -> Output {
     var o: Output;
@@ -51,6 +53,7 @@ struct Output {
     o.uv = vec2<f32>(v.uv.x, 1.0 - v.uv.y);
     o.base_color = v.base_color;
     o.editor_selection = v.response.w;
+    o.emission_color = v.emission_color;
     o.world_position = (model * vec4<f32>(v.position, 1.0)).xyz;
     return o;
 }
@@ -64,7 +67,7 @@ struct Output {
     let highlighted = mix(albedo, vec3<f32>(1.0), select(v.base_color.a, 0.0, v.editor_selection > 0.5));
     if lighting.mode_counts.x == 0u {
         // Preserve V1 arithmetic; zero authored lights never select this path.
-        return vec4<f32>(highlighted * (0.28 + 0.72 * diffuse), selection_alpha);
+        return vec4<f32>(highlighted * (0.28 + 0.72 * diffuse) + v.emission_color, selection_alpha);
     }
     let n = v.normal / sqrt(max(dot(v.normal, v.normal), 1e-8));
     var light_sum = lighting.ambient.rgb;
@@ -92,5 +95,5 @@ struct Output {
         light_sum += point.color_intensity.rgb * (max(dot(n, direction), 0.0) * attenuation);
     }
     // Relative diffuse output in the existing SDR target; no HDR/exposure claim.
-    return vec4<f32>(clamp(highlighted * light_sum, vec3<f32>(0.0), vec3<f32>(1.0)), selection_alpha);
+    return vec4<f32>(clamp(highlighted * light_sum + v.emission_color, vec3<f32>(0.0), vec3<f32>(1.0)), selection_alpha);
 }

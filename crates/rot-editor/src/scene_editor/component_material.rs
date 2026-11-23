@@ -557,6 +557,16 @@ impl ComponentWorkspace {
                         draft.value.tint = color;
                     }
                 });
+                ui_kit::property_row_with_label(ui, Text::EmissionColor.plain(), |ui, label| {
+                    let mut color = draft.value.emission_color;
+                    if ui
+                        .color_edit_button_rgb(&mut color)
+                        .labelled_by(label)
+                        .changed()
+                    {
+                        draft.value.emission_color = color;
+                    }
+                });
                 texture_choice(
                     ui,
                     Text::BaseColorSrgb,
@@ -895,10 +905,11 @@ impl ComponentWorkspace {
             .then(|| id(&args["material_id"]))
             .transpose()?;
         let next = if op == "scene_material_set" {
+            let id = material_id.ok_or_else(invalid)?;
             self.commit_material(
                 revision,
-                material_id.ok_or_else(invalid)?,
-                material(&args["material"])?,
+                id,
+                material(&args["material"], scene.materials.get(id))?,
                 assignment.zip(exact.as_deref()),
                 None,
             )
@@ -994,7 +1005,7 @@ impl ComponentWorkspace {
                 "material_id":id, "assigned_count":users.len(), "users_truncated":users.len()>4,
                 "user_ids":users.iter().take(4).map(|&index| &scene.objects[index].id).collect::<Vec<_>>(),
                 "material":{
-                    "name":value.name,"tint":value.tint,"base_color_texture":value.base_color_texture,
+                    "name":value.name,"tint":value.tint,"emission_color":value.emission_color,"base_color_texture":value.base_color_texture,
                     "roughness_texture":value.roughness_texture,"filter":value.filter,"address":value.address,
                     "response":value.response,
                 },
@@ -1074,6 +1085,7 @@ mod tests {
         let source = OpaqueMaterial {
             name: Some("Varnish".into()),
             tint: [0.21, 0.37, 0.59],
+            emission_color: [0.11, 0.0, 0.35],
             base_color_texture: Some("missing-color".into()),
             roughness_texture: Some("ready-color".into()),
             filter: rot_scene::TextureFilter::Nearest,

@@ -9,7 +9,7 @@ const TOOLS: &[(&str, &str, &[&str])] = &[
     ),
     (
         "scene_material_set",
-        "Create or fully replace a scene-owned opaque material. Shared edits affect every assigned object; object tint remains multiplied into appearance. Optional assign_object_id atomically assigns only a newly created material. New or changed texture slots require matching ready import roles and complete UVs for all users, including inactive roughness maps. Unchanged, recoverable references can be retained. In v23, component_id selects an exact Mesh Renderer for assign_object_id. Omitted or null roughness_texture clears that slot; assignment never changes the scalar or scene display. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry. Source imports/refresh remain outside scene Undo.",
+        "Create or fully replace a scene-owned opaque material. Shared edits affect every assigned object; object tint remains multiplied into appearance. Optional assign_object_id atomically assigns only a newly created material. New or changed texture slots require matching ready import roles and complete UVs for all users, including inactive roughness maps. Unchanged, recoverable references can be retained. In v23, component_id selects an exact Mesh Renderer for assign_object_id. Omitted emission_color preserves existing linear RGB or defaults to black. Omitted or null roughness_texture clears that slot; assignment never changes the scalar or scene display. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry. Source imports/refresh remain outside scene Undo.",
         &["material_id", "material"],
     ),
     (
@@ -108,6 +108,7 @@ fn shape(tool: &str, field: &str) -> Value {
             json!({
                 "name":name_schema(),
                 "tint":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number","minimum":0,"maximum":1},"description":"Finite linear RGB tint; all three channels are required."},
+                "emission_color":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number","minimum":0,"maximum":1},"description":"Linear RGB self-emission. Omitted preserves the edited color or defaults to black on new materials."},
                 "base_color_texture":id_schema(true),
                 "roughness_texture":{
                     "type":["string","null"],"minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9_.-]+$",
@@ -172,20 +173,14 @@ fn valid_material(value: &Value) -> bool {
     super::exact_keys(
         material,
         &["tint", "base_color_texture", "filter", "address"],
-        &["name", "response", "roughness_texture"],
+        &["name", "response", "roughness_texture", "emission_color"],
     ) && material.get("name").is_none_or(valid_name)
         && material.get("response").is_none_or(valid_response)
         && material
             .get("roughness_texture")
             .is_none_or(|value| value.is_null() || valid_id(value))
-        && material["tint"].as_array().is_some_and(|tint| {
-            tint.len() == 3
-                && tint.iter().all(|channel| {
-                    channel
-                        .as_f64()
-                        .is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value))
-                })
-        })
+        && valid_rgb(&material["tint"])
+        && material.get("emission_color").is_none_or(valid_rgb)
         && (material["base_color_texture"].is_null() || valid_id(&material["base_color_texture"]))
         && material["filter"]
             .as_str()
@@ -193,6 +188,17 @@ fn valid_material(value: &Value) -> bool {
         && material["address"]
             .as_str()
             .is_some_and(|address| ["repeat", "clamp"].contains(&address))
+}
+
+fn valid_rgb(value: &Value) -> bool {
+    value.as_array().is_some_and(|color| {
+        color.len() == 3
+            && color.iter().all(|channel| {
+                channel
+                    .as_f64()
+                    .is_some_and(|channel| (0.0..=1.0).contains(&channel))
+            })
+    })
 }
 
 fn valid_response(value: &Value) -> bool {
@@ -341,6 +347,13 @@ mod tests {
             let mut args = set.clone();
             args["material"]["roughness_texture"] = texture;
             assert!(!valid("scene_material_set", &args));
+        }
+        let mut emission = set.clone();
+        emission["material"]["emission_color"] = json!([0.25, 0, 1]);
+        assert!(valid("scene_material_set", &emission));
+        for color in [Value::Null, json!([0.]), json!([0, 1.0000000001, 0])] {
+            emission["material"]["emission_color"] = color;
+            assert!(!valid("scene_material_set", &emission));
         }
         for response in [
             json!({"type":"legacy_diffuse"}),

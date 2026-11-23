@@ -22,6 +22,7 @@ struct Probe {
 impl Probe {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let instance = Instance {
+            emission_color: [0.0; 3],
             model: Mat4::IDENTITY.to_cols_array_2d(),
             normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
             color: [1.; 4],
@@ -467,6 +468,7 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
     let mut resources = egui_wgpu::CallbackResources::default();
     resources.insert(r);
     let object = Instance {
+        emission_color: [0.0; 3],
         model: Mat4::IDENTITY.to_cols_array_2d(),
         normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
         color: [1.; 4],
@@ -919,6 +921,7 @@ fn verify_asset_submission_backpressure(
                 roughness: None,
                 mesh: Some(mesh),
                 instances: vec![Instance {
+                    emission_color: [0.0; 3],
                     model: Mat4::IDENTITY.to_cols_array_2d(),
                     normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
                     color: [1.; 4],

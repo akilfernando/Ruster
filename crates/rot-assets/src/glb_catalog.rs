@@ -78,19 +78,20 @@ fn same_material_structure(old: &ModelInfo, new: &ModelInfo) -> bool {
                 if prior == next {
                     return true;
                 }
-                if prior.roughness_texture.is_some()
-                    || next.roughness_texture.is_none()
-                    || !old_omitted_roughness(old, name)
-                {
-                    return false;
-                }
                 let mut upgraded = prior.clone();
-                upgraded
-                    .roughness_texture
-                    .clone_from(&next.roughness_texture);
-                if prior.base_color_texture.is_none() {
-                    upgraded.linear = next.linear;
-                    upgraded.repeat = next.repeat;
+                // Constant emission changes no resources, scene-owned copies or placement.
+                upgraded.emission_color = next.emission_color;
+                if prior.roughness_texture.is_none()
+                    && next.roughness_texture.is_some()
+                    && old_omitted_roughness(old, name)
+                {
+                    upgraded
+                        .roughness_texture
+                        .clone_from(&next.roughness_texture);
+                    if prior.base_color_texture.is_none() {
+                        upgraded.linear = next.linear;
+                        upgraded.repeat = next.repeat;
+                    }
                 }
                 &upgraded == next
             })
@@ -129,12 +130,25 @@ pub(super) fn read_accepted(root: &Path, info: &ModelInfo) -> Result<DecodedMode
         warning.starts_with("Light ")
             && warning.ends_with(": Skipped spot light. Its node is kept.")
     });
+    let emission = !info.materials.keys().any(|name| {
+        info.warnings.iter().any(|warning| {
+            warning
+                .strip_prefix(name)
+                .and_then(|warning| warning.strip_prefix(": "))
+                .is_some_and(|details| {
+                    details.split(", ").any(|part| {
+                        matches!(part, "emissive factor omitted" | "emissive map omitted")
+                    })
+                })
+        })
+    });
     let decoded = glb::decode_accepted(
         &info.id,
         &info.source,
         &bytes,
         packed_roughness,
         place_spots,
+        emission,
     )?;
     if &decoded.info != info {
         return Err(error(format!(
@@ -210,6 +224,14 @@ impl Registry {
                     .is_some_and(|camera| ModelInfo::is_primitive_path(path) || !camera.is_valid())
             }) {
                 return Err(error("invalid static model camera catalog entry"));
+            }
+            if model.materials.values().any(|material| {
+                !material
+                    .emission_color
+                    .into_iter()
+                    .all(|value| (0.0..=1.0).contains(&value))
+            }) {
+                return Err(error("invalid static model emission color"));
             }
             for (resource, _) in model.resources() {
                 validate_id(resource)?;
@@ -567,14 +589,37 @@ mod tests {
     }
 
     #[test]
+    fn factor_with_an_emissive_texture_stays_black() {
+        use serde_json::json;
+        let bytes = packed_fixture(&[240; 12], |doc, _| {
+            doc["materials"][0]["emissiveFactor"] = json!([0.25, 0.125, 0.5]);
+            doc["materials"][0]["emissiveTexture"] = json!({"index":0});
+        });
+        let decoded = glb::decode("paint", "paint.glb", &bytes).unwrap();
+        assert_eq!(decoded.info.materials["Paint"].emission_color, [0.0; 3]);
+        assert!(decoded
+            .info
+            .warnings
+            .iter()
+            .any(|text| text.contains("emissive texture unsupported (black fallback)")));
+        let invalid = packed_fixture(&[240; 12], |doc, _| {
+            doc["materials"][0]["emissiveFactor"] = json!([1.0000000001, 0.0, 0.0]);
+        });
+        assert!(glb::decode("paint", "paint.glb", &invalid).is_err());
+    }
+
+    #[test]
     fn packed_glb_roughness_upgrades_old_catalog_and_preserves_exact_green_in_exports() {
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("paint.glb");
         let pixels = [1, 20, 122, 2, 40, 123, 3, 60, 124, 4, 80, 125];
-        let bytes = packed_fixture(&pixels, |_, _| {});
+        let bytes = packed_fixture(&pixels, |doc, _| {
+            doc["materials"][0]["emissiveFactor"] = serde_json::json!([0.25, 0.125, 0.5]);
+        });
         fs::write(&source, &bytes).unwrap();
         let mut store = AssetStore::open(root.path()).unwrap();
-        let decoded = glb::decode_accepted("paint", "paint.glb", &bytes, false, true).unwrap();
+        let decoded =
+            glb::decode_accepted("paint", "paint.glb", &bytes, false, true, false).unwrap();
         let prior = decoded.info.clone();
         let mut registry = store.registry.clone();
         registry.models.insert("paint".into(), prior.clone());
@@ -600,6 +645,11 @@ mod tests {
         assert_eq!(store.model("paint"), Some(&prior));
         let accepted = store.refresh_glb_at(1, "paint").unwrap();
         assert_eq!(store.revision(), 2);
+        assert_eq!(prior.materials["Paint"].emission_color, [0.0; 3]);
+        assert_eq!(
+            accepted.materials["Paint"].emission_color,
+            [0.25, 0.125, 0.5]
+        );
         assert_eq!(accepted.hash, prior.hash);
         assert_eq!(accepted.nodes, prior.nodes);
         assert_eq!(
@@ -634,7 +684,13 @@ mod tests {
         );
         assert_eq!(export.read_sources().unwrap(), sources);
         let newer = [1, 80, 122, 2, 60, 123, 3, 40, 124, 4, 20, 125];
-        fs::write(&source, packed_fixture(&newer, |_, _| {})).unwrap();
+        fs::write(
+            &source,
+            packed_fixture(&newer, |doc, _| {
+                doc["materials"][0]["emissiveFactor"] = serde_json::json!([0.25, 0.125, 0.5]);
+            }),
+        )
+        .unwrap();
         let refreshed = store.refresh_glb_at(2, "paint").unwrap();
         assert_eq!(refreshed.materials, accepted.materials);
         assert_eq!(
@@ -767,7 +823,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let bytes = crate::fixtures::punctual_glb(|_| {});
         fs::write(root.path().join("light.glb"), &bytes).unwrap();
-        let decoded = glb::decode_accepted("light", "light.glb", &bytes, true, false).unwrap();
+        let decoded =
+            glb::decode_accepted("light", "light.glb", &bytes, true, false, true).unwrap();
         let old = decoded.info.clone();
         let mut store = AssetStore::open(root.path()).unwrap();
         let mut registry = store.registry.clone();

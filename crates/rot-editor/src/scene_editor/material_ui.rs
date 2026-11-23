@@ -191,6 +191,13 @@ impl MaterialDraft {
             name: (!self.name.is_empty()).then(|| self.name.clone()),
             response,
             tint: self.tint_value()?,
+            emission_color: if self.intent == MaterialIntent::Create {
+                [0.0; 3]
+            } else {
+                self.original_material
+                    .as_ref()
+                    .map_or([0.0; 3], |value| value.emission_color)
+            },
             base_color_texture: self.texture.clone(),
             roughness_texture: self.roughness_texture.clone(),
             filter: self.filter,

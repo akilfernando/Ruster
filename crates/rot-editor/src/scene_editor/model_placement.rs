@@ -9,6 +9,7 @@ pub(super) fn imported_material(name: &str, source: &rot_assets::ModelMaterial) 
     OpaqueMaterial {
         name: Some(name.to_owned()),
         tint: source.base_color_factor,
+        emission_color: source.emission_color,
         base_color_texture: source.base_color_texture.clone(),
         roughness_texture: source.roughness_texture.clone(),
         filter: if source.linear {

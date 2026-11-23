@@ -145,6 +145,7 @@ editor_text! {
     ComponentRemove => "Remove Component",
     ComponentGeometry => "Geometry",
     ComponentTint => "Tint",
+    EmissionColor => "Emission Color",
     ComponentMaterial => "Material",
     ComponentNoMaterial => "None",
     MaterialUnapplied => "Unapplied Changes",

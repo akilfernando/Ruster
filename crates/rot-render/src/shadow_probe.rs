@@ -242,6 +242,7 @@ impl Probe {
         let instances = models.map(|model| {
             let normal = Mat3::from_mat4(model).inverse().transpose();
             Instance {
+                emission_color: [0.0; 3],
                 model: model.to_cols_array_2d(),
                 normal: normal.to_cols_array_2d().map(|v| [v[0], v[1], v[2], 0.]),
                 color: [1.; 4],

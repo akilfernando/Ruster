@@ -31,6 +31,7 @@ struct Vertex {
     @location(10) uv: vec2<f32>,
     @location(11) base_color: vec4<f32>,
     @location(12) response: vec4<f32>,
+    @location(13) emission_color: vec3<f32>,
 };
 struct Output {
     @builtin(position) position: vec4<f32>,
@@ -40,6 +41,7 @@ struct Output {
     @location(3) base_color: vec4<f32>,
     @location(4) world_position: vec3<f32>,
     @location(5) @interpolate(flat) response: vec4<f32>,
+    @location(6) @interpolate(flat) emission_color: vec3<f32>,
 };
 @vertex fn vs(v: Vertex) -> Output {
     var o: Output;
@@ -52,6 +54,7 @@ struct Output {
     o.uv = vec2<f32>(v.uv.x, 1.0 - v.uv.y);
     o.base_color = v.base_color;
     o.response = v.response;
+    o.emission_color = v.emission_color;
     o.world_position = (model * vec4<f32>(v.position, 1.0)).xyz;
     return o;
 }
@@ -108,7 +111,7 @@ fn hdr_storage(radiance: vec3<f32>) -> vec4<f32> {
     let ambient_scale = select(1.0, 0.96, response.x > 0.5);
     if lighting.mode_counts.x == 0u {
         let incoming = normalize(vec3<f32>(0.4, 0.8, 0.6));
-        let stored = hdr_storage(highlighted * (0.28 * ambient_scale) + 0.72 * direct_response(highlighted, n, view, incoming, response));
+        let stored = hdr_storage(highlighted * (0.28 * ambient_scale) + 0.72 * direct_response(highlighted, n, view, incoming, response) + v.emission_color);
         return vec4<f32>(stored.rgb, selection_alpha);
     }
     var result = highlighted * lighting.ambient.rgb * ambient_scale;
@@ -136,5 +139,5 @@ fn hdr_storage(radiance: vec3<f32>) -> vec4<f32> {
         }
         result += point.color_intensity.rgb * direct_response(highlighted, n, view, direction, response) * attenuation;
     }
-    return vec4<f32>(hdr_storage(result).rgb, selection_alpha);
+    return vec4<f32>(hdr_storage(result + v.emission_color).rgb, selection_alpha);
 }

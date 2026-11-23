@@ -89,6 +89,7 @@ fn verify_case(
                 roughness: None,
                 mesh: Some(mesh),
                 instances: vec![Instance {
+                    emission_color: [0.0; 3],
                     model: matrix.to_cols_array_2d(),
                     normal: [
                         [columns as f32, 0., 0., 0.],

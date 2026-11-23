@@ -117,6 +117,8 @@ pub struct OpaqueMaterial {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub tint: [f32; 3],
+    #[serde(default, skip_serializing_if = "black_emission")]
+    pub emission_color: [f32; 3],
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_color_texture: Option<String>,
     /// Linear roughness-data asset; retained when its surface response is inactive.
@@ -132,6 +134,7 @@ impl Default for OpaqueMaterial {
         Self {
             name: None,
             tint: [1.0; 3],
+            emission_color: [0.0; 3],
             base_color_texture: None,
             roughness_texture: None,
             filter: TextureFilter::Linear,
@@ -140,6 +143,10 @@ impl Default for OpaqueMaterial {
         }
     }
 }
+fn black_emission(color: &[f32; 3]) -> bool {
+    *color == [0.0; 3]
+}
+
 impl OpaqueMaterial {
     pub fn validate(&self) -> Result<(), SceneError> {
         validate_name(self.name.as_deref())?;
@@ -150,6 +157,15 @@ impl OpaqueMaterial {
         {
             return Err(SceneError::Invalid(
                 "material tint must be finite in 0..=1".into(),
+            ));
+        }
+        if !self
+            .emission_color
+            .iter()
+            .all(|value| (0.0..=1.0).contains(value))
+        {
+            return Err(SceneError::Invalid(
+                "material emission color must be finite in 0..=1".into(),
             ));
         }
         if let Some(id) = &self.base_color_texture {
