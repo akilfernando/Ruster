@@ -42,6 +42,13 @@ The Hub opens it and Linux Build packages its saved dependency closure.
 Explicit file Open uses the chosen document, and Play runs the active scene.
 Approved MCP reports each route. A relocated Title build retained its texture
 while an unsaved Rail Yard remained open in the editor.
+Project Settings → Player controls the Linux window title and initial
+logical size. Build and approved MCP show effective values and provenance.
+Rot and Plain authoring, a refused stale edit, an old default package and
+a relocated 1280 × 720 window were verified. Start retained its title and
+size, and manual resize worked. At matched 1100 × 760, 20 release launches
+per build reached first presentation in 205/225 ms p50/p95 before and
+210/241 ms with settings. Steady GPU scene p95 held at 0.049 ms.
 A configured Start Button can enter one saved v23 sibling at tick zero in
 Play and relocated Linux Build. Approved MCP reports separate authored
 and committed runtime scene identities. The built Title and Rail Yard
