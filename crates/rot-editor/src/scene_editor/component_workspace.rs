@@ -3231,7 +3231,7 @@ mod tests {
             serde_json::json!([copied_root])
         );
         assert_eq!(reply["result"]["object_count"], 2);
-        assert_eq!(editor.selection, BTreeSet::from([copied_root]));
+        assert_eq!(editor.selection, HashSet::from([copied_root]));
         editor.command(Action::Undo);
         assert_eq!(editor.session.scene(), &scene);
     }
