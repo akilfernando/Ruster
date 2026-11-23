@@ -3861,6 +3861,44 @@ mod tests {
     }
 
     #[test]
+    fn orthographic_game_camera_shares_parallel_view_and_physical_content() {
+        use super::*;
+        use rot_scene::component_scene::{CameraClip, TransformCameraPose, TransformProjection};
+        let camera = TransformCameraPose {
+            eye: [2., 3., 4.],
+            forward: [0., 0., -1.],
+            up: [0., 1., 0.],
+            projection: TransformProjection::Orthographic { vertical_size: 8. },
+            aspect_ratio: Some(1.5),
+            clip: Some(CameraClip {
+                near: 0.5,
+                far: Some(32.5),
+            }),
+        };
+        let (view, projection, overlay) = transform_camera_matrices(camera, 16. / 9.).unwrap();
+        let eye = Vec3::from_array(camera.eye);
+        let project = |matrix: Mat4, x, y, depth: f32| {
+            (matrix * view).project_point3(eye + Vec3::new(x, y, -depth))
+        };
+        for depth in [1., 20.] {
+            assert_eq!(project(projection, 0., 4., depth).y, 1.);
+            let width =
+                project(projection, 1., 0., depth).x - project(projection, -1., 0., depth).x;
+            assert!((width - 1. / 3.).abs() < 1e-6);
+        }
+        assert_eq!(project(projection, 0., 0., 0.5).z, 0.);
+        assert_eq!(project(projection, 0., 0., 32.5).z, 1.);
+        assert_eq!(project(overlay, 0., 0., 0.5).z, -1.);
+        assert_eq!(project(overlay, 0., 0., 32.5).z, 1.);
+        assert_eq!(transform_camera_eye_mode(camera), [0., 0., 1., 0.]);
+        let narrow = transform_camera_output_projection(camera, [960, 721]).unwrap();
+        let wide = transform_camera_output_projection(camera, [1281, 720]).unwrap();
+        assert_eq!(narrow.0.projection, wide.0.projection);
+        assert_eq!(narrow.1, [0., 40. / 721., 1., 640. / 721.]);
+        assert_eq!(wide.1, [100. / 1281., 0., 1080. / 1281., 1.]);
+    }
+
+    #[test]
     fn hierarchy_viewport_fit_uses_world_pose_without_editing_locals() {
         let mut scene = Scene::demo();
         scene.objects.truncate(1);

@@ -367,6 +367,14 @@ the creator’s Scene view. Disabling the Camera, its object, or an ancestor
 suspends the designation until it is enabled again. **Clear Game Camera**
 keeps the component and its lens settings.
 
+To frame an isometric or 2D game, change **Projection** to **Orthographic**.
+Set **Vertical Size** to the full frame height in world units. Objects of
+equal size stay the same size on screen at any distance within **Near Clip**
+and **Far Clip**. Enable **Fixed Aspect** to set a width-to-height ratio and
+show bars when the Game view or player window has a different ratio. The
+transform and active designation stay in place when you change projection.
+Choose **Apply** to commit the lens settings together.
+
 ## Edit a material in a legacy scene
 
 Select an object and find **Material** in the Inspector. Editing a material
@@ -513,9 +521,9 @@ Inspector from the fourth `update` argument. For example, call the cue when
 
 In the Sound Cue dialog, **Playback** defaults to **2D**. Choose
 **Positional** and set a positive **Range** in scene units to hear it
-from the script owner's position relative to the active **Transform
-Perspective** Game Camera. The cue fades linearly to silence at Range
-and pans with the camera's orientation. Each one-shot keeps the position
+from the script owner's position relative to the active **Transform** Game
+Camera. The cue fades linearly to silence at Range and pans with the
+camera's orientation. Each one-shot keeps the position
 and camera sampled when its Step commits. The Lua call is the same.
 
 Each Script component owns its cues. Two objects can use the same Lua file

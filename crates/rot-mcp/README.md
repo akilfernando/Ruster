@@ -174,6 +174,15 @@ connected project.
   resolved pose and reference matrices as `player_view_inspect.runtime.camera`.
   They describe the committed runtime tick. A failed Step preserves the
   previous shot.
+- For an orthographic Game Camera, use the existing guarded
+  `scene_components_edit` exact Camera replacement with
+  `{"type":"transform_orthographic","vertical_size":8.0,"clip":{"near":0.1,"far":1000.0},"aspect_ratio":1.5}`
+  in `component.view`. `vertical_size` is the full world-space frame height
+  (0.01–10,000). Both clip distances are finite and `0 < near < far`.
+  Omit `aspect_ratio` to follow the output ratio. A fixed ratio can add bars.
+  The existing activation command and pose axes are shared with Perspective.
+  Inspect the authored mode and runtime matrices through `player_view_inspect`,
+  or use `viewport_screenshot` for the normalized content rectangle.
 - To replace a calibrated Transform Perspective lens through guarded
   `scene_components_edit`, use
   `{"type":"transform_perspective","vertical_fov_degrees":49,"aspect_ratio":1.5,"clip":{"near":0.35,"far":21}}`
@@ -296,7 +305,7 @@ connected project.
   Omit `value.playback` for 2D. In v23, add
   `"playback":{"type":"positional","range":10}` to the cue value for
   camera-relative sound from the script owner. Range is finite and positive
-  in scene units. Enable and activate a Transform Perspective Game Camera
+  in scene units. Enable and activate a Transform Game Camera
   before Play or Linux Build. Committed positional cues report effective
   `gain` and `pan` (−1 left, 0 center, +1 right). At or beyond Range gain
   is zero and no voice starts. Paused Step can report cues silently.

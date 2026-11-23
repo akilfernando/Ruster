@@ -1001,6 +1001,49 @@ mod tests {
     }
 
     #[test]
+    fn orthographic_camera_wire_requires_height_and_finite_ordered_clips() {
+        use serde_json::json;
+        let value = json!({
+            "type":"transform_orthographic", "vertical_size":8.0, "aspect_ratio":1.5,
+            "clip":{"near":0.5, "far":64.0}
+        });
+        let decoded: CameraView = serde_json::from_value(value.clone()).unwrap();
+        decoded.validate_settings().unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        for (field, invalid) in [
+            ("vertical_fov_degrees", json!(45)),
+            ("aspect_ratio", json!(null)),
+            ("clip", json!({"near":0.5})),
+            ("clip", json!({"near":0.5,"far":null})),
+        ] {
+            let mut bad = value.clone();
+            bad[field] = invalid;
+            assert!(
+                serde_json::from_value::<CameraView>(bad).is_err(),
+                "{field}"
+            );
+        }
+        for (field, invalid) in [
+            ("vertical_size", json!(0)),
+            ("vertical_size", json!(10_001)),
+            ("aspect_ratio", json!(0)),
+            ("clip", json!({"near":0,"far":64})),
+            ("clip", json!({"near":5,"far":4})),
+            ("clip", json!({"near":1.0,"far":1.000000001})),
+        ] {
+            let mut bad = value.clone();
+            bad[field] = invalid;
+            assert!(
+                serde_json::from_value::<CameraView>(bad)
+                    .unwrap()
+                    .validate_settings()
+                    .is_err(),
+                "{field}"
+            );
+        }
+    }
+
+    #[test]
     fn camera_view_wire_keeps_orbit_and_rejects_mixed_settings() {
         let orbit = |anchor| {
             serde_json::json!({
