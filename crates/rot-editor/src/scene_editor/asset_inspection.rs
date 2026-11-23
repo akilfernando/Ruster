@@ -123,6 +123,14 @@ pub(super) fn model_summary(model: &rot_assets::ModelInfo) -> Value {
     let mut result = json!({"id":model.id,"source":source,"source_truncated":source.len()!=model.source.len(),
         "hash":model.hash,"status":"accepted","node_count":model.nodes.len(),"material_count":model.materials.len(),
         "clips":clips});
+    let roughness_map_count = model
+        .materials
+        .values()
+        .filter(|material| material.roughness_texture.is_some())
+        .count();
+    if roughness_map_count != 0 {
+        result["roughness_map_count"] = json!(roughness_map_count);
+    }
     let camera_count = model
         .nodes
         .values()
@@ -144,6 +152,13 @@ pub(super) fn model_summary(model: &rot_assets::ModelInfo) -> Value {
         let warnings: Vec<String> = model
             .warnings
             .iter()
+            .filter(|message| message.contains("roughness map"))
+            .chain(
+                model
+                    .warnings
+                    .iter()
+                    .filter(|message| !message.contains("roughness map")),
+            )
             .take(PREVIEW_WARNINGS)
             .map(|message| message.chars().take(DIAGNOSTIC_CHARS).collect())
             .collect();

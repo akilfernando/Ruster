@@ -140,7 +140,7 @@ fn number(bytes: &[u8]) -> u32 {
 // Inspect all chunks before decoder allocation, including chunks after IDAT.
 // This prevents ignored profile/APNG/ancillary chunks or trailing data from
 // bypassing the fixed input policy. The PNG decoder still validates structure.
-fn preflight(bytes: &[u8], role: TextureRole) -> Result<(), AssetError> {
+fn preflight(bytes: &[u8], role: TextureRole, packed_green: bool) -> Result<(), AssetError> {
     if bytes.len() > MAX_TEXTURE_SOURCE_BYTES {
         return Err(error("PNG exceeds 8 MiB source limit"));
     }
@@ -186,7 +186,7 @@ fn preflight(bytes: &[u8], role: TextureRole) -> Result<(), AssetError> {
                 ihdr = true;
                 let (width, height) = (number(&data[..4]), number(&data[4..8]));
                 chain_bytes(width, height, role)?;
-                indexed = role == TextureRole::BaseColor && data[9] == 3;
+                indexed = (role == TextureRole::BaseColor || packed_green) && data[9] == 3;
                 if data[8] != 8
                     || !(matches!(data[9], 2 | 6)
                         || indexed
@@ -302,7 +302,19 @@ pub fn decode_png(bytes: &[u8]) -> Result<Texture, AssetError> {
 /// Roughness uses raw gray/red bytes, ignores alpha and valid color tags, and
 /// averages perceptual roughness directly. This is not general color management.
 pub fn decode_png_with_role(bytes: &[u8], role: TextureRole) -> Result<Texture, AssetError> {
-    preflight(bytes, role)?;
+    decode_png_channel(bytes, role, false)
+}
+
+pub(crate) fn decode_glb_roughness(bytes: &[u8]) -> Result<Texture, AssetError> {
+    decode_png_channel(bytes, TextureRole::Roughness, true)
+}
+
+fn decode_png_channel(
+    bytes: &[u8],
+    role: TextureRole,
+    packed_green: bool,
+) -> Result<Texture, AssetError> {
+    preflight(bytes, role, packed_green)?;
     let mut decoder = png::Decoder::new_with_limits(
         Cursor::new(bytes),
         png::Limits {
@@ -332,7 +344,7 @@ pub fn decode_png_with_role(bytes: &[u8], role: TextureRole) -> Result<Texture, 
         .map_err(|e| error(format!("PNG finish: {e}")))?;
     let channels = match info.color_type {
         png::ColorType::Grayscale if role == TextureRole::Roughness => 1,
-        png::ColorType::Indexed if role == TextureRole::BaseColor => 1,
+        png::ColorType::Indexed if role == TextureRole::BaseColor || packed_green => 1,
         png::ColorType::Rgb => 3,
         png::ColorType::Rgba => 4,
         _ => return Err(error("unexpected PNG output type")),
@@ -357,7 +369,11 @@ pub fn decode_png_with_role(bytes: &[u8], role: TextureRole) -> Result<Texture, 
             let rgb = colors
                 .get(usize::from(index))
                 .ok_or_else(|| error("PNG pixel references an undefined palette entry"))?;
-            pixels.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+            if packed_green {
+                pixels.push(rgb[1]);
+            } else {
+                pixels.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+            }
         }
     } else {
         for pixel in decoded.chunks_exact(channels) {
@@ -365,7 +381,9 @@ pub fn decode_png_with_role(bytes: &[u8], role: TextureRole) -> Result<Texture, 
                 TextureRole::BaseColor => {
                     pixels.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
                 }
-                TextureRole::Roughness => pixels.push(pixel[0]),
+                TextureRole::Roughness => {
+                    pixels.push(pixel[usize::from(packed_green && channels != 1)])
+                }
             }
         }
     }
@@ -394,6 +412,24 @@ pub fn decode_png_with_role(bytes: &[u8], role: TextureRole) -> Result<Texture, 
     validate_texture(&texture)?;
     Ok(texture)
 }
+/// Package an already admitted linear level zero as ordinary grayscale PNG.
+pub(crate) fn encode_roughness_source(texture: &Texture) -> Result<Vec<u8>, AssetError> {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, texture.width, texture.height);
+        encoder.set_color(png::ColorType::Grayscale);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_compression(png::Compression::Fast);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| error(format!("Roughness PNG encode: {e}")))?;
+        writer
+            .write_image_data(&texture.mips[0].bytes)
+            .map_err(|e| error(format!("Roughness PNG pixels: {e}")))?;
+    }
+    Ok(bytes)
+}
+
 fn to_linear(byte: u8) -> f64 {
     let encoded = f64::from(byte) / 255.0;
     if encoded <= 0.04045 {

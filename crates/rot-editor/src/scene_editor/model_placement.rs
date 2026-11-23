@@ -10,7 +10,7 @@ pub(super) fn imported_material(name: &str, source: &rot_assets::ModelMaterial) 
         name: Some(name.to_owned()),
         tint: source.base_color_factor,
         base_color_texture: source.base_color_texture.clone(),
-        roughness_texture: None,
+        roughness_texture: source.roughness_texture.clone(),
         filter: if source.linear {
             TextureFilter::Linear
         } else {
@@ -194,8 +194,9 @@ impl super::SceneEditor {
         for material in model.materials.values() {
             if material
                 .base_color_texture
-                .as_ref()
-                .is_some_and(|texture| !self.resolved_textures.contains_key(texture))
+                .iter()
+                .chain(&material.roughness_texture)
+                .any(|texture| !self.resolved_textures.contains_key(texture))
             {
                 return Err(
                     "Couldn't place the model. Its texture is missing. Refresh the model.".into(),

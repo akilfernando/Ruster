@@ -156,6 +156,7 @@ editor_text! {
     ComponentDisplayExposureInvalid => "Enter an exposure from −8 to 8 stops.",
     ComponentDisplayProfile => "Profile",
     ComponentEmbeddedBaseColor => "Embedded Base Color",
+    ComponentEmbeddedRoughness => "Embedded Roughness",
     ComponentMaterialClosePending => "Apply or cancel the material edit before closing the window.",
     ComponentMaterialResponse => "Shading",
     ComponentPrefabMaterialSource => "Edit this material in the prefab source.",

@@ -123,8 +123,23 @@ pub struct ModelMaterial {
     pub base_color_factor: [f32; 3],
     pub roughness: f32,
     pub base_color_texture: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub roughness_texture: Option<String>,
     pub linear: bool,
     pub repeat: bool,
+}
+
+impl ModelMaterial {
+    pub fn texture(&self, role: TextureRole) -> Option<&str> {
+        match role {
+            TextureRole::BaseColor => self.base_color_texture.as_deref(),
+            TextureRole::Roughness => self.roughness_texture.as_deref(),
+        }
+    }
 }
 
 impl ModelInfo {
@@ -138,19 +153,32 @@ impl ModelInfo {
         self.nodes
             .values()
             .filter_map(|node| node.mesh_id.as_deref().map(|id| (id, AssetKind::Mesh)))
-            .chain(self.materials.values().filter_map(|material| {
-                material
-                    .base_color_texture
-                    .as_deref()
-                    .map(|id| (id, AssetKind::Texture))
+            .chain(self.materials.values().flat_map(|material| {
+                [TextureRole::BaseColor, TextureRole::Roughness]
+                    .into_iter()
+                    .filter_map(|role| material.texture(role).map(|id| (id, AssetKind::Texture)))
             }))
     }
 }
 
 #[derive(Debug)]
 pub(super) struct ModelResource {
-    pub bytes: Vec<u8>,
+    bytes: Option<Vec<u8>>,
     pub payload: Payload,
+}
+
+impl ModelResource {
+    pub(super) fn export_bytes(self) -> Result<Vec<u8>, AssetError> {
+        if let Some(bytes) = self.bytes {
+            return Ok(bytes);
+        }
+        match self.payload {
+            Payload::Texture(texture) if texture.role == TextureRole::Roughness => {
+                texture::encode_roughness_source(&texture)
+            }
+            _ => unreachable!("only packed roughness derives its package source"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -906,6 +934,7 @@ struct Decoder<'a> {
     bin: &'a [u8],
     seen: BTreeSet<usize>,
     used_materials: BTreeMap<String, usize>,
+    packed_roughness: bool,
     mesh_bytes: usize,
     texture_bytes: usize,
     skipped_triangles: usize,
@@ -1117,7 +1146,7 @@ impl Decoder<'_> {
         let mesh = parse_obj_with_normal_policy(&bytes, MeshNormalPolicy::AuthoredWhenComplete)
             .map_err(|e| error(format!("GLB generated triangle payload: {e}")))?;
         Ok(ModelResource {
-            bytes,
+            bytes: Some(bytes),
             payload: Payload::Mesh(mesh),
         })
     }
@@ -1185,11 +1214,13 @@ impl Decoder<'_> {
             fallbacks.push("roughness raised to 0.08");
         }
         for (texture, warning) in [
-            (&material.normal_texture, "normal map omitted"),
-            (&material.occlusion_texture, "occlusion map omitted"),
-            (&material.emissive_texture, "emissive map omitted"),
+            (material.normal_texture.as_ref(), "normal map omitted"),
+            (material.occlusion_texture.as_ref(), "occlusion map omitted"),
+            (material.emissive_texture.as_ref(), "emissive map omitted"),
             (
-                &surface.metallic_roughness_texture,
+                (!self.packed_roughness)
+                    .then_some(surface.metallic_roughness_texture.as_ref())
+                    .flatten(),
                 "metallic-roughness map omitted",
             ),
         ] {
@@ -1211,9 +1242,11 @@ impl Decoder<'_> {
             base_color_factor: [rgba[0], rgba[1], rgba[2]],
             roughness: roughness.max(MIN_DIELECTRIC_ROUGHNESS),
             base_color_texture: None,
+            roughness_texture: None,
             linear: true,
             repeat: true,
         };
+        let mut base_resource = None;
         if let Some(binding) = &surface.base_color_texture {
             let transform = binding.extensions.transform.as_ref();
             if transform
@@ -1246,14 +1279,77 @@ impl Decoder<'_> {
             }
             let texture = decode_png(bytes)?;
             let id = resource_id(&self.model.info.id, "base-color", &name);
-            self.retain(
-                id.clone(),
-                ModelResource {
-                    bytes: bytes.to_vec(),
-                    payload: Payload::Texture(texture),
-                },
-            )?;
+            base_resource = Some(ModelResource {
+                bytes: Some(bytes.to_vec()),
+                payload: Payload::Texture(texture),
+            });
             definition.base_color_texture = Some(id);
+        }
+        let mut roughness_sampler_warning = None;
+        if let Some(binding) = surface
+            .metallic_roughness_texture
+            .as_ref()
+            .filter(|_| self.packed_roughness)
+        {
+            let texture = at(&self.doc.textures, binding.index, "roughness texture")?;
+            let image = at(&self.doc.images, texture.source, "roughness image")?;
+            let (view, bytes) = self.view(image.buffer_view)?;
+            let transform = binding.extensions.transform.as_ref();
+            fallbacks.push("metallic-roughness blue channel omitted");
+            if transform
+                .and_then(|value| value.tex_coord)
+                .unwrap_or(binding.tex_coord)
+                != 0
+            {
+                fallbacks.push("roughness map omitted because it requires TEXCOORD_0");
+            } else if transform.is_some_and(|value| {
+                value.offset.unwrap_or([0.; 2]) != [0.; 2]
+                    || value.rotation.unwrap_or(0.) != 0.
+                    || value.scale.unwrap_or([1.; 2]) != [1.; 2]
+            }) {
+                fallbacks.push("roughness map omitted because its UV transform is unsupported");
+            } else if image.mime_type != "image/png"
+                || view.target.is_some()
+                || view.byte_stride.is_some()
+            {
+                fallbacks.push("roughness map omitted because it requires a tightly stored PNG");
+            } else {
+                let mut repeat = true;
+                let mut linear = true;
+                if let Some(index) = texture.sampler {
+                    let sampler = at(&self.doc.samplers, index, "roughness sampler")?;
+                    (linear, roughness_sampler_warning) = sampler.filtering()?;
+                    repeat = sampler.wrapping()?;
+                }
+                if definition.base_color_texture.is_some() {
+                    if (linear, repeat) != (definition.linear, definition.repeat) {
+                        fallbacks.push(
+                            "roughness map uses the Base Color sampler to preserve its appearance",
+                        );
+                    }
+                } else {
+                    definition.linear = linear;
+                    definition.repeat = repeat;
+                }
+                let roughness = texture::decode_glb_roughness(bytes).map_err(|failure| {
+                    error(format!("GLB material {name:?} roughness PNG: {failure}"))
+                })?;
+                let id = resource_id(&self.model.info.id, "roughness", &name);
+                self.retain(
+                    id.clone(),
+                    ModelResource {
+                        bytes: None,
+                        payload: Payload::Texture(roughness),
+                    },
+                )?;
+                definition.roughness_texture = Some(id);
+            }
+        }
+        let roughness_sampler_warning =
+            roughness_sampler_warning.map(|warning| format!("roughness {warning}"));
+        fallbacks.extend(roughness_sampler_warning.as_deref());
+        if let (Some(id), Some(resource)) = (&definition.base_color_texture, base_resource) {
+            self.retain(id.clone(), resource)?;
         }
         fallbacks.extend(sampler_warning.as_deref());
         if !fallbacks.is_empty() {
@@ -1275,9 +1371,8 @@ impl Decoder<'_> {
         material: Option<String>,
     ) -> Result<(), AssetError> {
         let textured = material.as_ref().is_some_and(|material| {
-            self.model.info.materials[material]
-                .base_color_texture
-                .is_some()
+            let material = &self.model.info.materials[material];
+            material.base_color_texture.is_some() || material.roughness_texture.is_some()
         });
         let resource = self
             .mesh(primitive, textured)
@@ -1632,6 +1727,23 @@ impl Decoder<'_> {
 }
 
 pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedModel, AssetError> {
+    decode_model(id, source, bytes, true)
+}
+
+pub(super) fn decode_without_packed_roughness(
+    id: &str,
+    source: &str,
+    bytes: &[u8],
+) -> Result<DecodedModel, AssetError> {
+    decode_model(id, source, bytes, false)
+}
+
+fn decode_model(
+    id: &str,
+    source: &str,
+    bytes: &[u8],
+    packed_roughness: bool,
+) -> Result<DecodedModel, AssetError> {
     let (json, bin) = chunks(bytes)?;
     let doc: Document<'_> = serde_json::from_slice(json)
         .map_err(|e| error(format!("unsupported or invalid static GLB document: {e}")))?;
@@ -1694,6 +1806,7 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
         bin,
         seen: BTreeSet::new(),
         used_materials: BTreeMap::new(),
+        packed_roughness,
         mesh_bytes: 0,
         texture_bytes: 0,
         skipped_triangles: 0,

@@ -99,15 +99,6 @@ fn textures(material: &OpaqueMaterial) -> [(Option<&str>, TextureRole); 2] {
     ]
 }
 
-fn embedded_model<'a>(store: &'a AssetStore, id: &str) -> Option<&'a rot_assets::ModelInfo> {
-    store.models().find(|model| {
-        model
-            .materials
-            .values()
-            .any(|material| material.base_color_texture.as_deref() == Some(id))
-    })
-}
-
 fn standalone_texture(info: &rot_assets::AssetInfo, role: TextureRole) -> bool {
     info.kind == AssetKind::Texture
         && info.texture_role == Some(role)
@@ -116,11 +107,12 @@ fn standalone_texture(info: &rot_assets::AssetInfo, role: TextureRole) -> bool {
 
 fn good_texture(assets: Option<&AssetStore>, id: &str, role: TextureRole) -> bool {
     assets.is_some_and(|store| {
-        store.texture(id).is_some()
-            && store.asset_info(id).map_or_else(
-                || role == TextureRole::BaseColor && embedded_model(store, id).is_some(),
-                |info| standalone_texture(info, role),
-            )
+        store
+            .texture(id)
+            .is_some_and(|texture| texture.role == role)
+            && store
+                .asset_info(id)
+                .is_none_or(|info| standalone_texture(info, role))
     })
 }
 
@@ -136,22 +128,19 @@ fn ready_texture_choices(
         .filter(|info| standalone_texture(info, role) && assets.texture(&info.id).is_some())
         .map(|info| (info.id.clone(), file_name(&info.source).to_owned()))
         .collect::<BTreeMap<_, _>>();
-    if role != TextureRole::BaseColor {
-        return textures;
-    }
+    let embedded = match role {
+        TextureRole::BaseColor => Text::ComponentEmbeddedBaseColor,
+        TextureRole::Roughness => Text::ComponentEmbeddedRoughness,
+    };
     for model in assets.models() {
         for id in model
             .materials
             .values()
-            .filter_map(|material| material.base_color_texture.as_ref())
+            .filter_map(|material| material.texture(role))
         {
             if assets.texture(id).is_some() {
-                textures.entry(id.clone()).or_insert_with(|| {
-                    format!(
-                        "{} · {}",
-                        file_name(&model.source),
-                        Text::ComponentEmbeddedBaseColor.plain()
-                    )
+                textures.entry(id.to_owned()).or_insert_with(|| {
+                    format!("{} · {}", file_name(&model.source), embedded.plain())
                 });
             }
         }
@@ -803,7 +792,7 @@ impl ComponentWorkspace {
                 .then(|| {
                     self.assets
                         .as_ref()
-                        .and_then(|store| embedded_model(store, id))
+                        .and_then(|store| store.model_texture(id))
                 })
                 .flatten();
             let accepted = self
@@ -812,7 +801,7 @@ impl ComponentWorkspace {
                 .is_some_and(|store| store.texture(id).is_some());
             let actual_role = info
                 .and_then(|info| info.texture_role)
-                .or_else(|| model.map(|_| TextureRole::BaseColor));
+                .or_else(|| model.map(|(_, role)| role));
             let status = match info {
                 Some(info) if info.kind != AssetKind::Texture => "wrong_kind",
                 _ if (info.is_some() || model.is_some()) && actual_role != Some(role) => {
@@ -832,7 +821,7 @@ impl ComponentWorkspace {
             json!({
                 "asset_id":id, "status":status, "expected_role":role, "accepted":accepted,
                 "texture_role":actual_role,
-                "hash":info.and_then(|info|info.hash.as_ref()).or_else(|| model.map(|model| &model.hash)),
+                "hash":info.and_then(|info|info.hash.as_ref()).or_else(|| model.map(|(model, _)| &model.hash)),
                 "diagnostic":info.and_then(|info| info.diagnostic.as_deref()).map(|text| text.chars().take(256).collect::<String>()),
             })
         };

@@ -52,6 +52,50 @@ pub(super) fn read_candidate(root: &Path, source: &str) -> Result<Vec<u8>, Asset
     Ok(embedded.unwrap_or(bytes))
 }
 
+fn old_omitted_roughness(info: &ModelInfo, material: &str) -> bool {
+    info.warnings.iter().any(|warning| {
+        warning
+            .strip_prefix(material)
+            .and_then(|warning| warning.strip_prefix(": "))
+            .is_some_and(|details| {
+                details
+                    .split(", ")
+                    .any(|part| part == "metallic-roughness map omitted")
+            })
+    })
+}
+
+fn same_material_structure(old: &ModelInfo, new: &ModelInfo) -> bool {
+    old.materials.len() == new.materials.len()
+        && old
+            .materials
+            .iter()
+            .zip(&new.materials)
+            .all(|((name, prior), (next_name, next))| {
+                if name != next_name {
+                    return false;
+                }
+                if prior == next {
+                    return true;
+                }
+                if prior.roughness_texture.is_some()
+                    || next.roughness_texture.is_none()
+                    || !old_omitted_roughness(old, name)
+                {
+                    return false;
+                }
+                let mut upgraded = prior.clone();
+                upgraded
+                    .roughness_texture
+                    .clone_from(&next.roughness_texture);
+                if prior.base_color_texture.is_none() {
+                    upgraded.linear = next.linear;
+                    upgraded.repeat = next.repeat;
+                }
+                &upgraded == next
+            })
+}
+
 pub(super) fn read_accepted(root: &Path, info: &ModelInfo) -> Result<DecodedModel, AssetError> {
     let directory = accepted_directory(root)?;
     let bytes = read_bounded(
@@ -70,7 +114,22 @@ pub(super) fn read_accepted(root: &Path, info: &ModelInfo) -> Result<DecodedMode
             info.id
         )));
     }
-    let decoded = glb::decode(&info.id, &info.source, &bytes)?;
+    // Old accepted catalogs recorded exact scalar-only warnings. Recreate
+    // their original interpretation until a Refresh publishes the new one.
+    let omitted = info
+        .materials
+        .keys()
+        .any(|name| old_omitted_roughness(info, name));
+    let decoded = if omitted
+        && info
+            .materials
+            .values()
+            .all(|material| material.roughness_texture.is_none())
+    {
+        glb::decode_without_packed_roughness(&info.id, &info.source, &bytes)?
+    } else {
+        glb::decode(&info.id, &info.source, &bytes)?
+    };
     if &decoded.info != info {
         return Err(error(format!(
             "model {:?} accepted GLB structure does not match its catalog",
@@ -207,6 +266,19 @@ impl AssetStore {
         self.registry.model_clip(id)
     }
 
+    pub fn model_texture(&self, id: &str) -> Option<(&ModelInfo, TextureRole)> {
+        let (model, kind) = self.registry.model_resource(id)?;
+        if kind != AssetKind::Texture {
+            return None;
+        }
+        model.materials.values().find_map(|material| {
+            [TextureRole::BaseColor, TextureRole::Roughness]
+                .into_iter()
+                .find(|&role| material.texture(role) == Some(id))
+                .map(|role| (model, role))
+        })
+    }
+
     pub fn import_glb_at(
         &mut self,
         expected: u64,
@@ -275,7 +347,7 @@ impl AssetStore {
                         path == old_path && next.same_placement_structure(old)
                     },
                 );
-            if !same_nodes || decoded.info.materials != prior.materials {
+            if !same_nodes || !same_material_structure(prior, &decoded.info) {
                 return Err(error("GLB structure changed (named paths, local transforms, material assignments or settings); import as a fresh model"));
             }
             if !decoded.info.same_clip_structure(prior) {
@@ -286,7 +358,7 @@ impl AssetStore {
         next.models.insert(id.into(), decoded.info.clone());
         next.validate_models()?;
         self.check_model_budget(&decoded)?;
-        let changed = prior.is_none_or(|prior| prior.hash != decoded.info.hash);
+        let changed = prior != Some(&decoded.info);
         let registry = changed
             .then(|| mutations::encode_registry(next))
             .transpose()?;

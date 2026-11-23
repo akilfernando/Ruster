@@ -65,8 +65,9 @@ impl ComponentWorkspace {
         for (name, source) in &model.materials {
             if source
                 .base_color_texture
-                .as_ref()
-                .is_some_and(|texture| !self.textures.contains_key(texture))
+                .iter()
+                .chain(&source.roughness_texture)
+                .any(|texture| !self.textures.contains_key(texture))
             {
                 return Err(invalid(
                     "A model texture is unavailable. Reimport its source.",

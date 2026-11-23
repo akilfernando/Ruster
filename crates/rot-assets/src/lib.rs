@@ -614,7 +614,7 @@ impl ExportSnapshot {
                     .and_then(|source| source.model_id.as_ref())
                     == Some(model_id)
                 {
-                    visit(&id, resource.bytes)?;
+                    visit(&id, resource.export_bytes()?)?;
                 }
             }
         }
@@ -837,8 +837,11 @@ impl AssetStore {
                         kind,
                         mesh_normal_policy: (kind == AssetKind::Mesh)
                             .then_some(MeshNormalPolicy::AuthoredWhenComplete),
-                        texture_role: (kind == AssetKind::Texture)
-                            .then_some(TextureRole::BaseColor),
+                        texture_role: if kind == AssetKind::Texture {
+                            self.model_texture(id).map(|(_, role)| role)
+                        } else {
+                            None
+                        },
                         source: model.source.clone(),
                         hash: model.hash.clone(),
                         model_id: Some(model.id.clone()),
