@@ -33,5 +33,9 @@ egui_tiles = { path = "../../third_party/egui_tiles" }
 # Native file dialogs through the desktop portal.
 rfd = { version = "0.18", default-features = false, features = ["xdg-portal"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+flate2 = "1"
+tar = { version = "0.4", default-features = false }
+
 [lints]
 workspace = true

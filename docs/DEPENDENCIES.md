@@ -5,7 +5,7 @@ This inventory covers every external package in the locked workspace resolution,
 Cargo's declared SPDX license expression is metadata supplied by each package. Its presence is not an independent license review or certification.
 Project source licensing does not change the licenses of dependencies.
 
-External locked package versions: **483**. Packages with no discovered readable license text: **72**.
+External locked package versions: **485**. Packages with no discovered readable license text: **72**.
 
 | Package | Version | Cargo source | Declared license expression | Upstream repository |
 | --- | --- | --- | --- | --- |
@@ -140,6 +140,7 @@ External locked package versions: **483**. Packages with no discovered readable 
 | fax | 0.2.7 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/pdf-rs/fax](https://github.com/pdf-rs/fax) |
 | fdeflate | 0.3.7 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/image-rs/fdeflate](https://github.com/image-rs/fdeflate) |
 | fearless_simd | 0.4.1 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/linebender/fearless_simd](https://github.com/linebender/fearless_simd) |
+| filetime | 0.2.30 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT/Apache-2.0` | [https://github.com/alexcrichton/filetime](https://github.com/alexcrichton/filetime) |
 | find-msvc-tools | 0.1.15 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/cc-rs](https://github.com/rust-lang/cc-rs) |
 | fixedbitset | 0.5.7 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/petgraph/fixedbitset](https://github.com/petgraph/fixedbitset) |
 | flate2 | 1.1.10 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/flate2-rs](https://github.com/rust-lang/flate2-rs) |
@@ -374,6 +375,7 @@ External locked package versions: **483**. Packages with no discovered readable 
 | strict-num | 0.1.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/RazrFalcon/strict-num](https://github.com/RazrFalcon/strict-num) |
 | syn | 2.0.119 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/syn](https://github.com/dtolnay/syn) |
 | syn | 3.0.9 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/syn](https://github.com/dtolnay/syn) |
+| tar | 0.4.46 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/composefs/tar-rs](https://github.com/composefs/tar-rs) |
 | tempfile | 3.27.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/Stebalien/tempfile](https://github.com/Stebalien/tempfile) |
 | thin-vec | 0.2.21 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/mozilla/thin-vec](https://github.com/mozilla/thin-vec) |
 | thiserror | 1.0.69 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/thiserror](https://github.com/dtolnay/thiserror) |

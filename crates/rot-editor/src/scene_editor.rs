@@ -11,6 +11,8 @@ mod asset_inspection;
 mod asset_timing;
 mod assets_browser;
 mod behavior_commands;
+#[cfg(target_os = "linux")]
+mod build_archive;
 mod capture_commands;
 mod capture_timing;
 mod collider_commands;

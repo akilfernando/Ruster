@@ -1,4 +1,5 @@
-//! Stage a runnable v23 creation and publish the entire directory atomically.
+//! Stage a runnable v23 creation and publish a folder or archive atomically.
+use super::build_archive;
 use crate::{
     editor_theme,
     strings::Text,
@@ -17,7 +18,7 @@ use rot_assets::{AssetKind, AssetStore};
 use rot_scene::component_scene::{ComponentScene, ComponentSession};
 use std::collections::BTreeMap;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -26,6 +27,49 @@ use std::sync::{
 
 pub(super) const PLAYER: &str = "rot-motion-lab";
 const APPLICATION: &str = "application";
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum OutputFormat {
+    #[default]
+    Folder,
+    LinuxArchive,
+}
+
+impl OutputFormat {
+    fn label(self) -> Text {
+        match self {
+            Self::Folder => Text::BuildFolderFormat,
+            Self::LinuxArchive => Text::BuildArchiveFormat,
+        }
+    }
+    fn wire(self) -> &'static str {
+        match self {
+            Self::Folder => "folder",
+            Self::LinuxArchive => "linux_archive",
+        }
+    }
+    fn update_path(self, path: &mut String) {
+        match self {
+            Self::Folder => {
+                if let Some(base) = path.strip_suffix(".tar.gz") {
+                    path.truncate(base.len());
+                }
+            }
+            Self::LinuxArchive if !path.ends_with(".tar.gz") => path.push_str(".tar.gz"),
+            Self::LinuxArchive => {}
+        }
+    }
+}
+
+enum BuildArtifact {
+    Folder(PathBuf),
+    Archive(ArchiveArtifact),
+}
+
+struct ArchiveArtifact {
+    path: PathBuf,
+    bytes: u64,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BuildFailureKind {
@@ -231,12 +275,27 @@ impl BuildRequest {
         })
     }
 
+    #[cfg(test)]
     fn publish(
-        mut self,
+        self,
         destination: &Path,
         player: &Path,
         cancel: &AtomicBool,
     ) -> Result<PathBuf, PublishError> {
+        match self.publish_output(destination, player, cancel, OutputFormat::Folder, || {})? {
+            BuildArtifact::Folder(application) => Ok(application),
+            BuildArtifact::Archive(_) => unreachable!("folder request"),
+        }
+    }
+
+    fn publish_output(
+        mut self,
+        destination: &Path,
+        player: &Path,
+        cancel: &AtomicBool,
+        format: OutputFormat,
+        compressing: impl FnOnce(),
+    ) -> Result<BuildArtifact, PublishError> {
         use rustix::{
             fs::{renameat_with, RenameFlags, CWD},
             io::Errno,
@@ -256,6 +315,14 @@ impl BuildRequest {
                 BuildFailureKind::InvalidDestination
                     .detail(format!("Invalid build path: {}", destination.display()))
             })?;
+        let archive_root = if format == OutputFormat::LinuxArchive {
+            Some(build_archive::game_name(name).ok_or_else(|| {
+                BuildFailureKind::InvalidDestination
+                    .detail("Choose an absolute path ending in .tar.gz.")
+            })?)
+        } else {
+            None
+        };
         let parent = destination
             .parent()
             .expect("an absolute path with a filename has a parent");
@@ -317,7 +384,7 @@ impl BuildRequest {
         cancelled()?;
         fs::copy(player, stage.join(APPLICATION)).map_err(|error| error.to_string())?;
         cancelled()?;
-        renameat_with(CWD, stage, CWD, &destination, RenameFlags::NOREPLACE).map_err(|error| {
+        let publish_error = |error: Errno| {
             let kind = match error {
                 Errno::EXIST | Errno::NOTEMPTY => BuildFailureKind::DestinationOccupied,
                 Errno::NOENT | Errno::NOTDIR | Errno::ACCESS | Errno::PERM | Errno::ROFS => {
@@ -326,9 +393,56 @@ impl BuildRequest {
                 _ => BuildFailureKind::BuildFailed,
             };
             kind.detail(format!("Publishing {}: {error}", destination.display()))
-        })?;
+        };
+        if let Some(top) = archive_root {
+            use rustix::fs::{linkat, open, AtFlags, Mode, OFlags};
+            use std::os::fd::AsRawFd;
+            let dir = open(
+                &parent,
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::empty(),
+            )
+            .map(fs::File::from)
+            .map_err(publish_error)?;
+            let meta = dir
+                .metadata()
+                .map_err(|error| BuildFailureKind::ParentUnavailable.detail(error))?;
+            let mut archive = tempfile::Builder::new()
+                .prefix(".rot-archive-")
+                .tempfile_in(format!("/proc/self/fd/{}", dir.as_raw_fd()))
+                .map_err(|error| BuildFailureKind::ParentUnavailable.detail(error))?;
+            compressing();
+            let bytes = build_archive::write(archive.as_file_mut(), stage, top, cancel);
+            cancelled()?;
+            let bytes = bytes.map_err(|error| BuildFailureKind::BuildFailed.detail(error))?;
+            if !parent
+                .symlink_metadata()
+                .is_ok_and(|now| now.is_dir() && now.ino() == meta.ino() && now.dev() == meta.dev())
+            {
+                return Err(BuildFailureKind::ParentUnavailable
+                    .detail("The archive destination folder changed while building.")
+                    .into());
+            }
+            cancelled()?;
+            // Publish the verified open file by its held descriptor, without
+            // replacing an output that appeared during compression.
+            linkat(
+                CWD,
+                format!("/proc/self/fd/{}", archive.as_file().as_raw_fd()),
+                &dir,
+                name,
+                AtFlags::SYMLINK_FOLLOW,
+            )
+            .map_err(publish_error)?;
+            return Ok(BuildArtifact::Archive(ArchiveArtifact {
+                path: destination,
+                bytes,
+            }));
+        }
+        renameat_with(CWD, stage, CWD, &destination, RenameFlags::NOREPLACE)
+            .map_err(publish_error)?;
         let _ = staging.keep();
-        Ok(destination.join(APPLICATION))
+        Ok(BuildArtifact::Folder(destination.join(APPLICATION)))
     }
     fn stage_scene(
         self,
@@ -481,6 +595,8 @@ enum BuildOutcome {
 #[derive(Default)]
 pub(super) struct BuildUi {
     path: Option<String>,
+    format: OutputFormat,
+    archive: Option<ArchiveArtifact>,
     player_window: Option<(PlayerWindow, String)>,
     startup: Option<StartupSelection>,
     focus: bool,
@@ -544,8 +660,9 @@ impl StartupSelection {
 }
 
 struct BuildWorker {
-    result: mpsc::Receiver<Result<PathBuf, PublishError>>,
+    result: mpsc::Receiver<Result<BuildArtifact, PublishError>>,
     cancel: Arc<AtomicBool>,
+    compressing: Arc<AtomicBool>,
     run: bool,
 }
 
@@ -588,6 +705,7 @@ impl BuildUi {
                 .to_string_lossy()
                 .into_owned(),
         );
+        self.format = OutputFormat::Folder;
         self.focus = true;
         self.show_failure = false;
         self.details_open = false;
@@ -614,6 +732,13 @@ impl BuildUi {
         use serde_json::json;
 
         let (state, published, failure) = match &self.outcome {
+            _ if self
+                .worker
+                .as_ref()
+                .is_some_and(|worker| worker.compressing.load(Ordering::Relaxed)) =>
+            {
+                ("compressing", false, None)
+            }
             _ if self.worker.is_some() => ("building", false, None),
             _ if matches!(&self.startup, Some(StartupSelection::Preparing { .. })) => {
                 ("preparing", false, None)
@@ -629,7 +754,11 @@ impl BuildUi {
             let (code, message, recovery) = failure.kind.feedback();
             json!({"code":code, "message":message.plain(), "recovery":recovery.plain()})
         });
-        let mut result = json!({"state":state, "published":published, "failure":failure});
+        let mut result = json!({
+            "state":state, "published":published, "failure":failure,
+            "output_format":self.format.wire(),
+            "archive_bytes":self.archive.as_ref().map(|archive| archive.bytes.to_string()),
+        });
         if let Some((player, scene_id)) = &self.player_window {
             result["player_window"] = super::project_startup::player_context(player, scene_id);
         }
@@ -660,8 +789,12 @@ impl BuildUi {
         let run = worker.run && !worker.cancel.load(Ordering::Relaxed);
         self.worker = None;
         let outcome = match result {
-            Ok(application) if run => Self::launch(&application),
-            Ok(_) => BuildOutcome::Built,
+            Ok(BuildArtifact::Folder(application)) if run => Self::launch(&application),
+            Ok(BuildArtifact::Folder(_)) => BuildOutcome::Built,
+            Ok(BuildArtifact::Archive(artifact)) => {
+                self.archive = Some(artifact);
+                BuildOutcome::Built
+            }
             Err(PublishError::Cancelled) => BuildOutcome::Cancelled,
             Err(PublishError::Failed(failure)) => BuildOutcome::Failed(failure),
         };
@@ -675,6 +808,37 @@ impl BuildUi {
             self.startup = None;
         }
         self.outcome = Some(outcome);
+    }
+
+    pub(super) fn show_archive(&self, ui: &mut egui::Ui) -> Option<String> {
+        let archive = self.archive.as_ref()?;
+        if !ui
+            .button(Text::BuildShowArchive.plain())
+            .on_hover_text(archive.path.display().to_string())
+            .clicked()
+        {
+            return None;
+        }
+        let parent = archive.path.parent().expect("published archive parent");
+        if !archive
+            .path
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.is_file())
+            || !parent
+                .canonicalize()
+                .is_ok_and(|resolved| resolved == parent)
+        {
+            return Some(Text::BuildArchiveUnavailable.plain().into());
+        }
+        match std::process::Command::new("xdg-open").arg(parent).spawn() {
+            Ok(mut child) => {
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+                None
+            }
+            Err(_) => Some(Text::AssetOpenFileManagerError.plain().into()),
+        }
     }
 
     fn launch(application: &Path) -> BuildOutcome {
@@ -713,12 +877,16 @@ impl BuildUi {
             .show(ctx, |ui| {
                 ui.set_width(ctx.content_rect().width().min(480.0) - 2.0 * SPACE_L);
                 ui.heading(Text::ComponentBuildApplication.plain());
-                let escape = ui
-                    .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+                let escape = !egui::Popup::is_any_open(ctx)
+                    && ui.input_mut(|input| {
+                        input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                    });
                 if let Some(worker) = &self.worker {
                     let cancelling = worker.cancel.load(Ordering::Relaxed);
                     let status = if cancelling {
                         Text::BuildCancelling
+                    } else if worker.compressing.load(Ordering::Relaxed) {
+                        Text::BuildCompressingArchive
                     } else {
                         Text::Building
                     };
@@ -756,7 +924,44 @@ impl BuildUi {
                     return;
                 }
 
-                let label = ui.label(Text::ComponentBuildFolder.plain());
+                let old_format = self.format;
+                ui_kit::property_row_with_label(
+                    ui,
+                    Text::BuildOutputFormat.plain(),
+                    |ui, label| {
+                        let focus =
+                            super::combo_focus::ComboFocus::capture(ui, "build_output_format");
+                        let mut selected = false;
+                        let response = egui::ComboBox::from_id_salt("build_output_format")
+                            .selected_text(self.format.label().plain())
+                            .show_ui(ui, |ui| {
+                                for format in [OutputFormat::Folder, OutputFormat::LinuxArchive] {
+                                    if ui
+                                        .selectable_value(
+                                            &mut self.format,
+                                            format,
+                                            format.label().plain(),
+                                        )
+                                        .clicked()
+                                    {
+                                        selected = true;
+                                        ui.close();
+                                    }
+                                }
+                            });
+                        focus.restore(ui, &response.response, selected);
+                        response.response.labelled_by(label);
+                    },
+                );
+                if self.format != old_format {
+                    self.format.update_path(&mut path);
+                }
+                let archive = self.format == OutputFormat::LinuxArchive;
+                let label = ui.label(if archive {
+                    Text::BuildArchiveFile.plain()
+                } else {
+                    Text::ComponentBuildFolder.plain()
+                });
                 let edit = ui
                     .add(egui::TextEdit::singleline(&mut path).desired_width(f32::INFINITY))
                     .labelled_by(label.id);
@@ -833,11 +1038,15 @@ impl BuildUi {
                 if let Some(BuildOutcome::Failed(failure)) = failure {
                     Self::show_failure(ui, failure, &mut self.details_open);
                 }
-                let labels = [
-                    Text::ComponentCancel,
-                    Text::ComponentBuildRun,
-                    Text::ComponentBuild,
-                ];
+                let labels: &[Text] = if archive {
+                    &[Text::ComponentCancel, Text::ComponentBuild]
+                } else {
+                    &[
+                        Text::ComponentCancel,
+                        Text::ComponentBuildRun,
+                        Text::ComponentBuild,
+                    ]
+                };
                 let pad = 2.0 * ui.spacing().button_padding.x;
                 let font = egui::TextStyle::Body.resolve(ui.style());
                 let gap = ui.spacing().item_spacing.x;
@@ -865,9 +1074,10 @@ impl BuildUi {
                         || escape;
                     let enabled = saved && !path.trim().is_empty();
                     ui.add_enabled_ui(enabled, |ui| {
-                        let run = ui_kit::button(ui, Text::ComponentBuildRun.plain())
-                            .on_hover_text(Text::ComponentBuildRun.plain())
-                            .clicked();
+                        let run = !archive
+                            && ui_kit::button(ui, Text::ComponentBuildRun.plain())
+                                .on_hover_text(Text::ComponentBuildRun.plain())
+                                .clicked();
                         let build = editor_theme::primary_button(ui, Text::ComponentBuild.plain())
                             .on_hover_text(Text::BuildSubmitShortcut.plain())
                             .clicked();
@@ -888,6 +1098,7 @@ impl BuildUi {
             self.details_open = false;
             self.show_failure = false;
             self.outcome = None;
+            self.archive = None;
             let path = self.path.as_deref().expect("open build dialog").trim();
             match self.start(ctx, session, assets, PathBuf::from(path), run) {
                 Ok(worker) => {
@@ -988,12 +1199,19 @@ impl BuildUi {
             .join(PLAYER);
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = cancel.clone();
+        let compressing = Arc::new(AtomicBool::new(false));
+        let worker_progress = compressing.clone();
+        let format = self.format;
         let ctx = ctx.clone();
         let (sender, result) = mpsc::sync_channel(1);
         std::thread::Builder::new()
             .name("rot-build".into())
             .spawn(move || {
-                let outcome = request.publish(&destination, &player, &worker_cancel);
+                let outcome =
+                    request.publish_output(&destination, &player, &worker_cancel, format, || {
+                        worker_progress.store(true, Ordering::Relaxed);
+                        ctx.request_repaint();
+                    });
                 let _ = sender.send(outcome);
                 ctx.request_repaint();
             })
@@ -1001,6 +1219,7 @@ impl BuildUi {
         Ok(BuildWorker {
             result,
             cancel,
+            compressing,
             run,
         })
     }
@@ -1285,7 +1504,7 @@ f 1 2 3
             .is_err());
         assert_eq!(
             build.inspect(),
-            json!({"state":"preparing", "published":false, "failure":null,
+            json!({"state":"preparing", "published":false, "failure":null, "output_format":"folder", "archive_bytes":null,
                 "player_window": super::super::project_startup::player_context(&PlayerWindow::default(), "title")})
         );
         let ctx = egui::Context::default();
@@ -1923,6 +2142,7 @@ f 1 2 3
             ui.worker = Some(BuildWorker {
                 result: receiver,
                 cancel: Arc::new(AtomicBool::new(cancelled)),
+                compressing: Arc::new(AtomicBool::new(false)),
                 run: true,
             });
             assert_eq!(ui.inspect()["state"], "building");
@@ -1939,7 +2159,7 @@ f 1 2 3
         assert!(!ui.is_open());
         assert_eq!(
             ui.inspect(),
-            json!({"state":"cancelled", "published":false, "failure":null,
+            json!({"state":"cancelled", "published":false, "failure":null, "output_format":"folder", "archive_bytes":null,
                 "player_window": super::super::project_startup::player_context(&PlayerWindow::default(), "scene")})
         );
 
@@ -1952,7 +2172,11 @@ f 1 2 3
         let application = root.path().join(APPLICATION);
         fs::write(&application, b"#!/no-such-rot-build-interpreter\n").unwrap();
         fs::set_permissions(&application, fs::Permissions::from_mode(0o755)).unwrap();
-        deliver(&mut ui, Ok(application.clone()), false);
+        deliver(
+            &mut ui,
+            Ok(BuildArtifact::Folder(application.clone())),
+            false,
+        );
         assert!(ui.is_open());
         assert!(application.exists());
         assert!(matches!(
@@ -1962,7 +2186,7 @@ f 1 2 3
         ));
         assert_eq!(
             ui.inspect(),
-            json!({"state":"launch_failed", "published":true,
+            json!({"state":"launch_failed", "published":true, "output_format":"folder", "archive_bytes":null,
                 "player_window": super::super::project_startup::player_context(&PlayerWindow::default(), "scene"),
                 "failure":{
                 "code":"launch_failed",

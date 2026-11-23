@@ -2706,6 +2706,8 @@ impl ComponentWorkspace {
         };
         let has_import_issues = !self.asset_browser.issues.is_empty();
         let light_budget_exceeded = self.light_budget_exceeded();
+        #[cfg(target_os = "linux")]
+        let mut reveal_error = None;
         if scene_error.is_some()
             || build_status.is_some()
             || self.prefab_feedback.is_some()
@@ -2716,7 +2718,13 @@ impl ComponentWorkspace {
                 if let Some(error) = scene_error {
                     ui.colored_label(editor_theme::colors(ui).error, error);
                 } else if let Some(status) = build_status {
-                    ui.add(egui::Label::new(crate::strings::tr(ui.ctx(), status)).truncate());
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Label::new(crate::strings::tr(ui.ctx(), status)).truncate());
+                        #[cfg(target_os = "linux")]
+                        {
+                            reveal_error = self.build.show_archive(ui);
+                        }
+                    });
                 } else if light_budget_exceeded {
                     ui.colored_label(
                         editor_theme::colors(ui).warning,
@@ -2738,6 +2746,10 @@ impl ComponentWorkspace {
                     self.prefab_details_open = false;
                 }
             });
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(error) = reveal_error {
+            self.error = Some(error);
         }
         self.workspace.shortcuts_ui(&ctx);
         if let Some(mut palette) = self.palette.take() {
