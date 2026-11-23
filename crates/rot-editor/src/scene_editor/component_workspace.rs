@@ -1452,10 +1452,6 @@ impl ComponentWorkspace {
                 return;
             }
             Action::Open => {
-                #[cfg(unix)]
-                {
-                    self.revoke_ai_connection = true;
-                }
                 self.scene_picker = Some(ScenesPicker::new(
                     ScenePickerPurpose::Open,
                     self.startup_project.clone(),
@@ -2933,6 +2929,10 @@ impl ComponentWorkspace {
             let dirty = self.session.is_dirty() || self.draft_dirty();
             match picker.show(&ctx, dirty) {
                 Some(SceneChoice::Browse) => {
+                    #[cfg(unix)]
+                    {
+                        self.revoke_ai_connection = true;
+                    }
                     self.open_path = Some(String::new());
                     self.open_focused = false;
                     self.error = None;
