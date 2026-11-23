@@ -110,10 +110,11 @@ impl ComponentScene {
     }
 
     pub fn behavior_projection(&self) -> Result<BehaviorInput, SceneError> {
-        self.validate()?;
+        let hierarchy = self.validate()?;
         let mut hidden_mesh_renderers = None;
         let mut scene = Scene::empty(self.id.clone());
         scene.display = self.display;
+        scene.player_view = self.effective_camera(&hierarchy).cloned();
         scene.materials.clone_from(&self.materials);
         let mut authoring = Authoring {
             sources: self.sources.clone(),
@@ -227,12 +228,7 @@ impl ComponentScene {
                             return Err(duplicate("Animator"));
                         }
                     }
-                    Component::Camera { view } => {
-                        if self.gameplay_camera.as_ref() == Some(&component.id) && component.enabled
-                        {
-                            scene.player_view = Some(view.clone());
-                        }
-                    }
+                    Component::Camera { .. } => {}
                     Component::Script {
                         binding,
                         source_kind,

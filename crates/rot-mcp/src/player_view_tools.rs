@@ -33,11 +33,13 @@ pub fn list() -> Vec<Value> {
         json!({"name":"scene_player_view_set",
             "description":"Set or clear the optional authored player view as one undoable scene edit. Use the current scene token and revision. Follow an existing Object or Group by world-space offset. Yaw/pitch use radians; vertical FOV uses degrees. Use null to clear.",
             "inputSchema":{"type":"object","additionalProperties":false,
-                "required":["expected_session_token","expected_revision","player_view"],
+                "required":["expected_session_token","expected_revision"],
+                "anyOf":[{"required":["player_view"]},{"required":["component_id"]}],
                 "properties":{
                     "expected_session_token":{"type":"string","minLength":1,"maxLength":256},
                     "expected_revision":{"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20},
-                    "player_view":{"anyOf":[{"type":"null"},view]}
+                    "player_view":{"anyOf":[{"type":"null"},view]},
+                    "component_id":{"type":["string","null"],"minLength":1,"maxLength":128}
                 }},
             "annotations":{"readOnlyHint":false,"openWorldHint":false}}),
     ]
@@ -52,19 +54,28 @@ pub fn valid(name: &str, args: &Value) -> bool {
         "scene_player_view_set" => {
             super::exact_keys(
                 map,
-                &["expected_session_token", "expected_revision", "player_view"],
-                &[],
+                &["expected_session_token", "expected_revision"],
+                &["player_view", "component_id"],
             ) && args["expected_session_token"]
                 .as_str()
                 .is_some_and(|s| !s.is_empty() && s.len() <= 256)
                 && super::canonical_u64(&args["expected_revision"])
-                && serde_json::from_value::<Option<PlayerView>>(args["player_view"].clone())
-                    .is_ok_and(|view| {
-                        view.is_none_or(|view| {
+                && args.get("component_id").is_none_or(|value| {
+                    value.is_null()
+                        || value
+                            .as_str()
+                            .is_some_and(|id| rot_scene::validate_id(id).is_ok())
+                })
+                && match args.get("player_view") {
+                    None => args["component_id"].is_string(),
+                    Some(Value::Null) => !map.contains_key("component_id"),
+                    Some(value) => {
+                        serde_json::from_value::<PlayerView>(value.clone()).is_ok_and(|view| {
                             view.followed_target()
                                 .is_none_or(|id| rot_scene::validate_id(id).is_ok())
                         })
-                    })
+                    }
+                }
         }
         _ => false,
     }

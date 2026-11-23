@@ -271,8 +271,17 @@ fn snapshot_error(error: SceneError) -> String {
 pub fn static_component_preview(
     scene: &ComponentScene,
 ) -> Result<Option<Arc<rot_render::component_preview::ComponentPreview>>, SceneError> {
-    if supports_static_preview(scene)
-        && (scene.objects.len() > rot_scene::MAX_OBJECTS
+    let fixed_or_unset = match scene.designated_camera() {
+        Some((index, component, view)) if component.enabled && view.followed_target().is_some() => {
+            !rot_scene::component_scene::ObjectHierarchy::build(&scene.objects)?.effectively_enabled
+                [index]
+        }
+        _ => true,
+    };
+    if fixed_or_unset
+        && supports_static_preview(scene)
+        && (scene.gameplay_camera.is_some()
+            || scene.objects.len() > rot_scene::MAX_OBJECTS
             || scene.objects.iter().any(|object| {
                 !object.enabled
                     || object.parent.is_some()
@@ -297,7 +306,6 @@ fn supports_static_preview(scene: &ComponentScene) -> bool {
     scene.sources.is_empty()
         && scene.actions == Default::default()
         && scene.hud.is_default()
-        && scene.gameplay_camera.is_none()
         && scene.objects.iter().all(|object| {
             object.components.iter().all(|component| {
                 !matches!(
@@ -711,7 +719,13 @@ impl CreationManifest {
         let scene = RuntimeScene::from_document(snapshot)?;
         match &scene {
             RuntimeScene::Behavior(session) => self.validate_behavior_scene(session)?,
-            RuntimeScene::StaticHierarchy { scene, .. } => {
+            RuntimeScene::StaticHierarchy { scene, preview } => {
+                if self.initial_camera.is_some() && preview.scene().player_view.is_some() {
+                    return Err(
+                        "Remove legacy initial camera framing when the scene owns a player view."
+                            .into(),
+                    );
+                }
                 if self.version != NO_AUDIO_VERSION {
                     return Err("Static component hierarchies require descriptor version 5".into());
                 }

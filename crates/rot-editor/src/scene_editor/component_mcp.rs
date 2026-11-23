@@ -125,6 +125,12 @@ impl ComponentWorkspace {
         let invalid = || ("invalid_arguments", "Check the tool arguments.".into());
         let map = args.as_object().ok_or_else(invalid)?;
         let revision = self.session.revision();
+        if op == "player_view_inspect" {
+            if !map.is_empty() {
+                return Err(invalid());
+            }
+            return Ok(self.inspect_gameplay_camera());
+        }
         if op == "scene_inspect" {
             if map.keys().any(|key| key != "offset") {
                 return Err(invalid());
@@ -242,6 +248,10 @@ impl ComponentWorkspace {
                     .filter(|key| map.contains_key(**key))
                     .count()
             }
+            "scene_player_view_set" => {
+                2 + usize::from(map.contains_key("player_view"))
+                    + usize::from(map.contains_key("component_id"))
+            }
             "scene_mesh" => 5,
             "scene_create" | "scene_group_create" => {
                 let optional = ["parent_id", "transform", "primitive", "member_ids"];
@@ -278,6 +288,47 @@ impl ComponentWorkspace {
                 "drafts_pending",
                 "Finish the pending editor change first.".into(),
             ));
+        }
+
+        if op == "scene_player_view_set" {
+            if self.runtime.in_play_mode() {
+                return Err((
+                    "play_active",
+                    "Stop Play before editing the Game Camera.".into(),
+                ));
+            }
+            let destination = match args.get("component_id") {
+                Some(Value::String(id)) if rot_scene::validate_id(id).is_ok() => {
+                    Some(Some(id.as_str()))
+                }
+                Some(Value::Null) => Some(None),
+                None => None,
+                _ => return Err(invalid()),
+            };
+            let next = match (args.get("player_view"), destination) {
+                (None, Some(Some(id))) => {
+                    self.set_camera_designation(revision, Some(id.to_owned()))
+                }
+                (Some(Value::Null), None) => self.set_camera_designation(revision, None),
+                (Some(value), destination) if !value.is_null() => {
+                    let view = serde_json::from_value::<rot_scene::PlayerView>(value.clone())
+                        .map_err(|_| invalid())?;
+                    let default;
+                    let id = match destination {
+                        Some(id) => id,
+                        None => {
+                            default = self.default_camera_destination();
+                            default.as_deref()
+                        }
+                    };
+                    self.update_fixed_camera(revision, id, view)
+                }
+                _ => return Err(invalid()),
+            }
+            .map_err(|error| ("invalid_player_view", error.to_string()))?;
+            let mut payload = self.inspect_gameplay_camera();
+            payload["changed"] = json!(next != revision);
+            return Ok(payload);
         }
 
         if op == "scene_prefab" {
@@ -641,6 +692,58 @@ impl ComponentWorkspace {
             .ok_or_else(object_not_found)?;
         self.validate_material_bindings(before, object)
             .map_err(|error| ("material_unavailable", error.to_string()))
+    }
+
+    fn inspect_gameplay_camera(&self) -> Value {
+        use super::super::player_view::{camera_observation, resolved_camera_observation};
+        use rot_scene::{PlayerAnchor, ResolvedPlayerView};
+
+        let scene = self.session.scene();
+        let designated = scene.designated_camera();
+        let active = designated.is_some_and(|(index, component, _)| {
+            component.enabled && self.camera_owner_enabled(index)
+        });
+        let authored = designated.filter(|_| active).and_then(|(_, _, view)| {
+            let anchor = match &view.anchor {
+                PlayerAnchor::Fixed { position } => *position,
+                PlayerAnchor::Follow { target_id, offset } => {
+                    let index = scene
+                        .objects
+                        .iter()
+                        .position(|object| &object.id == target_id)?;
+                    let world = scene.world_matrices().ok()?[index].w_axis.to_array();
+                    let position =
+                        std::array::from_fn(|axis| (world[axis] + f64::from(offset[axis])) as f32);
+                    if !position
+                        .iter()
+                        .all(|value| value.is_finite() && value.abs() <= 10_000.0)
+                    {
+                        return None;
+                    }
+                    position
+                }
+            };
+            Some(resolved_camera_observation(ResolvedPlayerView {
+                anchor,
+                yaw: view.yaw,
+                pitch: view.pitch,
+                distance: view.distance,
+                vertical_fov_degrees: view.vertical_fov_degrees,
+            }))
+        });
+        let runtime = self.runtime.displayed_frame().map(|frame| json!({
+            "tick":frame.tick.to_string(),"authored_revision":frame.key.authored_revision.to_string(),
+            "stale":self.runtime.stale,"camera":camera_observation(&frame.scene),
+        }));
+        json!({
+            "mode": if self.navigation.player_view {"player"} else {"scene"},
+            "object_id": designated.map(|(index, _, _)| &scene.objects[index].id),
+            "component_id": designated.map(|(_, component, _)| &component.id),
+            "effective_state": if active {"active"} else if designated.is_some() {"suspended"} else {"unset"},
+            "player_view": designated.map(|(_, _, view)| view),
+            "authored_camera": authored,
+            "runtime":runtime, "dirty":self.session.is_dirty(),
+        })
     }
 
     fn mesh_assignment(&self, args: &Value) -> Result<(ObjectNode, Value), CommandError> {

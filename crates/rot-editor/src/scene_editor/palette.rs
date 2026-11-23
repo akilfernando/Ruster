@@ -71,7 +71,12 @@ impl SceneEditor {
         let (run, keep_open) = palette.show(
             ctx,
             &self.workspace,
-            |action| action != Action::GroupSelection,
+            |action| {
+                !matches!(
+                    action,
+                    Action::GroupSelection | Action::SetGameCameraFromView
+                )
+            },
             |action| self.command_enabled(action),
         );
         if let Some(action) = run {

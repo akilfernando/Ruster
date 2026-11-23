@@ -178,6 +178,7 @@ pub(super) fn components(
             component.kind,
             Component::MeshRenderer { .. }
                 | Component::Collider { .. }
+                | Component::Camera { .. }
                 | Component::Light { .. }
                 | Component::Script {
                     source_kind: Some(_),
@@ -253,6 +254,36 @@ pub(super) fn components(
                         intensity,
                         kind,
                     } => submit |= light_fields(ui, color, intensity, kind),
+                    Component::Camera { view } => {
+                        let mode = super::component_workspace::component_camera::camera_mode(view);
+                        ui_kit::property_row(ui, Text::ComponentCamera.plain(), |ui| {
+                            ui.label(mode);
+                        });
+                        if let rot_scene::PlayerAnchor::Fixed {
+                            position: [x, y, z],
+                        } = view.anchor
+                        {
+                            ui_kit::property_row(ui, Text::CameraWorldTarget.plain(), |ui| {
+                                ui.label(format!("{x:.3}, {y:.3}, {z:.3}"));
+                            });
+                        }
+                        for (label, value) in [
+                            (Text::CameraYaw, format!("{:.2}°", view.yaw.to_degrees())),
+                            (
+                                Text::CameraPitch,
+                                format!("{:.2}°", view.pitch.to_degrees()),
+                            ),
+                            (Text::CameraDistance, format!("{:.3}", view.distance)),
+                            (
+                                Text::CameraVerticalFov,
+                                format!("{:.2}°", view.vertical_fov_degrees),
+                            ),
+                        ] {
+                            ui_kit::property_row(ui, label.plain(), |ui| {
+                                ui.label(value);
+                            });
+                        }
+                    }
                     Component::Script {
                         binding,
                         source_kind,

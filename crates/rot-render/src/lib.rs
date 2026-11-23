@@ -605,6 +605,9 @@ pub struct NavigationOptions {
     pub player_view: bool,
     pub toggle_projection: bool,
     pub view_preset: Option<ViewPreset>,
+    /// An optional frontend command in the Scene view's preset menu.
+    pub capture_camera_label: Option<&'static str>,
+    pub capture_camera_requested: bool,
     /// A frontend-owned Fit succeeded outside the shared geometry route.
     /// Consumed once to clear its old diagnostic, without claiming a shared Fit.
     pub clear_fit_error: bool,
@@ -638,6 +641,8 @@ impl Default for NavigationOptions {
             player_view: false,
             toggle_projection: false,
             view_preset: None,
+            capture_camera_label: None,
+            capture_camera_requested: false,
             clear_fit_error: false,
             overlay_origin: None,
             show_stats: false,
@@ -1212,6 +1217,16 @@ pub fn allocate_viewport(
                     navigation.reset = true;
                     ui.ctx().request_repaint();
                     ui.close();
+                }
+                if let Some(label) = navigation.capture_camera_label {
+                    ui.separator();
+                    if ui
+                        .add_enabled(navigation_enabled, egui::Button::new(label))
+                        .clicked()
+                    {
+                        navigation.capture_camera_requested = true;
+                        ui.close();
+                    }
                 }
             });
             if ui

@@ -98,6 +98,6 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("hud_panel_set", "Create, change or delete (null) a HUD panel."),
     ("hud_panel_move", "Change a HUD panel's drawing order."),
     ("player_view_inspect", "Read the game camera and how it frames the scene at 4:3 and 16:9."),
-    ("scene_player_view_set", "Set the game camera, or clear it with null. It can follow an object at an offset; yaw and pitch in radians, field of view in degrees."),
+    ("scene_player_view_set", "Set the game camera (null clears). v23 uses a fixed view and optional component_id; component_id alone activates an existing camera. Yaw and pitch are radians, FOV degrees."),
     ("scene_animation_set", "Set or remove the animation clip played on an imported model."),
 ];

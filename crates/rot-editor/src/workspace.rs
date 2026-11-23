@@ -87,6 +87,7 @@ pub(super) enum Action {
     GroupSelection,
     CreateDirectionalLight,
     GameCamera,
+    SetGameCameraFromView,
     GameUi,
     AssignCube,
     ToggleHierarchy,
@@ -107,7 +108,7 @@ pub(super) enum Action {
     CommandPalette,
 }
 impl Action {
-    pub const ALL: [Self; 70] = [
+    pub const ALL: [Self; 71] = [
         Self::New,
         Self::Open,
         Self::Save,
@@ -160,6 +161,7 @@ impl Action {
         Self::GroupSelection,
         Self::CreateDirectionalLight,
         Self::GameCamera,
+        Self::SetGameCameraFromView,
         Self::GameUi,
         Self::AssignCube,
         Self::ToggleHierarchy,
@@ -234,6 +236,7 @@ impl Action {
             Self::GroupSelection => Text::LabelGroupSelection.plain(),
             Self::CreateDirectionalLight => Text::LabelCreateDirectionalLight.plain(),
             Self::GameCamera => Text::LabelGameCamera.plain(),
+            Self::SetGameCameraFromView => Text::SetGameCameraFromView.plain(),
             Self::GameUi => Text::LabelGameUi.plain(),
             Self::AssignCube => Text::LabelAssignCube.plain(),
             Self::ToggleHierarchy => Text::ComponentHierarchy.plain(),
@@ -308,6 +311,7 @@ impl Action {
             Self::GroupSelection => "Group selection",
             Self::CreateDirectionalLight => "Create directional light",
             Self::GameCamera => "Game camera",
+            Self::SetGameCameraFromView => "Set Game Camera from View",
             Self::GameUi => "Game UI",
             Self::AssignCube => "Assign procedural cube",
             Self::ToggleHierarchy => "Toggle Hierarchy",
@@ -485,6 +489,7 @@ impl Default for Preferences {
                         Action::CreateEmpty,
                         Action::CreateDirectionalLight,
                         Action::GameCamera,
+                        Action::SetGameCameraFromView,
                         Action::GameUi,
                         Action::AssignCube,
                         Action::ToggleHierarchy,

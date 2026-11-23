@@ -63,6 +63,27 @@ struct SceneFile<S> {
 }
 
 impl ComponentScene {
+    /// Return the designated Camera's owner index, component and authored settings.
+    pub fn designated_camera(&self) -> Option<(usize, &ComponentInstance, &PlayerView)> {
+        let id = self.gameplay_camera.as_deref()?;
+        self.objects.iter().enumerate().find_map(|(index, object)| {
+            object
+                .components
+                .iter()
+                .find_map(|component| match &component.kind {
+                    Component::Camera { view } if component.id == id => {
+                        Some((index, component, view))
+                    }
+                    _ => None,
+                })
+        })
+    }
+
+    pub fn effective_camera(&self, hierarchy: &ObjectHierarchy) -> Option<&PlayerView> {
+        let (index, component, view) = self.designated_camera()?;
+        (component.enabled && hierarchy.effectively_enabled[index]).then_some(view)
+    }
+
     pub fn validate(&self) -> Result<ObjectHierarchy, SceneError> {
         validate_id(&self.id)?;
         let hierarchy = ObjectHierarchy::build(&self.objects)?;

@@ -4713,6 +4713,7 @@ impl SceneEditor {
         }
         match action {
             Action::New => self.request_new(),
+            Action::SetGameCameraFromView => {}
             Action::CreateCube => self.object_action("create"),
             Action::CreateSphere => self.object_action("create_sphere"),
             Action::CreateCapsule => self.object_action("create_capsule"),

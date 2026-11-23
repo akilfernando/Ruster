@@ -268,6 +268,10 @@ pub fn project_editor_with_world(
     let mut scene = Scene::empty(component_scene.id.clone());
     scene.materials.clone_from(&component_scene.materials);
     scene.display = component_scene.display;
+    scene.player_view = component_scene
+        .effective_camera(&hierarchy)
+        .filter(|view| view.followed_target().is_none())
+        .cloned();
     let mut lights = BTreeMap::new();
     let mut matrices = Vec::new();
     let mut point_lights = 0;

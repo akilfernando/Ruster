@@ -619,26 +619,8 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
             output["authored_hud"] = serde_json::to_value(&app.session().authoring().hud)
                 .map_err(|error| error.to_string())?;
         }
-        if let Some(view) = app
-            .content()
-            .scene()
-            .resolve_player_view()
-            .map_err(|error| error.to_string())?
-        {
-            let mut matrices = Vec::new();
-            let mut eye = None;
-            for aspect in [4.0 / 3.0, 16.0 / 9.0] {
-                let camera = rot_app::player_view_projection(view, aspect)
-                    .ok_or("Resolved player view could not be projected")?;
-                eye = Some(camera.eye);
-                matrices.push(serde_json::json!({
-                    "aspect": aspect, "view": camera.view, "projection": camera.projection
-                }));
-            }
-            output["player_view"] = serde_json::json!({
-                "anchor": view.anchor, "eye": eye, "vertical_fov_degrees": view.vertical_fov_degrees,
-                "matrices": matrices
-            });
+        if let Some(camera) = player_view_report(app.content().scene())? {
+            output["player_view"] = camera;
         }
         if let Some(camera) = manifest.initial_camera {
             output["initial_camera"] = serde_json::to_value(camera).map_err(|e| e.to_string())?;
@@ -685,6 +667,29 @@ impl Application for StaticHierarchyApp {
     }
 }
 
+fn player_view_report(scene: &rot_scene::Scene) -> Result<Option<serde_json::Value>, String> {
+    let Some(view) = scene
+        .resolve_player_view()
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(None);
+    };
+    let mut matrices = Vec::new();
+    let mut eye = None;
+    for aspect in [4.0 / 3.0, 16.0 / 9.0] {
+        let camera = rot_app::player_view_projection(view, aspect)
+            .ok_or("Resolved player view could not be projected")?;
+        eye = Some(camera.eye);
+        matrices.push(serde_json::json!({
+            "aspect": aspect, "view": camera.view, "projection": camera.projection
+        }));
+    }
+    Ok(Some(serde_json::json!({
+        "anchor": view.anchor, "eye": eye, "vertical_fov_degrees": view.vertical_fov_degrees,
+        "matrices": matrices
+    })))
+}
+
 fn execute_static_hierarchy(
     options: Options,
     manifest: CreationManifest,
@@ -712,7 +717,7 @@ fn execute_static_hierarchy(
             .zip(matrices)
             .map(|(object, matrix)| (&object.id, matrix.to_cols_array_2d()))
             .collect::<std::collections::BTreeMap<_, _>>();
-        let output = serde_json::json!({
+        let mut output = serde_json::json!({
             "mode": "creation",
             "title": manifest.title,
             "scene_id": scene.id,
@@ -722,6 +727,9 @@ fn execute_static_hierarchy(
             "runtime_scene": scene,
             "world_matrices": world_matrices,
         });
+        if let Some(camera) = player_view_report(runtime.app().content().scene())? {
+            output["player_view"] = camera;
+        }
         println!(
             "{}",
             serde_json::to_string_pretty(&output).map_err(|error| error.to_string())?

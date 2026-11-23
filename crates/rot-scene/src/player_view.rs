@@ -45,7 +45,7 @@ impl PlayerView {
         }
     }
 
-    pub(crate) fn validate_settings(&self) -> Result<(), SceneError> {
+    pub fn validate_settings(&self) -> Result<(), SceneError> {
         if !self.yaw.is_finite()
             || self.yaw.abs() > 10_000.0
             || !self.pitch.is_finite()

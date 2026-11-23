@@ -79,6 +79,7 @@ enum SceneChange {
         object: ObjectNode,
     },
     Display(DisplayProfile),
+    GameplayCamera(Option<String>),
     Material {
         id: String,
         value: Option<OpaqueMaterial>,
@@ -110,6 +111,9 @@ impl SceneChange {
                 object: std::mem::replace(&mut objects[index], object),
             },
             Self::Display(value) => Self::Display(std::mem::replace(&mut scene.display, value)),
+            Self::GameplayCamera(value) => {
+                Self::GameplayCamera(std::mem::replace(&mut scene.gameplay_camera, value))
+            }
             Self::Material { id, value } => {
                 let previous = match value {
                     Some(material) => scene.materials.insert(id.clone(), material),
@@ -347,6 +351,66 @@ impl ComponentSession {
             return Ok(self.revision);
         }
         self.commit(changes)
+    }
+
+    /// Designate an existing Camera, or clear only the designation.
+    pub fn set_gameplay_camera(
+        &mut self,
+        expected: u64,
+        camera: Option<String>,
+    ) -> Result<u64, SceneError> {
+        self.edit_gameplay_camera(expected, camera, None)
+    }
+
+    /// Insert or update a camera owner and designate its camera in one edit.
+    pub fn put_gameplay_camera(
+        &mut self,
+        expected: u64,
+        camera: String,
+        owner: ObjectNode,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected)?;
+        if !owner.components.iter().any(|component| {
+            component.id == camera && matches!(component.kind, Component::Camera { .. })
+        }) {
+            return Err(SceneError::Invalid(
+                "Camera owner does not contain the chosen Camera.".into(),
+            ));
+        }
+        self.edit_gameplay_camera(expected, Some(camera), Some(owner))
+    }
+
+    fn edit_gameplay_camera(
+        &mut self,
+        expected: u64,
+        camera: Option<String>,
+        owner: Option<ObjectNode>,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected)?;
+        let mut changes = Vec::new();
+        if let Some(object) = owner {
+            match self
+                .scene
+                .objects
+                .iter()
+                .position(|node| node.id == object.id)
+            {
+                Some(index) if self.scene.objects[index] == object => {}
+                Some(index) => changes.push(SceneChange::Replace { index, object }),
+                None => changes.push(SceneChange::Insert {
+                    index: self.scene.objects.len(),
+                    object,
+                }),
+            }
+        }
+        if self.scene.gameplay_camera != camera {
+            changes.push(SceneChange::GameplayCamera(camera));
+        }
+        if changes.is_empty() {
+            Ok(self.revision)
+        } else {
+            self.commit(changes)
+        }
     }
 
     /// Change scene-wide display settings as one reversible authoring edit.
@@ -1078,7 +1142,18 @@ impl ComponentSession {
             .revision
             .checked_add(1)
             .ok_or(SceneError::RevisionOverflow)?;
-        let inverse = apply_changes(changes, &mut self.scene);
+        let mut inverse = apply_changes(changes, &mut self.scene);
+        if self.scene.gameplay_camera.is_some()
+            && !inverse
+                .iter()
+                .any(|change| matches!(change, SceneChange::GameplayCamera(_)))
+            && self.scene.designated_camera().is_none()
+        {
+            inverse.insert(
+                0,
+                SceneChange::GameplayCamera(self.scene.gameplay_camera.take()),
+            );
+        }
         if let Err(error) = self
             .scene
             .validate()

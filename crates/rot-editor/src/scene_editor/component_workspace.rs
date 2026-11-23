@@ -18,6 +18,9 @@ use rot_scene::{Primitive, SceneError, Transform};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 
+#[path = "component_camera.rs"]
+pub(super) mod component_camera;
+
 #[path = "component_display.rs"]
 mod component_display;
 
@@ -236,6 +239,7 @@ pub(super) struct ComponentWorkspace {
     multi_draft: Option<MultiInspector>,
     material_draft: Option<component_material::Draft>,
     display_draft: Option<component_display::Draft>,
+    camera_authoring: component_camera::Authoring,
     material_usage: component_material::Usage,
     edit_scene_during_play: bool,
     component_picker: component_inspector::ComponentPicker,
@@ -350,6 +354,7 @@ impl ComponentWorkspace {
             multi_draft: None,
             material_draft: None,
             display_draft: None,
+            camera_authoring: Default::default(),
             material_usage: component_material::Usage::default(),
             edit_scene_during_play: false,
             component_picker: Default::default(),
@@ -690,7 +695,9 @@ impl ComponentWorkspace {
     }
 
     pub(super) fn surface_edit_pending(&self) -> bool {
-        self.material_draft.is_some() || self.display_draft.is_some()
+        self.material_draft.is_some()
+            || self.display_draft.is_some()
+            || self.camera_authoring.pending()
     }
 
     fn authored_edit_pending(&self) -> bool {
@@ -1344,6 +1351,10 @@ impl ComponentWorkspace {
                 self.group_selection_from_ui(None);
                 return;
             }
+            Action::SetGameCameraFromView => {
+                self.begin_camera_capture();
+                return;
+            }
             Action::Frame => {
                 self.error = self.frame_objects(None, None).err().map(str::to_owned);
                 return;
@@ -1495,7 +1506,11 @@ impl ComponentWorkspace {
             Vec::new()
         };
         let playing = frame.is_some() && self.runtime.is_playing();
+        self.camera_authoring
+            .begin_frame(frame.is_some(), &mut self.navigation);
         self.navigation.player_view = frame.is_some() && scene.player_view.is_some();
+        self.navigation.capture_camera_label =
+            (!self.runtime.in_play_mode()).then_some(Text::SetGameCameraFromView.plain());
         self.navigation.focusable = playing && !self.session.scene().actions.is_empty();
         self.navigation.enabled =
             !blocked && !self.runtime.input_owned() && !self.transform_tool.active();
@@ -1568,6 +1583,13 @@ impl ComponentWorkspace {
                     || self.draft_dirty()
                     || self.runtime.in_play_mode(),
             );
+        if frame.is_none() && !moving && !ctx.will_discard() {
+            self.camera_authoring
+                .submit_scene_view(self.navigation.camera, &interaction);
+        }
+        if std::mem::take(&mut self.navigation.capture_camera_requested) {
+            self.begin_camera_capture();
+        }
         #[cfg(unix)]
         let painted = (!moving).then(|| self.capture_viewport(ui, frame.as_ref(), &interaction));
         #[cfg(not(unix))]
@@ -1757,8 +1779,9 @@ impl ComponentWorkspace {
         if publishing {
             ui.disable();
         }
-        let surface_close_pending =
-            self.defer_material_close(&ctx) || self.defer_display_close(&ctx);
+        let surface_close_pending = self.defer_material_close(&ctx)
+            || self.defer_display_close(&ctx)
+            || self.defer_camera_close(&ctx);
         if (build_open || publishing) && ctx.input(|input| input.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
@@ -1987,6 +2010,7 @@ impl ComponentWorkspace {
                             | Action::GroupSelection
                             | Action::Delete
                             | Action::Frame
+                            | Action::SetGameCameraFromView
                             | Action::FindContent
                             | Action::ToggleAssets
                             | Action::KeyboardShortcuts
@@ -2308,6 +2332,7 @@ impl ComponentWorkspace {
                                             self.runtime.diagnostic.as_ref(),
                                         );
                                     submit |= component_submit;
+                                    self.camera_controls(ui);
                                     if let Some(request) = material_request {
                                         self.begin_material(request);
                                     }
@@ -2360,6 +2385,7 @@ impl ComponentWorkspace {
         }
         self.show_material_draft(&ctx);
         self.show_display_draft(&ctx);
+        self.show_camera_draft(&ctx);
         if let Some(mut path) = self.open_path.take() {
             let mut cancel = false;
             let mut opened = None;
