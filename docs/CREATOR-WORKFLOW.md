@@ -335,7 +335,11 @@ Choose **Control runtime** in the Game view to give it keyboard input.
 Stop before editing the bindings. Each Play run uses its starting action
 map and accepted Lua source. Save the scene before building. The Linux
 player uses the saved bindings and compiled runtime package. This workflow
-works in supported flat scripted scenes.
+works in supported flat scenes and under transform-only groups with positive
+uniform scale. A script attached to a mesh under a group reads and returns that
+object’s local transform. The parent determines how a local movement appears
+in the world. If a step would move a child outside the world limits, Play
+keeps the previous committed frame and reports the error.
 
 ## Reuse a hierarchy as a prefab
 

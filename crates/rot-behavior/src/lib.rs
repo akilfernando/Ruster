@@ -1679,6 +1679,126 @@ mod input_tests {
     use rot_scene::input::{ActionDefinition, ActionKind, ButtonState, MAX_ACTIONS};
     use rot_scene::Object;
 
+    #[test]
+    fn component_leaf_lua_keeps_local_pose_and_rejects_world_limits_atomically() {
+        use rot_scene::component_scene::{
+            CameraView, Component, ComponentInstance, ComponentScene, ObjectNode,
+        };
+        let (scene, authoring) = fixture(
+            r#"
+            return {update = function(object, properties, dt, host)
+                object.translation[1] = object.translation[1] + host.axis("move")
+                if properties.is_trolley and host.button("fire").pressed then
+                    object.translation[1] = 9000
+                end
+                return object
+            end}
+        "#,
+        );
+        let mut authored =
+            ComponentScene::from_legacy(&rot_scene::Session::new(scene).unwrap()).unwrap();
+        authored.actions = authoring.actions;
+        authored.sources = authoring.sources;
+        authored.objects.push(ObjectNode {
+            id: "rail".into(),
+            name: "Rail".into(),
+            enabled: true,
+            parent: None,
+            transform: Transform {
+                translation: [4., 0., 2.],
+                rotation: [0., std::f32::consts::FRAC_PI_2, 0.],
+                scale: [1.25; 3],
+            },
+            components: Vec::new(),
+        });
+        for object in authored
+            .objects
+            .iter_mut()
+            .filter(|object| object.id != "rail")
+        {
+            object.parent = Some("rail".into());
+            let binding_id = format!("binding-{}", object.id);
+            let mut binding = authoring.bindings[&binding_id].clone();
+            binding.properties.insert(
+                "is_trolley".into(),
+                rot_scene::PropertyValue::Bool(object.id == "b"),
+            );
+            object.components.push(ComponentInstance {
+                id: binding_id,
+                enabled: true,
+                kind: Component::Script {
+                    binding,
+                    source_kind: None,
+                },
+            });
+        }
+        authored.objects[1].components.push(ComponentInstance {
+            id: "lens".into(),
+            enabled: true,
+            kind: Component::Camera {
+                view: CameraView::transform_perspective(45.),
+            },
+        });
+        authored.gameplay_camera = Some("lens".into());
+        let session = rot_scene::Session::from_component_runtime(&authored).unwrap();
+        assert!(matches!(
+            session.authoring().validate(session.scene()),
+            Err(rot_scene::SceneError::HierarchyAuthoringConflict)
+        ));
+        assert!(
+            session.snapshot_bytes().is_err(),
+            "detached runtime is not a legacy document"
+        );
+        let mut engine = Engine::new(Limits::default()).unwrap();
+        let mut runtime = engine
+            .reset_projected(
+                session.scene(),
+                session.authoring(),
+                session.transform_camera_binding().cloned(),
+                session.runtime_projection(),
+            )
+            .unwrap();
+        let frame = |pressed| {
+            ActionFrame(BTreeMap::from([
+                ("move".into(), ActionValue::Axis1d { value: 1 }),
+                (
+                    "fire".into(),
+                    ActionValue::Button(ButtonState {
+                        held: pressed,
+                        pressed,
+                        released: false,
+                    }),
+                ),
+            ]))
+        };
+        engine.step_with_input(&mut runtime, &frame(false)).unwrap();
+        let start = runtime.scene().clone();
+        let tick = runtime.tick();
+        let receipt = runtime.last_step_commit_revision();
+        let camera = runtime.transform_camera().unwrap();
+        assert_eq!(start.objects[1].transform.translation, [1., 0., 0.]);
+        assert!((camera.eye[0] - 4.).abs() < 1e-6 && (camera.eye[2] - 0.75).abs() < 1e-6);
+        let error = engine
+            .step_with_input(&mut runtime, &frame(true))
+            .unwrap_err();
+        assert_eq!(error.code, DiagnosticCode::InvalidOutput);
+        assert_eq!(error.phase, Phase::Commit);
+        assert_eq!(error.object_id.as_deref(), Some("b"));
+        assert!(error.message.contains("world transform"));
+        assert_eq!(runtime.scene(), &start);
+        assert_eq!(runtime.tick(), tick);
+        assert_eq!(runtime.last_step_commit_revision(), receipt);
+        assert_eq!(runtime.transform_camera(), Some(camera));
+        engine.step_with_input(&mut runtime, &frame(false)).unwrap();
+        assert_eq!(runtime.tick(), tick + 1);
+        assert_eq!(
+            runtime.scene().objects[0].transform.translation,
+            [2., 0., 0.]
+        );
+        authored.sources.get_mut("source").unwrap().host_api_version = SPATIAL_HOST_API_VERSION;
+        assert!(authored.behavior_projection().is_err());
+    }
+
     fn fixture(text: &str) -> (Scene, Authoring) {
         let mut scene = Scene::empty("input");
         scene.objects = ["a", "b"].map(|id| Object::cube(id, None)).into();

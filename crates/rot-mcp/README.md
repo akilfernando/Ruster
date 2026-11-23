@@ -224,7 +224,11 @@ connected project.
   or `{"kind":{"type":"button","keys":["space"]}}`. Stop Play and finish
   pending human edits before writes. Each mutation shares Undo. Test input
   in an active run using `behavior_runtime_step` and its admitted action
-  frames.
+  frames. Under a v23 transform-only group with positive uniform scale,
+  Object Lua API1/2 reads and returns local TRS. `behavior_runtime_inspect`
+  reports committed child transforms in that same space. If a Step would
+  exceed the composed world bounds, the previous tick, transforms and
+  camera stay committed.
 - In legacy scenes, `scene_inspect` reports `group_creation_blockers` for
   `scene_group_create`. Each entry includes a `code` and can include a named
   `example`. Codes are `input_actions`, `hud`, `script_sources`,
