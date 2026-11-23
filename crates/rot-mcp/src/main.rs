@@ -727,12 +727,12 @@ fn tools() -> Value {
         if name == "scene_prefab" {
             let id = json!({"type":"string","minLength":1,"maxLength":128});
             properties.insert("action".into(), json!({"enum":["save","place","apply","revert","unpack"]}));
-            properties.insert("object_id".into(), json!({"type":"string","minLength":1,"maxLength":128,"description":"Selection or override target. Use the instance root for unpack or a new root ID for place."}));
+            properties.insert("object_id".into(), json!({"type":"string","minLength":1,"maxLength":128,"description":"Use the instance root for unpack or a new ID for place."}));
             properties.insert("asset_id".into(), id.clone());
             properties.insert("source".into(), json!({"type":"string","maxLength":256,"description":"Optional new Assets/*.prefab path for save."}));
             properties.insert("property".into(), json!({"enum":["position","rotation","scale","tint","material"]}));
             properties.insert("component_id".into(), id);
-            properties.insert("expected_source_hash".into(), json!({"type":"string","pattern":"^[0-9a-f]{64}$","description":"For unpack read prefab_instance in scene_components_inspect and supply asset_id. Material Apply/Revert reads prefab_material."}));
+            properties.insert("expected_source_hash".into(), json!({"type":"string","pattern":"^[0-9a-f]{64}$","description":"Read prefab_instance for unpack or prefab_material for material Apply/Revert."}));
             hierarchy_tools::creation_properties(&mut properties);
             required.extend(["action","object_id"]);
         }
