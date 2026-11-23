@@ -5892,22 +5892,22 @@ struct Host {
     #[cfg(unix)]
     workspace_enabled: bool,
 }
-impl eframe::App for Host {
-    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
-        #[cfg(feature = "inspection")]
-        asset_timing::install_pass_marker(ctx);
-        self.input.observe(raw, ctx);
-        if let Some(component) = &mut self.editor.component {
-            component.input_raw_focus(ctx, raw);
-            #[cfg(unix)]
-            if raw.viewport().close_requested() && !component.surface_edit_pending() {
-                self.disconnect_adapter();
-            }
+impl Host {
+    fn component_replacement_pending(&self) -> bool {
+        self.editor.component.is_some()
+            && matches!(
+                self.editor.recovery_transition,
+                Some(RecoveryTransition::Replace { .. })
+            )
+    }
+
+    fn editor_logic(&mut self, ctx: &egui::Context) {
+        // The current component remains installed until the old connection and
+        // recovery boundary drain. Its normal fast path skips this work.
+        if self.component_replacement_pending() {
+            self.logic_tick(ctx);
             return;
         }
-        self.editor.runtime.input_raw_focus(ctx, raw);
-    }
-    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Some(component) = &mut self.editor.component {
             component.poll_runtime(ctx);
             #[cfg(target_os = "linux")]
@@ -5935,7 +5935,31 @@ impl eframe::App for Host {
         }
         self.logic_tick(ctx);
     }
+}
+
+impl eframe::App for Host {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        #[cfg(feature = "inspection")]
+        asset_timing::install_pass_marker(ctx);
+        self.input.observe(raw, ctx);
+        if let Some(component) = &mut self.editor.component {
+            component.input_raw_focus(ctx, raw);
+            #[cfg(unix)]
+            if raw.viewport().close_requested() && !component.surface_edit_pending() {
+                self.disconnect_adapter();
+            }
+            return;
+        }
+        self.editor.runtime.input_raw_focus(ctx, raw);
+    }
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.editor_logic(ctx);
+    }
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        if self.component_replacement_pending() {
+            self.editor.close_finalization_ui(ui.ctx());
+            return;
+        }
         #[cfg(unix)]
         if self.editor.component.is_some() {
             self.native_connection_ui(ui);
@@ -6208,6 +6232,94 @@ fn run_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[test]
+    fn component_open_finishes_after_the_prior_listener_drains() {
+        use rot_scene::component_scene::{ComponentScene, ComponentSession};
+
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("Title.scene.json");
+        let destination = dir.path().join("Rail.scene.json");
+        let session = |path: &std::path::Path, id| {
+            let scene = Session::new(Scene::authored_empty(id)).unwrap();
+            ComponentScene::from_legacy(&scene)
+                .unwrap()
+                .save_new(path)
+                .unwrap();
+            ComponentSession::open(path).unwrap()
+        };
+        let mut title = session(&source, "title");
+        session(&destination, "rail");
+        title
+            .set_action(
+                title.revision(),
+                "unsaved",
+                Some(rot_scene::input::ActionDefinition::default()),
+            )
+            .unwrap();
+        let prior_revision = title.revision();
+
+        let ctx = egui::Context::default();
+        let bridge = crate::bridge::Bridge::start(ctx.clone()).unwrap();
+        let original = bridge.authority();
+        let mut editor = SceneEditor::with_workspace(
+            Session::new(Scene::authored_empty("untitled")).unwrap(),
+            Workspace::detached(),
+        );
+        editor.recovery = crate::recovery_ui::RecoveryUi::disabled();
+        editor.connection_authority = Some(original.clone());
+        editor.component = Some(Box::new(component_workspace::ComponentWorkspace::new(
+            source.clone(),
+            title,
+        )));
+        let mut host = Host {
+            editor,
+            input: Default::default(),
+            bridge: Some(bridge),
+            workspace: None,
+            workspace_enabled: true,
+        };
+        let directory = project_startup::ProjectDirectory::capture(dir.path()).unwrap();
+        let rows = directory
+            .scene_rows("Title.scene.json", &Default::default())
+            .unwrap();
+        let row = rows
+            .iter()
+            .find(|row| row.filename == "Rail.scene.json")
+            .unwrap();
+        let pin = directory.pin_scene(row);
+        let document = pin.load(false).unwrap();
+        host.editor
+            .open_document(OpenedScene::Picked(pin, Box::new(document)));
+
+        assert!(host.component_replacement_pending());
+        assert_eq!(
+            host.editor.component.as_ref().unwrap().ai_document(),
+            (source.as_path(), "title", prior_revision)
+        );
+        assert!(original.draining());
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while host.component_replacement_pending() {
+            assert!(
+                Instant::now() < deadline,
+                "old listener and document boundary must finish"
+            );
+            host.editor_logic(&ctx);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        assert_eq!(
+            host.editor.component.as_ref().unwrap().ai_document(),
+            (destination.as_path(), "rail", 0)
+        );
+        assert!(!original.live() && !original.draining());
+        assert!(ComponentSession::open(&source)
+            .unwrap()
+            .scene()
+            .actions
+            .is_empty());
+    }
+
     #[test]
     fn document_transition_initiation_revokes_destination_even_when_cancelled() {
         let directory = tempfile::tempdir().unwrap();
