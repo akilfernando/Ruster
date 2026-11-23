@@ -295,7 +295,7 @@ mod tests {
             .split_once("Example input_frame: ")
             .unwrap()
             .1
-            .split_once(". Axis values")
+            .split_once(". Omit input")
             .unwrap();
         let example: Value = serde_json::from_str(example).unwrap();
         assert!(valid_input_frame(&example));
