@@ -500,7 +500,7 @@ struct TextureTransform {
 
 fn unsupported_uv(
     required: bool,
-    warnings: &mut Vec<&'static str>,
+    warnings: &mut Vec<&str>,
     detail: &'static str,
 ) -> Result<(), AssetError> {
     if required {
