@@ -1,6 +1,12 @@
 //! Name and stable-ID lookup in v23 Hierarchy order.
 use super::ComponentWorkspace;
-use crate::{strings::Text, ui_kit::tokens::ROW_HEIGHT};
+use crate::{
+    strings::Text,
+    ui_kit::{
+        self,
+        tokens::{CONTROL_HEIGHT, MIN_HIT, ROW_HEIGHT, SPACE_XXS},
+    },
+};
 use eframe::egui;
 use rot_scene::component_scene::ObjectNode;
 
@@ -102,24 +108,55 @@ impl ComponentWorkspace {
             self.hierarchy_search.clear();
             ui.memory_mut(|memory| memory.surrender_focus(input_id));
         }
-        let edit = ui.add_enabled(
-            !blocked,
-            egui::TextEdit::singleline(&mut self.hierarchy_search.query)
-                .id(input_id)
-                .hint_text(Text::LabelFindObjects.plain())
-                .char_limit(128)
-                .desired_width(ui.available_width()),
-        );
-        edit.widget_info(|| {
-            egui::WidgetInfo::labeled(
-                egui::Role::TextInput,
-                !blocked,
-                Text::LabelFindObjects.plain(),
-            )
-        });
-        if !blocked && std::mem::take(&mut self.hierarchy_search.focus_requested) {
-            edit.request_focus();
-        }
+        let edit = ui
+            .add_enabled_ui(!blocked, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = SPACE_XXS;
+                    let (_, icon) = ui.allocate_space(egui::vec2(14.0, CONTROL_HEIGHT));
+                    let center = icon.center() - egui::vec2(1.0, 1.0);
+                    let stroke = egui::Stroke::new(1.25, ui.visuals().weak_text_color());
+                    ui.painter().circle_stroke(center, 3.5, stroke);
+                    ui.painter().line_segment(
+                        [center + egui::vec2(2.5, 2.5), center + egui::vec2(5.5, 5.5)],
+                        stroke,
+                    );
+                    let clear_width = if self.hierarchy_search.query.is_empty() {
+                        0.0
+                    } else {
+                        MIN_HIT + SPACE_XXS
+                    };
+                    let edit = ui.add_sized(
+                        [
+                            (ui.available_width() - clear_width).max(16.0),
+                            CONTROL_HEIGHT,
+                        ],
+                        egui::TextEdit::singleline(&mut self.hierarchy_search.query)
+                            .id(input_id)
+                            .hint_text(Text::LabelFindObjects.plain())
+                            .char_limit(128),
+                    );
+                    edit.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::Role::TextInput,
+                            !blocked,
+                            Text::LabelFindObjects.plain(),
+                        )
+                    });
+                    if !self.hierarchy_search.query.is_empty()
+                        && ui_kit::icon_button(ui, "×", Text::ClearSearch.plain(), None, false)
+                            .clicked()
+                    {
+                        self.hierarchy_search.clear();
+                        edit.request_focus();
+                    }
+                    if !blocked && std::mem::take(&mut self.hierarchy_search.focus_requested) {
+                        edit.request_focus();
+                    }
+                    edit
+                })
+                .inner
+            })
+            .inner;
         if !self.hierarchy_search.is_active() {
             return false;
         }
@@ -173,32 +210,77 @@ impl ComponentWorkspace {
                     let prefix = if truncated { "… / " } else { "" };
                     format!("{prefix}{}", parents.join(" / "))
                 };
+                let (_, rect) = ui.allocate_space(egui::vec2(ui.available_width(), result_height));
                 let response = ui
-                    .allocate_ui_with_layout(
-                        egui::vec2(ui.available_width(), result_height),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            ui.spacing_mut().item_spacing.y = 0.0;
-                            let response = ui
-                                .add_enabled(
-                                    !blocked,
-                                    egui::Button::selectable(
-                                        row == search.active,
-                                        format!("{} · {}", object.name, object.id),
-                                    )
-                                    .truncate(),
-                                )
-                                .on_hover_text(format!(
-                                    "{}\n{breadcrumb}\n{}",
-                                    object.name, object.id
-                                ));
-                            ui.add(
-                                egui::Label::new(egui::RichText::new(breadcrumb).weak()).truncate(),
-                            );
-                            response
-                        },
-                    )
+                    .add_enabled_ui(!blocked, |ui| {
+                        ui.interact(
+                            rect,
+                            ui.make_persistent_id(("hierarchy_search_result", &object.id)),
+                            egui::Sense::click(),
+                        )
+                    })
                     .inner;
+                let selected = row == search.active;
+                let label = format!("{} · {}", object.name, object.id);
+                response.widget_info(|| {
+                    egui::WidgetInfo::selected(egui::Role::Button, !blocked, selected, &label)
+                });
+                let visuals = ui.visuals();
+                let widget = ui.style().interact(&response);
+                if selected || response.hovered() || response.has_focus() {
+                    let fill = if selected {
+                        visuals.selection.bg_fill
+                    } else {
+                        widget.weak_bg_fill
+                    };
+                    let stroke = if response.has_focus() {
+                        widget.fg_stroke
+                    } else {
+                        egui::Stroke::NONE
+                    };
+                    ui.painter().rect(
+                        rect,
+                        widget.corner_radius,
+                        fill,
+                        stroke,
+                        egui::StrokeKind::Inside,
+                    );
+                }
+                let x = rect.left() + SPACE_XXS;
+                let width = (rect.width() - 2.0 * SPACE_XXS).max(0.0);
+                for (text, y, style, color) in [
+                    (
+                        label,
+                        rect.top(),
+                        egui::TextStyle::Body,
+                        if selected {
+                            visuals.selection.stroke.color
+                        } else {
+                            widget.text_color()
+                        },
+                    ),
+                    (
+                        breadcrumb.clone(),
+                        rect.top() + ROW_HEIGHT,
+                        egui::TextStyle::Small,
+                        if selected {
+                            visuals.selection.stroke.color
+                        } else {
+                            visuals.weak_text_color()
+                        },
+                    ),
+                ] {
+                    let galley = egui::WidgetText::from(text).into_galley(
+                        ui,
+                        Some(egui::TextWrapMode::Truncate),
+                        width,
+                        style,
+                    );
+                    let y = y + (ROW_HEIGHT - galley.size().y) * 0.5;
+                    ui.painter().galley(egui::pos2(x, y), galley, color);
+                }
+                let response =
+                    response.on_hover_text(format!("{}\n{breadcrumb}\n{}", object.name, object.id));
                 if response.clicked() {
                     reveal = Some(index);
                 }
