@@ -277,6 +277,12 @@ connected project.
   surface. The existing registered connection remains pinned to its
   approved scene path, regardless of the startup selection. During startup
   preparation, the Linux build status is `preparing`.
+- For a v23 Linux player, read `project_startup.player_window` for the
+  effective `title` and logical `initial_size` (`width`, `height`).
+  `title_source` and `size_source` identify `default` or `project_settings`.
+  Once the native Build panel opens, `creation_export_inspect.build.player_window`
+  also shows its pinned settings when available. Set them in
+  **Project Settings → Player**.
 - For a configured Start Transition, read `project_startup.transition`
   for the action ID and exact source and destination identities.
   A guarded `behavior_runtime_step` sends the Button press under that

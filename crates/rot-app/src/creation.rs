@@ -535,12 +535,106 @@ impl InitialCamera {
     }
 }
 
+pub const DEFAULT_WINDOW_SIZE: PlayerWindowSize = PlayerWindowSize {
+    width: 1100,
+    height: 760,
+};
+pub const MIN_WINDOW_SIZE: PlayerWindowSize = PlayerWindowSize {
+    width: 800,
+    height: 540,
+};
+pub const MAX_WINDOW_SIZE: PlayerWindowSize = PlayerWindowSize {
+    width: 3840,
+    height: 2160,
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlayerWindowSize {
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlayerWindow {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_player_value"
+    )]
+    pub title: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_player_value"
+    )]
+    pub initial_size: Option<PlayerWindowSize>,
+}
+
+fn present_player_value<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
+fn validate_title(title: &str) -> Result<(), String> {
+    if title.is_empty()
+        || title.trim() != title
+        || title.len() > 128
+        || title.chars().any(char::is_control)
+    {
+        return Err("Application title must be 1–128 UTF-8 bytes without controls or surrounding whitespace".into());
+    }
+    Ok(())
+}
+
+impl PlayerWindow {
+    pub fn is_default(&self) -> bool {
+        self.title.is_none() && self.initial_size.is_none()
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(title) = &self.title {
+            validate_title(title)?;
+        }
+        if let Some(size) = self.initial_size {
+            if !(MIN_WINDOW_SIZE.width..=MAX_WINDOW_SIZE.width).contains(&size.width)
+                || !(MIN_WINDOW_SIZE.height..=MAX_WINDOW_SIZE.height).contains(&size.height)
+            {
+                return Err(format!(
+                    "Initial size must be {}–{} wide and {}–{} high in logical pixels.",
+                    MIN_WINDOW_SIZE.width,
+                    MAX_WINDOW_SIZE.width,
+                    MIN_WINDOW_SIZE.height,
+                    MAX_WINDOW_SIZE.height
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn effective_title(&self, default_title: &str) -> String {
+        self.title
+            .clone()
+            .unwrap_or_else(|| format!("Rot Engine | {default_title}"))
+    }
+
+    pub fn effective_size(&self) -> PlayerWindowSize {
+        self.initial_size.unwrap_or(DEFAULT_WINDOW_SIZE)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreationManifest {
     pub format: String,
     pub version: u32,
     pub title: String,
+    #[serde(default, skip_serializing_if = "PlayerWindow::is_default")]
+    pub player: PlayerWindow,
     pub scene: String,
     #[serde(deserialize_with = "unique_meshes")]
     pub meshes: BTreeMap<String, String>,
@@ -717,13 +811,8 @@ impl CreationManifest {
                     .into(),
             );
         }
-        if self.title.trim().is_empty()
-            || self.title.trim() != self.title
-            || self.title.len() > 128
-            || self.title.chars().any(char::is_control)
-        {
-            return Err("Application title must be 1–128 UTF-8 bytes without controls or surrounding whitespace".into());
-        }
+        validate_title(&self.title)?;
+        self.player.validate()?;
         match (self.version, self.tick_millis, self.tick_nanos) {
             (1..=4, Some(millis), None) if (1..=1000).contains(&millis) => {},
             (5..=VERSION, None, Some(nanos)) if (1_000_000..=1_000_000_000).contains(&nanos) => {},
@@ -1515,6 +1604,46 @@ mod tests {
     // Protect descriptor interpretation/resource confinement, not the existing
     // scene, OBJ parser or Lua evaluation matrices.
     #[test]
+    fn player_window_keeps_default_and_strict_optional_values() {
+        let default = PlayerWindow::default();
+        assert_eq!(default.effective_title("rail"), "Rot Engine | rail");
+        assert_eq!(default.effective_size(), DEFAULT_WINDOW_SIZE);
+        for invalid in [
+            r#"{"title":null}"#,
+            r#"{"title":"a","title":"b"}"#,
+            r#"{"initial_size":null}"#,
+            r#"{"initial_size":{"width":800,"height":540,"scale":2}}"#,
+            r#"{"initial_size":{"width":800.5,"height":540}}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<PlayerWindow>(invalid).is_err(),
+                "{invalid}"
+            );
+        }
+        for invalid in [
+            r#"{"title":" title"}"#,
+            r#"{"title":"a\nb"}"#,
+            r#"{"initial_size":{"width":3841,"height":540}}"#,
+            r#"{"initial_size":{"width":800,"height":539}}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<PlayerWindow>(invalid)
+                    .unwrap()
+                    .validate()
+                    .is_err(),
+                "{invalid}"
+            );
+        }
+        let authored: PlayerWindow = serde_json::from_str(
+            r#"{"title":"Night Rail — 夕方","initial_size":{"width":3840,"height":2160}}"#,
+        )
+        .unwrap();
+        assert!(authored.validate().is_ok());
+        assert_eq!(authored.effective_size(), MAX_WINDOW_SIZE);
+        assert_eq!(authored.effective_title("rail"), "Night Rail — 夕方");
+    }
+
+    #[test]
     fn creator_descriptor_roundtrip_and_read_only_boundaries() {
         let directory = tempfile::tempdir().unwrap();
         let scene_path = directory.path().join("scene.json");
@@ -1533,6 +1662,7 @@ mod tests {
             format: FORMAT.into(),
             version: NO_AUDIO_VERSION,
             title: "My creation 世界".into(),
+            player: PlayerWindow::default(),
             scene: "scene.json".into(),
             meshes: [("marker".into(), "marker.obj".into())].into(),
             mesh_normal_policies: [("marker".into(), rot_assets::MeshNormalPolicy::Flat)].into(),

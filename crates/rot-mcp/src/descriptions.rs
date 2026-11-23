@@ -51,7 +51,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("viewport_capture_inspect", "Fetch a screenshot started with viewport_capture_start, or its pending state."),
     ("viewport_screenshot", "Take a screenshot of the viewport (at most 512 pixels) and return it as an image."),
     ("viewport_frame", "Frame a visible v23 subtree from world front, side or top. Check with viewport_screenshot."),
-    ("creation_export_inspect", "Read the current or last v23 Linux editor build, startup scene and recovery guidance with no arguments. For legacy exports, read settings and status, optionally by operation_id."),
+    ("creation_export_inspect", "Read v23 Linux Build, startup and player_window context with no arguments. Legacy reports export settings and status, optionally by operation_id."),
     ("creation_export_start", "Build the saved scene as a Linux application. Returns an operation_id; follow it with creation_export_inspect."),
     ("creation_export_cancel", "Cancel the running build."),
     ("play_check_inspect", "Read the project's play checks and the result of the last run."),

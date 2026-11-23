@@ -1,4 +1,5 @@
 //! Project startup selection is independent of active document authority.
+use rot_app::creation::PlayerWindow;
 use rot_scene::component_scene::{ComponentScene, ComponentSession};
 use serde::{Deserialize, Serialize};
 use std::fs::{File, Metadata};
@@ -16,12 +17,25 @@ struct Startup {
     scene_id: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Settings {
-    startup_scene: Startup,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_startup"
+    )]
+    startup_scene: Option<Startup>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     startup_transition: Option<StartupTransition>,
+    #[serde(default, skip_serializing_if = "PlayerWindow::is_default")]
+    player: PlayerWindow,
+}
+
+fn present_startup<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Startup>, D::Error> {
+    Startup::deserialize(deserializer).map(Some)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -259,7 +273,8 @@ impl ProjectDirectory {
             .and_then(|file| serde_json::from_slice(&file.bytes).ok());
         let startup = settings
             .as_ref()
-            .map(|settings| settings.startup_scene.file.as_str());
+            .and_then(|settings| settings.startup_scene.as_ref())
+            .map(|startup| startup.file.as_str());
         let destination = settings
             .as_ref()
             .and_then(|settings| settings.startup_transition.as_ref())
@@ -461,6 +476,8 @@ pub(crate) struct Observation {
     #[cfg(unix)]
     directory: File,
     settings: Option<ObservedFile>,
+    settings_decoded: bool,
+    player: Result<PlayerWindow, String>,
     target: Result<Option<(Startup, Stamp)>, String>,
     startup_locator: Option<Startup>,
     validation_error: Option<String>,
@@ -545,14 +562,21 @@ impl Observation {
         if let Some(file) = &observed.settings {
             match serde_json::from_slice::<Settings>(&file.bytes) {
                 Ok(settings) => {
-                    let startup = settings.startup_scene;
-                    observed.startup_locator = Some(startup.clone());
-                    observed.target = (|| {
-                        validate_filename(&startup.file)?;
-                        rot_scene::validate_id(&startup.scene_id).map_err(error)?;
-                        let stamp = observed.child_stamp(&startup.file)?;
-                        Ok(Some((startup, stamp)))
-                    })();
+                    observed.player = settings.player.validate().map(|()| settings.player);
+                    observed.startup_locator = settings.startup_scene.clone();
+                    observed.target = settings
+                        .startup_scene
+                        .map(|startup| {
+                            validate_filename(&startup.file)?;
+                            rot_scene::validate_id(&startup.scene_id).map_err(error)?;
+                            let stamp = observed.child_stamp(&startup.file)?;
+                            Ok((startup, stamp))
+                        })
+                        .transpose();
+                    if observed.startup_locator.is_none() && settings.startup_transition.is_some() {
+                        observed.target =
+                            Err("A Start Transition requires a saved Startup Scene.".into());
+                    }
                     observed.transition = settings.startup_transition.map(|transition| {
                         let target = &transition.target_scene;
                         let stamp = validate_filename(&target.file)
@@ -561,7 +585,12 @@ impl Observation {
                         (transition, stamp)
                     });
                 }
-                Err(failure) => observed.target = Err(error(failure)),
+                Err(failure) => {
+                    observed.settings_decoded = false;
+                    let reason = error(failure);
+                    observed.player = Err(reason.clone());
+                    observed.target = Err(reason);
+                }
             }
         }
         observed.verify_root()?;
@@ -585,6 +614,8 @@ impl Observation {
             #[cfg(unix)]
             directory: parent,
             settings: None,
+            settings_decoded: true,
+            player: Ok(PlayerWindow::default()),
             target: Ok(None),
             startup_locator: None,
             validation_error: None,
@@ -738,7 +769,7 @@ impl Observation {
     }
 
     pub(super) fn exists(&self) -> bool {
-        self.settings.is_some()
+        self.startup_locator.is_some() || self.target.is_err()
     }
 
     fn verify_target(&self, startup: &Startup, stamp: &Stamp) -> Result<PathBuf, String> {
@@ -941,8 +972,9 @@ impl Observation {
             target_scene: target.clone(),
         };
         let bytes = serde_json::to_vec(&Settings {
-            startup_scene: startup.clone(),
+            startup_scene: Some(startup.clone()),
             startup_transition: Some(transition.clone()),
+            player: self.player_window()?.clone(),
         })
         .map_err(error)?;
         self.with_lock(|| {
@@ -1014,8 +1046,9 @@ impl Observation {
                         return Ok(());
                     }
                     let bytes = serde_json::to_vec(&Settings {
-                        startup_scene: startup.clone(),
+                        startup_scene: Some(startup.clone()),
                         startup_transition: None,
+                        player: self.player_window()?.clone(),
                     })
                     .map_err(error)?;
                     self.publish(&bytes, || {
@@ -1084,16 +1117,63 @@ impl Observation {
         }
     }
 
+    pub(super) fn player_settings_editable(&self) -> bool {
+        self.settings_decoded
+    }
+
+    pub(super) fn player_window(&self) -> Result<&PlayerWindow, String> {
+        self.player.as_ref().map_err(Clone::clone)
+    }
+
+    pub(super) fn set_player_window(&self, player: PlayerWindow) -> Result<(), String> {
+        player.validate()?;
+        self.with_lock(|| {
+            let mut settings = self
+                .settings
+                .as_ref()
+                .map_or(Ok(Settings::default()), |file| {
+                    serde_json::from_slice::<Settings>(&file.bytes).map_err(error)
+                })?;
+            if settings.player == player {
+                return Ok(());
+            }
+            settings.player = player;
+            self.publish_settings(&settings)
+        })
+    }
+
+    fn publish_settings(&self, settings: &Settings) -> Result<(), String> {
+        if settings.startup_scene.is_some()
+            || settings.startup_transition.is_some()
+            || !settings.player.is_default()
+        {
+            let bytes = serde_json::to_vec(settings).map_err(error)?;
+            self.publish(&bytes, || self.verify_settings())
+        } else if self.settings.is_some() {
+            #[cfg(unix)]
+            rustix::fs::unlinkat(&self.directory, SETTINGS, rustix::fs::AtFlags::empty())
+                .map_err(error)?;
+            #[cfg(not(unix))]
+            std::fs::remove_file(self.root.join(SETTINGS)).map_err(error)?;
+            Ok(())
+        } else {
+            Ok(())
+        }
+    }
+
     pub(super) fn reset(&self) -> Result<(), String> {
         self.with_lock(|| {
-            if self.settings.is_some() {
-                #[cfg(unix)]
-                rustix::fs::unlinkat(&self.directory, SETTINGS, rustix::fs::AtFlags::empty())
-                    .map_err(error)?;
-                #[cfg(not(unix))]
-                std::fs::remove_file(self.root.join(SETTINGS)).map_err(error)?;
-            }
-            Ok(())
+            // Reset remains the recovery route for an unreadable settings
+            // document. For valid documents keep independent Player settings.
+            let player = self
+                .settings
+                .as_ref()
+                .and_then(|file| serde_json::from_slice::<Settings>(&file.bytes).ok())
+                .map_or_else(PlayerWindow::default, |settings| settings.player);
+            self.publish_settings(&Settings {
+                player,
+                ..Default::default()
+            })
         })
     }
 
@@ -1163,6 +1243,17 @@ fn validate_action(source: &ComponentScene, action: &str) -> Result<(), String> 
 }
 
 #[cfg(unix)]
+pub(super) fn player_context(player: &PlayerWindow, scene_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "status": "ready",
+        "title": player.effective_title(scene_id),
+        "title_source": if player.title.is_some() { "project_settings" } else { "default" },
+        "initial_size": player.effective_size(),
+        "size_source": if player.initial_size.is_some() { "project_settings" } else { "default" },
+    })
+}
+
+#[cfg(unix)]
 pub(super) fn context(
     project: Result<&ProjectDirectory, &str>,
     path: &Path,
@@ -1217,6 +1308,18 @@ pub(super) fn context(
             result["hub_source"] = serde_json::Value::Null;
         }
     }
+    let player = observed
+        .as_ref()
+        .map_err(Clone::clone)
+        .and_then(Observation::player_window);
+    result["player_window"] = match (player, &selection) {
+        (Ok(player), Ok(Some((_, scene_id)))) => player_context(player, scene_id),
+        (Ok(player), Ok(None)) => player_context(player, &session.scene().id),
+        (Err(reason), _) => {
+            json!({"status":"invalid","reason":reason.chars().take(240).collect::<String>()})
+        }
+        (Ok(_), Err(_)) => json!({"status":"startup_unavailable"}),
+    };
     result["transition"] = json!({"status":"none"});
     if let Ok(observed) = &observed {
         if let Some((transition, _)) = &observed.transition {
@@ -1249,6 +1352,71 @@ mod tests {
             .save_new(path)
             .unwrap();
         ComponentSession::open(path).unwrap()
+    }
+
+    #[test]
+    fn player_settings_preserve_startup_and_reject_stale_and_invalid_changes() {
+        use rot_app::creation::PlayerWindowSize;
+
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let project = ProjectDirectory::capture(root).unwrap();
+        let file = root.join("Rail.scene.json");
+        let session = scene(&file, "rail");
+        let before = project.observe().unwrap();
+        assert!(before.choice().unwrap().is_none());
+        assert!(before.player_window().unwrap().is_default());
+        let profile = PlayerWindow {
+            title: Some("Rail — 夕方".into()),
+            initial_size: Some(PlayerWindowSize {
+                width: 1280,
+                height: 800,
+            }),
+        };
+        before.set_player_window(profile.clone()).unwrap();
+        assert!(before.reset().is_err());
+        let player_only = project.observe().unwrap();
+        assert!(player_only.choice().unwrap().is_none());
+        assert!(!player_only.exists());
+        assert_eq!(player_only.player_window().unwrap(), &profile);
+        assert!(!std::fs::read_to_string(root.join(SETTINGS))
+            .unwrap()
+            .contains("startup_scene"));
+
+        player_only.use_saved(&file, &session).unwrap();
+        let both = project.validated().unwrap();
+        assert_eq!(both.choice().unwrap(), Some(("Rail.scene.json", "rail")));
+        assert_eq!(both.player_window().unwrap(), &profile);
+        let invalid = PlayerWindow {
+            initial_size: Some(PlayerWindowSize {
+                width: 799,
+                height: 800,
+            }),
+            ..profile.clone()
+        };
+        let original = std::fs::read(root.join(SETTINGS)).unwrap();
+        assert!(both.set_player_window(invalid).is_err());
+        assert_eq!(std::fs::read(root.join(SETTINGS)).unwrap(), original);
+        assert!(player_only
+            .set_player_window(PlayerWindow::default())
+            .is_err());
+
+        both.set_player_window(PlayerWindow::default()).unwrap();
+        let startup_only = project.validated().unwrap();
+        assert_eq!(
+            startup_only.choice().unwrap(),
+            Some(("Rail.scene.json", "rail"))
+        );
+        assert!(startup_only.player_window().unwrap().is_default());
+        startup_only.set_player_window(profile.clone()).unwrap();
+        project.observe().unwrap().reset().unwrap();
+        let player_only = project.observe().unwrap();
+        assert!(player_only.choice().unwrap().is_none());
+        assert_eq!(player_only.player_window().unwrap(), &profile);
+        player_only
+            .set_player_window(PlayerWindow::default())
+            .unwrap();
+        assert!(!root.join(SETTINGS).exists());
     }
 
     #[test]

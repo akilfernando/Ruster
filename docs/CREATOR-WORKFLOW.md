@@ -91,6 +91,23 @@ saved scene by filename and update or reset the setting. If another editor
 changes the setting while a dialog is open, close and reopen the dialog
 before retrying.
 
+## Set the Linux player window
+
+In a v23 project, open **Edit → Project Settings… → Player**. Set
+**Window Title**, **Initial Width**, and **Initial Height**, then choose
+**Apply**. Press Enter in a field to apply or Escape to cancel the draft.
+The title accepts 1–128 UTF-8 bytes without controls or surrounding spaces.
+Set both dimensions to request an initial size of 800–3840 wide by
+540–2160 high in logical pixels. The desktop can adjust that request, and
+the player window remains resizable.
+
+Leave the title or both dimensions blank to use the default
+**Rot Engine | startup scene ID** or **1100 × 760**. Without a configured
+Startup Scene, the default title uses the scene being built. Player settings
+are independent of Startup Scene and Start Transition. Build shows the
+effective settings and packages them for launch. A Start Transition keeps the
+same title and window.
+
 ## Open a project scene
 
 Choose **File → Open Scene…**, press **Ctrl+O**, or run **Open Scene** from the

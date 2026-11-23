@@ -36,6 +36,8 @@ pub(super) mod component_collider;
 mod component_display;
 #[path = "component_new_scene.rs"]
 mod component_new_scene;
+#[path = "component_player.rs"]
+mod component_player;
 #[path = "component_spot.rs"]
 mod component_spot;
 
@@ -248,6 +250,7 @@ pub(super) struct ComponentWorkspace {
     palette: Option<palette::Palette>,
     project_settings: Option<ProjectPage>,
     startup_settings: Option<Result<super::project_startup::Observation, String>>,
+    player_settings: Option<Result<component_player::PlayerDraft, String>>,
     start_action_choice: String,
     start_target: Option<(super::project_startup::ScenePin, String)>,
     scene_picker: Option<ScenesPicker>,
@@ -383,6 +386,7 @@ impl ComponentWorkspace {
             palette: None,
             project_settings: None,
             startup_settings: None,
+            player_settings: None,
             start_action_choice: String::new(),
             start_target: None,
             scene_picker: None,
@@ -802,6 +806,7 @@ impl ComponentWorkspace {
             || self.sound_cue.is_some()
             || self.display_draft.is_some()
             || self.input_actions.pending()
+            || self.player_pending()
             || self.camera_authoring.pending()
             || self.spot_aim.is_some()
     }
@@ -2247,7 +2252,15 @@ impl ComponentWorkspace {
             return;
         };
         self.runtime.release_input(ctx);
-        let pending = self.input_actions.pending();
+        let player_pending = self.player_pending();
+        let pending = self.input_actions.pending() || player_pending;
+        if player_pending
+            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.player_settings = None;
+            self.error = None;
+            return;
+        }
         if !pending
             && self.scene_picker.is_none()
             && !self.input_actions.capturing()
@@ -2256,6 +2269,7 @@ impl ComponentWorkspace {
         {
             self.project_settings = None;
             self.startup_settings = None;
+            self.player_settings = None;
             return;
         }
         let editable = self.input_action_editable();
@@ -2263,13 +2277,10 @@ impl ComponentWorkspace {
         let mut open = true;
         #[cfg(target_os = "linux")]
         let mut build = false;
-        project_settings::settings_window(
-            ctx,
-            &mut page,
-            &mut open,
-            pending,
-            |ui, page| match page {
+        project_settings::settings_window(ctx, &mut page, &mut open, pending, true, |ui, page| {
+            match page {
                 ProjectPage::Project => self.show_startup_settings(ui),
+                ProjectPage::Player => self.show_player_settings(ui),
                 ProjectPage::InputActions => {
                     if !editable {
                         ui.weak(Text::InputActionsStopPlay.plain());
@@ -2286,8 +2297,8 @@ impl ComponentWorkspace {
                         build = editor_theme::primary_button(ui, Action::Export.label()).clicked();
                     }
                 }
-            },
-        );
+            }
+        });
         if let Some(edit) = edit {
             use crate::input_ui::Edit;
             let result = match edit {
@@ -2311,7 +2322,14 @@ impl ComponentWorkspace {
             self.input_actions.cancel_capture();
             self.error = Some(Text::InputActionsCloseDraft.plain().into());
         }
-        self.project_settings = (open || self.input_actions.pending()).then_some(page);
+        if !open && self.player_pending() {
+            self.error = Some(Text::PlayerDraftPending.plain().into());
+        }
+        self.project_settings =
+            (open || self.input_actions.pending() || self.player_pending()).then_some(page);
+        if self.project_settings != Some(ProjectPage::Player) {
+            self.player_settings = None;
+        }
         if self.project_settings != Some(ProjectPage::Project) {
             self.startup_settings = None;
         }
@@ -2339,11 +2357,19 @@ impl ComponentWorkspace {
             || self.defer_display_close(&ctx)
             || self.defer_game_hud_close(&ctx)
             || self.defer_camera_close(&ctx)
-            || (self.input_actions.pending()
+            || ((self.input_actions.pending() || self.player_pending())
                 && ctx.input(|input| input.viewport().close_requested()));
-        if self.input_actions.pending() && surface_close_pending {
+        if surface_close_pending && (self.input_actions.pending() || self.player_pending()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.error = Some(Text::InputActionsCloseDraft.plain().into());
+            self.error = Some(
+                if self.player_pending() {
+                    Text::PlayerDraftPending
+                } else {
+                    Text::InputActionsCloseDraft
+                }
+                .plain()
+                .into(),
+            );
         }
         if (build_open || publishing) && ctx.input(|input| input.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);

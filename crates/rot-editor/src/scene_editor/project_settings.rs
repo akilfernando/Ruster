@@ -10,14 +10,16 @@ pub(super) enum ProjectPage {
     #[default]
     Project,
     InputActions,
+    Player,
     Build,
 }
 impl ProjectPage {
-    const ALL: [Self; 3] = [Self::Project, Self::InputActions, Self::Build];
+    const ALL: [Self; 4] = [Self::Project, Self::InputActions, Self::Player, Self::Build];
     fn label(self) -> &'static str {
         match self {
             Self::Project => "Project",
             Self::InputActions => "Input Actions",
+            Self::Player => Text::PlayerPage.plain(),
             Self::Build => "Build",
         }
     }
@@ -69,14 +71,22 @@ impl SceneEditor {
         }
         let mut open = true;
         let mut edit = None;
-        settings_window(ctx, &mut page, &mut open, false, |ui, page| match page {
-            ProjectPage::Project => project_page(ui, self.session.path()),
-            ProjectPage::InputActions => {
-                let editable = self.input_action_editable();
-                edit = self.input_actions.show(ui, &self.session, editable);
-            }
-            ProjectPage::Build => self.build_page(ui),
-        });
+        settings_window(
+            ctx,
+            &mut page,
+            &mut open,
+            false,
+            false,
+            |ui, page| match page {
+                ProjectPage::Project => project_page(ui, self.session.path()),
+                ProjectPage::InputActions => {
+                    let editable = self.input_action_editable();
+                    edit = self.input_actions.show(ui, &self.session, editable);
+                }
+                ProjectPage::Player => {}
+                ProjectPage::Build => self.build_page(ui),
+            },
+        );
         if open {
             self.project_settings = Some(page);
             self.input_actions_open = page == ProjectPage::InputActions;
@@ -128,6 +138,7 @@ pub(super) fn settings_window(
     page: &mut ProjectPage,
     open: &mut bool,
     locked: bool,
+    player_available: bool,
     mut body_ui: impl FnMut(&mut egui::Ui, ProjectPage),
 ) {
     let screen = ctx.content_rect();
@@ -145,7 +156,10 @@ pub(super) fn settings_window(
             ui.horizontal_top(|ui| {
                 ui.vertical(|ui| {
                     ui.set_width(120.0);
-                    for candidate in ProjectPage::ALL {
+                    for candidate in ProjectPage::ALL
+                        .into_iter()
+                        .filter(|page| *page != ProjectPage::Player || player_available)
+                    {
                         ui.add_enabled_ui(!locked, |ui| {
                             ui.selectable_value(page, candidate, candidate.label());
                         });

@@ -1,3 +1,4 @@
+use crate::creation::{PlayerWindow, MIN_WINDOW_SIZE};
 use crate::{egui, Application, InputFrame, Runtime};
 use eframe::egui_wgpu::{WgpuSetup, WgpuSetupCreateNew};
 use std::{
@@ -9,6 +10,7 @@ use std::{
 #[derive(Clone, Debug)]
 pub struct HostOptions {
     pub title: String,
+    pub player_window: PlayerWindow,
     pub app_id: String,
     pub tick_duration: Duration,
     pub max_frames: Option<u64>,
@@ -20,6 +22,7 @@ impl Default for HostOptions {
     fn default() -> Self {
         Self {
             title: "Application".into(),
+            player_window: PlayerWindow::default(),
             app_id: "org.rot.application".into(),
             tick_duration: Duration::from_millis(100),
             max_frames: None,
@@ -71,10 +74,12 @@ pub fn run<A: Application>(app: A, options: HostOptions) -> Result<(), String> {
     let mut setup = WgpuSetupCreateNew::without_display_handle();
     setup.instance_descriptor.backends = wgpu::Backends::VULKAN;
     rot_render::configure_setup(&mut setup);
+    options.player_window.validate()?;
+    let size = options.player_window.effective_size();
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1100.0, 760.0])
-            .with_min_inner_size([800.0, 540.0])
+            .with_inner_size([size.width as f32, size.height as f32])
+            .with_min_inner_size([MIN_WINDOW_SIZE.width as f32, MIN_WINDOW_SIZE.height as f32])
             .with_app_id(&options.app_id)
             .with_icon(rot_render::window_icon()),
         renderer: eframe::Renderer::Wgpu,
@@ -84,7 +89,7 @@ pub fn run<A: Application>(app: A, options: HostOptions) -> Result<(), String> {
         },
         ..Default::default()
     };
-    let title = format!("Rot Engine | {}", options.title);
+    let title = options.player_window.effective_title(&options.title);
     let exit_error = Arc::new(Mutex::new(None));
     let host_error = exit_error.clone();
     eframe::run_native(&title, native, Box::new(move |cc| {

@@ -137,6 +137,7 @@ fn execute(options: Options) -> Result<(), String> {
             app,
             HostOptions {
                 title: "Rot Engine Yard — Delivery challenge".into(),
+                player_window: Default::default(),
                 app_id: "rot-yard".into(),
                 tick_duration,
                 max_frames: options.frames,

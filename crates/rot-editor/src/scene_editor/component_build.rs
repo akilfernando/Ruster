@@ -9,9 +9,9 @@ use crate::{
 };
 use eframe::egui;
 use rot_app::creation::{
-    CreationManifest, DrawDependencies, RuntimeScene, StartupTransition, DESCRIPTOR_NAME, FORMAT,
-    NO_ANIMATION_VERSION, NO_AUDIO_VERSION, STARTUP_TARGET_DIRECTORY, STARTUP_TRANSITION_NAME,
-    VERSION,
+    CreationManifest, DrawDependencies, PlayerWindow, RuntimeScene, StartupTransition,
+    DESCRIPTOR_NAME, FORMAT, NO_ANIMATION_VERSION, NO_AUDIO_VERSION, STARTUP_TARGET_DIRECTORY,
+    STARTUP_TRANSITION_NAME, VERSION,
 };
 use rot_assets::{AssetKind, AssetStore};
 use rot_scene::component_scene::{ComponentScene, ComponentSession};
@@ -132,6 +132,7 @@ impl From<String> for BuildFailure {
 }
 
 struct BuildRequest {
+    player: PlayerWindow,
     bytes: Vec<u8>,
     lua_scene: Option<ComponentScene>,
     scene: RuntimeScene,
@@ -220,6 +221,7 @@ impl BuildRequest {
             )
         };
         Ok(Self {
+            player: PlayerWindow::default(),
             bytes,
             lua_scene,
             scene,
@@ -351,6 +353,7 @@ impl BuildRequest {
                 NO_AUDIO_VERSION
             },
             title: draw.id.clone(),
+            player: self.player,
             scene: "scene.json".into(),
             meshes: BTreeMap::new(),
             mesh_normal_policies: BTreeMap::new(),
@@ -478,6 +481,7 @@ enum BuildOutcome {
 #[derive(Default)]
 pub(super) struct BuildUi {
     path: Option<String>,
+    player_window: Option<(PlayerWindow, String)>,
     startup: Option<StartupSelection>,
     focus: bool,
     worker: Option<BuildWorker>,
@@ -564,6 +568,17 @@ impl BuildUi {
             .and_then(|startup| startup.choice().ok().flatten())
             .map_or(id, |(_, id)| id)
             .to_owned();
+        self.player_window = None;
+        let startup = startup.and_then(|observed| {
+            self.player_window = observed.choice().ok().and_then(|_| {
+                observed
+                    .player_window()
+                    .ok()
+                    .map(|player| (player.clone(), id.clone()))
+            });
+            observed.player_window()?;
+            Ok(observed)
+        });
         self.startup = Some(StartupSelection::prepare(startup));
         let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         self.path = Some(
@@ -614,7 +629,11 @@ impl BuildUi {
             let (code, message, recovery) = failure.kind.feedback();
             json!({"code":code, "message":message.plain(), "recovery":recovery.plain()})
         });
-        json!({"state":state, "published":published, "failure":failure})
+        let mut result = json!({"state":state, "published":published, "failure":failure});
+        if let Some((player, scene_id)) = &self.player_window {
+            result["player_window"] = super::project_startup::player_context(player, scene_id);
+        }
+        result
     }
 
     pub(super) fn poll(&mut self) {
@@ -782,6 +801,31 @@ impl BuildUi {
                     }
                     None => false,
                 };
+                if let Some((player, scene_id)) = &self.player_window {
+                    let size = player.effective_size();
+                    let source = |configured| {
+                        if configured {
+                            Text::PlayerFromProject.plain()
+                        } else {
+                            Text::PlayerDefault.plain()
+                        }
+                    };
+                    let title = format!(
+                        "{} · {} ({})",
+                        Text::PlayerWindowTitle.plain(),
+                        player.effective_title(scene_id),
+                        source(player.title.is_some())
+                    );
+                    ui.add(egui::Label::new(&title).truncate())
+                        .on_hover_text(&title);
+                    ui.label(format!(
+                        "{} · {} × {} ({})",
+                        Text::PlayerInitialSize.plain(),
+                        size.width,
+                        size.height,
+                        source(player.initial_size.is_some())
+                    ));
+                }
                 let enter = (edit.has_focus() || edit.lost_focus())
                     && ui.input_mut(|input| {
                         input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
@@ -903,7 +947,9 @@ impl BuildUi {
             .with_current(|_| {
                 observation.observed.verify_transition_target()?;
                 let source = observation.saved.as_deref().unwrap_or(session);
+                let player = observation.observed.player_window()?.clone();
                 let request = BuildRequest::capture(source, assets).and_then(|mut request| {
+                    request.player = player;
                     if let Some(transition) = &observation.transition {
                         let target = BuildRequest::capture(&transition.session, assets).map_err(
                             |failure| failure.at_transition_target(&transition.session.scene().id),
@@ -1030,6 +1076,10 @@ mod tests {
         let single = rot_app::ResourceRoot::new(&legacy).unwrap();
         let manifest = CreationManifest::load(&single).unwrap();
         assert_eq!(manifest.version, NO_AUDIO_VERSION);
+        assert!(serde_json::to_value(&manifest)
+            .unwrap()
+            .get("player")
+            .is_none());
         let runtime = manifest.load_runtime_scene(&single).unwrap();
         assert!(StartupTransition::load(&single, &runtime)
             .unwrap()
@@ -1041,6 +1091,18 @@ mod tests {
             .unwrap()
             .set_transition("start", "Rail.scene.json")
             .unwrap();
+        let window = PlayerWindow {
+            title: Some("Night Rail — 夕方".into()),
+            initial_size: Some(rot_app::creation::PlayerWindowSize {
+                width: 1280,
+                height: 800,
+            }),
+        };
+        project
+            .observe()
+            .unwrap()
+            .set_player_window(window.clone())
+            .unwrap();
         let mut build = BuildUi::default();
         build.open(&rail_path, "rail", project.observe());
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -1049,6 +1111,14 @@ mod tests {
             build.poll();
             std::thread::yield_now();
         }
+        assert_eq!(
+            build.inspect()["player_window"]["title"],
+            "Night Rail — 夕方"
+        );
+        assert_eq!(
+            build.inspect()["player_window"]["size_source"],
+            "project_settings"
+        );
         let capture = || build.capture_project_request(&rail, Some(&assets)).unwrap();
         let stale_assets = capture();
         let broken = directory.path().join("broken");
@@ -1064,10 +1134,15 @@ mod tests {
 
         let output = directory.path().join("build");
         capture().publish(&output, &player, &cancel).unwrap();
+        let mut configured = serde_json::to_value(
+            CreationManifest::load(&rot_app::ResourceRoot::new(&output).unwrap()).unwrap(),
+        )
+        .unwrap();
         assert_eq!(
-            fs::read(output.join(DESCRIPTOR_NAME)).unwrap(),
-            fs::read(legacy.join(DESCRIPTOR_NAME)).unwrap()
+            configured.as_object_mut().unwrap().remove("player"),
+            Some(json!(window))
         );
+        assert_eq!(configured, serde_json::to_value(&manifest).unwrap());
         assert!(!output
             .join(STARTUP_TARGET_DIRECTORY)
             .join(APPLICATION)
@@ -1088,6 +1163,7 @@ mod tests {
         fs::rename(root, directory.path().join("offline-source")).unwrap();
         let package = rot_app::ResourceRoot::new(&relocated).unwrap();
         let startup = CreationManifest::load(&package).unwrap();
+        assert_eq!(startup.player, window);
         let runtime = startup.load_runtime_scene(&package).unwrap();
         let route = StartupTransition::load(&package, &runtime)
             .unwrap()
@@ -1104,6 +1180,7 @@ mod tests {
         );
         let (resources, target, scene) = route.load_destination(&package).unwrap();
         assert_eq!(scene.draw_scene().id, "rail");
+        assert!(target.player.is_default());
         assert_eq!(
             target
                 .load_meshes(&resources)
