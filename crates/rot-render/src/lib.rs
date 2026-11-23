@@ -465,6 +465,7 @@ fn transform_camera_matrices(
     camera: rot_scene::component_scene::TransformCameraPose,
     aspect: f32,
 ) -> Option<(Mat4, Mat4, Mat4)> {
+    let aspect = camera.aspect_ratio.unwrap_or(aspect);
     if !(0.01..=100.0).contains(&aspect) || !(10.0..=120.0).contains(&camera.vertical_fov_degrees) {
         return None;
     }
@@ -478,7 +479,6 @@ fn transform_camera_matrices(
     {
         return None;
     }
-    let aspect = camera.aspect_ratio.unwrap_or(aspect);
     let fov = camera.vertical_fov_degrees.to_radians();
     let view = Mat4::look_to_rh(eye, forward, up);
     let (projection, overlay) = match camera.clip {
