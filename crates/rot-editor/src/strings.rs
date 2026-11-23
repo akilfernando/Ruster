@@ -980,7 +980,7 @@ editor_text! {
     PlayerInitialHeight => "Initial Height",
     PlayerDefault => "Default",
     PlayerFromProject => "Project Settings",
-    PlayerWindowHelp => "Leave fields blank for the default. Set both dimensions to request an initial size in logical pixels.",
+    PlayerWindowHelp => "Blank fields use defaults. Set both size fields in logical pixels.",
     PlayerDraftPending => "Apply or cancel Player settings before closing.",
     PlayerReopen => "Project settings changed. Cancel or reopen the Player page before applying.",
     StartupScene => "Startup Scene",

@@ -1285,7 +1285,8 @@ f 1 2 3
             .is_err());
         assert_eq!(
             build.inspect(),
-            json!({"state":"preparing", "published":false, "failure":null})
+            json!({"state":"preparing", "published":false, "failure":null,
+                "player_window": super::super::project_startup::player_context(&PlayerWindow::default(), "title")})
         );
         let ctx = egui::Context::default();
         ctx.run_ui(
@@ -1938,7 +1939,8 @@ f 1 2 3
         assert!(!ui.is_open());
         assert_eq!(
             ui.inspect(),
-            json!({"state":"cancelled", "published":false, "failure":null})
+            json!({"state":"cancelled", "published":false, "failure":null,
+                "player_window": super::super::project_startup::player_context(&PlayerWindow::default(), "scene")})
         );
 
         ui.open(
@@ -1960,7 +1962,9 @@ f 1 2 3
         ));
         assert_eq!(
             ui.inspect(),
-            json!({"state":"launch_failed", "published":true, "failure":{
+            json!({"state":"launch_failed", "published":true,
+                "player_window": super::super::project_startup::player_context(&PlayerWindow::default(), "scene"),
+                "failure":{
                 "code":"launch_failed",
                 "message":Text::BuildLaunchFailed.plain(),
                 "recovery":Text::BuildRunManually.plain(),
