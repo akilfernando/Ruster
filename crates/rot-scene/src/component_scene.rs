@@ -300,8 +300,9 @@ impl CameraView {
                 }
             }
             Self::Transform(TransformLens::Orthographic(lens)) => {
-                let near = lens.clip.near;
-                let far = lens.clip.far;
+                let near = f64::from(lens.clip.near);
+                let far = f64::from(lens.clip.far);
+                let span = far - near;
                 if (0.01..=10_000.).contains(&lens.vertical_size)
                     && lens
                         .aspect_ratio
@@ -310,11 +311,14 @@ impl CameraView {
                     && near.is_finite()
                     && far.is_finite()
                     && far > near
-                    && (far - near).recip().is_finite()
+                    // The GL overlay maps depth to [-1, 1], so its depth
+                    // coefficients bound the corresponding Vulkan ones.
+                    && ((2. / span) as f32).is_finite()
+                    && (((far + near) / span) as f32).is_finite()
                 {
                     Ok(())
                 } else {
-                    Err(SceneError::Invalid("Transform Orthographic requires Vertical Size 0.01..10000, optional aspect 0.01..100, and finite positive ordered clip planes.".into()))
+                    Err(SceneError::Invalid("Transform Orthographic requires Vertical Size 0.01..10000, optional aspect 0.01..100, and finite positive ordered clip planes with enough separation for rendering.".into()))
                 }
             }
         }
@@ -1030,6 +1034,7 @@ mod tests {
             ("clip", json!({"near":0,"far":64})),
             ("clip", json!({"near":5,"far":4})),
             ("clip", json!({"near":1.0,"far":1.000000001})),
+            ("clip", json!({"near":1e-38,"far":1.4e-38})),
         ] {
             let mut bad = value.clone();
             bad[field] = invalid;
