@@ -425,6 +425,7 @@ editor_text! {
     RecoveryCopyHint => "Restore opens an unsaved copy. Discard deletes the recovery copy.",
     RecoveryUnreadable => "Unreadable Recovery Copy",
     RecoveryDetails => "Recovery Details",
+    RecoveryPreparingScene => "Preparing Recovered Scene…",
     RecoveryAsNewScene => "Recover as New Scene",
     RecoveryComponentScope => "Committed Scene Changes",
     RecoveryComponentScopeHint => "Unapplied edits, Undo history, and Play state are excluded.",

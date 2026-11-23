@@ -325,3 +325,40 @@ fn deadlines_debounce_cap_continuous_edits_and_reset_without_sleeping() {
     assert!(!deadline.ready(base + Duration::from_secs(21)));
     assert!(deadline.ready(base + Duration::from_secs(22)));
 }
+
+#[test]
+fn completed_component_checkpoint_roundtrips_more_than_the_legacy_limit() {
+    use rot_scene::component_scene::{ComponentScene, ObjectNode};
+    let project = tempfile::tempdir().unwrap();
+    let origin = project.path().join("Workshop.scene.json");
+    let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+    let prefab_free_template = scene.objects[0].clone();
+    scene.objects = (0..5_000)
+        .map(|index| {
+            let mut node: ObjectNode = prefab_free_template.clone();
+            node.id = format!("part-{index}");
+            node.name = format!("Workshop part {index}");
+            node.components[0].id = format!("renderer-{index}");
+            node
+        })
+        .collect();
+    let checkpoint = Snapshot::capture_component(&scene, origin.clone(), [7; 32], 23).unwrap();
+    assert!(checkpoint.document.get().len() as u64 > rot_scene::MAX_FILE_BYTES);
+    assert_eq!(checkpoint.drafts.get(), "{}");
+    let store = Store::open(project.path().join("recovery")).unwrap();
+    let mut journal = store.allocate().unwrap();
+    journal.checkpoint(checkpoint).unwrap();
+    let key = id(&journal);
+    drop(journal);
+    let candidates = store.scan().unwrap();
+    let [candidate] = candidates.as_slice() else {
+        panic!("expected one candidate");
+    };
+    assert!(candidate.component);
+    assert_eq!(candidate.origin.as_ref(), Some(&origin));
+    assert_eq!(candidate.revision, Some(23));
+    let (journal, snapshot) = store.claim(&key).unwrap();
+    assert_eq!(snapshot.restore_component().unwrap(), scene);
+    journal.retire().unwrap();
+    assert!(store.scan().unwrap().is_empty());
+}

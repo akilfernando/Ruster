@@ -189,7 +189,8 @@ mod tests {
             .send(Command::Boundary {
                 id: 10,
                 epoch: 1,
-                adopt: Some(adopted)
+                adopt: Some(adopted),
+                retire: true
             })
             .is_ok());
         release.send(()).unwrap();
@@ -231,7 +232,8 @@ mod tests {
             .send(Command::Boundary {
                 id: 11,
                 epoch: 2,
-                adopt: None
+                adopt: None,
+                retire: true
             })
             .is_ok());
         assert!(matches!(

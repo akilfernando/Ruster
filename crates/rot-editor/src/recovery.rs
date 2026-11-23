@@ -156,10 +156,10 @@ impl Snapshot {
         scene
             .write_json(&mut bytes)
             .map_err(|error| error.to_string())?;
-        let document_sha256 = digest(&bytes.0);
         let document =
             RawValue::from_string(String::from_utf8(bytes.0).map_err(|error| error.to_string())?)
                 .map_err(|error| error.to_string())?;
+        let document_sha256 = digest(document.get().as_bytes());
         let snapshot = Self {
             origin: Some(origin),
             asset_origin: None,

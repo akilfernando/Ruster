@@ -19,6 +19,7 @@ pub(super) struct RecoveryUi {
     worker: Option<Worker>,
     pub candidates: Vec<Candidate>,
     pub open: bool,
+    pub preparing_component: bool,
     pub warning: String,
     warning_generation: u64,
     submitted: Option<(Option<Stamp>, u64)>,
@@ -48,6 +49,7 @@ impl RecoveryUi {
             worker: None,
             candidates: Vec::new(),
             open: false,
+            preparing_component: false,
             warning: String::new(),
             warning_generation: 0,
             submitted: None,
@@ -460,6 +462,10 @@ impl RecoveryUi {
                 .ok()
                 .map(|time| time.as_secs());
             ui.heading(Text::RecoveryHeading.plain());
+            if self.preparing_component {
+                ui.label(Text::RecoveryPreparingScene.plain());
+                return;
+            }
             egui::ScrollArea::vertical()
                 .max_height((ctx.content_rect().height() - 170.0).max(64.0))
                 .show(ui, |ui| {
@@ -613,6 +619,66 @@ mod tests {
         },
         time::Duration,
     };
+    #[test]
+    fn covering_component_save_retires_even_with_capture_in_flight() {
+        use rot_scene::component_scene::{ComponentScene, ComponentSession};
+        let root = tempfile::tempdir().unwrap();
+        let origin = root.path().join("scene.json");
+        let legacy = rot_scene::Session::new(rot_scene::Scene::demo()).unwrap();
+        let scene = ComponentScene::from_legacy(&legacy).unwrap();
+        scene.save_new(&origin).unwrap();
+        let mut session = ComponentSession::open(&origin).unwrap();
+        let recovery_root = root.path().join("recovery");
+        let mut recovery = RecoveryUi::at(Store::open(recovery_root.clone()).unwrap());
+        let mut object = session.scene().objects[0].clone();
+        object.name = "First dirty revision".into();
+        session.put_object(0, object.clone()).unwrap();
+        let (path, digest, pin) = session.recovery_snapshot().unwrap();
+        recovery.observe_component(1, 0, true, Instant::now());
+        recovery.checkpoint(crate::recovery::Snapshot::capture_component(
+            &pin, path, digest, 1,
+        ));
+        drop(pin);
+
+        object.name = "Second dirty revision".into();
+        session.put_object(1, object).unwrap();
+        recovery.observe_component(2, 0, true, Instant::now());
+        let (path, digest, pin) = session.recovery_snapshot().unwrap();
+        let (started, begin) = mpsc::channel();
+        let (release, gate) = mpsc::channel();
+        recovery
+            .dispatch(Box::new(move || {
+                started.send(()).unwrap();
+                gate.recv_timeout(Duration::from_secs(5)).unwrap();
+                crate::recovery::Snapshot::capture_component(&pin, path, digest, 2)
+            }))
+            .unwrap();
+        begin.recv_timeout(Duration::from_secs(5)).unwrap();
+        session.save(&origin).unwrap();
+        recovery.observe_component(
+            2,
+            session.save_generation(),
+            session.is_dirty(),
+            Instant::now(),
+        );
+        release.send(()).unwrap();
+        recovery.wait_idle();
+        assert!(recovery
+            .take_ack()
+            .is_some_and(|(_, result)| result.is_ok()));
+        assert!(std::fs::read_dir(recovery_root).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("window-")
+        }));
+        assert_eq!(
+            ComponentSession::open(origin).unwrap().scene(),
+            session.scene()
+        );
+    }
+
     fn snapshot() -> crate::recovery::Snapshot {
         crate::recovery::Snapshot::capture(
             &rot_scene::Session::new(rot_scene::Scene::demo()).unwrap(),
