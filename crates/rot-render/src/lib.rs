@@ -562,18 +562,22 @@ pub fn transform_camera_output_projection(
 fn transform_camera_viewport(
     rect: egui::Rect,
     dpi: f32,
-    aspect: Option<f32>,
-) -> Option<egui::Rect> {
+    aspect: f32,
+) -> Option<(egui::Rect, bool)> {
     let pixel_min = (rect.min.to_vec2() * dpi).round();
     let size = (rect.max.to_vec2() * dpi).round() - pixel_min;
     let output = [size.x as u32, size.y as u32];
     if output.contains(&0) {
         return None;
     }
-    let [x, y, w, h] = camera_content_pixels(output, aspect);
+    let [x, y, w, h] = camera_content_pixels(output, Some(aspect));
+    let has_bars = [w, h] != output;
+    if !has_bars {
+        return Some((rect, false));
+    }
     let min = ((pixel_min + egui::vec2(x as f32, y as f32)) / dpi).to_pos2();
     let max = ((pixel_min + egui::vec2((x + w) as f32, (y + h) as f32)) / dpi).to_pos2();
-    Some(egui::Rect::from_min_max(min, max))
+    Some((egui::Rect::from_min_max(min, max), true))
 }
 
 #[cfg(test)]
@@ -1726,21 +1730,23 @@ fn render_draw_scene(
 ) -> ViewportInteraction {
     let scene = draw.scene;
     let mut player_content = None;
+    let mut paint_bars = false;
     let player_view = if navigation.player_view {
         let aspect = surface.rect.aspect_ratio();
         let camera = if let Some(camera) = draw.transform_camera {
-            let content = if camera.aspect_ratio.is_some() {
+            let content = if let Some(authored_aspect) = camera.aspect_ratio {
                 transform_camera_viewport(
                     surface.rect,
                     ui.ctx().pixels_per_point(),
-                    camera.aspect_ratio,
+                    authored_aspect,
                 )
             } else {
-                Some(surface.rect)
+                Some((surface.rect, false))
             };
             content
-                .and_then(|content| {
+                .and_then(|(content, has_bars)| {
                     player_content = Some(content);
+                    paint_bars = has_bars;
                     transform_camera_matrices(camera, aspect)
                 })
                 .map(|matrices| (matrices, Vec3::from_array(camera.eye).extend(1.).to_array()))
@@ -2132,11 +2138,7 @@ fn render_draw_scene(
         .collect();
     let receipt = FrameReceipt::default();
     let draw_rect = player_content.unwrap_or(rect);
-    if draw
-        .transform_camera
-        .is_some_and(|camera| camera.aspect_ratio.is_some())
-        && player_content.is_some()
-    {
+    if paint_bars {
         ui.painter().rect_filled(rect, 0., egui::Color32::BLACK);
     }
     ui.painter().add(egui_wgpu::Callback::new_paint_callback(
