@@ -201,7 +201,7 @@ impl ProjectDirectory {
         filename: &str,
         scene: &ComponentScene,
     ) -> Result<PreparedSibling, String> {
-        use std::io::Seek;
+        use std::io::{BufWriter, Seek, Write};
         validate_filename(filename)?;
         self.verify()?;
         let path = self.root.join(filename);
@@ -241,7 +241,11 @@ impl ProjectDirectory {
         let file = &mut staged.file;
         #[cfg(not(unix))]
         let file = staged.as_file_mut();
-        scene.write_json(&mut *file).map_err(error)?;
+        {
+            let mut writer = BufWriter::new(&mut *file);
+            scene.write_json(&mut writer).map_err(error)?;
+            writer.flush().map_err(error)?;
+        }
         file.sync_all().map_err(error)?;
         file.rewind().map_err(error)?;
         let session = ComponentSession::from_open_file(&path, file.try_clone().map_err(error)?)
