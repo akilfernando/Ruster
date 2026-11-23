@@ -501,12 +501,16 @@ placement Group and plays it in a loop.
 
 **Step** from stopped shows the clip's first pose. **Play**, **Pause** and **Step**
 advance it with every other runtime motion, and **Stop** returns to the
-authored rest pose, which the clip never changes. Select the placement
-Group to find **Animation** in the Inspector: choose another clip from
-the same model, clear **Loop** to hold the last pose, or **Remove
-animation**. Each change is one Undo step. A target the clip animates
-cannot also carry a transform-writing behavior, and it cannot be deleted
-while the animation exists.
+authored rest pose. Select the placement Group and open **Animator** in
+the v23 Inspector. **Clip** lists the model’s clips and their durations.
+Choose a clip and use **Apply** to commit it. Clear **Loop** to hold
+the last pose. Tab reaches the controls, Enter selects a focused clip
+or submits **Apply**, and Escape cancels the draft. Use **Remove
+Component** to detach the Animator. Each Apply or removal is one Undo
+step. In legacy scenes the **Animation** section offers the same clip
+and loop controls. A target the clip animates cannot also carry a
+transform-writing behavior, and deleting it requires removing the
+animation first.
 
 After changing keys in Blender, overwrite the source and use **Refresh**.
 The placement keeps its binding. Renaming a clip, or animating a

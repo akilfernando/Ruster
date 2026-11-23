@@ -19,7 +19,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("scene_rename", "Rename an object. Its ID stays the same."),
     ("scene_duplicate", "Duplicate an object under a new ID and name."),
     ("scene_components_inspect", "List component IDs and types on a v23 object. Follow next_offset, or supply component_id for its authored definition."),
-    ("scene_components_edit", "Edit v23 components in one Undo. Changed texture bindings and Lua files need expected_asset_revision. For file Scripts use source_kind asset and the asset ID as binding.source_id."),
+    ("scene_components_edit", "Edit v23 components in one Undo. Pin expected_asset_revision for clip, texture and file-backed Script changes. Scripts use source_kind asset and the asset ID as binding.source_id."),
     ("scene_delete", "Delete an object. In v23, also delete its descendants."),
     ("scene_transform_many", "Set the position, rotation (radians) and scale of up to 256 objects as one Undo step."),
     ("scene_duplicate_many", "Duplicate up to 256 objects under new IDs as one Undo step."),
@@ -99,5 +99,5 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("hud_panel_move", "Change a HUD panel's drawing order."),
     ("player_view_inspect", "Read the game camera mode, effective pose and framing at 4:3 and 16:9."),
     ("scene_player_view_set", "Set the game camera (null clears). v23 uses a fixed view and optional component_id; component_id alone activates an existing camera. Yaw and pitch are radians, FOV degrees."),
-    ("scene_animation_set", "Set or remove the animation clip played on an imported model."),
+    ("scene_animation_set", "Set or remove an imported model’s animation. v23 clip selection requires expected_asset_revision. Send looping alone to change only repeat."),
 ];

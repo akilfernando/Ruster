@@ -9,6 +9,7 @@ pub struct AnimatedFixture {
     /// X translation reached at two seconds, linear from zero.
     pub end_x: f32,
     pub clip_name: &'static str,
+    pub second_clip_name: Option<&'static str>,
     /// `LINEAR`, `STEP` or `CUBICSPLINE` for the rotation sampler.
     pub rotation_interpolation: &'static str,
     /// glTF channel path for the first channel, normally `rotation`.
@@ -25,6 +26,7 @@ impl Default for AnimatedFixture {
             mid_angle: std::f32::consts::FRAC_PI_2,
             end_x: 2.0,
             clip_name: "Swing",
+            second_clip_name: None,
             rotation_interpolation: "LINEAR",
             rotation_path: "rotation",
             split_materials: false,
@@ -103,6 +105,11 @@ pub fn animated_glb(fixture: AnimatedFixture) -> Vec<u8> {
             ],
         }],
     });
+    if let Some(name) = fixture.second_clip_name {
+        let mut second = document["animations"][0].clone();
+        second["name"] = json!(name);
+        document["animations"].as_array_mut().unwrap().push(second);
+    }
     if fixture.material_fallbacks {
         document["materials"][0] = json!({
             "pbrMetallicRoughness":{"roughnessFactor":0.0},

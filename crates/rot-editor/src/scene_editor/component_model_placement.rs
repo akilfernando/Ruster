@@ -322,6 +322,87 @@ mod tests {
         assert_eq!(workspace.session.scene(), &placed);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn v23_animator_edits_share_guards_and_keep_the_placement_map() {
+        use serde_json::{json, Value};
+
+        let project = tempfile::tempdir().unwrap();
+        let path = project.path().join("scene.json");
+        let source = project.path().join("Bridge.glb");
+        let fixture = animated_glb(AnimatedFixture {
+            clip_name: "Lower",
+            second_clip_name: Some("Raise"),
+            ..Default::default()
+        });
+        fs::write(&source, &fixture).unwrap();
+        fs::write(project.path().join("Foreign.glb"), fixture).unwrap();
+        let mut store = AssetStore::open(project.path()).unwrap();
+        let model = store.import_glb_at(0, "bridge", "Bridge.glb").unwrap();
+        let foreign = store.import_glb_at(1, "other", "Foreign.glb").unwrap();
+        let initial =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("animator")).unwrap()).unwrap();
+        let mut workspace = ComponentWorkspace::new(path, ComponentSession::new(initial).unwrap());
+        workspace.meshes = store.mesh_snapshots();
+        workspace.assets = Some(store);
+        let owner = workspace.place_model(&model.id, None, None).unwrap();
+        let placed = workspace.session.scene().clone();
+        let component = placed.objects[0].components[0].clone();
+        let Component::Animator { binding } = &component.kind else {
+            unreachable!()
+        };
+        let mut request = json!({"expected_session_token":"session", "expected_revision":"1",
+            "owner_id":owner,"clip_id":model.clips["Raise"].id});
+        for (asset_revision, clip, code) in [
+            (
+                Value::Null,
+                &model.clips["Raise"].id,
+                "asset_revision_required",
+            ),
+            (json!("1"), &model.clips["Raise"].id, "stale_asset_revision"),
+            (json!("2"), &foreign.clips["Raise"].id, "invalid_clip"),
+        ] {
+            if !asset_revision.is_null() {
+                request["expected_asset_revision"] = asset_revision;
+            }
+            request["clip_id"] = json!(clip);
+            let reply = workspace.ai_command("session", "scene_animation_set", &request);
+            assert_eq!(reply["error"]["code"], code, "{reply}");
+            assert_eq!(workspace.session.revision(), 1);
+            assert_eq!(workspace.session.scene(), &placed);
+        }
+        let mut malformed = serde_json::to_value(&component).unwrap();
+        malformed["binding"]["targets"]
+            .as_object_mut()
+            .unwrap()
+            .remove("Rig/Arm");
+        let reply = workspace.ai_command("session", "scene_components_edit", &json!({
+            "expected_session_token":"session","expected_revision":"1","expected_asset_revision":"2",
+            "edits":[{"operation":"replace","object_id":owner,"component":malformed}]
+        }));
+        assert_eq!(reply["error"]["code"], "invalid_clip", "{reply}");
+        assert_eq!(workspace.session.revision(), 1);
+
+        request["clip_id"] = json!(model.clips["Raise"].id);
+        let reply = workspace.ai_command("session", "scene_animation_set", &request);
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["result"]["animation"]["source"]["clip_name"], "Raise");
+        assert_eq!(reply["result"]["animation"]["looping"], true);
+        let Component::Animator { binding: next } =
+            &workspace.session.scene().objects[0].components[0].kind
+        else {
+            unreachable!()
+        };
+        assert_eq!(next.targets, binding.targets);
+        let reply = workspace.ai_command("session", "scene_animation_set", &json!({
+            "expected_session_token":"session","expected_revision":"2","owner_id":owner,"looping":false
+        }));
+        assert_eq!(reply["result"]["animation"]["looping"], false, "{reply}");
+        workspace.session.undo(3).unwrap();
+        workspace.session.undo(4).unwrap();
+        assert_eq!(workspace.session.scene(), &placed);
+    }
+
     #[test]
     fn v23_model_placement_preserves_materials_and_animator_in_one_undo() {
         let project = tempfile::tempdir().unwrap();

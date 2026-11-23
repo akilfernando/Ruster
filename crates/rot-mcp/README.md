@@ -145,6 +145,20 @@ connected project.
   clamped to a relative 0–16. Point range defaults to 5 units when
   omitted. Inspect the placed lighting and use shared Undo to remove
   the hierarchy and its lights together.
+- To change an imported v23 Animator’s clip, call `scene_animation_set`
+  with the inspected `expected_session_token`, `expected_revision`,
+  `expected_asset_revision`, the placement root’s `owner_id`, and
+  `clip_id` from that model’s `asset_inspect` clip list. Pass optional
+  `looping` with the clip or send it alone to change only looping.
+  Use `remove:true` to remove the Animator. Loop-only and removal
+  requests work with the scene guards alone. Legacy keeps its
+  `clip_id`/optional `looping` or `remove:true` contract.
+- Inspect an Animator through `scene_components_inspect` using its
+  component ID. The response includes accepted clip metadata when
+  available. `scene_components_edit` uses the same asset revision and
+  compatibility checks to change a clip. The placement’s target map
+  stays intact. Start Play again to see the result of an edit
+  or a same-ID source refresh.
 - For a v23 Lua file, find a ready asset with `kind: "script"` in
   `asset_inspect`. In `scene_components_edit`, add a component with
   `type: "script"`, `source_kind: "asset"`, a unique component ID and
