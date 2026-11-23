@@ -123,9 +123,31 @@ pub(super) fn model_summary(model: &rot_assets::ModelInfo) -> Value {
     let mut result = json!({"id":model.id,"source":source,"source_truncated":source.len()!=model.source.len(),
         "hash":model.hash,"status":"accepted","node_count":model.nodes.len(),"material_count":model.materials.len(),
         "clips":clips});
+    let light_count = model
+        .nodes
+        .values()
+        .filter(|node| node.light.is_some())
+        .count();
+    if light_count != 0 {
+        result["light_count"] = json!(light_count);
+    }
     if !model.warnings.is_empty() {
+        const PREVIEW_WARNINGS: usize = 4;
+        let warnings: Vec<String> = model
+            .warnings
+            .iter()
+            .take(PREVIEW_WARNINGS)
+            .map(|message| message.chars().take(DIAGNOSTIC_CHARS).collect())
+            .collect();
         result["warning_count"] = json!(model.warnings.len());
-        result["warnings"] = json!(model.warnings.iter().take(2).collect::<Vec<_>>());
+        result["warnings_truncated"] = json!(
+            warnings.len() < model.warnings.len()
+                || warnings
+                    .iter()
+                    .zip(&model.warnings)
+                    .any(|(shown, full)| shown.len() < full.len())
+        );
+        result["warnings"] = json!(warnings);
     }
     result
 }

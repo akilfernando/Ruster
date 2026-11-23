@@ -202,6 +202,7 @@ impl super::SceneEditor {
                 );
             }
         }
+        let has_lights = model.nodes.values().any(|node| node.light.is_some());
         let placement = model_placement(&self.session, model, name.unwrap_or(id).into())
             .map_err(|error| error.to_string())?;
         let root = placement.root_id.clone();
@@ -210,7 +211,13 @@ impl super::SceneEditor {
             .map_err(|error| error.to_string())?;
         self.select_object(Some(root.clone()), false);
         self.error.clear();
-        self.notice = format!("Placed {id}.");
+        self.notice = if has_lights {
+            crate::strings::Text::LegacyModelPlacedWithoutLights
+                .plain()
+                .into()
+        } else {
+            format!("Placed {id}.")
+        };
         Ok(root)
     }
 }

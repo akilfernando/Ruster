@@ -122,7 +122,7 @@ impl Registry {
                 || &model.id != id
                 || !ids.insert(id)
                 || !sources.insert(&model.source)
-                || model.warnings.len() > MAX_MODEL_ITEMS + 1
+                || model.warnings.len() > MAX_MODEL_ITEMS * 2 + 2
                 || model.warnings.iter().any(|message| {
                     message.is_empty()
                         || message.len() > 512
@@ -133,6 +133,12 @@ impl Registry {
                 || model.nodes.len() - source_nodes > MAX_MODEL_ITEMS
             {
                 return Err(error("invalid or duplicate static model catalog identity"));
+            }
+            if model.nodes.iter().any(|(path, node)| {
+                node.light
+                    .is_some_and(|light| ModelInfo::is_primitive_path(path) || !light.is_valid())
+            }) {
+                return Err(error("invalid static model light catalog entry"));
             }
             for (resource, _) in model.resources() {
                 validate_id(resource)?;
@@ -257,7 +263,13 @@ impl AssetStore {
         let bytes = read_candidate(&self.root, source)?;
         let decoded = glb::decode(id, source, &bytes)?;
         if let Some(prior) = prior {
-            if decoded.info.nodes != prior.nodes || decoded.info.materials != prior.materials {
+            let same_nodes = decoded.info.nodes.len() == prior.nodes.len()
+                && decoded.info.nodes.iter().zip(&prior.nodes).all(
+                    |((path, next), (old_path, old))| {
+                        path == old_path && next.same_placement_structure(old)
+                    },
+                );
+            if !same_nodes || decoded.info.materials != prior.materials {
                 return Err(error("GLB structure changed (named paths, local transforms, material assignments or settings); import as a fresh model"));
             }
             if !decoded.info.same_clip_structure(prior) {

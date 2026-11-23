@@ -1,9 +1,10 @@
 //! Material and hierarchy copies for model assets in v23 scenes.
 use super::{ComponentWorkspace, Geometry};
 use crate::scene_editor::model_placement::imported_material;
+use rot_assets::ModelLight;
 use rot_scene::{
     component_scene::{Component, ComponentInstance, ObjectNode},
-    AnimationBinding, SceneError, Transform,
+    AnimationBinding, LightKind, SceneError, SunShadow, Transform,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -156,6 +157,31 @@ impl ComponentWorkspace {
                         },
                         tint: [1.0; 4],
                         material,
+                    },
+                });
+            }
+            if let Some(light) = node.light {
+                let (color, intensity, kind) = match light {
+                    ModelLight::Point {
+                        color,
+                        intensity,
+                        range,
+                    } => (color, intensity, LightKind::Point { range }),
+                    ModelLight::Directional { color, intensity } => (
+                        color,
+                        intensity,
+                        LightKind::Directional {
+                            shadow: SunShadow::default(),
+                        },
+                    ),
+                };
+                components.push(ComponentInstance {
+                    id: format!("{id}-light"),
+                    enabled: true,
+                    kind: Component::Light {
+                        color,
+                        intensity,
+                        kind,
                     },
                 });
             }

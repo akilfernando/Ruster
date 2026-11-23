@@ -403,6 +403,7 @@ editor_text! {
     LabelCopy => "Copy",
     LabelCreateCapsule => "Capsule",
     LabelCreateTriangularPrism => "Triangular Prism",
+    LegacyModelPlacedWithoutLights => "Placed model geometry. Import lights in a v23 scene.",
     LabelCreateCube => "Cube",
     LabelCreateDirectionalLight => "Directional Light",
     LabelCreateEmpty => "Create Empty",

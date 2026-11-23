@@ -4,6 +4,10 @@ use glam::{DMat4, DQuat, DVec3, EulerRot};
 use serde_json::value::RawValue;
 use std::borrow::Cow;
 
+#[path = "glb_punctual.rs"]
+mod punctual;
+pub use punctual::ModelLight;
+
 pub const MAX_GLB_SOURCE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_JSON_BYTES: usize = 2 * 1024 * 1024;
 // Match the scene hierarchy qualification bound, including the creator root
@@ -84,6 +88,24 @@ pub struct ModelNode {
     pub scale: [f32; 3],
     pub mesh_id: Option<String>,
     pub material: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub light: Option<ModelLight>,
+}
+
+impl ModelNode {
+    pub(super) fn same_placement_structure(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.parent == other.parent
+            && self.translation == other.translation
+            && self.rotation == other.rotation
+            && self.scale == other.scale
+            && self.mesh_id == other.mesh_id
+            && self.material == other.material
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -214,8 +236,12 @@ struct AnimationSampler {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Document<'a> {
     asset: Header,
-    #[serde(default, rename = "extensionsUsed")]
-    _extensions_used: Vec<String>,
+    #[serde(default)]
+    extensions_used: Vec<String>,
+    #[serde(default)]
+    extensions_required: Vec<String>,
+    #[serde(default, deserialize_with = "present")]
+    extensions: Option<punctual::RootExtensions>,
     scene: Option<usize>,
     scenes: Vec<SourceScene>,
     #[serde(borrow)]
@@ -260,6 +286,8 @@ struct Node<'a> {
     #[serde(default)]
     name: String,
     mesh: Option<usize>,
+    #[serde(default, deserialize_with = "present")]
+    extensions: Option<punctual::NodeExtensions>,
     #[serde(default)]
     children: Vec<usize>,
     // Defer matrix shape diagnostics until the node path is known.
@@ -733,6 +761,7 @@ impl Node<'_> {
             scale: stored_scale,
             mesh_id: None,
             material: None,
+            light: None,
         };
         if let Some(matrix) = matrix {
             if !matrix_close(matrix, PlacementPose::from_local(&definition).matrix()) {
@@ -866,6 +895,8 @@ struct Decoder<'a> {
     mesh_bytes: usize,
     texture_bytes: usize,
     skipped_triangles: usize,
+    light_definitions: Vec<punctual::AdmittedLight>,
+    used_lights: BTreeSet<usize>,
     /// Source node index to named path, and which paths place as Groups.
     paths: BTreeMap<usize, String>,
     group_paths: BTreeSet<String>,
@@ -1311,6 +1342,11 @@ impl Decoder<'_> {
         let mut definition = node
             .placement(index, parent, becomes_group)
             .map_err(|e| error(format!("GLB node {path:?}: {e}")))?;
+        if let Some(light) = &node.extensions {
+            let index = light.index();
+            definition.light = self.light_definitions[index].placement;
+            self.used_lights.insert(index);
+        }
         let local = PlacementPose::from_local(&definition);
         let world = ancestors
             .iter()
@@ -1343,6 +1379,7 @@ impl Decoder<'_> {
                     scale: [1.; 3],
                     mesh_id: None,
                     material: None,
+                    light: None,
                 };
                 self.attach_primitive(&mut child, &child_path, primitive, material)?;
                 self.model.info.nodes.insert(child_path, child);
@@ -1602,6 +1639,12 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
             "GLB scene, buffer or resource counts exceed the static subset",
         ));
     }
+    let light_definitions = punctual::admit(
+        &doc.extensions_used,
+        &doc.extensions_required,
+        doc.extensions.as_ref(),
+        doc.nodes.iter().map(|node| node.extensions.as_ref()),
+    )?;
     let bin = &bin[..buffer.byte_length];
     let roots = doc.scenes[0].nodes.clone();
     let mut decoder = Decoder {
@@ -1612,6 +1655,8 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
         mesh_bytes: 0,
         texture_bytes: 0,
         skipped_triangles: 0,
+        light_definitions,
+        used_lights: BTreeSet::new(),
         paths: BTreeMap::new(),
         group_paths: BTreeSet::new(),
         model: DecodedModel {
@@ -1652,6 +1697,10 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
             }
         ));
     }
+    decoder.model.info.warnings.extend(punctual::warnings(
+        &decoder.light_definitions,
+        &decoder.used_lights,
+    ));
     decoder.model.info.warnings.sort_unstable();
     Ok(decoder.model)
 }
