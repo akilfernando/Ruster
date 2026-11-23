@@ -31,6 +31,10 @@ move or delete objects together, and save. Inspector edits shared Transform
 and component values. Viewport settings stay local. Automatic upgrades remain open.
 
 The v23 Inspector shows live Transform and script state during Play and Step.
+An imported model's Animator lists same-model clips and their durations.
+Native and approved MCP edits choose a clip and Loop setting with shared Undo.
+A drawbridge held its final pose or looped as authored through Play and Linux
+Build, after a source refresh retained the selected clip's ID.
 Assets watches Lua files. Add Component → Script and approved MCP
 attach the same stable file reference. New Play runs pick up accepted
 edits, and Linux Build embeds a verified copy of the source.
