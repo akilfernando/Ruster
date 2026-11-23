@@ -372,6 +372,11 @@ connected project.
   `expected_session_token` and `expected_revision` to pin the edit to that
   scene. If a creator changes it meanwhile, inspect again before editing.
   Center and half extents can change together in one shared Undo.
+  For Sphere, `collider_world` includes `local_radius`, `local_offset` and
+  `effective_enabled`. A resolved sphere reports world `center` and `radius`.
+  A nonuniform world scale reports `unsupported_scale`; shear reports
+  `unsupported_shear`. To change radius, replace the exact component with
+  a new `shape.radius` and preserve the rest.
 - For v23 keyboard actions, call `behavior_inspect` with `kind: "actions"`
   to find stable IDs and the current session token and revision. To read or
   remove one action, send those guards as `expected_session_token` and

@@ -634,7 +634,7 @@ Labels appear in the Game view and in a saved Linux build. They leave keyboard
 and pointer input available to the game. Existing buttons and state-bound
 rows remain in their panels.
 
-## Edit a Box Collider in Scene view
+## Edit a collider in Scene view
 
 Select an object with an enabled Box Collider and choose **Edit Collider**
 on its Inspector component. Drag a filled handle along its local axis.
@@ -647,6 +647,12 @@ the box, the viewport cannot draw handles that match the runtime box.
 Adjust the parent rotation or scale, or edit the local numeric fields.
 For collider participation in Play, the scene must also meet the runtime's
 existing behavior requirements.
+
+For a Sphere Collider, choose **Edit Collider** and drag the round handle
+at the right of the sphere. The radius changes around its fixed center
+in either projection. Release to commit one Undo or press Escape to cancel.
+You can also enter **Radius** directly in the Inspector. The sphere guide
+requires a positive, uniform world scale and a world pose without shear.
 
 ## Reuse a hierarchy as a prefab
 

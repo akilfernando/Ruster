@@ -709,6 +709,159 @@ mod tests {
     }
 
     #[test]
+    fn sphere_collider_radius_drag_uses_the_grouped_world_scale_and_preserves_center() {
+        use crate::workspace::Action;
+        use glam::{DMat4, DVec3};
+        use rot_scene::component_scene::{
+            Component, ComponentInstance, ComponentSession, ObjectNode,
+        };
+        use rot_scene::{ColliderRole, ColliderShape, Transform};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("radius.scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let owner = &mut scene.objects[0];
+        let id = owner.id.clone();
+        owner.parent = Some("stand".into());
+        owner.transform.translation = [0.5, 0.0, 0.0];
+        owner.components.push(ComponentInstance {
+            id: "probe-sphere".into(),
+            enabled: true,
+            kind: Component::Collider {
+                role: ColliderRole::Blocker,
+                offset: [0.25, 0.1, 0.0],
+                shape: ColliderShape::Sphere { radius: 0.5 },
+            },
+        });
+        scene.objects.push(ObjectNode {
+            id: "stand".into(),
+            name: "Stand".into(),
+            enabled: true,
+            parent: None,
+            transform: Transform {
+                translation: [0., 2., 0.],
+                rotation: [0., 0., std::f32::consts::FRAC_PI_2],
+                scale: [2.; 3],
+            },
+            components: Vec::new(),
+        });
+        scene.save_new(&path).unwrap();
+
+        for orthographic in [false, true] {
+            let mut editor =
+                ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+            editor.select(Some(id.clone()));
+            editor.toggle_collider_mode("probe-sphere".into());
+            let inspect = |editor: &mut ComponentWorkspace| {
+                editor.ai_command(
+                    "scene",
+                    "scene_components_inspect",
+                    &json!({
+                        "object_id": id, "component_id": "probe-sphere",
+                    }),
+                )["result"]["collider_world"]
+                    .clone()
+            };
+            let reference = inspect(&mut editor);
+            assert_eq!(reference["radius"], 1.0);
+            assert_eq!(reference["effective_enabled"], true);
+            let center =
+                DVec3::from_array(serde_json::from_value(reference["center"].clone()).unwrap());
+            assert!(center.abs_diff_eq(DVec3::new(-0.2, 3.5, 0.0), 1e-6));
+            editor.navigation.camera = Some(rot_render::CameraState {
+                target: center.as_vec3().to_array(),
+                yaw: 0.6,
+                pitch: 0.3,
+                distance: 6.0,
+                orthographic,
+            });
+            editor.navigation.reset = false;
+            let ctx = egui::Context::default();
+            let draw = |editor: &mut ComponentWorkspace, events| {
+                ctx.run_ui(
+                    egui::RawInput {
+                        focused: true,
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1280.0, 800.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        editor.show_workspace(ui, true);
+                    },
+                )
+                .textures_delta
+                .clear();
+            };
+            draw(&mut editor, vec![]);
+            let view = editor.capture.view.unwrap();
+            let matrix = view.matrices.0;
+            let right = DVec3::new(
+                matrix[0][0].into(),
+                matrix[1][0].into(),
+                matrix[2][0].into(),
+            )
+            .normalize();
+            let view_projection =
+                DMat4::from_cols_array_2d(&view.matrices.1.map(|c| c.map(f64::from)))
+                    * DMat4::from_cols_array_2d(&matrix.map(|c| c.map(f64::from)));
+            let screen_at = |radius| {
+                let ndc = view_projection.project_point3(center + right * radius);
+                view.viewport_rect.center()
+                    + egui::vec2(
+                        ndc.x as f32 * view.viewport_rect.width() * 0.5,
+                        -ndc.y as f32 * view.viewport_rect.height() * 0.5,
+                    )
+            };
+            let button = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let press = |editor: &mut ComponentWorkspace| {
+                draw(editor, vec![egui::Event::PointerMoved(screen_at(1.0))]);
+                draw(editor, vec![button(screen_at(1.0), true)]);
+                assert!(editor.collider_tool.active());
+            };
+            press(&mut editor);
+            draw(&mut editor, vec![egui::Event::PointerMoved(screen_at(1.6))]);
+            assert_eq!(inspect(&mut editor), reference);
+            assert_eq!(editor.session.revision(), 0);
+            draw(&mut editor, vec![button(screen_at(1.6), false)]);
+            assert_eq!(editor.session.revision(), 1);
+            let after = inspect(&mut editor);
+            assert!((after["radius"].as_f64().unwrap() - 1.6).abs() < 1e-5);
+            assert_eq!(after["center"], reference["center"]);
+            assert_eq!(after["local_offset"], reference["local_offset"]);
+            assert_eq!(
+                editor.session.scene().objects[0].transform,
+                scene.objects[0].transform
+            );
+            editor.command(Action::Undo);
+            assert_eq!(editor.session.scene(), &scene);
+            press(&mut editor);
+            draw(&mut editor, vec![egui::Event::PointerMoved(screen_at(1.8))]);
+            draw(
+                &mut editor,
+                vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+            draw(&mut editor, vec![button(screen_at(1.8), false)]);
+            assert!(!editor.collider_tool.active());
+            assert_eq!(editor.session.revision(), 2);
+            assert_eq!(editor.session.scene(), &scene);
+        }
+    }
+
+    #[test]
     fn collider_face_drag_owns_the_viewport_and_commits_one_exact_component() {
         use crate::workspace::Action;
         use glam::{DMat4, DVec3};
