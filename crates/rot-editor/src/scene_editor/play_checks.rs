@@ -2,6 +2,7 @@
 use super::{component_workspace::ComponentWorkspace, SceneEditor};
 use crate::strings::Text;
 use eframe::egui;
+use rot_app::creation::RuntimeScene;
 use rot_behavior::play_check::{
     self as check, CheckIdentity, Comparison, Expectation, PlayCheck, Report, Selection,
 };
@@ -434,8 +435,8 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
                     });
                 }
             };
-            let session = match snapshot.saved {
-                SavedScene::Legacy(session) => session,
+            let runtime = match snapshot.saved {
+                SavedScene::Legacy(session) => RuntimeScene::Behavior(session),
                 SavedScene::Components(pin) => {
                     let stale = case.identity.stale_fields(&identity);
                     if !stale.is_empty() {
@@ -444,20 +445,22 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
                             diagnostic: format!("Changed {}; re-pin the case explicitly without replacing its expectations.", stale.join(", ")),
                         });
                     }
-                    Box::new(component_check_session(pin, script_sources)?)
+                    component_check_runtime(pin, script_sources)?
                 }
             };
-            let clips = match snapshot.assets.expect("verified resources") {
-                Some(assets) => rot_behavior::decode_clips(assets.clips())?,
-                None => Default::default(),
+            let report = match runtime {
+                RuntimeScene::StaticHierarchy { preview, .. } => {
+                    check::run_static(preview.scene(), &case, identity, cancel)
+                }
+                RuntimeScene::Behavior(session) => {
+                    let clips = match snapshot.assets.expect("verified resources") {
+                        Some(assets) => rot_behavior::decode_clips(assets.clips())?,
+                        None => Default::default(),
+                    };
+                    check::run_with_identity(&session, &case, Ok(identity), &clips, cancel)
+                }
             };
-            Ok(Completion::Ran(check::run_with_identity(
-                &session,
-                &case,
-                Ok(identity),
-                &clips,
-                cancel,
-            )))
+            Ok(Completion::Ran(report))
         }
         Work::Save(case, baseline) => {
             if case.identity != identity {
@@ -520,15 +523,15 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
     }
 }
 
-fn component_check_session(
+fn component_check_runtime(
     pin: SavedComponentPin,
     scripts: BTreeMap<String, rot_scene::BehaviorSource>,
-) -> Result<Session, String> {
+) -> Result<RuntimeScene, String> {
     let mut scene = pin.scene().clone();
     scene
         .bake_script_assets(scripts)
         .map_err(|error| error.to_string())?;
-    Session::from_component_runtime(&scene).map_err(|error| error.to_string())
+    RuntimeScene::from_components(Box::new(scene))
 }
 
 impl SceneEditor {
@@ -1547,6 +1550,70 @@ mod tests {
         );
         assert!(!editor.play_checks.open);
         assert_eq!(editor.play_checks.draft.as_ref().unwrap().frames.len(), 120);
+    }
+
+    #[test]
+    fn dense_flat_check_uses_static_play_and_observes_the_last_object() {
+        use rot_scene::component_scene::{ComponentScene, ComponentSession};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dense.scene.json");
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(rot_scene::Scene::demo()).unwrap()).unwrap();
+        let template = scene.objects[0].clone();
+        scene.objects = (0..640)
+            .map(|index| {
+                let mut object = template.clone();
+                object.id = format!("crate-{index}");
+                object.transform.translation = [index as f32, 0.0, 0.0];
+                for component in &mut object.components {
+                    component.id = format!("{}-{index}", component.id);
+                }
+                object
+            })
+            .collect();
+        scene.save_new(&path).unwrap();
+        let session = ComponentSession::open(&path).unwrap();
+        let run = |work| {
+            execute(
+                Snapshot {
+                    saved: SavedScene::Components(session.saved_pin().unwrap()),
+                    path: path.clone(),
+                    assets: Ok(None),
+                },
+                work,
+                Arc::new(AtomicBool::new(false)),
+            )
+            .unwrap()
+        };
+        let Completion::Captured(identity) = run(Work::Capture) else {
+            panic!("expected capture")
+        };
+        let case = PlayCheck {
+            format: check::FORMAT.into(),
+            version: check::VERSION,
+            name: "Flat storage".into(),
+            identity,
+            frames: vec![ActionFrame::default(); check::MAX_FRAMES],
+            expectations: vec![Expectation {
+                select: Selection::Translation {
+                    object_id: "crate-639".into(),
+                },
+                comparison: Comparison::Equals {
+                    expected: StateValue::Vec3([639.0, 0.0, 0.0]),
+                    tolerance: None,
+                },
+            }],
+        };
+        assert!(matches!(
+            run(Work::Save(Box::new(case), None)),
+            Completion::Saved(..)
+        ));
+        let Completion::Ran(report) = run(Work::Run) else {
+            panic!("expected report")
+        };
+        assert_eq!(report.status, check::Status::Passed);
+        assert_eq!(report.completed_tick, 120);
     }
 
     #[test]

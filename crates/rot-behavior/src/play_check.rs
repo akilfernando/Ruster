@@ -257,17 +257,21 @@ impl Expectation {
         Ok(())
     }
 
-    fn observe(&self, runtime: &Runtime) -> Option<StateValue> {
+    fn observe(
+        &self,
+        scene: &rot_scene::Scene,
+        tick: u64,
+        runtime: Option<&Runtime>,
+    ) -> Option<StateValue> {
         match &self.select {
-            Selection::Tick => Some(StateValue::Number(runtime.tick() as f64)),
-            Selection::Translation { object_id } => runtime
-                .scene()
+            Selection::Tick => Some(StateValue::Number(tick as f64)),
+            Selection::Translation { object_id } => scene
                 .objects
                 .iter()
                 .find(|object| object.id == *object_id)
                 .map(|object| StateValue::Vec3(object.transform.translation.map(f64::from))),
             Selection::State { binding_id, field } => {
-                runtime.state().binding(binding_id)?.get(field).cloned()
+                runtime?.state().binding(binding_id)?.get(field).cloned()
             }
         }
     }
@@ -370,6 +374,36 @@ pub fn run_with_identity(
     clips: &crate::Clips,
     cancel: Arc<AtomicBool>,
 ) -> Report {
+    run_with_source(
+        CheckSource::Behavior(session, clips),
+        case,
+        identity,
+        cancel,
+    )
+}
+
+/// Check the immutable scene used by ordinary v23 static Play. Static Steps
+/// advance only the tick and do not initialize or run a Lua VM.
+pub fn run_static(
+    scene: &rot_scene::Scene,
+    case: &PlayCheck,
+    identity: CheckIdentity,
+    cancel: Arc<AtomicBool>,
+) -> Report {
+    run_with_source(CheckSource::Static(scene), case, Ok(identity), cancel)
+}
+
+enum CheckSource<'a> {
+    Behavior(&'a Session, &'a crate::Clips),
+    Static(&'a rot_scene::Scene),
+}
+
+fn run_with_source(
+    source: CheckSource<'_>,
+    case: &PlayCheck,
+    identity: Result<CheckIdentity, String>,
+    cancel: Arc<AtomicBool>,
+) -> Report {
     let deadline = Instant::now() + MAX_RUN_TIME;
     let mut report = Report {
         status: Status::InvalidCase,
@@ -404,14 +438,20 @@ pub fn run_with_identity(
             ),
         );
     }
-    if !session.scene().hierarchy.is_empty() {
+    if matches!(&source, CheckSource::Behavior(session, _) if !session.scene().hierarchy.is_empty())
+    {
         return report.finish(
             Status::InvalidCase,
             "Play checks currently require a flat scene.",
         );
     }
+    let empty_actions = rot_scene::input::ActionMap::new();
+    let actions = match &source {
+        CheckSource::Behavior(session, _) => &session.authoring().actions,
+        CheckSource::Static(_) => &empty_actions,
+    };
     for (index, frame) in case.frames.iter().enumerate() {
-        if let Err(error) = frame.validate_only_against(&session.authoring().actions) {
+        if let Err(error) = frame.validate_only_against(actions) {
             return report.finish(
                 Status::InvalidCase,
                 format!("input frame {}: {error}", index + 1),
@@ -433,33 +473,43 @@ pub fn run_with_identity(
     if let Some((status, message)) = stopped() {
         return report.finish(status, message);
     }
-    let limits = Limits {
-        fixed_dt: Duration::from_nanos(current.tick_nanos).as_secs_f64(),
-        ..Limits::default()
-    };
-    let mut engine = match Engine::with_cancellation(limits, cancel.clone()) {
-        Ok(engine) => engine,
-        Err(failure) => return report.script_error(failure),
-    };
-    engine.set_clips(clips.clone());
-    let mut runtime = match engine.reset_projected(
-        session.scene(),
-        session.authoring(),
-        session.transform_camera_binding().cloned(),
-        session.runtime_projection(),
-    ) {
-        Ok(runtime) => runtime,
-        Err(failure) => return report.script_error(failure),
-    };
-    for frame in &case.frames {
-        if let Some((status, message)) = stopped() {
-            return report.finish(status, message);
+    let (scene, runtime) = match source {
+        CheckSource::Static(scene) => {
+            report.completed_tick = case.frames.len() as u64;
+            (scene, None)
         }
-        if let Err(failure) = engine.step_with_input(&mut runtime, frame) {
-            return report.script_error(failure);
+        CheckSource::Behavior(session, clips) => {
+            let limits = Limits {
+                fixed_dt: Duration::from_nanos(current.tick_nanos).as_secs_f64(),
+                ..Limits::default()
+            };
+            let mut engine = match Engine::with_cancellation(limits, cancel.clone()) {
+                Ok(engine) => engine,
+                Err(failure) => return report.script_error(failure),
+            };
+            engine.set_clips(clips.clone());
+            let mut runtime = match engine.reset_projected(
+                session.scene(),
+                session.authoring(),
+                session.transform_camera_binding().cloned(),
+                session.runtime_projection(),
+            ) {
+                Ok(runtime) => runtime,
+                Err(failure) => return report.script_error(failure),
+            };
+            for frame in &case.frames {
+                if let Some((status, message)) = stopped() {
+                    return report.finish(status, message);
+                }
+                if let Err(failure) = engine.step_with_input(&mut runtime, frame) {
+                    return report.script_error(failure);
+                }
+                report.completed_tick = runtime.tick();
+            }
+            (session.scene(), Some(runtime))
         }
-        report.completed_tick = runtime.tick();
-    }
+    };
+    let scene = runtime.as_ref().map_or(scene, Runtime::scene);
     if let Some((status, message)) = stopped() {
         return report.finish(status, message);
     }
@@ -468,7 +518,7 @@ pub fn run_with_identity(
         .iter()
         .enumerate()
         .map(|(index, expectation)| {
-            let mut actual = expectation.observe(&runtime);
+            let mut actual = expectation.observe(scene, report.completed_tick, runtime.as_ref());
             let passed = actual
                 .as_ref()
                 .is_some_and(|actual| expectation.matches(actual));
