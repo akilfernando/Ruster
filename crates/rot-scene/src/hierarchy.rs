@@ -42,11 +42,11 @@ pub(crate) struct Pose {
     rotation: DQuat,
     scale: DVec3,
 }
-/// Parent IDs for a leaf of an already validated runtime hierarchy.
+/// Parent IDs for a target of an already validated runtime hierarchy.
 #[derive(Clone, Debug)]
-pub struct LeafParentPath(Vec<String>);
+pub struct ParentPath(Vec<String>);
 
-impl LeafParentPath {
+impl ParentPath {
     pub fn resolve(&self, scene: &Scene, local: &Transform) -> Result<Transform, SceneError> {
         let mut pose = Pose::from_local(local);
         for id in &self.0 {
@@ -269,8 +269,8 @@ impl Scene {
         }
         Ok(())
     }
-    /// Capture nearest-parent-first IDs for one leaf after scene validation.
-    pub fn leaf_parent_path(&self, id: &str) -> Option<LeafParentPath> {
+    /// Capture nearest-parent-first IDs for one target after scene validation.
+    pub fn parent_path(&self, id: &str) -> Option<ParentPath> {
         let mut parents = Vec::new();
         let mut current = id;
         while let Some(parent) = self.hierarchy.parents.get(current) {
@@ -280,7 +280,7 @@ impl Scene {
             parents.push(parent.clone());
             current = parent;
         }
-        (!parents.is_empty()).then_some(LeafParentPath(parents))
+        (!parents.is_empty()).then_some(ParentPath(parents))
     }
 
     /// Resolve after topology admission. No persistent cache and no Scene clone.

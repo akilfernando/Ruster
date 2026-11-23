@@ -256,7 +256,8 @@ pub struct Runtime {
     query_observations: Vec<QueryObservation>,
     audio_batch: Option<AudioBatch>,
     has_sound_binding: bool,
-    leaf_parents: Option<Arc<BTreeMap<String, rot_scene::LeafParentPath>>>,
+    leaf_parents: Option<Arc<BTreeMap<String, rot_scene::ParentPath>>>,
+    follow_parent: Option<rot_scene::ParentPath>,
     kinematic_owner: Option<KinematicOwner>,
     /// Clip bindings resolved at Reset; fixed for this Runtime.
     animations: Arc<Vec<(AnimationBinding, Arc<Clip>)>>,
@@ -838,11 +839,18 @@ impl Engine {
                             let rot_scene::BindingTarget::Object(id) = &binding.target else {
                                 return None;
                             };
-                            scene.leaf_parent_path(id).map(|path| (id.clone(), path))
+                            scene.parent_path(id).map(|path| (id.clone(), path))
                         })
                         .collect(),
                 )
             });
+        let follow_parent = leaf_parents.as_ref().and_then(|_| {
+            scene
+                .player_view
+                .as_ref()?
+                .followed_target()
+                .and_then(|id| scene.parent_path(id))
+        });
         let transform_camera =
             resolve_transform_camera(transform_camera_binding.as_deref(), scene, Phase::Setup)?;
         self.check_cancelled()?;
@@ -865,6 +873,7 @@ impl Engine {
             audio_batch: None,
             has_sound_binding,
             leaf_parents,
+            follow_parent,
             kinematic_owner,
             animations,
             transform_camera_binding,
@@ -1028,7 +1037,19 @@ impl Engine {
             }
         }
         if !group_changed {
-            validate_player_view_commit(&staged)?;
+            if runtime.leaf_parents.is_some() {
+                staged
+                    .validate_player_view_with_follow_path(runtime.follow_parent.as_ref())
+                    .map_err(|error| {
+                        Diagnostic::plain(
+                            DiagnosticCode::InvalidOutput,
+                            Phase::Commit,
+                            &error.to_string(),
+                        )
+                    })?;
+            } else {
+                validate_player_view_commit(&staged)?;
+            }
         }
         staged_state.validate_total()?;
         let transform_camera = resolve_transform_camera(
@@ -1795,6 +1816,39 @@ mod input_tests {
             runtime.scene().objects[0].transform.translation,
             [2., 0., 0.]
         );
+        // A valid world pose can still invalidate an offset Follow anchor.
+        let camera = authored.objects[1].components.last_mut().unwrap();
+        camera.kind = Component::Camera {
+            view: CameraView::Orbit(rot_scene::PlayerView {
+                anchor: rot_scene::PlayerAnchor::Follow {
+                    target_id: "b".into(),
+                    offset: [0., 0., -10_000.],
+                },
+                yaw: 0.,
+                pitch: 0.,
+                distance: 5.,
+                vertical_fov_degrees: 45.,
+            }),
+        };
+        let projected = authored.behavior_projection().unwrap();
+        let mut runtime = engine
+            .reset_projected(
+                &projected.scene,
+                &projected.authoring,
+                projected.transform_camera,
+                projected.projection,
+            )
+            .unwrap();
+        engine.step_with_input(&mut runtime, &frame(false)).unwrap();
+        let committed = runtime.scene().clone();
+        let error = engine
+            .step_with_input(&mut runtime, &frame(false))
+            .unwrap_err();
+        assert_eq!(error.code, DiagnosticCode::InvalidOutput);
+        assert!(error.message.contains("Resolved player view anchor"));
+        assert_eq!(runtime.scene(), &committed);
+        assert_eq!(runtime.tick(), 1);
+
         authored.sources.get_mut("source").unwrap().host_api_version = SPATIAL_HOST_API_VERSION;
         assert!(authored.behavior_projection().is_err());
     }

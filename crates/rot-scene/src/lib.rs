@@ -25,7 +25,7 @@ pub const MAX_MATERIALS: usize = 64;
 mod imported;
 pub use imported::ImportedPlacement;
 mod hierarchy;
-pub use hierarchy::{Group, Hierarchy, LeafParentPath, ResolvedPoses, TransformRequest};
+pub use hierarchy::{Group, Hierarchy, ParentPath, ResolvedPoses, TransformRequest};
 mod animation;
 mod authoring;
 mod collider;

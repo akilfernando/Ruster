@@ -1,5 +1,7 @@
 //! Renderer-independent authored perspective view and world anchor admission.
-use crate::{validate_id, ResolvedPoses, Scene, SceneDelta, SceneError, Session};
+use crate::{
+    validate_id, ParentPath, ResolvedPoses, Scene, SceneDelta, SceneError, Session, Transform,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -79,6 +81,19 @@ impl PlayerView {
         scene: &Scene,
         poses: Option<&ResolvedPoses>,
     ) -> Result<ResolvedPlayerView, SceneError> {
+        self.resolve_following(scene, |id, local| {
+            Ok(poses
+                .and_then(|poses| poses.transforms.get(id))
+                .unwrap_or(local)
+                .translation)
+        })
+    }
+
+    fn resolve_following(
+        &self,
+        scene: &Scene,
+        follow_position: impl FnOnce(&str, &Transform) -> Result<[f32; 3], SceneError>,
+    ) -> Result<ResolvedPlayerView, SceneError> {
         self.validate_settings()?;
         let anchor = match &self.anchor {
             PlayerAnchor::Fixed { position } => *position,
@@ -90,10 +105,7 @@ impl PlayerView {
                     .ok_or_else(|| SceneError::Invalid(format!(
                         "Player view target {target_id} must be an existing Object or Group; clear or retarget the player view first"
                     )))?;
-                let position = poses
-                    .and_then(|poses| poses.transforms.get(target_id))
-                    .unwrap_or(target)
-                    .translation;
+                let position = follow_position(target_id, target)?;
                 let mut anchor = [0.0; 3];
                 for ((out, position), offset) in anchor.iter_mut().zip(position).zip(*offset) {
                     let resolved = f64::from(position) + f64::from(offset);
@@ -134,6 +146,20 @@ impl Scene {
         } else {
             view.resolve(self, None).map(Some)
         }
+    }
+
+    /// Validate the same Follow anchor using a path captured from validated topology.
+    pub fn validate_player_view_with_follow_path(
+        &self,
+        path: Option<&ParentPath>,
+    ) -> Result<(), SceneError> {
+        if let Some(view) = &self.player_view {
+            view.resolve_following(self, |_, local| match path {
+                Some(path) => Ok(path.resolve(self, local)?.translation),
+                None => Ok(local.translation),
+            })?;
+        }
+        Ok(())
     }
 
     pub fn validate_player_view_with_poses(&self, poses: &ResolvedPoses) -> Result<(), SceneError> {
