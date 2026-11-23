@@ -88,6 +88,16 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+**Play Checks** support saved flat v23 scenes in the editor and approved MCP.
+The 30-tick conveyor check passed both ways and kept the live preview paused.
+A saved scene edit and a Lua speed change each made the check out of date.
+Recapture kept the expectation at 0 and reported an actual position of 1,
+matching guarded normal Steps. A 640-object static scene reached tick 120
+and verified its last object. A 120-tick release check with 240 objects
+and 41 Lua attachments completed in 118 ms median p95 across three runs.
+With the dialog open, editor accessibility inspection p95 was 42 ms idle and
+49 ms during checks. Cancellation stopped the isolated run.
+
 **Material Tiling, Offset and Wrap** work in v23 Edit Material. Base Color
 and Roughness share the sampled UVs. Compatible Blender scale and offset
 import directly. An earlier accepted file reopened pixel-identically and
