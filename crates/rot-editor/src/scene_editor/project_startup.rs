@@ -92,11 +92,7 @@ impl ProjectDirectory {
     }
 
     pub(super) fn observe(&self) -> Result<Observation, String> {
-        let observed = Observation::read(&self.root)?;
-        if observed.identity != self.identity {
-            return Err(CHANGED.into());
-        }
-        Ok(observed)
+        Observation::read_expected(&self.root, Some(&self.identity))
     }
 
     pub(super) fn validated(&self) -> Result<Observation, String> {
@@ -181,7 +177,14 @@ impl Drop for PublicationLock {
 
 impl Observation {
     pub(super) fn read(root: &Path) -> Result<Self, String> {
+        Self::read_expected(root, None)
+    }
+
+    fn read_expected(root: &Path, expected: Option<&Identity>) -> Result<Self, String> {
         let (root, identity) = directory(root)?;
+        if expected.is_some_and(|expected| expected != &identity) {
+            return Err(CHANGED.into());
+        }
         #[cfg(unix)]
         let parent = open_project_directory(&root)?;
         #[cfg(unix)]
