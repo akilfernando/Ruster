@@ -42,6 +42,14 @@ shows degrees. MCP uses Euler radians about fixed X, then Y, then Z axes.
 Transforms are relative to the parent. To pitch a roof and turn the house,
 tilt the roof child about X and rotate the house parent about Y.
 
+For a pitched roof with closed ends, create a **Triangular Prism** child.
+It starts one unit wide, high, and deep, with its ridge along local Z.
+Scale X for width including overhang, Y for the rise, and Z for length.
+Place the pivot half the rise above the wall top. The pivot is at the
+center of the shape's bounds. Press Ctrl+K and search **Triangular Prism**
+to create one from the command palette. You can assign a textured
+material and add a separate Collider when needed.
+
 Select the parent and press **F**, or choose **Frame Selected** from its
 Hierarchy menu, to fit its visible geometry and child parts. For an
 orthographic check, choose **Front**, **Right**, or **Top** from **View

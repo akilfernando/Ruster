@@ -74,7 +74,8 @@ material dialog can select, replace or clear it. Edit → Scene Display
 sets Surface HDR and exposure independently of object selection. Existing
 scenes keep their display settings.
 The built-in Cube samples Base Color and roughness through its existing
-face UVs. Two Cubes sharing both textures were verified in Play and a
+face UVs. Triangular Prism provides a textured closed gable shape with a
+local Z ridge, available in native creation and approved MCP. Two Cubes sharing both textures were verified in Play and a
 relocated Vulkan build.
 v23 prefabs link reusable hierarchies in the editor and MCP. Child transform
 and mesh tint overrides support Apply, Revert and shared Undo. The cottage

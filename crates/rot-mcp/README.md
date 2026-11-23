@@ -83,6 +83,14 @@ connected project.
   `{"type":"surface_hdr","exposure_stops":0}`, with exposure from −8 to +8
   stops. One accepted change shares Undo with the editor. Apply or cancel
   the native draft before writing or saving.
+- Use `primitive: "triangular_prism"` with `scene_create` to make a
+  closed pitched solid. The local bounds are −0.5 to +0.5 in all axes,
+  with +Y up, the pivot at the center of the bounds, and the ridge along
+  local Z. With `parent_id`, all transforms are parent-local. For a roof,
+  set X to width including overhang, Y to rise, and Z to length. Set
+  local Y half the rise above the wall top. Inspect both gables before
+  duplicating an assembly. Use `scene_primitive` to change a single
+  Mesh Renderer or `scene_components_edit` for an exact component.
 - Use a `set_enabled` edit in `scene_components_edit` to disable or enable
   an exact Mesh Renderer with one shared Undo. Supported scripted v23 Play
   and builds use this authored flag. A disabled renderer and its shadow
