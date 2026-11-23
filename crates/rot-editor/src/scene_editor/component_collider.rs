@@ -543,16 +543,27 @@ fn paint_box(
         }
     }
     for face in faces() {
-        let Some((point, _)) = camera.screen(world_box.face(face)) else {
+        let origin = world_box.face(face);
+        let Some((point, _)) = camera.screen(origin) else {
             continue;
         };
         let hot = active.or(hover) == Some(face);
         let radius = if hot { 5.0 } else { 3.5 };
-        painter.rect_filled(
-            egui::Rect::from_center_size(point, egui::Vec2::splat(radius * 2.0)),
-            1.0,
-            if hot { highlight } else { color },
-        );
+        let handle = egui::Rect::from_center_size(point, egui::Vec2::splat(radius * 2.0));
+        if hot
+            || camera
+                .axis_at(point, origin, world_box.axis(face.axis))
+                .is_some()
+        {
+            painter.rect_filled(handle, 1.0, if hot { highlight } else { color });
+        } else {
+            painter.rect_stroke(
+                handle,
+                1.0,
+                egui::Stroke::new(1.0, color.gamma_multiply(0.45)),
+                egui::StrokeKind::Inside,
+            );
+        }
         if hot {
             ui.ctx().set_cursor_icon(if active.is_some() {
                 egui::CursorIcon::Grabbing

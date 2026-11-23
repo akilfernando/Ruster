@@ -344,8 +344,8 @@ keeps the previous committed frame and reports the error.
 ## Edit a Box Collider in Scene view
 
 Select an object with an enabled Box Collider and choose **Edit Collider**
-on its Inspector component. Orbit until you can see a face handle, then
-drag it along its local axis. The opposite face stays fixed. Release to
+on its Inspector component. Drag a filled handle along its local axis.
+If a handle is hollow, orbit to see the face from an angle. The opposite face stays fixed. Release to
 commit the center and size together in one Undo. Escape cancels. For
 keyboard entry, use **Center** and **Size** in the same Inspector section.
 
