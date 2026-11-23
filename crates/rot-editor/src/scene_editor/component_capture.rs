@@ -437,9 +437,10 @@ impl ComponentWorkspace {
                                 return Err(fail("invalid_geometry"));
                             }
                             let preview = self
-                                .preview
-                                .as_ref()
-                                .map_err(|_| fail("invalid_geometry"))?;
+                                .current_animation_preview()
+                                .map(|preview| &preview.projection)
+                                .or_else(|| self.preview.as_ref().ok())
+                                .ok_or_else(|| fail("invalid_geometry"))?;
                             let object_id = preview.pick_at(
                                 &self.meshes,
                                 view.matrices,
@@ -497,6 +498,13 @@ impl ComponentWorkspace {
         }) else {
             unreachable!()
         };
+        if let Some(preview) = self
+            .current_animation_preview()
+            .filter(|_| view.runtime_frame.is_none())
+        {
+            fields.insert("animation_preview".into(), preview.observation());
+            fields.insert("display_mode".into(), json!("animation_preview"));
+        }
         if let (Some(camera), Some(content)) = (view.transform_camera, view.player_content) {
             let crop_axis = |origin: &str, extent: &str, min: f32, max: f32| {
                 let origin = source[origin].as_u64().unwrap_or(0) as f32;

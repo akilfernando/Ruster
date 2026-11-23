@@ -196,8 +196,12 @@ pub(super) fn mesh_renderer_heading(ordinal: Option<usize>) -> std::borrow::Cow<
     ordinal.map_or_else(|| label.into(), |index| format!("{label} {index}").into())
 }
 
+use super::component_workspace::component_animation_preview::{self, PreviewEdit};
+
 pub(super) struct ComponentControls<'a> {
     pub reveal: Option<&'a str>,
+    pub(super) animation_preview: Option<(&'a str, f32, f32)>,
+    pub(super) allow_animation_preview: bool,
     pub(super) allow_new_material: bool,
     pub(super) allow_spot_aim: bool,
     pub(super) allow_sound_cues: bool,
@@ -208,6 +212,7 @@ pub(super) struct ComponentControls<'a> {
 pub(super) struct ComponentEdits {
     pub(super) submit: bool,
     pub(super) material: Option<super::component_workspace::component_material::Request>,
+    pub(super) animation_preview: Option<PreviewEdit>,
     pub(super) animator_revision: Option<(String, u64)>,
     pub(super) collider: Option<String>,
     pub(super) spot_aim: Option<String>,
@@ -228,6 +233,8 @@ pub(super) fn components(
         allow_sound_cues,
         diagnostic,
         collider_edit,
+        animation_preview,
+        allow_animation_preview,
         reveal,
     } = controls;
     use super::component_workspace::component_material::{Intent, Request};
@@ -237,6 +244,7 @@ pub(super) fn components(
     let mut collider_request = None;
     let mut spot_aim = None;
     let mut animator_revision = None;
+    let mut preview_edit = None;
     let mut submit = false;
     let mut remove = None;
     let multiple_renderers = draft
@@ -462,6 +470,18 @@ pub(super) fn components(
                         if let Some(revision) = animator_fields(ui, binding, assets) {
                             animator_revision = Some((component.id.clone(), revision));
                         }
+                        if let Some(edit) = component_animation_preview::controls(
+                            ui,
+                            &component.id,
+                            allow_animation_preview
+                                && component.enabled
+                                && assets.is_some_and(|store| store.clip(&binding.clip).is_some()),
+                            animation_preview
+                                .filter(|(id, _, _)| *id == component.id)
+                                .map(|(_, time, duration)| (time, duration)),
+                        ) {
+                            preview_edit = Some(edit);
+                        }
                         if ui.button(Text::ComponentRemove.plain()).clicked() {
                             remove = Some(index);
                         }
@@ -604,6 +624,7 @@ pub(super) fn components(
         submit,
         material: material_request,
         animator_revision,
+        animation_preview: preview_edit,
         collider: collider_request,
         spot_aim,
         sound_cue,

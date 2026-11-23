@@ -29,6 +29,9 @@ use std::path::PathBuf;
 #[path = "component_camera.rs"]
 pub(super) mod component_camera;
 
+#[path = "component_animation_preview.rs"]
+pub(super) mod component_animation_preview;
+
 #[path = "component_collider.rs"]
 pub(super) mod component_collider;
 
@@ -264,6 +267,7 @@ pub(super) struct ComponentWorkspace {
     viewport_aspect: Option<f32>,
     preview: Result<rot_render::component_preview::ComponentPreview, rot_scene::SceneError>,
     preview_world: Vec<DMat4>,
+    animation_preview: Option<component_animation_preview::AnimationPreview>,
     transform_tool: TransformTool,
     collider_tool: component_collider::ColliderTool,
     rows: Vec<(usize, usize)>,
@@ -377,6 +381,7 @@ impl ComponentWorkspace {
         let mut editor = Self {
             preview,
             preview_world,
+            animation_preview: None,
             transform_tool: TransformTool::default(),
             collider_tool: Default::default(),
             rows,
@@ -548,6 +553,7 @@ impl ComponentWorkspace {
                         self.runtime_asset_revision = Some(snapshot.store.revision());
                     }
                     self.assets = Some(snapshot.store);
+                    self.validate_animation_preview();
                     self.asset_error = snapshot.warning;
                 }
                 Err(error) => self.asset_error = Some(error),
@@ -716,6 +722,7 @@ impl ComponentWorkspace {
     }
 
     fn rebuild_draft(&mut self) {
+        self.clear_animation_preview();
         self.transform_tool.invalidate_target();
         #[cfg(unix)]
         {
@@ -843,6 +850,7 @@ impl ComponentWorkspace {
     }
 
     fn refresh_view(&mut self) {
+        self.clear_animation_preview();
         self.transform_tool.cancel();
         self.collider_tool.cancel();
         self.transform_tool.invalidate_target();
@@ -1535,6 +1543,7 @@ impl ComponentWorkspace {
                 return;
             }
             Action::Play | Action::Pause | Action::Step => {
+                self.clear_animation_preview();
                 self.runtime.queue_shortcut(match action {
                     Action::Play => PlayShortcut::Play,
                     Action::Pause => PlayShortcut::Pause,
@@ -1707,9 +1716,9 @@ impl ComponentWorkspace {
             return Err("Choose an object to frame.");
         }
         let camera = self
-            .preview
-            .as_ref()
-            .ok()
+            .current_animation_preview()
+            .map(|preview| &preview.projection)
+            .or_else(|| self.preview.as_ref().ok())
             .and_then(|preview| {
                 preview.framed_camera(
                     &ids,
@@ -1795,7 +1804,15 @@ impl ComponentWorkspace {
         surface.set_transform_camera(frame.as_ref().and_then(|frame| frame.transform_camera()));
         let preview = match &frame {
             Some(frame) => frame.static_preview.as_deref(),
-            None => self.transform_tool.preview().or(self.preview.as_ref().ok()),
+            None => self
+                .transform_tool
+                .preview()
+                .or_else(|| {
+                    self.animation_preview
+                        .as_ref()
+                        .map(|preview| &preview.projection)
+                })
+                .or(self.preview.as_ref().ok()),
         };
         let interaction = if let Some(preview) = preview {
             preview.render(
@@ -1857,7 +1874,8 @@ impl ComponentWorkspace {
             || save_pending
             || self.palette.is_some()
             || self.draft_dirty()
-            || self.runtime.in_play_mode();
+            || self.runtime.in_play_mode()
+            || self.current_animation_preview().is_some();
         let moving = frame.is_none()
             && (self.draw_collider_tool(ui, &interaction, edit_blocked)
                 || self.draw_transform_tool(ui, &interaction, edit_blocked));
@@ -2386,6 +2404,17 @@ impl ComponentWorkspace {
             self.close_pending = true;
         }
         self.poll_runtime(&ctx);
+        self.validate_animation_preview();
+        if self.current_animation_preview().is_some()
+            && !self.authored_edit_pending()
+            && !self.ai_transition_pending()
+            && self.project_settings.is_none()
+            && self.palette.is_none()
+            && !egui::Popup::is_any_open(&ctx)
+            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.clear_animation_preview();
+        }
         let blocked = self.close_pending
             || self.open_path.is_some()
             || self.scene_picker.is_some()
@@ -2975,6 +3004,9 @@ impl ComponentWorkspace {
                                     let collider_edit = self.collider_inspector_state();
                                     let allow_spot_aim = !self.authored_edit_pending()
                                         && !self.runtime.in_play_mode();
+                                    let animation_preview = self.animation_preview.as_ref().map(
+                                        component_animation_preview::AnimationPreview::controls,
+                                    );
                                     let edits = component_inspector::components(
                                         ui,
                                         self.draft.as_mut().expect("selected draft"),
@@ -2987,6 +3019,9 @@ impl ComponentWorkspace {
                                             allow_sound_cues: allow_spot_aim,
                                             diagnostic: self.runtime.diagnostic.as_ref(),
                                             collider_edit: &collider_edit,
+                                            animation_preview,
+                                            allow_animation_preview: allow_spot_aim && !blocked,
+
                                             reveal: self
                                                 .texture_use_reveal
                                                 .as_ref()
@@ -2997,6 +3032,11 @@ impl ComponentWorkspace {
                                     if let Some(id) = edits.collider.filter(|_| !self.draft_dirty())
                                     {
                                         self.toggle_collider_mode(id);
+                                    }
+                                    if let Some(edit) = edits.animation_preview {
+                                        let owner =
+                                            self.draft.as_ref().expect("selected draft").id.clone();
+                                        self.apply_animation_preview_ui(&owner, edit);
                                     }
                                     if let Some((id, revision)) = edits.animator_revision {
                                         self.animator_draft_revisions.insert(id, revision);

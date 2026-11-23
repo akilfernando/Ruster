@@ -15,6 +15,8 @@ pub fn list() -> Vec<Value> {
                 "expected_session_token":{"type":"string","minLength":1,"maxLength":256},
                 "expected_revision":{"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20},
                 "owner_id":id,
+                "component_id":id,
+                "preview_seconds":{"type":["number","null"],"description":"v23 exact Animator preview. Absolute clip seconds, including the endpoint. Null exits preview. Requires component_id and expected_asset_revision."},
                 "expected_asset_revision":{"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20},
                 "clip_id":{"type":"string","minLength":1,"maxLength":256},
                 "looping":{"type":"boolean"},
@@ -27,6 +29,33 @@ pub fn valid(name: &str, args: &Value) -> bool {
     let Some(map) = args.as_object() else {
         return false;
     };
+    if name == "scene_animation_set" && map.contains_key("preview_seconds") {
+        return super::exact_keys(
+            map,
+            &[
+                "expected_session_token",
+                "expected_revision",
+                "expected_asset_revision",
+                "owner_id",
+                "component_id",
+                "preview_seconds",
+            ],
+            &[],
+        ) && args["expected_session_token"]
+            .as_str()
+            .is_some_and(|token| !token.is_empty() && token.len() <= 256)
+            && super::canonical_u64(&args["expected_revision"])
+            && super::canonical_u64(&args["expected_asset_revision"])
+            && ["owner_id", "component_id"].iter().all(|key| {
+                args[*key]
+                    .as_str()
+                    .is_some_and(|id| rot_scene::validate_id(id).is_ok())
+            })
+            && (args["preview_seconds"].is_null()
+                || args["preview_seconds"]
+                    .as_f64()
+                    .is_some_and(|value| (0.0..=600.0).contains(&value)));
+    }
     if name != "scene_animation_set"
         || !super::exact_keys(
             map,

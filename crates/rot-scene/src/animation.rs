@@ -161,6 +161,21 @@ impl ClipTrack {
             std::array::from_fn(|i| a[i] + (b[i] - a[i]) * f)
         }
     }
+    fn apply(&self, time: f32, transform: &mut crate::Transform) {
+        let value = self.sample(time);
+        match self.property {
+            ClipProperty::Translation => {
+                transform.translation = [value[0] as f32, value[1] as f32, value[2] as f32];
+            }
+            ClipProperty::Scale => {
+                transform.scale = [value[0] as f32, value[1] as f32, value[2] as f32];
+            }
+            ClipProperty::Rotation => {
+                let (z, y, x) = DQuat::from_array(value).normalize().to_euler(EulerRot::ZYX);
+                transform.rotation = [x as f32, y as f32, z as f32];
+            }
+        }
+    }
 }
 
 impl Clip {
@@ -219,6 +234,24 @@ impl Clip {
         }) as f32
     }
 
+    /// Sample validated clip-local time, including the final endpoint.
+    pub fn sample_channel(
+        &self,
+        channel: usize,
+        time: f32,
+        transform: &mut crate::Transform,
+    ) -> Result<(), SceneError> {
+        let track = self
+            .tracks
+            .get(channel)
+            .ok_or_else(|| invalid("unknown animation channel"))?;
+        if !(0.0..=self.duration).contains(&time) {
+            return Err(invalid("animation time is outside the clip"));
+        }
+        track.apply(time, transform);
+        Ok(())
+    }
+
     /// Replace only the animated channels of the bound targets. Authored values
     /// of unanimated channels and targets are untouched. Callers validate the
     /// resulting scene before committing it.
@@ -243,19 +276,7 @@ impl Clip {
             } else {
                 return Err(invalid(format!("animation target {id} is missing")));
             };
-            let value = track.sample(time);
-            match track.property {
-                ClipProperty::Translation => {
-                    transform.translation = [value[0] as f32, value[1] as f32, value[2] as f32];
-                }
-                ClipProperty::Scale => {
-                    transform.scale = [value[0] as f32, value[1] as f32, value[2] as f32];
-                }
-                ClipProperty::Rotation => {
-                    let (z, y, x) = DQuat::from_array(value).normalize().to_euler(EulerRot::ZYX);
-                    transform.rotation = [x as f32, y as f32, z as f32];
-                }
-            }
+            track.apply(time, transform);
         }
         Ok(())
     }

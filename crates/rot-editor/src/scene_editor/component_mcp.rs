@@ -130,6 +130,12 @@ impl ComponentWorkspace {
                 self.assets.as_ref(),
             )
             .map_err(runtime_commands::runtime_failure)?;
+        if matches!(
+            op,
+            "behavior_runtime_reset" | "behavior_runtime_play" | "behavior_runtime_step"
+        ) {
+            self.clear_animation_preview();
+        }
         if serde_json::to_vec(&value).map_or(true, |bytes| bytes.len() > 60000) {
             return Err(fail("output_limit", "The runtime response is too large."));
         }
@@ -336,10 +342,17 @@ impl ComponentWorkspace {
             "scene_transform_many" | "scene_delete" | "scene_delete_many" | "scene_duplicate" => 3,
             "scene_components_edit" => 3 + usize::from(map.contains_key("expected_asset_revision")),
             "scene_animation_set" => {
-                3 + ["expected_asset_revision", "clip_id", "looping", "remove"]
-                    .iter()
-                    .filter(|key| map.contains_key(**key))
-                    .count()
+                3 + [
+                    "expected_asset_revision",
+                    "clip_id",
+                    "looping",
+                    "remove",
+                    "component_id",
+                    "preview_seconds",
+                ]
+                .iter()
+                .filter(|key| map.contains_key(**key))
+                .count()
             }
             "scene_undo" | "scene_redo" => 2,
             "behavior_action" | "behavior_action_remove" => 3,
@@ -451,6 +464,12 @@ impl ComponentWorkspace {
         }
 
         if op == "scene_animation_set" {
+            if map.contains_key("preview_seconds") {
+                return self.animation_preview_command(args);
+            }
+            if map.contains_key("component_id") {
+                return Err(invalid());
+            }
             return self.edit_animation(args, revision);
         }
 
@@ -859,6 +878,49 @@ impl ComponentWorkspace {
         Ok(payload)
     }
 
+    fn animation_preview_command(&mut self, args: &Value) -> Result<Value, CommandError> {
+        let invalid = || {
+            ("invalid_arguments", "Pass owner_id, component_id and preview_seconds (number or null), with asset and scene guards.".into())
+        };
+        let map = args.as_object().ok_or_else(invalid)?;
+        if map.len() != 6
+            || ["clip_id", "looping", "remove"]
+                .iter()
+                .any(|key| map.contains_key(*key))
+        {
+            return Err(invalid());
+        }
+        let owner = hierarchy_id(&args["owner_id"]).ok_or_else(invalid)?;
+        let component = hierarchy_id(&args["component_id"]).ok_or_else(invalid)?;
+        self.require_component_asset_revision(decimal(&args["expected_asset_revision"]))?;
+        let changed = if args["preview_seconds"].is_null() {
+            if self.runtime.in_play_mode() {
+                return Err((
+                    "play_active",
+                    "Stop Play before previewing an Animator.".into(),
+                ));
+            }
+            if self.current_animation_preview().is_some_and(|preview| {
+                preview.owner_id != owner || preview.component_id != component
+            }) {
+                return Err((
+                    "stale_preview",
+                    "Inspect the active Animator preview before clearing.".into(),
+                ));
+            }
+            self.clear_animation_preview()
+        } else {
+            self.seek_animation_preview(
+                owner,
+                component,
+                args["preview_seconds"].as_f64().ok_or_else(invalid)?,
+            )?
+        };
+        Ok(json!({"animation_preview":self.current_animation_preview()
+            .map(super::component_animation_preview::AnimationPreview::observation),
+            "changed":changed, "dirty":self.session.is_dirty()}))
+    }
+
     fn edit_animation(&mut self, args: &Value, revision: u64) -> Result<Value, CommandError> {
         use component_animation::{observe, validate_binding};
 
@@ -1238,6 +1300,12 @@ impl ComponentWorkspace {
             }
             if let Component::Animator { binding } = &component.kind {
                 response["animation"] = component_animation::observe(self.assets.as_ref(), binding);
+                response["animation_preview"] =
+                    json!(self
+                        .current_animation_preview()
+                        .filter(|preview| preview.owner_id == id
+                            && preview.component_id == component_id)
+                        .map(super::component_animation_preview::AnimationPreview::observation));
             }
             if let Component::MeshRenderer { material, .. } = &component.kind {
                 if let Some((root, link, part, source)) = self

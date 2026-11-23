@@ -99,5 +99,5 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("hud_panel_move", "Change a HUD panel's drawing order."),
     ("player_view_inspect", "Read the game camera mode, effective pose and framing at 4:3 and 16:9."),
     ("scene_player_view_set", "Set the game camera (null clears). v23 uses a fixed view and optional component_id; component_id alone activates an existing camera. Yaw and pitch are radians, FOV degrees."),
-    ("scene_animation_set", "Set or remove an imported model’s animation. v23 clip selection requires expected_asset_revision. Send looping alone to change only repeat."),
+    ("scene_animation_set", "Edit an imported animation or preview an exact v23 Animator. For preview use component_id, preview_seconds (null exits), and expected_asset_revision."),
 ];

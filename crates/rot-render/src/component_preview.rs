@@ -116,6 +116,40 @@ impl ComponentPreview {
         Ok(())
     }
 
+    /// Apply a prepared animation preview without publishing a partial pose.
+    pub fn set_sampled_rows<'a>(
+        &mut self,
+        draws: impl Iterator<Item = (usize, DMat4)>,
+        lights: impl Iterator<Item = (&'a str, DMat4, Option<glam::DQuat>)>,
+    ) -> Result<(), SceneError> {
+        let draws = draws
+            .map(|(row, world)| {
+                draw_matrix(world, &self.scene.objects[row].id).map(|matrix| (row, matrix))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let lights = lights
+            .map(|(id, world, rotation)| {
+                let light = self.scene.lighting.light(id).expect("preview light ID");
+                light_transform(world, &light.kind, id, rotation).map(|pose| (id, pose))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        for (row, matrix) in draws {
+            self.matrices[row] = matrix;
+        }
+        if !lights.is_empty() {
+            let Lighting::Authored {
+                lights: authored, ..
+            } = &mut Arc::make_mut(&mut self.scene).lighting
+            else {
+                unreachable!("preview light IDs require authored lighting");
+            };
+            for (id, pose) in lights {
+                authored.get_mut(id).expect("preview light ID").transform = pose;
+            }
+        }
+        Ok(())
+    }
+
     pub fn light_budget_exceeded(&self) -> bool {
         self.light_budget_exceeded
     }
