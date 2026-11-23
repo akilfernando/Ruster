@@ -34,21 +34,6 @@ fn anchor_name(anchor: HudAnchor) -> &'static str {
         .1
 }
 
-fn selected_panel(hud: &Hud, argument: Option<&Value>) -> Result<usize> {
-    if let Some(id) = argument {
-        hud.panels
-            .iter()
-            .position(|panel| id.as_str() == Some(&panel.id))
-            .ok_or_else(|| invalid("Choose a HUD panel ID from hud_panel_inspect."))
-    } else if hud.panels.len() == 1 {
-        Ok(0)
-    } else {
-        Err(invalid(
-            "Supply the HUD panel ID. Use hud_panel_set to create a panel first.",
-        ))
-    }
-}
-
 impl ComponentWorkspace {
     pub(super) fn open_game_hud(&mut self) {
         if self.authored_edit_pending()
@@ -80,6 +65,19 @@ impl ComponentWorkspace {
                 return false;
             }
         }
+        true
+    }
+
+    pub(super) fn defer_game_hud_close(&mut self, ctx: &egui::Context) -> bool {
+        let Some(draft) = self
+            .game_hud
+            .as_mut()
+            .filter(|_| ctx.input(|input| input.viewport().close_requested()))
+        else {
+            return false;
+        };
+        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        draft.error = Some("Apply or cancel the Game HUD changes before closing.".into());
         true
     }
 
@@ -241,7 +239,8 @@ impl ComponentWorkspace {
         args: &Value,
     ) -> Result<Value> {
         use crate::scene_editor::hud_commands::{
-            legacy_definition, observation_page, panel_header, panel_observation,
+            decimal, identifier, legacy_definition, observation_page, panel_header,
+            panel_observation, select_panel,
         };
         let map = args
             .as_object()
@@ -290,10 +289,8 @@ impl ComponentWorkspace {
                     "model":panel_observation(model),"last_prepared":null,"guidance":guidance}),
                 );
             }
-            let offset = map
-                .get("offset")
-                .map_or(Some(0), |value| value.as_str()?.parse::<usize>().ok())
-                .ok_or_else(|| invalid("Invalid HUD offset."))?;
+            let offset = usize::try_from(map.get("offset").map(decimal).transpose()?.unwrap_or(0))
+                .map_err(|_| invalid("Offset exceeds platform range."))?;
             let total = hud.elements().count();
             let ids: Vec<_> = hud
                 .elements()
@@ -324,11 +321,15 @@ impl ComponentWorkspace {
                 ))
             }
         };
-        if map.keys().any(|key| {
-            !supported.contains(&key.as_str())
-                && !matches!(key.as_str(), "expected_session_token" | "expected_revision")
-        }) {
-            return Err(invalid("Unexpected HUD arguments."));
+        if args["expected_session_token"].as_str().is_none()
+            || !map.contains_key("expected_revision")
+            || map.keys().any(|key| {
+                !supported.contains(&key.as_str())
+                    && !matches!(key.as_str(), "expected_session_token" | "expected_revision")
+            })
+            || serde_json::to_vec(args).map_or(true, |bytes| bytes.len() > 64 * 1024)
+        {
+            return Err(invalid("Unexpected or oversized HUD arguments."));
         }
         if args["expected_session_token"].as_str() != Some(token) {
             return Err((
@@ -336,11 +337,7 @@ impl ComponentWorkspace {
                 "Inspect the current scene again.".into(),
             ));
         }
-        if args["expected_revision"]
-            .as_str()
-            .and_then(|value| value.parse::<u64>().ok())
-            != Some(revision)
-        {
+        if decimal(&args["expected_revision"])? != revision {
             return Err((
                 "stale_revision".into(),
                 "Inspect the current HUD revision again.".into(),
@@ -373,16 +370,13 @@ impl ComponentWorkspace {
                         .ok_or_else(|| invalid("Enabled must be a Boolean."))?;
                 }
                 if let Some(anchor) = settings.get("anchor") {
-                    let panel = selected_panel(&hud, map.get("panel_id"))?;
+                    let panel = select_panel(&hud, map.get("panel_id"))?;
                     hud.panels[panel].anchor = serde_json::from_value(anchor.clone())
                         .map_err(|error| invalid(error.to_string()))?;
                 }
             }
             "hud_panel_set" => {
-                let id = args["panel_id"]
-                    .as_str()
-                    .ok_or_else(|| invalid("Expected a panel ID."))?;
-                rot_scene::validate_id(id).map_err(|error| invalid(error.to_string()))?;
+                let id = identifier(&args["panel_id"])?;
                 let existing = hud.panels.iter().position(|panel| panel.id == id);
                 let settings = map
                     .get("settings")
@@ -436,10 +430,7 @@ impl ComponentWorkspace {
                 }
             }
             "hud_label_set" => {
-                let id = args["label_id"]
-                    .as_str()
-                    .ok_or_else(|| invalid("Expected a label ID."))?;
-                rot_scene::validate_id(id).map_err(|error| invalid(error.to_string()))?;
+                let id = identifier(&args["label_id"])?;
                 if map
                     .get("enabled_when")
                     .is_some_and(|value| !value.is_null())
@@ -463,7 +454,7 @@ impl ComponentWorkspace {
                 let panel = match existing {
                     Some((panel, _)) => {
                         if map.contains_key("panel_id")
-                            && selected_panel(&hud, map.get("panel_id"))? != panel
+                            && select_panel(&hud, map.get("panel_id"))? != panel
                         {
                             return Err(invalid("The label belongs to a different panel."));
                         }
@@ -474,7 +465,7 @@ impl ComponentWorkspace {
                             json!({"session_token":token,"revision":revision.to_string(),"changed":false,"dirty":self.session.is_dirty()}),
                         );
                     }
-                    None => selected_panel(&hud, map.get("panel_id"))?,
+                    None => select_panel(&hud, map.get("panel_id"))?,
                 };
                 let rows = &mut hud.panels[panel].elements;
                 if let Some((_, index)) = existing {
@@ -567,6 +558,9 @@ mod tests {
                 "source":{"kind":"static","text":"After"}
             })
         };
+        assert!(workspace
+            .game_hud_command("test", "hud_label_set", &request("label", "00"))
+            .is_err());
         assert!(workspace
             .game_hud_command("test", "hud_label_set", &request("label", "12"))
             .is_err());

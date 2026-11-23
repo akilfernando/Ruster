@@ -11,7 +11,7 @@ fn error(code: &str, message: impl Into<String>) -> (String, String) {
     (code.into(), message.into())
 }
 
-fn decimal(value: &Value) -> Result<u64> {
+pub(super) fn decimal(value: &Value) -> Result<u64> {
     let text = value.as_str().ok_or_else(|| {
         error(
             "invalid_arguments",
@@ -27,7 +27,7 @@ fn decimal(value: &Value) -> Result<u64> {
     Ok(parsed)
 }
 
-fn identifier(value: &Value) -> Result<&str> {
+pub(super) fn identifier(value: &Value) -> Result<&str> {
     let id = value
         .as_str()
         .ok_or_else(|| error("invalid_arguments", "Expected a stable ID"))?;
@@ -144,7 +144,7 @@ pub(super) fn panel_observation(mut observation: Value) -> Value {
     observation
 }
 
-fn select_panel(hud: &Hud, panel_id: Option<&Value>) -> Result<usize> {
+pub(super) fn select_panel(hud: &Hud, panel_id: Option<&Value>) -> Result<usize> {
     if let Some(panel_id) = panel_id {
         let id = identifier(panel_id)?;
         hud.panels

@@ -2277,6 +2277,7 @@ impl ComponentWorkspace {
         }
         let surface_close_pending = self.defer_material_close(&ctx)
             || self.defer_display_close(&ctx)
+            || self.defer_game_hud_close(&ctx)
             || self.defer_camera_close(&ctx)
             || (self.input_actions.pending()
                 && ctx.input(|input| input.viewport().close_requested()));
