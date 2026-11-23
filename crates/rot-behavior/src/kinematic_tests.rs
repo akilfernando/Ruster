@@ -496,14 +496,13 @@ end}
 
     let mut missing = projected.scene.clone();
     missing.objects.retain(|object| object.id != "gate");
-    let error = engine
-        .reset_projected(
-            &missing,
-            &projected.authoring,
-            projected.transform_camera,
-            projected.projection,
-        )
-        .err()
-        .expect("stale sensor binding fails Reset");
+    let Err(error) = engine.reset_projected(
+        &missing,
+        &projected.authoring,
+        projected.transform_camera,
+        projected.projection,
+    ) else {
+        panic!("stale sensor binding should fail Reset");
+    };
     assert!(error.to_string().contains("checkpoint"));
 }
