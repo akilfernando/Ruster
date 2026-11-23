@@ -300,6 +300,13 @@ pick up its factor for new placements. Existing placed materials keep their edit
 Press Enter to apply or Escape to cancel. Apply or cancel before saving.
 Edits to materials copied from GLB models are saved with the scene.
 
+Enable **Double Sided** under **Edit Material** to draw both faces of an
+opaque surface such as a flat sign or leaf. Applying a shared material
+changes every renderer using it. Use **Make Unique** first to change just
+one renderer. Rot imports the setting from opaque GLB materials.
+**Reimport** can pick up the setting for new placements. Existing scene
+materials keep their values.
+
 Select a texture in **Assets**, then choose **Find Uses in Scene** in the
 Inspector. The list shows each material slot and Mesh Renderer that references
 that texture ID, including disabled renderers and linked prefab parts.

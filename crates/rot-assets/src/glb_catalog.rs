@@ -637,12 +637,13 @@ mod tests {
     }
 
     #[test]
-    fn packed_glb_roughness_upgrades_old_catalog_and_preserves_exact_green_in_exports() {
+    fn glb_material_upgrades_preserve_old_catalog_and_exact_green_in_exports() {
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("paint.glb");
         let pixels = [1, 20, 122, 2, 40, 123, 3, 60, 124, 4, 80, 125];
         let bytes = packed_fixture(&pixels, |doc, _| {
             doc["materials"][0]["emissiveFactor"] = serde_json::json!([0.25, 0.125, 0.5]);
+            doc["materials"][0]["doubleSided"] = serde_json::json!(true);
         });
         fs::write(&source, &bytes).unwrap();
         let mut store = AssetStore::open(root.path()).unwrap();
@@ -674,6 +675,10 @@ mod tests {
         let accepted = store.refresh_glb_at(1, "paint").unwrap();
         assert_eq!(store.revision(), 2);
         assert_eq!(prior.materials["Paint"].emission_color, [0.0; 3]);
+        assert!(!prior.materials["Paint"].double_sided);
+        assert!(old_single_sided_warning(&prior, "Paint"));
+        assert!(accepted.materials["Paint"].double_sided);
+        assert!(!old_single_sided_warning(&accepted, "Paint"));
         assert_eq!(
             accepted.materials["Paint"].emission_color,
             [0.25, 0.125, 0.5]

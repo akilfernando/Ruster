@@ -87,6 +87,11 @@ connected project.
   `next_offset`, and set `expected_session_token`, `expected_revision`,
   and `expected_asset_revision` from `session_token`, `revision`, and
   `asset_revision`. Restart from the first page if a guard is stale.
+- Use `material.double_sided: true` in a guarded `scene_material_set` to
+  draw both faces of an opaque material. `material_inspect` reports
+  `double_sided` on the exact shared material. Omission preserves the current
+  value or defaults to false on creation. Custom SDR shaders keep their own
+  lighting code and can use WGSL `front_facing` to shade back faces.
 - For v23 **Emission Color**, read `emission_color` from the exact shared
   material and check its assignment count before calling guarded
   `scene_material_set`. Supply three linear RGB channels in `[0, 1]`.

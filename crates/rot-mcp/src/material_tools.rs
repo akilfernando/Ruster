@@ -363,6 +363,16 @@ mod tests {
             emission["material"]["emission_color"] = color;
             assert!(!valid("scene_material_set", &emission));
         }
+        for (flag, accepted) in [
+            (json!(true), true),
+            (json!(false), true),
+            (Value::Null, false),
+            (json!("true"), false),
+        ] {
+            let mut args = set.clone();
+            args["material"]["double_sided"] = flag;
+            assert_eq!(valid("scene_material_set", &args), accepted);
+        }
         for response in [
             json!({"type":"legacy_diffuse"}),
             json!({"type":"dielectric","roughness":0.08}),

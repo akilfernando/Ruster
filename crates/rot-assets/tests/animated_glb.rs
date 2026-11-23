@@ -23,6 +23,7 @@ fn unsupported_material_settings_import_with_persistent_warnings() {
     let model = store.import_glb_at(0, "rig", "rig.glb").unwrap();
 
     assert_eq!(model.materials["Material 1"].roughness, 0.08);
+    assert!(!model.materials["Material 1"].double_sided);
     assert_eq!(
         model.materials["Material 1"].emission_color,
         [0.2, 0.1, 0.0]
