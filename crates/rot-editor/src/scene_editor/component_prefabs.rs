@@ -385,6 +385,7 @@ impl ComponentWorkspace {
                         .plain()
                         .replace("{count}", &draft.count.to_string()),
                 );
+                ui.label(Text::PrefabUnpackSource.plain());
                 if let Some(error) = &draft.error {
                     ui.colored_label(ui.visuals().error_fg_color, error);
                 }
