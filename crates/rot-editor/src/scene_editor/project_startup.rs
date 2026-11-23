@@ -639,11 +639,14 @@ impl Observation {
         {
             return None;
         }
-        let destination = self.load_startup().and_then(|saved| {
-            validate_action(saved.scene(), &transition.action_id)?;
-            self.load_transition(scene)?
-                .ok_or_else(|| "The Start Transition is unavailable.".into())
-        });
+        let destination = self
+            .load_startup()
+            .map_err(|error| format!("Startup Scene {} is unavailable. {error}", startup.file))
+            .and_then(|saved| {
+                validate_action(saved.scene(), &transition.action_id)?;
+                self.load_transition(scene)?
+                    .ok_or_else(|| "The Start Transition is unavailable.".into())
+            });
         Some((
             transition.action_id.clone(),
             transition.target_scene.file.clone(),

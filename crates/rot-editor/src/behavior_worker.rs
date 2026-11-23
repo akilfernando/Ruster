@@ -1848,7 +1848,7 @@ fn transition_on_press(
             let reason = if error == crate::scene_editor::project_startup::CHANGED {
                 format!("Start Transition to {} could not use the saved scenes or route. Check Project Settings and restart Play.", route.destination_file)
             } else {
-                format!("Start Transition to {} failed. {error} Repair the destination and restart Play.", route.destination_file)
+                format!("Start Transition to {} failed. {error} Check the saved scenes and restart Play.", route.destination_file)
             };
             execution.start_transition = Some(StartTransition {
                 action_id: route.action_id,
