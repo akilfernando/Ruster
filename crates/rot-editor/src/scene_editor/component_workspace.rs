@@ -1391,7 +1391,11 @@ impl ComponentWorkspace {
             }
             #[cfg(target_os = "linux")]
             Action::Export => {
-                let startup = self.observe_startup();
+                let startup = self
+                    .startup_project
+                    .as_ref()
+                    .map_err(Clone::clone)
+                    .and_then(super::project_startup::ProjectDirectory::observe);
                 self.build
                     .open(&self.path, &self.session.scene().id, startup);
                 return;

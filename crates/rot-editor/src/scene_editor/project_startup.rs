@@ -91,7 +91,7 @@ impl ProjectDirectory {
         Ok(Self { root, identity })
     }
 
-    fn observe(&self) -> Result<Observation, String> {
+    pub(super) fn observe(&self) -> Result<Observation, String> {
         let observed = Observation::read(&self.root)?;
         if observed.identity != self.identity {
             return Err(CHANGED.into());
@@ -479,29 +479,40 @@ impl Observation {
         })
     }
 
-    /// Select and verify a saved configured scene while the directory setting
-    /// is pinned, leaving active document navigation and authority untouched.
-    pub(super) fn with_source<T>(
+    /// Hold the settings observation through selection/capture and check it
+    /// again before the caller uses the result.
+    pub(super) fn with_current<T>(
         &self,
-        run: impl FnOnce(Option<(&Path, ComponentSession)>) -> Result<T, String>,
+        run: impl FnOnce(Option<&Path>) -> Result<T, String>,
     ) -> Result<T, String> {
         self.with_lock(|| {
             self.choice().map_err(str::to_owned)?;
             let selected = self.target.as_ref().map_err(Clone::clone)?;
-            let Some((startup, stamp)) = selected else {
-                let result = run(None)?;
-                self.verify_settings()?;
-                return Ok(result);
-            };
-            let path = self.verify_target(startup, stamp)?;
-            let session = ComponentSession::open(&path).map_err(error)?;
-            if session.scene().id != startup.scene_id {
-                return Err("Startup Scene now has a different scene ID. Choose it again in Project Settings.".into());
+            let path = selected
+                .as_ref()
+                .map(|(startup, stamp)| self.verify_target(startup, stamp))
+                .transpose()?;
+            let result = run(path.as_deref())?;
+            if let Some((startup, stamp)) = selected {
+                self.verify_target(startup, stamp)?;
             }
-            let result = run(Some((&path, session)))?;
-            self.verify_target(startup, stamp)?;
             self.verify_settings()?;
             Ok(result)
+        })
+    }
+
+    pub(super) fn with_source<T>(
+        &self,
+        run: impl FnOnce(Option<(&Path, ComponentSession)>) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let choice = self.choice().map_err(str::to_owned)?;
+        self.with_current(|path| {
+            let Some((path, (_, scene_id))) = path.zip(choice) else { return run(None) };
+            let session = ComponentSession::open(path).map_err(error)?;
+            if session.scene().id != scene_id {
+                return Err("Startup Scene now has a different scene ID. Choose it again in Project Settings.".into());
+            }
+            run(Some((path, session)))
         })
     }
 }

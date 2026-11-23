@@ -418,12 +418,28 @@ enum BuildOutcome {
 #[derive(Default)]
 pub(super) struct BuildUi {
     path: Option<String>,
-    startup: Option<Result<super::project_startup::Observation, String>>,
+    startup: Option<Result<BuildStartup, String>>,
     focus: bool,
     worker: Option<BuildWorker>,
     outcome: Option<BuildOutcome>,
     show_failure: bool,
     details_open: bool,
+}
+
+struct BuildStartup {
+    observed: super::project_startup::Observation,
+    saved: Option<Box<ComponentSession>>,
+}
+
+impl BuildStartup {
+    fn prepare(observed: super::project_startup::Observation) -> Result<Self, String> {
+        let saved = if observed.choice().map_err(str::to_owned)?.is_some() {
+            observed.with_source(|selected| Ok(selected.map(|(_, session)| Box::new(session))))?
+        } else {
+            None
+        };
+        Ok(Self { observed, saved })
+    }
 }
 
 struct BuildWorker {
@@ -445,12 +461,12 @@ impl BuildUi {
         id: &str,
         startup: Result<super::project_startup::Observation, String>,
     ) {
-        self.startup = Some(startup);
+        self.startup = Some(startup.and_then(BuildStartup::prepare));
         let id = self
             .startup
             .as_ref()
             .and_then(|startup| startup.as_ref().ok())
-            .and_then(|startup| startup.choice().ok().flatten())
+            .and_then(|startup| startup.observed.choice().ok().flatten())
             .map_or(id, |(_, id)| id);
         let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         self.path = Some(
@@ -525,6 +541,7 @@ impl BuildUi {
         self.focus = self.show_failure;
         if !self.show_failure {
             self.path = None;
+            self.startup = None;
         }
         self.outcome = Some(outcome);
     }
@@ -621,7 +638,7 @@ impl BuildUi {
                     .expect("opened Build")
                     .as_ref()
                     .map_err(String::as_str)
-                    .and_then(super::project_startup::Observation::choice);
+                    .and_then(|startup| startup.observed.choice());
                 let saved = match selection {
                     Ok(Some((file, _))) => {
                         ui.label(format!("{}  {file}", Text::StartupScene.plain()));
@@ -635,11 +652,13 @@ impl BuildUi {
                         saved
                     }
                     Err(reason) => {
-                        ui.colored_label(
-                            editor_theme::colors(ui).error,
-                            Text::StartupInvalid.plain(),
-                        )
-                        .on_hover_text(reason);
+                        let reason: String = reason.chars().take(240).collect();
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(reason).color(editor_theme::colors(ui).error),
+                            )
+                            .wrap(),
+                        );
                         false
                     }
                 };
@@ -695,6 +714,7 @@ impl BuildUi {
                 });
             });
         if close {
+            self.startup = None;
             self.show_failure = false;
             self.details_open = false;
             return;
@@ -759,11 +779,12 @@ impl BuildUi {
             .map_err(|error| BuildFailureKind::SceneUnavailable.detail(error))?;
         // Keep typed build asset failures distinct from settings conflicts.
         observation
-            .with_source(|selected| {
-                Ok(match selected {
-                    Some((_, startup)) => BuildRequest::capture(&startup, assets),
-                    None => BuildRequest::capture(session, assets),
-                })
+            .observed
+            .with_current(|_| {
+                Ok(BuildRequest::capture(
+                    observation.saved.as_deref().unwrap_or(session),
+                    assets,
+                ))
             })
             .map_err(|error| BuildFailureKind::SceneUnavailable.detail(error))?
     }
@@ -886,7 +907,7 @@ f 1 2 3
         let active_bytes = fs::read(&active_file).unwrap();
         let title_bytes = fs::read(&target_file).unwrap();
         let mut build = BuildUi::default();
-        build.open(&active_file, "active", project.validated());
+        build.open(&active_file, "active", project.observe());
         let request = build
             .capture_project_request(&active, Some(&assets))
             .unwrap();
