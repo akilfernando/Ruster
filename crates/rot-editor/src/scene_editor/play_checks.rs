@@ -54,6 +54,7 @@ pub(super) struct Host {
     baseline: Option<Vec<u8>>,
     draft_path: Option<PathBuf>,
     message: String,
+    repaint: Option<egui::Context>,
 }
 struct Job {
     id: u64,
@@ -164,14 +165,24 @@ fn component_check_assets(
         }
     }
     for (assets, kind) in [
-        (&scripts, rot_assets::AssetKind::Script),
-        (&sounds, rot_assets::AssetKind::Sound),
+        (scripts, rot_assets::AssetKind::Script),
+        (sounds, rot_assets::AssetKind::Sound),
+        (
+            dependencies.meshes.iter().map(String::as_str).collect(),
+            rot_assets::AssetKind::Mesh,
+        ),
     ] {
-        for &id in assets {
+        for id in assets {
             if snapshot.kind(id) != Some(kind) {
                 return Err(format!("Asset {id} needs the {kind:?} import type."));
             }
         }
+    }
+    if let Some(id) = clips
+        .into_iter()
+        .find(|id| !snapshot.clips().contains_key(*id))
+    {
+        return Err(format!("Animation clip {id} has no accepted content."));
     }
     Ok(Some(snapshot))
 }
@@ -188,6 +199,7 @@ impl Host {
             job.cancel.store(true, Ordering::Release);
         }
         self.open = false;
+        self.repaint = None;
         self.draft = None;
         self.baseline = None;
         self.draft_path = None;
@@ -257,11 +269,12 @@ impl Host {
                 receipt["report"] = json!({"status":status,"diagnostic":self.message});
             }
             Ok(Completion::Ran(report)) => {
-                self.message = format!(
-                    "Play check {}: {:?}, completed tick {}",
-                    report.name, report.status, report.completed_tick
-                );
                 receipt["report"] = json!(report);
+                let status = status_label(&receipt["report"]["status"]);
+                self.message = format!(
+                    "Play check {} · {status} · completed tick {}",
+                    report.name, report.completed_tick
+                );
             }
             Ok(Completion::Captured(identity)) => {
                 if self.draft_path.as_ref() == Some(&job.path) {
@@ -311,6 +324,19 @@ impl Host {
         Ok(value)
     }
 }
+fn status_label(status: &Value) -> &'static str {
+    match status.as_str().unwrap_or_default() {
+        "passed" => "Passed",
+        "assertion_failed" => "Assertion failed",
+        "stale" => "Out of date",
+        "invalid_case" => "Invalid check",
+        "script_error" => "Script error",
+        "cancelled" => "Cancelled",
+        "timed_out" => "Timed out",
+        _ => "Unknown",
+    }
+}
+
 fn strip_details(value: &mut Value) {
     match value {
         Value::Object(map) => {
@@ -742,7 +768,7 @@ impl ComponentWorkspace {
     fn check_snapshot(&self) -> Result<Snapshot, String> {
         if self.play_check_blocked() {
             return Err(
-                "Apply or cancel pending edits and wait for project operations first.".into(),
+                "Wait for content, save, open or close operations before a play check.".into(),
             );
         }
         let (session, store) = self.play_check_workspace();
@@ -776,13 +802,14 @@ impl ComponentWorkspace {
     ) -> CommandResult {
         let mut host = std::mem::take(&mut self.play_checks);
         let (session, store) = self.play_check_workspace();
+        let repaint = host.repaint.clone();
         let result = host.command(
             token,
             op,
             args,
             (session.revision(), asset_revision(store)),
             || self.check_snapshot(),
-            None,
+            repaint,
         );
         self.play_checks = host;
         result
@@ -845,6 +872,7 @@ impl Host {
         if !self.open {
             return;
         }
+        self.repaint = Some(ctx.clone());
         let mut action = None;
         let mut close = false;
         let popup = egui::Popup::is_any_open(ctx);
@@ -902,11 +930,12 @@ impl Host {
                         .find(|receipt| receipt.get("report").is_some())
                     {
                         let report = &receipt["report"];
-                        ui.label(format!(
-                            "Result: {} · completed tick {}",
-                            report["status"].as_str().unwrap_or("unknown"),
-                            report["completed_tick"]
-                        ));
+                        let status = status_label(&report["status"]);
+                        if let Some(tick) = report["completed_tick"].as_u64() {
+                            ui.label(format!("Result: {status} · completed tick {tick}"));
+                        } else {
+                            ui.label(format!("Result: {status}"));
+                        }
                         if let Some(rows) = report["results"].as_array() {
                             for row in rows
                                 .iter()
@@ -1500,7 +1529,7 @@ mod tests {
             frame(&ctx, vec![], |_| editor.play_checks_ui(&ctx));
         }
         let shapes = frame(&ctx, vec![], |_| editor.play_checks_ui(&ctx));
-        let result = text_rect(&shapes, "Result: assertion_failed");
+        let result = text_rect(&shapes, "Result: Assertion failed");
         let form = text_rect(&shapes, "Check name");
         assert!(result.max.y < form.min.y);
         text_rect(&shapes, "Run Saved Check");
@@ -1518,6 +1547,152 @@ mod tests {
         );
         assert!(!editor.play_checks.open);
         assert_eq!(editor.play_checks.draft.as_ref().unwrap().frames.len(), 120);
+    }
+
+    #[test]
+    fn component_check_pins_saved_document_and_file_lua_without_rewriting_expectations() {
+        use rot_scene::component_scene::{
+            ComponentInstance, ComponentScene, ComponentSession, ScriptSourceKind,
+        };
+        use rot_scene::{BehaviorBinding, BindingTarget};
+
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("studio.scene.json");
+        let lua = root.path().join("conveyor.lua");
+        let write_lua = |speed| {
+            std::fs::write(
+            &lua,
+            format!("return {{update=function(o,p,dt,h) o.translation[1]=o.translation[1]+{speed}*h.axis('drive'); return o end}}")
+        ).unwrap()
+        };
+        write_lua(1);
+        let mut store = rot_assets::AssetStore::open(root.path()).unwrap();
+        store.import("conveyor", "conveyor.lua").unwrap();
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(rot_scene::Scene::demo()).unwrap()).unwrap();
+        let owner = scene.objects[0].id.clone();
+        scene.objects[0].transform.translation = [0.0; 3];
+        scene.objects[0].components.push(ComponentInstance {
+            id: "drive-script".into(),
+            enabled: true,
+            kind: Component::Script {
+                source_kind: Some(ScriptSourceKind::Asset),
+                movement: Default::default(),
+                binding: BehaviorBinding {
+                    target: BindingTarget::Object(owner.clone()),
+                    source_id: "conveyor".into(),
+                    enabled: true,
+                    properties: Default::default(),
+                    commands: Default::default(),
+                    state_defaults: Default::default(),
+                },
+            },
+        });
+        scene.actions = serde_json::from_value(json!({
+            "drive":{"kind":{"type":"axis1d","negative":["a"],"positive":["d"]}}
+        }))
+        .unwrap();
+        scene.save_new(&path).unwrap();
+        let mut session = ComponentSession::open(&path).unwrap();
+        let snapshot = |session: &ComponentSession, store: &rot_assets::AssetStore| Snapshot {
+            saved: SavedScene::Components(session.saved_pin().unwrap()),
+            path: path.clone(),
+            assets: component_check_assets(session.scene(), Some(store)),
+        };
+        let run = |session: &ComponentSession, store: &rot_assets::AssetStore, work| {
+            execute(
+                snapshot(session, store),
+                work,
+                Arc::new(AtomicBool::new(false)),
+            )
+            .unwrap()
+        };
+        let capture = |session: &ComponentSession, store: &rot_assets::AssetStore| {
+            let Completion::Captured(identity) = run(session, store, Work::Capture) else {
+                panic!("expected a captured identity");
+            };
+            identity
+        };
+        let mut case = PlayCheck {
+            format: check::FORMAT.into(),
+            version: check::VERSION,
+            name: "Drive 30 ticks".into(),
+            identity: capture(&session, &store),
+            frames: vec![
+                ActionFrame(BTreeMap::from([(
+                    "drive".into(),
+                    ActionValue::Axis1d { value: 1 }
+                )]));
+                30
+            ],
+            expectations: vec![Expectation {
+                select: Selection::Translation { object_id: owner },
+                comparison: Comparison::Equals {
+                    expected: StateValue::Vec3([30.0, 0.0, 0.0]),
+                    tolerance: None,
+                },
+            }],
+        };
+        let initial_revision = session.revision();
+        let initial_doc = std::fs::read(&path).unwrap();
+        let Completion::Saved(_, baseline) =
+            run(&session, &store, Work::Save(Box::new(case.clone()), None))
+        else {
+            panic!("expected a saved check");
+        };
+        let Completion::Ran(report) = run(&session, &store, Work::Run) else {
+            panic!("expected a report")
+        };
+        assert_eq!(report.status, check::Status::Passed);
+        assert_eq!(report.completed_tick, 30);
+        assert_eq!(session.revision(), initial_revision);
+        assert_eq!(std::fs::read(&path).unwrap(), initial_doc);
+
+        write_lua(2);
+        assert!(matches!(
+            run(&session, &store, Work::Run),
+            Completion::Refused {
+                status: "stale",
+                ..
+            }
+        ));
+        store.refresh("conveyor").unwrap();
+        assert!(matches!(
+            run(&session, &store, Work::Run),
+            Completion::Refused {
+                status: "stale",
+                ..
+            }
+        ));
+        let next = capture(&session, &store);
+        assert_eq!(case.identity.scene_sha256, next.scene_sha256);
+        assert_ne!(case.identity.resources_sha256, next.resources_sha256);
+        case.identity = next;
+        assert!(matches!(
+            run(&session, &store, Work::Save(Box::new(case), Some(baseline))),
+            Completion::Saved(..)
+        ));
+        let Completion::Ran(report) = run(&session, &store, Work::Run) else {
+            panic!("expected a report")
+        };
+        assert_eq!(report.status, check::Status::AssertionFailed);
+        assert_eq!(
+            report.results[0].actual,
+            Some(StateValue::Vec3([60.0, 0.0, 0.0]))
+        );
+
+        let mut edited = session.scene().objects[0].clone();
+        edited.name = "New Conveyor Label".into();
+        session.put_object(session.revision(), edited).unwrap();
+        assert!(session.saved_pin().is_none());
+        session.save(&path).unwrap();
+        assert!(matches!(
+            run(&session, &store, Work::Run),
+            Completion::Refused {
+                status: "stale",
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -55,7 +55,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("creation_export_start", "Build the saved scene as a Linux application. Returns an operation_id; follow it with creation_export_inspect."),
     ("creation_export_cancel", "Cancel the running build."),
     ("play_check_inspect", "Read the project's play checks and the result of the last run."),
-    ("play_check_start", "Run the saved scene's play checks in isolation. Returns an operation_id; follow it with play_check_inspect."),
+    ("play_check_start", "Run a saved flat scene’s Play Check in isolation. Returns operation_id; poll play_check_inspect."),
     ("play_check_cancel", "Cancel a running play check."),
     ("scene_persistence_inspect", "Read the save guards, destination, blockers and last receipt. Inspect here after an unknown save outcome."),
     ("scene_save", "Save the active scene in place with all three guards from scene_persistence_inspect. Only legacy Save As accepts a filename."),

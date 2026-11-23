@@ -945,20 +945,23 @@ for the guarded equivalent.
 
 ## Save and rerun a play check
 
-With a saved Scene11 or newer creation, open **File → Play checks…**.
+Open **Window → Play Checks…** in a saved scene. In v23, use a flat scene
+with behavior supported by ordinary Play. Checks run the fixed input frames
+against that saved scene, including verified Lua files from Assets. They leave
+your live Play session and scene Undo alone.
 Create a check, add ordered named-action frames and choose the final tick,
-translation or typed state values to verify. **Capture current identity**
-pins the current saved scene and its resources. **Save check** writes the
-sibling `<scene-stem>.play-check.json`. Use **Reopen check** to continue
+translation or typed state values to verify. **Capture Current Identity**
+pins the current saved scene and its resources. **Save Check** writes the
+sibling `<scene-stem>.play-check.json`. Use **Reopen Check** to continue
 editing the saved case later.
 
-**Run saved check** starts isolated playback and shows expected and actual
-values. **Cancel operation** stops an active check. When the scene or resources
+**Run Saved Check** starts isolated playback and shows expected and actual
+values. **Cancel Operation** stops an active check. When the scene or resources
 change, save the creation, capture its identity again and review the existing
 expectations before saving the check. This keeps failures reproducible while
 you repair the behavior.
 
-Export using a matched kit advertising `repeatable_play_checks`. After
+For legacy scenes, export using a matched kit advertising `repeatable_play_checks`. After
 relocation run `application/application --play-check`. The app prints a
 structured report and exits 0 on pass or 2 on a failed check. You can still
 launch the app normally. The [MCP guide](../crates/rot-mcp/README.md)

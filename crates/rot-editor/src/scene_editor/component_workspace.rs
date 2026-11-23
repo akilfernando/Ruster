@@ -541,8 +541,7 @@ impl ComponentWorkspace {
     }
 
     pub(super) fn play_check_blocked(&self) -> bool {
-        let blocked = self.authored_edit_pending()
-            || self.close_pending
+        let blocked = self.close_pending
             || self.close_approved
             || self.open_path.is_some()
             || self.scene_picker.is_some()

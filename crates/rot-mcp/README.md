@@ -452,3 +452,15 @@ the editor. The editor handles approval and shared Undo for either route.
 cargo test -p rot-mcp
 cargo build -p rot-mcp
 ```
+
+
+### Saved Play Checks
+
+Create and save a case from **Window → Play Checks…** in a supported flat
+v23 scene. A check pins the saved scene, its input map, resource closure
+(including file Lua), and fixed tick. Guard `play_check_start` with the current
+session token, scene revision and asset revision. Poll the returned
+`operation_id` with `play_check_inspect` and use `details:true` for expected
+and actual values. `play_check_cancel` takes that ID and the session token.
+If a run reports `stale`, use **Capture Current Identity** and **Save Check**
+in the editor to repin it. Capture keeps the input frames and expectations.
