@@ -80,6 +80,16 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+On Linux, Assets → Create → Lua Script creates a starter file in the chosen
+folder and selects its stable asset once ready. Open in Code Editor opens
+that source using the saved editor configuration. The conveyor fixture
+kept 0.5 units per second after a disk save and used 1.5 on the next Play,
+after reopening and in a relocated Vulkan build. Approved MCP attachment
+shared native Undo and left the source intact. In a warmed release
+session with 600 mesh assets, p95 was 211 ms from Create to Ready and
+164 ms for the equivalent guarded import. A source save reached Ready in
+333 ms p95 through the watcher and in 235 ms with immediate explicit refresh.
+
 v23 Transform Game Cameras can use an Orthographic projection with a full
 vertical size, finite near and far planes and optional fixed aspect. Two
 equal rulers at different depths drew equally in native Game view, an
