@@ -74,6 +74,11 @@ v23 Move (W), Rotate (E), and Scale (R) preview geometry and lights during
 drags. World and Local axes, pivot modes and snapping are in the viewport
 toolbar. Release commits one shared Undo entry. Approved MCP clients read
 the committed scene during a drag.
+Edit Collider adds local face handles to v23 Box Colliders. One drag moves
+a face while keeping the opposite face fixed and commits one shared Undo.
+Approved MCP inspects the exact component and its world corners. A flat
+sphere sweep verified the edited contact in Play and a relocated Linux
+player. A sheared box remains editable through local numeric fields.
 On Linux, v23 watches `Assets/` for imports and changes. The Assets panel
 shows live folders, previews and diagnostics, accepts drops, and places
 meshes and multi-primitive GLB hierarchies with Undo. File actions keep stable IDs
