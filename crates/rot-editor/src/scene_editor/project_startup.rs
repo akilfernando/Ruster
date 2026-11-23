@@ -20,6 +20,20 @@ struct Startup {
 #[serde(deny_unknown_fields)]
 struct Settings {
     startup_scene: Startup,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    startup_transition: Option<StartupTransition>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StartupTransition {
+    action_id: String,
+    target_scene: Startup,
+}
+
+pub(super) struct TransitionInput {
+    pub(super) action_id: String,
+    pub(super) session: ComponentSession,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -303,6 +317,9 @@ pub(super) struct Observation {
     settings: Option<ObservedFile>,
     target: Result<Option<(Startup, Stamp)>, String>,
     validation_error: Option<String>,
+    transition: Option<(StartupTransition, Result<Stamp, String>)>,
+    transition_error: Option<String>,
+    buttons: Vec<(String, String)>,
 }
 
 fn error(error: impl std::fmt::Display) -> String {
@@ -394,20 +411,32 @@ impl Observation {
             settings: None,
             target: Ok(None),
             validation_error: None,
+            transition: None,
+            transition_error: None,
+            buttons: Vec::new(),
         };
         observed.settings = observed.read_settings()?;
-        observed.target = observed
-            .settings
-            .as_ref()
-            .map(|settings| {
-                let value: Settings = serde_json::from_slice(&settings.bytes).map_err(error)?;
-                let startup = value.startup_scene;
-                validate_filename(&startup.file)?;
-                rot_scene::validate_id(&startup.scene_id).map_err(error)?;
-                let stamp = observed.child_stamp(&startup.file)?;
-                Ok::<_, String>((startup, stamp))
-            })
-            .transpose();
+        if let Some(file) = &observed.settings {
+            match serde_json::from_slice::<Settings>(&file.bytes) {
+                Ok(settings) => {
+                    let startup = settings.startup_scene;
+                    observed.target = (|| {
+                        validate_filename(&startup.file)?;
+                        rot_scene::validate_id(&startup.scene_id).map_err(error)?;
+                        let stamp = observed.child_stamp(&startup.file)?;
+                        Ok(Some((startup, stamp)))
+                    })();
+                    observed.transition = settings.startup_transition.map(|transition| {
+                        let target = &transition.target_scene;
+                        let stamp = validate_filename(&target.file)
+                            .and_then(|()| rot_scene::validate_id(&target.scene_id).map_err(error))
+                            .and_then(|()| observed.child_stamp(&target.file));
+                        (transition, stamp)
+                    });
+                }
+                Err(failure) => observed.target = Err(error(failure)),
+            }
+        }
         observed.verify_root()?;
         Ok(observed)
     }
@@ -463,8 +492,35 @@ impl Observation {
     }
 
     fn validate(mut self) -> Self {
-        self.validation_error = self.inspect_scene().err();
+        self.validate_observed();
         self
+    }
+
+    fn validate_observed(&mut self) {
+        self.validation_error = self.verify_settings().err();
+        if self.validation_error.is_some() {
+            return;
+        }
+        match self.target.as_ref() {
+            Ok(Some((startup, stamp))) => match self.load_saved(startup, stamp) {
+                Ok(source) => {
+                    self.buttons = source
+                        .scene()
+                        .actions
+                        .iter()
+                        .filter_map(|(id, action)| {
+                            matches!(action.kind, rot_scene::input::ActionKind::Button { .. }).then(
+                                || (id.clone(), action.label.as_deref().unwrap_or(id).to_owned()),
+                            )
+                        })
+                        .collect();
+                    self.transition_error = self.load_transition(source.scene()).err();
+                }
+                Err(failure) => self.validation_error = Some(failure),
+            },
+            Err(failure) => self.validation_error = Some(failure.clone()),
+            Ok(None) => {}
+        }
     }
 
     fn verify_root(&self) -> Result<(), String> {
@@ -540,21 +596,136 @@ impl Observation {
         Ok(path)
     }
 
-    pub(super) fn inspect_scene(&self) -> Result<(), String> {
-        self.verify_settings()?;
-        if let Some((startup, stamp)) = self.target.as_ref().map_err(Clone::clone)? {
-            self.verify_target(startup, stamp)?;
-            let file = self.open_regular(&startup.file).map_err(error)?;
-            if Stamp::new(&file.metadata().map_err(error)?) != *stamp {
-                return Err(CHANGED.into());
-            }
-            let scene = ComponentScene::read_json(file).map_err(error)?;
-            if scene.id != startup.scene_id {
-                return Err("Startup Scene now has a different scene ID. Choose it again in Project Settings.".into());
-            }
-            self.verify_target(startup, stamp)?;
+    fn load_saved(&self, saved: &Startup, expected: &Stamp) -> Result<ComponentSession, String> {
+        let path = self.verify_target(saved, expected)?;
+        let file = self.open_regular(&saved.file).map_err(error)?;
+        if stamp(&file)? != *expected {
+            return Err(CHANGED.into());
         }
-        self.verify_settings()
+        let session = ComponentSession::from_open_file(&path, file).map_err(error)?;
+        if session.scene().id != saved.scene_id {
+            return Err(format!(
+                "{} now has a different scene ID. Choose it again in Project Settings.",
+                saved.file
+            ));
+        }
+        self.verify_target(saved, expected)?;
+        Ok(session)
+    }
+
+    pub(super) fn has_transition(&self) -> bool {
+        self.transition.is_some()
+    }
+
+    pub(super) fn transition_value(&self) -> Option<(&str, &str, Option<&str>)> {
+        let (transition, _) = self.transition.as_ref()?;
+        Some((
+            &transition.action_id,
+            &transition.target_scene.file,
+            self.validation_error
+                .as_deref()
+                .or(self.transition_error.as_deref()),
+        ))
+    }
+
+    pub(super) fn buttons(&self) -> &[(String, String)] {
+        &self.buttons
+    }
+
+    pub(super) fn load_transition(
+        &self,
+        source: &ComponentScene,
+    ) -> Result<Option<TransitionInput>, String> {
+        let Some((transition, target_stamp)) = self.transition.as_ref() else {
+            return Ok(None);
+        };
+        let (startup, source_stamp) = self
+            .target
+            .as_ref()
+            .map_err(Clone::clone)?
+            .as_ref()
+            .ok_or("Choose a saved Startup Scene first.")?;
+        self.verify_settings()?;
+        self.verify_target(startup, source_stamp)?;
+        validate_action(source, &transition.action_id)?;
+        let target = &transition.target_scene;
+        if target.file == startup.file || target.scene_id == startup.scene_id {
+            return Err("Choose a different scene for the Start Transition.".into());
+        }
+        let session = self.load_saved(target, target_stamp.as_ref().map_err(Clone::clone)?)?;
+        self.verify_target(startup, source_stamp)?;
+        self.verify_settings()?;
+        Ok(Some(TransitionInput {
+            action_id: transition.action_id.clone(),
+            session,
+        }))
+    }
+
+    pub(super) fn set_transition(&self, action_id: &str, filename: &str) -> Result<(), String> {
+        validate_filename(filename)?;
+        let (startup, startup_stamp) = self
+            .target
+            .as_ref()
+            .map_err(Clone::clone)?
+            .as_ref()
+            .ok_or("Choose a saved Startup Scene first.")?;
+        if filename == startup.file {
+            return Err("Choose a different scene for the Start Transition.".into());
+        }
+        let source = self.load_saved(startup, startup_stamp)?;
+        validate_action(source.scene(), action_id)?;
+        let target_stamp = self.child_stamp(filename)?;
+        let path = self.root.join(filename);
+        let target = self.open_regular(filename).map_err(error)?;
+        if stamp(&target)? != target_stamp {
+            return Err(CHANGED.into());
+        }
+        let session = ComponentSession::from_open_file(&path, target).map_err(error)?;
+        if session.scene().id == startup.scene_id {
+            return Err("Choose a different saved scene ID for the Start Transition.".into());
+        }
+        let target = Startup {
+            file: filename.into(),
+            scene_id: session.scene().id.clone(),
+        };
+        let transition = StartupTransition {
+            action_id: action_id.into(),
+            target_scene: target.clone(),
+        };
+        let bytes = serde_json::to_vec(&Settings {
+            startup_scene: startup.clone(),
+            startup_transition: Some(transition.clone()),
+        })
+        .map_err(error)?;
+        self.with_lock(|| {
+            self.verify_target(startup, startup_stamp)?;
+            self.verify_target(&target, &target_stamp)?;
+            if self
+                .transition
+                .as_ref()
+                .is_some_and(|(current, _)| current == &transition)
+            {
+                return Ok(());
+            }
+            self.publish(&bytes, || {
+                self.verify_settings()?;
+                self.verify_target(startup, startup_stamp)?;
+                self.verify_target(&target, &target_stamp)?;
+                Ok(())
+            })
+        })
+    }
+
+    pub(super) fn clear_transition(&self) -> Result<(), String> {
+        let Some(file) = self.settings.as_ref() else {
+            return Ok(());
+        };
+        let mut settings: Settings = serde_json::from_slice(&file.bytes).map_err(error)?;
+        if settings.startup_transition.take().is_none() {
+            return Ok(());
+        }
+        let bytes = serde_json::to_vec(&settings).map_err(error)?;
+        self.with_lock(|| self.publish(&bytes, || self.verify_settings()))
     }
 
     pub(super) fn use_saved(
@@ -596,6 +767,7 @@ impl Observation {
                     }
                     let bytes = serde_json::to_vec(&Settings {
                         startup_scene: startup.clone(),
+                        startup_transition: None,
                     })
                     .map_err(error)?;
                     self.publish(&bytes, || {
@@ -701,7 +873,6 @@ impl Observation {
 
     /// Prepare the exact opened regular file for Build without keeping a
     /// publication lock held while its scene is parsed on the worker.
-    #[cfg(target_os = "linux")]
     pub(super) fn load_startup(&self) -> Result<ComponentSession, String> {
         self.verify_settings()?;
         let (source, expected) = self
@@ -710,19 +881,7 @@ impl Observation {
             .map_err(Clone::clone)?
             .as_ref()
             .ok_or("Choose a startup scene first.")?;
-        let path = self.verify_target(source, expected)?;
-        let file = self.open_regular(&source.file).map_err(error)?;
-        if stamp(&file)? != *expected {
-            return Err(CHANGED.into());
-        }
-        let session = ComponentSession::from_open_file(&path, file).map_err(error)?;
-        if session.scene().id != source.scene_id {
-            return Err(
-                "Startup Scene now has a different scene ID. Choose it again in Project Settings."
-                    .into(),
-            );
-        }
-        self.verify_target(source, expected)?;
+        let session = self.load_saved(source, expected)?;
         self.verify_settings()?;
         Ok(session)
     }
@@ -741,6 +900,18 @@ impl Observation {
             run(Some((path, session)))
         })
     }
+}
+
+fn validate_action(source: &ComponentScene, action: &str) -> Result<(), String> {
+    rot_scene::validate_id(action).map_err(error)?;
+    if !source.actions.get(action).is_some_and(|definition| {
+        matches!(definition.kind, rot_scene::input::ActionKind::Button { .. })
+    }) {
+        return Err(format!(
+            "Start Button {action:?} is missing or is not a Button in the Startup Scene."
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -765,10 +936,12 @@ pub(super) fn context(
                     && previous.identity == observed.identity
                     && previous.settings == observed.settings
                     && previous.target == observed.target
+                    && previous.transition == observed.transition
             }) {
                 observed.validation_error = previous.validation_error;
+                observed.transition_error = previous.transition_error;
             } else {
-                observed.validation_error = observed.inspect_scene().err();
+                observed.validate_observed();
             }
             observed
         });
@@ -796,6 +969,22 @@ pub(super) fn context(
             result["hub_source"] = serde_json::Value::Null;
         }
     }
+    result["transition"] = json!({"status":"none"});
+    if let Ok(observed) = &observed {
+        if let Some((transition, _)) = &observed.transition {
+            let reason = observed
+                .validation_error
+                .as_ref()
+                .or(observed.transition_error.as_ref());
+            result["transition"] = json!({
+                "status":if reason.is_some() {"invalid"} else {"configured"},
+                "action_id":transition.action_id,
+                "source":result["startup_scene"],
+                "target":transition.target_scene,
+                "reason":reason.map(|message|message.chars().take(240).collect::<String>()),
+            });
+        }
+    }
     *cached = observed.ok();
     result
 }
@@ -812,6 +1001,52 @@ mod tests {
             .save_new(path)
             .unwrap();
         ComponentSession::open(path).unwrap()
+    }
+
+    #[test]
+    fn transition_pins_saved_button_and_distinct_sibling() {
+        let dir = tempfile::tempdir().unwrap();
+        let source_path = dir.path().join("Title.scene.json");
+        let target_path = dir.path().join("Rail.scene.json");
+        let mut source = scene(&source_path, "title");
+        scene(&target_path, "rail");
+        source
+            .set_action(
+                source.revision(),
+                "start",
+                Some(rot_scene::input::ActionDefinition {
+                    label: Some("Start".into()),
+                    kind: rot_scene::input::ActionKind::Button {
+                        keys: vec![rot_scene::input::InputKey::Enter],
+                    },
+                }),
+            )
+            .unwrap();
+        source.save(&source_path).unwrap();
+
+        let project = ProjectDirectory::capture(dir.path()).unwrap();
+        project
+            .validated()
+            .unwrap()
+            .use_saved(&source_path, &source)
+            .unwrap();
+        let before = project.validated().unwrap();
+        assert!(before.set_transition("missing", "Rail.scene.json").is_err());
+        assert!(before.set_transition("start", "Title.scene.json").is_err());
+        before.set_transition("start", "Rail.scene.json").unwrap();
+        assert!(before.set_transition("start", "Rail.scene.json").is_err());
+        let configured = project.validated().unwrap();
+        let route = configured.load_transition(source.scene()).unwrap().unwrap();
+        assert_eq!(route.action_id, "start");
+        assert_eq!(route.session.scene().id, "rail");
+
+        fs::remove_file(&target_path).unwrap();
+        symlink(&source_path, &target_path).unwrap();
+        assert!(configured.load_transition(source.scene()).is_err());
+        project.validated().unwrap().clear_transition().unwrap();
+        let cleared = project.validated().unwrap();
+        assert_eq!(cleared.choice(), Ok(Some(("Title.scene.json", "title"))));
+        assert!(cleared.load_transition(source.scene()).unwrap().is_none());
     }
 
     #[test]

@@ -234,6 +234,8 @@ pub(super) struct ComponentWorkspace {
     palette: Option<palette::Palette>,
     project_settings: Option<ProjectPage>,
     startup_settings: Option<Result<super::project_startup::Observation, String>>,
+    start_action_choice: String,
+    start_target_file: String,
     startup_project: Result<super::project_startup::ProjectDirectory, String>,
     #[cfg(unix)]
     startup_context_cache: std::cell::RefCell<Option<super::project_startup::Observation>>,
@@ -362,6 +364,8 @@ impl ComponentWorkspace {
             palette: None,
             project_settings: None,
             startup_settings: None,
+            start_action_choice: String::new(),
+            start_target_file: String::new(),
             startup_project,
             #[cfg(unix)]
             startup_context_cache: Default::default(),
@@ -1981,7 +1985,14 @@ impl ComponentWorkspace {
             && !self.runtime.in_play_mode()
             && !self.ai_transition_pending();
         if self.startup_settings.is_none() {
-            self.startup_settings = Some(self.observe_startup());
+            let observed = self.observe_startup();
+            let route = observed
+                .as_ref()
+                .ok()
+                .and_then(Observation::transition_value);
+            self.start_action_choice = route.map_or_else(String::new, |(id, _, _)| id.to_owned());
+            self.start_target_file = route.map_or_else(String::new, |(_, file, _)| file.to_owned());
+            self.startup_settings = Some(observed);
         }
         let observation = self
             .startup_settings
@@ -2023,6 +2034,86 @@ impl ComponentWorkspace {
                 )
                 .clicked();
         });
+        let mut set_transition = false;
+        let mut clear_transition = false;
+        if let Ok(observation) = observation {
+            if selection.is_ok_and(|choice| choice.is_some()) || observation.has_transition() {
+                ui.separator();
+                ui.heading(Text::StartupTransition.plain());
+                if let Some((action, file, reason)) = observation.transition_value() {
+                    ui.label(format!("{action} → {file}"));
+                    if let Some(reason) = reason {
+                        ui.colored_label(editor_theme::colors(ui).error, reason);
+                    }
+                }
+                let ready = !self.runtime.in_play_mode() && !self.authored_edit_pending();
+                let buttons = observation.buttons();
+                if !buttons.is_empty() {
+                    let current = buttons
+                        .iter()
+                        .find(|(id, _)| id == &self.start_action_choice)
+                        .map_or(Text::StartupChooseButton.plain(), |(_, label)| label);
+                    crate::ui_kit::property_row_with_label(
+                        ui,
+                        Text::StartupStartButton.plain(),
+                        |ui, label| {
+                            egui::ComboBox::from_id_salt("startup_transition_button")
+                                .selected_text(current)
+                                .show_ui(ui, |ui| {
+                                    for (id, name) in buttons {
+                                        ui.selectable_value(
+                                            &mut self.start_action_choice,
+                                            id.clone(),
+                                            format!("{name} · {id}"),
+                                        );
+                                    }
+                                })
+                                .response
+                                .labelled_by(label);
+                        },
+                    );
+                } else {
+                    ui.weak(Text::StartupNoButtons.plain());
+                }
+                let target = crate::ui_kit::property_row_with_label(
+                    ui,
+                    Text::StartupDestination.plain(),
+                    |ui, label| {
+                        ui.add_enabled(
+                            ready,
+                            egui::TextEdit::singleline(&mut self.start_target_file)
+                                .char_limit(255)
+                                .hint_text("Scene Name.scene.json"),
+                        )
+                        .labelled_by(label)
+                    },
+                );
+                let can_set = ready
+                    && !self.start_target_file.trim().is_empty()
+                    && buttons
+                        .iter()
+                        .any(|(id, _)| id == &self.start_action_choice);
+                ui.horizontal_wrapped(|ui| {
+                    set_transition = ui
+                        .add_enabled(
+                            can_set,
+                            egui::Button::new(Text::StartupSetTransition.plain()),
+                        )
+                        .clicked()
+                        || can_set
+                            && (target.has_focus() || target.lost_focus())
+                            && ui.input_mut(|input| {
+                                input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                            });
+                    clear_transition = ui
+                        .add_enabled(
+                            ready && observation.has_transition(),
+                            egui::Button::new(Text::StartupClearTransition.plain()),
+                        )
+                        .clicked();
+                });
+            }
+        }
         if let Some(error) = &self.error {
             ui.colored_label(editor_theme::colors(ui).error, error);
         }
@@ -2031,12 +2122,19 @@ impl ComponentWorkspace {
                 Some(observation.use_saved(&self.path, &self.session))
             } else if reset {
                 Some(observation.reset())
+            } else if set_transition {
+                Some(
+                    observation
+                        .set_transition(&self.start_action_choice, self.start_target_file.trim()),
+                )
+            } else if clear_transition {
+                Some(observation.clear_transition())
             } else {
                 None
             };
             match result {
                 Some(Ok(())) => {
-                    self.startup_settings = Some(self.observe_startup());
+                    self.startup_settings = None;
                     self.error = None;
                 }
                 Some(Err(error)) => self.error = Some(error),
