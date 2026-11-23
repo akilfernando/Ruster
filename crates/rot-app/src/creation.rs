@@ -224,12 +224,14 @@ impl RuntimeScene {
     }
 
     pub fn from_components(scene: Box<ComponentScene>) -> Result<Self, String> {
-        let error = |error: SceneError| error.to_string();
-        let Some(preview) = static_component_preview(&scene).map_err(error)? else {
+        Self::from_components_checked(scene).map_err(|error| error.to_string())
+    }
+
+    pub fn from_components_checked(scene: Box<ComponentScene>) -> Result<Self, SceneError> {
+        let Some(preview) = static_component_preview(&scene)? else {
             return Session::from_component_runtime(&scene)
                 .map(Box::new)
-                .map(Self::Behavior)
-                .map_err(error);
+                .map(Self::Behavior);
         };
         Ok(Self::StaticHierarchy { scene, preview })
     }

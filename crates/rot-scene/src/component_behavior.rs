@@ -116,9 +116,9 @@ impl ComponentScene {
         scene.display = self.display;
         scene.player_view = match self.effective_camera(&hierarchy) {
             Some((_, super::CameraView::Orbit(view))) => Some(view.clone()),
-            Some((_, super::CameraView::Transform(_))) => return Err(SceneError::Invalid(
-                "Transform Perspective cameras require a static scene. Activate a Fixed or Follow camera, or clear the Game Camera before Play or Build.".into(),
-            )),
+            Some((_, super::CameraView::Transform(_))) => {
+                return Err(SceneError::TransformCameraRequiresStatic);
+            }
             None => None,
         };
         scene.materials.clone_from(&self.materials);

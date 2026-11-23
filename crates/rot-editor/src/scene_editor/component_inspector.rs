@@ -117,6 +117,20 @@ fn enter_commits(ui: &egui::Ui, response: &egui::Response) -> bool {
     response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))
 }
 
+fn exact_drag_value<'a>(ui: &egui::Ui, value: &'a mut f32) -> egui::DragValue<'a> {
+    let id = ui.next_auto_id();
+    let ctx = ui.ctx().clone();
+    let formatter = ui.style().number_formatter.clone();
+    egui::DragValue::new(value).custom_formatter(move |value, decimals| {
+        if ctx.memory(|memory| memory.has_focus(id)) {
+            // DragValue reparses this text even if the creator just tabs away.
+            (value as f32).to_string()
+        } else {
+            formatter.format(value, decimals)
+        }
+    })
+}
+
 fn vector(
     ui: &mut egui::Ui,
     label: Text,
@@ -126,21 +140,28 @@ fn vector(
 ) -> bool {
     let mut submit = false;
     ui_kit::vector_row(ui, label.plain(), |ui, axis, width| {
-        let response = ui.add_sized(
-            [width, ui_kit::tokens::CONTROL_HEIGHT],
-            egui::DragValue::new(&mut values[axis])
-                .prefix(
-                    [
-                        Text::ComponentAxisX,
-                        Text::ComponentAxisY,
-                        Text::ComponentAxisZ,
-                    ][axis]
-                        .plain(),
-                )
-                .speed(step)
-                .range(range.clone())
-                .clamp_existing_to_range(false),
-        );
+        let layout = egui::Layout::centered_and_justified(ui.layout().main_dir());
+        let response = ui
+            .allocate_ui_with_layout(
+                egui::vec2(width, ui_kit::tokens::CONTROL_HEIGHT),
+                layout,
+                |ui| {
+                    let field = exact_drag_value(ui, &mut values[axis])
+                        .prefix(
+                            [
+                                Text::ComponentAxisX,
+                                Text::ComponentAxisY,
+                                Text::ComponentAxisZ,
+                            ][axis]
+                                .plain(),
+                        )
+                        .speed(step)
+                        .range(range.clone())
+                        .clamp_existing_to_range(false);
+                    ui.add(field)
+                },
+            )
+            .inner;
         submit |= enter_commits(ui, &response);
     });
     submit
@@ -538,7 +559,8 @@ fn number_field(
     tooltip: Text,
 ) -> bool {
     let response = ui_kit::property_row_with_label(ui, label.plain(), |ui, label| {
-        ui.add(egui::DragValue::new(value).speed(speed).range(range))
+        let field = exact_drag_value(ui, value).speed(speed).range(range);
+        ui.add(field)
             .labelled_by(label)
             .on_hover_text(tooltip.plain())
     });
@@ -744,6 +766,62 @@ impl ComponentPicker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tabbing_transform_and_lens_keeps_the_authored_floats() {
+        let ctx = egui::Context::default();
+        let mut draft = ObjectNode {
+            id: "camera".into(),
+            name: "Camera".into(),
+            parent: None,
+            enabled: true,
+            transform: rot_scene::Transform {
+                translation: [0.123456, 2.34567, -0.456789],
+                rotation: [0.02, 0.73, -0.04],
+                scale: [1.234567, 2.345678, 1.054321],
+            },
+            components: Vec::new(),
+        };
+        let original = draft.transform.clone();
+        let mut fov = 45.12345;
+        for index in 0..=11 {
+            let events = if index == 0 {
+                Vec::new()
+            } else {
+                [true, false]
+                    .map(|pressed| egui::Event::Key {
+                        key: egui::Key::Tab,
+                        physical_key: None,
+                        pressed,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    })
+                    .to_vec()
+            };
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    assert!(!transform(ui, &mut draft));
+                    assert!(!number_field(
+                        ui,
+                        Text::CameraVerticalFov,
+                        &mut fov,
+                        0.25,
+                        10.0..=120.0,
+                        Text::CameraTransformFovHint
+                    ));
+                    let _ = ui.button(Text::CameraMakeActive.plain());
+                },
+            );
+            output.textures_delta.clear();
+            assert_eq!(draft.transform, original);
+            assert_eq!(fov, 45.12345);
+        }
+    }
 
     #[test]
     fn directional_light_advanced_shadows_commit_on_enter() {

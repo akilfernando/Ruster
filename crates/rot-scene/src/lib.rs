@@ -528,6 +528,7 @@ pub enum SceneError {
     Invalid(String),
     CannotPreserveWorldTransform,
     HierarchyAuthoringConflict,
+    TransformCameraRequiresStatic,
     /// The validated authored payload and required history exceed the serialized budget.
     Capacity,
     StaleRevision {
@@ -556,6 +557,7 @@ impl fmt::Display for SceneError {
             Self::Invalid(reason) => write!(f, "invalid scene: {reason}"),
             Self::CannotPreserveWorldTransform => write!(f, "cannot preserve world transforms"),
             Self::HierarchyAuthoringConflict => write!(f, "invalid scene: live hierarchy accepts only Group-local rotation authoring; Object/Application bindings, input actions and HUD are unsupported"),
+            Self::TransformCameraRequiresStatic => write!(f, "Transform Perspective cameras require a static scene. Activate a Fixed or Follow camera, or clear the Game Camera before Play or Build."),
             Self::Capacity => write!(f, "authored state and required reversible history exceed 1 MiB; reduce content or edit size before retrying"),
             Self::StaleRevision { expected, actual } => write!(
                 f,

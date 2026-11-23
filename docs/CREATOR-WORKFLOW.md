@@ -426,7 +426,7 @@ enabled collider while the mesh and its shadow disappear. Undo restores the
 renderer for the next Play session. Build preserves these authored states and
 includes imported meshes and textures referenced by disabled geometry.
 Scripted or animated hierarchies and scenes with input actions, HUD controls
-or a gameplay camera use the behavior runtime. Its hierarchy still uses
+or an active Follow camera use the behavior runtime. Its hierarchy still uses
 transform-only groups as parents.
 The editor finds the `rot-motion-lab` player alongside `rot-editor`. Local
 installs include both. When building from source, build both Cargo packages.
