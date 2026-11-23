@@ -1118,15 +1118,11 @@ impl ComponentWorkspace {
         #[cfg(target_os = "linux")]
         if let Some(items) = result["assets"].as_array_mut() {
             for item in items {
-                if let Some(available) = item["id"]
+                if let Some((status, message)) = item["id"]
                     .as_str()
-                    .and_then(|id| store.missing_source_restore_available(id))
+                    .and_then(|id| self.asset_browser.source_restore_status(id))
                 {
-                    item["source_restore"] = if available {
-                        json!({"status":"candidate", "message":Text::AssetRestoreMissingGuide.plain()})
-                    } else {
-                        json!({"status":"unavailable", "message":Text::AssetRestoreCacheUnavailable.plain()})
-                    };
+                    item["source_restore"] = json!({"status":status, "message":message.plain()});
                 }
             }
         }

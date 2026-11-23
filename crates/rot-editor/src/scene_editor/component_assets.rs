@@ -52,6 +52,25 @@ enum FileDialog {
 
 const SEARCH: &str = "v23_asset_search";
 
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SourceRestore {
+    Candidate,
+    CacheUnavailable,
+    SidecarInvalid,
+}
+
+#[cfg(target_os = "linux")]
+impl SourceRestore {
+    fn guidance(self) -> Text {
+        match self {
+            Self::Candidate => Text::AssetRestoreMissingGuide,
+            Self::CacheUnavailable => Text::AssetRestoreCacheUnavailable,
+            Self::SidecarInvalid => Text::AssetRestoreSidecarInvalid,
+        }
+    }
+}
+
 struct AssetRow {
     id: String,
     source: String,
@@ -61,7 +80,8 @@ struct AssetRow {
     kind: &'static str,
     settings: Option<&'static str>,
     can_import_roughness: bool,
-    source_restore: Option<bool>,
+    #[cfg(target_os = "linux")]
+    source_restore: Option<SourceRestore>,
     model: bool,
     registered: bool,
     status: AssetStatus,
@@ -86,6 +106,7 @@ impl AssetRow {
             kind,
             settings: None,
             can_import_roughness: false,
+            #[cfg(target_os = "linux")]
             source_restore: None,
             model: false,
             registered: true,
@@ -442,6 +463,20 @@ impl Browser {
         Some((catalog, action))
     }
 
+    #[cfg(target_os = "linux")]
+    pub(super) fn source_restore_status(&self, id: &str) -> Option<(&'static str, Text)> {
+        let row = &self.rows[*self.by_id.get(id)?];
+        let status = row.source_restore?;
+        Some((
+            if status == SourceRestore::Candidate {
+                "candidate"
+            } else {
+                "unavailable"
+            },
+            status.guidance(),
+        ))
+    }
+
     pub(super) fn refresh(
         &mut self,
         assets: &rot_assets::AssetStore,
@@ -473,10 +508,6 @@ impl Browser {
             };
             let mut row = AssetRow::new(&info.id, &info.source, kind, info.status.clone());
             row.diagnostic = info.diagnostic.as_deref().map(diagnostic);
-            #[cfg(target_os = "linux")]
-            {
-                row.source_restore = assets.missing_source_restore_available(&info.id);
-            }
             row.settings = match (info.mesh_normal_policy, info.texture_role) {
                 (Some(MeshNormalPolicy::Flat), _) => Some("Normals: Flat"),
                 (Some(MeshNormalPolicy::AuthoredWhenComplete), _) => Some("Normals: From the file"),
@@ -529,6 +560,25 @@ impl Browser {
             }
         }
         for row in &mut self.rows {
+            #[cfg(target_os = "linux")]
+            {
+                row.source_restore =
+                    assets
+                        .missing_source_restore_available(&row.id)
+                        .map(|cached| {
+                            if !cached {
+                                SourceRestore::CacheUnavailable
+                            } else if self
+                                .issues
+                                .get(&format!("{}.rotmeta", row.source))
+                                .is_some_and(|issue| issue.status == AssetStatus::Invalid)
+                            {
+                                SourceRestore::SidecarInvalid
+                            } else {
+                                SourceRestore::Candidate
+                            }
+                        });
+            }
             if row.status != AssetStatus::Ready {
                 // A model is registered in an open store only while its accepted
                 // GLB payload is loaded. Other assets can have metadata alone.
@@ -925,14 +975,9 @@ impl Browser {
                 message
             };
             ui.colored_label(editor_theme::colors(ui).error, message.plain());
-            ui.label(
-                match row.source_restore {
-                    Some(true) => Text::AssetRestoreMissingGuide,
-                    Some(false) => Text::AssetRestoreCacheUnavailable,
-                    None => recovery,
-                }
-                .plain(),
-            );
+            #[cfg(target_os = "linux")]
+            let recovery = row.source_restore.map_or(recovery, SourceRestore::guidance);
+            ui.label(recovery.plain());
             if row.registered {
                 let fallback = if row.last_good_available {
                     Text::AssetLastGoodAvailable
@@ -1012,7 +1057,7 @@ fn file_actions(ui: &mut egui::Ui, row: &AssetRow) -> Option<ContextAction> {
             .extension()
             .and_then(|extension| extension.to_str())
             .is_some_and(|extension| matches!(extension, "obj" | "lua" | "wav"));
-    let action = if row.source_restore == Some(true)
+    let action = if row.source_restore == Some(SourceRestore::Candidate)
         && ui.button(Text::AssetRestoreMissingSource.plain()).clicked()
     {
         Some(ContextAction::File(FileAction::RestoreMissingSource {

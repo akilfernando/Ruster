@@ -388,6 +388,12 @@ connected project.
   pending human edits before writes. Each mutation shares Undo. Test input
   in an active run using `behavior_runtime_step` and its admitted action
   frames. Under a v23 transform-only group with positive uniform scale,
+  A missing accepted Lua or WAV can expose `source_restore` on its
+  `asset_inspect` row. `status:"candidate"` means Assets can attempt the
+  native Restore Missing Source action and verify the cache and sidecar.
+  `status:"unavailable"` includes recovery guidance. Once restored, the
+  existing asset ID reports `ready` and retains its accepted hash.
+
   For a file-backed Lua error, `behavior_runtime_inspect.diagnostic.project_source`
   identifies the run's `asset_id`, project-relative `source` and `accepted_hash`.
   `current_source` and `status` (`ready`, `changed` or `unavailable`) describe

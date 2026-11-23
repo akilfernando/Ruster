@@ -296,6 +296,7 @@ editor_text! {
     AssetReplaceSource => "Replace it with a valid file at this path.",
     AssetRestoreMissingSource => "Restore Missing Source",
     AssetRestoreMissingGuide => "Use Restore Missing Source in Assets to verify the cache and sidecar.",
+    AssetRestoreSidecarInvalid => "Fix the original import sidecar before restoring this source.",
     AssetRestoreCacheUnavailable => "No accepted source is cached. Restore a backup at this path.",
     AssetRestoreSource => "Restore the file to this path.",
     AssetLastGoodAvailable => "Last working version is available.",

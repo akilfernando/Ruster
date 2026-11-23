@@ -544,6 +544,14 @@ the error has no line or your editor arguments omit `{line}`. A renamed
 asset can still open if its saved contents match the run. If the source
 changed, run Play again for a current error location.
 
+For a missing Lua script or WAV, select its row in **Assets** and choose
+**Asset Actions → Restore Missing Source** when available. Rot verifies
+the last accepted cached bytes and the original import sidecar before
+restoring the same file at its original path. The asset returns to **Ready**
+with the same ID, so existing Script and Sound Cue bindings keep working.
+If the original cache or sidecar is unavailable, use a backup. If a file
+has appeared at the path, inspect it in Assets before continuing.
+
 For a v23 **Button**, select **Primary Mouse** to bind the primary button
 alongside any keyboard keys. In Play, click the Game view to give it control,
 then press inside the game image. The claim click never fires the action.

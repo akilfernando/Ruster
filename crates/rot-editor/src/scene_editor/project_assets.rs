@@ -1621,6 +1621,135 @@ mod tests {
     }
 
     #[test]
+    fn restores_missing_lua_and_wav_when_the_worker_confirms_the_same_identity() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        fs::create_dir(root.join("Assets")).unwrap();
+        let wav = b"RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\x02\0\0\0\0\0";
+        for (path, bytes) in [
+            ("Assets/Signal.lua", b"return {}\r\n".as_slice()),
+            ("Assets/Bell.wav", wav.as_slice()),
+        ] {
+            fs::write(root.join(path), bytes).unwrap();
+        }
+        let worker = ProjectAssets::start(root.to_owned(), &Context::default()).unwrap();
+        let next = || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Some(update) = worker.take_update() {
+                    break update.unwrap();
+                }
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        let initial = next();
+        let records: Vec<_> = initial.store.infos().cloned().collect();
+        assert_eq!(records.len(), 2);
+        for record in records {
+            let source = root.join(&record.source);
+            let original = fs::read(&source).unwrap();
+            let sidecar = root.join(format!("{}.rotmeta", record.source));
+            let original_sidecar = fs::read(&sidecar).unwrap();
+            let sidecar_ino = fs::metadata(&sidecar).unwrap().ino();
+
+            fs::remove_file(&source).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut snapshot = next();
+            while snapshot.store.missing_source_restore_available(&record.id) != Some(true) {
+                assert!(Instant::now() < deadline);
+                snapshot = next();
+            }
+            let result = worker
+                .file_action(
+                    FileAction::RestoreMissingSource {
+                        id: record.id.clone(),
+                    },
+                    snapshot.store.state_identity(),
+                )
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+            assert!(result.errors.is_empty(), "{:?}", result.errors);
+            let accepted = next();
+            let ready = accepted.store.asset_info(&record.id).unwrap();
+            assert_eq!(ready.source, record.source);
+            assert_eq!(ready.hash, record.hash);
+            assert_eq!(ready.status, AssetStatus::Ready);
+            assert_eq!(fs::read(&source).unwrap(), original);
+            assert_eq!(fs::read(&sidecar).unwrap(), original_sidecar);
+            assert_eq!(fs::metadata(&sidecar).unwrap().ino(), sidecar_ino);
+        }
+    }
+
+    #[test]
+    fn restore_rejects_altered_bytes_and_sidecar_and_never_replaces_a_competing_source() {
+        use std::os::unix::fs::symlink;
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        fs::create_dir_all(root.join("Assets/Code")).unwrap();
+        let source = root.join("Assets/Code/signal.lua");
+        let sidecar = root.join("Assets/Code/signal.lua.rotmeta");
+        let original_sidecar = b"{\n  \"id\": \"signal\"\n}\n";
+        fs::write(&sidecar, original_sidecar).unwrap();
+        fs::write(&source, "return {}\n").unwrap();
+        let mut store = AssetStore::open(root).unwrap();
+        store.import("signal", "Assets/Code/signal.lua").unwrap();
+        fs::remove_file(&source).unwrap();
+        let store = AssetStore::open(root).unwrap();
+        let held = fs::File::open(root).unwrap();
+        let (cache, _) = store.missing_source_restore_cache("signal").unwrap();
+        let cache = root.join(cache);
+        let original_cache = fs::read(&cache).unwrap();
+        fs::write(&cache, b"return []\n").unwrap();
+        assert!(restore_missing_source(&store, &held, "signal", || true)
+            .unwrap_err()
+            .contains("SHA-256"));
+        assert!(!source.exists());
+        let reopened = AssetStore::open(root).unwrap();
+        assert_eq!(
+            reopened.missing_source_restore_available("signal"),
+            Some(false)
+        );
+        fs::write(&cache, original_cache).unwrap();
+
+        fs::write(&sidecar, br#"{"id":"unrelated"}"#).unwrap();
+        assert!(restore_missing_source(&store, &held, "signal", || true)
+            .unwrap_err()
+            .contains("sidecar"));
+        assert!(!source.exists());
+        fs::write(&sidecar, original_sidecar).unwrap();
+
+        let dir = root.join("Assets/Code");
+        let moved = root.join("Assets/Old Code");
+        fs::rename(&dir, &moved).unwrap();
+        symlink(&moved, &dir).unwrap();
+        assert!(restore_missing_source(&store, &held, "signal", || true).is_err());
+        assert!(!moved.join("signal.lua").exists());
+        fs::remove_file(&dir).unwrap();
+        fs::rename(&moved, &dir).unwrap();
+
+        assert!(restore_missing_source(&store, &held, "signal", || {
+            fs::write(&source, "competing source").unwrap();
+            true
+        })
+        .unwrap_err()
+        .contains("already exists"));
+        assert_eq!(fs::read(&source).unwrap(), b"competing source");
+        assert_eq!(fs::read(&sidecar).unwrap(), original_sidecar);
+
+        fs::remove_file(&source).unwrap();
+        assert!(restore_missing_source(&store, &held, "signal", || {
+            fs::rename(&sidecar, dir.join("old-sidecar")).unwrap();
+            fs::write(&sidecar, original_sidecar).unwrap();
+            true
+        })
+        .unwrap_err()
+        .contains("sidecar changed"));
+        assert!(!source.exists());
+    }
+
+    #[test]
     fn error_location_opens_as_one_argument_only_when_run_bytes_match() {
         let project = tempfile::tempdir().unwrap();
         let root = project.path();
