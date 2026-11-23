@@ -1,7 +1,7 @@
 //! Project startup selection is independent of active document authority.
 use rot_scene::component_scene::{ComponentScene, ComponentSession};
 use serde::{Deserialize, Serialize};
-use std::fs::{self, File, Metadata};
+use std::fs::{File, Metadata};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
@@ -83,8 +83,11 @@ struct ObservedFile {
 pub(super) struct Observation {
     root: PathBuf,
     identity: Identity,
+    #[cfg(unix)]
+    directory: File,
     settings: Option<ObservedFile>,
     target: Result<Option<(Startup, Stamp)>, String>,
+    validation_error: Option<String>,
 }
 
 fn error(error: impl std::fmt::Display) -> String {
@@ -111,106 +114,179 @@ fn validate_filename(file: &str) -> Result<(), String> {
 fn directory(path: &Path) -> Result<(PathBuf, Identity), String> {
     let root = std::path::absolute(path).map_err(error)?;
     let meta = root.symlink_metadata().map_err(error)?;
-    if !meta.is_dir() || root.canonicalize().map_err(error)? != root {
+    if !meta.is_dir() {
         return Err("Project Startup needs a direct, non-symlink project folder.".into());
     }
-    Ok((root, Identity::new(&meta)))
+    let canonical = root.canonicalize().map_err(error)?;
+    #[cfg(unix)]
+    if canonical != root {
+        return Err("Project Startup needs a direct, non-symlink project folder.".into());
+    }
+    Ok((canonical, Identity::new(&meta)))
 }
 
-fn regular_stamp(path: &Path) -> Result<Stamp, String> {
-    let meta = path.symlink_metadata().map_err(error)?;
+fn stamp(file: &File) -> Result<Stamp, String> {
+    let meta = file.metadata().map_err(error)?;
     if !meta.is_file() {
-        return Err("Startup needs a regular scene file without symlinks.".into());
+        return Err("Startup needs a regular file without symlinks.".into());
     }
     Ok(Stamp::new(&meta))
 }
 
-fn open_regular(path: &Path) -> io::Result<File> {
-    #[cfg(unix)]
-    {
-        use rustix::fs::{open, Mode, OFlags};
-        open(
-            path,
-            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
-            Mode::empty(),
-        )
-        .map(File::from)
-        .map_err(Into::into)
-    }
-    #[cfg(not(unix))]
-    {
-        if !path.symlink_metadata()?.is_file() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Expected a regular file.",
-            ));
-        }
-        File::open(path)
-    }
+#[cfg(unix)]
+fn open_project_directory(path: &Path) -> Result<File, String> {
+    use rustix::fs::{open, Mode, OFlags};
+    open(
+        path,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map(File::from)
+    .map_err(error)
 }
 
-fn read_settings(root: &Path) -> Result<Option<ObservedFile>, String> {
-    let path = root.join(SETTINGS);
-    let file = match open_regular(&path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(failure) => return Err(error(failure)),
-    };
-    let metadata = file.metadata().map_err(error)?;
-    if !metadata.is_file() || metadata.len() > LIMIT {
-        return Err("Startup settings must be a small regular file.".into());
+#[cfg(unix)]
+struct PublicationLock(File);
+
+#[cfg(unix)]
+impl Drop for PublicationLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
     }
-    let stamp = Stamp::new(&metadata);
-    let mut bytes = Vec::new();
-    file.take(LIMIT + 1)
-        .read_to_end(&mut bytes)
-        .map_err(error)?;
-    if bytes.len() as u64 != stamp.bytes || regular_stamp(&path)? != stamp {
-        return Err(CHANGED.into());
-    }
-    Ok(Some(ObservedFile { bytes, stamp }))
 }
 
 impl Observation {
     pub(super) fn read(root: &Path) -> Result<Self, String> {
         let (root, identity) = directory(root)?;
-        let settings = read_settings(&root)?;
-        let target = settings
+        #[cfg(unix)]
+        let parent = open_project_directory(&root)?;
+        #[cfg(unix)]
+        if Identity::new(&parent.metadata().map_err(error)?) != identity {
+            return Err(CHANGED.into());
+        }
+        let mut observed = Self {
+            root,
+            identity,
+            #[cfg(unix)]
+            directory: parent,
+            settings: None,
+            target: Ok(None),
+            validation_error: None,
+        };
+        observed.settings = observed.read_settings()?;
+        observed.target = observed
+            .settings
             .as_ref()
             .map(|settings| {
                 let value: Settings = serde_json::from_slice(&settings.bytes).map_err(error)?;
                 let startup = value.startup_scene;
                 validate_filename(&startup.file)?;
                 rot_scene::validate_id(&startup.scene_id).map_err(error)?;
-                let stamp = regular_stamp(&root.join(&startup.file))?;
+                let stamp = observed.child_stamp(&startup.file)?;
                 Ok::<_, String>((startup, stamp))
             })
             .transpose();
-        Ok(Self {
-            root,
-            identity,
-            settings,
-            target,
-        })
+        observed.verify_root()?;
+        Ok(observed)
+    }
+
+    fn open_regular(&self, name: &str) -> io::Result<File> {
+        #[cfg(unix)]
+        {
+            use rustix::fs::{openat, Mode, OFlags};
+            openat(
+                &self.directory,
+                name,
+                OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+                Mode::empty(),
+            )
+            .map(File::from)
+            .map_err(Into::into)
+        }
+        #[cfg(not(unix))]
+        {
+            let path = self.root.join(name);
+            if !path.symlink_metadata()?.is_file() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Expected a regular file.",
+                ));
+            }
+            File::open(path)
+        }
+    }
+
+    fn child_stamp(&self, name: &str) -> Result<Stamp, String> {
+        stamp(&self.open_regular(name).map_err(error)?)
+    }
+
+    fn read_settings(&self) -> Result<Option<ObservedFile>, String> {
+        let file = match self.open_regular(SETTINGS) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(failure) => return Err(error(failure)),
+        };
+        let stamp = stamp(&file)?;
+        if stamp.bytes > LIMIT {
+            return Err("Startup settings must be a small regular file.".into());
+        }
+        let mut bytes = Vec::new();
+        file.take(LIMIT + 1)
+            .read_to_end(&mut bytes)
+            .map_err(error)?;
+        if bytes.len() as u64 != stamp.bytes || self.child_stamp(SETTINGS)? != stamp {
+            return Err(CHANGED.into());
+        }
+        Ok(Some(ObservedFile { bytes, stamp }))
     }
 
     pub(super) fn validated(root: &Path) -> Result<Self, String> {
         let mut observation = Self::read(root)?;
         if let Err(error) = observation.inspect_scene() {
-            observation.target = Err(error);
+            observation.validation_error = Some(error);
         }
         Ok(observation)
     }
 
+    fn verify_root(&self) -> Result<(), String> {
+        if directory(&self.root)?.1 != self.identity {
+            return Err(CHANGED.into());
+        }
+        Ok(())
+    }
+
     fn verify_settings(&self) -> Result<(), String> {
-        if directory(&self.root)?.1 != self.identity || read_settings(&self.root)? != self.settings
-        {
+        self.verify_root()?;
+        if self.read_settings()? != self.settings {
             return Err(CHANGED.into());
         }
         Ok(())
     }
 
     fn with_lock<T>(&self, run: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+        #[cfg(unix)]
+        {
+            use rustix::fs::{openat, Mode, OFlags};
+            self.verify_root()?;
+            let file = openat(
+                &self.directory,
+                "..rot-project.json.rot-lock",
+                OFlags::RDWR
+                    | OFlags::CREATE
+                    | OFlags::NOFOLLOW
+                    | OFlags::NONBLOCK
+                    | OFlags::CLOEXEC,
+                Mode::RUSR | Mode::WUSR,
+            )
+            .map(File::from)
+            .map_err(error)?;
+            stamp(&file)?;
+            file.try_lock().map_err(error)?;
+            let _lock = PublicationLock(file);
+            self.verify_settings()?;
+            run()
+        }
+        #[cfg(not(unix))]
         rot_scene::with_publication_lock(&self.root.join(SETTINGS), |_| {
             self.verify_settings()?;
             run()
@@ -219,6 +295,9 @@ impl Observation {
     }
 
     pub(super) fn choice(&self) -> Result<Option<(&str, &str)>, &str> {
+        if let Some(reason) = &self.validation_error {
+            return Err(reason);
+        }
         self.target
             .as_ref()
             .map(|target| {
@@ -235,7 +314,8 @@ impl Observation {
 
     fn verify_target(&self, startup: &Startup, stamp: &Stamp) -> Result<PathBuf, String> {
         let path = self.root.join(&startup.file);
-        if &regular_stamp(&path)? != stamp || directory(&self.root)?.1 != self.identity {
+        self.verify_root()?;
+        if &self.child_stamp(&startup.file)? != stamp {
             return Err(CHANGED.into());
         }
         Ok(path)
@@ -244,8 +324,8 @@ impl Observation {
     pub(super) fn inspect_scene(&self) -> Result<(), String> {
         self.verify_settings()?;
         if let Some((startup, stamp)) = self.target.as_ref().map_err(Clone::clone)? {
-            let path = self.verify_target(startup, stamp)?;
-            let file = open_regular(&path).map_err(error)?;
+            self.verify_target(startup, stamp)?;
+            let file = self.open_regular(&startup.file).map_err(error)?;
             if Stamp::new(&file.metadata().map_err(error)?) != *stamp {
                 return Err(CHANGED.into());
             }
@@ -269,44 +349,99 @@ impl Observation {
             .ok_or("Startup Scene needs a UTF-8 filename.")?;
         validate_filename(file)?;
         let local = self.root.join(file);
-        let active = std::path::absolute(active).map_err(error)?;
-        if local != active || session.path() != Some(local.as_path()) {
+        let active_root = active
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        if directory(active_root)? != (self.root.clone(), self.identity.clone())
+            || session.path() != Some(local.as_path())
+        {
             return Err("Save the current scene directly in this project folder.".into());
         }
-        let stamp = regular_stamp(&local)?;
+        let stamp = self.child_stamp(file)?;
         let startup = Startup {
             file: file.into(),
             scene_id: session.scene().id.clone(),
         };
         self.with_lock(|| {
             self.verify_target(&startup, &stamp)?;
-            session.saved_bytes().map_err(error)?;
-            self.verify_target(&startup, &stamp)?;
-            if self.target.as_ref().is_ok_and(|current| {
-                current
-                    .as_ref()
-                    .is_some_and(|(target, _)| target == &startup)
-            }) {
-                return Ok(());
-            }
-            let bytes = serde_json::to_vec(&Settings {
-                startup_scene: startup.clone(),
-            })
+            session
+                .with_verified_saved(|| {
+                    self.verify_target(&startup, &stamp)?;
+                    if self.target.as_ref().is_ok_and(|current| {
+                        current
+                            .as_ref()
+                            .is_some_and(|(target, _)| target == &startup)
+                    }) {
+                        return Ok(());
+                    }
+                    let bytes = serde_json::to_vec(&Settings {
+                        startup_scene: startup.clone(),
+                    })
+                    .map_err(error)?;
+                    self.publish(&bytes, || {
+                        self.verify_settings()?;
+                        self.verify_target(&startup, &stamp)?;
+                        Ok(())
+                    })
+                })
+                .map_err(error)?
+        })
+    }
+
+    fn publish(
+        &self,
+        bytes: &[u8],
+        verify: impl FnOnce() -> Result<(), String>,
+    ) -> Result<(), String> {
+        #[cfg(unix)]
+        {
+            use rustix::fs::{openat, renameat, unlinkat, AtFlags, Mode, OFlags};
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let temporary = format!(
+                ".rot-project.{}.{}.tmp",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            );
+            let mut staged = openat(
+                &self.directory,
+                &temporary,
+                OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::RUSR | Mode::WUSR,
+            )
+            .map(File::from)
             .map_err(error)?;
+            let result = (|| {
+                staged.write_all(bytes).map_err(error)?;
+                staged.sync_all().map_err(error)?;
+                verify()?;
+                renameat(&self.directory, &temporary, &self.directory, SETTINGS).map_err(error)
+            })();
+            if result.is_err() {
+                let _ = unlinkat(&self.directory, &temporary, AtFlags::empty());
+            }
+            result
+        }
+        #[cfg(not(unix))]
+        {
             let mut staged = tempfile::NamedTempFile::new_in(&self.root).map_err(error)?;
-            staged.write_all(&bytes).map_err(error)?;
+            staged.write_all(bytes).map_err(error)?;
             staged.as_file().sync_all().map_err(error)?;
-            self.verify_settings()?;
-            self.verify_target(&startup, &stamp)?;
+            verify()?;
             staged.persist(self.root.join(SETTINGS)).map_err(error)?;
             Ok(())
-        })
+        }
     }
 
     pub(super) fn reset(&self) -> Result<(), String> {
         self.with_lock(|| {
             if self.settings.is_some() {
-                fs::remove_file(self.root.join(SETTINGS)).map_err(error)?;
+                #[cfg(unix)]
+                rustix::fs::unlinkat(&self.directory, SETTINGS, rustix::fs::AtFlags::empty())
+                    .map_err(error)?;
+                #[cfg(not(unix))]
+                std::fs::remove_file(self.root.join(SETTINGS)).map_err(error)?;
             }
             Ok(())
         })
@@ -319,6 +454,7 @@ impl Observation {
         run: impl FnOnce(Option<(&Path, ComponentSession)>) -> Result<T, String>,
     ) -> Result<T, String> {
         self.with_lock(|| {
+            self.choice().map_err(str::to_owned)?;
             let selected = self.target.as_ref().map_err(Clone::clone)?;
             let Some((startup, stamp)) = selected else {
                 let result = run(None)?;
@@ -339,14 +475,31 @@ impl Observation {
 }
 
 #[cfg(unix)]
-pub(super) fn context(root: &Path, path: &Path, session: &ComponentSession) -> serde_json::Value {
+pub(super) fn context(
+    root: &Path,
+    path: &Path,
+    session: &ComponentSession,
+    cached: &mut Option<Observation>,
+) -> serde_json::Value {
     use serde_json::json;
     let active = json!({
         "file": path.file_name().and_then(|file| file.to_str()),
         "scene_id": session.scene().id,
         "dirty": session.is_dirty(),
     });
-    let observed = Observation::validated(root);
+    let observed = Observation::read(root).map(|mut observed| {
+        if let Some(previous) = cached.take().filter(|previous| {
+            previous.root == observed.root
+                && previous.identity == observed.identity
+                && previous.settings == observed.settings
+                && previous.target == observed.target
+        }) {
+            observed.validation_error = previous.validation_error;
+        } else {
+            observed.validation_error = observed.inspect_scene().err();
+        }
+        observed
+    });
     let selection = observed
         .as_ref()
         .map_err(String::as_str)
@@ -371,5 +524,6 @@ pub(super) fn context(root: &Path, path: &Path, session: &ComponentSession) -> s
             result["hub_source"] = serde_json::Value::Null;
         }
     }
+    *cached = observed.ok();
     result
 }

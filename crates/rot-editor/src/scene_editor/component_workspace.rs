@@ -230,6 +230,8 @@ pub(super) struct ComponentWorkspace {
     palette: Option<palette::Palette>,
     project_settings: Option<ProjectPage>,
     startup_settings: Option<Result<super::project_startup::Observation, String>>,
+    #[cfg(unix)]
+    startup_context_cache: std::cell::RefCell<Option<super::project_startup::Observation>>,
     input_actions: crate::input_ui::InputUi,
     meshes: rot_app::MeshMap,
     textures: rot_app::TextureMap,
@@ -318,6 +320,8 @@ impl ComponentWorkspace {
             palette: None,
             project_settings: None,
             startup_settings: None,
+            #[cfg(unix)]
+            startup_context_cache: Default::default(),
             input_actions: Default::default(),
             session,
             path,

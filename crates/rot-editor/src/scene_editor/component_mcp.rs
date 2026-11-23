@@ -1052,6 +1052,7 @@ impl ComponentWorkspace {
             super::project_directory(&self.path),
             &self.path,
             &self.session,
+            &mut self.startup_context_cache.borrow_mut(),
         )
     }
 

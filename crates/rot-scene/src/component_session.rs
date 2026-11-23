@@ -308,32 +308,52 @@ impl ComponentSession {
     /// Capture the exact bytes of the saved v23 document. The recorded length
     /// bounds the read even if the scene has since been replaced or grown.
     pub fn saved_bytes(&self) -> Result<Vec<u8>, SceneError> {
+        self.with_saved_file(|saved, mut file| {
+            let mut bytes = Vec::new();
+            let len = usize::try_from(saved.bytes)
+                .map_err(|_| SceneError::Invalid("The saved scene cannot fit in memory.".into()))?;
+            bytes
+                .try_reserve_exact(len)
+                .map_err(|_| SceneError::Invalid("The saved scene cannot fit in memory.".into()))?;
+            (&mut file)
+                .take(saved.bytes.saturating_add(1))
+                .read_to_end(&mut bytes)?;
+            if bytes.len() as u64 != saved.bytes
+                || <[u8; 32]>::from(Sha256::digest(&bytes)) != saved.digest
+            {
+                return Err(SceneError::Conflict);
+            }
+            Ok(bytes)
+        })
+    }
+
+    /// Keep the saved document's cooperative lock through an adjacent publish
+    /// after comparing the exact bytes without allocating a second copy.
+    pub fn with_verified_saved<T>(&self, publish: impl FnOnce() -> T) -> Result<T, SceneError> {
+        self.with_saved_file(|saved, file| {
+            if digest(file.take(saved.bytes.saturating_add(1)))? != saved.digest {
+                return Err(SceneError::Conflict);
+            }
+            Ok(publish())
+        })
+    }
+
+    fn with_saved_file<T>(
+        &self,
+        read: impl FnOnce(&SavedDocument, File) -> Result<T, SceneError>,
+    ) -> Result<T, SceneError> {
         let saved = self
             .saved
             .as_ref()
             .filter(|_| !self.is_dirty())
             .ok_or_else(|| SceneError::Invalid("Save the scene before building.".into()))?;
         let lock = SceneLock::acquire(&saved.path)?;
-        let mut file = File::open(&lock.path)?;
+        let file = File::open(&lock.path)?;
         let metadata = file.metadata()?;
         if !metadata.is_file() || metadata.len() != saved.bytes {
             return Err(SceneError::Conflict);
         }
-        let mut bytes = Vec::new();
-        let len = usize::try_from(saved.bytes)
-            .map_err(|_| SceneError::Invalid("The saved scene cannot fit in memory.".into()))?;
-        bytes
-            .try_reserve_exact(len)
-            .map_err(|_| SceneError::Invalid("The saved scene cannot fit in memory.".into()))?;
-        (&mut file)
-            .take(saved.bytes.saturating_add(1))
-            .read_to_end(&mut bytes)?;
-        if bytes.len() as u64 != saved.bytes
-            || <[u8; 32]>::from(Sha256::digest(&bytes)) != saved.digest
-        {
-            return Err(SceneError::Conflict);
-        }
-        Ok(bytes)
+        read(saved, file)
     }
 
     /// Insert a new object or replace the authored data for an existing ID.
