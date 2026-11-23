@@ -559,7 +559,7 @@ impl ComponentWorkspace {
         self.workspace.prefs.allow_ai_connections
     }
 
-    #[cfg(unix)]
+    // Native camera authoring and the approved bridge share these transition guards.
     pub(super) fn ai_transition_pending(&self) -> bool {
         #[cfg(target_os = "linux")]
         if self.build.is_open() || self.asset_publish_pending() {
