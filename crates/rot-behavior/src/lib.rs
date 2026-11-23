@@ -54,8 +54,12 @@ pub const INPUT_HOST_API_VERSION: u32 = 2;
 pub const SPATIAL_HOST_API_VERSION: u32 = 3;
 pub const STATE_HOST_API_VERSION: u32 = 4;
 pub const LIFECYCLE_HOST_API_VERSION: u32 = 5;
-pub const KINEMATIC_HOST_API_VERSION: u32 = 7;
-pub use rot_scene::GROUP_ROTATION_HOST_API_VERSION;
+pub use rot_scene::{GROUP_ROTATION_HOST_API_VERSION, KINEMATIC_HOST_API_VERSION};
+/// Check the existing kinematic admission rules without running Lua.
+pub fn validate_kinematic_scene(scene: &Scene, authoring: &Authoring) -> Result<(), String> {
+    kinematic_owner(scene, authoring).map(drop)
+}
+
 pub const APPLICATION_TEMPLATE: &str = include_str!("../templates/application.lua");
 pub const MAX_SPATIAL_QUERIES: u32 = 32;
 pub const FOLLOWER_TEMPLATE: &str = include_str!("../templates/follower.lua");
@@ -1872,6 +1876,7 @@ mod input_tests {
                 kind: Component::Script {
                     binding,
                     source_kind: None,
+                    movement: Default::default(),
                 },
             });
         }
@@ -2068,6 +2073,7 @@ mod input_tests {
                 kind: Component::Script {
                     binding,
                     source_kind: None,
+                    movement: Default::default(),
                 },
             });
         }

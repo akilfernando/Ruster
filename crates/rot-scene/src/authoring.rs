@@ -185,6 +185,7 @@ impl PropertyValue {
 
 /// Source discriminator for a Group-local rotation binding.
 pub const GROUP_ROTATION_HOST_API_VERSION: u32 = 6;
+pub const KINEMATIC_HOST_API_VERSION: u32 = 7;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BindingTarget {

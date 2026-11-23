@@ -1,14 +1,14 @@
 //! Temporary input adapter for the legacy behavior runtime.
 use super::{
-    CameraView, Component, ComponentScene, Geometry, ObjectNode, TransformCameraPose,
-    TransformPerspective,
+    CameraView, Component, ComponentScene, Geometry, ObjectNode, ScriptMovement,
+    TransformCameraPose, TransformPerspective,
 };
 use crate::{
     Authoring, BehaviorSource, BindingTarget, Collider, Group, HiddenMeshRenderers, Light,
     LightKind, Lighting, Object, Scene, SceneError, Session, MAX_POINT_LIGHTS, MAX_SOURCES,
 };
 use glam::{DMat4, DQuat, DVec3, EulerRot};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
 /// Runtime-only immutable lookup for a component camera's projected transform chain.
@@ -191,6 +191,7 @@ impl ComponentScene {
                 Component::Script {
                     binding,
                     source_kind: Some(_),
+                    ..
                 } => Some(binding.source_id.as_str()),
                 _ => None,
             })
@@ -201,7 +202,7 @@ impl ComponentScene {
     /// establishes authority for every distinct accepted source before binding.
     pub fn bake_script_assets(
         &mut self,
-        sources: BTreeMap<String, BehaviorSource>,
+        mut sources: BTreeMap<String, BehaviorSource>,
     ) -> Result<(), SceneError> {
         let required = self.script_asset_ids();
         if let Some(id) = required.iter().find(|id| !sources.contains_key(**id)) {
@@ -217,7 +218,20 @@ impl ComponentScene {
         if sources.is_empty() {
             return Ok(());
         }
-        if self.sources.len().saturating_add(sources.len()) > MAX_SOURCES {
+        let variants: BTreeSet<_> = self
+            .objects
+            .iter()
+            .flat_map(|object| &object.components)
+            .filter_map(|component| match &component.kind {
+                Component::Script {
+                    binding,
+                    source_kind: Some(_),
+                    movement,
+                } => Some((binding.source_id.clone(), *movement)),
+                _ => None,
+            })
+            .collect();
+        if self.sources.len().saturating_add(variants.len()) > MAX_SOURCES {
             return Err(SceneError::Invalid("script source limit exceeded".into()));
         }
         drop(required);
@@ -229,6 +243,7 @@ impl ComponentScene {
                 Component::Script {
                     binding,
                     source_kind: None,
+                    ..
                 } => Some(binding.source_id.as_str()),
                 _ => None,
             })
@@ -238,7 +253,16 @@ impl ComponentScene {
         }
         let mut keys = BTreeMap::new();
         let mut index = 1;
-        for (asset, source) in sources {
+        let mut variants = variants.into_iter().peekable();
+        while let Some((asset, movement)) = variants.next() {
+            let mut source = if variants.peek().is_some_and(|(next, _)| next == &asset) {
+                sources[&asset].clone()
+            } else {
+                sources.remove(&asset).expect("verified asset source")
+            };
+            if movement == ScriptMovement::KinematicSphere {
+                source.host_api_version = crate::KINEMATIC_HOST_API_VERSION;
+            }
             let key = loop {
                 let candidate = format!("asset-lua-{index}");
                 index += 1;
@@ -248,7 +272,9 @@ impl ComponentScene {
                 }
             };
             self.sources.insert(key.clone(), source);
-            keys.insert(asset, key);
+            keys.entry(asset)
+                .or_insert_with(BTreeMap::new)
+                .insert(movement, key);
         }
         for component in self
             .objects
@@ -258,11 +284,13 @@ impl ComponentScene {
             if let Component::Script {
                 binding,
                 source_kind,
+                movement,
             } = &mut component.kind
             {
                 if source_kind.is_some() {
-                    binding.source_id = keys[&binding.source_id].clone();
+                    binding.source_id = keys[&binding.source_id][movement].clone();
                     *source_kind = None;
+                    *movement = ScriptMovement::Ordinary;
                 }
             }
         }
@@ -412,6 +440,7 @@ impl ComponentScene {
                     Component::Script {
                         binding,
                         source_kind,
+                        ..
                     } => {
                         if source_kind.is_some() {
                             return Err(SceneError::Invalid(format!(

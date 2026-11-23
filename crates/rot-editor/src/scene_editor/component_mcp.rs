@@ -1146,6 +1146,10 @@ impl ComponentWorkspace {
             }
             let mut response = json!({"object_id":id,"component":component});
             if super::component_sound::sound_script(component).is_some() {
+                if let Component::Script { movement, .. } = &component.kind {
+                    response["movement"] = json!(movement);
+                }
+                response["movement_guidance"] = json!("An exact replace can set component.movement to kinematic_sphere or ordinary (omission keeps it). Kinematic Sphere needs a flat scene, one enabled mover, an enabled uniformly scaled Blocker Sphere, and stationary blockers. Call host.move_and_slide({dx,dy,dz}) once per Step, use suggested_translation, and return {transform=object}.");
                 response["sound_cue_guidance"] = json!(
                     r#"File-backed Object Lua calls host.play_sound("cue-name"). Use binding.properties with type sound_ref and value {asset_id,gain}. Find ready kind sound via asset_inspect; pin expected_asset_revision when setting a cue."#
                 );
@@ -1228,9 +1232,10 @@ impl ComponentWorkspace {
             let mut summary = json!({
                 "id":component.id, "type":component_type(&component.kind), "enabled":component.enabled
             });
-            if let Component::Script { binding, source_kind: Some(_) } = &component.kind {
+            if let Component::Script { binding, source_kind: Some(_), movement } = &component.kind {
                 summary["source_kind"] = json!("asset");
                 summary["source_id"] = json!(&binding.source_id);
+                summary["movement"] = json!(movement);
             }
             summary
         }).collect();
@@ -1285,7 +1290,8 @@ impl ComponentWorkspace {
                     *entry.insert(index)
                 }
             };
-            action.apply(&mut changed[index])?;
+            let movement_explicit = edit["component"].get("movement").is_some();
+            action.apply(&mut changed[index], movement_explicit)?;
         }
         for object in &changed {
             let before = originals[object.id.as_str()];
@@ -1296,6 +1302,7 @@ impl ComponentWorkspace {
                     let Component::Script {
                         binding,
                         source_kind: Some(ScriptSourceKind::Asset),
+                        ..
                     } = &component.kind
                     else {
                         return None;
@@ -1303,7 +1310,7 @@ impl ComponentWorkspace {
                     (!before.components.iter().any(|old| {
                         old.id == component.id
                             && matches!(&old.kind,
-                        Component::Script { binding: old, source_kind: Some(_) }
+                        Component::Script { binding: old, source_kind: Some(_), .. }
                             if old.source_id == binding.source_id)
                     }))
                     .then_some(binding.source_id.as_str())
@@ -1427,7 +1434,7 @@ enum ComponentEdit {
 }
 
 impl ComponentEdit {
-    fn apply(self, object: &mut ObjectNode) -> Result<(), CommandError> {
+    fn apply(self, object: &mut ObjectNode, movement_explicit: bool) -> Result<(), CommandError> {
         let object_id = match &self {
             Self::Add { object_id, .. }
             | Self::Replace { object_id, .. }
@@ -1456,12 +1463,29 @@ impl ComponentEdit {
                 }
                 object.components.push(component);
             }
-            Self::Replace { component, .. } => {
+            Self::Replace { mut component, .. } => {
                 let index = find(object, &component.id)?;
                 if std::mem::discriminant(&object.components[index].kind)
                     != std::mem::discriminant(&component.kind)
                 {
                     return Err(invalid_component_arguments());
+                }
+                if !movement_explicit {
+                    if let (
+                        Component::Script {
+                            movement: old,
+                            source_kind: Some(_),
+                            ..
+                        },
+                        Component::Script {
+                            movement,
+                            source_kind: Some(_),
+                            ..
+                        },
+                    ) = (&object.components[index].kind, &mut component.kind)
+                    {
+                        *movement = *old;
+                    }
                 }
                 object.components[index] = component;
             }
@@ -1550,6 +1574,39 @@ mod tests {
         component_scene::{ComponentScene, ComponentSession},
         Scene, Session,
     };
+
+    #[test]
+    fn script_replace_keeps_omitted_movement_and_can_explicitly_clear() {
+        use rot_scene::component_scene::ScriptMovement;
+        let scene = rot_scene::component_scene::ComponentScene::from_legacy(
+            &rot_scene::Session::new(rot_scene::Scene::demo()).unwrap(),
+        )
+        .unwrap();
+        let mut object = scene.objects[0].clone();
+        let mut component: ComponentInstance = serde_json::from_value(json!({
+            "id":"driver","enabled":true,"type":"script","source_kind":"asset",
+            "movement":"kinematic_sphere",
+            "binding":{"object_id":object.id,"source_id":"drive","enabled":true,"properties":{}}
+        }))
+        .unwrap();
+        object.components.push(component.clone());
+        let Component::Script { movement, .. } = &mut component.kind else {
+            unreachable!()
+        };
+        *movement = ScriptMovement::Ordinary;
+        for explicit in [false, true] {
+            ComponentEdit::Replace {
+                object_id: object.id.clone(),
+                component: component.clone(),
+            }
+            .apply(&mut object, explicit)
+            .unwrap();
+            assert!(
+                matches!(object.components.last().unwrap().kind, Component::Script {movement,..}
+                if movement == if explicit { ScriptMovement::Ordinary } else { ScriptMovement::KinematicSphere })
+            );
+        }
+    }
 
     #[test]
     fn component_action_edits_use_guarded_shared_history_and_save() {

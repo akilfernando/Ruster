@@ -243,6 +243,14 @@ connected project.
   A new Play run uses the latest accepted file. Build embeds the accepted
   source. File-backed object scripts use Lua host API 2 with the same
   object transform return contract and `host.button(id)` / `host.axis(id)`.
+- For file-backed Object Lua, inspect the exact Script component before
+  setting `component.movement` to `"kinematic_sphere"` in a guarded
+  `scene_components_edit` `replace`. Include the inspected scene token and
+  revision, and preserve the component ID, `source_kind` and binding. Explicit
+  `"ordinary"` clears the mode and omission keeps it. A kinematic scene is
+  flat, with one enabled mover using an enabled uniformly scaled Blocker Sphere
+  and stationary blockers. Inspect `behavior_runtime_inspect.query_observations`
+  for committed `move_and_slide` results.
 - File-backed Object Lua can use `host.play_sound("confirm")` after a named
   Sound Cue is assigned to the exact Script component. Find a ready
   `kind: "sound"` WAV and its stable ID in `asset_inspect`. Read the exact

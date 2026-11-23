@@ -413,6 +413,34 @@ object’s local transform. The parent determines how a local movement appears
 in the world. If a step would move a child outside the world limits, Play
 keeps the previous committed frame and reports the error.
 
+## Slide a scripted sphere along blockers
+
+On a file-backed **Script**, set **Movement** to **Kinematic Sphere** and
+choose **Apply**. Use a flat scene with one enabled mover. Give the mover an
+enabled uniformly scaled Blocker Sphere collider and keep other blockers
+stationary. In **Input Actions**, add two axes such as `move_x` and `move_z`.
+
+```lua
+return {
+    update = function(object, properties, dt, host)
+        if host.move_and_slide then
+            if dt > 0 then
+                local dx = host.axis("move_x") * 4 * dt
+                local dz = host.axis("move_z") * 4 * dt
+                local result = host.move_and_slide({dx, 0, dz})
+                object.translation = result.suggested_translation
+            end
+            return {transform = object}
+        end
+        return object
+    end
+}
+```
+
+Use the solver translation as returned and call it once per Step. **Ordinary**
+keeps the normal transform-return API, and each Script chooses its own mode
+even when several components use the same file.
+
 ## Play one-shot sounds from a Script
 
 Import a WAV into **Assets**. On the file-backed **Script** component, choose

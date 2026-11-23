@@ -156,6 +156,21 @@ impl BuildRequest {
                 .write_json(&mut bytes)
                 .map_err(|error| error.to_string())?;
         }
+        let kinematic_file = authored
+            .objects
+            .iter()
+            .flat_map(|object| &object.components)
+            .any(|component| {
+                component.enabled
+                    && matches!(
+                        component.kind,
+                        rot_scene::component_scene::Component::Script {
+                            source_kind: Some(_),
+                            movement: rot_scene::component_scene::ScriptMovement::KinematicSphere,
+                            ..
+                        }
+                    )
+            });
         let script_ids = authored
             .script_asset_ids()
             .into_iter()
@@ -169,6 +184,12 @@ impl BuildRequest {
         };
         let scene = RuntimeScene::from_components_checked(Box::new(runtime))
             .map_err(|error| BuildFailure::from(error.to_string()))?;
+        if kinematic_file {
+            if let RuntimeScene::Behavior(session) = &scene {
+                rot_behavior::validate_kinematic_scene(session.scene(), session.authoring())
+                    .map_err(|error| BuildFailure::from(format!("Kinematic Sphere: {error}")))?;
+            }
+        }
         let dependencies = scene
             .draw_dependencies()
             .map_err(|error| BuildFailureKind::AssetUnavailable.detail(error))?;
@@ -1237,11 +1258,11 @@ f 1 2 3
     }
 
     #[test]
-    fn file_backed_script_build_pins_bytes_and_bakes_one_source() {
+    fn file_backed_script_build_pins_once_and_keeps_movement_bindings_separate() {
         use rot_scene::component_scene::{
-            Component, ComponentInstance, PrefabSource, ScriptSourceKind,
+            Component, ComponentInstance, PrefabSource, ScriptMovement, ScriptSourceKind,
         };
-        use rot_scene::{BehaviorBinding, BindingTarget};
+        use rot_scene::{BehaviorBinding, BindingTarget, ColliderRole, ColliderShape};
 
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
@@ -1251,14 +1272,42 @@ f 1 2 3
         fs::create_dir(source.parent().unwrap()).unwrap();
         fs::write(&player, b"dummy player").unwrap();
         fs::set_permissions(&player, fs::Permissions::from_mode(0o755)).unwrap();
-        let original = "return { update = function(o, p, dt) o.rotation[3] = 1; return o end }";
+        let original = r#"return {update=function(o,p,dt,h)
+            if h.move_and_slide then
+                if dt > 0 then
+                    o.translation=h.move_and_slide({0.125,0,0}).suggested_translation
+                    if h.button("bad").pressed then o.translation[1]=o.translation[1]+0.5 end
+                end
+                return {transform=o}
+            end
+            o.rotation[3] = 1
+            return o
+        end}"#;
         let changed = original.replace("= 1", "= 2");
         assert_eq!(original.len(), changed.len());
         fs::write(&source, original).unwrap();
         let mut assets = AssetStore::open(root).unwrap();
         assets.import("spin", "Assets/spin.lua").unwrap();
         let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
-        for object in scene.objects.iter_mut().take(2) {
+        scene.actions = serde_json::from_value(serde_json::json!({
+            "bad":{"kind":{"type":"button","keys":["space"]}}
+        }))
+        .unwrap();
+        for (index, object) in scene.objects.iter_mut().take(2).enumerate() {
+            let movement = if index == 0 {
+                ScriptMovement::Ordinary
+            } else {
+                object.components.push(ComponentInstance {
+                    id: "mover-sphere".into(),
+                    enabled: true,
+                    kind: Component::Collider {
+                        role: ColliderRole::Blocker,
+                        offset: [0.; 3],
+                        shape: ColliderShape::Sphere { radius: 0.25 },
+                    },
+                });
+                ScriptMovement::KinematicSphere
+            };
             object.components.push(ComponentInstance {
                 id: format!("{}-script", object.id),
                 enabled: true,
@@ -1272,6 +1321,7 @@ f 1 2 3
                         state_defaults: BTreeMap::new(),
                     },
                     source_kind: Some(ScriptSourceKind::Asset),
+                    movement,
                 },
             });
         }
@@ -1296,9 +1346,12 @@ f 1 2 3
             .unwrap();
         assert!(copied.components.iter().any(|component| matches!(
             &component.kind,
-            Component::Script { binding, source_kind: Some(ScriptSourceKind::Asset) }
+            Component::Script { binding, source_kind: Some(ScriptSourceKind::Asset), .. }
                 if binding.source_id == "spin" && binding.object_id() == Some("placed-spinner"))));
         scene.save_new(&path).unwrap();
+        let authored = fs::read_to_string(&path).unwrap();
+        assert_eq!(authored.matches("\"movement\"").count(), 1);
+        assert!(authored.contains("kinematic_sphere"));
         let session = ComponentSession::open(&path).unwrap();
         let capture = |assets: &AssetStore| BuildRequest::capture(&session, Some(assets)).unwrap();
         let stale = capture(&assets);
@@ -1315,8 +1368,44 @@ f 1 2 3
             .unwrap();
         let baked = ComponentScene::open(destination.join("scene.json")).unwrap();
         assert!(baked.script_asset_ids().is_empty());
-        assert_eq!(baked.sources.len(), 1);
-        assert_eq!(baked.sources.values().next().unwrap().text, changed);
+        assert_eq!(baked.sources.len(), 2);
+        assert!(baked.sources.values().all(|source| source.text == changed));
+        let projected = baked.behavior_projection().unwrap();
+        for (owner, api) in [
+            (&scene.objects[0], rot_behavior::INPUT_HOST_API_VERSION),
+            (&scene.objects[1], rot_behavior::KINEMATIC_HOST_API_VERSION),
+        ] {
+            let binding = &projected.authoring.bindings[&format!("{}-script", owner.id)];
+            assert_eq!(
+                projected.authoring.sources[&binding.source_id].host_api_version,
+                api
+            );
+        }
+        let mut engine = rot_behavior::Engine::new(Default::default()).unwrap();
+        let mut runtime = engine
+            .reset_projected(
+                &projected.scene,
+                &projected.authoring,
+                projected.transform_camera,
+                projected.projection,
+            )
+            .unwrap();
+        engine.step(&mut runtime).unwrap();
+        assert_ne!(
+            runtime.scene().objects[1].transform.translation,
+            scene.objects[1].transform.translation
+        );
+        let prior = runtime.scene().clone();
+        let trigger = serde_json::from_value(serde_json::json!({
+            "bad":{"type":"button","held":true,"pressed":true,"released":false}
+        }))
+        .unwrap();
+        let error = engine.step_with_input(&mut runtime, &trigger).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("exact move_and_slide translation"));
+        assert_eq!(runtime.tick(), 1);
+        assert_eq!(runtime.scene(), &prior);
         assert_eq!(ComponentScene::open(path).unwrap(), scene);
     }
 

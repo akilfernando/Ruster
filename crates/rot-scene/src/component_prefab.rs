@@ -499,6 +499,7 @@ impl PrefabSource {
                     Component::Script {
                         binding,
                         source_kind,
+                        ..
                     } => {
                         if source_kind.is_none() {
                             binding.source_id = instance
@@ -679,6 +680,7 @@ impl PrefabSource {
                 Component::Script {
                     binding,
                     source_kind: None,
+                    ..
                 } => {
                     let id = &binding.source_id;
                     let source = scene.sources.get(id).ok_or_else(|| {

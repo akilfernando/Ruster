@@ -13,6 +13,7 @@ pub(super) fn sound_script(
         Component::Script {
             binding,
             source_kind: Some(ScriptSourceKind::Asset),
+            ..
         } => Some(&binding.properties),
         _ => None,
     }
@@ -279,6 +280,7 @@ impl ComponentWorkspace {
         let Component::Script {
             binding,
             source_kind: Some(ScriptSourceKind::Asset),
+            ..
         } = &mut component.kind
         else {
             return Err("The file-backed script is unavailable.".into());

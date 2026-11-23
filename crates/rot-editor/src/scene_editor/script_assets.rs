@@ -43,6 +43,7 @@ pub(crate) fn resolved(
                     rot_scene::component_scene::Component::Script {
                         binding,
                         source_kind: Some(_),
+                        ..
                     } if component.enabled => &binding.properties,
                     _ => continue,
                 };
@@ -134,6 +135,7 @@ mod tests {
                 enabled: true,
                 kind: Component::Script {
                     source_kind: Some(ScriptSourceKind::Asset),
+                    movement: Default::default(),
                     binding: BehaviorBinding {
                         target: BindingTarget::Object(object.id.clone()),
                         source_id: "shared".into(),
@@ -246,6 +248,7 @@ mod tests {
                             state_defaults: BTreeMap::new(),
                         },
                         source_kind: Some(ScriptSourceKind::Asset),
+                        movement: Default::default(),
                     },
                 },
             ],
@@ -309,6 +312,7 @@ mod tests {
                         state_defaults: BTreeMap::new(),
                     },
                     source_kind,
+                    movement: Default::default(),
                 },
             });
         }
@@ -318,7 +322,7 @@ mod tests {
         assert!(baked.sources.contains_key("asset-lua-2"));
         assert!(matches!(
             &baked.objects[0].components[1].kind,
-            Component::Script { binding, source_kind: None }
+            Component::Script { binding, source_kind: None, .. }
                 if binding.source_id == "asset-lua-1"));
         assert_eq!(scene, original);
     }

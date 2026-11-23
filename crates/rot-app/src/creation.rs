@@ -1068,6 +1068,7 @@ mod tests {
                         enabled: true,
                         kind: Component::Script {
                             source_kind: None,
+                            movement: Default::default(),
                             binding: BehaviorBinding {
                                 target: BindingTarget::Object("trolley".into()),
                                 source_id: "drive".into(),
@@ -1196,6 +1197,7 @@ mod tests {
             enabled: true,
             kind: Component::Script {
                 source_kind: None,
+                movement: Default::default(),
                 binding: rot_scene::BehaviorBinding {
                     target: rot_scene::BindingTarget::Object(owner.id.clone()),
                     source_id: "source".into(),

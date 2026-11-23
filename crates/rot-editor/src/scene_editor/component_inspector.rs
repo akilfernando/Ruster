@@ -4,7 +4,8 @@ use crate::ui_kit;
 use crate::workspace::Action;
 use eframe::egui;
 use rot_scene::component_scene::{
-    CameraView, Component, ComponentInstance, Geometry, ObjectNode, ScriptSourceKind,
+    CameraView, Component, ComponentInstance, Geometry, ObjectNode, ScriptMovement,
+    ScriptSourceKind,
 };
 use rot_scene::{
     BehaviorBinding, BindingTarget, ColliderRole, ColliderShape, Light, LightKind, OpaqueMaterial,
@@ -63,6 +64,7 @@ impl AddComponent {
                         commands: BTreeMap::new(),
                     },
                     source_kind: Some(ScriptSourceKind::Asset),
+                    movement: ScriptMovement::Ordinary,
                 },
                 Self::Light | Self::DirectionalLight | Self::SpotLight => {
                     let light = match self {
@@ -464,6 +466,7 @@ pub(super) fn components(
                     Component::Script {
                         binding,
                         source_kind,
+                        movement,
                     } => {
                         binding.enabled = component.enabled;
                         if source_kind.is_some() {
@@ -481,6 +484,47 @@ pub(super) fn components(
                                 ui.label(Text::ComponentScriptUnavailable.plain());
                             }
                             ui.separator();
+                            ui_kit::property_row_with_label(
+                                ui,
+                                Text::ScriptMovement.plain(),
+                                |ui, label| {
+                                    let focus =
+                                        super::combo_focus::ComboFocus::capture(ui, "movement");
+                                    let mut selected = false;
+                                    let response = egui::ComboBox::from_id_salt("movement")
+                                        .selected_text(match movement {
+                                            ScriptMovement::Ordinary => {
+                                                Text::ScriptOrdinary.plain()
+                                            }
+                                            ScriptMovement::KinematicSphere => {
+                                                Text::ScriptKinematicSphere.plain()
+                                            }
+                                        })
+                                        .show_ui(ui, |ui| {
+                                            for (mode, text) in [
+                                                (ScriptMovement::Ordinary, Text::ScriptOrdinary),
+                                                (
+                                                    ScriptMovement::KinematicSphere,
+                                                    Text::ScriptKinematicSphere,
+                                                ),
+                                            ] {
+                                                if ui
+                                                    .selectable_value(movement, mode, text.plain())
+                                                    .clicked()
+                                                {
+                                                    selected = true;
+                                                    ui.close();
+                                                }
+                                            }
+                                        })
+                                        .response;
+                                    focus.restore(ui, &response, selected);
+                                    response.labelled_by(label);
+                                },
+                            );
+                            if *movement == ScriptMovement::KinematicSphere {
+                                ui.weak(Text::ScriptKinematicRequirements.plain());
+                            }
                             ui.strong("Sound Cues");
                             for (name, property) in &binding.properties {
                                 let rot_scene::PropertyValue::SoundRef(cue) = property else {

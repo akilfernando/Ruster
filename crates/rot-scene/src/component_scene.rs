@@ -305,8 +305,15 @@ impl ComponentScene {
                     Component::Script {
                         binding,
                         source_kind,
+                        movement,
                     } => {
                         binding.validate()?;
+                        if source_kind.is_none() && !movement.is_ordinary() {
+                            return Err(SceneError::Invalid(format!(
+                                "Kinematic Sphere mode requires a file-backed Object Lua script ({})",
+                                component.id
+                            )));
+                        }
                         if source_kind.is_some()
                             && (!matches!(binding.target, BindingTarget::Object(_))
                                 || binding.properties.values().any(|property| {
@@ -530,6 +537,7 @@ impl ComponentScene {
                 enabled: binding.enabled,
                 kind: Component::Script {
                     source_kind: None,
+                    movement: ScriptMovement::Ordinary,
                     binding: binding.clone(),
                 },
             });
@@ -708,6 +716,8 @@ pub enum Component {
         binding: BehaviorBinding,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         source_kind: Option<ScriptSourceKind>,
+        #[serde(default, skip_serializing_if = "ScriptMovement::is_ordinary")]
+        movement: ScriptMovement,
     },
     MeshRenderer {
         geometry: Geometry,
@@ -732,6 +742,20 @@ pub enum Component {
 #[serde(rename_all = "snake_case")]
 pub enum ScriptSourceKind {
     Asset,
+}
+
+/// Movement authority used when a file-backed script is baked for runtime.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScriptMovement {
+    #[default]
+    Ordinary,
+    KinematicSphere,
+}
+impl ScriptMovement {
+    fn is_ordinary(&self) -> bool {
+        *self == Self::Ordinary
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

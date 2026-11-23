@@ -251,6 +251,7 @@ fn transform_camera_pose_commits_with_animated_parent_owner_and_rejected_step() 
             enabled: true,
             kind: Component::Script {
                 source_kind: None,
+                movement: Default::default(),
                 binding: BehaviorBinding {
                     target: BindingTarget::Group("fault".into()),
                     source_id: "fault".into(),
