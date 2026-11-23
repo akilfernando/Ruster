@@ -484,6 +484,16 @@ zero at **Outer Half-Angle**. The fields are in degrees. Set the inner value fro
 Parent scale affects the light's position. Spot angles stay in degrees and range stays in world units. Spot Lights render in the Scene view and in static Play and
 Linux builds.
 
+Select a Spot Light to see its forward ray, dashed inner ring and solid
+outer ring in the Scene view. In its Inspector, choose **Aim at Object…**,
+search by object name or ID, and choose the target. Use the arrow keys to
+choose a result, Enter to aim, or Escape to close the picker. The edit points
+the light at the target's current pivot. It rotates the light's owner along
+with its attached mesh and children. Undo restores the previous owner
+rotation. Approved MCP clients can read the authored world origin and
+forward through exact `scene_components_inspect` and request one guarded
+`aim_spot_at_object` edit.
+
 To make a moving headlamp, attach one **Point Light** or **Spot Light** to
 the object that carries the Mesh Renderer and an Object Lua API 1 or 2
 script. Use a leaf object and its supported transform-only parent groups.
