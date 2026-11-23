@@ -70,6 +70,17 @@ An imported model's Animator lists same-model clips and their durations.
 Native and approved MCP edits choose a clip and Loop setting with shared Undo.
 A drawbridge held its final pose or looped as authored through Play and Linux
 Build, after a source refresh retained the selected clip's ID.
+The Inspector and approved MCP can preview one exact Animator before Play.
+Scrubbing includes the final pose with Loop enabled and preserves saved
+authoring and Undo. Blender drawbridge captures verified the pose and an
+unchanged peer. Preview-to-viewport CPU submission was 6.4 ms p95 on the
+16-object fixture and 7.1 ms with 5,000 objects. MCP capture with a verified
+pose took 191 ms and 190 ms p95, including transport and image readback.
+At the zero pose, parked viewport CPU prepare p95 was 98–107 µs on the
+small fixture and 1.01–1.19 ms with 5,000 objects. Authored-rest phases
+measured 101–118 µs and 0.99–1.06 ms respectively. Offscreen Vulkan
+timestamps varied across repeated rest phases while the desktop was in
+use, so the sample does not isolate the GPU cost of parking.
 Assets watches Lua files. Add Component → Script and approved MCP
 attach the same stable file reference. New Play runs pick up accepted
 edits, and Linux Build embeds a verified copy of the source. v23 Input
