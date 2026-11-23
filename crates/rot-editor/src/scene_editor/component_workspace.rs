@@ -1831,13 +1831,21 @@ fn hierarchy_disclosure(ui: &mut egui::Ui, name: &str, collapsed: bool) -> egui:
     } else {
         [[-4.0, -2.0], [0.0, 2.0], [4.0, -2.0]]
     };
-    let stroke = ui.style().interact(&response).fg_stroke;
+    let widget = ui.style().interact(&response);
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            response.rect,
+            widget.corner_radius,
+            ui.visuals().selection.stroke,
+            egui::StrokeKind::Inside,
+        );
+    }
     ui.painter().add(egui::Shape::line(
         points
             .into_iter()
             .map(|[x, y]| origin + egui::vec2(x, y))
             .collect(),
-        stroke,
+        widget.fg_stroke,
     ));
     response.on_hover_text(label)
 }
