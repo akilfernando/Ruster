@@ -280,6 +280,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cylinder_has_a_welded_wrap_flat_caps_and_outward_winding() {
+        let mesh = builtin_mesh(Primitive::Cylinder);
+        rot_assets::validate_mesh(mesh).unwrap();
+        assert!(Arc::ptr_eq(mesh, builtin_mesh(Primitive::Cylinder)));
+        assert!(mesh.has_complete_uvs());
+        assert_eq!(
+            (
+                mesh.vertices.len(),
+                mesh.indices.len(),
+                mesh.payload_bytes()
+            ),
+            (132, 384, 5760)
+        );
+        let uvs = mesh.texcoords.as_ref().unwrap();
+        let columns = SEGMENTS + 1;
+        for (start, y, v) in [(0, -1., 0.), (columns, 1., 1.)] {
+            let seam = &mesh.vertices[start];
+            let duplicate = &mesh.vertices[start + SEGMENTS];
+            assert_eq!(seam.position, [0., y, -0.5]);
+            assert_eq!(seam.position, duplicate.position);
+            assert_eq!(seam.normal, duplicate.normal);
+            assert_eq!(uvs[start], [0., v]);
+            assert_eq!(uvs[start + SEGMENTS], [1., v]);
+            for vertex in &mesh.vertices[start..start + columns] {
+                let radial = Vec3::from_array(vertex.position) - Vec3::Y * y;
+                assert!(radial.abs_diff_eq(Vec3::from_array(vertex.normal) * 0.5, 1e-6));
+                assert!((radial.length() - 0.5).abs() < 1e-6);
+            }
+        }
+        for (start, y, side, seam_uv) in [
+            (2 * columns, -1., 0, [0.5, 0.]),
+            (3 * columns, 1., columns, [0.5, 1.]),
+        ] {
+            assert_eq!(mesh.vertices[start].position, [0., y, 0.]);
+            assert_eq!(uvs[start], [0.5; 2]);
+            assert_eq!(
+                mesh.vertices[start + 1].position,
+                mesh.vertices[side].position
+            );
+            assert_eq!(uvs[start + 1], seam_uv);
+            for vertex in &mesh.vertices[start..start + columns] {
+                assert_eq!(vertex.normal, [0., y, 0.]);
+            }
+        }
+        for &[a, b, c] in mesh.indices.as_chunks::<3>().0 {
+            let [a, b, c] = [a, b, c].map(|i| &mesh.vertices[i as usize]);
+            let [pa, pb, pc] = [a, b, c].map(|vertex| Vec3::from_array(vertex.position));
+            assert!((pb - pa).cross(pc - pa).dot(Vec3::from_array(a.normal)) > 0.);
+        }
+    }
+
+    #[test]
     fn triangular_prism_is_closed_outward_and_textured() {
         use std::collections::HashMap;
 

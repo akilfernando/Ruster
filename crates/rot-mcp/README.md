@@ -144,6 +144,14 @@ connected project.
   local Y half the rise above the wall top. Inspect both gables before
   duplicating an assembly. Use `scene_primitive` to change a single
   Mesh Renderer or `scene_components_edit` for an exact component.
+- Use `primitive: "cylinder"` with `scene_create` or `scene_primitive`.
+  It has a centered pivot, a 1-unit diameter in XZ and 2-unit height along
+  local Y. To stand one on a parent's local floor, pass its exact
+  `parent_id` with
+  `transform: {"translation":[0,1,0],"rotation":[0,0,0],"scale":[1,1,1]}`.
+  Check the new object's exact Mesh Renderer with `scene_components_inspect`,
+  then frame and capture one result before making copies. Use an independent
+  Collider component for collision.
 - Use a `set_enabled` edit in `scene_components_edit` to disable or enable
   an exact Mesh Renderer with one shared Undo. Supported scripted v23 Play
   and builds use this authored flag. A disabled renderer and its shadow

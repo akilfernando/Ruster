@@ -50,6 +50,19 @@ center of the shape's bounds. Press Ctrl+K and search **Triangular Prism**
 to create one from the command palette. You can assign a textured
 material and add a separate Collider when needed.
 
+For a post, roller, or bollard, choose **Cylinder** in **Object → 3D Object**,
+**Create Child**, the command palette, or the Mesh Renderer geometry picker.
+The built-in shape is two units high along local Y and one unit in diameter,
+with its pivot at the center. At unit scale, a child with local Y = 1 rests
+on the parent's local floor. Scale X and Z together to keep the cross-section
+round. Assign a textured material as usual and add a separate Collider if
+needed.
+
+The side wraps once, with the seam on local −Z at U = 0 and U = 1.
+U increases around the side toward −X, +Z, then +X. V runs from bottom to
+top. Each cap uses its own planar UVs. Cap U follows +X, with V following
+−Z on top and +Z on the bottom.
+
 Select the parent and press **F**, or choose **Frame Selected** from its
 Hierarchy menu, to fit its visible geometry and child parts. For an
 orthographic check, choose **Front**, **Right**, or **Top** from **View
@@ -640,7 +653,7 @@ edit its name, enabled state, or Transform in Inspector, then choose
 **Apply**. Use **Add Component** to attach a **Mesh Renderer** or
 **Collider**. Expand its section to edit properties or toggle the component.
 Right-click the section header to remove it. Use **Object** or
-**Hierarchy → Create** to add an empty object, cube, sphere, or capsule.
+**Hierarchy → Create** to add an empty object, cube, sphere, capsule, cylinder, or triangular prism.
 Drag an object onto another row to parent it, or onto **Scene Root** to
 unparent it. You can also change **Parent** in Inspector. Both preserve the
 object’s world transform. Drag to the top or bottom edge of a row to place
@@ -758,8 +771,8 @@ or while paused, Inspector shows the latest committed Transform and script
 state under **Play Values**. Select **Scene Values** to edit the authored
 scene. **Stop** returns Inspector to the authored values.
 
-On Unix, an approved AI app can add cubes, spheres, capsules and empty
-groups to the open v23 scene. It can inspect, rename, reparent, move or
+On Unix, an approved AI app can add cubes, spheres, capsules, cylinders,
+triangular prisms and empty groups to the open v23 scene. It can inspect, rename, reparent, move or
 delete objects. Batched moves or deletes take one Undo each. In v23,
 `scene_reparent` accepts an `object_id` or an ordered `object_ids` list.
 Choose `parent_id` (null for Scene Root), `before_id`, or `after_id`.

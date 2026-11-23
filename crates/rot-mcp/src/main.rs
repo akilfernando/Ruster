@@ -2105,8 +2105,13 @@ mod tests {
     fn schemas_and_validation_prevent_unknown_or_rounded_arguments() {
         let mut server = ready();
         let tools = tool_definitions();
-        let shape = json!({"expected_session_token":"s","expected_revision":"0","object_id":"a","primitive":"capsule"});
-        assert!(valid_arguments("scene_primitive", &shape));
+        for primitive in rot_scene::Primitive::ALL {
+            let mut shape = json!({"expected_session_token":"s","expected_revision":"0","object_id":"a","primitive":primitive});
+            assert_eq!(shape["primitive"], primitive.as_str());
+            assert!(valid_arguments("scene_primitive", &shape));
+            shape["name"] = json!(primitive.label());
+            assert!(valid_arguments("scene_create", &shape));
+        }
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
