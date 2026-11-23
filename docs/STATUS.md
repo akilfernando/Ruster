@@ -80,6 +80,16 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+Double Sided draws both faces of an opaque v23 material. Opaque GLB import
+and explicit Reimport preserve the setting for new placements. Existing
+assignments keep their authored value and share Undo. A Blender sheet
+verified back-face picking, mirrored artwork, depth and lighting in SDR
+and Surface HDR, plus shadows in both sun directions. Single-sided views
+matched prior pixels. A 5,000-sheet release run retained one color draw and
+pipeline for each uniform mode. Mixed kept two. Median GPU scene p95 was
+0.095 ms single-sided, 0.108 ms double-sided and 0.102 ms mixed. Shadow
+p95 stayed at 0.012 ms in this fixture.
+
 The v23 Inspector shows live Transform and script state during Play and Step.
 An imported model's Animator lists same-model clips and their durations.
 Native and approved MCP edits choose a clip and Loop setting with shared Undo.
