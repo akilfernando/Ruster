@@ -131,6 +131,13 @@ with inspected guards. Three linked cottages survived reopen and a relocated bui
 Group Selection in v23 inserts a parent around the selected objects with
 world transforms preserved. The Object menu, Hierarchy context menu,
 remappable Ctrl+G and approved MCP clients share one Undo entry.
+Duplicate copies ordinary v23 subtrees in the editor and guarded MCP. The
+selected copies retain assets and materials and remap internal references.
+Native edits, Undo and Redo, approved Claude and relocated Vulkan verified
+two independent market stalls. In a 5,000-object release fixture, a
+100-object copy took 5.41 ms p95, and its first UI frame took 1.24 ms p95
+after the command. Matched GPU scene p95 was 0.225 ms after copying and
+0.223 ms for the prebuilt scene.
 v23 Move (W), Rotate (E), and Scale (R) preview geometry and lights during
 drags. World and Local axes, pivot modes and snapping are in the viewport
 toolbar. Release commits one shared Undo entry. Approved MCP clients read
