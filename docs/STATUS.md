@@ -158,7 +158,14 @@ metallic–roughness PNGs supply linear Roughness maps from green. Placement
 keeps the authored multiplier, and Linux Build embeds the verified map.
 Refresh can add the map to an older accepted model while preserving
 materials already assigned in the scene. Diagnostics explain omitted maps
-when the UV mapping or sampler is unsupported. Failed imports show
+when the UV mapping or sampler is unsupported. v23 shared Emission Color
+and factor-only GLB emission survived editor authoring, guarded Claude and
+shared Undo, and relocated Vulkan at three display settings. The dark
+housing and receiver stayed pixel-exact. In a 5,000-mesh offscreen release
+test, emission added 60 KB of instance data per frame. Median GPU scene
+p95 was 0.301 ms before and 0.309 ms with half the meshes emitting. CPU
+preparation p95 varied from 0.358 to 0.719 ms with half the meshes emitting
+and 0.331 to 0.543 ms before. Failed imports show
 the source path, recovery, last working
 version availability and separate Error Details in the Inspector. Approved MCP
 clients can page the same issues, including sources with no asset ID. A

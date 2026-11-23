@@ -76,6 +76,10 @@ connected project.
   from `asset_inspect`. Use a separate asset ID if the source is also used
   as Base Color. When the import is ready, set `roughness_texture` on the
   shared material, keeping the existing response and scalar roughness.
+- For v23 **Emission Color**, read `emission_color` from the exact shared
+  material and check its assignment count before calling guarded
+  `scene_material_set`. Supply three linear RGB channels in `[0, 1]`.
+  Black clears emission. Omitting the field retains the current value.
 - To make a v23 material unique, inspect `material_inspect` for the
   session, scene revision and asset revision. Read the exact Mesh
   Renderer with `scene_components_inspect` to get its component ID and
