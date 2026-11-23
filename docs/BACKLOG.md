@@ -426,6 +426,9 @@ for native file dialogs everywhere.
 it into the scene, with no form.
 **Not now.** Folder tree, automatic reimport and sidecar files (C-04).
 
+**Follow-up in progress, Sol, 2026-11-23.** Find Uses in Scene for
+v23 textures in the Assets browser and approved MCP.
+
 #### S-13 · Project hub and templates — S — ready
 Status: done — 2026-11-17, Claude Opus 5.5 (UX helper). The list shows Unity Hub's "Modified" (scene file time), not a stored last-opened time (agent choice).
 **Outcome.** A first launch that looks finished.
