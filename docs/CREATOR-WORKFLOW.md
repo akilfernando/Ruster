@@ -82,7 +82,8 @@ separate saved scene in its original project. The original scene and
 project startup selection stay in place. If a recovered filename is already
 taken, Rot tries a numbered sibling.
 
-Checkpoints contain scene changes and asset references. Unapplied edits,
+Checkpoints contain scene changes and asset references and support up to
+64 MiB of scene data. Unapplied edits,
 Undo history, and Play state are outside the checkpoint. Choose **Keep for
 Later** or reopen the list through **File → Recovery Checkpoints…**.
 **Discard Recovery Copy** removes the checkpoint.

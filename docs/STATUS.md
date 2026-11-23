@@ -80,6 +80,17 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+After an unexpected exit, **Recover as New Scene** opens the latest
+completed v23 checkpoint as a sibling. Native and approved Claude edits
+survived a private editor crash and the recovered script ran after opening
+the copy. The original and its startup choice kept their exact bytes. A
+5,000-object scene recovered and a verified Save retired its checkpoint.
+In two warmed 5,000-object release runs per build, UI-thread CPU from
+rename submission to commit was 16.66–18.98 ms p95 before recovery and
+18.59–19.21 ms with it. A 4.10 MB checkpoint appeared 2.06–2.27 s after
+the last observed edit, including the quiet period. No writes were observed
+during four-second clean and settled-dirty idle checks.
+
 On Linux, Assets → Create → Lua Script creates a starter file in the chosen
 folder and selects its stable asset once ready. Open in Code Editor opens
 that source using the saved editor configuration. The conveyor fixture
