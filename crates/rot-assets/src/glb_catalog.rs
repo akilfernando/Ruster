@@ -79,14 +79,9 @@ fn same_material_structure(old: &ModelInfo, new: &ModelInfo) -> bool {
                     return true;
                 }
                 let mut upgraded = prior.clone();
-                // Constant emission changes no resources, scene-owned copies or placement.
+                // Material shading flags do not change resources or placed copies.
                 upgraded.emission_color = next.emission_color;
-                if !upgraded.double_sided
-                    && next.double_sided
-                    && old_single_sided_warning(old, name)
-                {
-                    upgraded.double_sided = true;
-                }
+                upgraded.double_sided = next.double_sided;
                 if prior.roughness_texture.is_none()
                     && next.roughness_texture.is_some()
                     && old_omitted_roughness(old, name)
@@ -725,7 +720,9 @@ mod tests {
         )
         .unwrap();
         let refreshed = store.refresh_glb_at(2, "paint").unwrap();
-        assert_eq!(refreshed.materials, accepted.materials);
+        let mut expected = accepted.materials;
+        expected.get_mut("Paint").unwrap().double_sided = false;
+        assert_eq!(refreshed.materials, expected);
         assert_eq!(
             store.texture(&roughness_id).unwrap().mips[0].bytes,
             [80, 60, 40, 20]
