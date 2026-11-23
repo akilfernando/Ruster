@@ -109,6 +109,19 @@ impl ResourceRoot {
         rot_assets::read_regular_file(&path, limit)
             .map_err(|error| format!("resource {}: {error}", path.display()))
     }
+
+    pub(crate) fn read_optional(
+        &self,
+        relative: &str,
+        limit: usize,
+    ) -> Result<Option<Vec<u8>>, String> {
+        validate_relative(Path::new(relative))?;
+        match self.0.join(relative).symlink_metadata() {
+            Ok(_) => self.read(relative, limit).map(Some),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(format!("resource {relative}: {error}")),
+        }
+    }
 }
 
 fn validate_relative(path: &Path) -> Result<(), String> {

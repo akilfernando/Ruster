@@ -9,8 +9,9 @@ use crate::{
 };
 use eframe::egui;
 use rot_app::creation::{
-    CreationManifest, DrawDependencies, RuntimeScene, DESCRIPTOR_NAME, FORMAT,
-    NO_ANIMATION_VERSION, NO_AUDIO_VERSION, VERSION,
+    CreationManifest, DrawDependencies, RuntimeScene, StartupTransition, DESCRIPTOR_NAME, FORMAT,
+    NO_ANIMATION_VERSION, NO_AUDIO_VERSION, STARTUP_TARGET_DIRECTORY, STARTUP_TRANSITION_NAME,
+    VERSION,
 };
 use rot_assets::{AssetKind, AssetStore};
 use rot_scene::component_scene::{ComponentScene, ComponentSession};
@@ -94,6 +95,15 @@ struct BuildFailure {
     diagnostic: String,
 }
 
+impl BuildFailure {
+    fn at_transition_target(self, scene: &str) -> Self {
+        self.kind.detail(format!(
+            "Start Transition destination {scene}: {}",
+            self.diagnostic
+        ))
+    }
+}
+
 #[derive(Debug)]
 enum PublishError {
     Cancelled,
@@ -127,6 +137,7 @@ struct BuildRequest {
     scene: RuntimeScene,
     dependencies: DrawDependencies,
     assets: Option<rot_assets::ExportSnapshot>,
+    transition: Option<(StartupTransition, Box<BuildRequest>)>,
 }
 
 impl BuildRequest {
@@ -193,11 +204,12 @@ impl BuildRequest {
             scene,
             dependencies,
             assets,
+            transition: None,
         })
     }
 
     fn publish(
-        self,
+        mut self,
         destination: &Path,
         player: &Path,
         cancel: &AtomicBool,
@@ -260,6 +272,47 @@ impl BuildRequest {
             .tempdir_in(&parent)
             .map_err(|error| BuildFailureKind::ParentUnavailable.detail(error))?;
         let stage = staging.path();
+        let transition = self.transition.take();
+        self.stage_scene(stage, cancel, cancelled)?;
+        if let Some((route, target)) = transition {
+            cancelled()?;
+            let child = stage.join(STARTUP_TARGET_DIRECTORY);
+            fs::create_dir(&child).map_err(|error| error.to_string())?;
+            target
+                .stage_scene(&child, cancel, cancelled)
+                .map_err(|error| match error {
+                    PublishError::Failed(failure) => {
+                        failure.at_transition_target(&route.target_scene_id).into()
+                    }
+                    PublishError::Cancelled => PublishError::Cancelled,
+                })?;
+            let descriptor =
+                serde_json::to_vec_pretty(&route).map_err(|error| error.to_string())?;
+            fs::write(stage.join(STARTUP_TRANSITION_NAME), descriptor)
+                .map_err(|error| error.to_string())?;
+        }
+        cancelled()?;
+        fs::copy(player, stage.join(APPLICATION)).map_err(|error| error.to_string())?;
+        cancelled()?;
+        renameat_with(CWD, stage, CWD, &destination, RenameFlags::NOREPLACE).map_err(|error| {
+            let kind = match error {
+                Errno::EXIST | Errno::NOTEMPTY => BuildFailureKind::DestinationOccupied,
+                Errno::NOENT | Errno::NOTDIR | Errno::ACCESS | Errno::PERM | Errno::ROFS => {
+                    BuildFailureKind::ParentUnavailable
+                }
+                _ => BuildFailureKind::BuildFailed,
+            };
+            kind.detail(format!("Publishing {}: {error}", destination.display()))
+        })?;
+        let _ = staging.keep();
+        Ok(destination.join(APPLICATION))
+    }
+    fn stage_scene(
+        self,
+        stage: &Path,
+        cancel: &AtomicBool,
+        cancelled: impl Fn() -> Result<(), PublishError>,
+    ) -> Result<(), PublishError> {
         let sound = self.scene.sound_asset_references();
         let draw = self.scene.draw_scene();
         let DrawDependencies {
@@ -389,21 +442,7 @@ impl BuildRequest {
                 .into());
         }
         fs::write(stage.join(DESCRIPTOR_NAME), descriptor).map_err(|error| error.to_string())?;
-        cancelled()?;
-        fs::copy(player, stage.join(APPLICATION)).map_err(|error| error.to_string())?;
-        cancelled()?;
-        renameat_with(CWD, stage, CWD, &destination, RenameFlags::NOREPLACE).map_err(|error| {
-            let kind = match error {
-                Errno::EXIST | Errno::NOTEMPTY => BuildFailureKind::DestinationOccupied,
-                Errno::NOENT | Errno::NOTDIR | Errno::ACCESS | Errno::PERM | Errno::ROFS => {
-                    BuildFailureKind::ParentUnavailable
-                }
-                _ => BuildFailureKind::BuildFailed,
-            };
-            kind.detail(format!("Publishing {}: {error}", destination.display()))
-        })?;
-        let _ = staging.keep();
-        Ok(destination.join(APPLICATION))
+        Ok(())
     }
 }
 
@@ -429,6 +468,7 @@ pub(super) struct BuildUi {
 struct BuildStartup {
     observed: super::project_startup::Observation,
     saved: Option<Box<ComponentSession>>,
+    transition: Option<super::project_startup::TransitionInput>,
 }
 
 enum StartupSelection {
@@ -451,6 +491,7 @@ impl StartupSelection {
                 return Self::Ready(Ok(Box::new(BuildStartup {
                     observed,
                     saved: None,
+                    transition: None,
                 })))
             }
             Err(reason) => return Self::Ready(Err(reason.to_owned())),
@@ -459,12 +500,15 @@ impl StartupSelection {
         let worker = std::thread::Builder::new()
             .name("rot-startup".into())
             .spawn(move || {
-                let loaded = observed.load_startup().map(|saved| {
-                    Box::new(BuildStartup {
+                let loaded = (|| {
+                    let saved = observed.load_startup()?;
+                    let transition = observed.load_transition(saved.scene())?;
+                    Ok(Box::new(BuildStartup {
                         observed,
                         saved: Some(Box::new(saved)),
-                    })
-                });
+                        transition,
+                    }))
+                })();
                 let _ = sender.send(loaded);
             });
         match worker {
@@ -836,10 +880,24 @@ impl BuildUi {
         observation
             .observed
             .with_current(|_| {
-                Ok(BuildRequest::capture(
-                    observation.saved.as_deref().unwrap_or(session),
-                    assets,
-                ))
+                observation.observed.verify_transition_target()?;
+                let source = observation.saved.as_deref().unwrap_or(session);
+                let request = BuildRequest::capture(source, assets).and_then(|mut request| {
+                    if let Some(transition) = &observation.transition {
+                        let target = BuildRequest::capture(&transition.session, assets).map_err(
+                            |failure| failure.at_transition_target(&transition.session.scene().id),
+                        )?;
+                        let route = StartupTransition::new(
+                            source.scene().id.clone(),
+                            transition.action_id.clone(),
+                            transition.session.scene().id.clone(),
+                        );
+                        request.transition = Some((route, Box::new(target)));
+                    }
+                    Ok(request)
+                });
+                observation.observed.verify_transition_target()?;
+                Ok(request)
             })
             .map_err(|error| BuildFailureKind::SceneUnavailable.detail(error))?
     }
@@ -889,6 +947,165 @@ mod tests {
         Scene, Session, Transform,
     };
     use serde_json::json;
+
+    #[test]
+    fn configured_transition_packages_two_exact_closures_and_rejects_changed_target() {
+        use super::super::project_startup::ProjectDirectory;
+        use rot_scene::input::{ActionDefinition, ActionKind, InputKey};
+
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("project");
+        fs::create_dir(&root).unwrap();
+        let title_path = root.join("Title.scene.json");
+        let rail_path = root.join("Rail.scene.json");
+        let mut assets = AssetStore::open(&root).unwrap();
+        let triangle = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+        for id in ["title-mesh", "rail-mesh"] {
+            let file = format!("{id}.obj");
+            fs::write(root.join(&file), triangle).unwrap();
+            assets.import(id, &file).unwrap();
+        }
+        let scene = |id: &str, mesh: &str, path: &Path| {
+            let mut scene = Scene::demo();
+            scene.id = id.into();
+            scene.objects[0].mesh = Some(mesh.into());
+            ComponentScene::from_legacy(&Session::new(scene).unwrap())
+                .unwrap()
+                .save_new(path)
+                .unwrap();
+            ComponentSession::open(path).unwrap()
+        };
+        let mut title = scene("title", "title-mesh", &title_path);
+        let rail = scene("rail", "rail-mesh", &rail_path);
+        title
+            .set_action(
+                title.revision(),
+                "start",
+                Some(ActionDefinition {
+                    label: Some("Start".into()),
+                    kind: ActionKind::Button {
+                        keys: vec![InputKey::Enter],
+                    },
+                }),
+            )
+            .unwrap();
+        title.save(&title_path).unwrap();
+        let project = ProjectDirectory::capture(&root).unwrap();
+        project
+            .validated()
+            .unwrap()
+            .use_saved(&title_path, &title)
+            .unwrap();
+
+        let player = directory.path().join(PLAYER);
+        fs::write(&player, b"test player").unwrap();
+        fs::set_permissions(&player, fs::Permissions::from_mode(0o755)).unwrap();
+        let cancel = AtomicBool::new(false);
+        let legacy = directory.path().join("single");
+        BuildRequest::capture(&title, Some(&assets))
+            .unwrap()
+            .publish(&legacy, &player, &cancel)
+            .unwrap();
+        let single = rot_app::ResourceRoot::new(&legacy).unwrap();
+        let manifest = CreationManifest::load(&single).unwrap();
+        assert_eq!(manifest.version, NO_AUDIO_VERSION);
+        let runtime = manifest.load_runtime_scene(&single).unwrap();
+        assert!(StartupTransition::load(&single, &runtime)
+            .unwrap()
+            .is_none());
+        assert!(!legacy.join(STARTUP_TARGET_DIRECTORY).exists());
+
+        project
+            .validated()
+            .unwrap()
+            .set_transition("start", "Rail.scene.json")
+            .unwrap();
+        let mut build = BuildUi::default();
+        build.open(&rail_path, "rail", project.observe());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while matches!(&build.startup, Some(StartupSelection::Preparing { .. })) {
+            assert!(std::time::Instant::now() < deadline);
+            build.poll();
+            std::thread::yield_now();
+        }
+        let capture = || build.capture_project_request(&rail, Some(&assets)).unwrap();
+        let stale_assets = capture();
+        let broken = directory.path().join("broken");
+        let rail_asset = root.join("rail-mesh.obj");
+        fs::write(&rail_asset, b"invalid replacement").unwrap();
+        assert!(matches!(
+            stale_assets.publish(&broken, &player, &cancel),
+            Err(PublishError::Failed(BuildFailure { kind: BuildFailureKind::AssetUnavailable, diagnostic }))
+                if diagnostic.contains("Start Transition destination rail")
+        ));
+        assert!(!broken.exists());
+        fs::write(&rail_asset, triangle).unwrap();
+
+        let output = directory.path().join("build");
+        capture().publish(&output, &player, &cancel).unwrap();
+        assert_eq!(
+            fs::read(output.join(DESCRIPTOR_NAME)).unwrap(),
+            fs::read(legacy.join(DESCRIPTOR_NAME)).unwrap()
+        );
+        assert!(!output
+            .join(STARTUP_TARGET_DIRECTORY)
+            .join(APPLICATION)
+            .exists());
+        let replacement = tempfile::NamedTempFile::new_in(&root).unwrap();
+        fs::copy(&rail_path, replacement.path()).unwrap();
+        replacement.persist(&rail_path).unwrap();
+        assert!(matches!(
+            build.capture_project_request(&rail, Some(&assets)),
+            Err(BuildFailure {
+                kind: BuildFailureKind::SceneUnavailable,
+                ..
+            })
+        ));
+
+        let relocated = directory.path().join("relocated");
+        fs::rename(output, &relocated).unwrap();
+        fs::rename(root, directory.path().join("offline-source")).unwrap();
+        let package = rot_app::ResourceRoot::new(&relocated).unwrap();
+        let startup = CreationManifest::load(&package).unwrap();
+        let runtime = startup.load_runtime_scene(&package).unwrap();
+        let route = StartupTransition::load(&package, &runtime)
+            .unwrap()
+            .unwrap();
+        assert_eq!(route.action_id, "start");
+        assert_eq!(
+            startup
+                .load_meshes(&package)
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["title-mesh"]
+        );
+        let (resources, target, scene) = route.load_destination(&package).unwrap();
+        assert_eq!(scene.draw_scene().id, "rail");
+        assert_eq!(
+            target
+                .load_meshes(&resources)
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["rail-mesh"]
+        );
+
+        let descriptor = relocated.join(STARTUP_TRANSITION_NAME);
+        let mut invalid: serde_json::Value =
+            serde_json::from_slice(&fs::read(&descriptor).unwrap()).unwrap();
+        invalid["target_scene_id"] = json!("wrong-target");
+        fs::write(&descriptor, serde_json::to_vec(&invalid).unwrap()).unwrap();
+        let wrong_target = StartupTransition::load(&package, &runtime)
+            .unwrap()
+            .unwrap();
+        assert!(wrong_target.load_destination(&package).is_err());
+        invalid["target_manifest"] = json!("../app.json");
+        fs::write(descriptor, serde_json::to_vec(&invalid).unwrap()).unwrap();
+        assert!(StartupTransition::load(&package, &runtime).is_err());
+    }
 
     #[test]
     fn configured_build_pins_sibling_dependencies_without_saving_live_scene() {

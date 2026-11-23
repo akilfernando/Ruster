@@ -24,6 +24,108 @@ pub const NO_AUDIO_VERSION: u32 = 5;
 pub const NO_ANIMATION_VERSION: u32 = 6;
 pub const VERSION: u32 = 7;
 pub const MAX_DESCRIPTOR_BYTES: usize = 8 * 1024 * 1024;
+pub const STARTUP_TRANSITION_NAME: &str = "startup-transition.json";
+pub const STARTUP_TARGET_DIRECTORY: &str = "transition";
+const STARTUP_TARGET_MANIFEST: &str = "transition/app.json";
+const STARTUP_TRANSITION_BYTES: usize = 4096;
+
+/// Optional once-per-launch metadata for the single packaged Start Button edge.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct StartupTransition {
+    version: u32,
+    pub source_scene_id: String,
+    pub action_id: String,
+    pub target_scene_id: String,
+    target_manifest: String,
+}
+
+impl StartupTransition {
+    pub fn new(source_scene_id: String, action_id: String, target_scene_id: String) -> Self {
+        Self {
+            version: 1,
+            source_scene_id,
+            action_id,
+            target_scene_id,
+            target_manifest: STARTUP_TARGET_MANIFEST.into(),
+        }
+    }
+
+    pub fn load(root: &ResourceRoot, source: &RuntimeScene) -> Result<Option<Self>, String> {
+        let Some(bytes) = root.read_optional(STARTUP_TRANSITION_NAME, STARTUP_TRANSITION_BYTES)?
+        else {
+            return Ok(None);
+        };
+        let route: Self = serde_json::from_slice(&bytes)
+            .map_err(|error| format!("Invalid {STARTUP_TRANSITION_NAME}: {error}"))?;
+        route.validate()?;
+        let scene = source.draw_scene();
+        if scene.id != route.source_scene_id {
+            return Err("Start Transition source scene ID differs from the startup scene".into());
+        }
+        if !matches!(source, RuntimeScene::Behavior(session)
+            if session.authoring().actions.get(&route.action_id).is_some_and(|action|
+                matches!(action.kind, rot_scene::input::ActionKind::Button { .. })))
+        {
+            return Err(format!(
+                "Start Button {:?} is missing or is not a Button in the startup scene",
+                route.action_id
+            ));
+        }
+        Ok(Some(route))
+    }
+
+    pub fn load_destination(
+        &self,
+        root: &ResourceRoot,
+    ) -> Result<(ResourceRoot, CreationManifest, RuntimeScene), String> {
+        self.validate()?;
+        let child = root.resolve(STARTUP_TARGET_DIRECTORY)?;
+        let path = root.resolve(&self.target_manifest)?;
+        if path.parent() != Some(child.as_path()) {
+            return Err("Start Transition manifest escapes its scene resource directory".into());
+        }
+        let resources = ResourceRoot::new(child)?;
+        let manifest = CreationManifest::load(&resources)?;
+        let snapshot = SceneSnapshot::from_file(resources.open_regular(&manifest.scene)?)
+            .map_err(snapshot_error)?;
+        let SceneSnapshot::Components(target) = snapshot else {
+            return Err("Start Transition requires a packaged component scene".into());
+        };
+        if target.id != self.target_scene_id {
+            return Err(
+                "Start Transition destination scene ID differs from its configured ID".into(),
+            );
+        }
+        let scene = manifest.runtime_scene(SceneSnapshot::Components(target))?;
+        let dependencies = scene.draw_dependencies()?;
+        if !manifest.meshes.keys().eq(dependencies.meshes.iter())
+            || manifest.texture_roles.as_ref() != Some(&dependencies.texture_roles)
+        {
+            return Err(
+                "Start Transition resources differ from the destination scene dependencies".into(),
+            );
+        }
+        Ok((resources, manifest, scene))
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.version != 1 || self.target_manifest != STARTUP_TARGET_MANIFEST {
+            return Err("Unsupported Start Transition descriptor or destination manifest".into());
+        }
+        for id in [
+            &self.source_scene_id,
+            &self.action_id,
+            &self.target_scene_id,
+        ] {
+            rot_scene::validate_id(id).map_err(|error| error.to_string())?;
+        }
+        if self.source_scene_id == self.target_scene_id {
+            return Err("Start Transition destination must be a different scene".into());
+        }
+        Ok(())
+    }
+}
 
 /// Launch data for an application. Static hierarchies outside the behavior
 /// adapter's capabilities retain their component objects and draw matrices.
@@ -721,6 +823,10 @@ impl CreationManifest {
         self.validate()?;
         let snapshot =
             SceneSnapshot::from_file(root.open_regular(&self.scene)?).map_err(snapshot_error)?;
+        self.runtime_scene(snapshot)
+    }
+
+    fn runtime_scene(&self, snapshot: SceneSnapshot) -> Result<RuntimeScene, String> {
         let scene = RuntimeScene::from_document(snapshot)?;
         match &scene {
             RuntimeScene::Behavior(session) => self.validate_behavior_scene(session)?,
