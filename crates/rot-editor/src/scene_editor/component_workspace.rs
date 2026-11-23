@@ -1842,8 +1842,11 @@ fn hierarchy_disclosure(ui: &mut egui::Ui, name: &str, collapsed: bool) -> egui:
     response.on_hover_text(label)
 }
 
-fn hierarchy_key(ui: &egui::Ui) -> Option<(egui::Key, egui::Modifiers)> {
-    ui.input_mut(|input| {
+fn hierarchy_key(ui: &egui::Ui, id: egui::Id) -> Option<(egui::Key, egui::Modifiers)> {
+    let key = ui.input_mut(|input| {
+        if input.key_pressed(egui::Key::Tab) || input.key_pressed(egui::Key::Escape) {
+            return None;
+        }
         for key in [
             egui::Key::ArrowLeft,
             egui::Key::ArrowRight,
@@ -1860,7 +1863,22 @@ fn hierarchy_key(ui: &egui::Ui) -> Option<(egui::Key, egui::Modifiers)> {
             }
         }
         None
-    })
+    });
+    ui.memory_mut(|memory| {
+        memory.set_focus_lock_filter(
+            id,
+            egui::EventFilter {
+                horizontal_arrows: true,
+                vertical_arrows: true,
+                ..Default::default()
+            },
+        );
+        if key.is_some() {
+            // A newly focused row can still have queued egui arrow navigation.
+            memory.move_focus(egui::FocusDirection::None);
+        }
+    });
+    key
 }
 
 fn hierarchy_rows(objects: &[ObjectNode]) -> (Vec<(usize, usize)>, Vec<Option<usize>>) {
@@ -3022,10 +3040,10 @@ impl ComponentWorkspace {
                                     if disclosure.clicked() {
                                         toggle = Some(index);
                                     }
-                                    disclosure.has_focus()
+                                    disclosure.has_focus().then_some(disclosure.id)
                                 } else {
                                     ui.add_space(crate::ui_kit::tokens::CONTROL_HEIGHT);
-                                    false
+                                    None
                                 };
                                 let active = self.selection.contains(&object.id);
                                 let response = ui
@@ -3038,13 +3056,19 @@ impl ComponentWorkspace {
                                 if focus.is_some_and(|(target, _)| index == target) {
                                     response.request_focus();
                                 }
-                                let tree_focused = (response.has_focus() || disclosure_focused)
-                                    && focus.is_none_or(|(target, _)| index == target)
-                                    && !transform_active
-                                    && !egui::Popup::is_any_open(ui.ctx());
-                                if let Some((key, modifiers)) =
-                                    tree_focused.then(|| hierarchy_key(ui)).flatten()
-                                {
+                                let focused = if response.has_focus() {
+                                    Some(response.id)
+                                } else {
+                                    disclosure_focused
+                                };
+                                let tree_key = focused
+                                    .filter(|_| {
+                                        focus.is_none_or(|(target, _)| index == target)
+                                            && !transform_active
+                                            && !egui::Popup::is_any_open(ui.ctx())
+                                    })
+                                    .and_then(|id| hierarchy_key(ui, id));
+                                if let Some((key, modifiers)) = tree_key {
                                     let target = match key {
                                         egui::Key::ArrowLeft if has_children && !collapsed => {
                                             toggle = Some(index);
