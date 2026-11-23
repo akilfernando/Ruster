@@ -1200,22 +1200,26 @@ impl ComponentSession {
             .checked_add(1)
             .ok_or(SceneError::RevisionOverflow)?;
         let mut inverse = apply_changes(changes, &mut self.scene);
-        let mut released: HashSet<_> = inverse
-            .iter()
-            .flat_map(|change| match change {
-                SceneChange::Prefab {
-                    value: Some(instance),
-                    ..
-                } => Some(instance),
-                _ => None,
-            })
-            .flat_map(|instance| {
-                instance
-                    .parts
-                    .values()
-                    .flat_map(|part| part.material_overrides.values().cloned())
-            })
-            .collect();
+        let mut released = HashSet::new();
+        for change in &inverse {
+            if let SceneChange::Prefab {
+                root,
+                value: Some(old),
+            } = change
+            {
+                let current = self.scene.prefabs.get(root);
+                for (part_id, part) in &old.parts {
+                    let current_part = current.and_then(|instance| instance.parts.get(part_id));
+                    for (component, material) in &part.material_overrides {
+                        if current_part.and_then(|part| part.material_overrides.get(component))
+                            != Some(material)
+                        {
+                            released.insert(material.clone());
+                        }
+                    }
+                }
+            }
+        }
         if !released.is_empty() {
             for id in self
                 .scene

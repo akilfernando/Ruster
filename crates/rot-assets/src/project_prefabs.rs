@@ -140,8 +140,6 @@ fn prefab_metadata(entries: &[Metadata]) -> Result<&Metadata, AssetError> {
     }
 }
 
-/// Compare the source and its stable sidecar before publishing an authoring
-/// command or its inverse. The caller has already validated the prefab data.
 /// Compare an accepted prefab source and sidecar without writing either file.
 pub fn verify_project_prefab(
     project_root: &Path,
@@ -178,6 +176,8 @@ fn verify_prefab_bytes(
     Ok(())
 }
 
+/// Compare the source and its stable sidecar before publishing an authoring
+/// command or its inverse. The caller has already validated the prefab data.
 pub fn publish_project_prefab(
     project_root: &Path,
     source: &str,

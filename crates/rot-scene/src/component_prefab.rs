@@ -803,6 +803,193 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn material_override_promotes_one_renderer_rolls_back_and_releases_owned_copies() {
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let base = OpaqueMaterial {
+            name: Some("Oak".into()),
+            base_color_texture: Some("oak-color".into()),
+            roughness_texture: Some("oak-roughness".into()),
+            response: crate::MaterialResponse::Dielectric { roughness: 0.71 },
+            ..Default::default()
+        };
+        scene.materials.insert("oak".into(), base.clone());
+        let root = &mut scene.objects[0];
+        let Component::MeshRenderer { material, .. } = &mut root.components[0].kind else {
+            unreachable!()
+        };
+        *material = Some("oak".into());
+        let primary = root.components[0].id.clone();
+        let mut sibling = root.components[0].clone();
+        sibling.id = "second-renderer".into();
+        root.components.push(sibling);
+        let source = PrefabSource::from_selection(&scene, "left").unwrap();
+        let mut session = ComponentSession::new(scene).unwrap();
+        let file = RefCell::new(None::<Arc<[u8]>>);
+        let publish = |edit: &PrefabFileEdit| {
+            let mut live = file.borrow_mut();
+            if *live != edit.before {
+                return Err(SceneError::Conflict);
+            }
+            *live = edit.after.clone();
+            Ok(())
+        };
+        let path = "Assets/Display.prefab";
+        session
+            .link_prefab(0, "display".into(), path.into(), &source, publish)
+            .unwrap();
+        let hash = source.content_hash().unwrap();
+        for id in ["second", "third"] {
+            session
+                .place_prefab(
+                    session.revision(),
+                    "display".into(),
+                    hash.clone(),
+                    &source,
+                    id,
+                    Transform::default(),
+                    None,
+                )
+                .unwrap();
+        }
+        let live_component = |session: &ComponentSession, root: &str, source: &str| {
+            session.scene().prefabs[root].parts["left"].components[source].clone()
+        };
+        let bound = |scene: &ComponentScene, root: &str, source: &str| {
+            let id = &scene.prefabs[root].parts["left"].components[source];
+            let component = scene
+                .objects
+                .iter()
+                .flat_map(|object| &object.components)
+                .find(|component| &component.id == id)
+                .unwrap();
+            let Component::MeshRenderer {
+                material: Some(material),
+                ..
+            } = &component.kind
+            else {
+                unreachable!()
+            };
+            material.clone()
+        };
+        let mut finish = base.clone();
+        finish.tint = [0.5, 0.6, 0.7];
+        let mut other = base.clone();
+        other.tint = [0.3, 0.4, 0.5];
+        session
+            .set_unique_material(3, "finish-local", finish.clone(), "left", &primary)
+            .unwrap();
+        let peer = live_component(&session, "second", &primary);
+        session
+            .set_unique_material(4, "peer-local", other.clone(), "second", &peer)
+            .unwrap();
+        assert_eq!(
+            session.scene().prefabs["left"].parts["left"].material_overrides[&primary],
+            "finish-local"
+        );
+        assert!(!session.scene().prefabs["left"]
+            .materials
+            .values()
+            .any(|id| id == "finish-local"));
+
+        let prior = session.scene().clone();
+        let mut changed = source.scene().clone();
+        changed.objects[0].components[0].kind = Component::Camera {
+            view: super::super::CameraView::transform_perspective(45.),
+        };
+        let changed = PrefabSource::from_document(changed).unwrap();
+        assert!(session
+            .refresh_prefab(5, "display", &changed.content_hash().unwrap(), &changed)
+            .is_err());
+        let bytes = file.borrow().clone().unwrap();
+        let property = PrefabProperty::Material(primary.clone());
+        assert!(session
+            .apply_prefab_override(
+                5,
+                "left",
+                "left",
+                &property,
+                bytes.clone(),
+                path.into(),
+                |_| Err(SceneError::Conflict)
+            )
+            .is_err());
+        assert_eq!(session.scene(), &prior);
+        assert_eq!(session.revision(), 5);
+
+        session
+            .apply_prefab_override(
+                5,
+                "left",
+                "left",
+                &property,
+                bytes.clone(),
+                path.into(),
+                publish,
+            )
+            .unwrap();
+        assert!(!session.scene().materials.contains_key("finish-local"));
+        assert_eq!(
+            session.scene().materials[&bound(session.scene(), "third", &primary)],
+            finish
+        );
+        assert_eq!(
+            session.scene().materials[&bound(session.scene(), "third", "second-renderer")],
+            base
+        );
+        assert_eq!(bound(session.scene(), "second", &primary), "peer-local");
+        let updated = PrefabSource::read_json(file.borrow().as_deref().unwrap()).unwrap();
+        assert_eq!(updated.scene().materials.len(), 2);
+        let mut reused = session
+            .scene()
+            .objects
+            .iter()
+            .find(|object| object.id == "center")
+            .unwrap()
+            .clone();
+        let Component::MeshRenderer { material, .. } = &mut reused.components[0].kind else {
+            unreachable!()
+        };
+        *material = Some("peer-local".into());
+        reused.components[0].enabled = false;
+        session.put_object(6, reused).unwrap();
+        session
+            .revert_prefab_override(
+                7,
+                "second",
+                "second",
+                &PrefabProperty::Material(peer),
+                &updated,
+                &updated.content_hash().unwrap(),
+            )
+            .unwrap();
+        assert_eq!(session.scene().materials["peer-local"], other);
+        assert_eq!(
+            session.scene().materials[&bound(session.scene(), "second", &primary)],
+            finish
+        );
+
+        let third = live_component(&session, "third", &primary);
+        session
+            .set_unique_material(8, "obsolete", base.clone(), "third", &third)
+            .unwrap();
+        session
+            .set_unique_material(9, "deleting", base, "third", &third)
+            .unwrap();
+        assert!(!session.scene().materials.contains_key("obsolete"));
+        session.remove_subtree(10, "third").unwrap();
+        assert!(!session.scene().materials.contains_key("deleting"));
+        session.undo(11).unwrap();
+        assert_eq!(bound(session.scene(), "third", &primary), "deleting");
+        let root = tempfile::tempdir().unwrap();
+        let saved = root.path().join("scene.json");
+        session.save(&saved).unwrap();
+        assert_eq!(
+            ComponentSession::open(saved).unwrap().scene(),
+            session.scene()
+        );
+    }
+
+    #[test]
     fn prefab_roundtrip_keeps_only_the_subtree_and_its_child_pose() {
         let legacy = Session::new(Scene::demo()).unwrap();
         let mut scene = ComponentScene::from_legacy(&legacy).unwrap();

@@ -192,8 +192,8 @@ for that Mesh Renderer. The draft starts with the shared material’s
 settings and texture references. **Apply** creates the copy and assigns it
 to that renderer in one Undo step. Other renderers, including ones on the
 same object, retain their assignments. The default name adds **Copy** so
-you can find the new definition in the material picker. This action is
-available on standalone renderers.
+you can find the new definition in the material picker. On a linked prefab, the
+copy becomes a local material override.
 
 Set the material tint, **Base color (sRGB)**, and nonmetallic roughness in
 the dialog. To use a loose PNG as a roughness map, put it in the project's
@@ -323,6 +323,15 @@ in the packaged scene so the standalone can run independently.
    its source value on the selected instance. Ordinary scene edits and
    prefab Apply/Revert share Undo and Redo with MCP.
 
+For a linked Mesh Renderer, **Make Unique** creates a **Local Material**
+override on that renderer. It keeps the material’s texture references and
+settings as the starting point. In the **Prefab** section, check the
+renderer number and choose **Apply to Prefab** to promote that finish to
+the source renderer. Peers using the inherited finish update. Peers with
+their own local finish keep it. **Revert Material** restores the current
+inherited finish on the selected renderer. Both actions share Undo with
+the editor and MCP.
+
 Keep the `.prefab` and its `.rotmeta` together when moving them. If a source
 is unavailable, the Inspector reports it and instances keep their last
 usable contents for editing, saving and building. Restore the file and
@@ -334,8 +343,10 @@ Approved MCP clients can use `scene_prefab` to `save` the selected
 `object_id`, or `place` a prefab using its `asset_id` from `asset_inspect`
 and a new root `object_id`. Placement accepts an optional `parent_id` and
 local `transform`. For `apply` and `revert`, supply the target object and
-one property (`position`, `rotation`, `scale` or `tint`). Tint also needs
-the Mesh Renderer `component_id`. Use the current scene session token and
+one property (`position`, `rotation`, `scale`, `tint` or `material`).
+Tint also needs the Mesh Renderer `component_id`. Material needs the
+Mesh Renderer `component_id` and `expected_source_hash` from
+`scene_components_inspect`. Use the current scene session token and
 revision for each operation.
 
 ## Open a v23 scene

@@ -99,6 +99,16 @@ connected project.
   }
   ```
 
+- On a linked v23 renderer, the same copy command creates a local material
+  override. Inspect `scene_components_inspect` with the exact `object_id`
+  and `component_id` to get `prefab_material.state`, `source_component_id`,
+  and `source_hash`. To promote or revert that finish, call `scene_prefab`
+  with the current scene token and revision, `action: "apply"` or
+  `"revert"`, `property: "material"`, the live object and component IDs,
+  and `expected_source_hash` from that inspection. Apply changes only the
+  corresponding source renderer and peers inheriting it. Revert restores
+  the inherited finish on the selected renderer. Both share Undo with
+  the editor.
 - In v23, `material_inspect` also reports committed `display` and whether
   a native `pending_display` draft is open. Use `scene_display_set` through
   `rot_tools` with the current session token and revision. The display
