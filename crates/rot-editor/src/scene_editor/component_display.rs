@@ -69,12 +69,17 @@ fn edit_background(ui: &mut egui::Ui, draft: &mut BackgroundDraft) {
                 .plain(),
             )
             .show_ui(ui, |ui| {
-                ui.selectable_value(
-                    &mut draft.solid,
-                    false,
-                    Text::SceneBackgroundDefault.plain(),
-                );
-                ui.selectable_value(&mut draft.solid, true, Text::SceneBackgroundSolid.plain());
+                for (solid, text) in [
+                    (false, Text::SceneBackgroundDefault),
+                    (true, Text::SceneBackgroundSolid),
+                ] {
+                    if ui
+                        .selectable_value(&mut draft.solid, solid, text.plain())
+                        .clicked()
+                    {
+                        ui.close();
+                    }
+                }
             })
             .response
             .labelled_by(label);
@@ -230,6 +235,11 @@ impl ComponentWorkspace {
                     });
                 }
                 edit_background(ui, &mut draft.background);
+                if draft.error.as_deref() == Some(Text::SceneBackgroundHexInvalid.plain())
+                    && draft.background.value().is_ok()
+                {
+                    draft.error = None;
+                }
                 if let Some(error) = &draft.error {
                     ui.colored_label(editor_theme::colors(ui).error, error);
                 }
