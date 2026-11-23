@@ -266,9 +266,7 @@ impl ComponentWorkspace {
                                 }),
                         )
                         .labelled_by(label.id)
-                        .on_hover_text(
-                            "Scene units. Requires an active Transform Perspective Game Camera.",
-                        );
+                        .on_hover_text("Scene units. Requires an active Transform Game Camera.");
                     apply |= (range.has_focus() || range.lost_focus())
                         && ui.input_mut(|input| {
                             input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)

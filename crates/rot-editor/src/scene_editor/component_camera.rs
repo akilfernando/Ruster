@@ -429,7 +429,12 @@ impl ComponentWorkspace {
 
 fn camera_mode(view: &CameraView) -> &'static str {
     match view {
-        CameraView::Transform(_) => Text::CameraTransformPerspective.plain(),
+        CameraView::Transform(rot_scene::component_scene::TransformLens::Perspective(_)) => {
+            Text::CameraTransformPerspective.plain()
+        }
+        CameraView::Transform(rot_scene::component_scene::TransformLens::Orthographic(_)) => {
+            Text::CameraTransformOrthographic.plain()
+        }
         CameraView::Orbit(view) if view.followed_target().is_some() => Text::CameraFollow.plain(),
         CameraView::Orbit(_) => Text::CameraFixed.plain(),
     }

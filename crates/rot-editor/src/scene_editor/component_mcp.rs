@@ -285,7 +285,7 @@ impl ComponentWorkspace {
                 result["assembly_guidance"] = json!("When building repeated structures, use viewport_frame and viewport_screenshot to check one complete assembly from the front, side, and top before making linked copies with scene_prefab.");
                 result["primitive_guidance"] = json!("triangular_prism is 1 unit per axis (local bounds -0.5 to 0.5), with a bounding-box center pivot, +Y up, and its ridge along local Z. With parent_id, the whole transform is parent-local.");
                 result["spot_light_guidance"] = json!("Light kind spot uses local -Z, rotated by its owner's authored rotation chain. Range is in world units; inner_degrees and outer_degrees are half-angles, 0 <= inner < outer <= 90. Scene view and static Play/Build share four active Point and Spot slots in scene order. In behavior Play/Build, one Point or Spot can follow a Mesh Renderer leaf with Object Lua API 1/2. Standalone Spot requires static playback.");
-                result["camera_guidance"] = json!("A v23 Transform Perspective camera uses its owner's world position and authored rotation; local -Z is forward and +Y is up. Parent scale affects position, never orientation or FOV.");
+                result["camera_guidance"] = json!("A v23 Transform camera uses its owner's world position and authored rotation; local -Z is forward and +Y is up. Parent scale affects position. Orthographic vertical_size is the full world-space frame height.");
             }
             return Ok(result);
         }
@@ -1103,7 +1103,7 @@ impl ComponentWorkspace {
             component.enabled && self.camera_owner_enabled(index)
         });
         let mode = designated.map(|(_, _, view)| match view {
-            CameraView::Transform(_) => "transform_perspective",
+            CameraView::Transform(lens) => lens.projection().mode(),
             CameraView::Orbit(view) if view.followed_target().is_some() => "follow",
             CameraView::Orbit(_) => "fixed",
         });
@@ -1268,7 +1268,7 @@ impl ComponentWorkspace {
                 }
                 response["movement_guidance"] = json!("An exact replace can set component.movement to kinematic_sphere or ordinary (omission keeps it). Kinematic Sphere needs a flat scene, one enabled mover, an enabled uniformly scaled Blocker Sphere, and stationary blockers. Call host.move_and_slide({dx,dy,dz}) once per Step, use suggested_translation, and return {transform=object}.");
                 response["sound_cue_guidance"] = json!(
-                    r#"File-backed Object Lua calls host.play_sound("cue-name"). Use binding.properties sound_ref value {asset_id,gain}. For positional add playback:{type:"positional",range:10} and activate a Transform Perspective Game Camera. Omit playback for 2D. Find WAVs in asset_inspect and pin expected_asset_revision."#
+                    r#"File-backed Object Lua calls host.play_sound("cue-name"). Use binding.properties sound_ref value {asset_id,gain}. For positional add playback:{type:"positional",range:10} and activate a Transform Game Camera. Omit playback for 2D. Find WAVs in asset_inspect and pin expected_asset_revision."#
                 );
             }
             if let Component::Light {

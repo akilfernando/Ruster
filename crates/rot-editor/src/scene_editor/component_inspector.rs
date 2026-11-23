@@ -4,8 +4,8 @@ use crate::ui_kit;
 use crate::workspace::Action;
 use eframe::egui;
 use rot_scene::component_scene::{
-    CameraView, Component, ComponentInstance, Geometry, ObjectNode, ScriptMovement,
-    ScriptSourceKind,
+    CameraClip, CameraView, Component, ComponentInstance, Geometry, ObjectNode, OrthographicClip,
+    ScriptMovement, ScriptSourceKind, TransformLens, TransformOrthographic,
 };
 use rot_scene::{
     BehaviorBinding, BindingTarget, ColliderRole, ColliderShape, Light, LightKind, OpaqueMaterial,
@@ -396,40 +396,8 @@ pub(super) fn components(
                         }
                     }
                     Component::Camera { view } => {
-                        if let CameraView::Transform(lens) = view {
-                            ui_kit::property_row(ui, Text::ComponentCamera.plain(), |ui| {
-                                ui.label(Text::CameraTransformPerspective.plain());
-                            });
-                            submit |= number_field(
-                                ui,
-                                Text::CameraVerticalFov,
-                                &mut lens.vertical_fov_degrees,
-                                0.25,
-                                10.0..=120.0,
-                                Text::CameraTransformFovHint,
-                            );
-                            ui_kit::property_row(ui, Text::CameraAspectRatio.plain(), |ui| {
-                                if let Some(ratio) = lens.aspect_ratio {
-                                    ui.label(format!("{ratio}"));
-                                } else {
-                                    ui.label(Text::CameraViewportAdaptive.plain());
-                                }
-                            });
-                            let clip =
-                                lens.clip.unwrap_or(rot_scene::component_scene::CameraClip {
-                                    near: 0.1,
-                                    far: Some(1000.),
-                                });
-                            ui_kit::property_row(ui, Text::CameraNearClip.plain(), |ui| {
-                                ui.label(format!("{}", clip.near));
-                            });
-                            ui_kit::property_row(ui, Text::CameraFarClip.plain(), |ui| {
-                                if let Some(far) = clip.far {
-                                    ui.label(format!("{far}"));
-                                } else {
-                                    ui.label(Text::CameraInfinity.plain());
-                                }
-                            });
+                        if matches!(view, CameraView::Transform(_)) {
+                            submit |= transform_camera_fields(ui, view);
                             return;
                         }
                         let CameraView::Orbit(view) = view else {
@@ -918,6 +886,155 @@ fn shadow_fields(ui: &mut egui::Ui, shadow: &mut SunShadow) -> bool {
         })
         .body_returned
         .unwrap_or(false)
+}
+
+fn transform_camera_fields(ui: &mut egui::Ui, view: &mut CameraView) -> bool {
+    let CameraView::Transform(lens) = view else {
+        unreachable!()
+    };
+    let original_ortho = matches!(lens, TransformLens::Orthographic(_));
+    let mut orthographic = original_ortho;
+    ui_kit::property_row_with_label(ui, Text::CameraProjection.plain(), |ui, label| {
+        let mode = |ortho| {
+            if ortho {
+                Text::Orthographic.plain()
+            } else {
+                Text::Perspective.plain()
+            }
+        };
+        let focus = super::combo_focus::ComboFocus::capture(ui, "camera_projection");
+        let mut selected = false;
+        let response = egui::ComboBox::from_id_salt("camera_projection")
+            .width(ui.available_width())
+            .selected_text(mode(orthographic))
+            .show_ui(ui, |ui| {
+                for option in [false, true] {
+                    if ui
+                        .selectable_label(orthographic == option, mode(option))
+                        .clicked()
+                    {
+                        orthographic = option;
+                        selected = true;
+                        ui.close();
+                    }
+                }
+            });
+        focus.restore(ui, &response.response, selected);
+        response.response.labelled_by(label);
+    });
+    if orthographic != original_ortho {
+        *view = match lens {
+            TransformLens::Perspective(lens) => {
+                CameraView::Transform(TransformLens::Orthographic(TransformOrthographic::new(
+                    8.0,
+                    lens.aspect_ratio,
+                    OrthographicClip {
+                        near: lens.clip.map_or(0.1, |plane| plane.near),
+                        far: lens.clip.and_then(|plane| plane.far).unwrap_or_else(|| {
+                            if lens.clip.is_some_and(|plane| plane.near >= 1000.) {
+                                f32::MAX
+                            } else {
+                                1000.
+                            }
+                        }),
+                    },
+                )))
+            }
+            TransformLens::Orthographic(lens) => CameraView::transform_perspective_with_lens(
+                45.,
+                lens.aspect_ratio,
+                Some(CameraClip {
+                    near: lens.clip.near,
+                    far: Some(lens.clip.far),
+                }),
+            ),
+        };
+    }
+    let CameraView::Transform(lens) = view else {
+        unreachable!()
+    };
+    match lens {
+        TransformLens::Perspective(lens) => {
+            let submit = number_field(
+                ui,
+                Text::CameraVerticalFov,
+                &mut lens.vertical_fov_degrees,
+                0.25,
+                10.0..=120.0,
+                Text::CameraTransformFovHint,
+            );
+            ui_kit::property_row(ui, Text::CameraAspectRatio.plain(), |ui| {
+                if let Some(ratio) = lens.aspect_ratio {
+                    ui.label(format!("{ratio}"));
+                } else {
+                    ui.label(Text::CameraViewportAdaptive.plain());
+                }
+            });
+            let clip = lens.clip.unwrap_or(CameraClip {
+                near: 0.1,
+                far: Some(1000.),
+            });
+            ui_kit::property_row(ui, Text::CameraNearClip.plain(), |ui| {
+                ui.label(format!("{}", clip.near));
+            });
+            ui_kit::property_row(ui, Text::CameraFarClip.plain(), |ui| {
+                if let Some(far) = clip.far {
+                    ui.label(format!("{far}"));
+                } else {
+                    ui.label(Text::CameraInfinity.plain());
+                }
+            });
+            submit
+        }
+        TransformLens::Orthographic(lens) => {
+            let mut submit = number_field(
+                ui,
+                Text::CameraVerticalSize,
+                &mut lens.vertical_size,
+                0.1,
+                0.01..=10_000.,
+                Text::CameraVerticalSizeHint,
+            );
+            ui_kit::property_row_with_label(ui, Text::CameraFixedAspect.plain(), |ui, label| {
+                let mut fixed = lens.aspect_ratio.is_some();
+                if ui
+                    .checkbox(&mut fixed, "")
+                    .labelled_by(label)
+                    .on_hover_text(Text::CameraFixedAspectHint.plain())
+                    .changed()
+                {
+                    lens.aspect_ratio = fixed.then_some(16. / 9.);
+                }
+            });
+            if let Some(aspect) = &mut lens.aspect_ratio {
+                submit |= number_field(
+                    ui,
+                    Text::CameraAspectRatio,
+                    aspect,
+                    0.01,
+                    0.01..=100.,
+                    Text::CameraFixedAspectHint,
+                );
+            }
+            submit |= number_field(
+                ui,
+                Text::CameraNearClip,
+                &mut lens.clip.near,
+                0.01,
+                f32::MIN_POSITIVE..=f32::MAX,
+                Text::CameraClipHint,
+            );
+            submit |= number_field(
+                ui,
+                Text::CameraFarClip,
+                &mut lens.clip.far,
+                0.1,
+                f32::MIN_POSITIVE..=f32::MAX,
+                Text::CameraClipHint,
+            );
+            submit
+        }
+    }
 }
 
 fn number_field(

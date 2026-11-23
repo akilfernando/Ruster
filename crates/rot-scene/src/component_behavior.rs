@@ -1,7 +1,7 @@
 //! Temporary input adapter for the legacy behavior runtime.
 use super::{
     CameraView, Component, ComponentScene, Geometry, ObjectNode, ScriptMovement,
-    TransformCameraPose, TransformPerspective,
+    TransformCameraPose, TransformLens,
 };
 use crate::{
     Authoring, BehaviorSource, BindingTarget, Collider, Group, HiddenMeshRenderers, Light,
@@ -41,7 +41,7 @@ impl ObjectNode {
 /// Runtime-only immutable lookup for a component camera's projected transform chain.
 #[derive(Clone, Debug)]
 pub struct TransformCameraBinding {
-    lens: TransformPerspective,
+    lens: TransformLens,
     owner: CameraTarget,
     ancestors: Vec<String>,
 }
@@ -55,11 +55,7 @@ enum CameraTarget {
 }
 
 impl TransformCameraBinding {
-    fn bind(
-        scene: &Scene,
-        owner: &ObjectNode,
-        lens: &TransformPerspective,
-    ) -> Result<Self, SceneError> {
+    fn bind(scene: &Scene, owner: &ObjectNode, lens: &TransformLens) -> Result<Self, SceneError> {
         let id = owner.id.as_str();
         let mut ancestors = Vec::new();
         let mut current = id;
@@ -408,7 +404,7 @@ impl ComponentScene {
                             || transform_camera.is_none())
                     {
                         return Err(SceneError::Invalid(format!(
-                            "Binding {}, cue {name}: positional sound requires an Object Lua owner and an enabled active Transform Perspective Game Camera.",
+                            "Binding {}, cue {name}: positional sound requires an Object Lua owner and an enabled active Transform Game Camera.",
                             component.id
                         )));
                     }

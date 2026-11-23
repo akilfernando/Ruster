@@ -524,7 +524,7 @@ impl ComponentWorkspace {
             let (x, w) = crop_axis("x", "width", content.min.x, content.max.x);
             let (y, h) = crop_axis("y", "height", content.min.y, content.max.y);
             let mut observed = json!(camera);
-            observed["type"] = json!("transform_perspective");
+            observed["type"] = json!(camera.projection.mode());
             if !source.is_null() {
                 observed["content_rect"] = json!([x, y, w, h]);
             }

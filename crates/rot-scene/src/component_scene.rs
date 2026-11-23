@@ -68,7 +68,69 @@ struct SceneFile<S> {
 #[serde(untagged)]
 pub enum CameraView {
     Orbit(PlayerView),
-    Transform(TransformPerspective),
+    Transform(TransformLens),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum TransformLens {
+    Perspective(TransformPerspective),
+    Orthographic(TransformOrthographic),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TransformOrthographic {
+    #[serde(rename = "type")]
+    kind: OrthographicKind,
+    pub vertical_size: f32,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_lens_value"
+    )]
+    pub aspect_ratio: Option<f32>,
+    pub clip: OrthographicClip,
+}
+
+impl TransformOrthographic {
+    pub fn new(vertical_size: f32, aspect_ratio: Option<f32>, clip: OrthographicClip) -> Self {
+        Self {
+            kind: OrthographicKind::TransformOrthographic,
+            vertical_size,
+            aspect_ratio,
+            clip,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OrthographicClip {
+    pub near: f32,
+    pub far: f32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum OrthographicKind {
+    TransformOrthographic,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum TransformProjection {
+    Perspective { vertical_fov_degrees: f32 },
+    Orthographic { vertical_size: f32 },
+}
+
+impl TransformProjection {
+    pub fn mode(self) -> &'static str {
+        match self {
+            Self::Perspective { .. } => "transform_perspective",
+            Self::Orthographic { .. } => "transform_orthographic",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -120,14 +182,26 @@ pub struct TransformCameraPose {
     pub eye: [f32; 3],
     pub forward: [f32; 3],
     pub up: [f32; 3],
-    pub vertical_fov_degrees: f32,
+    #[serde(flatten)]
+    pub projection: TransformProjection,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub aspect_ratio: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clip: Option<CameraClip>,
 }
 
-impl TransformPerspective {
+impl TransformLens {
+    pub fn projection(&self) -> TransformProjection {
+        match self {
+            Self::Perspective(lens) => TransformProjection::Perspective {
+                vertical_fov_degrees: lens.vertical_fov_degrees,
+            },
+            Self::Orthographic(lens) => TransformProjection::Orthographic {
+                vertical_size: lens.vertical_size,
+            },
+        }
+    }
+
     pub(crate) fn resolve_pose(
         &self,
         world: DMat4,
@@ -140,13 +214,23 @@ impl TransformPerspective {
             ));
         }
         let rotation = rotation.normalize();
+        let (aspect_ratio, clip) = match self {
+            Self::Perspective(lens) => (lens.aspect_ratio, lens.clip),
+            Self::Orthographic(lens) => (
+                lens.aspect_ratio,
+                Some(CameraClip {
+                    near: lens.clip.near,
+                    far: Some(lens.clip.far),
+                }),
+            ),
+        };
         Ok(TransformCameraPose {
             eye: eye.to_array(),
             forward: (rotation * -glam::DVec3::Z).as_vec3().to_array(),
             up: (rotation * glam::DVec3::Y).as_vec3().to_array(),
-            vertical_fov_degrees: self.vertical_fov_degrees,
-            aspect_ratio: self.aspect_ratio,
-            clip: self.clip,
+            projection: self.projection(),
+            aspect_ratio,
+            clip,
         })
     }
 }
@@ -167,12 +251,12 @@ impl CameraView {
         aspect_ratio: Option<f32>,
         clip: Option<CameraClip>,
     ) -> Self {
-        Self::Transform(TransformPerspective {
+        Self::Transform(TransformLens::Perspective(TransformPerspective {
             kind: PerspectiveKind::TransformPerspective,
             vertical_fov_degrees,
             aspect_ratio,
             clip,
-        })
+        }))
     }
 
     pub fn followed_target(&self) -> Option<&str> {
@@ -189,7 +273,7 @@ impl CameraView {
     pub fn validate_settings(&self) -> Result<(), SceneError> {
         match self {
             Self::Orbit(view) => view.validate_settings(),
-            Self::Transform(lens) => {
+            Self::Transform(TransformLens::Perspective(lens)) => {
                 let valid = (10. ..=120.).contains(&lens.vertical_fov_degrees)
                     && lens
                         .aspect_ratio
@@ -213,6 +297,24 @@ impl CameraView {
                     Err(SceneError::Invalid(
                         "Transform Perspective requires FOV 10..120 degrees, optional aspect 0.01..100, and positive ordered clip planes.".into(),
                     ))
+                }
+            }
+            Self::Transform(TransformLens::Orthographic(lens)) => {
+                let near = lens.clip.near;
+                let far = lens.clip.far;
+                if (0.01..=10_000.).contains(&lens.vertical_size)
+                    && lens
+                        .aspect_ratio
+                        .is_none_or(|ratio| (0.01..=100.).contains(&ratio))
+                    && near > 0.
+                    && near.is_finite()
+                    && far.is_finite()
+                    && far > near
+                    && (far - near).recip().is_finite()
+                {
+                    Ok(())
+                } else {
+                    Err(SceneError::Invalid("Transform Orthographic requires Vertical Size 0.01..10000, optional aspect 0.01..100, and finite positive ordered clip planes.".into()))
                 }
             }
         }
@@ -633,7 +735,7 @@ impl ComponentScene {
         index: usize,
         hierarchy: &ObjectHierarchy,
         world: &[DMat4],
-        lens: &TransformPerspective,
+        lens: &TransformLens,
     ) -> Result<TransformCameraPose, SceneError> {
         lens.resolve_pose(world[index], self.world_rotation(index, &hierarchy.parents))
     }

@@ -466,7 +466,7 @@ fn transform_camera_matrices(
     aspect: f32,
 ) -> Option<(Mat4, Mat4, Mat4)> {
     let aspect = camera.aspect_ratio.unwrap_or(aspect);
-    if !(0.01..=100.0).contains(&aspect) || !(10.0..=120.0).contains(&camera.vertical_fov_degrees) {
+    if !(0.01..=100.0).contains(&aspect) {
         return None;
     }
     let eye = Vec3::from_array(camera.eye);
@@ -479,33 +479,86 @@ fn transform_camera_matrices(
     {
         return None;
     }
-    let fov = camera.vertical_fov_degrees.to_radians();
+    use rot_scene::component_scene::TransformProjection;
     let view = Mat4::look_to_rh(eye, forward, up);
-    let (projection, overlay) = match camera.clip {
-        None => (
-            Mat4::perspective_rh(fov, aspect, 0.1, 1000.0),
-            Mat4::perspective_rh_gl(fov, aspect, 0.1, 1000.0),
-        ),
-        Some(clip) => {
-            let near = f64::from(clip.near);
-            let fov = f64::from(camera.vertical_fov_degrees).to_radians();
-            let aspect = f64::from(aspect);
-            if let Some(far) = clip.far {
-                let far = f64::from(far);
-                (
-                    glam::DMat4::perspective_rh(fov, aspect, near, far).as_mat4(),
-                    glam::DMat4::perspective_rh_gl(fov, aspect, near, far).as_mat4(),
-                )
-            } else {
-                let projection = glam::DMat4::perspective_infinite_rh(fov, aspect, near).as_mat4();
-                let mut overlay = projection;
-                overlay.w_axis.z *= 2.;
-                (projection, overlay)
+    let (projection, overlay) = match camera.projection {
+        TransformProjection::Perspective {
+            vertical_fov_degrees,
+        } => {
+            if !(10.0..=120.0).contains(&vertical_fov_degrees) {
+                return None;
             }
+            let fov = vertical_fov_degrees.to_radians();
+            match camera.clip {
+                None => (
+                    Mat4::perspective_rh(fov, aspect, 0.1, 1000.0),
+                    Mat4::perspective_rh_gl(fov, aspect, 0.1, 1000.0),
+                ),
+                Some(clip) => {
+                    let near = f64::from(clip.near);
+                    let fov = f64::from(vertical_fov_degrees).to_radians();
+                    let aspect = f64::from(aspect);
+                    if let Some(far) = clip.far {
+                        let far = f64::from(far);
+                        (
+                            glam::DMat4::perspective_rh(fov, aspect, near, far).as_mat4(),
+                            glam::DMat4::perspective_rh_gl(fov, aspect, near, far).as_mat4(),
+                        )
+                    } else {
+                        let projection =
+                            glam::DMat4::perspective_infinite_rh(fov, aspect, near).as_mat4();
+                        let mut overlay = projection;
+                        overlay.w_axis.z *= 2.;
+                        (projection, overlay)
+                    }
+                }
+            }
+        }
+        TransformProjection::Orthographic { vertical_size } => {
+            let clip = camera.clip?;
+            let near = f64::from(clip.near);
+            let far = f64::from(clip.far?);
+            if !(0.01..=10_000.).contains(&vertical_size) || near <= 0. || far <= near {
+                return None;
+            }
+            let half_height = f64::from(vertical_size) * 0.5;
+            let half_width = half_height * f64::from(aspect);
+            (
+                glam::DMat4::orthographic_rh(
+                    -half_width,
+                    half_width,
+                    -half_height,
+                    half_height,
+                    near,
+                    far,
+                )
+                .as_mat4(),
+                glam::DMat4::orthographic_rh_gl(
+                    -half_width,
+                    half_width,
+                    -half_height,
+                    half_height,
+                    near,
+                    far,
+                )
+                .as_mat4(),
+            )
         }
     };
     (view.is_finite() && projection.is_finite() && overlay.is_finite())
         .then_some((view, projection, overlay))
+}
+
+fn transform_camera_eye_mode(camera: rot_scene::component_scene::TransformCameraPose) -> [f32; 4] {
+    use rot_scene::component_scene::TransformProjection;
+    match camera.projection {
+        TransformProjection::Perspective { .. } => {
+            Vec3::from_array(camera.eye).extend(1.).to_array()
+        }
+        TransformProjection::Orthographic { .. } => {
+            (-Vec3::from_array(camera.forward)).extend(0.).to_array()
+        }
+    }
 }
 
 pub fn transform_camera_projection(
@@ -1790,7 +1843,7 @@ fn render_draw_scene(
                     paint_bars = has_bars;
                     transform_camera_matrices(camera, aspect)
                 })
-                .map(|matrices| (matrices, Vec3::from_array(camera.eye).extend(1.).to_array()))
+                .map(|matrices| (matrices, transform_camera_eye_mode(camera)))
         } else {
             let view = match draw.prepared {
                 Some(prepared) => prepared.player_view(),
@@ -3765,12 +3818,14 @@ mod tests {
     #[test]
     fn calibrated_camera_centers_physical_content_and_preserves_depth() {
         use super::*;
-        use rot_scene::component_scene::{CameraClip, TransformCameraPose};
+        use rot_scene::component_scene::{CameraClip, TransformCameraPose, TransformProjection};
         let mut lens = TransformCameraPose {
             eye: [0.; 3],
             forward: [0., 0., -1.],
             up: [0., 1., 0.],
-            vertical_fov_degrees: 49.,
+            projection: TransformProjection::Perspective {
+                vertical_fov_degrees: 49.,
+            },
             aspect_ratio: Some(1.5),
             clip: Some(CameraClip {
                 near: 0.35,

@@ -55,7 +55,7 @@ pub(super) fn emitters(
         });
         Some(emitter.map(|emitter| (id.clone(), emitter)).ok_or_else(|| {
             Diagnostic::plain(DiagnosticCode::InvalidAuthoring, Phase::Setup,
-                &format!("Cue {name}: positional sound requires an Object Lua owner and an enabled active Transform Perspective Game Camera."))
+                &format!("Cue {name}: positional sound requires an Object Lua owner and an enabled active Transform Game Camera."))
                 .context(id, binding, authoring.sources.get(&binding.source_id))
         }))
     }).collect()
