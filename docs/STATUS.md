@@ -88,6 +88,22 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+**Restore Missing Source** returns previously accepted Lua and WAV files to
+their original paths through Assets. The signal box restored both exact source
+digests with the same sidecars, IDs, scene references and history. Approved
+Claude inspected the recovery candidates and ran a guarded Step that moved the
+signal and emitted one bell cue. The reopened scene built successfully, and a
+relocated Vulkan player moved the signal and played the restored bell into an
+isolated audio sink. Corrupt cached bytes were refused in the editor. Worker
+tests covered changed sidecars, unsafe folders and a competing destination.
+The selected idle Inspector and five MCP inspections produced zero watched
+cache reads. The new action received focus and restored the same file in the
+targeted Rot Dark and Plain Light checks. Median warmed release p50/p95 to
+Ready was 2.638/2.966 ms for a 42-byte Lua file and 12.978/13.909 ms for a
+1,920,044-byte WAV. Normal watcher reimport after an atomic backup put-back
+took 37.498/38.277 and 45.517/46.532 ms. Concurrent editor CPU frame p95
+was 0.974 and 0.871 ms during restore and 0.890 and 0.839 ms during reimport.
+
 **Sphere Collider radius fitting** extends Scene view Edit Collider. The
 parented robot shell grew from 0.55 to 0.90 in perspective and orthographic,
 with its local offset and resolved center intact. Escape preserved the prior
