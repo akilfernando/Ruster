@@ -88,6 +88,15 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+**Scene Background** gives v23 Scene Display a solid color picker and sRGB
+hex entry. Approved Claude changed the background under a scene guard, and
+native Undo restored it. The saved title and yard cleared correctly in Scene,
+Game and a relocated Vulkan player. Default Game images matched exactly.
+The authored clear kept the tested grid coverage, cube lighting, HUD and
+camera bars. At 5,000 objects, warmed GPU scene p95 was 0.364 ms for the
+previous and current default and 0.362 ms with the solid clear. Each used one
+target and two scene draws.
+
 **Play Checks** support saved flat v23 scenes in the editor and approved MCP.
 The 30-tick conveyor check passed both ways and kept the live preview paused.
 A saved scene edit and a Lua speed change each made the check out of date.

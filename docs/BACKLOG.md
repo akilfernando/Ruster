@@ -12,8 +12,6 @@ package in your lane under **Now**. How to work is in the
 - File references were checked on 2026-11-17 and drift; search if a line
   number is off.
 
-- C-14 Scene Background — in progress — Sol, 2026-11-24
-
 ## Needs the user
 
 - **Vetoes.** The [architecture decisions](PARITY-PLAN.md#4-architecture-decisions)
@@ -659,6 +657,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-11a v23 crash recovery | Recover a completed dirty scene checkpoint as an exclusive new sibling after an unexpected exit. | done · A completed v23 checkpoint keeps native and approved MCP edits. Recover as New Scene opens an exclusive sibling with a fresh scene ID and intact object, component and asset references. The original and startup choice stay intact. Native recovery verified a filename collision and 5,000 objects. Save fencing, discard, corrupt record preservation and version 1 checkpoint compatibility passed. |
 | C-12 Benchmark scenes | 5,000- and 50,000-object scenes and a one-command frame-time report. | done · 2026-11-19 · deterministic v23 scene export and [release timings](../crates/rot-render/README.md#large-scene-benchmark) |
 | C-13 v23 Play Checks | Save and rerun a fixed input and assertion sequence in a flat scene. | done · Native and approved MCP reproduced the same 30-tick conveyor check. Saved scene and Lua changes separately invalidated its pin. Recapture kept the original expectation and produced the same failure as guarded Steps. A 640-object static check ran 120 ticks and verified the last object. |
+| C-14 Scene Background | Author a solid per-scene background with the existing display controls. | done · Native picker and sRGB hex, guarded MCP, shared Undo and saved linear color work in v23. SDR and HDR pixels matched, including after a relocated Vulkan title-to-yard Start. Default images, grid coverage, geometry lighting, HUD and letterbox witnesses were verified. |
 
 ### C-04 implementation brief
 
