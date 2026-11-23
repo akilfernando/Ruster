@@ -429,6 +429,14 @@ connected project.
   Camera stays assigned. Linked prefab selections are refused. The legacy
   `object_id`, `new_object_id`, and `name` arguments still copy one legacy object.
 
+- To unpack one v23 prefab instance, call `scene_components_inspect` on
+  the root or one of its parts and read `prefab_instance`. Then call
+  `scene_prefab` with `action:"unpack"`, `object_id` from `root_id`,
+  `asset_id`, and `expected_source_hash` from `source_hash`, plus the
+  current scene session token and revision. These identify the link saved
+  in the scene, even if the source file is missing. Unpack removes that
+  one link with shared Undo and keeps its materialized objects and data.
+
 `tools/list` advertises the main project, object, component, asset, Play and
 screenshot controls in under 15 KB. To find earlier or less common commands,
 call `rot_tools` with `{"action":"list"}`. Use `action: "describe"` and a

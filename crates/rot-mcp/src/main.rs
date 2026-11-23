@@ -2132,6 +2132,19 @@ mod tests {
             shape["name"] = json!(primitive.label());
             assert!(valid_arguments("scene_create", &shape));
         }
+        let mut unpack = json!({
+            "expected_session_token":"scene","expected_revision":"0","action":"unpack",
+            "object_id":"station","asset_id":"fixture","expected_source_hash":"a".repeat(64)
+        });
+        assert!(valid_arguments("scene_prefab", &unpack));
+        unpack["expected_asset_revision"] = json!("0");
+        assert!(!valid_arguments("scene_prefab", &unpack));
+        unpack
+            .as_object_mut()
+            .unwrap()
+            .remove("expected_asset_revision");
+        unpack.as_object_mut().unwrap().remove("asset_id");
+        assert!(!valid_arguments("scene_prefab", &unpack));
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())

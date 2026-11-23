@@ -567,6 +567,109 @@ mod tests {
     use rot_scene::component_scene::{ComponentScene, ComponentSession};
     use rot_scene::{Scene, Session};
 
+    #[cfg(unix)]
+    #[test]
+    fn guarded_unpack_keeps_objects_and_history_without_a_source_file() {
+        use serde_json::json;
+        let project = tempfile::tempdir().unwrap();
+        let path = project.path().join("scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let root = scene.objects[0].id.clone();
+        let child = scene.objects[1].id.clone();
+        scene.objects[1].parent = Some(root.clone());
+        let renderer = scene.objects[1].components[0].id.clone();
+        let source = PrefabSource::from_selection(&scene, &root).unwrap();
+        let hash = source.content_hash().unwrap();
+        let mut session = ComponentSession::new(scene).unwrap();
+        session
+            .link_prefab(
+                0,
+                "fixture".into(),
+                "Assets/Missing.prefab".into(),
+                &source,
+                |edit| {
+                    assert!(edit.before.is_none() && edit.after.is_some());
+                    Ok(())
+                },
+            )
+            .unwrap();
+        session
+            .place_prefab(
+                1,
+                "fixture".into(),
+                hash.clone(),
+                &source,
+                "peer",
+                Transform::default(),
+                None,
+            )
+            .unwrap();
+        session
+            .set_unique_material(
+                2,
+                "local-paint",
+                rot_scene::OpaqueMaterial::default(),
+                &child,
+                &renderer,
+            )
+            .unwrap();
+        session.save(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let before = editor.session.scene().clone();
+        let source_path = project.path().join("Assets/Missing.prefab");
+        assert!(!source_path.exists());
+        let detail = editor.ai_command(
+            "scene",
+            "scene_components_inspect",
+            &json!({"object_id": child}),
+        );
+        assert_eq!(
+            detail["result"]["prefab_instance"],
+            json!({
+                "root_id":root,"asset_id":"fixture","source_hash":hash,"object_count":2
+            })
+        );
+        let mut args = json!({
+            "expected_session_token":"scene","expected_revision":"0","action":"unpack",
+            "object_id":root,"asset_id":"wrong","expected_source_hash":hash
+        });
+        assert_eq!(
+            editor.ai_command("scene", "scene_prefab", &args)["error"]["code"],
+            "stale_prefab_instance"
+        );
+        assert_eq!(editor.session.scene(), &before);
+        args["asset_id"] = json!("fixture");
+        args["object_id"] = json!(child);
+        assert_eq!(
+            editor.ai_command("scene", "scene_prefab", &args)["ok"],
+            false
+        );
+        args["object_id"] = json!(root);
+        assert_eq!(
+            editor.ai_command("scene", "scene_prefab", &args)["result"]["object_count"],
+            2
+        );
+        let mut detached = before.clone();
+        detached.prefabs.remove(&root);
+        assert_eq!(editor.session.scene(), &detached);
+        assert!(editor.session.scene().materials.contains_key("local-paint"));
+        for (action, revision, expected) in
+            [("scene_undo", "1", before), ("scene_redo", "2", detached)]
+        {
+            let result = editor.ai_command(
+                "scene",
+                action,
+                &json!({
+                    "expected_session_token":"scene","expected_revision":revision
+                }),
+            );
+            assert_eq!(result["ok"], true, "{result}");
+            assert_eq!(editor.session.scene(), &expected);
+        }
+        assert!(!source_path.exists());
+    }
+
     #[test]
     fn prefab_save_collision_keeps_details_until_retry_succeeds() {
         let project = tempfile::tempdir().unwrap();

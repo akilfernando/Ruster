@@ -655,6 +655,13 @@ their own local finish keep it. **Revert Material** restores the current
 inherited finish on the selected renderer. Both actions share Undo with
 the editor and MCP.
 
+To keep an instance as ordinary scene objects, select its root and choose
+**Unpack Prefab Instance…** in the Inspector. Review the root and object
+count, then choose **Unpack**. The assembly keeps its objects, components,
+placement, and current materials, including local overrides. It stops
+receiving prefab updates. The source and other linked instances stay in
+place. Unpack works when the source is missing, and Undo restores the link.
+
 Keep the `.prefab` and its `.rotmeta` together when moving them. If a source
 is unavailable, the Inspector reports it and instances keep their last
 usable contents for editing, saving and building. Restore the file and
