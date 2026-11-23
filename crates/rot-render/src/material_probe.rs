@@ -593,6 +593,8 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
         };
         light
     };
+    let mut coincident_spot = spot(0., 10., 35.);
+    coincident_spot.transform.translation[2] = 0.5;
     let mut renamed = Lighting::authored_default("sun");
     if let Lighting::Authored { lights, .. } = &mut renamed {
         lights.get_mut("sun").unwrap().name = Some("Renamed only".into());
@@ -633,6 +635,7 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
             authored(vec![("spot", spot(50., 10., 35.))]),
         ),
         ("spot-tiny", authored(vec![("spot", spot(0., 0., 0.0001))])),
+        ("spot-coincident", authored(vec![("spot", coincident_spot)])),
         ("point-distance1", authored(vec![("point", near)])),
         (
             "point-distance2",
@@ -921,6 +924,7 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
         "point-range-edge",
         "point-range-outside",
         "point-coincident",
+        "spot-coincident",
     ] {
         assert!(
             observations[name][..3].iter().all(|&v| v <= 3),

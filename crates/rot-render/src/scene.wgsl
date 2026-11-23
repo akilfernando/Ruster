@@ -85,7 +85,7 @@ struct Output {
             let cone = lighting.spot_cones[i];
             // Squared chord equals 2(1 - cos(theta)) for unit vectors.
             // Normalize independently of the distance attenuation's near floor.
-            let chord = delta / sqrt(max(d2, 1e-38)) - cone.xyz;
+            let chord = delta / sqrt(max(d2, 1e-30)) - cone.xyz;
             let angular = clamp((cone.w - dot(chord, chord)) * point.color_intensity.w, 0.0, 1.0);
             attenuation *= angular * angular;
         }
