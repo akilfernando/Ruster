@@ -817,6 +817,11 @@ fn create_script(
             {
                 return Err(error("The project or folder changed. Try again.".into()));
             }
+            match at::statat(&destination, name.as_str(), at::AtFlags::SYMLINK_NOFOLLOW) {
+                Ok(_) => return Err(error("A file with that name already exists.".into())),
+                Err(Errno::NOENT) => {}
+                Err(reason) => return Err(error(reason.to_string())),
+            }
             match at::statat(
                 &destination,
                 format!("{name}.rotmeta"),
@@ -1343,10 +1348,10 @@ mod tests {
         );
         assert!(!directory.join("Reserved.lua").exists());
 
-        let created = create("Track & Rail.lua", &first);
+        let created = create("Track & Ráil.lua", &first);
         assert!(created.errors.is_empty(), "{created:?}");
         let (id, relative) = created.created_script.unwrap();
-        assert_eq!(relative, folder.join("Track & Rail.lua"));
+        assert_eq!(relative, folder.join("Track & Ráil.lua"));
         let snapshot = next();
         let info = snapshot.store.asset_info(&id).unwrap();
         assert_eq!(info.status, AssetStatus::Ready);
@@ -1355,7 +1360,7 @@ mod tests {
             fs::read_to_string(root.join(&relative)).unwrap(),
             OBJECT_LUA_TEMPLATE
         );
-        assert!(directory.join("Track & Rail.lua.rotmeta").is_file());
+        assert!(directory.join("Track & Ráil.lua.rotmeta").is_file());
 
         let held = fs::File::open(root).unwrap();
         let launch = LaunchSpec {
