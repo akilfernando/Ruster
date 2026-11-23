@@ -9,7 +9,7 @@ mod punctual;
 pub use punctual::ModelLight;
 #[path = "glb_camera.rs"]
 mod camera;
-pub use camera::ModelCamera;
+pub use camera::{ModelCamera, ModelOrthographicCamera, ModelPerspectiveCamera};
 
 pub const MAX_GLB_SOURCE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_JSON_BYTES: usize = 2 * 1024 * 1024;
@@ -1853,6 +1853,7 @@ impl Decoder<'_> {
 pub(super) struct ImportFeatures {
     pub packed_roughness: bool,
     pub place_spots: bool,
+    pub place_orthographic: bool,
     pub emission: bool,
     pub double_sided: bool,
     pub uv_transforms: bool,
@@ -1862,6 +1863,7 @@ impl ImportFeatures {
     const CURRENT: Self = Self {
         packed_roughness: true,
         place_spots: true,
+        place_orthographic: true,
         emission: true,
         double_sided: true,
         uv_transforms: true,
@@ -1881,6 +1883,7 @@ pub(super) fn decode_accepted(
     let ImportFeatures {
         packed_roughness,
         place_spots,
+        place_orthographic,
         emission,
         double_sided,
         uv_transforms,
@@ -1939,7 +1942,7 @@ pub(super) fn decode_accepted(
         .cameras
         .iter()
         .enumerate()
-        .map(|(index, camera)| camera.admit(index))
+        .map(|(index, camera)| camera.admit(index, place_orthographic))
         .collect::<Result<Vec<_>, _>>()?;
     let bin = &bin[..buffer.byte_length];
     let roots = doc.scenes[0].nodes.clone();

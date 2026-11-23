@@ -151,6 +151,9 @@ pub(super) fn read_accepted(root: &Path, info: &ModelInfo) -> Result<DecodedMode
         warning.starts_with("Light ")
             && warning.ends_with(": Skipped spot light. Its node is kept.")
     });
+    let place_orthographic = !info.warnings.iter().any(|warning| {
+        warning.starts_with("GLB camera ") && warning.ends_with(": skipped orthographic lens.")
+    });
     let emission = !info.materials.keys().any(|name| {
         info.warnings.iter().any(|warning| {
             warning
@@ -186,6 +189,7 @@ pub(super) fn read_accepted(root: &Path, info: &ModelInfo) -> Result<DecodedMode
         glb::ImportFeatures {
             packed_roughness,
             place_spots,
+            place_orthographic,
             emission,
             double_sided,
             uv_transforms,
@@ -683,6 +687,7 @@ mod tests {
             glb::ImportFeatures {
                 packed_roughness: false,
                 place_spots: true,
+                place_orthographic: true,
                 emission: false,
                 double_sided: false,
                 uv_transforms: false,
@@ -913,12 +918,12 @@ mod tests {
         assert_eq!(first.nodes["Rig/Base"].camera, Some(lens));
         assert_eq!(
             lens,
-            crate::ModelCamera {
+            crate::ModelCamera::Perspective(crate::ModelPerspectiveCamera {
                 vertical_fov_degrees: 49.,
                 aspect_ratio: Some(1.5),
                 near: 0.35,
                 far: None
-            }
+            })
         );
         assert!(first.nodes["Rig/Sun"].camera.is_none());
         assert!(first.nodes["Rig/Spot"].camera.is_none());
@@ -951,6 +956,7 @@ mod tests {
             glb::ImportFeatures {
                 packed_roughness: true,
                 place_spots: false,
+                place_orthographic: true,
                 emission: true,
                 double_sided: false,
                 uv_transforms: false,

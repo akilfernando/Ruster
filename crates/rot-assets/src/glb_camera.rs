@@ -1,10 +1,27 @@
 use super::{error, present, AssetError};
 use serde::{de::IgnoredAny, Deserialize, Serialize};
 
-/// A perspective lens attached to an original GLB node.
+/// A lens attached to an original GLB node. The old perspective object
+/// keeps its existing catalog wire shape.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ModelCamera {
+    Perspective(ModelPerspectiveCamera),
+    Orthographic(ModelOrthographicCamera),
+}
+
+impl ModelCamera {
+    pub(crate) fn is_valid(self) -> bool {
+        match self {
+            Self::Perspective(lens) => lens.is_valid(),
+            Self::Orthographic(lens) => lens.is_valid(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ModelCamera {
+pub struct ModelPerspectiveCamera {
     pub vertical_fov_degrees: f32,
     #[serde(
         default,
@@ -21,8 +38,8 @@ pub struct ModelCamera {
     pub far: Option<f32>,
 }
 
-impl ModelCamera {
-    pub(crate) fn is_valid(self) -> bool {
+impl ModelPerspectiveCamera {
+    fn is_valid(self) -> bool {
         (10. ..=120.).contains(&self.vertical_fov_degrees)
             && self
                 .aspect_ratio
@@ -36,6 +53,32 @@ impl ModelCamera {
                     && far > near
                     && (2. * near * far / (far - near)) <= f64::from(f32::MAX)
             })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelOrthographicCamera {
+    pub vertical_size: f32,
+    pub aspect_ratio: f32,
+    pub near: f32,
+    pub far: f32,
+}
+
+impl ModelOrthographicCamera {
+    fn is_valid(self) -> bool {
+        // Match CameraView's shared Vulkan/overlay representability bounds.
+        let near = f64::from(self.near);
+        let far = f64::from(self.far);
+        let span = far - near;
+        (0.01..=10_000.).contains(&self.vertical_size)
+            && (0.01..=100.).contains(&self.aspect_ratio)
+            && near > 0.
+            && near.is_finite()
+            && far.is_finite()
+            && far > near
+            && ((2. / span) as f32).is_finite()
+            && (((far + near) / span) as f32).is_finite()
     }
 }
 
@@ -97,7 +140,11 @@ pub(super) struct AdmittedCamera {
 }
 
 impl SourceCamera {
-    pub(super) fn admit(&self, index: usize) -> Result<AdmittedCamera, AssetError> {
+    pub(super) fn admit(
+        &self,
+        index: usize,
+        place_orthographic: bool,
+    ) -> Result<AdmittedCamera, AssetError> {
         let name: String = self
             .name
             .chars()
@@ -122,14 +169,14 @@ impl SourceCamera {
                 let near = p.znear as f32;
                 let far = p.zfar.map(|far| far as f32);
                 let aspect_ratio = p.aspect_ratio.map(|ratio| ratio as f32);
-                let lens = ModelCamera {
+                let lens = ModelPerspectiveCamera {
                     vertical_fov_degrees: p.yfov.to_degrees() as f32,
                     aspect_ratio,
                     near,
                     far,
                 };
                 if lens.is_valid() {
-                    (Some(lens), None)
+                    (Some(ModelCamera::Perspective(lens)), None)
                 } else {
                     (
                         None,
@@ -143,7 +190,30 @@ impl SourceCamera {
                 if o.xmag == 0. || o.ymag == 0. || o.znear < 0. || o.zfar <= o.znear {
                     return Err(reject("orthographic magnification must be nonzero and clip planes must be ordered"));
                 }
-                (None, Some(format!("{label}: skipped orthographic lens.")))
+                let (lens, reason) = if !place_orthographic {
+                    (None, "")
+                } else if o.xmag < 0. || o.ymag < 0. {
+                    (None, " Use positive X and Y magnifications.")
+                } else if o.znear == 0. {
+                    (None, " Use a positive near clip plane.")
+                } else {
+                    let lens = ModelOrthographicCamera {
+                        vertical_size: (2. * o.ymag) as f32,
+                        aspect_ratio: (o.xmag / o.ymag) as f32,
+                        near: o.znear as f32,
+                        far: o.zfar as f32,
+                    };
+                    if lens.is_valid() {
+                        (Some(ModelCamera::Orthographic(lens)), "")
+                    } else {
+                        (None, " Use Vertical Size 0.01–10000, aspect 0.01–100 and representable clip depths.")
+                    }
+                };
+                (
+                    lens,
+                    lens.is_none()
+                        .then(|| format!("{label}: skipped orthographic lens.{reason}")),
+                )
             }
             _ => return Err(reject("camera type must match exactly one lens definition")),
         };

@@ -29,7 +29,8 @@ pub use audio::{
 };
 pub use glb::{
     ClipProperty, ClipTarget, ModelCamera, ModelClip, ModelInfo, ModelLight, ModelMaterial,
-    ModelNode, MAX_CLIP_BYTES, MAX_GLB_SOURCE_BYTES, MAX_MODEL_CLIPS,
+    ModelNode, ModelOrthographicCamera, ModelPerspectiveCamera, MAX_CLIP_BYTES,
+    MAX_GLB_SOURCE_BYTES, MAX_MODEL_CLIPS,
 };
 #[doc(hidden)]
 pub mod fixtures;

@@ -203,21 +203,37 @@ impl ComponentWorkspace {
                 });
             }
             if let Some(camera) = node.camera {
-                use rot_scene::component_scene::{CameraClip, CameraView};
-
-                components.push(ComponentInstance {
-                    id: format!("{id}-camera"),
-                    enabled: true,
-                    kind: Component::Camera {
-                        view: CameraView::transform_perspective_with_lens(
+                use rot_assets::ModelCamera;
+                use rot_scene::component_scene::{
+                    CameraClip, CameraView, OrthographicClip, TransformLens, TransformOrthographic,
+                };
+                let view = match camera {
+                    ModelCamera::Perspective(camera) => {
+                        CameraView::transform_perspective_with_lens(
                             camera.vertical_fov_degrees,
                             camera.aspect_ratio,
                             Some(CameraClip {
                                 near: camera.near,
                                 far: camera.far,
                             }),
-                        ),
-                    },
+                        )
+                    }
+                    ModelCamera::Orthographic(camera) => CameraView::Transform(
+                        TransformLens::Orthographic(TransformOrthographic::new(
+                            camera.vertical_size,
+                            Some(camera.aspect_ratio),
+                            OrthographicClip {
+                                near: camera.near,
+                                far: camera.far,
+                            },
+                        )),
+                    ),
+                };
+
+                components.push(ComponentInstance {
+                    id: format!("{id}-camera"),
+                    enabled: true,
+                    kind: Component::Camera { view },
                 });
             }
             objects.push(ObjectNode {

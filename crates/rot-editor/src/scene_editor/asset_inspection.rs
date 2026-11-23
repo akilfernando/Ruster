@@ -147,6 +147,14 @@ pub(super) fn model_summary(model: &rot_assets::ModelInfo) -> Value {
     if camera_count != 0 {
         result["camera_count"] = json!(camera_count);
     }
+    let orthographic_camera_count = model
+        .nodes
+        .values()
+        .filter(|node| matches!(node.camera, Some(rot_assets::ModelCamera::Orthographic(_))))
+        .count();
+    if orthographic_camera_count != 0 {
+        result["orthographic_camera_count"] = json!(orthographic_camera_count);
+    }
     let light_count = model
         .nodes
         .values()
@@ -162,11 +170,23 @@ pub(super) fn model_summary(model: &rot_assets::ModelInfo) -> Value {
                 || message.contains("Base Color UV transform")
                 || message.contains("Base Color map omitted")
         };
+        let camera_warning = |message: &str| message.starts_with("GLB camera ");
         let warnings: Vec<String> = model
             .warnings
             .iter()
-            .filter(|message| priority(message))
-            .chain(model.warnings.iter().filter(|message| !priority(message)))
+            .filter(|message| camera_warning(message))
+            .chain(
+                model
+                    .warnings
+                    .iter()
+                    .filter(|message| !camera_warning(message) && priority(message)),
+            )
+            .chain(
+                model
+                    .warnings
+                    .iter()
+                    .filter(|message| !camera_warning(message) && !priority(message)),
+            )
             .take(PREVIEW_WARNINGS)
             .map(|message| message.chars().take(DIAGNOSTIC_CHARS).collect())
             .collect();
