@@ -80,6 +80,16 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+The built-in **Cylinder** is centered, 2 units tall along local Y and
+0.5 units in radius. A numbered conveyor roller verified the side wrap,
+both flat cap textures, end-on cap picking and its cast shadow. An
+approved Claude edit placed a second roller in its parent frame and
+shared Undo. A relocated Vulkan build used one texture and no external
+mesh. At 1,000 instances, median release extraction p95 was 0.233 ms
+built-in and 0.377 ms for the imported reference with the same triangles.
+GPU scene p95 was 0.340 and 0.337 ms. Shadow p95 was 0.079 and
+0.077 ms. Both used one scene draw and no mesh uploads in warmed frames. The importer expanded its vertex buffer.
+
 After an unexpected exit, **Recover as New Scene** opens the latest
 completed v23 checkpoint as a sibling. Native and approved Claude edits
 survived a private editor crash and the recovered script ran after opening
