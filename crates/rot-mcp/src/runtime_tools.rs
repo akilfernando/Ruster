@@ -282,6 +282,23 @@ mod tests {
             step["inputSchema"]["properties"]["input_frame"]["maxProperties"],
             32
         );
+        let advertised = super::super::listed();
+        let brief = advertised["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "behavior_runtime_step")
+            .unwrap()["description"]
+            .as_str()
+            .unwrap();
+        let (example, _) = brief
+            .split_once("Example input_frame: ")
+            .unwrap()
+            .1
+            .split_once(". Axis values")
+            .unwrap();
+        let example: Value = serde_json::from_str(example).unwrap();
+        assert!(valid_input_frame(&example));
         let mut state = json!({"expected_session_token":"session","expected_revision":"3",
             "expected_run_id":"1:2:3","expected_tick":"9007199254740993",
             "binding_id":"application","source_hash":null,"schema_hash":"ab".repeat(32)});
