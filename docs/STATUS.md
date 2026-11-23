@@ -90,7 +90,12 @@ clients can page the same issues, including sources with no asset ID. A
 relocated build loaded 80 meshes.
 The v23 Mesh Renderer can create and assign a textured material or edit
 an existing shared definition. The editor shows its affected object count.
-Native edits and approved MCP commands share Undo and preserve scene
+Make Unique copies the assigned material for one standalone Mesh Renderer,
+including when an object has several renderers. The draft shows the exact
+scope and starts with the same texture references. Apply and approved MCP
+copy share one Undo step for creation and assignment. The independently
+edited finish survives reopen and Linux Build. Native edits and approved MCP
+commands preserve scene
 material edits when the source GLB is reimported. Assets can import an
 additional linear Roughness interpretation of a PNG, and the shared
 material dialog can select, replace or clear it. Edit → Scene Display
