@@ -219,7 +219,8 @@ connected project.
   startup choice (default/configured/invalid), and the sources used by
   Hub, Play and native Build. Project Settings is the creator's write
   surface. The existing registered connection remains pinned to its
-  approved scene path, regardless of the startup selection.
+  approved scene path, regardless of the startup selection. During startup
+  preparation, the Linux build status is `preparing`.
 - For a v23 Box Collider, use `scene_components_inspect` with the exact
   `object_id` and `component_id`. The component's `offset` and
   `shape.half_extents` are local. `collider_world` reports its resolved

@@ -188,8 +188,19 @@ impl ComponentSession {
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SceneError> {
         let lock = SceneLock::acquire(path.as_ref())?;
+        Self::from_open_file(&lock.path, File::open(&lock.path)?)
+    }
+
+    /// Decode a regular file opened by a caller that has pinned its pathname
+    /// and identity. Later saves still verify the original content digest.
+    pub fn from_open_file(path: &Path, file: File) -> Result<Self, SceneError> {
+        if !path.is_absolute() || !file.metadata()?.is_file() {
+            return Err(SceneError::Invalid(
+                "Expected an absolute saved scene and a regular file.".into(),
+            ));
+        }
         let mut input = SceneInput {
-            file: File::open(&lock.path)?,
+            file,
             digest: Sha256::new(),
         };
         let scene = ComponentScene::read_json(&mut input)?;
@@ -197,7 +208,7 @@ impl ComponentSession {
         Ok(Self::from_saved(
             scene,
             SavedDocument {
-                path: lock.path.clone(),
+                path: path.to_path_buf(),
                 digest: input.digest.finalize().into(),
                 bytes,
             },

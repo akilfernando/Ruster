@@ -418,7 +418,7 @@ enum BuildOutcome {
 #[derive(Default)]
 pub(super) struct BuildUi {
     path: Option<String>,
-    startup: Option<Result<BuildStartup, String>>,
+    startup: Option<StartupSelection>,
     focus: bool,
     worker: Option<BuildWorker>,
     outcome: Option<BuildOutcome>,
@@ -431,14 +431,46 @@ struct BuildStartup {
     saved: Option<Box<ComponentSession>>,
 }
 
-impl BuildStartup {
-    fn prepare(observed: super::project_startup::Observation) -> Result<Self, String> {
-        let saved = if observed.choice().map_err(str::to_owned)?.is_some() {
-            observed.with_source(|selected| Ok(selected.map(|(_, session)| Box::new(session))))?
-        } else {
-            None
+enum StartupSelection {
+    Preparing {
+        file: String,
+        result: mpsc::Receiver<Result<Box<BuildStartup>, String>>,
+    },
+    Ready(Result<Box<BuildStartup>, String>),
+}
+
+impl StartupSelection {
+    fn prepare(observed: Result<super::project_startup::Observation, String>) -> Self {
+        let observed = match observed {
+            Ok(observed) => observed,
+            Err(error) => return Self::Ready(Err(error)),
         };
-        Ok(Self { observed, saved })
+        let file = match observed.choice() {
+            Ok(Some((file, _))) => file.to_owned(),
+            Ok(None) => {
+                return Self::Ready(Ok(Box::new(BuildStartup {
+                    observed,
+                    saved: None,
+                })))
+            }
+            Err(reason) => return Self::Ready(Err(reason.to_owned())),
+        };
+        let (sender, result) = mpsc::sync_channel(1);
+        let worker = std::thread::Builder::new()
+            .name("rot-startup".into())
+            .spawn(move || {
+                let loaded = observed.load_startup().map(|saved| {
+                    Box::new(BuildStartup {
+                        observed,
+                        saved: Some(Box::new(saved)),
+                    })
+                });
+                let _ = sender.send(loaded);
+            });
+        match worker {
+            Ok(_) => Self::Preparing { file, result },
+            Err(error) => Self::Ready(Err(error.to_string())),
+        }
     }
 }
 
@@ -461,13 +493,13 @@ impl BuildUi {
         id: &str,
         startup: Result<super::project_startup::Observation, String>,
     ) {
-        self.startup = Some(startup.and_then(BuildStartup::prepare));
-        let id = self
-            .startup
+        let id = startup
             .as_ref()
-            .and_then(|startup| startup.as_ref().ok())
-            .and_then(|startup| startup.observed.choice().ok().flatten())
-            .map_or(id, |(_, id)| id);
+            .ok()
+            .and_then(|startup| startup.choice().ok().flatten())
+            .map_or(id, |(_, id)| id)
+            .to_owned();
+        self.startup = Some(StartupSelection::prepare(startup));
         let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         self.path = Some(
             path.parent()
@@ -503,6 +535,9 @@ impl BuildUi {
 
         let (state, published, failure) = match &self.outcome {
             _ if self.worker.is_some() => ("building", false, None),
+            _ if matches!(&self.startup, Some(StartupSelection::Preparing { .. })) => {
+                ("preparing", false, None)
+            }
             None => ("idle", false, None),
             Some(BuildOutcome::Cancelled) => ("cancelled", false, None),
             Some(BuildOutcome::Failed(failure)) => ("failed", false, Some(failure)),
@@ -518,6 +553,18 @@ impl BuildUi {
     }
 
     pub(super) fn poll(&mut self) {
+        if let Some(StartupSelection::Preparing { result, .. }) = &self.startup {
+            let completed = match result.try_recv() {
+                Ok(result) => Some(result),
+                Err(mpsc::TryRecvError::Disconnected) => Some(Err(
+                    "Startup preparation stopped. Close and reopen Build.".into(),
+                )),
+                Err(mpsc::TryRecvError::Empty) => None,
+            };
+            if let Some(completed) = completed {
+                self.startup = Some(StartupSelection::Ready(completed));
+            }
+        }
         let Some(worker) = &self.worker else { return };
         let result = match worker.result.try_recv() {
             Ok(result) => result,
@@ -632,26 +679,33 @@ impl BuildUi {
                 if std::mem::take(&mut self.focus) {
                     edit.request_focus();
                 }
-                let selection = self
-                    .startup
-                    .as_ref()
-                    .expect("opened Build")
-                    .as_ref()
-                    .map_err(String::as_str)
-                    .and_then(|startup| startup.observed.choice());
+                let selection = match self.startup.as_ref().expect("opened Build") {
+                    StartupSelection::Preparing { file, .. } => {
+                        ui.label(format!("{}  {file}", Text::StartupScene.plain()));
+                        ui.weak(Text::StartupPreparing.plain());
+                        ctx.request_repaint_after(std::time::Duration::from_millis(16));
+                        None
+                    }
+                    StartupSelection::Ready(result) => Some(
+                        result
+                            .as_ref()
+                            .map_err(String::as_str)
+                            .and_then(|startup| startup.observed.choice()),
+                    ),
+                };
                 let saved = match selection {
-                    Ok(Some((file, _))) => {
+                    Some(Ok(Some((file, _)))) => {
                         ui.label(format!("{}  {file}", Text::StartupScene.plain()));
                         true
                     }
-                    Ok(None) => {
+                    Some(Ok(None)) => {
                         let saved = !draft_dirty && !session.is_dirty();
                         if !saved {
                             ui.label(Text::ComponentSaveBeforeBuild.plain());
                         }
                         saved
                     }
-                    Err(reason) => {
+                    Some(Err(reason)) => {
                         let reason: String = reason.chars().take(240).collect();
                         ui.add(
                             egui::Label::new(
@@ -661,6 +715,7 @@ impl BuildUi {
                         );
                         false
                     }
+                    None => false,
                 };
                 let enter = (edit.has_focus() || edit.lost_focus())
                     && ui.input_mut(|input| {
@@ -771,10 +826,10 @@ impl BuildUi {
         session: &ComponentSession,
         assets: Option<&AssetStore>,
     ) -> Result<BuildRequest, BuildFailure> {
-        let observation = self
-            .startup
-            .as_ref()
-            .expect("opened Build")
+        let Some(StartupSelection::Ready(observation)) = &self.startup else {
+            return Err(BuildFailureKind::SceneUnavailable.detail(Text::StartupPreparing.plain()));
+        };
+        let observation = observation
             .as_ref()
             .map_err(|error| BuildFailureKind::SceneUnavailable.detail(error))?;
         // Keep typed build asset failures distinct from settings conflicts.
@@ -908,6 +963,39 @@ f 1 2 3
         let title_bytes = fs::read(&target_file).unwrap();
         let mut build = BuildUi::default();
         build.open(&active_file, "active", project.observe());
+        // A request cannot capture while preparing. Escape retires its receiver
+        // even if the detached worker has already loaded a scene.
+        assert!(build
+            .capture_project_request(&active, Some(&assets))
+            .is_err());
+        assert_eq!(
+            build.inspect(),
+            json!({"state":"preparing", "published":false, "failure":null})
+        );
+        let ctx = egui::Context::default();
+        ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| build.show(ui.ctx(), &active, Some(&assets), false),
+        )
+        .textures_delta
+        .clear();
+        assert!(!build.is_open() && build.startup.is_none());
+        build.open(&active_file, "active", project.observe());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while matches!(&build.startup, Some(StartupSelection::Preparing { .. })) {
+            assert!(std::time::Instant::now() < deadline);
+            build.poll();
+            std::thread::yield_now();
+        }
         let request = build
             .capture_project_request(&active, Some(&assets))
             .unwrap();

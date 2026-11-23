@@ -504,6 +504,34 @@ impl Observation {
         })
     }
 
+    /// Prepare the exact opened regular file for Build without keeping a
+    /// publication lock held while its scene is parsed on the worker.
+    #[cfg(target_os = "linux")]
+    pub(super) fn load_startup(&self) -> Result<ComponentSession, String> {
+        self.verify_settings()?;
+        let (source, expected) = self
+            .target
+            .as_ref()
+            .map_err(Clone::clone)?
+            .as_ref()
+            .ok_or("Choose a startup scene first.")?;
+        let path = self.verify_target(source, expected)?;
+        let file = self.open_regular(&source.file).map_err(error)?;
+        if stamp(&file)? != *expected {
+            return Err(CHANGED.into());
+        }
+        let session = ComponentSession::from_open_file(&path, file).map_err(error)?;
+        if session.scene().id != source.scene_id {
+            return Err(
+                "Startup Scene now has a different scene ID. Choose it again in Project Settings."
+                    .into(),
+            );
+        }
+        self.verify_target(source, expected)?;
+        self.verify_settings()?;
+        Ok(session)
+    }
+
     pub(super) fn with_source<T>(
         &self,
         run: impl FnOnce(Option<(&Path, ComponentSession)>) -> Result<T, String>,

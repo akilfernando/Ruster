@@ -927,6 +927,7 @@ editor_text! {
     NotSet => "Not set",
     ProjectSettings => "Project Settings",
     RuntimeKit => "Runtime Kit",
+    StartupPreparing => "Preparing startup scene…",
     StartupUseSaved => "Use Current Saved Scene",
     StartupReset => "Reset to Default",
     StartupDefault => "Default",
