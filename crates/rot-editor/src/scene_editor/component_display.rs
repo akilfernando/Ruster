@@ -400,7 +400,7 @@ mod tests {
         assert_eq!(changed["result"]["background"], json!(hex));
         let reset = scene_display(&mut editor, "2", json!({"background":null}));
         assert_eq!(reset["result"]["background"], serde_json::Value::Null);
-        assert_eq!(reset["result"]["display"]["exposure_stops"], 2);
+        assert_eq!(reset["result"]["display"]["exposure_stops"], 2.0);
         let undo = editor.ai_command(
             "scene",
             "scene_undo",
