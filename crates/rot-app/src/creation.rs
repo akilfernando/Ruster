@@ -925,7 +925,7 @@ mod tests {
     use crate::Content;
 
     #[test]
-    fn active_transform_camera_refuses_behavior_but_dormant_lens_allows_it() {
+    fn behavior_accepts_active_and_dormant_transform_lenses() {
         use rot_scene::{
             component_scene::{CameraView, ComponentInstance},
             BehaviorSource,
@@ -952,14 +952,14 @@ mod tests {
             RuntimeScene::Behavior(_)
         ));
         scene.gameplay_camera = Some("lens".into());
-        assert!(
-            matches!(RuntimeScene::from_components(Box::new(scene.clone())),
-            Err(error) if error.contains("Activate a Fixed or Follow camera"))
-        );
+        assert!(matches!(
+            RuntimeScene::from_components(Box::new(scene.clone())).unwrap(),
+            RuntimeScene::Behavior(session) if session.transform_camera_binding().is_some()
+        ));
         scene.objects[0].components.last_mut().unwrap().enabled = false;
         assert!(
             matches!(RuntimeScene::from_components(Box::new(scene)).unwrap(),
-            RuntimeScene::Behavior(session) if session.scene().player_view.is_none())
+            RuntimeScene::Behavior(session) if session.transform_camera_binding().is_none() && session.scene().player_view.is_none())
         );
     }
 

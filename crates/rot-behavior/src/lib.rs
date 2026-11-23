@@ -12,6 +12,7 @@ use std::sync::{
 use mlua::chunk::ChunkMode;
 use mlua::debug::DebugEvent;
 use mlua::{Function, HookTriggers, Lua, LuaOptions, StdLib, Table, Value, VmState};
+use rot_scene::component_scene::{TransformCameraBinding, TransformCameraPose};
 use rot_scene::input::{ActionFrame, ActionValue, ValidatedActionFrame};
 use rot_scene::{
     AnimationBinding, Authoring, BehaviorBinding, BehaviorSource, Clip, PropertyValue, Scene,
@@ -227,6 +228,20 @@ pub fn decode_clips<'a>(
         .collect()
 }
 
+fn resolve_transform_camera(
+    binding: Option<&TransformCameraBinding>,
+    scene: &Scene,
+    phase: Phase,
+) -> Result<Option<TransformCameraPose>, Diagnostic> {
+    binding
+        .map(|binding| {
+            binding.resolve(scene).map_err(|error| {
+                Diagnostic::plain(DiagnosticCode::InvalidOutput, phase, &error.to_string())
+            })
+        })
+        .transpose()
+}
+
 /// No VM handles escape. Authored source/properties stay fixed until explicit Reset.
 #[derive(Clone, Debug)]
 pub struct Runtime {
@@ -244,9 +259,14 @@ pub struct Runtime {
     kinematic_owner: Option<KinematicOwner>,
     /// Clip bindings resolved at Reset; fixed for this Runtime.
     animations: Arc<Vec<(AnimationBinding, Arc<Clip>)>>,
+    transform_camera_binding: Option<Arc<TransformCameraBinding>>,
+    transform_camera: Option<TransformCameraPose>,
     state: Arc<RuntimeState>,
 }
 impl Runtime {
+    pub fn transform_camera(&self) -> Option<TransformCameraPose> {
+        self.transform_camera
+    }
     pub fn authoring_snapshot(&self) -> &Arc<Authoring> {
         &self.authoring
     }
@@ -663,6 +683,15 @@ impl Engine {
     /// Trial every enabled module/update at dt0; discard output and commit no time.
     /// Failure leaves any previously returned Runtime entirely under caller ownership.
     pub fn reset(&mut self, scene: &Scene, authoring: &Authoring) -> Result<Runtime, Diagnostic> {
+        self.reset_with_transform_camera(scene, authoring, None)
+    }
+
+    pub fn reset_with_transform_camera(
+        &mut self,
+        scene: &Scene,
+        authoring: &Authoring,
+        transform_camera_binding: Option<Arc<TransformCameraBinding>>,
+    ) -> Result<Runtime, Diagnostic> {
         scene
             .validate()
             .and_then(|()| authoring.validate(scene))
@@ -781,6 +810,8 @@ impl Engine {
         }
         trial_state.validate_total()?;
         self.check_cancelled()?;
+        let transform_camera =
+            resolve_transform_camera(transform_camera_binding.as_deref(), scene, Phase::Setup)?;
         Ok(Runtime {
             scene: scene.clone(),
             authoring: Arc::new(authoring.clone()),
@@ -801,6 +832,8 @@ impl Engine {
             has_sound_binding,
             kinematic_owner,
             animations,
+            transform_camera_binding,
+            transform_camera,
             state,
         })
     }
@@ -930,6 +963,11 @@ impl Engine {
         validate_player_view_commit(&staged)?;
         staged_state.validate_total()?;
         self.check_cancelled()?;
+        let transform_camera = resolve_transform_camera(
+            runtime.transform_camera_binding.as_deref(),
+            &staged,
+            Phase::Commit,
+        )?;
         let observations =
             queries.map_or_else(Vec::new, |queries| queries.observations.into_inner());
         let cues = audio.into_inner();
@@ -938,6 +976,7 @@ impl Engine {
             commit_revision,
             cues,
         });
+        runtime.transform_camera = transform_camera;
         runtime.scene = staged;
         runtime.tick = next;
         runtime.commit_revision = commit_revision;

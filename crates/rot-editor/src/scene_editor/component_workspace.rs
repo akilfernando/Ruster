@@ -1534,12 +1534,10 @@ impl ComponentWorkspace {
         self.camera_authoring
             .begin_frame(frame.is_some(), &mut self.navigation);
         self.navigation.player_view = frame.as_ref().is_some_and(|frame| {
-            frame
-                .static_preview
-                .as_ref()
-                .map_or(scene.player_view.is_some(), |preview| {
-                    preview.has_player_camera()
-                })
+            frame.static_preview.as_ref().map_or(
+                frame.transform_camera().is_some() || scene.player_view.is_some(),
+                |preview| preview.has_player_camera(),
+            )
         });
         self.navigation.capture_camera_label =
             (!self.runtime.in_play_mode()).then_some(Text::SetGameCameraFromView.plain());
@@ -1577,6 +1575,7 @@ impl ComponentWorkspace {
                 .as_ref()
                 .and_then(|frame| frame.hidden_mesh_renderers.clone()),
         );
+        surface.set_transform_camera(frame.as_ref().and_then(|frame| frame.transform_camera()));
         let preview = match &frame {
             Some(frame) => frame.static_preview.as_deref(),
             None => self.transform_tool.preview().or(self.preview.as_ref().ok()),

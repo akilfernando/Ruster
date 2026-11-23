@@ -2117,6 +2117,7 @@ enum Request {
         scene: Arc<rot_scene::Scene>,
         authoring: Arc<rot_scene::Authoring>,
         hidden_mesh_renderers: Option<rot_scene::HiddenMeshRenderers>,
+        transform_camera: Option<Arc<rot_scene::component_scene::TransformCameraBinding>>,
         sounds: BTreeMap<String, Arc<rot_assets::AudioClip>>,
         clips: Arc<rot_behavior::Clips>,
     },
@@ -2152,6 +2153,7 @@ impl Request {
                 scene,
                 authoring,
                 hidden_mesh_renderers,
+                transform_camera,
                 sounds,
                 clips,
             } => VmCommand::Reset {
@@ -2159,6 +2161,7 @@ impl Request {
                 scene: scene.clone(),
                 authoring: authoring.clone(),
                 hidden_mesh_renderers: hidden_mesh_renderers.clone(),
+                transform_camera: transform_camera.clone(),
                 sounds: sounds.clone(),
                 clips: clips.clone(),
             },
@@ -2514,11 +2517,12 @@ impl RuntimeUi {
                 return Ok(key);
             }
         }
-        let (mut scene, authoring, hidden_mesh_renderers) = match source {
+        let (mut scene, authoring, hidden_mesh_renderers, transform_camera) = match source {
             RuntimeSource::Legacy(session) => (
                 session.scene().clone(),
                 session.authoring().clone(),
                 session.hidden_mesh_renderers().cloned(),
+                session.transform_camera_binding().cloned(),
             ),
             RuntimeSource::Components(session) => {
                 let scene = session.scene();
@@ -2528,7 +2532,12 @@ impl RuntimeUi {
                     .unwrap_or(scene)
                     .behavior_projection()
                     .map_err(|error| error.to_string())?;
-                (input.scene, input.authoring, input.hidden_mesh_renderers)
+                (
+                    input.scene,
+                    input.authoring,
+                    input.hidden_mesh_renderers,
+                    input.transform_camera,
+                )
             }
         };
         scene.revision = source.revision();
@@ -2554,6 +2563,7 @@ impl RuntimeUi {
             scene: Arc::new(scene),
             authoring,
             hidden_mesh_renderers,
+            transform_camera,
             sounds,
             clips,
         });
@@ -3154,6 +3164,19 @@ impl RuntimeUi {
             self.spatial_feedback_summary(ui);
         }
     }
+}
+
+#[cfg(unix)]
+pub(crate) fn transform_camera_observation(
+    camera: rot_scene::component_scene::TransformCameraPose,
+) -> serde_json::Value {
+    use serde_json::json;
+    let matrices: Vec<_> = [[960, 720], [1280, 720]].into_iter()
+        .filter_map(|output| rot_render::transform_camera_output_projection(camera, output)
+            .map(|(projection, content)|
+                json!({"aspect": output[0] as f32 / output[1] as f32, "output_pixels":output, "content_rect":content, "eye":projection.eye, "view":projection.view, "projection":projection.projection})))
+        .collect();
+    json!({"resolved":camera, "matrices":matrices})
 }
 
 #[cfg(test)]
@@ -4378,6 +4401,7 @@ mod tests {
                 last_step_commit_revision: None,
                 commit_revision_required: false,
                 static_preview: None,
+                resolved_transform_camera: None,
                 hidden_mesh_renderers: None,
                 command_schema_hash: None,
                 authoring: Arc::new(Default::default()),
@@ -4408,6 +4432,7 @@ mod tests {
             last_step_commit_revision: None,
             commit_revision_required: false,
             static_preview: None,
+            resolved_transform_camera: None,
             hidden_mesh_renderers: None,
             command_schema_hash: None,
             authoring: Arc::new(Default::default()),
@@ -4430,6 +4455,7 @@ mod tests {
             last_step_commit_revision: None,
             commit_revision_required: false,
             static_preview: None,
+            resolved_transform_camera: None,
             hidden_mesh_renderers: None,
             command_schema_hash: None,
             authoring: Arc::new(Default::default()),

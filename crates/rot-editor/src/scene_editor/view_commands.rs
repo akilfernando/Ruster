@@ -326,6 +326,7 @@ mod tests {
             last_step_commit_revision: None,
             commit_revision_required: false,
             static_preview: None,
+            resolved_transform_camera: None,
             hidden_mesh_renderers: None,
             command_schema_hash: None,
             authoring: std::sync::Arc::new(Default::default()),

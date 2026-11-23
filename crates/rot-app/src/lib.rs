@@ -41,6 +41,7 @@ fn checked_texture_bytes(current: usize, additional: usize) -> Result<usize, Str
 /// Construct a new Content to replace meshes; this keeps retained GPU identities stable.
 #[derive(Clone)]
 pub struct Content {
+    transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
     hidden_mesh_renderers: Option<rot_scene::HiddenMeshRenderers>,
     scene: ContentScene,
     meshes: MeshMap,
@@ -100,6 +101,7 @@ impl Content {
         })?;
         let content = Self {
             hidden_mesh_renderers: None,
+            transform_camera: None,
             scene,
             meshes,
             textures,
@@ -121,14 +123,16 @@ impl Content {
     }
     pub fn has_player_camera(&self) -> bool {
         match &self.scene {
-            ContentScene::Behavior(scene) => scene.player_view.is_some(),
+            ContentScene::Behavior(scene) => {
+                self.transform_camera.is_some() || scene.player_view.is_some()
+            }
             ContentScene::StaticHierarchy(preview) => preview.has_player_camera(),
         }
     }
 
     pub fn transform_camera(&self) -> Option<rot_scene::component_scene::TransformCameraPose> {
         match &self.scene {
-            ContentScene::Behavior(_) => None,
+            ContentScene::Behavior(_) => self.transform_camera,
             ContentScene::StaticHierarchy(preview) => preview.transform_camera(),
         }
     }
@@ -140,6 +144,13 @@ impl Content {
         };
         scene
     }
+    pub fn set_transform_camera(
+        &mut self,
+        camera: Option<rot_scene::component_scene::TransformCameraPose>,
+    ) {
+        self.transform_camera = camera;
+    }
+
     pub fn set_hidden_mesh_renderers(&mut self, hidden: Option<rot_scene::HiddenMeshRenderers>) {
         self.hidden_mesh_renderers = hidden;
     }

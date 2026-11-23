@@ -440,10 +440,16 @@ impl Application for GenericMotionLab {
         }
         let engine = self.engine.as_mut().expect("initialized engine");
         engine.set_clips(self.clips.clone());
-        let result = engine.reset(self.session.scene(), &authoring);
+        let result = engine.reset_with_transform_camera(
+            self.session.scene(),
+            &authoring,
+            self.session.transform_camera_binding().cloned(),
+        );
         let candidate = self.report(result)?;
         // Engine validated transforms; meshes remain the same immutable Content resources.
         *self.content.scene_mut() = candidate.scene().clone();
+        self.content
+            .set_transform_camera(candidate.transform_camera());
         self.content
             .set_hidden_mesh_renderers(self.session.hidden_mesh_renderers().cloned());
         self.hud_cache.clear();
@@ -577,12 +583,10 @@ impl Application for GenericMotionLab {
         }
         self.report(result)?;
         self.last_input = Some((step.tick, input, origin));
-        *self.content.scene_mut() = self
-            .runtime
-            .as_ref()
-            .expect("active runtime")
-            .scene()
-            .clone();
+        let runtime = self.runtime.as_ref().expect("active runtime");
+        *self.content.scene_mut() = runtime.scene().clone();
+        self.content
+            .set_transform_camera(runtime.transform_camera());
         self.diagnostic = None;
         Ok(())
     }

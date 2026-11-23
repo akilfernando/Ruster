@@ -34,7 +34,6 @@ enum BuildFailureKind {
     PlayerUnavailable,
     SceneUnavailable,
     AssetUnavailable,
-    TransformCameraRequiresStatic,
     BuildFailed,
     LaunchFailed,
 }
@@ -71,11 +70,6 @@ impl BuildFailureKind {
                 "asset_unavailable",
                 Text::BuildAssetUnavailable,
                 Text::BuildFixAsset,
-            ),
-            Self::TransformCameraRequiresStatic => (
-                "transform_camera_requires_static",
-                Text::CameraBuildStaticRequired,
-                Text::CameraBuildUseAnother,
             ),
             Self::BuildFailed => ("build_failed", Text::BuildFailed, Text::BuildCheckDetails),
             Self::LaunchFailed => (
@@ -162,13 +156,8 @@ impl BuildRequest {
             Some(resolved) => (resolved, Some(authored)),
             None => (authored, None),
         };
-        let scene = RuntimeScene::from_components_checked(Box::new(runtime)).map_err(|error| {
-            if matches!(error, rot_scene::SceneError::TransformCameraRequiresStatic) {
-                BuildFailureKind::TransformCameraRequiresStatic.detail(error)
-            } else {
-                BuildFailure::from(error.to_string())
-            }
-        })?;
+        let scene = RuntimeScene::from_components_checked(Box::new(runtime))
+            .map_err(|error| BuildFailure::from(error.to_string()))?;
         let dependencies = scene
             .draw_dependencies()
             .map_err(|error| BuildFailureKind::AssetUnavailable.detail(error))?;

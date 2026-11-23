@@ -482,6 +482,7 @@ impl<A: Application> Host<A> {
                     let content = app.content();
                     let selected = app.selected();
                     surface.set_hidden_mesh_renderers(content.hidden_mesh_renderers.clone());
+                    surface.set_transform_camera(content.transform_camera());
                     match &content.scene {
                         crate::ContentScene::Behavior(scene) => rot_render::render_viewport_with_materials(
                             ui, scene, selected.as_slice(), content.meshes(),

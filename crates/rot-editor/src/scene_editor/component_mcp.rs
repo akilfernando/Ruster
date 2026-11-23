@@ -1,6 +1,6 @@
 //! Guarded v23 commands dispatched only under the existing Host request lease.
 use super::{ComponentWorkspace, HierarchyDestination, RUNTIME_GENERATION};
-use crate::behavior_ui::RuntimeSource;
+use crate::behavior_ui::{transform_camera_observation, RuntimeSource};
 use crate::scene_editor::{asset_inspection, component_animation, runtime_commands};
 use crate::strings::Text;
 use rot_scene::component_scene::{
@@ -860,8 +860,7 @@ impl ComponentWorkspace {
         });
         let runtime = self.runtime.displayed_frame().map(|frame| json!({
             "tick":frame.tick.to_string(),"authored_revision":frame.key.authored_revision.to_string(),
-            "stale":self.runtime.stale,"camera":frame.static_preview.as_ref()
-                .and_then(|preview| preview.transform_camera())
+            "stale":self.runtime.stale,"camera":frame.transform_camera()
                 .map_or_else(|| camera_observation(&frame.scene), transform_camera_observation),
         }));
         json!({
@@ -1115,15 +1114,6 @@ fn single_renderer_geometry(
         ));
     }
     Ok((component_id, geometry))
-}
-
-fn transform_camera_observation(camera: rot_scene::component_scene::TransformCameraPose) -> Value {
-    let matrices: Vec<_> = [[960, 720], [1280, 720]].into_iter()
-        .filter_map(|output| rot_render::transform_camera_output_projection(camera, output)
-            .map(|(projection, content)|
-                json!({"aspect": output[0] as f32 / output[1] as f32, "output_pixels":output, "content_rect":content, "eye":projection.eye, "view":projection.view, "projection":projection.projection})))
-        .collect();
-    json!({"resolved":camera, "matrices":matrices})
 }
 
 type CommandError = (&'static str, String);

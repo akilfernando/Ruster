@@ -19,6 +19,7 @@ use crate::{
 
 #[path = "component_behavior.rs"]
 mod behavior;
+pub use behavior::TransformCameraBinding;
 #[path = "component_session.rs"]
 mod session;
 #[cfg(unix)]
@@ -124,6 +125,30 @@ pub struct TransformCameraPose {
     pub aspect_ratio: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clip: Option<CameraClip>,
+}
+
+impl TransformPerspective {
+    pub(crate) fn resolve_pose(
+        &self,
+        world: DMat4,
+        rotation: glam::DQuat,
+    ) -> Result<TransformCameraPose, SceneError> {
+        let eye = world.w_axis.truncate().as_vec3();
+        if !eye.is_finite() || !rotation.is_finite() {
+            return Err(SceneError::Invalid(
+                "Game Camera position or orientation exceeds renderer precision.".into(),
+            ));
+        }
+        let rotation = rotation.normalize();
+        Ok(TransformCameraPose {
+            eye: eye.to_array(),
+            forward: (rotation * -glam::DVec3::Z).as_vec3().to_array(),
+            up: (rotation * glam::DVec3::Y).as_vec3().to_array(),
+            vertical_fov_degrees: self.vertical_fov_degrees,
+            aspect_ratio: self.aspect_ratio,
+            clip: self.clip,
+        })
+    }
 }
 
 impl From<PlayerView> for CameraView {
@@ -586,13 +611,7 @@ impl ComponentScene {
         world: &[DMat4],
         lens: &TransformPerspective,
     ) -> Result<TransformCameraPose, SceneError> {
-        use glam::{DQuat, DVec3, EulerRot};
-        let eye = world[index].w_axis.truncate().as_vec3();
-        if !eye.is_finite() {
-            return Err(SceneError::Invalid(
-                "Game Camera position exceeds renderer precision.".into(),
-            ));
-        }
+        use glam::{DQuat, EulerRot};
         let mut rotation = DQuat::IDENTITY;
         let mut current = Some(index);
         while let Some(index) = current {
@@ -600,15 +619,7 @@ impl ComponentScene {
             rotation = DQuat::from_euler(EulerRot::ZYX, z, y, x) * rotation;
             current = hierarchy.parents[index];
         }
-        let rotation = rotation.normalize();
-        Ok(TransformCameraPose {
-            eye: eye.to_array(),
-            forward: (rotation * -DVec3::Z).as_vec3().to_array(),
-            up: (rotation * DVec3::Y).as_vec3().to_array(),
-            vertical_fov_degrees: lens.vertical_fov_degrees,
-            aspect_ratio: lens.aspect_ratio,
-            clip: lens.clip,
-        })
+        lens.resolve_pose(world[index], rotation)
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SceneError> {

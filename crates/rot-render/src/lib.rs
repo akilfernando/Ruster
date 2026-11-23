@@ -1181,6 +1181,7 @@ pub struct ViewportSurface {
     pub rect: egui::Rect,
     pub response: egui::Response,
     pub input_owned: bool,
+    transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
     hidden_mesh_renderers: Option<rot_scene::HiddenMeshRenderers>,
     camera_id: egui::Id,
     error_id: egui::Id,
@@ -1418,6 +1419,7 @@ pub fn allocate_viewport(
         rect,
         response,
         input_owned: false,
+        transform_camera: None,
         hidden_mesh_renderers: None,
         camera_id,
         error_id,
@@ -1689,6 +1691,13 @@ fn objects_in_rect(
 
 impl ViewportSurface {
     /// Apply the authored renderer visibility of the exact behavior frame being drawn.
+    pub fn set_transform_camera(
+        &mut self,
+        camera: Option<rot_scene::component_scene::TransformCameraPose>,
+    ) {
+        self.transform_camera = camera;
+    }
+
     pub fn set_hidden_mesh_renderers(&mut self, hidden: Option<rot_scene::HiddenMeshRenderers>) {
         self.hidden_mesh_renderers = hidden;
     }
@@ -1709,6 +1718,7 @@ pub fn render_viewport_with_materials(
         ui,
         DrawScene {
             hidden_mesh_renderers: hidden.as_deref(),
+            transform_camera: surface.transform_camera,
             ..scene.into()
         },
         selected,

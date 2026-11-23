@@ -43,10 +43,20 @@ pub(super) struct Frame {
     pub authoring: Arc<Authoring>,
     pub scene: Arc<Scene>,
     pub static_preview: Option<Arc<ComponentPreview>>,
+    pub resolved_transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
     pub hidden_mesh_renderers: Option<rot_scene::HiddenMeshRenderers>,
     pub state: Arc<rot_behavior::RuntimeState>,
     pub input: Option<Arc<LastConsumedInput>>,
     pub query_observations: Option<Arc<[rot_behavior::QueryObservation]>>,
+}
+impl Frame {
+    pub fn transform_camera(&self) -> Option<rot_scene::component_scene::TransformCameraPose> {
+        self.resolved_transform_camera.or_else(|| {
+            self.static_preview
+                .as_ref()
+                .and_then(|preview| preview.transform_camera())
+        })
+    }
 }
 #[derive(Clone, Debug)]
 pub(super) struct AudioReport {
@@ -154,6 +164,7 @@ pub(super) enum Command {
         scene: Arc<Scene>,
         authoring: Arc<Authoring>,
         hidden_mesh_renderers: Option<rot_scene::HiddenMeshRenderers>,
+        transform_camera: Option<Arc<rot_scene::component_scene::TransformCameraBinding>>,
         sounds: Sounds,
         clips: Arc<rot_behavior::Clips>,
     },
@@ -1161,6 +1172,7 @@ fn frame(shared: &Shared, execution: &mut Execution, repaint: &Option<Repaint>, 
             authoring: Arc::clone(execution.runtime.as_ref().unwrap().authoring_snapshot()),
             scene,
             static_preview: None,
+            resolved_transform_camera: runtime.transform_camera(),
             hidden_mesh_renderers: execution.hidden_mesh_renderers.clone(),
             input: execution.last_input.clone(),
             query_observations,
@@ -1220,6 +1232,7 @@ fn process(
                 command_schema_hash: None,
                 scene: preview.scene_snapshot(),
                 static_preview: Some(preview),
+                resolved_transform_camera: None,
                 hidden_mesh_renderers: None,
                 authoring: Arc::default(),
                 state: Arc::default(),
@@ -1236,6 +1249,7 @@ fn process(
             scene,
             authoring,
             hidden_mesh_renderers,
+            transform_camera,
             sounds,
             clips,
             ..
@@ -1334,7 +1348,7 @@ fn process(
                 handle.map(|handle| (key, handle));
             let engine = execution.engine.as_mut().expect("engine constructed above");
             engine.set_clips((*clips).clone());
-            match engine.reset(&scene, &authoring) {
+            match engine.reset_with_transform_camera(&scene, &authoring, transform_camera) {
                 Ok(runtime) if active(shared, key) && !shared.cancel.load(Ordering::SeqCst) => {
                     let keys = KeyEventAccumulator::new(authoring.actions.clone())
                         .expect("Reset validated the immutable action map");
@@ -2269,6 +2283,7 @@ mod tests {
         let key = worker.advance(generation, scene.revision).unwrap();
         worker
             .try_request(Command::Reset {
+                transform_camera: None,
                 hidden_mesh_renderers: None,
                 key,
                 scene,
@@ -2914,6 +2929,7 @@ mod tests {
             );
             worker
                 .try_request(Command::Reset {
+                    transform_camera: None,
                     hidden_mesh_renderers: None,
                     key,
                     scene: scene.clone(),
@@ -3050,6 +3066,7 @@ mod tests {
         let old = worker.advance(1, 0).unwrap();
         worker
             .try_request(Command::Reset {
+                transform_camera: None,
                 hidden_mesh_renderers: None,
                 key: old,
                 scene: scene.clone(),
@@ -3091,6 +3108,7 @@ mod tests {
         let key = worker.advance(1, 0).unwrap();
         worker
             .try_request(Command::Reset {
+                transform_camera: None,
                 hidden_mesh_renderers: None,
                 key,
                 scene,
@@ -3157,6 +3175,7 @@ mod tests {
         let attempted = worker.advance(7, 0).unwrap();
         worker
             .try_request(Command::Reset {
+                transform_camera: None,
                 hidden_mesh_renderers: None,
                 key: attempted,
                 scene: scene.clone(),

@@ -126,9 +126,7 @@ impl ComponentWorkspace {
                     .camera
                     .filter(|_| !self.navigation.player_view),
                 player_content: viewport.player_content,
-                transform_camera: frame
-                    .and_then(|frame| frame.static_preview.as_ref())
-                    .and_then(|preview| preview.transform_camera()),
+                transform_camera: frame.and_then(Frame::transform_camera),
                 scene_revision: self.session.revision(),
                 asset_revision: self.assets.as_ref().map(rot_assets::AssetStore::revision),
                 epoch: self.capture.epoch,

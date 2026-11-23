@@ -1,17 +1,111 @@
 //! Temporary input adapter for the legacy behavior runtime.
-use super::{Component, ComponentScene, Geometry, ObjectNode};
+use super::{
+    CameraView, Component, ComponentScene, Geometry, ObjectNode, TransformCameraPose,
+    TransformPerspective,
+};
 use crate::{
     Authoring, BehaviorSource, BindingTarget, Collider, Group, HiddenMeshRenderers, Light,
     Lighting, Object, Scene, SceneError, Session, MAX_SOURCES,
 };
+use glam::{DMat4, DQuat, DVec3, EulerRot};
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
+
+/// Runtime-only immutable lookup for a component camera's projected transform chain.
+#[derive(Clone, Debug)]
+pub struct TransformCameraBinding {
+    lens: TransformPerspective,
+    owner: CameraTarget,
+    ancestors: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+enum CameraTarget {
+    Object { index: usize, id: String },
+    Group(String),
+    Light(String),
+}
+
+impl TransformCameraBinding {
+    fn bind(scene: &Scene, owner: &str, lens: &TransformPerspective) -> Result<Self, SceneError> {
+        let mut ancestors = Vec::new();
+        let mut current = owner;
+        while let Some(parent) = scene.hierarchy.parents.get(current) {
+            ancestors.push(parent.clone());
+            current = parent;
+        }
+        let owner = if let Some(index) = scene.objects.iter().position(|object| object.id == owner)
+        {
+            CameraTarget::Object {
+                index,
+                id: owner.into(),
+            }
+        } else if scene.hierarchy.groups.contains_key(owner) {
+            CameraTarget::Group(owner.into())
+        } else if scene.lighting.light(owner).is_some() {
+            CameraTarget::Light(owner.into())
+        } else {
+            return Err(missing_camera_transform());
+        };
+        Ok(Self {
+            lens: lens.clone(),
+            owner,
+            ancestors,
+        })
+    }
+
+    /// Resolve just the admitted owner chain from a staged simulation scene.
+    pub fn resolve(&self, scene: &Scene) -> Result<TransformCameraPose, SceneError> {
+        let owner = match &self.owner {
+            CameraTarget::Object { index, id } => scene
+                .objects
+                .get(*index)
+                .filter(|object| object.id == *id)
+                .map(|object| &object.transform),
+            CameraTarget::Group(id) => scene.hierarchy.groups.get(id).map(|group| &group.transform),
+            CameraTarget::Light(id) => scene.lighting.light(id).map(|light| &light.transform),
+        }
+        .ok_or_else(missing_camera_transform)?;
+        let mut world = DMat4::IDENTITY;
+        let mut orientation = DQuat::IDENTITY;
+        for local in self
+            .ancestors
+            .iter()
+            .rev()
+            .map(|id| {
+                scene
+                    .hierarchy
+                    .groups
+                    .get(id)
+                    .map(|group| &group.transform)
+                    .ok_or_else(missing_camera_transform)
+            })
+            .chain([Ok(owner)])
+        {
+            let local = local?;
+            let [x, y, z] = local.rotation.map(f64::from);
+            let rotation = DQuat::from_euler(EulerRot::ZYX, z, y, x);
+            world *= DMat4::from_scale_rotation_translation(
+                DVec3::from_array(local.scale.map(f64::from)),
+                rotation,
+                DVec3::from_array(local.translation.map(f64::from)),
+            );
+            orientation *= rotation;
+        }
+        self.lens.resolve_pose(world, orientation)
+    }
+}
+
+fn missing_camera_transform() -> SceneError {
+    SceneError::Invalid("Game Camera transform is missing from the behavior scene.".into())
+}
 
 /// A behavior projection and its runtime-only draw visibility.
 pub struct BehaviorInput {
     pub scene: Scene,
     pub authoring: Authoring,
     pub hidden_mesh_renderers: Option<HiddenMeshRenderers>,
+    pub transform_camera: Option<Arc<TransformCameraBinding>>,
 }
 
 impl ComponentScene {
@@ -114,10 +208,12 @@ impl ComponentScene {
         let mut hidden_mesh_renderers = None;
         let mut scene = Scene::empty(self.id.clone());
         scene.display = self.display;
+        let mut transform_camera = None;
         scene.player_view = match self.effective_camera(&hierarchy) {
-            Some((_, super::CameraView::Orbit(view))) => Some(view.clone()),
-            Some((_, super::CameraView::Transform(_))) => {
-                return Err(SceneError::TransformCameraRequiresStatic);
+            Some((_, CameraView::Orbit(view))) => Some(view.clone()),
+            Some((index, CameraView::Transform(lens))) => {
+                transform_camera = Some((self.objects[index].id.as_str(), lens));
+                None
             }
             None => None,
         };
@@ -252,7 +348,11 @@ impl ComponentScene {
                     }
                 }
             }
-            if detached_only && object.parent.is_none() && !parents.contains(object.id.as_str()) {
+            if detached_only
+                && object.parent.is_none()
+                && !parents.contains(object.id.as_str())
+                && transform_camera.is_none_or(|(id, _)| id != object.id)
+            {
                 continue;
             }
             if let Some(parent) = &object.parent {
@@ -281,10 +381,14 @@ impl ComponentScene {
         }
         scene.validate()?;
         authoring.validate(&scene)?;
+        let transform_camera = transform_camera
+            .map(|(owner, lens)| TransformCameraBinding::bind(&scene, owner, lens).map(Arc::new))
+            .transpose()?;
         Ok(BehaviorInput {
             scene,
             authoring,
             hidden_mesh_renderers: hidden_mesh_renderers.map(Arc::new),
+            transform_camera,
         })
     }
 }
@@ -310,6 +414,7 @@ impl Session {
             scene,
             authoring,
             hidden_mesh_renderers,
+            transform_camera,
         } = components.behavior_projection()?;
         let mut document = crate::Document::new(scene);
         document.authoring = authoring;
@@ -322,6 +427,7 @@ impl Session {
             saved: None,
             history_evictions: 0,
             hidden_mesh_renderers,
+            transform_camera,
         })
     }
 }

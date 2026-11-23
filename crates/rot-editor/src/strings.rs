@@ -94,8 +94,6 @@ editor_text! {
     CameraViewportAdaptive => "Viewport Adaptive",
     CameraTransformPerspective => "Transform Perspective",
     CameraTransformFovHint => "Vertical field of view in degrees (10 to 120).",
-    CameraBuildStaticRequired => "Transform Perspective needs a static scene.",
-    CameraBuildUseAnother => "Activate Fixed or Follow, or clear the Game Camera.",
     CameraFollow => "Follow",
     CameraWorldTarget => "World Target",
     CameraYaw => "Yaw",

@@ -548,6 +548,21 @@ fn select_creation(options: &Options, executable: &Path) -> Result<Option<PathBu
     }
 }
 
+fn transform_camera_report(
+    camera: rot_scene::component_scene::TransformCameraPose,
+) -> Result<serde_json::Value, String> {
+    let matrices = [[960, 720], [1280, 720]].into_iter().map(|size| {
+                let (projection, content_rect) = rot_app::transform_camera_output_projection(camera, size)
+                    .ok_or("Transform Perspective camera could not be projected")?;
+                Ok(serde_json::json!({"aspect":size[0] as f32 / size[1] as f32, "output_pixels":size,
+                    "content_rect":content_rect, "view":projection.view, "projection":projection.projection}))
+            }).collect::<Result<Vec<_>, &str>>()?;
+    let mut camera = serde_json::to_value(camera).map_err(|error| error.to_string())?;
+    camera["type"] = serde_json::json!("transform_perspective");
+    camera["matrices"] = serde_json::json!(matrices);
+    Ok(camera)
+}
+
 fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
     validate_creation_options(&options)?;
     let parent = descriptor
@@ -619,7 +634,9 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
             output["authored_hud"] = serde_json::to_value(&app.session().authoring().hud)
                 .map_err(|error| error.to_string())?;
         }
-        if let Some(camera) = player_view_report(app.content().scene())? {
+        if let Some(camera) = app.content().transform_camera() {
+            output["player_view"] = transform_camera_report(camera)?;
+        } else if let Some(camera) = player_view_report(app.content().scene())? {
             output["player_view"] = camera;
         }
         if let Some(camera) = manifest.initial_camera {
@@ -729,16 +746,7 @@ fn execute_static_hierarchy(
         });
         let content = runtime.app().content();
         if let Some(camera) = content.transform_camera() {
-            let matrices = [[960, 720], [1280, 720]].into_iter().map(|size| {
-                let (projection, content_rect) = rot_app::transform_camera_output_projection(camera, size)
-                    .ok_or("Transform Perspective camera could not be projected")?;
-                Ok(serde_json::json!({"aspect":size[0] as f32 / size[1] as f32, "output_pixels":size,
-                    "content_rect":content_rect, "view":projection.view, "projection":projection.projection}))
-            }).collect::<Result<Vec<_>, &str>>()?;
-            let mut camera = serde_json::to_value(camera).map_err(|error| error.to_string())?;
-            camera["type"] = serde_json::json!("transform_perspective");
-            camera["matrices"] = serde_json::json!(matrices);
-            output["player_view"] = camera;
+            output["player_view"] = transform_camera_report(camera)?;
         } else if let Some(camera) = player_view_report(content.scene())? {
             output["player_view"] = camera;
         }

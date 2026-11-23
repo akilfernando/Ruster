@@ -528,7 +528,6 @@ pub enum SceneError {
     Invalid(String),
     CannotPreserveWorldTransform,
     HierarchyAuthoringConflict,
-    TransformCameraRequiresStatic,
     /// The validated authored payload and required history exceed the serialized budget.
     Capacity,
     StaleRevision {
@@ -557,7 +556,6 @@ impl fmt::Display for SceneError {
             Self::Invalid(reason) => write!(f, "invalid scene: {reason}"),
             Self::CannotPreserveWorldTransform => write!(f, "cannot preserve world transforms"),
             Self::HierarchyAuthoringConflict => write!(f, "invalid scene: live hierarchy accepts only Group-local rotation authoring; Object/Application bindings, input actions and HUD are unsupported"),
-            Self::TransformCameraRequiresStatic => write!(f, "Transform Perspective cameras require a static scene. Activate a Fixed or Follow camera, or clear the Game Camera before Play or Build."),
             Self::Capacity => write!(f, "authored state and required reversible history exceed 1 MiB; reduce content or edit size before retrying"),
             Self::StaleRevision { expected, actual } => write!(
                 f,
@@ -2253,6 +2251,7 @@ pub type HiddenMeshRenderers = Arc<HashSet<String>>;
 #[derive(Clone, Debug)]
 pub struct Session {
     hidden_mesh_renderers: Option<HiddenMeshRenderers>,
+    transform_camera: Option<std::sync::Arc<component_scene::TransformCameraBinding>>,
     document: Document,
     path: Option<PathBuf>,
     saved: Option<Document>,
@@ -2271,6 +2270,7 @@ impl Session {
             loaded_format_version: FORMAT_VERSION,
             history_evictions: 0,
             hidden_mesh_renderers: None,
+            transform_camera: None,
         })
     }
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SceneError> {
@@ -2280,6 +2280,7 @@ impl Session {
             loaded_format_version: document.format_version,
             history_evictions: 0,
             hidden_mesh_renderers: None,
+            transform_camera: None,
             saved: Some(document.clone()),
             document,
             path: Some(lock.path.clone()),
@@ -2299,8 +2300,15 @@ impl Session {
             saved: None,
             history_evictions: 0,
             hidden_mesh_renderers: None,
+            transform_camera: None,
         })
     }
+    pub fn transform_camera_binding(
+        &self,
+    ) -> Option<&std::sync::Arc<component_scene::TransformCameraBinding>> {
+        self.transform_camera.as_ref()
+    }
+
     pub fn hidden_mesh_renderers(&self) -> Option<&HiddenMeshRenderers> {
         self.hidden_mesh_renderers.as_ref()
     }
