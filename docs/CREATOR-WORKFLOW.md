@@ -192,8 +192,8 @@ Frame the shot in the v23 **Perspective** Scene view. In **View Presets**,
 choose **Set Game Camera from View**, or find it with Ctrl+K. Choose a
 Camera and select **Set Camera**. The active fixed Camera is the default
 destination. **New Camera** creates and activates a separate shot, and
-is the default when no Camera is active or the active Camera follows an
-object. The capture keeps the rendered target, yaw, pitch, distance,
+is the default when the active Camera uses an object transform or follows an
+object, and when no Camera is active. The capture keeps the rendered target, yaw, pitch, distance,
 and 45-degree vertical lens. It takes one Undo step.
 
 The Camera Inspector shows its saved world-space shot and active status.
@@ -203,6 +203,24 @@ shot. Static scenes also suspend the shot when its owner or an ancestor
 is disabled. **Play** and Linux Build use the active shot. **Stop** returns
 to your independent Scene view. Existing Follow cameras keep their target
 behavior.
+
+## Use an object's transform as the Game Camera
+
+Select an object, choose **Add Component → Camera**, then choose **Make
+Active**. Its **Transform Perspective** lens starts at 45°. Edit **Vertical
+FOV** between 10° and 120° in the Camera Inspector. Use the object's Transform
+or viewport tools to move, tilt, or roll the shot.
+
+The camera looks down its local −Z axis with local +Y up. It uses its world
+position, including the effects of parent scale, and its composed authored
+rotation. Parent scale leaves lens orientation and FOV unchanged. The
+perspective clip planes are 0.1 and 1,000 world units.
+
+Static Play and Linux builds use the same camera. Disabling the Camera, its
+object, or an ancestor suspends the designation until it is enabled again.
+**Clear Game Camera** keeps the component and its lens settings. For scenes
+that execute behavior, activate a Fixed or Follow camera or clear the
+designation before Play or Build.
 
 ## Edit a material in a legacy scene
 

@@ -107,6 +107,16 @@ connected project.
   Camera. Use `player_view: null` to clear the designation. Yaw and
   pitch use radians. Vertical FOV uses degrees. Each accepted change
   shares Undo with the editor.
+- For an object-driven camera, add or replace a `camera` component through
+  `scene_components_edit`. Use the exact `view`
+  `{"type":"transform_perspective","vertical_fov_degrees":45.0}` with vertical
+  FOV in 10–120°. Then activate its component ID with `scene_player_view_set`.
+  `player_view_inspect` reports `camera_mode` and a resolved world eye,
+  forward, up and lens. Game viewport captures include the same pose in
+  `player_camera`. Local −Z is forward and +Y is up. Parent scale affects
+  the world eye position. The camera uses composed authored rotations for its
+  orientation. Transform Perspective uses static Play and Build. For behavior
+  scenes, activate Fixed or Follow or clear the designation.
 - A static GLB with punctual lights can be placed in v23 using
   `scene_model_place`. `asset_inspect` reports `light_count`, bounded
   warnings and `warnings_truncated`. Point and directional lights are

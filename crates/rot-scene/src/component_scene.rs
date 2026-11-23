@@ -745,6 +745,43 @@ mod tests {
     }
 
     #[test]
+    fn camera_view_wire_keeps_orbit_and_rejects_mixed_settings() {
+        let orbit = |anchor| {
+            serde_json::json!({
+                "anchor": anchor, "yaw":0.25, "pitch":0.125, "distance":10.0, "vertical_fov_degrees":45.0
+            })
+        };
+        for value in [
+            orbit(serde_json::json!({"type":"fixed", "position":[1.0,2.0,3.0]})),
+            orbit(
+                serde_json::json!({"type":"follow", "target_id":"target", "offset":[0.0,1.0,0.0]}),
+            ),
+            serde_json::json!({"type":"transform_perspective","vertical_fov_degrees":45.0}),
+        ] {
+            let decoded: CameraView = serde_json::from_value(value.clone()).unwrap();
+            decoded.validate_settings().unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        }
+        for bad in [
+            serde_json::json!({"type":"transform_perspective","vertical_fov_degrees":45.0,"yaw":0.0}),
+            serde_json::json!({"type":"transform_perspective"}),
+            serde_json::json!({"type":"unknown","vertical_fov_degrees":45.0}),
+        ] {
+            assert!(serde_json::from_value::<CameraView>(bad).is_err());
+        }
+        for fov in [10., 120.] {
+            assert!(CameraView::transform_perspective(fov)
+                .validate_settings()
+                .is_ok());
+        }
+        for fov in [9.9, 120.1, f32::NAN] {
+            assert!(CameraView::transform_perspective(fov)
+                .validate_settings()
+                .is_err());
+        }
+    }
+
+    #[test]
     fn tracked_examples_migrate_without_losing_objects_or_scripts() {
         for bytes in [
             include_bytes!("../../../examples/arrangement.scene.json").as_slice(),

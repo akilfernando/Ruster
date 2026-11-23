@@ -386,6 +386,70 @@ mod tests {
     use std::fs;
 
     #[test]
+    fn transform_camera_keeps_authored_up_and_exact_affine_eye() {
+        use rot_scene::component_scene::{CameraView, ComponentInstance, ObjectNode};
+        use std::f32::consts::FRAC_PI_2;
+        let mut authored = ComponentScene::from_legacy(
+            &rot_scene::Session::new(Scene::empty("overhead")).unwrap(),
+        )
+        .unwrap();
+        authored.objects.push(ObjectNode {
+            id: "rig".into(),
+            name: "Rig".into(),
+            enabled: true,
+            parent: None,
+            components: Vec::new(),
+            transform: Transform {
+                translation: [3., 4., 5.],
+                rotation: [0., FRAC_PI_2, 0.],
+                scale: [2., 3., 4.],
+            },
+        });
+        authored.objects.push(ObjectNode {
+            id: "camera".into(),
+            name: "Camera".into(),
+            enabled: true,
+            parent: Some("rig".into()),
+            transform: Transform {
+                translation: [1., 2., 3.],
+                rotation: [-FRAC_PI_2, 0., 0.],
+                ..Default::default()
+            },
+            components: vec![ComponentInstance {
+                id: "lens".into(),
+                enabled: true,
+                kind: Component::Camera {
+                    view: CameraView::transform_perspective(45.),
+                },
+            }],
+        });
+        authored.gameplay_camera = Some("lens".into());
+        let observed = project(&authored).unwrap().transform_camera().unwrap();
+        assert!(Vec3::from(observed.eye).abs_diff_eq(Vec3::new(15., 10., 3.), 1e-5));
+        assert!(Vec3::from(observed.forward).abs_diff_eq(-Vec3::Y, 1e-6));
+        assert!(Vec3::from(observed.up).abs_diff_eq(-Vec3::X, 1e-6));
+        let w = |aspect| super::super::transform_camera_projection(observed, aspect).unwrap();
+        let narrow = w(4. / 3.);
+        let wide = w(16. / 9.);
+        assert_eq!(narrow.view, wide.view);
+        assert_eq!(narrow.projection[1][1], wide.projection[1][1]);
+        assert!(wide.projection[0][0] < narrow.projection[0][0]);
+        // Tilt and roll under the nonuniform parent. Orientation uses the
+        // rotation chain even though the world matrix contains shear.
+        authored.objects[1].transform.rotation = [0.2, 0.4, 0.6];
+        let observed = project(&authored).unwrap().transform_camera().unwrap();
+        let reference = glam::DMat3::from_rotation_y(f64::from(FRAC_PI_2))
+            * glam::DMat3::from_rotation_z(f64::from(0.6_f32))
+            * glam::DMat3::from_rotation_y(f64::from(0.4_f32))
+            * glam::DMat3::from_rotation_x(f64::from(0.2_f32));
+        assert!(Vec3::from(observed.forward).abs_diff_eq((-reference.z_axis).as_vec3(), 1e-6));
+        assert!(Vec3::from(observed.up).abs_diff_eq(reference.y_axis.as_vec3(), 1e-6));
+        authored.objects[0].enabled = false;
+        assert!(!project(&authored).unwrap().has_player_camera());
+        assert_eq!(authored.gameplay_camera.as_deref(), Some("lens"));
+    }
+
+    #[test]
     fn parented_directional_light_uses_rotated_local_axis_in_gpu_packet() {
         use crate::lighting_gpu::LightingPacket;
         use rot_scene::component_scene::{ComponentInstance, ObjectNode};

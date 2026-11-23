@@ -923,6 +923,45 @@ mod tests {
     use crate::Content;
 
     #[test]
+    fn active_transform_camera_refuses_behavior_but_dormant_lens_allows_it() {
+        use rot_scene::{
+            component_scene::{CameraView, ComponentInstance},
+            BehaviorSource,
+        };
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.sources.insert(
+            "source".into(),
+            BehaviorSource {
+                label: None,
+                language_id: "lua54".into(),
+                host_api_version: 1,
+                text: "return {}".into(),
+            },
+        );
+        scene.objects[0].components.push(ComponentInstance {
+            id: "lens".into(),
+            enabled: true,
+            kind: Component::Camera {
+                view: CameraView::transform_perspective(45.),
+            },
+        });
+        assert!(matches!(
+            RuntimeScene::from_components(Box::new(scene.clone())).unwrap(),
+            RuntimeScene::Behavior(_)
+        ));
+        scene.gameplay_camera = Some("lens".into());
+        assert!(
+            matches!(RuntimeScene::from_components(Box::new(scene.clone())),
+            Err(error) if error.contains("Activate a Fixed or Follow camera"))
+        );
+        scene.objects[0].components.last_mut().unwrap().enabled = false;
+        assert!(
+            matches!(RuntimeScene::from_components(Box::new(scene)).unwrap(),
+            RuntimeScene::Behavior(session) if session.scene().player_view.is_none())
+        );
+    }
+
+    #[test]
     fn oversized_package_scene_keeps_strict_version_dispatch() {
         let project = tempfile::tempdir().unwrap();
         let root = ResourceRoot::new(project.path()).unwrap();
