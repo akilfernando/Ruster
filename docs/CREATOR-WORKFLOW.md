@@ -57,6 +57,21 @@ Presets**. An approved MCP client can call `viewport_frame` with the parent
 ID and `front`, `side`, or `top`, then call `viewport_screenshot` for each
 view. Inspect one assembly from multiple angles before copying it.
 
+## Create a scene in the current project
+
+Choose **File → New Scene**, use the default **Ctrl+N** shortcut, or search
+**New Scene** in the command palette. Enter a name and check the
+`.scene.json` filename shown in the dialog. Choose **Create** to save and
+open an empty scene in the same project.
+
+For unsaved work, choose **Save and Create** or **Discard and Create**.
+**Cancel** or Escape returns to the current scene. An existing filename
+stays intact and the dialog lets you choose another name.
+
+The new scene uses the existing project Assets and keeps the project's
+startup setting. To edit it with an approved MCP client, connect to the
+newly opened scene and inspect its session and revision before editing.
+
 ## Choose a project startup scene
 
 Save a v23 scene directly in the project folder. Open **Edit → Project
