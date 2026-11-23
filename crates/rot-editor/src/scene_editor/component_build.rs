@@ -439,9 +439,13 @@ impl Drop for BuildWorker {
 }
 
 impl BuildUi {
-    pub(super) fn open(&mut self, path: &Path, id: &str) {
-        let root = super::component_workspace::project_directory(path);
-        self.startup = Some(super::project_startup::Observation::validated(root));
+    pub(super) fn open(
+        &mut self,
+        path: &Path,
+        id: &str,
+        startup: Result<super::project_startup::Observation, String>,
+    ) {
+        self.startup = Some(startup);
         let id = self
             .startup
             .as_ref()
@@ -1329,7 +1333,11 @@ mod tests {
             ui.poll();
         };
 
-        ui.open(&scene, "scene");
+        ui.open(
+            &scene,
+            "scene",
+            super::super::project_startup::Observation::read(root.path()),
+        );
         deliver(&mut ui, Err(PublishError::Cancelled), true);
         assert!(!ui.is_open());
         assert_eq!(
@@ -1337,7 +1345,11 @@ mod tests {
             json!({"state":"cancelled", "published":false, "failure":null})
         );
 
-        ui.open(&scene, "scene");
+        ui.open(
+            &scene,
+            "scene",
+            super::super::project_startup::Observation::read(root.path()),
+        );
         assert_eq!(ui.inspect()["state"], "cancelled");
         let application = root.path().join(APPLICATION);
         fs::write(&application, b"#!/no-such-rot-build-interpreter\n").unwrap();

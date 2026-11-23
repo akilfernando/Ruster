@@ -1049,7 +1049,7 @@ impl ComponentWorkspace {
 
     fn startup_context(&self) -> Value {
         super::super::project_startup::context(
-            super::project_directory(&self.path),
+            self.startup_project.as_ref().map_err(String::as_str),
             &self.path,
             &self.session,
             &mut self.startup_context_cache.borrow_mut(),

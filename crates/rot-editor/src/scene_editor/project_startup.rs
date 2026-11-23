@@ -80,6 +80,30 @@ struct ObservedFile {
     stamp: Stamp,
 }
 
+pub(super) struct ProjectDirectory {
+    root: PathBuf,
+    identity: Identity,
+}
+
+impl ProjectDirectory {
+    pub(super) fn capture(root: &Path) -> Result<Self, String> {
+        let (root, identity) = directory(root)?;
+        Ok(Self { root, identity })
+    }
+
+    fn observe(&self) -> Result<Observation, String> {
+        let observed = Observation::read(&self.root)?;
+        if observed.identity != self.identity {
+            return Err(CHANGED.into());
+        }
+        Ok(observed)
+    }
+
+    pub(super) fn validated(&self) -> Result<Observation, String> {
+        self.observe().map(Observation::validate)
+    }
+}
+
 pub(super) struct Observation {
     root: PathBuf,
     identity: Identity,
@@ -240,12 +264,9 @@ impl Observation {
         Ok(Some(ObservedFile { bytes, stamp }))
     }
 
-    pub(super) fn validated(root: &Path) -> Result<Self, String> {
-        let mut observation = Self::read(root)?;
-        if let Err(error) = observation.inspect_scene() {
-            observation.validation_error = Some(error);
-        }
-        Ok(observation)
+    fn validate(mut self) -> Self {
+        self.validation_error = self.inspect_scene().err();
+        self
     }
 
     fn verify_root(&self) -> Result<(), String> {
@@ -416,6 +437,17 @@ impl Observation {
                 staged.write_all(bytes).map_err(error)?;
                 staged.sync_all().map_err(error)?;
                 verify()?;
+                #[cfg(target_os = "linux")]
+                if self.settings.is_none() {
+                    return rustix::fs::renameat_with(
+                        &self.directory,
+                        &temporary,
+                        &self.directory,
+                        SETTINGS,
+                        rustix::fs::RenameFlags::NOREPLACE,
+                    )
+                    .map_err(error);
+                }
                 renameat(&self.directory, &temporary, &self.directory, SETTINGS).map_err(error)
             })();
             if result.is_err() {
@@ -476,7 +508,7 @@ impl Observation {
 
 #[cfg(unix)]
 pub(super) fn context(
-    root: &Path,
+    project: Result<&ProjectDirectory, &str>,
     path: &Path,
     session: &ComponentSession,
     cached: &mut Option<Observation>,
@@ -487,19 +519,22 @@ pub(super) fn context(
         "scene_id": session.scene().id,
         "dirty": session.is_dirty(),
     });
-    let observed = Observation::read(root).map(|mut observed| {
-        if let Some(previous) = cached.take().filter(|previous| {
-            previous.root == observed.root
-                && previous.identity == observed.identity
-                && previous.settings == observed.settings
-                && previous.target == observed.target
-        }) {
-            observed.validation_error = previous.validation_error;
-        } else {
-            observed.validation_error = observed.inspect_scene().err();
-        }
-        observed
-    });
+    let observed = project
+        .map_err(str::to_owned)
+        .and_then(ProjectDirectory::observe)
+        .map(|mut observed| {
+            if let Some(previous) = cached.take().filter(|previous| {
+                previous.root == observed.root
+                    && previous.identity == observed.identity
+                    && previous.settings == observed.settings
+                    && previous.target == observed.target
+            }) {
+                observed.validation_error = previous.validation_error;
+            } else {
+                observed.validation_error = observed.inspect_scene().err();
+            }
+            observed
+        });
     let selection = observed
         .as_ref()
         .map_err(String::as_str)

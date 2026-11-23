@@ -230,6 +230,7 @@ pub(super) struct ComponentWorkspace {
     palette: Option<palette::Palette>,
     project_settings: Option<ProjectPage>,
     startup_settings: Option<Result<super::project_startup::Observation, String>>,
+    startup_project: Result<super::project_startup::ProjectDirectory, String>,
     #[cfg(unix)]
     startup_context_cache: std::cell::RefCell<Option<super::project_startup::Observation>>,
     input_actions: crate::input_ui::InputUi,
@@ -296,6 +297,8 @@ impl ComponentWorkspace {
             &BTreeSet::new(),
             BTreeSet::new(),
         );
+        let startup_project =
+            super::project_startup::ProjectDirectory::capture(project_directory(&path));
         let (preview, preview_world) = match projection {
             Ok((preview, world)) => (Ok(preview), world),
             Err(error) => (Err(error), Vec::new()),
@@ -320,6 +323,7 @@ impl ComponentWorkspace {
             palette: None,
             project_settings: None,
             startup_settings: None,
+            startup_project,
             #[cfg(unix)]
             startup_context_cache: Default::default(),
             input_actions: Default::default(),
@@ -1387,7 +1391,9 @@ impl ComponentWorkspace {
             }
             #[cfg(target_os = "linux")]
             Action::Export => {
-                self.build.open(&self.path, &self.session.scene().id);
+                let startup = self.observe_startup();
+                self.build
+                    .open(&self.path, &self.session.scene().id, startup);
                 return;
             }
             Action::ToggleAssets => {
@@ -1867,6 +1873,13 @@ impl ComponentWorkspace {
             && !self.draft_dirty()
     }
 
+    fn observe_startup(&self) -> Result<super::project_startup::Observation, String> {
+        self.startup_project
+            .as_ref()
+            .map_err(Clone::clone)
+            .and_then(super::project_startup::ProjectDirectory::validated)
+    }
+
     fn show_startup_settings(&mut self, ui: &mut egui::Ui) {
         use super::project_startup::Observation;
         project_settings::project_identity(ui, Some(&self.path));
@@ -1874,9 +1887,13 @@ impl ComponentWorkspace {
             && !self.session.is_dirty()
             && !self.runtime.in_play_mode()
             && !self.ai_transition_pending();
+        if self.startup_settings.is_none() {
+            self.startup_settings = Some(self.observe_startup());
+        }
         let observation = self
             .startup_settings
-            .get_or_insert_with(|| Observation::validated(project_directory(&self.path)));
+            .as_ref()
+            .expect("observed Startup Scene");
         let selection = observation
             .as_ref()
             .map_err(String::as_str)
@@ -1926,8 +1943,7 @@ impl ComponentWorkspace {
             };
             match result {
                 Some(Ok(())) => {
-                    self.startup_settings =
-                        Some(Observation::validated(project_directory(&self.path)));
+                    self.startup_settings = Some(self.observe_startup());
                     self.error = None;
                 }
                 Some(Err(error)) => self.error = Some(error),
