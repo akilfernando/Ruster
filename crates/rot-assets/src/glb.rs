@@ -498,6 +498,20 @@ struct TextureTransform {
     tex_coord: Option<usize>,
 }
 
+fn unsupported_uv(
+    required: bool,
+    warnings: &mut Vec<&'static str>,
+    detail: &'static str,
+) -> Result<(), AssetError> {
+    if required {
+        return Err(error(format!(
+            "required KHR_texture_transform cannot be honored: {detail}"
+        )));
+    }
+    warnings.push(detail);
+    Ok(())
+}
+
 impl TextureBinding {
     fn effective_tex_coord(&self) -> usize {
         self.extensions
@@ -1006,6 +1020,7 @@ struct Decoder<'a> {
     emission: bool,
     double_sided: bool,
     uv_transforms: bool,
+    required_uv_transform: bool,
     mesh_bytes: usize,
     texture_bytes: usize,
     skipped_triangles: usize,
@@ -1348,7 +1363,11 @@ impl Decoder<'_> {
             }
             let uv = binding.uv_transform()?;
             if self.uv_transforms && binding.has_uv_rotation() {
-                fallbacks.push("Base Color UV transform omitted because rotation is unsupported");
+                unsupported_uv(
+                    self.required_uv_transform,
+                    &mut fallbacks,
+                    "Base Color UV transform omitted because rotation is unsupported",
+                )?;
             } else if self.uv_transforms && tex_coord == 0 {
                 (definition.uv_tiling, definition.uv_offset) = uv;
             } else if !self.uv_transforms && (uv != IDENTITY_UV || binding.has_uv_rotation()) {
@@ -1377,7 +1396,11 @@ impl Decoder<'_> {
                 });
                 definition.base_color_texture = Some(id);
             } else {
-                fallbacks.push("Base Color map omitted because it requires TEXCOORD_0");
+                unsupported_uv(
+                    self.required_uv_transform,
+                    &mut fallbacks,
+                    "Base Color map omitted because it requires TEXCOORD_0",
+                )?;
             }
         }
         let mut roughness_sampler_warning = None;
@@ -1392,15 +1415,23 @@ impl Decoder<'_> {
             let uv = binding.uv_transform()?;
             fallbacks.push("metallic-roughness blue channel omitted");
             if binding.effective_tex_coord() != 0 {
-                fallbacks.push("roughness map omitted because it requires TEXCOORD_0");
+                unsupported_uv(
+                    self.required_uv_transform,
+                    &mut fallbacks,
+                    "roughness map omitted because it requires TEXCOORD_0",
+                )?;
             } else if !self.uv_transforms && (uv != IDENTITY_UV || binding.has_uv_rotation()) {
                 fallbacks.push("roughness map omitted because its UV transform is unsupported");
             } else if binding.has_uv_rotation() {
-                fallbacks.push("roughness map omitted because UV rotation is unsupported");
+                unsupported_uv(
+                    self.required_uv_transform,
+                    &mut fallbacks,
+                    "roughness map omitted because UV rotation is unsupported",
+                )?;
             } else if definition.base_color_texture.is_some()
                 && uv != (definition.uv_tiling, definition.uv_offset)
             {
-                fallbacks.push("roughness map omitted because it needs different tiling or offset from Base Color");
+                unsupported_uv(self.required_uv_transform, &mut fallbacks, "roughness map omitted because it needs different tiling or offset from Base Color")?;
             } else if image.mime_type != "image/png"
                 || view.target.is_some()
                 || view.byte_stride.is_some()
@@ -1912,6 +1943,10 @@ pub(super) fn decode_accepted(
         .collect::<Result<Vec<_>, _>>()?;
     let bin = &bin[..buffer.byte_length];
     let roots = doc.scenes[0].nodes.clone();
+    let required_uv_transform = doc
+        .extensions_required
+        .iter()
+        .any(|value| value == "KHR_texture_transform");
     let mut decoder = Decoder {
         doc,
         bin,
@@ -1921,6 +1956,7 @@ pub(super) fn decode_accepted(
         emission,
         double_sided,
         uv_transforms,
+        required_uv_transform,
         mesh_bytes: 0,
         texture_bytes: 0,
         skipped_triangles: 0,

@@ -764,6 +764,38 @@ mod tests {
             AssetStore::open(root.path()).unwrap().model("paint"),
             Some(&accepted)
         );
+        for (rotation, tex_coord, different_offset) in [
+            (0.0, 0, false),
+            (0.125, 0, false),
+            (0.0, 1, false),
+            (0.0, 0, true),
+        ] {
+            let required = packed_fixture(&pixels, |doc, _| {
+                doc["extensionsUsed"] = serde_json::json!(["KHR_texture_transform"]);
+                doc["extensionsRequired"] = doc["extensionsUsed"].clone();
+                let surface = &mut doc["materials"][0]["pbrMetallicRoughness"];
+                surface["baseColorTexture"]["extensions"] = serde_json::json!({
+                    "KHR_texture_transform":{"offset":[0.25,0.125],"rotation":rotation,"texCoord":tex_coord}
+                });
+                surface["metallicRoughnessTexture"]["extensions"] = serde_json::json!({
+                    "KHR_texture_transform":{"offset":[if different_offset { 0.5 } else { 0.25 },0.125]}
+                });
+            });
+            let result = glb::decode("paint", "paint.glb", &required);
+            if rotation == 0.0 && tex_coord == 0 && !different_offset {
+                assert_eq!(
+                    result.unwrap().info.materials["Paint"].uv_offset,
+                    [0.25, 0.125]
+                );
+            } else {
+                let Err(failure) = result else {
+                    panic!("accepted unsupported required UV transform");
+                };
+                assert!(failure
+                    .to_string()
+                    .contains("required KHR_texture_transform"));
+            }
+        }
         let newer = [1, 80, 122, 2, 60, 123, 3, 40, 124, 4, 20, 125];
         fs::write(
             &source,
