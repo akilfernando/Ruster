@@ -3708,6 +3708,60 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn spot_light_edits_are_guarded_and_invalid_cones_are_atomic() {
+        use serde_json::json;
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("scene.json");
+        let scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("scene")).unwrap()).unwrap();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.command(Action::CreateSpotLight);
+        let owner = editor.session.scene().objects[0].clone();
+        assert_eq!(owner.name, "Spot Light");
+        let original = json!(owner.components[0]);
+        assert_eq!(
+            original["kind"],
+            json!({"type":"spot","range":5.0,"inner_degrees":0.0,"outer_degrees":45.0})
+        );
+        let edit = |editor: &mut ComponentWorkspace, component: &serde_json::Value| {
+            let revision = editor.session.revision().to_string();
+            editor.ai_command(
+                "scene",
+                "scene_components_edit",
+                &json!({
+                    "expected_session_token":"scene", "expected_revision":revision,
+                    "edits":[{"operation":"replace","object_id":owner.id,"component":component}]
+                }),
+            )
+        };
+        let revision = editor.session.revision();
+        let mut replacement = original.clone();
+        replacement["kind"]["inner_degrees"] = json!(55.0);
+        assert_eq!(edit(&mut editor, &replacement)["ok"], false);
+        assert_eq!(editor.session.revision(), revision);
+        replacement["kind"]["outer_degrees"] = json!(60.0);
+        assert_eq!(edit(&mut editor, &replacement)["result"]["changed"], true);
+        editor.command(Action::Undo);
+        assert_eq!(
+            json!(editor.session.scene().objects[0].components[0]),
+            original
+        );
+        editor.command(Action::Redo);
+        assert_eq!(
+            json!(editor.session.scene().objects[0].components[0]),
+            replacement
+        );
+        assert!(editor.save());
+        assert_eq!(
+            ComponentSession::open(&path).unwrap().scene(),
+            editor.session.scene()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn directional_light_settings_survive_mcp_and_editor_edits() {
         use component_inspector::AddComponent;
         use rot_scene::{Light, LightKind, ShadowQuality, SunShadow};

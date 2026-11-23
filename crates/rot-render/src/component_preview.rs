@@ -516,6 +516,65 @@ mod tests {
     }
 
     #[test]
+    fn parented_spot_ignores_scale_and_shares_point_budget_in_scene_order() {
+        use crate::lighting_gpu::LightingPacket;
+        use rot_scene::component_scene::{ComponentInstance, ObjectNode};
+        use std::f32::consts::{FRAC_PI_2, FRAC_PI_6};
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("spots")).unwrap()).unwrap();
+        scene.objects.push(ObjectNode {
+            id: "rig".into(),
+            name: "Rig".into(),
+            parent: None,
+            enabled: true,
+            transform: Transform {
+                scale: [2., 1., 3.],
+                rotation: [0., FRAC_PI_2, 0.],
+                ..Default::default()
+            },
+            components: vec![],
+        });
+        // Reverse ID order to ensure admission is based on the scene order.
+        for (index, id) in ["z", "y", "x", "w", "a"].into_iter().enumerate() {
+            let light = if index == 1 || index == 4 {
+                Light::spot(None)
+            } else {
+                Light::point(None)
+            };
+            scene.objects.push(ObjectNode {
+                id: format!("owner-{id}"),
+                name: "Lamp".into(),
+                parent: Some("rig".into()),
+                enabled: true,
+                transform: Transform {
+                    rotation: [-FRAC_PI_6, 0., 0.],
+                    ..Default::default()
+                },
+                components: vec![ComponentInstance {
+                    id: id.into(),
+                    enabled: true,
+                    kind: Component::Light {
+                        color: light.color,
+                        intensity: light.intensity,
+                        kind: light.kind,
+                    },
+                }],
+            });
+        }
+        let preview = project(&scene).unwrap();
+        assert!(preview.light_budget_exceeded());
+        let lighting = &preview.scene().lighting;
+        assert!(lighting.light("a").is_none());
+        assert_eq!(lighting.light("y").unwrap().kind, Light::spot(None).kind);
+        let packet = LightingPacket::try_pack(lighting).unwrap();
+        assert_eq!(packet.mode_counts, [1, 4, 0, 1]);
+        let expected = Vec3::new(FRAC_PI_6.cos(), FRAC_PI_6.sin(), 0.0);
+        assert!(Vec3::from_slice(&packet.spot_cones[2][..3]).abs_diff_eq(expected, 1e-5));
+        assert!(packet.spot_cones[2][3].is_finite());
+        assert!((packet.points[2].position_inverse_range_squared[3] - 0.04).abs() < 1e-7);
+    }
+
+    #[test]
     fn frame_uses_only_target_world_geometry_in_all_three_views() {
         let mut setup = Scene::demo();
         setup.objects[0].transform.translation = [120., 2., -25.];

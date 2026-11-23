@@ -174,14 +174,24 @@ connected project.
   Inspector exposes Vertical FOV, Aspect Ratio, Near Clip and Far Clip.
   Activate a placed camera by component ID with `scene_player_view_set`.
   Refresh updates the imported lens for future placements.
-- A static GLB with punctual lights can be placed in v23 using
-  `scene_model_place`. `asset_inspect` reports `light_count`, bounded
-  warnings and `warnings_truncated`. Point and directional lights are
-  editable on their original nodes. Point brightness uses candela
-  divided by 100 and directional brightness uses lux divided by 1,000,
-  clamped to a relative 0–16. Point range defaults to 5 units when
-  omitted. Inspect the placed lighting and use shared Undo to remove
-  the hierarchy and its lights together.
+- Place static GLB lights with `scene_model_place`. Point, Spot and
+  Directional components are editable on their original nodes in v23.
+  `asset_inspect` reports `light_count`, bounded warnings and
+  `warnings_truncated`. Point and Spot brightness use candela divided by
+  100. Directional brightness uses lux divided by 1,000. Rot clamps
+  relative intensity to 0–16 and uses 5 units for omitted local range.
+  Spot admission on a previously accepted, same-byte GLB takes effect
+  when refreshed. Existing placed values stay editable.
+- Use `scene_components_inspect` for the exact Spot component and pin
+  the scene token and revision when submitting an Add or Replace to
+  `scene_components_edit`. A default component payload is
+  `{"id":"lamp","enabled":true,"type":"light","color":[1,1,1],"intensity":1,"kind":{"type":"spot","range":5,"inner_degrees":0,"outer_degrees":45}}`.
+  Rotate the owner to aim local −Z. A parent's authored rotation affects
+  aim, while range and cone half-angles are independent of scale. Range
+  is in world units. Half-angles satisfy 0 ≤ inner < outer ≤ 90°.
+  Scene view and static Play/Build use the first four enabled visible
+  Point or Spot Lights in scene order. See first-page `scene_inspect`
+  for this guidance and any budget warning.
 - Imported GLB metallic-roughness PNGs expose the green channel as a
   ready `roughness_linear` asset. The model summary in `asset_inspect`
   reports `roughness_map_count` and prioritizes omissions such as
