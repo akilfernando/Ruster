@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// In-memory editing state for a v23 scene. History is never serialized.
+#[derive(Clone)]
 pub struct ComponentSession {
     scene: ComponentScene,
     revision: u64,
@@ -22,6 +23,7 @@ pub struct ComponentSession {
     saved: Option<SavedDocument>,
 }
 
+#[derive(Clone)]
 struct SavedDocument {
     path: PathBuf,
     digest: [u8; 32],
@@ -34,6 +36,7 @@ pub struct SavedComponentScene {
     pub bytes: u64,
 }
 
+#[derive(Clone)]
 struct HistoryEntry {
     changes: Vec<SceneChange>,
     state: u64,
@@ -67,6 +70,7 @@ impl PrefabFileEdit {
     }
 }
 
+#[derive(Clone)]
 enum SceneChange {
     Insert {
         index: usize,

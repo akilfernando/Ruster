@@ -80,6 +80,7 @@ struct ObservedFile {
     stamp: Stamp,
 }
 
+#[derive(Clone)]
 pub(super) struct ProjectDirectory {
     root: PathBuf,
     identity: Identity,
@@ -91,12 +92,178 @@ impl ProjectDirectory {
         Ok(Self { root, identity })
     }
 
+    pub(super) fn verify(&self) -> Result<(), String> {
+        if directory(&self.root)?.1 != self.identity {
+            return Err("The project folder moved or was replaced. Reopen the project.".into());
+        }
+        Ok(())
+    }
+
+    pub(super) fn direct_sibling(&self, path: &Path) -> bool {
+        path.parent() == Some(self.root.as_path()) && self.verify().is_ok()
+    }
+
+    pub(super) fn prepare_scene(
+        &self,
+        filename: &str,
+        scene: &ComponentScene,
+    ) -> Result<PreparedSibling, String> {
+        use std::io::Seek;
+        validate_filename(filename)?;
+        self.verify()?;
+        let path = self.root.join(filename);
+        #[cfg(unix)]
+        let mut staged = {
+            use rustix::fs::{openat, Mode, OFlags};
+            let directory = open_project_directory(&self.root)?;
+            if Identity::new(&directory.metadata().map_err(error)?) != self.identity {
+                return Err("The project folder moved or was replaced. Reopen the project.".into());
+            }
+            check_free(rustix::fs::statat(
+                &directory,
+                filename,
+                rustix::fs::AtFlags::SYMLINK_NOFOLLOW,
+            ))?;
+            let name = format!(".{}.tmp", scene.id);
+            let file = openat(
+                &directory,
+                &name,
+                OFlags::RDWR | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::RUSR | Mode::WUSR,
+            )
+            .map(File::from)
+            .map_err(error)?;
+            StagedScene {
+                directory,
+                name,
+                file,
+            }
+        };
+        #[cfg(not(unix))]
+        let mut staged = {
+            check_free(path.symlink_metadata())?;
+            tempfile::NamedTempFile::new_in(&self.root).map_err(error)?
+        };
+        #[cfg(unix)]
+        let file = &mut staged.file;
+        #[cfg(not(unix))]
+        let file = staged.as_file_mut();
+        scene.write_json(&mut *file).map_err(error)?;
+        file.sync_all().map_err(error)?;
+        file.rewind().map_err(error)?;
+        let session = ComponentSession::from_open_file(&path, file.try_clone().map_err(error)?)
+            .map_err(error)?;
+        self.verify()?;
+        Ok(PreparedSibling {
+            project: self.clone(),
+            path,
+            session,
+            staged,
+        })
+    }
+
     pub(super) fn observe(&self) -> Result<Observation, String> {
         Observation::read_expected(&self.root, Some(&self.identity))
     }
 
     pub(super) fn validated(&self) -> Result<Observation, String> {
         self.observe().map(Observation::validate)
+    }
+}
+
+pub(super) struct PreparedSibling {
+    project: ProjectDirectory,
+    path: PathBuf,
+    session: ComponentSession,
+    #[cfg(unix)]
+    staged: StagedScene,
+    #[cfg(not(unix))]
+    staged: tempfile::NamedTempFile,
+}
+
+#[cfg(unix)]
+struct StagedScene {
+    directory: File,
+    name: String,
+    file: File,
+}
+
+#[cfg(unix)]
+impl Drop for StagedScene {
+    fn drop(&mut self) {
+        let _ = rustix::fs::unlinkat(&self.directory, &self.name, rustix::fs::AtFlags::empty());
+    }
+}
+
+fn scene_create_error(failure: impl Into<io::Error>) -> String {
+    let failure = failure.into();
+    if failure.kind() == io::ErrorKind::AlreadyExists {
+        "That scene filename already exists. Choose another name.".into()
+    } else {
+        failure.to_string()
+    }
+}
+
+fn check_free<T, E: Into<io::Error>>(entry: Result<T, E>) -> Result<(), String> {
+    match entry {
+        Ok(_) => Err(scene_create_error(io::Error::from(
+            io::ErrorKind::AlreadyExists,
+        ))),
+        Err(failure) => {
+            let failure = failure.into();
+            if failure.kind() == io::ErrorKind::NotFound {
+                Ok(())
+            } else {
+                Err(failure.to_string())
+            }
+        }
+    }
+}
+
+impl PreparedSibling {
+    pub(super) fn publish(self) -> Result<(PathBuf, ComponentSession), String> {
+        self.project.verify()?;
+        #[cfg(unix)]
+        {
+            use rustix::fs::{linkat, AtFlags};
+            let name = self.path.file_name().expect("a validated direct filename");
+            #[cfg(target_os = "linux")]
+            {
+                use std::os::fd::AsRawFd;
+                // Link the exact validated open file, even if its temporary
+                // name was moved while the old scene was being saved.
+                linkat(
+                    rustix::fs::CWD,
+                    format!("/proc/self/fd/{}", self.staged.file.as_raw_fd()),
+                    &self.staged.directory,
+                    name,
+                    AtFlags::SYMLINK_FOLLOW,
+                )
+                .map_err(scene_create_error)?;
+            }
+            #[cfg(not(target_os = "linux"))]
+            linkat(
+                &self.staged.directory,
+                &self.staged.name,
+                &self.staged.directory,
+                name,
+                AtFlags::empty(),
+            )
+            .map_err(scene_create_error)?;
+            self.staged.directory.sync_all().map_err(|failure| {
+                format!(
+                    "The scene was created, but the project folder could not be synced: {failure}"
+                )
+            })?;
+        }
+        #[cfg(not(unix))]
+        self.staged
+            .persist_noclobber(&self.path)
+            .map_err(|failure| scene_create_error(failure.error))?;
+        self.project
+            .verify()
+            .map_err(|error| format!("The scene was written to the original folder. {error}"))?;
+        Ok((self.path, self.session))
     }
 }
 

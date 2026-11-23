@@ -30,6 +30,8 @@ pub(super) mod component_collider;
 
 #[path = "component_display.rs"]
 mod component_display;
+#[path = "component_new_scene.rs"]
+mod component_new_scene;
 #[path = "component_spot.rs"]
 mod component_spot;
 
@@ -263,6 +265,7 @@ pub(super) struct ComponentWorkspace {
     component_picker: component_inspector::ComponentPicker,
     error: Option<String>,
     open_path: Option<String>,
+    new_scene: Option<component_new_scene::NewScene>,
     open_focused: bool,
     #[cfg(target_os = "linux")]
     browser: project_picker::FileBrowser,
@@ -287,14 +290,34 @@ pub(super) fn project_directory(scene_path: &std::path::Path) -> &std::path::Pat
 
 impl ComponentWorkspace {
     pub(super) fn new(path: PathBuf, session: ComponentSession) -> Self {
-        #[cfg(not(target_os = "linux"))]
-        let (assets, asset_error) =
-            match rot_assets::AssetStore::open_project(project_directory(&path)) {
-                Ok((assets, diagnostics)) => (Some(assets), diagnostics.into_iter().next()),
-                Err(error) => (None, Some(error.to_string())),
-            };
-        #[cfg(target_os = "linux")]
-        let (assets, asset_error): (Option<rot_assets::AssetStore>, _) = (None, None);
+        Self::open_in_project(path, session, None)
+    }
+
+    pub(super) fn open_in_project(
+        path: PathBuf,
+        session: ComponentSession,
+        prior: Option<&mut Self>,
+    ) -> Self {
+        let mut prior = prior.filter(|prior| {
+            prior
+                .startup_project
+                .as_ref()
+                .is_ok_and(|project| project.direct_sibling(&path))
+        });
+        let (assets, asset_error) = match prior.as_deref_mut() {
+            Some(prior) => (prior.assets.take(), prior.asset_error.take()),
+            None => {
+                #[cfg(target_os = "linux")]
+                {
+                    (None, None)
+                }
+                #[cfg(not(target_os = "linux"))]
+                match rot_assets::AssetStore::open_project(project_directory(&path)) {
+                    Ok((assets, diagnostics)) => (Some(assets), diagnostics.into_iter().next()),
+                    Err(error) => (None, Some(error.to_string())),
+                }
+            }
+        };
         let projection = rot_render::component_preview::project_editor_with_world(
             session.scene(),
             &BTreeSet::new(),
@@ -306,12 +329,25 @@ impl ComponentWorkspace {
             Ok((preview, world)) => (Ok(preview), world),
             Err(error) => (Err(error), Vec::new()),
         };
-        let meshes = assets
-            .as_ref()
-            .map_or_else(Default::default, rot_assets::AssetStore::mesh_snapshots);
-        let textures = assets
-            .as_ref()
-            .map_or_else(Default::default, rot_assets::AssetStore::texture_snapshots);
+        let (meshes, textures, mut asset_browser, prefab_files) = match prior.as_deref_mut() {
+            Some(prior) => (
+                std::mem::take(&mut prior.meshes),
+                std::mem::take(&mut prior.textures),
+                std::mem::take(&mut prior.asset_browser),
+                std::mem::take(&mut prior.prefab_files),
+            ),
+            None => (
+                assets
+                    .as_ref()
+                    .map_or_else(Default::default, rot_assets::AssetStore::mesh_snapshots),
+                assets
+                    .as_ref()
+                    .map_or_else(Default::default, rot_assets::AssetStore::texture_snapshots),
+                Default::default(),
+                Default::default(),
+            ),
+        };
+        asset_browser.selected = None;
         let fit = !session.scene().objects.is_empty();
         let (rows, parents) = hierarchy_rows(&session.scene().objects);
         let mut editor = Self {
@@ -343,13 +379,13 @@ impl ComponentWorkspace {
             assets,
             runtime_asset_revision: None,
             asset_error,
-            asset_browser: Default::default(),
-            prefab_files: BTreeMap::new(),
+            asset_browser,
+            prefab_files,
             prefab_refresh_pending: false,
             prefab_feedback: None,
             prefab_details_open: false,
             #[cfg(target_os = "linux")]
-            asset_watcher: None,
+            asset_watcher: prior.and_then(|prior| prior.asset_watcher.take()),
             #[cfg(target_os = "linux")]
             asset_picker: None,
             #[cfg(target_os = "linux")]
@@ -389,6 +425,7 @@ impl ComponentWorkspace {
             component_picker: Default::default(),
             error: None,
             open_path: None,
+            new_scene: None,
             open_focused: false,
             #[cfg(target_os = "linux")]
             browser: Default::default(),
@@ -597,6 +634,7 @@ impl ComponentWorkspace {
         self.close_pending
             || self.close_approved
             || self.open_path.is_some()
+            || self.new_scene.is_some()
             || self.asset_browser.file_dialog_open()
     }
 
@@ -857,8 +895,24 @@ impl ComponentWorkspace {
         if !self.draft_dirty() {
             return true;
         }
-        let revision = self.session.revision();
-        let result = if let Some(draft) = self.draft.clone() {
+        let result = self
+            .draft_objects()
+            .and_then(|objects| Self::put_draft(&mut self.session, objects));
+        match result {
+            Ok(_) => {
+                self.error = None;
+                self.refresh();
+                true
+            }
+            Err(error) => {
+                self.error = Some(error.to_string());
+                false
+            }
+        }
+    }
+
+    fn draft_objects(&self) -> Result<Vec<ObjectNode>, SceneError> {
+        if let Some(draft) = self.draft.clone() {
             let prior = &self.session.scene().objects
                 [self.selected_index.expect("draft requires selection")];
             let check_animation = || {
@@ -882,12 +936,11 @@ impl ComponentWorkspace {
                 }
                 Ok(())
             };
-            check_animation()
-                .and_then(|()| self.validate_material_bindings(prior, &draft))
-                .and_then(|()| self.session.put_object(revision, draft))
+            check_animation()?;
+            self.validate_material_bindings(prior, &draft)?;
+            Ok(vec![draft])
         } else if let Some(draft) = &self.multi_draft {
-            let edits = self
-                .session
+            self.session
                 .scene()
                 .objects
                 .iter()
@@ -897,21 +950,21 @@ impl ComponentWorkspace {
                     self.validate_material_bindings(object, &next)?;
                     Ok(next)
                 })
-                .collect::<Result<Vec<_>, _>>();
-            edits.and_then(|edits| self.session.put_objects(revision, edits))
+                .collect()
         } else {
-            return true;
-        };
-        match result {
-            Ok(_) => {
-                self.error = None;
-                self.refresh();
-                true
-            }
-            Err(error) => {
-                self.error = Some(error.to_string());
-                false
-            }
+            Ok(Vec::new())
+        }
+    }
+
+    fn put_draft(
+        session: &mut ComponentSession,
+        mut objects: Vec<ObjectNode>,
+    ) -> Result<u64, SceneError> {
+        let revision = session.revision();
+        match objects.len() {
+            0 => Ok(revision),
+            1 => session.put_object(revision, objects.pop().expect("single draft")),
+            _ => session.put_objects(revision, objects),
         }
     }
 
@@ -1378,6 +1431,10 @@ impl ComponentWorkspace {
                     Action::Scale => Tool::Scale,
                     _ => Tool::Translate,
                 };
+                return;
+            }
+            Action::New => {
+                self.begin_new_scene();
                 return;
             }
             Action::Open => {
@@ -2105,6 +2162,7 @@ impl ComponentWorkspace {
         self.poll_runtime(&ctx);
         let blocked = self.close_pending
             || self.open_path.is_some()
+            || self.new_scene.is_some()
             || build_open
             || publishing
             || self.surface_edit_pending();
@@ -2145,6 +2203,7 @@ impl ComponentWorkspace {
             }
             egui::MenuBar::new().ui(ui, |ui| {
                 editor_theme::text_menu(ui, Text::ComponentFileMenu.plain(), |ui| {
+                    self.menu_action(ui, Action::New);
                     self.menu_action(ui, Action::Open);
                     self.menu_action(ui, Action::Save);
                     #[cfg(target_os = "linux")]
@@ -2231,7 +2290,13 @@ impl ComponentWorkspace {
                 } else {
                     ""
                 };
-                ui.label(format!("{}{marker}", self.session.scene().id));
+                let label = self
+                    .path
+                    .file_name()
+                    .and_then(|file| file.to_str())
+                    .and_then(|file| file.strip_suffix(".scene.json"))
+                    .unwrap_or(&self.session.scene().id);
+                ui.label(format!("{label}{marker}"));
             });
         });
         let assets_loading = self.assets_loading();
@@ -2306,7 +2371,8 @@ impl ComponentWorkspace {
                 |action| {
                     matches!(
                         action,
-                        Action::Open
+                        Action::New
+                            | Action::Open
                             | Action::Save
                             | Action::Move
                             | Action::Rotate
@@ -2692,6 +2758,7 @@ impl ComponentWorkspace {
                     && !asset_dialog
                     && !self.close_pending
                     && self.open_path.is_none()
+                    && self.new_scene.is_none()
                     && !self.surface_edit_pending()
                     && self.project_settings.is_none()
                     && (self.collider_tool.mode().is_none()
@@ -2729,6 +2796,9 @@ impl ComponentWorkspace {
         self.show_display_draft(&ctx);
         self.show_camera_draft(&ctx);
         self.show_spot_aim(&ctx);
+        if let Some(document) = self.show_new_scene(&ctx) {
+            return Some(document);
+        }
         if let Some(mut path) = self.open_path.take() {
             let mut cancel = false;
             let mut opened = None;

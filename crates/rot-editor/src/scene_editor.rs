@@ -4589,7 +4589,10 @@ impl SceneEditor {
     }
     fn open_document(&mut self, document: OpenedScene) {
         match document {
-            OpenedScene::Legacy(session) => self.open_saved_session(*session),
+            OpenedScene::Legacy(session) => {
+                self.component = None;
+                self.open_saved_session(*session);
+            }
             OpenedScene::Components(path, session) => {
                 let render = self.render.clone();
                 if self.shader_revision > 0 {
@@ -4606,9 +4609,14 @@ impl SceneEditor {
                     .expect("empty placeholder scene");
                 let mut next = Self::with_workspace(empty, Workspace::detached());
                 next.render = render;
-                next.component = Some(Box::new(component_workspace::ComponentWorkspace::new(
-                    path, *session,
-                )));
+                let mut previous = self.component.take();
+                next.component = Some(Box::new(
+                    component_workspace::ComponentWorkspace::open_in_project(
+                        path,
+                        *session,
+                        previous.as_deref_mut(),
+                    ),
+                ));
                 self.begin_replacement(next, None, false, false);
             }
         }
@@ -5907,7 +5915,6 @@ impl eframe::App for Host {
                 self.disconnect_adapter();
             }
             if let Some(document) = document {
-                self.editor.component = None;
                 self.input = Default::default();
                 self.editor.open_document(document);
                 ui.ctx().request_repaint();
