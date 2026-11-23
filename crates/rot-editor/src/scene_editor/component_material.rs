@@ -5,7 +5,7 @@ use crate::{editor_theme, strings::Text, ui_kit};
 use eframe::egui;
 use rot_assets::{AssetKind, AssetStatus, AssetStore, TextureRole};
 use rot_scene::component_scene::{Component, ComponentScene, Geometry, ObjectNode};
-use rot_scene::{MaterialResponse, OpaqueMaterial, SceneError};
+use rot_scene::{MaterialResponse, OpaqueMaterial, SceneError, TextureAddress};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Default)]
@@ -507,6 +507,8 @@ impl ComponentWorkspace {
         let frame = ctx.cumulative_frame_nr();
         let enter = draft.opened_frame.is_some_and(|opened| opened != frame)
             && ctx.input(|input| input.modifiers.is_none() && input.key_pressed(egui::Key::Enter));
+        let focus_before = ctx.memory(|memory| memory.focused());
+        let mut uv_edit_focused = false;
         let response = egui::Modal::new(egui::Id::unique("component_material"))
             .frame(editor_theme::dialog_frame(ctx))
             .show(ctx, |ui| {
@@ -572,8 +574,39 @@ impl ComponentWorkspace {
                         .labelled_by(label)
                         .on_hover_text(Text::DoubleSidedDetail.plain());
                 });
-                material_uv_row(ui, Text::TextureTiling, &mut draft.value.uv_tiling);
-                material_uv_row(ui, Text::TextureOffset, &mut draft.value.uv_offset);
+                uv_edit_focused = material_uv_row(
+                    ui,
+                    Text::TextureTiling,
+                    &mut draft.value.uv_tiling,
+                    focus_before,
+                ) | material_uv_row(
+                    ui,
+                    Text::TextureOffset,
+                    &mut draft.value.uv_offset,
+                    focus_before,
+                );
+                ui_kit::property_row_with_label(ui, Text::Wrap.plain(), |ui, label| {
+                    egui::ComboBox::from_id_salt("texture_wrap")
+                        .selected_text(match draft.value.address {
+                            TextureAddress::Repeat => Text::Repeat.plain(),
+                            TextureAddress::Clamp => Text::Clamp.plain(),
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut draft.value.address,
+                                TextureAddress::Repeat,
+                                Text::Repeat.plain(),
+                            );
+                            ui.selectable_value(
+                                &mut draft.value.address,
+                                TextureAddress::Clamp,
+                                Text::Clamp.plain(),
+                            );
+                        })
+                        .response
+                        .labelled_by(label)
+                        .on_hover_text(Text::MaterialUiFilterAndWrapAffect.plain());
+                });
                 texture_choice(
                     ui,
                     Text::BaseColorSrgb,
@@ -647,7 +680,7 @@ impl ComponentWorkspace {
         if cancel || escape {
             return;
         }
-        let enter = enter && !popup_open && !egui::Popup::is_any_open(ctx);
+        let enter = enter && !uv_edit_focused && !popup_open && !egui::Popup::is_any_open(ctx);
         if apply || enter {
             match self.apply_material(&draft) {
                 Ok(()) => {
@@ -661,7 +694,15 @@ impl ComponentWorkspace {
     }
 }
 
-fn material_uv_row(ui: &mut egui::Ui, text: Text, values: &mut [f32; 2]) {
+// Enter can release DragValue focus during widget drawing. Match the focus
+// captured at the start of the frame so the same key cannot apply the dialog.
+fn material_uv_row(
+    ui: &mut egui::Ui,
+    text: Text,
+    values: &mut [f32; 2],
+    focus_before: Option<egui::Id>,
+) -> bool {
+    let mut focused = false;
     ui_kit::property_row_with_label(ui, text.plain(), |ui, label| {
         ui.horizontal(|ui| {
             for (axis, value) in ["X", "Y"].into_iter().zip(values) {
@@ -670,6 +711,7 @@ fn material_uv_row(ui: &mut egui::Ui, text: Text, values: &mut [f32; 2]) {
                     .prefix(format!("{axis} "));
                 let name = format!("{} {axis}", text.plain());
                 let response = ui.add(field).labelled_by(label);
+                focused |= focus_before == Some(response.id);
                 response.widget_info(|| {
                     let mut info = egui::WidgetInfo::drag_value(ui.is_enabled(), f64::from(*value));
                     info.label = Some(name.clone());
@@ -679,6 +721,7 @@ fn material_uv_row(ui: &mut egui::Ui, text: Text, values: &mut [f32; 2]) {
             }
         });
     });
+    focused
 }
 
 fn texture_choice(

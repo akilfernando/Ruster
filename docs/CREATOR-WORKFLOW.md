@@ -332,7 +332,8 @@ Edits to materials copied from GLB models are saved with the scene.
 In **Edit Material**, **Tiling** multiplies the X and Y texture coordinates
 and **Offset** shifts them by fractions of the image. These values apply to
 Base Color and Roughness together. For example, Tiling 2 on X repeats twice
-with **Repeat** addressing. A negative axis mirrors that axis, and Offset
+with **Wrap → Repeat**. Choose **Clamp** to extend the image edge instead.
+A negative axis mirrors that axis, and Offset
 moves the sampled region. The defaults are Tiling (1, 1) and Offset (0, 0).
 Apply commits one shared edit that affects every renderer using the material.
 
