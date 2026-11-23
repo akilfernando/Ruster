@@ -386,7 +386,8 @@ mod tests {
         std::fs::create_dir_all(scene.parent().unwrap()).unwrap();
         let mut host = listening(root.path(), &scene);
         let token = token(&host);
-        let _app = call(&mut host, &token, "scene_inspect", json!({}));
+        let (app, reply) = call(&mut host, &token, "scene_inspect", json!({}));
+        assert_eq!(reply["error"]["code"], "approval_required");
         host.answer_ai_prompt(Answer::Once);
         assert!(host.bridge.as_ref().unwrap().approved());
         assert!(
@@ -401,9 +402,18 @@ mod tests {
 
         host.disconnect_adapter();
         host.answer_ai_prompt(Answer::Deny); // nothing waiting: no effect
+        drop(app);
+        // A replacement uses the same discoverable files. Wait for the
+        // previous listener and its endpoint cleanup before reusing them.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !host.bridge.as_mut().unwrap().poll_retired() {
+            assert!(Instant::now() < deadline, "listener did not retire");
+            std::thread::sleep(Duration::from_millis(1));
+        }
         drop(host);
         let mut host = listening(root.path(), &scene.with_file_name("other.scene.json"));
-        let _app = call(&mut host, &token, "scene_inspect", json!({}));
+        let (_app, reply) = call(&mut host, &token, "scene_inspect", json!({}));
+        assert_eq!(reply["error"]["code"], "approval_required");
         host.answer_ai_prompt(Answer::Deny);
         assert!(!host.bridge.as_ref().unwrap().authority().live());
         assert!(host
