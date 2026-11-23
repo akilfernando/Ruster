@@ -88,6 +88,21 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+**Lua error navigation** connects v23 Game Error Details to the configured
+editor. Two same-named files reproduced a Step error at line 8 with the
+previous committed poses intact and a startup syntax error at line 4. Isolated
+Neovim verified the path and cursor. After an Assets rename, the captured run
+opened the renamed file at line 8. Changed or missing contents withheld the
+jump. File-only editor configuration opened the source at its beginning.
+Approved Claude identified the file, binding and line from runtime inspection.
+After repair, Play advanced past the old failure. File watching recorded zero
+source reads across 23 healthy ticks and a paused idle interval. The new action
+was checked for keyboard focus in Rot Dark and Plain Light. At 32 owners,
+three warmed release runs gave median Reset preparation p95 of 67.6 to 67.0 µs
+with one shared source and 302.6 to 308.4 µs with 32 sources. Failed Reset to
+the first assembled inspection report was 160.8 to 171.7 µs and 791.1 to
+785.7 µs, respectively.
+
 **Save Scene As** creates a v23 sibling with a fresh scene ID, stable object
 and component IDs, and a clean Undo history. Market Night retained the linked
 stalls and their local override, Game Camera and textured banner. It included

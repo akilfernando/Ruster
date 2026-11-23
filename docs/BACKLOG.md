@@ -12,8 +12,6 @@ package in your lane under **Now**. How to work is in the
 - File references were checked on 2026-11-17 and drift; search if a line
   number is off.
 
-**C-18 Lua error navigation** — in progress — Sol, 2026-11-24.
-
 ## Needs the user
 
 - **Vetoes.** The [architecture decisions](PARITY-PLAN.md#4-architecture-decisions)
@@ -663,6 +661,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-15 Primary Mouse Button | Bind Primary Mouse with keys to the same v23 Button action. | done · Native Project Settings and guarded MCP preserve Space. Editor Play and a relocated Vulkan build verified ownership, combined edges, HUD and letterbox exclusion, release outside and focus cancellation. |
 | C-16 Unpack Prefab Instance | Turn one linked v23 instance into ordinary scene objects. | done · The native confirmation and guarded MCP detach the exact root with shared Undo. The accepted hierarchy, roof and finish overrides, and asset references stay intact, including when the source is missing. Two neighboring links kept receiving source edits. Save, reopen and relocated Vulkan verified the independent cottage. |
 | C-17 Save Scene As | Copy the live v23 scene into an independent project sibling. | done · The File menu, shortcut and palette share a filename dialog. Market Night kept committed edits, the valid Inspector draft, linked stalls, camera and textured sign. Cancel, invalid name, filename collision and failed publication kept the original edit context. Approved Claude reconnected to the copy, and the variant launched from a relocated Vulkan build. |
+| C-18 Lua error navigation | Open a failed v23 file-backed Lua source from Game Error Details. | done · Neovim opened the exact Step and startup syntax lines, including after a same-byte rename. Changed and missing files withheld the jump. Approved Claude read the asset, path and binding from runtime inspection. A fresh run advanced after repair. |
 
 ### C-04 implementation brief
 
