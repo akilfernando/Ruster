@@ -426,13 +426,13 @@ impl Authoring {
     }
 
     pub fn validate(&self, scene: &Scene) -> Result<(), SceneError> {
-        self.validate_for_runtime(scene, Default::default())
+        self.validate_for_runtime(scene, &Default::default())
     }
 
     pub(crate) fn validate_for_runtime(
         &self,
         scene: &Scene,
-        projection: crate::component_scene::RuntimeProjection,
+        projection: &crate::component_scene::RuntimeProjection,
     ) -> Result<(), SceneError> {
         if !scene.hierarchy.is_empty() {
             if projection.allows_local_leaf_scripts() {

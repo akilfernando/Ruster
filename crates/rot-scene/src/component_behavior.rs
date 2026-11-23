@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{
     Authoring, BehaviorSource, BindingTarget, Collider, Group, HiddenMeshRenderers, Light,
-    Lighting, Object, Scene, SceneError, Session, MAX_SOURCES,
+    LightKind, Lighting, Object, Scene, SceneError, Session, MAX_POINT_LIGHTS, MAX_SOURCES,
 };
 use glam::{DMat4, DQuat, DVec3, EulerRot};
 use std::collections::{BTreeMap, HashSet};
@@ -115,18 +115,56 @@ fn missing_camera_transform() -> SceneError {
 }
 
 /// Runtime admission for an authored legacy scene or a detached v23 projection.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct RuntimeProjection {
     local_leaf_scripts: bool,
+    attached_lights: Option<Arc<AttachedLights>>,
+}
+
+/// A projected mesh leaf owns a distinct, non-targetable local light.
+#[derive(Clone, Debug)]
+pub struct AttachedLight {
+    pub owner_index: usize,
+    pub owner_id: String,
+    pub light: Light,
+}
+
+#[derive(Clone, Debug)]
+pub struct AttachedLights(Vec<AttachedLight>);
+
+impl AttachedLights {
+    pub fn iter(&self) -> impl Iterator<Item = &AttachedLight> {
+        self.0.iter()
+    }
+
+    pub fn for_owner(&self, index: usize) -> Option<&AttachedLight> {
+        self.0
+            .binary_search_by_key(&index, |light| light.owner_index)
+            .ok()
+            .map(|slot| &self.0[slot])
+    }
 }
 
 impl RuntimeProjection {
-    pub fn allows_local_leaf_scripts(self) -> bool {
+    pub fn allows_local_leaf_scripts(&self) -> bool {
         self.local_leaf_scripts
     }
 
+    pub fn attached_lights(&self) -> Option<&Arc<AttachedLights>> {
+        self.attached_lights.as_ref()
+    }
+
+    pub(crate) fn require_legacy_export(&self) -> Result<(), SceneError> {
+        if self.attached_lights.is_some() {
+            return Err(SceneError::Invalid(
+                "Save the authored component scene to keep attached lights.".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn validate_authoring(
-        self,
+        &self,
         scene: &Scene,
         authoring: &Authoring,
     ) -> Result<(), SceneError> {
@@ -235,6 +273,7 @@ impl ComponentScene {
     /// the old runtime cannot target every object/component combination.
     pub fn behavior_input(&self) -> Result<(Scene, Authoring), SceneError> {
         let input = self.behavior_projection()?;
+        input.projection.require_legacy_export()?;
         Ok((input.scene, input.authoring))
     }
 
@@ -260,6 +299,7 @@ impl ComponentScene {
             ..Authoring::default()
         };
         let mut lights = BTreeMap::new();
+        let mut attached = Vec::new();
         let parents: HashSet<_> = self
             .objects
             .iter()
@@ -335,19 +375,19 @@ impl ComponentScene {
                         intensity,
                         kind,
                     } => {
-                        if matches!(kind, crate::LightKind::Spot { .. }) {
-                            return Err(unsupported("Spot Lights require static Play and Build"));
-                        }
                         detached_only = false;
                         if light
-                            .replace(Light {
-                                name: Some(object.name.clone()),
-                                transform: object.transform.clone(),
-                                enabled: component.enabled,
-                                color: *color,
-                                intensity: *intensity,
-                                kind: kind.clone(),
-                            })
+                            .replace((
+                                component.id.as_str(),
+                                Light {
+                                    name: Some(object.name.clone()),
+                                    transform: object.transform.clone(),
+                                    enabled: component.enabled,
+                                    color: *color,
+                                    intensity: *intensity,
+                                    kind: kind.clone(),
+                                },
+                            ))
                             .is_some()
                         {
                             return Err(duplicate("Light"));
@@ -400,14 +440,57 @@ impl ComponentScene {
                     draw.collider = collider;
                     scene.objects.push(draw);
                 }
-                (None, Some(light), None) => {
+                (Some(draw), Some((component, mut light)), None) => {
+                    let reason = |message| unsupported(&format!("Light {component}: {message}"));
+                    if !matches!(light.kind, LightKind::Point { .. } | LightKind::Spot { .. })
+                        || parents.contains(object.id.as_str())
+                    {
+                        return Err(reason("use a Point or Spot Light on a scripted Mesh Renderer with no children"));
+                    }
+                    let supported_script = object.components.iter().any(|entry| {
+                        let Component::Script { binding, .. } = &entry.kind else { return false };
+                        matches!(&binding.target, BindingTarget::Object(owner) if owner == &object.id)
+                            && authoring.sources.get(&binding.source_id).is_some_and(|source| {
+                                matches!(source.host_api_version, 1 | 2)
+                            })
+                    });
+                    if !supported_script {
+                        return Err(reason("attach the light to a Mesh Renderer leaf with Object Lua API 1 or 2"));
+                    }
+                    light.transform.scale = [1.; 3];
+                    attached.push(AttachedLight {
+                        owner_index: scene.objects.len(),
+                        owner_id: object.id.clone(),
+                        light,
+                    });
+                    scene.objects.push(draw);
+                }
+                (None, Some((component, light)), None) => {
+                    if matches!(light.kind, LightKind::Spot { .. }) {
+                        return Err(unsupported(&format!("Light {component}: a standalone Spot Light requires static Play and Build")));
+                    }
                     lights.insert(object.id.clone(), light);
                 }
+                (_, Some((component, _)), Some(_)) => return Err(unsupported(&format!(
+                    "Light {component}: remove the Collider from the light owner for behavior Play and Build"
+                ))),
                 (None, None, None) => insert_group(&mut scene, object),
                 _ => return Err(unsupported("this combination of mesh, light and collider is unsupported by the behavior runtime")),
             }
         }
-        if self.ambient.is_some() || !lights.is_empty() {
+        if !attached.is_empty()
+            && attached.len()
+                + lights
+                    .values()
+                    .filter(|light| matches!(light.kind, LightKind::Point { .. }))
+                    .count()
+                > MAX_POINT_LIGHTS
+        {
+            return Err(SceneError::Invalid(format!(
+                "Behavior Play and Build allow {MAX_POINT_LIGHTS} Point or Spot Lights, including disabled lights. Remove a light or use a static scene."
+            )));
+        }
+        if self.ambient.is_some() || !lights.is_empty() || !attached.is_empty() {
             scene.lighting = Lighting::Authored {
                 ambient: self.ambient.clone().unwrap_or_default(),
                 lights,
@@ -417,6 +500,7 @@ impl ComponentScene {
         let projection = RuntimeProjection {
             local_leaf_scripts: !scene.hierarchy.is_empty()
                 && authoring.group_creation_blockers(&scene).next().is_some(),
+            attached_lights: (!attached.is_empty()).then(|| Arc::new(AttachedLights(attached))),
         };
         projection.validate_authoring(&scene, &authoring)?;
         let transform_camera = transform_camera
@@ -459,7 +543,7 @@ impl Session {
         let mut document = crate::Document::new(scene);
         document.authoring = authoring;
         document.format_version = document.required_version();
-        document.validate_for_runtime(projection)?;
+        document.validate_for_runtime(&projection)?;
         Ok(Self {
             loaded_format_version: document.format_version,
             runtime_projection: projection,

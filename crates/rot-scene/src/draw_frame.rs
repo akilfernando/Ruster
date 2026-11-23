@@ -1,6 +1,6 @@
 //! Immutable runtime scene data shared by simulation and viewport consumers.
-use crate::component_scene::TransformCameraPose;
-use crate::{Lighting, ResolvedPlayerView, ResolvedPoses, Scene, Transform};
+use crate::component_scene::{AttachedLights, TransformCameraPose};
+use crate::{Lighting, ResolvedPlayerView, ResolvedPoses, Scene, SceneError, Transform};
 use glam::{EulerRot, Mat4, Quat, Vec3};
 use std::sync::Arc;
 
@@ -56,8 +56,9 @@ impl SceneDrawFrame {
 #[derive(Clone, Debug)]
 pub struct HierarchyDraw {
     matrices: Vec<Mat4>,
-    lighting: Lighting,
+    lighting: Arc<Lighting>,
     player_view: Option<ResolvedPlayerView>,
+    has_attached_lights: bool,
 }
 
 impl HierarchyDraw {
@@ -80,9 +81,51 @@ impl HierarchyDraw {
         }
         Self {
             matrices,
-            lighting,
+            lighting: Arc::new(lighting),
             player_view,
+            has_attached_lights: false,
         }
+    }
+
+    pub fn with_attached_lights(
+        mut self,
+        scene: &Scene,
+        poses: &ResolvedPoses,
+        attached: &AttachedLights,
+    ) -> Result<Self, SceneError> {
+        let Lighting::Authored { lights, .. } = Arc::make_mut(&mut self.lighting) else {
+            return Err(SceneError::Invalid(
+                "Attached Lights require authored lighting".into(),
+            ));
+        };
+        for entry in attached.iter() {
+            if scene
+                .objects
+                .get(entry.owner_index)
+                .map(|owner| owner.id.as_str())
+                != Some(entry.owner_id.as_str())
+                || lights.contains_key(&entry.owner_id)
+            {
+                return Err(SceneError::Invalid(format!(
+                    "Attached Light owner {} changed",
+                    entry.owner_id
+                )));
+            }
+            let transform = poses
+                .transforms
+                .get(&entry.owner_id)
+                .ok_or_else(|| SceneError::ObjectNotFound(entry.owner_id.clone()))?;
+            let mut light = entry.light.clone();
+            light.transform = light_pose(transform);
+            lights.insert(entry.owner_id.clone(), light);
+        }
+        self.lighting.validate()?;
+        self.has_attached_lights = true;
+        Ok(self)
+    }
+
+    pub fn attached_lighting(&self) -> Option<&Lighting> {
+        self.has_attached_lights.then_some(self.lighting.as_ref())
     }
 
     pub fn matrices(&self) -> &[Mat4] {
@@ -97,16 +140,34 @@ impl HierarchyDraw {
         self.player_view
     }
 
-    /// The topology and light transforms are unchanged during a leaf-only step.
-    pub fn update_leaves(
+    /// Leaf commits update only the validated changed matrices and light poses.
+    pub fn update_leaves<'a>(
         &mut self,
         leaves: impl IntoIterator<Item = (usize, Mat4)>,
+        attached: impl IntoIterator<Item = (&'a str, Transform)>,
         player_view: Option<ResolvedPlayerView>,
     ) {
         for (index, matrix) in leaves {
             self.matrices[index] = matrix;
         }
+        let mut attached = attached.into_iter().peekable();
+        if attached.peek().is_some() {
+            let Lighting::Authored { lights, .. } = Arc::make_mut(&mut self.lighting) else {
+                unreachable!("bound attached lighting");
+            };
+            for (id, transform) in attached {
+                lights.get_mut(id).expect("bound attached light").transform =
+                    light_pose(&transform);
+            }
+        }
         self.player_view = player_view;
+    }
+}
+
+fn light_pose(world: &Transform) -> Transform {
+    Transform {
+        scale: [1.; 3],
+        ..world.clone()
     }
 }
 

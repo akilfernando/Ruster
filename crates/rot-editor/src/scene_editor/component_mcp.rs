@@ -258,7 +258,7 @@ impl ComponentWorkspace {
                 result["selected_object_ids"] = json!(selected_ids);
                 result["assembly_guidance"] = json!("When building repeated structures, use viewport_frame and viewport_screenshot to check one complete assembly from the front, side, and top before making linked copies with scene_prefab.");
                 result["primitive_guidance"] = json!("triangular_prism is 1 unit per axis (local bounds -0.5 to 0.5), with a bounding-box center pivot, +Y up, and its ridge along local Z. With parent_id, the whole transform is parent-local.");
-                result["spot_light_guidance"] = json!("Light kind spot uses local -Z, rotated by its owner's authored rotation chain. Range is in world units; inner_degrees and outer_degrees are half-angles, 0 <= inner < outer <= 90. Static Play/Build share four active Point and Spot slots in scene order.");
+                result["spot_light_guidance"] = json!("Light kind spot uses local -Z, rotated by its owner's authored rotation chain. Range is in world units; inner_degrees and outer_degrees are half-angles, 0 <= inner < outer <= 90. Scene view and static Play/Build share four active Point and Spot slots in scene order. In behavior Play/Build, one Point or Spot can follow a Mesh Renderer leaf with Object Lua API 1/2. Standalone Spot requires static playback.");
                 result["camera_guidance"] = json!("A v23 Transform Perspective camera uses its owner's world position and authored rotation; local -Z is forward and +Y is up. Parent scale affects position, never orientation or FOV.");
             }
             return Ok(result);

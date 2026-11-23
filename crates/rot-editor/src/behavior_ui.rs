@@ -2163,7 +2163,7 @@ impl Request {
                 scene: scene.clone(),
                 authoring: authoring.clone(),
                 hidden_mesh_renderers: hidden_mesh_renderers.clone(),
-                projection: *projection,
+                projection: projection.clone(),
                 transform_camera: transform_camera.clone(),
                 sounds: sounds.clone(),
                 clips: clips.clone(),

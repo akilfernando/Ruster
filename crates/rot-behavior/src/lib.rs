@@ -12,7 +12,9 @@ use std::sync::{
 use mlua::chunk::ChunkMode;
 use mlua::debug::DebugEvent;
 use mlua::{Function, HookTriggers, Lua, LuaOptions, StdLib, Table, Value, VmState};
-use rot_scene::component_scene::{RuntimeProjection, TransformCameraBinding, TransformCameraPose};
+use rot_scene::component_scene::{
+    AttachedLights, RuntimeProjection, TransformCameraBinding, TransformCameraPose,
+};
 use rot_scene::input::{ActionFrame, ActionValue, ValidatedActionFrame};
 use rot_scene::{
     AnimationBinding, Authoring, BehaviorBinding, BehaviorSource, Clip, PropertyValue, Scene,
@@ -257,6 +259,7 @@ pub struct Runtime {
     audio_batch: Option<AudioBatch>,
     has_sound_binding: bool,
     leaf_parents: Option<Arc<BTreeMap<String, rot_scene::ParentPath>>>,
+    attached_lights: Option<Arc<AttachedLights>>,
     follow_parent: Option<rot_scene::ParentPath>,
     kinematic_owner: Option<KinematicOwner>,
     /// Clip bindings resolved at Reset; fixed for this Runtime.
@@ -834,21 +837,23 @@ impl Engine {
             }
         }
         trial_state.validate_total()?;
-        let leaf_parents =
-            (projection.allows_local_leaf_scripts() && animations.is_empty()).then(|| {
-                Arc::new(
-                    authoring
-                        .bindings
-                        .values()
-                        .filter_map(|binding| {
-                            let rot_scene::BindingTarget::Object(id) = &binding.target else {
-                                return None;
-                            };
-                            scene.parent_path(id).map(|path| (id.clone(), path))
-                        })
-                        .collect(),
-                )
-            });
+        let attached_lights = projection.attached_lights().cloned();
+        let leaf_parents = ((projection.allows_local_leaf_scripts() || attached_lights.is_some())
+            && animations.is_empty())
+        .then(|| {
+            Arc::new(
+                authoring
+                    .bindings
+                    .values()
+                    .filter_map(|binding| {
+                        let rot_scene::BindingTarget::Object(id) = &binding.target else {
+                            return None;
+                        };
+                        scene.parent_path(id).map(|path| (id.clone(), path))
+                    })
+                    .collect(),
+            )
+        });
         let follow_parent = leaf_parents.as_ref().and_then(|_| {
             scene
                 .player_view
@@ -858,7 +863,7 @@ impl Engine {
         });
         let transform_camera =
             resolve_transform_camera(transform_camera_binding.as_deref(), scene, Phase::Setup)?;
-        let hierarchy_draw = if scene.hierarchy.is_empty() {
+        let hierarchy_draw = if scene.hierarchy.is_empty() && attached_lights.is_none() {
             None
         } else {
             let view = scene
@@ -870,9 +875,13 @@ impl Engine {
                         &error.to_string(),
                     )
                 })?;
-            Some(Arc::new(rot_scene::HierarchyDraw::resolved(
-                scene, &poses, view,
-            )))
+            Some(prepare_draw(
+                scene,
+                &poses,
+                view,
+                attached_lights.as_deref(),
+                Phase::Setup,
+            )?)
         };
         self.check_cancelled()?;
         Ok(Runtime {
@@ -895,6 +904,7 @@ impl Engine {
             audio_batch: None,
             has_sound_binding,
             leaf_parents,
+            attached_lights,
             follow_parent,
             kinematic_owner,
             animations,
@@ -1029,16 +1039,25 @@ impl Engine {
             .map(|staged| {
                 if group_changed {
                     let (poses, view) = resolve_group_commit(staged)?;
-                    return Ok((!staged.hierarchy.is_empty()).then(|| {
-                        Arc::new(rot_scene::HierarchyDraw::resolved(staged, &poses, view))
-                    }));
+                    if staged.hierarchy.is_empty() && runtime.attached_lights.is_none() {
+                        return Ok(None);
+                    }
+                    return prepare_draw(
+                        staged,
+                        &poses,
+                        view,
+                        runtime.attached_lights.as_deref(),
+                        Phase::Commit,
+                    )
+                    .map(Some);
                 }
                 if let Some(paths) = &runtime.leaf_parents {
+                    let mut attached = Vec::new();
                     let leaves = changed_leaves
                         .into_iter()
                         .map(|(index, id, binding)| {
                             let object = &staged.objects[index];
-                            let validate = || {
+                            let mut validate = || {
                                 let world = paths
                                     .get(&object.id)
                                     .map(|path| path.resolve(staged, &object.transform))
@@ -1046,6 +1065,13 @@ impl Engine {
                                 let transform = world.as_ref().unwrap_or(&object.transform);
                                 if let Some(collider) = object.collider {
                                     collider.resolve(transform)?;
+                                }
+                                if let Some(light) = runtime
+                                    .attached_lights
+                                    .as_ref()
+                                    .and_then(|lights| lights.for_owner(index))
+                                {
+                                    attached.push((light.owner_id.as_str(), transform.clone()));
                                 }
                                 Ok::<_, rot_scene::SceneError>((
                                     index,
@@ -1080,7 +1106,7 @@ impl Engine {
                         .hierarchy()
                         .expect("projected hierarchy")
                         .clone();
-                    Arc::make_mut(&mut draw).update_leaves(leaves, view);
+                    Arc::make_mut(&mut draw).update_leaves(leaves, attached, view);
                     Ok(Some(draw))
                 } else {
                     for object in &staged.objects {
@@ -1429,6 +1455,25 @@ fn same_transform(a: &Transform, b: &Transform) -> bool {
     a.translation.map(f32::to_bits) == b.translation.map(f32::to_bits)
         && a.rotation.map(f32::to_bits) == b.rotation.map(f32::to_bits)
         && a.scale.map(f32::to_bits) == b.scale.map(f32::to_bits)
+}
+
+fn prepare_draw(
+    scene: &Scene,
+    poses: &rot_scene::ResolvedPoses,
+    view: Option<rot_scene::ResolvedPlayerView>,
+    attached: Option<&AttachedLights>,
+    phase: Phase,
+) -> Result<Arc<rot_scene::HierarchyDraw>, Diagnostic> {
+    let draw = rot_scene::HierarchyDraw::resolved(scene, poses, view);
+    let draw = if let Some(attached) = attached {
+        draw.with_attached_lights(scene, poses, attached)
+            .map_err(|error| {
+                Diagnostic::plain(DiagnosticCode::InvalidOutput, phase, &error.to_string())
+            })?
+    } else {
+        draw
+    };
+    Ok(Arc::new(draw))
 }
 
 fn validate_group_commit(scene: &Scene) -> Result<(), Diagnostic> {
@@ -1828,6 +1873,15 @@ mod input_tests {
             });
         }
         authored.objects[1].components.push(ComponentInstance {
+            id: "lamp".into(),
+            enabled: true,
+            kind: Component::Light {
+                color: [1.; 3],
+                intensity: 1.,
+                kind: rot_scene::Light::spot(None).kind,
+            },
+        });
+        authored.objects[1].components.push(ComponentInstance {
             id: "lens".into(),
             enabled: true,
             kind: Component::Camera {
@@ -1878,6 +1932,20 @@ mod input_tests {
         };
         engine.step_with_input(&mut runtime, &frame(false)).unwrap();
         let committed_draw = runtime.draw_frame().clone();
+        let light = committed_draw
+            .hierarchy()
+            .unwrap()
+            .lighting()
+            .light("b")
+            .unwrap();
+        assert_eq!(light.transform.scale, [1.; 3]);
+        let light_matrix = rot_scene::draw_matrix(&light.transform);
+        let owner_matrix = committed_draw.hierarchy().unwrap().matrices()[1];
+        assert_eq!(light_matrix.w_axis, owner_matrix.w_axis);
+        assert!(light_matrix
+            .z_axis
+            .abs_diff_eq(owner_matrix.z_axis / 1.25, 1e-6));
+        assert!(runtime.scene().lighting.light("b").is_none());
         let poses = runtime.scene().resolve_poses().unwrap();
         assert_eq!(
             committed_draw.hierarchy().unwrap().matrices(),
@@ -1962,6 +2030,116 @@ mod input_tests {
 
         authored.sources.get_mut("source").unwrap().host_api_version = SPATIAL_HOST_API_VERSION;
         assert!(authored.behavior_projection().is_err());
+    }
+
+    #[test]
+    fn flat_attached_light_preserves_independent_visibility_and_unchanged_pose() {
+        use rot_scene::component_scene::{Component, ComponentInstance, ComponentScene};
+        let (scene, authoring) = fixture(
+            r#"
+            return {update = function(object, properties, dt, host)
+              if properties.lamp == host.button("fire").held then
+                object.translation[1] = object.translation[1] + host.axis("move")
+                object.rotation[2] = object.rotation[2] + 0.1 * host.axis("move")
+              end
+              return object
+            end}
+            "#,
+        );
+        let mut authored =
+            ComponentScene::from_legacy(&rot_scene::Session::new(scene).unwrap()).unwrap();
+        authored.actions = authoring.actions;
+        authored.sources = authoring.sources;
+        for object in &mut authored.objects {
+            let id = format!("binding-{}", object.id);
+            let mut binding = authoring.bindings[&id].clone();
+            binding.properties.insert(
+                "lamp".into(),
+                rot_scene::PropertyValue::Bool(object.id == "b"),
+            );
+            object.components.push(ComponentInstance {
+                id,
+                enabled: true,
+                kind: Component::Script {
+                    binding,
+                    source_kind: None,
+                },
+            });
+        }
+        authored.objects[1].components[0].enabled = false;
+        authored.objects[1].components.push(ComponentInstance {
+            id: "point".into(),
+            enabled: true,
+            kind: Component::Light {
+                color: [1.; 3],
+                intensity: 1.,
+                kind: rot_scene::Light::point(None).kind,
+            },
+        });
+        let input = authored.behavior_projection().unwrap();
+        assert!(input.hidden_mesh_renderers.as_ref().unwrap().contains("b"));
+        assert!(input.scene.hierarchy.is_empty());
+        let mut engine = Engine::new(Limits::default()).unwrap();
+        let session = rot_scene::Session::from_component_runtime(&authored).unwrap();
+        assert!(session.snapshot_bytes().is_err());
+        let mut runtime = engine
+            .reset_projected(
+                session.scene(),
+                session.authoring(),
+                None,
+                session.runtime_projection(),
+            )
+            .unwrap();
+        let initial = runtime.draw_frame().clone();
+        let move_owner = |held| {
+            ActionFrame(BTreeMap::from([
+                ("move".into(), ActionValue::Axis1d { value: 1 }),
+                (
+                    "fire".into(),
+                    ActionValue::Button(ButtonState {
+                        held,
+                        pressed: held,
+                        released: false,
+                    }),
+                ),
+            ]))
+        };
+        engine
+            .step_with_input(&mut runtime, &move_owner(false))
+            .unwrap();
+        let before = runtime.draw_frame().clone();
+        assert!(std::ptr::eq(
+            initial.hierarchy().unwrap().lighting(),
+            before.hierarchy().unwrap().lighting()
+        ));
+        assert_eq!(before.hierarchy().unwrap().matrices()[0].w_axis.x, 1.);
+        engine
+            .step_with_input(&mut runtime, &move_owner(true))
+            .unwrap();
+        let prepared = runtime.draw_frame().hierarchy().unwrap();
+        let light = prepared.lighting().light("b").unwrap();
+        assert_eq!(light.transform, runtime.scene().objects[1].transform);
+        assert_eq!(light.transform.translation[0], 1.);
+        assert!(light.enabled);
+
+        let lamp = &mut authored.objects[1];
+        lamp.components[0].enabled = true;
+        lamp.components[2].enabled = false;
+        let input = authored.behavior_projection().unwrap();
+        assert!(input.hidden_mesh_renderers.is_none());
+        let runtime = engine
+            .reset_projected(&input.scene, &input.authoring, None, input.projection)
+            .unwrap();
+        assert!(
+            !runtime
+                .draw_frame()
+                .hierarchy()
+                .unwrap()
+                .lighting()
+                .light("b")
+                .unwrap()
+                .enabled
+        );
     }
 
     fn fixture(text: &str) -> (Scene, Authoring) {

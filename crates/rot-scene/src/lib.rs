@@ -1503,11 +1503,11 @@ impl Document {
         }
     }
     fn validate(&self) -> Result<(), SceneError> {
-        self.validate_for_runtime(Default::default())
+        self.validate_for_runtime(&Default::default())
     }
     fn validate_for_runtime(
         &self,
-        projection: component_scene::RuntimeProjection,
+        projection: &component_scene::RuntimeProjection,
     ) -> Result<(), SceneError> {
         self.scene.validate()?;
         projection.validate_authoring(&self.scene, &self.authoring)?;
@@ -2313,6 +2313,7 @@ impl Session {
     }
     /// Complete admitted authored document without changing save authority or history.
     pub fn snapshot_bytes(&self) -> Result<Vec<u8>, SceneError> {
+        self.runtime_projection.require_legacy_export()?;
         self.document.encode()
     }
     /// Restore a validated snapshot as an unsaved copy, never bound to its origin.
@@ -2330,7 +2331,7 @@ impl Session {
         })
     }
     pub fn runtime_projection(&self) -> component_scene::RuntimeProjection {
-        self.runtime_projection
+        self.runtime_projection.clone()
     }
 
     pub fn transform_camera_binding(
@@ -3904,6 +3905,7 @@ impl Session {
     /// Save to the opened file only if the full saved baseline still matches.
     /// New destinations must not exist. Failure preserves all in-memory state.
     pub fn save(&mut self, path: impl AsRef<Path>) -> Result<(), SceneError> {
+        self.runtime_projection.require_legacy_export()?;
         let lock = SceneLock::acquire(path.as_ref())?;
         let existing = self.path.as_ref() == Some(&lock.path);
         if existing && self.saved.as_ref() != Some(&Document::load(&lock.path)?) {

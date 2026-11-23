@@ -192,6 +192,12 @@ connected project.
   Scene view and static Play/Build use the first four enabled visible
   Point or Spot Lights in scene order. See first-page `scene_inspect`
   for this guidance and any budget warning.
+- Behavior Play and Build can attach one Point or Spot to a Mesh Renderer
+  leaf with an Object Lua API 1 or 2 script. Enable the light and mesh
+  independently. The light follows the same committed transform as the
+  mesh. Standalone Spot Lights require static playback. The first page of
+  `behavior_runtime_inspect` reports committed `lighting` by runtime
+  object ID when the run has an attached light.
 - Imported GLB metallic-roughness PNGs expose the green channel as a
   ready `roughness_linear` asset. The model summary in `asset_inspect`
   reports `roughness_map_count` and prioritizes omissions such as
