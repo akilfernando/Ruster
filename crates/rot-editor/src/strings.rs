@@ -39,6 +39,8 @@ editor_text! {
     Welcome => "Welcome to Rot Engine",
     NoRecentProjects => "No recent projects",
     HierarchySearchEmpty => "No matching objects.",
+    HierarchyExpand => "Expand {name}",
+    HierarchyCollapse => "Collapse {name}",
     EmptyHierarchy => "This scene is empty. Add an object with Create.",
     NewGroup => "New Group",
     NewGroupHint => "Create an empty group.",

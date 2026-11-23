@@ -683,6 +683,13 @@ its child are selected, the child stays attached to the ancestor. Finish pending
 Inspector edits and unlock the affected objects before grouping. You can undo or
 redo the entire group in one step.
 
+Use the chevron beside a parent in the v23 Hierarchy to fold or open its
+branch. With a row focused, Right opens the branch or moves to its first child,
+and Left folds the branch or moves to its parent. Up and Down move through
+visible rows, and Shift extends the selection across those rows. Folding keeps
+your current selection and has no effect on the saved scene. Search Hierarchy
+and Find Uses in Scene open the ancestors needed to reveal their result.
+
 In a v23 scene, type in **Search Hierarchy** or press **Ctrl+F** to focus
 it. Search matches part of an object name or stable ID, regardless of case.
 Results include hidden and disabled objects. Parent breadcrumbs and stable

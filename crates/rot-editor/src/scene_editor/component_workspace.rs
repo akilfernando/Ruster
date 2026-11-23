@@ -279,6 +279,9 @@ pub(super) struct ComponentWorkspace {
     transform_tool: TransformTool,
     collider_tool: component_collider::ColliderTool,
     rows: Vec<(usize, usize)>,
+    collapsed_objects: HashSet<String>,
+    visible_rows: Option<Vec<usize>>,
+    hierarchy_focus: Option<(usize, bool)>,
     hierarchy_search: component_hierarchy_search::Search,
     hierarchy_search_index: component_hierarchy_search::SearchIndex,
     hierarchy_search_reveal: Option<String>,
@@ -398,6 +401,9 @@ impl ComponentWorkspace {
             transform_tool: TransformTool::default(),
             collider_tool: Default::default(),
             rows,
+            collapsed_objects: HashSet::new(),
+            visible_rows: None,
+            hierarchy_focus: None,
             hierarchy_search: Default::default(),
             hierarchy_search_index: Default::default(),
             hierarchy_search_reveal: None,
@@ -786,27 +792,26 @@ impl ComponentWorkspace {
     fn select_row(&mut self, row: usize, modifiers: egui::Modifiers) {
         self.asset_browser.selected = None;
         let objects = &self.session.scene().objects;
-        let id = objects[self.rows[row].0].id.clone();
+        let id = objects[self.row_at(row).0].id.clone();
         let additive = modifiers.command || modifiers.ctrl;
         if modifiers.shift {
-            let anchor = self
-                .selection_anchor
-                .as_deref()
-                .and_then(|id| {
-                    self.rows
-                        .iter()
-                        .position(|&(index, _)| objects[index].id == id)
-                })
-                .unwrap_or(row);
+            let anchor = self.selection_anchor.as_deref().and_then(|id| {
+                (0..self.visible_row_count()).find(|&row| objects[self.row_at(row).0].id == id)
+            });
+            if anchor.is_none() {
+                self.selection_anchor = Some(id);
+            }
+            let anchor = anchor.unwrap_or(row);
             if !additive {
                 self.selection.clear();
             }
-            self.selection.extend(
-                self.rows[anchor.min(row)..=anchor.max(row)]
-                    .iter()
-                    .map(|&(index, _)| objects[index].id.clone()),
-            );
-            self.selection_anchor.get_or_insert(id);
+            let rows = &self.rows;
+            let visible = &self.visible_rows;
+            self.selection
+                .extend((anchor.min(row)..=anchor.max(row)).map(|row| {
+                    let full = visible.as_ref().map_or(row, |visible| visible[row]);
+                    objects[rows[full].0].id.clone()
+                }));
         } else if additive {
             if !self.selection.remove(&id) {
                 self.selection.insert(id.clone());
@@ -817,6 +822,66 @@ impl ComponentWorkspace {
             return;
         }
         self.rebuild_draft();
+    }
+
+    fn row_at(&self, row: usize) -> (usize, usize) {
+        self.rows[self.full_row_at(row)]
+    }
+
+    fn full_row_at(&self, row: usize) -> usize {
+        self.visible_rows
+            .as_ref()
+            .map_or(row, |visible| visible[row])
+    }
+
+    fn visible_row_count(&self) -> usize {
+        self.visible_rows.as_ref().map_or(self.rows.len(), Vec::len)
+    }
+
+    fn visible_row_of(&self, index: usize) -> Option<usize> {
+        (0..self.visible_row_count()).find(|&row| self.row_at(row).0 == index)
+    }
+
+    fn refresh_disclosure(&mut self) {
+        if self.collapsed_objects.is_empty() {
+            self.visible_rows = None;
+            return;
+        }
+        let mut hidden_below = None;
+        let visible = self.visible_rows.get_or_insert_default();
+        visible.clear();
+        let objects = &self.session.scene().objects;
+        for (row, &(index, depth)) in self.rows.iter().enumerate() {
+            if hidden_below.is_some_and(|parent_depth| depth > parent_depth) {
+                continue;
+            }
+            visible.push(row);
+            hidden_below = self
+                .collapsed_objects
+                .contains(&objects[index].id)
+                .then_some(depth);
+        }
+    }
+
+    fn toggle_disclosure(&mut self, index: usize) {
+        let id = &self.session.scene().objects[index].id;
+        if !self.collapsed_objects.remove(id) {
+            self.collapsed_objects.insert(id.clone());
+        }
+        self.refresh_disclosure();
+    }
+
+    fn reveal_hierarchy_ancestors(&mut self, index: usize) {
+        let objects = &self.session.scene().objects;
+        let mut parent = self.parents[index];
+        let mut changed = false;
+        while let Some(index) = parent {
+            changed |= self.collapsed_objects.remove(&objects[index].id);
+            parent = self.parents[index];
+        }
+        if changed {
+            self.refresh_disclosure();
+        }
     }
 
     fn target_ids(&self, hit: Option<&str>) -> Vec<String> {
@@ -881,6 +946,8 @@ impl ComponentWorkspace {
         }
         self.rebuild_draft();
         (self.rows, self.parents) = hierarchy_rows(&self.session.scene().objects);
+        self.hierarchy_focus = None;
+        self.refresh_disclosure();
         self.refresh_view();
     }
 
@@ -1745,6 +1812,55 @@ fn action_menu_item(
         ui.close();
     }
     clicked
+}
+
+fn hierarchy_disclosure(ui: &mut egui::Ui, name: &str, collapsed: bool) -> egui::Response {
+    let size = crate::ui_kit::tokens::CONTROL_HEIGHT;
+    let label = if collapsed {
+        Text::HierarchyExpand
+    } else {
+        Text::HierarchyCollapse
+    }
+    .plain()
+    .replace("{name}", name);
+    let response = ui.add_sized([size, ROW_HEIGHT], egui::Button::new("").frame(false));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), &label));
+    let origin = response.rect.center();
+    let points = if collapsed {
+        [[-2.0, -4.0], [2.0, 0.0], [-2.0, 4.0]]
+    } else {
+        [[-4.0, -2.0], [0.0, 2.0], [4.0, -2.0]]
+    };
+    let stroke = ui.style().interact(&response).fg_stroke;
+    ui.painter().add(egui::Shape::line(
+        points
+            .into_iter()
+            .map(|[x, y]| origin + egui::vec2(x, y))
+            .collect(),
+        stroke,
+    ));
+    response.on_hover_text(label)
+}
+
+fn hierarchy_key(ui: &egui::Ui) -> Option<(egui::Key, egui::Modifiers)> {
+    ui.input_mut(|input| {
+        for key in [
+            egui::Key::ArrowLeft,
+            egui::Key::ArrowRight,
+            egui::Key::ArrowUp,
+            egui::Key::ArrowDown,
+        ] {
+            if matches!(key, egui::Key::ArrowUp | egui::Key::ArrowDown)
+                && input.consume_key(egui::Modifiers::SHIFT, key)
+            {
+                return Some((key, egui::Modifiers::SHIFT));
+            }
+            if input.consume_key(egui::Modifiers::NONE, key) {
+                return Some((key, egui::Modifiers::NONE));
+            }
+        }
+        None
+    })
 }
 
 fn hierarchy_rows(objects: &[ObjectNode]) -> (Vec<(usize, usize)>, Vec<Option<usize>>) {
@@ -2844,6 +2960,8 @@ impl ComponentWorkspace {
                 let mut duplicated = None;
                 let mut prefab = None;
                 let mut view_change = None;
+                let mut toggle = None;
+                let mut keyboard_target = None;
                 let revision = self.session.revision();
                 let mut moved = hierarchy_drop(ui, &root, None, revision, &self.selection);
                 let mut scroll = egui::ScrollArea::vertical().id_salt("hierarchy_tree");
@@ -2859,153 +2977,226 @@ impl ComponentWorkspace {
                     })
                     .or_else(|| self.texture_use_reveal.as_ref().map(|(index, _)| *index));
                 if let Some(index) = reveal {
-                    if let Some(row) = self.rows.iter().position(|&(row, _)| row == index) {
-                        scroll = scroll.vertical_scroll_offset(
-                            row as f32 * (ROW_HEIGHT + ui.spacing().item_spacing.y),
-                        );
-                    }
+                    self.reveal_hierarchy_ancestors(index);
+                    self.hierarchy_focus = Some((index, true));
                 }
-                scroll.show_rows(ui, ROW_HEIGHT, self.rows.len(), |ui, range| {
-                    for row in range {
-                        let (index, depth) = self.rows[row];
+                let focus = self.hierarchy_focus.take();
+                if let Some(row) = focus
+                    .filter(|&(_, scroll)| scroll)
+                    .and_then(|(index, _)| self.visible_row_of(index))
+                {
+                    scroll = scroll.vertical_scroll_offset(
+                        row as f32 * (ROW_HEIGHT + ui.spacing().item_spacing.y),
+                    );
+                }
+                scroll.show_rows(ui, ROW_HEIGHT, self.visible_row_count(), |ui, range| {
+                    for row in range.clone() {
+                        let full_row = self.full_row_at(row);
+                        let (index, depth) = self.rows[full_row];
+                        let has_children = self
+                            .rows
+                            .get(full_row + 1)
+                            .is_some_and(|&(_, next_depth)| next_depth > depth);
                         let object = &self.session.scene().objects[index];
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = SPACE_XS;
-                            let value = self.view_flags.get(index).copied().unwrap_or_default();
-                            let inherited = self.parents[index]
-                                .and_then(|parent| self.view_flags.get(parent).copied())
-                                .unwrap_or_default();
-                            for (flag, set, inherited) in [
-                                (Flag::Hidden, value.hidden, inherited.hidden),
-                                (Flag::Locked, value.locked, inherited.locked),
-                            ] {
-                                if flag.button(ui, &object.name, set, inherited) {
-                                    view_change = Some((flag, !set, object.id.clone()));
-                                }
-                            }
-                            ui.add_space(SPACE_XS * depth.min(12) as f32);
-                            let active = self.selection.contains(&object.id);
-                            let response = ui
-                                .add(
-                                    egui::Button::selectable(active, &object.name)
-                                        .truncate()
-                                        .sense(egui::Sense::click_and_drag()),
-                                )
-                                .on_hover_text(&object.name);
-                            if response.drag_started() {
-                                response.dnd_set_drag_payload(HierarchyDrag {
-                                    revision,
-                                    object_id: object.id.clone(),
-                                });
-                            }
-                            if let Some(asset) = AssetDrag::released(ui, &response) {
-                                placed = Some((asset, Some(object.id.clone())));
-                            }
-                            if let Some(drop) = hierarchy_drop(
-                                ui,
-                                &response,
-                                Some(&object.id),
-                                revision,
-                                &self.selection,
-                            ) {
-                                moved = Some(drop);
-                            }
-                            if response.clicked() {
-                                let modifiers = ui.input(|input| {
-                                    input
-                                        .events
-                                        .iter()
-                                        .rev()
-                                        .find_map(|event| match event {
-                                            egui::Event::PointerButton {
-                                                button: egui::PointerButton::Primary,
-                                                pressed: false,
-                                                modifiers,
-                                                ..
-                                            } => Some(*modifiers),
-                                            _ => None,
-                                        })
-                                        .unwrap_or(input.modifiers)
-                                });
-                                selected = Some(Some((row, modifiers)));
-                            }
-                            response.context_menu(|ui| {
-                                if ui
-                                    .add_enabled(
-                                        !blocked && !self.runtime.in_play_mode(),
-                                        egui::Button::new(Text::SaveAsPrefab.plain()),
-                                    )
-                                    .clicked()
-                                {
-                                    prefab = Some(object.id.clone());
-                                    ui.close();
-                                }
-                                ui.menu_button(Text::ComponentCreateChild.plain(), |ui| {
-                                    for action in [
-                                        Action::CreateEmpty,
-                                        Action::CreateCube,
-                                        Action::CreateSphere,
-                                        Action::CreateCapsule,
-                                        Action::CreateTriangularPrism,
-                                        Action::CreateCylinder,
-                                        Action::CreateLight,
-                                        Action::CreateDirectionalLight,
-                                        Action::CreateSpotLight,
-                                    ] {
-                                        if action_menu_item(ui, &self.workspace, action, !blocked) {
-                                            child = Some((action, object.id.clone()));
-                                        }
+                        ui.push_id(&object.id, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = SPACE_XS;
+                                let value = self.view_flags.get(index).copied().unwrap_or_default();
+                                let inherited = self.parents[index]
+                                    .and_then(|parent| self.view_flags.get(parent).copied())
+                                    .unwrap_or_default();
+                                for (flag, set, inherited) in [
+                                    (Flag::Hidden, value.hidden, inherited.hidden),
+                                    (Flag::Locked, value.locked, inherited.locked),
+                                ] {
+                                    if flag.button(ui, &object.name, set, inherited) {
+                                        view_change = Some((flag, !set, object.id.clone()));
                                     }
-                                });
-                                if action_menu_item(
-                                    ui,
-                                    &self.workspace,
-                                    Action::GroupSelection,
-                                    !blocked,
-                                ) {
-                                    grouped = Some(object.id.clone());
                                 }
-                                if action_menu_item(
-                                    ui,
-                                    &self.workspace,
-                                    Action::Duplicate,
-                                    !blocked,
-                                ) {
-                                    duplicated = Some(object.id.clone());
-                                }
-                                if ui
+                                ui.add_space(SPACE_XS * depth.min(12) as f32);
+                                let collapsed =
+                                    has_children && self.collapsed_objects.contains(&object.id);
+                                let disclosure_focused = if has_children {
+                                    let disclosure =
+                                        hierarchy_disclosure(ui, &object.name, collapsed);
+                                    if disclosure.clicked() {
+                                        toggle = Some(index);
+                                    }
+                                    disclosure.has_focus()
+                                } else {
+                                    ui.add_space(crate::ui_kit::tokens::CONTROL_HEIGHT);
+                                    false
+                                };
+                                let active = self.selection.contains(&object.id);
+                                let response = ui
                                     .add(
-                                        egui::Button::new(Action::Frame.label()).shortcut_text(
-                                            self.workspace.shortcut_hint(Action::Frame),
-                                        ),
+                                        egui::Button::selectable(active, &object.name)
+                                            .truncate()
+                                            .sense(egui::Sense::click_and_drag()),
                                     )
-                                    .clicked()
-                                {
-                                    framed = Some(object.id.clone());
-                                    ui.close();
+                                    .on_hover_text(&object.name);
+                                if focus.is_some_and(|(target, _)| index == target) {
+                                    response.request_focus();
                                 }
-                                if ui
-                                    .add(egui::Button::new(Action::Delete.label()).shortcut_text(
-                                        self.workspace.shortcut_text(Action::Delete),
-                                    ))
-                                    .clicked()
+                                let tree_focused = (response.has_focus() || disclosure_focused)
+                                    && focus.is_none_or(|(target, _)| index == target)
+                                    && !transform_active
+                                    && !egui::Popup::is_any_open(ui.ctx());
+                                if let Some((key, modifiers)) =
+                                    tree_focused.then(|| hierarchy_key(ui)).flatten()
                                 {
-                                    deleted = Some(object.id.clone());
-                                    ui.close();
+                                    let target = match key {
+                                        egui::Key::ArrowLeft if has_children && !collapsed => {
+                                            toggle = Some(index);
+                                            None
+                                        }
+                                        egui::Key::ArrowRight if collapsed => {
+                                            toggle = Some(index);
+                                            None
+                                        }
+                                        egui::Key::ArrowLeft => self.parents[index]
+                                            .and_then(|parent| self.visible_row_of(parent)),
+                                        egui::Key::ArrowRight if has_children => Some(row + 1),
+                                        egui::Key::ArrowUp => row.checked_sub(1),
+                                        egui::Key::ArrowDown
+                                            if row + 1 < self.visible_row_count() =>
+                                        {
+                                            Some(row + 1)
+                                        }
+                                        _ => None,
+                                    };
+                                    if let Some(target) = target {
+                                        keyboard_target =
+                                            Some((self.row_at(target).0, !range.contains(&target)));
+                                        selected = Some(Some((target, modifiers)));
+                                    }
                                 }
-                                if let Some(destination) = sibling_move_items(
+                                if response.drag_started() {
+                                    response.dnd_set_drag_payload(HierarchyDrag {
+                                        revision,
+                                        object_id: object.id.clone(),
+                                    });
+                                }
+                                if let Some(asset) = AssetDrag::released(ui, &response) {
+                                    placed = Some((asset, Some(object.id.clone())));
+                                }
+                                if let Some(drop) = hierarchy_drop(
                                     ui,
-                                    &self.session.scene().objects,
-                                    index,
+                                    &response,
+                                    Some(&object.id),
+                                    revision,
                                     &self.selection,
                                 ) {
-                                    moved = Some((object.id.clone(), destination));
+                                    moved = Some(drop);
                                 }
-                            });
+                                if response.clicked() {
+                                    let modifiers = ui.input(|input| {
+                                        input
+                                            .events
+                                            .iter()
+                                            .rev()
+                                            .find_map(|event| match event {
+                                                egui::Event::PointerButton {
+                                                    button: egui::PointerButton::Primary,
+                                                    pressed: false,
+                                                    modifiers,
+                                                    ..
+                                                } => Some(*modifiers),
+                                                _ => None,
+                                            })
+                                            .unwrap_or(input.modifiers)
+                                    });
+                                    selected = Some(Some((row, modifiers)));
+                                }
+                                response.context_menu(|ui| {
+                                    if ui
+                                        .add_enabled(
+                                            !blocked && !self.runtime.in_play_mode(),
+                                            egui::Button::new(Text::SaveAsPrefab.plain()),
+                                        )
+                                        .clicked()
+                                    {
+                                        prefab = Some(object.id.clone());
+                                        ui.close();
+                                    }
+                                    ui.menu_button(Text::ComponentCreateChild.plain(), |ui| {
+                                        for action in [
+                                            Action::CreateEmpty,
+                                            Action::CreateCube,
+                                            Action::CreateSphere,
+                                            Action::CreateCapsule,
+                                            Action::CreateTriangularPrism,
+                                            Action::CreateCylinder,
+                                            Action::CreateLight,
+                                            Action::CreateDirectionalLight,
+                                            Action::CreateSpotLight,
+                                        ] {
+                                            if action_menu_item(
+                                                ui,
+                                                &self.workspace,
+                                                action,
+                                                !blocked,
+                                            ) {
+                                                child = Some((action, object.id.clone()));
+                                            }
+                                        }
+                                    });
+                                    if action_menu_item(
+                                        ui,
+                                        &self.workspace,
+                                        Action::GroupSelection,
+                                        !blocked,
+                                    ) {
+                                        grouped = Some(object.id.clone());
+                                    }
+                                    if action_menu_item(
+                                        ui,
+                                        &self.workspace,
+                                        Action::Duplicate,
+                                        !blocked,
+                                    ) {
+                                        duplicated = Some(object.id.clone());
+                                    }
+                                    if ui
+                                        .add(
+                                            egui::Button::new(Action::Frame.label()).shortcut_text(
+                                                self.workspace.shortcut_hint(Action::Frame),
+                                            ),
+                                        )
+                                        .clicked()
+                                    {
+                                        framed = Some(object.id.clone());
+                                        ui.close();
+                                    }
+                                    if ui
+                                        .add(
+                                            egui::Button::new(Action::Delete.label())
+                                                .shortcut_text(
+                                                    self.workspace.shortcut_text(Action::Delete),
+                                                ),
+                                        )
+                                        .clicked()
+                                    {
+                                        deleted = Some(object.id.clone());
+                                        ui.close();
+                                    }
+                                    if let Some(destination) = sibling_move_items(
+                                        ui,
+                                        &self.session.scene().objects,
+                                        index,
+                                        &self.selection,
+                                    ) {
+                                        moved = Some((object.id.clone(), destination));
+                                    }
+                                });
+                            })
                         });
                     }
                 });
-                if let Some((asset, parent)) = placed.filter(|_| !blocked) {
+                if let Some(index) = toggle {
+                    self.toggle_disclosure(index);
+                    ui.ctx().request_repaint();
+                } else if let Some((asset, parent)) = placed.filter(|_| !blocked) {
                     self.place_asset(&asset, parent);
                 } else if let Some((flag, set, id)) = view_change {
                     self.set_view_flag(flag, set, vec![id]);
@@ -3026,7 +3217,13 @@ impl ComponentWorkspace {
                     self.delete(Some(&id));
                 } else if let Some(selected) = selected.filter(|_| self.apply()) {
                     match selected {
-                        Some((row, modifiers)) => self.select_row(row, modifiers),
+                        Some((row, modifiers)) => {
+                            self.select_row(row, modifiers);
+                            if let Some(target) = keyboard_target {
+                                self.hierarchy_focus = Some(target);
+                                ui.ctx().request_repaint();
+                            }
+                        }
                         None => self.select(None),
                     }
                 }
@@ -3796,6 +3993,53 @@ mod tests {
         assert!(editor.meshes.contains_key(&asset.id));
         assert!(dir.path().join("Assets/Triangle.obj.rotmeta").is_file());
         assert!(!editor.session.is_dirty());
+    }
+
+    #[test]
+    fn hierarchy_disclosure_keeps_full_scene_and_reveals_only_target_ancestors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("scene")).unwrap()).unwrap();
+        for (id, parent) in [
+            ("bay-a", None),
+            ("bank-a", Some("bay-a")),
+            ("bolt-a", Some("bank-a")),
+            ("bay-b", None),
+            ("bank-b", Some("bay-b")),
+        ] {
+            scene.objects.push(ObjectNode {
+                id: id.into(),
+                name: "Part".into(),
+                parent: parent.map(str::to_owned),
+                transform: Default::default(),
+                enabled: true,
+                components: Vec::new(),
+            });
+        }
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let disk = std::fs::read(path).unwrap();
+        editor.select_row(2, egui::Modifiers::NONE);
+        editor.toggle_disclosure(1);
+        editor.toggle_disclosure(0);
+        editor.toggle_disclosure(3);
+        assert_eq!(editor.target_ids(None), ["bolt-a"]);
+        assert_eq!(editor.rows.len(), 5);
+        assert_eq!(editor.visible_row_count(), 2);
+        editor.select_row(0, egui::Modifiers::NONE);
+        editor.select_row(1, egui::Modifiers::SHIFT);
+        assert_eq!(editor.target_ids(None), ["bay-a", "bay-b"]);
+
+        editor.refresh();
+        assert_eq!(editor.visible_row_count(), 2);
+        editor.reveal_hierarchy_ancestors(2);
+        assert_eq!(editor.visible_row_of(2), Some(2));
+        assert!(editor.visible_row_of(4).is_none());
+        assert_eq!(editor.session.scene(), &scene);
+        assert_eq!(editor.session.revision(), 0);
+        assert_eq!(std::fs::read(&editor.path).unwrap(), disk);
     }
 
     #[test]
