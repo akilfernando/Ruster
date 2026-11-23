@@ -10,12 +10,13 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use rot_app::audio::{Output as AudioOutput, OutputStatus, Sounds};
+use rot_app::creation::RuntimeScene;
 use rot_behavior::debug::{
     Breakpoint, DebugError, DebugHandle, DebugRunId, DebugSession, Resume, StopId, StopSnapshot,
 };
 use rot_behavior::{Diagnostic, Engine, Limits, Runtime};
 use rot_render::component_preview::ComponentPreview;
-use rot_scene::input::{ActionFrame, ActionMap, InputKey, KeyEventAccumulator};
+use rot_scene::input::{ActionFrame, ActionMap, ActionValue, InputKey, KeyEventAccumulator};
 use rot_scene::{Authoring, Scene};
 use sha2::{Digest, Sha256};
 
@@ -374,6 +375,18 @@ fn test_gate(gate: &Mutex<Option<TestGate>>) {
         let _ = gate.resume.recv_timeout(Duration::from_secs(5));
     }
 }
+pub(super) struct StartTarget {
+    pub runtime: RuntimeScene,
+    pub sounds: Sounds,
+    pub clips: rot_behavior::Clips,
+}
+
+pub(super) struct StartTransition {
+    pub action_id: String,
+    pub target: Result<StartTarget, String>,
+    pub observation: Option<crate::scene_editor::project_startup::Observation>,
+}
+
 struct Shared {
     epoch: AtomicU64,
     cancel: Arc<AtomicBool>,
@@ -383,6 +396,7 @@ struct Shared {
     input_enabled: AtomicBool,
     input: Mutex<Option<InputSlot>>,
     latest: Mutex<Option<Frame>>,
+    start_transition: Mutex<Option<(RunKey, StartTransition)>>,
     audio_report: Mutex<Option<(RunKey, AudioReport)>>,
     debugger: Mutex<Option<(RunKey, DebugHandle)>>,
     // A generation mismatch logically clears points on New/Open. Epoch/revision
@@ -476,6 +490,7 @@ impl Worker {
             input_enabled: AtomicBool::new(false),
             input: Mutex::new(None),
             latest: Mutex::new(None),
+            start_transition: Mutex::new(None),
             audio_report: Mutex::new(None),
             debugger: Mutex::new(None),
             breakpoints: Mutex::new((0, Vec::new())),
@@ -536,6 +551,14 @@ impl Worker {
         self.wake();
         Ok(self.current)
     }
+    pub fn set_start_transition(&mut self, key: RunKey, route: Option<StartTransition>) {
+        *self
+            .shared
+            .start_transition
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = route.map(|route| (key, route));
+    }
+
     /// Separate from gameplay ownership, which is revoked when a HUD button claims input.
     pub fn native_hud_epoch(&self) -> Result<u64, String> {
         let epoch = self.shared.hud_epoch.load(Ordering::SeqCst);
@@ -1038,6 +1061,8 @@ struct Execution {
     due: Option<Instant>,
     last_input: Option<Arc<LastConsumedInput>>,
     published_queries: Option<Arc<[rot_behavior::QueryObservation]>>,
+    start_transition: Option<StartTransition>,
+    limits: Limits,
     audio: AudioOutput,
     audio_enabled: bool,
     audio_last_batch: Option<Arc<rot_behavior::AudioBatch>>,
@@ -1082,6 +1107,7 @@ impl Execution {
         self.due = None;
         self.runtime = None;
         self.static_frame = None;
+        self.start_transition = None;
         self.hidden_mesh_renderers = None;
         self.key = None;
         self.last_input = None;
@@ -1175,6 +1201,26 @@ fn frame(shared: &Shared, execution: &mut Execution, repaint: &Option<Repaint>, 
     );
 }
 
+fn static_frame(key: RunKey, preview: Arc<ComponentPreview>) -> Frame {
+    Frame {
+        key,
+        tick: 0,
+        commit_revision: 0,
+        last_step_commit_revision: None,
+        commit_revision_required: false,
+        command_schema_hash: None,
+        scene: preview.scene_snapshot(),
+        static_preview: Some(preview),
+        draw_frame: None,
+        resolved_transform_camera: None,
+        hidden_mesh_renderers: None,
+        authoring: Arc::default(),
+        state: Arc::default(),
+        input: None,
+        query_observations: None,
+    }
+}
+
 fn publish_frame(shared: &Shared, frame: Frame, repaint: &Option<Repaint>) {
     let mut latest = shared.latest.lock().unwrap_or_else(|p| p.into_inner());
     if active(shared, frame.key) && !shared.cancel.load(Ordering::SeqCst) {
@@ -1217,23 +1263,7 @@ fn process(
                 return None;
             }
             execution.key = Some(key);
-            execution.static_frame = Some(Frame {
-                key,
-                tick: 0,
-                commit_revision: 0,
-                last_step_commit_revision: None,
-                commit_revision_required: false,
-                command_schema_hash: None,
-                scene: preview.scene_snapshot(),
-                static_preview: Some(preview),
-                draw_frame: None,
-                resolved_transform_camera: None,
-                hidden_mesh_renderers: None,
-                authoring: Arc::default(),
-                state: Arc::default(),
-                input: None,
-                query_observations: None,
-            });
+            execution.static_frame = Some(static_frame(key, preview));
             frame(shared, execution, repaint, false);
             Some(Event::Reset {
                 key,
@@ -1252,6 +1282,7 @@ fn process(
         } => {
             let _ = shared.revoke_input(true);
             execution.static_frame = None;
+            execution.start_transition = None;
             execution.playing = false;
             execution.due = None;
             execution.stop_audio(shared);
@@ -1363,6 +1394,13 @@ fn process(
                         // uncertain poisoned state is never reused for execution.
                         shared.input.clear_poison();
                     }
+                    execution.start_transition = shared
+                        .start_transition
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .take()
+                        .filter(|(route_key, _)| *route_key == key)
+                        .map(|(_, route)| route);
                     execution.runtime = Some(runtime);
                     execution.hidden_mesh_renderers = hidden_mesh_renderers;
                     execution.key = Some(key);
@@ -1675,7 +1713,11 @@ fn process(
         }
     }
 }
-fn step(execution: &mut Execution, shared: &Shared, repaint: &Option<Repaint>) -> Option<Event> {
+fn step(
+    execution: &mut Execution,
+    shared: &Arc<Shared>,
+    repaint: &Option<Repaint>,
+) -> Option<Event> {
     let key = execution.key?;
     if let Some(frame) = &mut execution.static_frame {
         let Some(tick) = frame.tick.checked_add(1) else {
@@ -1753,15 +1795,145 @@ fn step(execution: &mut Execution, shared: &Shared, repaint: &Option<Repaint>) -
     };
     step_with_admitted(execution, shared, repaint, admitted)
 }
+fn transition_on_press(
+    execution: &mut Execution,
+    shared: &Arc<Shared>,
+    repaint: &Option<Repaint>,
+    admitted: &AdmittedInput,
+) -> Option<Event> {
+    let key = execution.key?;
+    if !execution.start_transition.as_ref().is_some_and(|route| {
+        matches!(admitted.frame.0.get(&route.action_id), Some(ActionValue::Button(state)) if state.pressed)
+    }) {
+        return None;
+    }
+    let route = execution.start_transition.take()?;
+    let verify = || {
+        route
+            .observation
+            .as_ref()
+            .map_or(Ok(()), |value| value.verify_route_inputs())
+    };
+    let staged = verify()
+        .and(route.target)
+        .and_then(|target| match target.runtime {
+            RuntimeScene::Behavior(session) => {
+                let mut engine =
+                    Engine::with_cancellation(execution.limits.clone(), shared.cancel.clone())
+                        .map_err(|error| format!("{error:?}"))?;
+                engine.set_clips(target.clips);
+                let runtime = engine
+                    .reset_projected(
+                        session.scene(),
+                        session.authoring(),
+                        session.transform_camera_binding().cloned(),
+                        session.runtime_projection(),
+                    )
+                    .map_err(|error| format!("{error:?}"))?;
+                let keys = KeyEventAccumulator::new(session.authoring().actions.clone())
+                    .map_err(|error| error.to_string())?;
+                let hidden = session.hidden_mesh_renderers().cloned();
+                Ok((Some((engine, runtime, keys, hidden, target.sounds)), None))
+            }
+            RuntimeScene::StaticHierarchy { preview, .. } => Ok((None, Some(preview))),
+        })
+        .and_then(|target| verify().map(|()| target));
+    if !active(shared, key) || shared.cancel.load(Ordering::SeqCst) {
+        return None;
+    }
+    let (behavior, preview) = match staged {
+        Ok(value) => value,
+        Err(error) => {
+            let reason = format!(
+                "Start Transition failed. {error} Repair the destination and restart Play."
+            );
+            execution.start_transition = Some(StartTransition {
+                action_id: route.action_id,
+                target: Err(error),
+                observation: route.observation,
+            });
+            execution.playing = false;
+            execution.due = None;
+            let _ = shared.revoke_input(true);
+            execution.audio.pause(true);
+            return Some(Event::Error {
+                key,
+                operation: Operation::Step,
+                diagnostic: Diagnostic {
+                    code: rot_behavior::DiagnosticCode::InvalidAuthoring,
+                    phase: rot_behavior::Phase::Setup,
+                    message: reason,
+                    source_id: None,
+                    source_hash: None,
+                    binding_id: None,
+                    object_id: None,
+                    line: None,
+                },
+                last_good: execution.info(),
+            });
+        }
+    };
+    execution.stop_audio(shared);
+    execution.last_input = None;
+    execution.published_queries = None;
+    execution.hidden_mesh_renderers = None;
+    *shared.debugger.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    if let Some((engine, runtime, keys, hidden, sounds)) = behavior {
+        {
+            let mut input = shared.input.lock().unwrap_or_else(|p| p.into_inner());
+            let slot = input.as_mut().expect("source action was admitted");
+            slot.map_identity = map_identity(keys.map());
+            slot.keys.switch_scene(keys);
+        }
+        execution.engine = Some(engine);
+        execution.runtime = Some(runtime);
+        execution.hidden_mesh_renderers = hidden;
+        if !sounds.is_empty() {
+            let weak = Arc::downgrade(shared);
+            let guard = Arc::new(move || weak.upgrade().is_some_and(|state| active(&state, key)));
+            execution.audio.reset_scoped(sounds, Some(guard));
+            execution.audio.pause(!execution.playing);
+            execution.audio_enabled = true;
+            execution.report_audio(shared, key);
+        }
+    } else if let Some(preview) = preview {
+        execution.engine = None;
+        execution.runtime = None;
+        execution.static_frame = Some(static_frame(key, preview));
+    }
+    let receipt = InputReceipt {
+        map_identity: admitted.map_identity,
+        frame_hash: Sha256::digest(
+            serde_json::to_vec(&admitted.frame).expect("validated input frame serializes"),
+        )
+        .into(),
+        tick: 0,
+        input_epoch: admitted.epoch,
+        origin: admitted.origin,
+    };
+    frame(shared, execution, repaint, false);
+    Some(Event::Step {
+        key,
+        run: execution.info().expect("transition retains runtime"),
+        input: receipt,
+    })
+}
+
 fn step_with_admitted(
     execution: &mut Execution,
-    shared: &Shared,
+    shared: &Arc<Shared>,
     repaint: &Option<Repaint>,
     admitted: AdmittedInput,
 ) -> Option<Event> {
     let key = execution.key?;
     #[cfg(test)]
     test_gate(&shared.admission_gate);
+    if let Some(event) = transition_on_press(execution, shared, repaint, &admitted) {
+        return Some(event);
+    }
+    if !active(shared, key) {
+        return None;
+    }
     let was_playing = execution.playing;
     let result = execution
         .engine
@@ -1869,6 +2041,8 @@ fn run(
         due: None,
         last_input: None,
         published_queries: None,
+        start_transition: None,
+        limits: limits.clone(),
         audio: AudioOutput::default(),
         audio_enabled: false,
         audio_last_batch: None,
@@ -2361,6 +2535,80 @@ mod tests {
                     released: false,
                 }),
             )])),
+        }
+    }
+
+    #[test]
+    fn supplied_start_edge_commits_target_tick_zero_or_retains_exact_source() {
+        for failed in [false, true] {
+            let (mut worker, pulses) = worker(Limits::default());
+            let (scene, authoring) = input_fixture();
+            let key = worker.advance(1, scene.revision).unwrap();
+            let mut target = rot_scene::component_scene::ComponentScene::from_legacy(
+                &rot_scene::Session::new(Scene::empty("destination")).unwrap(),
+            )
+            .unwrap();
+            target.actions = authoring.actions.clone();
+            let target = RuntimeScene::from_components(Box::new(target)).unwrap();
+            worker.set_start_transition(
+                key,
+                Some(StartTransition {
+                    action_id: "fire".into(),
+                    target: if failed {
+                        Err("Destination is missing.".into())
+                    } else {
+                        Ok(StartTarget {
+                            runtime: target,
+                            sounds: Default::default(),
+                            clips: Default::default(),
+                        })
+                    },
+                    observation: None,
+                }),
+            );
+            worker
+                .try_request(Command::Reset {
+                    key,
+                    scene,
+                    authoring,
+                    hidden_mesh_renderers: None,
+                    projection: Default::default(),
+                    transform_camera: None,
+                    sounds: Default::default(),
+                    clips: Default::default(),
+                })
+                .unwrap();
+            assert!(matches!(wait_event(&worker, &pulses), Event::Reset { .. }));
+            let before = worker.last_good_frame().unwrap();
+            let input = worker.current_input_meta(key).unwrap();
+            worker.try_request(program(key, input, 0)).unwrap();
+            let event = wait_event(&worker, &pulses);
+            let after = worker.last_good_frame().unwrap();
+            assert_eq!(after.tick, 0);
+            assert_eq!(after.commit_revision, 0);
+            if failed {
+                assert!(matches!(event, Event::Error { .. }));
+                assert!(Arc::ptr_eq(&before.scene, &after.scene));
+            } else {
+                assert!(matches!(
+                    event,
+                    Event::Step {
+                        run: RunInfo { tick: 0, .. },
+                        ..
+                    }
+                ));
+                assert_eq!(after.scene.id, "destination");
+                assert!(after.input.is_none());
+                worker.try_request(Command::Step { key }).unwrap();
+                assert!(matches!(
+                    wait_event(&worker, &pulses),
+                    Event::Step {
+                        run: RunInfo { tick: 1, .. },
+                        ..
+                    }
+                ));
+            }
+            close(&mut worker);
         }
     }
 

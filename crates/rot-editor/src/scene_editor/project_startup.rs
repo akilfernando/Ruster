@@ -31,9 +31,9 @@ struct StartupTransition {
     target_scene: Startup,
 }
 
-pub(super) struct TransitionInput {
-    pub(super) action_id: String,
-    pub(super) session: ComponentSession,
+pub(crate) struct TransitionInput {
+    pub(crate) action_id: String,
+    pub(crate) session: ComponentSession,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -95,7 +95,7 @@ struct ObservedFile {
 }
 
 #[derive(Clone)]
-pub(super) struct ProjectDirectory {
+pub(crate) struct ProjectDirectory {
     root: PathBuf,
     identity: Identity,
 }
@@ -178,7 +178,7 @@ impl ProjectDirectory {
         })
     }
 
-    pub(super) fn observe(&self) -> Result<Observation, String> {
+    pub(crate) fn observe(&self) -> Result<Observation, String> {
         Observation::read_expected(&self.root, Some(&self.identity))
     }
 
@@ -309,7 +309,7 @@ impl PreparedSibling {
     }
 }
 
-pub(super) struct Observation {
+pub(crate) struct Observation {
     root: PathBuf,
     identity: Identity,
     #[cfg(unix)]
@@ -611,6 +611,37 @@ impl Observation {
         }
         self.verify_target(saved, expected)?;
         Ok(session)
+    }
+
+    pub(super) fn verify_transition_target(&self) -> Result<(), String> {
+        if let Some((route, stamp)) = &self.transition {
+            self.verify_target(&route.target_scene, stamp.as_ref().map_err(Clone::clone)?)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn verify_route_inputs(&self) -> Result<(), String> {
+        self.with_current(|_| self.verify_transition_target())
+    }
+
+    pub(crate) fn active_transition(
+        &self,
+        active: &Path,
+        scene: &ComponentScene,
+    ) -> Option<(String, Result<TransitionInput, String>)> {
+        let (startup, _) = self.target.as_ref().ok()?.as_ref()?;
+        let (transition, _) = self.transition.as_ref()?;
+        if active.file_name().and_then(|name| name.to_str()) != Some(&startup.file)
+            || scene.id != startup.scene_id
+        {
+            return None;
+        }
+        let destination = self.load_startup().and_then(|saved| {
+            validate_action(saved.scene(), &transition.action_id)?;
+            self.load_transition(scene)?
+                .ok_or_else(|| "The Start Transition is unavailable.".into())
+        });
+        Some((transition.action_id.clone(), destination))
     }
 
     pub(super) fn has_transition(&self) -> bool {

@@ -100,10 +100,7 @@ impl RuntimeUi {
         let catalog = &authoring.bindings[binding_id].commands;
         let binding_id = binding_id.clone();
         let schema_hash = frame.command_schema_hash.clone();
-        let run_id = format!(
-            "{}:{}:{}",
-            frame.key.generation, frame.key.reset_epoch, frame.key.authored_revision
-        );
+        let run_id = self.reported_run_id(frame.key, Some(frame));
         let supported = authoring.bindings[&binding_id].enabled
             && authoring
                 .sources

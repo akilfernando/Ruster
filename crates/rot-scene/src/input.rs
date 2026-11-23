@@ -340,6 +340,7 @@ struct ButtonEdges {
 pub struct KeyEventAccumulator {
     actions: ActionMap,
     held: BTreeSet<InputKey>,
+    suppress_until_release: BTreeSet<InputKey>,
     // Exactly the Button IDs from the immutable actions map, in the same
     // BTreeMap order. Both traversals below assert this private invariant.
     edges: BTreeMap<String, ButtonEdges>,
@@ -356,6 +357,7 @@ impl KeyEventAccumulator {
         Ok(Self {
             actions,
             held: BTreeSet::new(),
+            suppress_until_release: BTreeSet::new(),
             edges,
         })
     }
@@ -364,11 +366,26 @@ impl KeyEventAccumulator {
         &self.actions
     }
 
+    /// Install a new scene's validated map and suppress edges from keys held
+    /// across the boundary, until those keys are physically released.
+    pub fn switch_scene(&mut self, mut next: Self) {
+        next.suppress_until_release
+            .append(&mut self.suppress_until_release);
+        next.suppress_until_release.append(&mut self.held);
+        *self = next;
+    }
+
     /// Admit one logical key transition. Unbound keys and repeated press/release
     /// events are ignored; autorepeat cannot create another pressed edge while
     /// held. Hosts must discard backend repeat events, especially after cancel:
     /// a repeated down is not fresh physical admission to a new ownership epoch.
     pub fn key_event(&mut self, key: InputKey, pressed: bool) {
+        if self.suppress_until_release.contains(&key) {
+            if !pressed {
+                self.suppress_until_release.remove(&key);
+            }
+            return;
+        }
         if self.held.contains(&key) == pressed
             || !self
                 .actions
@@ -454,6 +471,7 @@ impl KeyEventAccumulator {
     /// Drop held state and pending edges without synthesizing release actions.
     pub fn cancel(&mut self) {
         self.held.clear();
+        self.suppress_until_release.clear();
         for edges in self.edges.values_mut() {
             *edges = ButtonEdges::default();
         }
@@ -487,6 +505,20 @@ mod tests {
                 },
             ),
         ])
+    }
+
+    #[test]
+    fn held_button_neither_presses_nor_releases_on_scene_switch() {
+        let actions = BTreeMap::from([("start".into(), button(vec![InputKey::Enter]))]);
+        let mut input = KeyEventAccumulator::new(actions.clone()).unwrap();
+        input.key_event(InputKey::Enter, true);
+        input.switch_scene(KeyEventAccumulator::new(actions.clone()).unwrap());
+        input.key_event(InputKey::Enter, true);
+        input.key_event(InputKey::Enter, false);
+        let neutral = ValidatedActionFrame::neutral(&actions).unwrap();
+        assert_eq!(input.take_snapshot(), neutral);
+        input.key_event(InputKey::Enter, true);
+        assert_ne!(input.take_snapshot(), neutral);
     }
 
     #[test]

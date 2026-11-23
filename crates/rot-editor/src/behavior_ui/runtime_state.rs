@@ -6,10 +6,7 @@ use serde_json::{json, Value};
 impl RuntimeUi {
     pub(super) fn state_page(&self, args: &Value) -> Result<Value, String> {
         let frame = self.frame.as_ref().ok_or("state_unavailable")?;
-        let captured_run = format!(
-            "{}:{}:{}",
-            frame.key.generation, frame.key.reset_epoch, frame.key.authored_revision
-        );
+        let captured_run = self.reported_run_id(frame.key, Some(frame));
         if args["expected_run_id"].as_str() != Some(&captured_run) {
             return Err("stale_run".into());
         }

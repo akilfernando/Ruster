@@ -195,8 +195,11 @@ impl RuntimeUi {
             && self.current_run() == Some(frame.key)
             && frame.key.generation == generation
             && frame.key.authored_revision == source.revision()
-            && captured.actions == *source.actions()
-            && source.bindings_match(captured)
+            && (self
+                .transition_source
+                .as_ref()
+                .is_some_and(|id| id != &frame.scene.id)
+                || (captured.actions == *source.actions() && source.bindings_match(captured)))
     }
 
     pub(super) fn input_help_window(
@@ -209,6 +212,10 @@ impl RuntimeUi {
             return;
         }
         let current = self.input_help_snapshot_current(source, generation);
+        let captured = current.then(|| self.captured.clone().expect("snapshot requires map"));
+        let actions = captured
+            .as_ref()
+            .map_or_else(|| source.actions(), |view| &view.actions);
         let popup_at_start = egui::Popup::is_any_open(ctx);
         let activation =
             self.input_control.help_activation_frame == Some(ctx.cumulative_frame_nr());
@@ -280,11 +287,11 @@ impl RuntimeUi {
                             _ => {}
                         }
                         ui.heading(Text::SceneControls.plain());
-                        if source.actions().is_empty() {
+                        if actions.is_empty() {
                             ui.label(Text::RuntimeInputNoActionsDefinedAdd.plain());
                         }
                         ui.label(Text::RuntimeInputSharedKeysDriveEvery.plain());
-                        for (id, definition) in source.actions() {
+                        for (id, definition) in actions {
                             ui.separator();
                             ui.strong(format!("{} · {id}", definition.label.as_deref().unwrap_or(id)));
                             ui.weak(action_hint(&definition.kind));
@@ -312,7 +319,7 @@ impl RuntimeUi {
                         ui.label(format!("Committed preview tick {}", frame.tick));
                         if let Some(input) = frame.input.as_deref().filter(|input| {
                             input.receipt.tick == frame.tick
-                                && input.frame.0.keys().eq(source.actions().keys())
+                                && input.frame.0.keys().eq(actions.keys())
                         }) {
                             let origin = match input.receipt.origin {
                                 InputOrigin::Neutral => "neutral",
@@ -532,11 +539,22 @@ impl RuntimeUi {
             if meta.epoch != lease.epoch || !meta.enabled || !meta.claimed {
                 return Err("Scene controls were suspended.".into());
             }
+            let mut lease = lease;
+            lease.map_identity = meta.map_identity;
             for (key, pressed) in events {
-                worker
-                    .publish_key_event(lease, key, pressed)
-                    .map_err(|error| format!("{error:?}"))?;
+                let mut result = worker.publish_key_event(lease, key, pressed);
+                if result == Err(crate::behavior_worker::InputError::StaleMap) {
+                    let current = worker
+                        .current_input_meta(lease.key)
+                        .map_err(|error| format!("{error:?}"))?;
+                    if current.epoch == lease.epoch && current.enabled && current.claimed {
+                        lease.map_identity = current.map_identity;
+                        result = worker.publish_key_event(lease, key, pressed);
+                    }
+                }
+                result.map_err(|error| format!("{error:?}"))?;
             }
+            self.input_control.lease = Some(lease);
             Ok(())
         });
         if let Err(error) = result {
@@ -594,7 +612,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut runtime = RuntimeUi::default();
         let key = runtime
-            .reset_source(&ctx, RuntimeSource::Components(&scene), 1, None)
+            .reset_source(&ctx, RuntimeSource::Components(&scene, None), 1, None)
             .unwrap();
         let wait = |runtime: &mut RuntimeUi, ready: fn(&RuntimeUi) -> bool| {
             let deadline = Instant::now() + Duration::from_secs(5);

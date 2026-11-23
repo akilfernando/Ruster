@@ -54,7 +54,7 @@ mod preview_probe;
 mod project_assets;
 mod project_picker;
 mod project_settings;
-mod project_startup;
+pub(crate) mod project_startup;
 mod recovered_input_ui;
 mod runtime_commands;
 mod runtime_transform_ui;

@@ -2218,6 +2218,7 @@ pub(super) struct RuntimeUi {
     control_focus: Option<ControlFocus>,
     debug: runtime_debug::DebugUi,
     input_control: runtime_input::InputControl,
+    transition_source: Option<String>,
     hud_activation: hud_activation::HudActivationControl,
     spatial_feedback_index: usize,
     invocation: InvocationDraft,
@@ -2263,21 +2264,27 @@ pub enum PlayShortcut {
 #[derive(Clone, Copy)]
 pub(super) enum RuntimeSource<'a> {
     Legacy(&'a Session),
-    Components(&'a rot_scene::component_scene::ComponentSession),
+    Components(
+        &'a rot_scene::component_scene::ComponentSession,
+        Option<(
+            &'a crate::scene_editor::project_startup::ProjectDirectory,
+            &'a std::path::Path,
+        )>,
+    ),
 }
 
 impl<'a> RuntimeSource<'a> {
     fn revision(self) -> u64 {
         match self {
             Self::Legacy(session) => session.scene().revision,
-            Self::Components(session) => session.revision(),
+            Self::Components(session, _) => session.revision(),
         }
     }
 
     fn actions(self) -> &'a rot_scene::input::ActionMap {
         match self {
             Self::Legacy(session) => &session.authoring().actions,
-            Self::Components(session) => &session.scene().actions,
+            Self::Components(session, _) => &session.scene().actions,
         }
     }
 
@@ -2285,9 +2292,62 @@ impl<'a> RuntimeSource<'a> {
         match self {
             Self::Legacy(session) => session.authoring().bindings == captured.bindings,
             // The component session advances its revision for every edit.
-            Self::Components(_) => true,
+            Self::Components(..) => true,
         }
     }
+}
+
+fn prepare_start_target(
+    scene: &rot_scene::component_scene::ComponentScene,
+    assets: Option<&rot_assets::AssetStore>,
+) -> Result<crate::behavior_worker::StartTarget, String> {
+    let resolved = crate::scene_editor::script_assets::resolved(scene, assets, true)?;
+    let runtime = rot_app::creation::RuntimeScene::from_components(Box::new(
+        resolved.unwrap_or_else(|| scene.clone()),
+    ))?;
+    let dependencies = runtime.draw_dependencies()?;
+    for id in &dependencies.meshes {
+        if assets.and_then(|store| store.mesh(id)).is_none() {
+            return Err(format!("Import destination mesh {id} and restart Play."));
+        }
+    }
+    for (id, role) in &dependencies.texture_roles {
+        if !assets
+            .and_then(|store| store.texture(id))
+            .is_some_and(|texture| texture.role == *role)
+        {
+            return Err(format!(
+                "Import destination texture {id} with the required role and restart Play."
+            ));
+        }
+    }
+    let sounds = runtime.sound_asset_references();
+    let sound_snapshots = if sounds.uses_sound {
+        let accepted = assets
+            .map(rot_assets::AssetStore::sound_snapshots)
+            .unwrap_or_default();
+        for id in &sounds.assets {
+            if !accepted.contains_key(id) {
+                return Err(format!("Import destination sound {id} and restart Play."));
+            }
+        }
+        accepted
+    } else {
+        Default::default()
+    };
+    let clips = if runtime.draw_scene().animations.is_empty() {
+        Default::default()
+    } else {
+        let accepted = assets
+            .ok_or("Import destination animations and restart Play.")?
+            .clip_snapshots();
+        rot_behavior::decode_clips(&accepted)?
+    };
+    Ok(crate::behavior_worker::StartTarget {
+        runtime,
+        sounds: sound_snapshots,
+        clips,
+    })
 }
 
 impl RuntimeUi {
@@ -2509,12 +2569,13 @@ impl RuntimeUi {
         generation: u64,
         assets: Option<&rot_assets::AssetStore>,
     ) -> Result<RunKey, String> {
-        if let RuntimeSource::Components(session) = source {
+        if let RuntimeSource::Components(session, _) = source {
             if let Some(preview) = rot_app::creation::static_component_preview(session.scene())
                 .map_err(|error| error.to_string())?
             {
                 let key = self.new_run(ctx, generation, source.revision())?;
                 self.captured = None;
+                self.transition_source = None;
                 self.pending = Some(Request::ResetStatic { key, preview });
                 self.finish_reset_submission(key);
                 return Ok(key);
@@ -2529,7 +2590,7 @@ impl RuntimeUi {
                     session.runtime_projection(),
                     session.transform_camera_binding().cloned(),
                 ),
-                RuntimeSource::Components(session) => {
+                RuntimeSource::Components(session, _) => {
                     let scene = session.scene();
                     let resolved =
                         crate::scene_editor::script_assets::resolved(scene, assets, true)?;
@@ -2559,7 +2620,25 @@ impl RuntimeUi {
             _ => Arc::default(),
         };
         let key = self.new_run(ctx, generation, source.revision())?;
+        let route = match source {
+            RuntimeSource::Components(session, Some((project, path))) => {
+                project.observe().ok().and_then(|observation| {
+                    let (action_id, target) =
+                        observation.active_transition(path, session.scene())?;
+                    Some(crate::behavior_worker::StartTransition {
+                        action_id,
+                        target: target.and_then(|target| {
+                            prepare_start_target(target.session.scene(), assets)
+                        }),
+                        observation: Some(observation),
+                    })
+                })
+            }
+            _ => None,
+        };
+        self.transition_source = route.as_ref().map(|_| scene.id.clone());
         let worker = self.worker.as_mut().unwrap();
+        worker.set_start_transition(key, route);
         worker
             .set_breakpoints(key, self.debug.points.clone())
             .map_err(|e| e.to_string())?;
@@ -2630,6 +2709,20 @@ impl RuntimeUi {
                 self.complete_reset();
             }
         } else if self.ready {
+            if self
+                .transition_source
+                .as_ref()
+                .is_some_and(|source| *source != frame.scene.id)
+            {
+                if self
+                    .frame
+                    .as_ref()
+                    .is_some_and(|old| old.scene.id != frame.scene.id)
+                {
+                    self.status = format!("Started {}.", frame.scene.id);
+                }
+                self.captured = Some(frame.authoring.clone());
+            }
             self.frame = Some(frame);
         }
     }

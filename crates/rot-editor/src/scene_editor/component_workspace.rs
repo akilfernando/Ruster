@@ -1785,7 +1785,9 @@ impl ComponentWorkspace {
         self.runtime.input_control_click(
             &ctx,
             blocked || hud_owns,
-            !self.session.scene().actions.is_empty(),
+            frame
+                .as_ref()
+                .is_some_and(|frame| !frame.authoring.actions.is_empty()),
             playing && interaction.response.clicked(),
         );
         self.runtime
@@ -2406,7 +2408,13 @@ impl ComponentWorkspace {
                 self.transform_toolbar(ui, blocked || self.runtime.in_play_mode());
                 self.runtime.controls_for_source(
                     ui,
-                    RuntimeSource::Components(&self.session),
+                    RuntimeSource::Components(
+                        &self.session,
+                        self.startup_project
+                            .as_ref()
+                            .ok()
+                            .map(|project| (project, self.path.as_path())),
+                    ),
                     RUNTIME_GENERATION,
                     blocked || assets_loading || transform_active || self.draft_dirty(),
                     self.assets.as_ref(),

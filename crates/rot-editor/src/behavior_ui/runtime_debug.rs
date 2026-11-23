@@ -141,6 +141,19 @@ impl RuntimeUi {
             }
         }
     }
+    pub(super) fn reported_run_id(&self, key: RunKey, frame: Option<&Frame>) -> String {
+        let id = run_id(key);
+        if frame.filter(|frame| frame.key == key).is_some_and(|frame| {
+            self.transition_source
+                .as_ref()
+                .is_some_and(|source| source != &frame.scene.id)
+        }) {
+            format!("{id}:destination")
+        } else {
+            id
+        }
+    }
+
     pub(crate) fn current_run(&self) -> Option<RunKey> {
         self.worker.as_ref().map(VmWorker::current_key)
     }
@@ -187,8 +200,17 @@ impl RuntimeUi {
                 && receipt.expected_tick.is_some()
         }) {
             if let VmEvent::Step { run, input, .. } = event {
-                if receipt.expected_tick.and_then(|tick| tick.checked_add(1)) != Some(run.tick)
-                    || receipt.input != Some(*input)
+                let mut expected = receipt.input;
+                let transitioned = run.tick == 0 && input.tick == 0;
+                if transitioned {
+                    expected = expected.map(|mut expected| {
+                        expected.tick = 0;
+                        expected
+                    });
+                }
+                if (!transitioned
+                    && receipt.expected_tick.and_then(|tick| tick.checked_add(1)) != Some(run.tick))
+                    || expected != Some(*input)
                 {
                     receipt.state = "unverified";
                     return;
@@ -731,8 +753,18 @@ impl RuntimeUi {
                 .frame
                 .as_ref()
                 .map_or(0, |frame| frame.state.binding_ids().count());
-            let mut report = json!({"run_id":current.map(run_id),"frame_run_id":self.frame.as_ref().map(|frame|run_id(frame.key)),"stale":self.stale,"visible":self.visible,"ready":self.ready,"playing":self.playing,"busy":self.pending.is_some()||self.awaiting.is_some()||self.hud_activation_busy(),"debug_stop_id":self.debug_snapshot().map(|stop|stop.stop.get().to_string()),"tick":self.frame.as_ref().map(|frame|frame.tick.to_string()),"commit_revision":self.frame.as_ref().map(|frame|frame.commit_revision.to_string()),"commit_revision_required":self.frame.as_ref().is_some_and(|frame|frame.commit_revision_required),"last_step_commit_revision":self.frame.as_ref().and_then(|frame|frame.last_step_commit_revision).map(|value|value.to_string()),"status":self.status,"diagnostic":self.diagnostic,"operation":receipt,"recent_operations":self.debug.recent.iter().map(Receipt::value).collect::<Vec<_>>(),"input":input_meta,"last_committed_input":last_input,"query_observations":query_page,"query_observation_count":queries.len(),"next_query_offset":(offset.saturating_add(16)<queries.len()).then(||offset.saturating_add(16).to_string()),"input_observation":"Input and query snapshots describe last_step_commit_revision, preserved across commands.","objects":objects,"object_count":total,"next_offset":(offset.saturating_add(16)<total).then(||offset.saturating_add(16).to_string()),
+            let mut report = json!({"run_id":current.map(|key|self.reported_run_id(key,self.frame.as_ref())),"frame_run_id":self.frame.as_ref().map(|frame|self.reported_run_id(frame.key,Some(frame))),"stale":self.stale,"visible":self.visible,"ready":self.ready,"playing":self.playing,"busy":self.pending.is_some()||self.awaiting.is_some()||self.hud_activation_busy(),"debug_stop_id":self.debug_snapshot().map(|stop|stop.stop.get().to_string()),"tick":self.frame.as_ref().map(|frame|frame.tick.to_string()),"commit_revision":self.frame.as_ref().map(|frame|frame.commit_revision.to_string()),"commit_revision_required":self.frame.as_ref().is_some_and(|frame|frame.commit_revision_required),"last_step_commit_revision":self.frame.as_ref().and_then(|frame|frame.last_step_commit_revision).map(|value|value.to_string()),"status":self.status,"diagnostic":self.diagnostic,"operation":receipt,"recent_operations":self.debug.recent.iter().map(Receipt::value).collect::<Vec<_>>(),"input":input_meta,"last_committed_input":last_input,"query_observations":query_page,"query_observation_count":queries.len(),"next_query_offset":(offset.saturating_add(16)<queries.len()).then(||offset.saturating_add(16).to_string()),"input_observation":"Input and query snapshots describe last_step_commit_revision, preserved across commands.","objects":objects,"object_count":total,"next_offset":(offset.saturating_add(16)<total).then(||offset.saturating_add(16).to_string()),
                 "groups":groups,"group_count":group_count,"next_group_offset":(offset.saturating_add(16)<group_count).then(||offset.saturating_add(16).to_string()),"state_owners":owners,"state_snapshot_status":self.state_snapshot_status(),"state_captured_revision":self.frame.as_ref().map(|frame|frame.key.authored_revision.to_string()),"state_owner_count":owner_count,"next_state_owner_offset":(offset.saturating_add(16)<owner_count).then(||offset.saturating_add(16).to_string())});
+            if let Some(frame) = &self.frame {
+                report["runtime_scene_id"] = json!(frame.scene.id);
+                if let Some(source) = &self.transition_source {
+                    report["transition_phase"] = json!(if source == &frame.scene.id {
+                        "source"
+                    } else {
+                        "destination"
+                    });
+                }
+            }
             if offset == 0 {
                 if let Some(lighting) = self
                     .frame
@@ -806,7 +838,10 @@ impl RuntimeUi {
             return Ok(json!({"configured":true,"status":self.status}));
         }
         if op != "behavior_runtime_reset"
-            && args["expected_run_id"].as_str() != current.map(run_id).as_deref()
+            && args["expected_run_id"].as_str()
+                != current
+                    .map(|key| self.reported_run_id(key, self.frame.as_ref()))
+                    .as_deref()
         {
             return Err("stale_run".into());
         }

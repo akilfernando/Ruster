@@ -108,7 +108,13 @@ impl ComponentWorkspace {
             .runtime_api_for_source(
                 op,
                 args,
-                RuntimeSource::Components(&self.session),
+                RuntimeSource::Components(
+                    &self.session,
+                    self.startup_project
+                        .as_ref()
+                        .ok()
+                        .map(|project| (project, self.path.as_path())),
+                ),
                 RUNTIME_GENERATION,
                 self.assets.as_ref(),
             )
