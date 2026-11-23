@@ -1815,8 +1815,9 @@ fn transition_on_press(
             .as_ref()
             .map_or(Ok(()), |value| value.verify_route_inputs())
     };
-    let staged = verify()
-        .and(route.target)
+    let staged = route
+        .target
+        .and_then(|target| verify().map(|()| target))
         .and_then(|target| match target.runtime {
             RuntimeScene::Behavior(session) => {
                 let mut engine =

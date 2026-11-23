@@ -511,10 +511,11 @@ impl Observation {
                         .scene()
                         .actions
                         .iter()
-                        .filter_map(|(id, action)| {
-                            matches!(action.kind, rot_scene::input::ActionKind::Button { .. }).then(
-                                || (id.clone(), action.label.as_deref().unwrap_or(id).to_owned()),
-                            )
+                        .filter(|(_, action)| {
+                            matches!(action.kind, rot_scene::input::ActionKind::Button { .. })
+                        })
+                        .map(|(id, action)| {
+                            (id.clone(), action.label.as_deref().unwrap_or(id).to_owned())
                         })
                         .collect();
                     self.transition_error = self.load_transition(source.scene()).err();
@@ -593,7 +594,10 @@ impl Observation {
     fn verify_target(&self, startup: &Startup, stamp: &Stamp) -> Result<PathBuf, String> {
         let path = self.root.join(&startup.file);
         self.verify_root()?;
-        if &self.child_stamp(&startup.file)? != stamp {
+        let current = self
+            .child_stamp(&startup.file)
+            .map_err(|error| format!("Saved scene {} is unavailable. {error}", startup.file))?;
+        if &current != stamp {
             return Err(CHANGED.into());
         }
         Ok(path)
