@@ -1569,6 +1569,20 @@ impl Document {
         }
     }
     fn validate(&self) -> Result<(), SceneError> {
+        if input::has_primary_mouse(&self.authoring.actions)
+            || self
+                .undo
+                .iter()
+                .chain(&self.redo)
+                .flat_map(|change| &change.actions)
+                .flat_map(|delta| [&delta.before, &delta.after])
+                .flatten()
+                .any(|action| action.kind.uses_primary_mouse())
+        {
+            return Err(SceneError::Invalid(
+                "Primary Mouse actions require a v23 scene.".into(),
+            ));
+        }
         self.validate_for_runtime(&Default::default())
     }
     fn validate_for_runtime(
@@ -2699,6 +2713,14 @@ impl Session {
     ) -> Result<u64, SceneError> {
         self.check_revision(expected_revision)?;
         validate_id(id)?;
+        if action
+            .as_ref()
+            .is_some_and(|action| action.kind.uses_primary_mouse())
+        {
+            return Err(SceneError::Invalid(
+                "Primary Mouse actions require a v23 scene.".into(),
+            ));
+        }
         let before = self.action(id).cloned();
         if before == action {
             return Ok(self.scene().revision);

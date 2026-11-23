@@ -460,6 +460,17 @@ mod tests {
         invalid = action;
         invalid["expected_revision"] = "01".into();
         assert!(!valid("behavior_action", &invalid));
+        for (value, accepted) in [
+            (json!(true), true),
+            (json!(false), true),
+            (Value::Null, false),
+            (json!("true"), false),
+        ] {
+            let mut mouse_button = set.clone();
+            mouse_button["definition"] =
+                json!({"kind":{"type":"button","keys":[],"primary_mouse":value}});
+            assert_eq!(valid("behavior_action_set", &mouse_button), accepted);
+        }
         let mut unbound = set;
         unbound["definition"] = json!({"kind":{"type":"button","keys":[]}});
         assert!(valid("behavior_action_set", &unbound));

@@ -474,3 +474,11 @@ session token, scene revision and asset revision. Poll the returned
 and actual values. `play_check_cancel` takes that ID and the session token.
 If a run reports `stale`, use **Capture Current Identity** and **Save Check**
 in the editor to repin it. Capture keeps the input frames and expectations.
+
+
+A v23 Button may bind the primary pointer button with
+`"kind":{"type":"button","keys":["space"],"primary_mouse":true}` in
+`behavior_action_set`. Read the exact action definition to inspect it.
+Omit `primary_mouse` or use `false` for keyboard-only behavior. Guard the
+edit with the current scene session and revision. The Game view must own
+native input; guarded Steps still use ordinary logical Button frames.

@@ -959,7 +959,7 @@ impl InputUi {
                             if session.supports_primary_mouse() {
                                 let response = ui.add_enabled(
                                     admit,
-                                    egui::Checkbox::new(primary_mouse, "Primary Mouse"),
+                                    egui::Checkbox::new(primary_mouse, Text::PrimaryMouse.plain()),
                                 );
                                 changed |= response.changed();
                                 owned_ids.push(response.id);

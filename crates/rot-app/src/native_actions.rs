@@ -65,3 +65,48 @@ impl NativeActionInput {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn owned_content_admits_primary_press_and_keeps_an_outside_release() {
+        let mut input = NativeActionInput::default();
+        let content = egui::Rect::from_min_max(egui::pos2(10., 10.), egui::pos2(90., 90.));
+        let pointer = |x, pressed| egui::Event::PointerButton {
+            pos: egui::pos2(x, 40.),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let key = egui::Event::Key {
+            key: egui::Key::A,
+            physical_key: Some(egui::Key::A),
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        assert!(input
+            .events(&[pointer(2., true), pointer(40., false)], Some(content))
+            .is_empty());
+        assert!(input.events(&[pointer(40., true)], None).is_empty());
+        assert_eq!(
+            input.events(&[pointer(40., true), key], Some(content)),
+            [
+                (PhysicalInput::PrimaryMouse, true),
+                (PhysicalInput::Key(InputKey::A), true)
+            ]
+        );
+        let release = [pointer(100., false)];
+        assert!(input.preserves_release(&release));
+        assert_eq!(
+            input.events(&release, None),
+            [(PhysicalInput::PrimaryMouse, false)]
+        );
+        assert!(!input.preserves_release(&release));
+        input.events(&[pointer(40., true)], Some(content));
+        input.clear();
+        assert!(input.events(&release, Some(content)).is_empty());
+    }
+}

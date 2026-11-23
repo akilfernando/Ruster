@@ -523,6 +523,13 @@ The optional `{workspace}` points to the project directory. Save the file in
 your code editor. An active Play keeps its starting code. Stop and Play
 again to use the saved changes, or build to package them.
 
+For a v23 **Button**, select **Primary Mouse** to bind the primary button
+alongside any keyboard keys. In Play, click the Game view to give it control,
+then press inside the game image. The claim click never fires the action.
+Holding the mouse button or any bound key holds the same action. Releasing
+the mouse outside the image clears that press. Escape or losing focus releases
+Game control. Letterbox bars and interactive HUD controls keep their usual roles.
+
 ## Slide a scripted sphere along blockers
 
 On a file-backed **Script**, set **Movement** to **Kinematic Sphere** and

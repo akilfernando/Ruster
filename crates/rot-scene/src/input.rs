@@ -48,6 +48,16 @@ impl Default for ActionKind {
 }
 
 impl ActionKind {
+    pub fn uses_primary_mouse(&self) -> bool {
+        matches!(
+            self,
+            Self::Button {
+                primary_mouse: true,
+                ..
+            }
+        )
+    }
+
     fn keys(&self) -> impl Iterator<Item = InputKey> + '_ {
         let (first, second) = match self {
             Self::Button { keys, .. } => (keys.as_slice(), &[][..]),
@@ -348,15 +358,9 @@ pub enum PhysicalInput {
 }
 
 pub fn has_primary_mouse(actions: &ActionMap) -> bool {
-    actions.values().any(|action| {
-        matches!(
-            action.kind,
-            ActionKind::Button {
-                primary_mouse: true,
-                ..
-            }
-        )
-    })
+    actions
+        .values()
+        .any(|action| action.kind.uses_primary_mouse())
 }
 
 #[derive(Debug)]
@@ -555,6 +559,68 @@ impl KeyEventAccumulator {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn primary_mouse_and_keys_are_one_button_across_release_and_scene_switch() {
+        let definition = ActionDefinition {
+            kind: ActionKind::Button {
+                keys: vec![InputKey::A],
+                primary_mouse: true,
+            },
+            ..ActionDefinition::default()
+        };
+        let actions = ActionMap::from([("signal".into(), definition)]);
+        let mut input = KeyEventAccumulator::new(actions.clone()).unwrap();
+        let sample = |input: &mut KeyEventAccumulator| match input.take_snapshot().get("signal") {
+            Some(ActionValue::Button(state)) => *state,
+            _ => panic!("expected signal Button"),
+        };
+        input.key_event(InputKey::A, true);
+        assert_eq!(
+            sample(&mut input),
+            ButtonState {
+                held: true,
+                pressed: true,
+                released: false
+            }
+        );
+        input.physical_event(PhysicalInput::PrimaryMouse, true);
+        input.key_event(InputKey::A, false);
+        assert_eq!(
+            sample(&mut input),
+            ButtonState {
+                held: true,
+                ..ButtonState::default()
+            }
+        );
+        input.physical_event(PhysicalInput::PrimaryMouse, false);
+        assert_eq!(
+            sample(&mut input),
+            ButtonState {
+                released: true,
+                ..ButtonState::default()
+            }
+        );
+
+        input.physical_event(PhysicalInput::PrimaryMouse, true);
+        input.switch_scene(KeyEventAccumulator::new(actions).unwrap());
+        input.physical_event(PhysicalInput::PrimaryMouse, false);
+        assert_eq!(sample(&mut input), ButtonState::default());
+        input.physical_event(PhysicalInput::PrimaryMouse, true);
+        input.physical_event(PhysicalInput::PrimaryMouse, false);
+        assert_eq!(
+            sample(&mut input),
+            ButtonState {
+                pressed: true,
+                released: true,
+                held: false
+            }
+        );
+        input.physical_event(PhysicalInput::PrimaryMouse, true);
+        input.cancel();
+        input.physical_event(PhysicalInput::PrimaryMouse, false);
+        assert_eq!(sample(&mut input), ButtonState::default());
+    }
+
     use super::*;
     use serde_json::json;
 

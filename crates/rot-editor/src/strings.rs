@@ -695,6 +695,7 @@ editor_text! {
     AddButton => "Add Button",
     AddKey => "Add Key",
     AssignUpToFourKeys => "Assign up to four keys.",
+    PrimaryMouse => "Primary Mouse",
     ButtonKeys => "Button keys",
     CancelKeyCapture => "Cancel Key Capture",
     Capture => "Capture",
@@ -1215,7 +1216,7 @@ editor_text! {
     RuntimeDebugChooseAScriptAnd => "Choose a script and enter a positive line number.",
 
     // Runtime Input
-    RuntimeInputKeyboardInputOverflowClick => "Keyboard input overflow; click the game view again.",
+    RuntimeInputKeyboardInputOverflowClick => "Input overflow; click the Game view again.",
 
     // Behavior Ui
     BehaviorUiPlayStoppedStartPlay => "Play stopped. Start Play again to retry.",
