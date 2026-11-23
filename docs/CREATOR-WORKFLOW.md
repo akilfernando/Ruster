@@ -91,6 +91,27 @@ saved scene by filename and update or reset the setting. If another editor
 changes the setting while a dialog is open, close and reopen the dialog
 before retrying.
 
+## Enter another scene from the startup screen
+
+Save the startup scene and its destination in the project folder. Create a
+named **Button** Input Action in the startup scene and bind a key such as
+Enter. In **Edit → Project Settings… → Project**, find **Start Transition**.
+Choose the **Start Button**, enter the destination's saved filename, and
+choose **Set Transition**. **Clear Transition** keeps the startup scene and
+removes the route.
+
+In Play, open the startup scene and claim the Game view's controls. Press
+the chosen button once to enter the destination with its own camera, input
+map and fresh script state. **Stop** returns to the authored startup scene
+with its edits and Undo history. Opening the destination directly also
+works through the usual Play controls.
+
+Linux Build packages the saved startup scene and the destination with their
+respective required assets. The relocated game follows the same button
+route. Approved MCP clients can inspect the configured route and use a
+guarded input Step with its action ID. Read runtime inspection again after
+the transition to obtain the destination's run, tick and input guards.
+
 ## Create an empty group in a legacy scene
 
 Choose **New Group** in the Hierarchy or **Create Empty** in the Create menu
