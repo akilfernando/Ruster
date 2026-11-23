@@ -42,6 +42,14 @@ The Hub opens it and Linux Build packages its saved dependency closure.
 Explicit file Open uses the chosen document, and Play runs the active scene.
 Approved MCP reports each route. A relocated Title build retained its texture
 while an unsaved Rail Yard remained open in the editor.
+A configured Start Button can enter one saved v23 sibling at tick zero in
+Play and relocated Linux Build. Approved MCP reports separate authored
+and committed runtime scene identities. The built Title and Rail Yard
+carry verified asset closures. A failed activation keeps the prior frame.
+A 5,000-object destination is prepared off the standalone render update, cutting
+the worst Start update from 35.819 to 0.108 ms in release. The first
+completed destination frame arrived in 35.0–51.5 ms while Title continued
+rendering.
 
 The v23 Inspector shows live Transform and script state during Play and Step.
 An imported model's Animator lists same-model clips and their durations.
