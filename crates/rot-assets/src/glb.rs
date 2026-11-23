@@ -1321,28 +1321,27 @@ impl Decoder<'_> {
                     (linear, roughness_sampler_warning) = sampler.filtering()?;
                     repeat = sampler.wrapping()?;
                 }
-                if definition.base_color_texture.is_some() {
-                    if (linear, repeat) != (definition.linear, definition.repeat) {
-                        fallbacks.push(
-                            "roughness map uses the Base Color sampler to preserve its appearance",
-                        );
-                    }
+                if definition.base_color_texture.is_some()
+                    && (linear, repeat) != (definition.linear, definition.repeat)
+                {
+                    fallbacks.push("roughness map omitted because it needs a different sampler from Base Color");
+                    roughness_sampler_warning = None;
                 } else {
                     definition.linear = linear;
                     definition.repeat = repeat;
+                    let roughness = texture::decode_glb_roughness(bytes).map_err(|failure| {
+                        error(format!("GLB material {name:?} roughness PNG: {failure}"))
+                    })?;
+                    let id = resource_id(&self.model.info.id, "roughness", &name);
+                    self.retain(
+                        id.clone(),
+                        ModelResource {
+                            bytes: None,
+                            payload: Payload::Texture(roughness),
+                        },
+                    )?;
+                    definition.roughness_texture = Some(id);
                 }
-                let roughness = texture::decode_glb_roughness(bytes).map_err(|failure| {
-                    error(format!("GLB material {name:?} roughness PNG: {failure}"))
-                })?;
-                let id = resource_id(&self.model.info.id, "roughness", &name);
-                self.retain(
-                    id.clone(),
-                    ModelResource {
-                        bytes: None,
-                        payload: Payload::Texture(roughness),
-                    },
-                )?;
-                definition.roughness_texture = Some(id);
             }
         }
         let roughness_sampler_warning =
