@@ -88,6 +88,24 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+**Orthographic GLB cameras** place editable v23 Camera components on the
+original nodes. The Blender workshop kept its rolled camera and a second
+node sharing the lens under their imported parent. Explicit Reimport added
+both lenses from the previously accepted bytes. Place kept the active Game
+Camera until approved Claude inspected and designated the workshop camera.
+A separate edit to the second camera left the first lens intact. Native Undo,
+Redo, save and reopen kept the expected designation and lens values. Editor
+Play and the relocated Vulkan player matched the Blender 3:2 framing at
+16:9 and 4:3 window sizes. Near and far rulers had equal pixel spans, and
+both clipping witnesses were absent. A zero near plane omitted the lens
+with an actionable warning. Invalid magnification kept the last good model
+and the saved active camera. Across three paired release runs, median p95
+first import was 0.589 ms with or without the lenses. Placement was
+0.051 ms with them and 0.048 ms without. At 5,000 authored objects,
+CPU preparation p95 was 0.390 ms for the imported camera and 0.388 ms for
+the matching hand-authored camera. GPU scene p95 was 0.313 ms in both cases.
+Draw and upload counts matched.
+
 **Restore Missing Source** returns previously accepted Lua and WAV files to
 their original paths through Assets. The signal box restored both exact source
 digests with the same sidecars, IDs, scene references and history. Approved
