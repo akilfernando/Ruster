@@ -3256,11 +3256,24 @@ impl RuntimeUi {
                         ui.collapsing(Text::ErrorDetails.plain(), |ui| {
                             ui.set_max_width(360.0);
                             if let Some(project) = self.project_error_source() {
-                                ui.label(&project.source);
+                                use crate::scene_editor::script_assets::SourceStatus;
+                                let source = project.observe(assets);
+                                ui.label(source.current_source.unwrap_or(&project.source));
+                                let problem = match source.status {
+                                    SourceStatus::Ready => None,
+                                    SourceStatus::Changed => Some(Text::LuaErrorSourceChanged),
+                                    SourceStatus::Unavailable => {
+                                        Some(Text::LuaErrorSourceUnavailable)
+                                    }
+                                };
+                                if let Some(problem) = problem {
+                                    ui.label(problem.plain());
+                                }
                                 #[cfg(target_os = "linux")]
-                                if let Some(launch) = code_editor {
-                                    let line =
-                                        diagnostic.line.filter(|_| launch.has_line_argument());
+                                if let Some(launch) = code_editor.filter(|_| problem.is_none()) {
+                                    let line = diagnostic
+                                        .line
+                                        .filter(|line| *line > 0 && launch.has_line_argument());
                                     if ui
                                         .add_enabled(
                                             !blocked,

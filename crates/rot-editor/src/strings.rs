@@ -1536,6 +1536,7 @@ editor_text! {
     NewScenario => "New scenario",
     OpenFile => "Open File",
     OpenErrorLine => "Open Error Line",
+    LuaErrorSourceChanged => "Lua source changed. Run Play again for a current error location.",
     LuaErrorSourceUnavailable => "Lua source unavailable. Check Assets and run Play again.",
     OpenScenario => "Open scenario",
     Paused => "PAUSED",

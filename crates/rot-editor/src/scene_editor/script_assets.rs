@@ -33,6 +33,45 @@ pub(crate) struct ProjectSource {
     pub accepted_hash: String,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SourceStatus {
+    Ready,
+    Changed,
+    Unavailable,
+}
+
+#[derive(serde::Serialize)]
+pub(crate) struct SourceObservation<'a> {
+    #[serde(flatten)]
+    pub captured: &'a ProjectSource,
+    pub current_source: Option<&'a str>,
+    pub status: SourceStatus,
+}
+
+impl ProjectSource {
+    pub(crate) fn observe<'a>(&'a self, assets: Option<&'a AssetStore>) -> SourceObservation<'a> {
+        let info = assets
+            .and_then(|store| store.asset_info(&self.asset_id))
+            .filter(|info| info.kind == rot_assets::AssetKind::Script);
+        let status = match info {
+            Some(info) if info.status == rot_assets::AssetStatus::Ready => {
+                if info.hash.as_deref() == Some(&self.accepted_hash) {
+                    SourceStatus::Ready
+                } else {
+                    SourceStatus::Changed
+                }
+            }
+            _ => SourceStatus::Unavailable,
+        };
+        SourceObservation {
+            captured: self,
+            current_source: info.map(|info| info.source.as_str()),
+            status,
+        }
+    }
+}
+
 pub(crate) type ProjectSources = BTreeMap<String, ProjectSource>;
 
 pub(crate) fn resolved(
