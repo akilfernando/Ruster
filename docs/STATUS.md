@@ -42,6 +42,11 @@ Actions in Project Settings and approved MCP share Button and 1D Axis
 bindings and Undo. File-backed Object Lua reads the map captured for that
 run. Focus loss releases held keys. A cube moved and turned on named
 actions through editor Play, guarded Steps and a relocated Linux build.
+Object Lua API1/2 can drive a child under transform-only, positive-uniform
+groups. A trolley moved along a rotated rail without moving the markers.
+World-pose and camera checks run before the tick commits. A rejected Step
+keeps the previous pose and camera. The compact MCP catalog shows button
+and axis input examples.
 The editor and viewer draw, fit and pick from cached world matrices.
 Play and Linux Build share the same render data for supported static hierarchies,
 including shear. Set Game Camera from View captures a fixed v23 perspective
