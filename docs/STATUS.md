@@ -78,7 +78,12 @@ photometric approximations, defaults, clamps, and skipped spots. GLB
 perspective cameras retain parented rotation, vertical lens, finite or
 infinite clipping, and authored framing through editor Play and Linux
 Build. Native placement keeps the current Game Camera active. Asset
-inspection and MCP explain when a lens is skipped. Failed imports show
+inspection and MCP explain when a lens is skipped. Packed glTF
+metallic–roughness PNGs supply linear Roughness maps from green. Placement
+keeps the authored multiplier, and Linux Build embeds the verified map.
+Refresh can add the map to an older accepted model while preserving
+materials already assigned in the scene. Diagnostics explain omitted maps
+when the UV mapping or sampler is unsupported. Failed imports show
 the source path, recovery, last working
 version availability and separate Error Details in the Inspector. Approved MCP
 clients can page the same issues, including sources with no asset ID. A
