@@ -223,7 +223,12 @@ impl ComponentWorkspace {
                 let selected = row == search.active;
                 let label = format!("{} · {}", object.name, object.id);
                 response.widget_info(|| {
-                    egui::WidgetInfo::selected(egui::Role::Button, !blocked, selected, &label)
+                    egui::WidgetInfo::selected(
+                        egui::Role::Button,
+                        !blocked,
+                        selected,
+                        format!("{label} · {breadcrumb}"),
+                    )
                 });
                 let visuals = ui.visuals();
                 let widget = ui.style().interact(&response);
