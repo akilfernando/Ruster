@@ -511,6 +511,198 @@ impl AssetStore {
 mod tests {
     use super::*;
 
+    fn packed_fixture(
+        pixels: &[u8; 12],
+        edit: impl FnOnce(&mut serde_json::Value, &mut [u8]),
+    ) -> Vec<u8> {
+        use crate::fixtures::{animated_glb, pack_glb};
+        use serde_json::json;
+        let original = animated_glb(Default::default());
+        let json_size = u32::from_le_bytes(original[12..16].try_into().unwrap()) as usize;
+        let mut doc: serde_json::Value =
+            serde_json::from_slice(&original[20..20 + json_size]).unwrap();
+        let mut bin = original[28 + json_size..].to_vec();
+        let uv_offset = bin.len();
+        bin.extend(
+            [0_f32, 0., 1., 0., 0., 1.]
+                .into_iter()
+                .flat_map(f32::to_le_bytes),
+        );
+        let image_offset = bin.len();
+        let mut encoded = Vec::new();
+        {
+            let mut png = png::Encoder::new(&mut encoded, 2, 2);
+            png.set_color(png::ColorType::Rgb);
+            png.set_depth(png::BitDepth::Eight);
+            png.write_header()
+                .unwrap()
+                .write_image_data(pixels)
+                .unwrap();
+        }
+        doc["bufferViews"].as_array_mut().unwrap().extend([
+            json!({"buffer":0,"byteOffset":uv_offset,"byteLength":24}),
+            json!({"buffer":0,"byteOffset":image_offset,"byteLength":encoded.len()}),
+        ]);
+        doc["accessors"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"bufferView":5,"componentType":5126,"count":3,"type":"VEC2"}));
+        doc["meshes"][0]["primitives"][0]["attributes"]["TEXCOORD_0"] = json!(5);
+        doc["materials"][0]["pbrMetallicRoughness"]["baseColorTexture"] = json!({"index":0});
+        doc["materials"][0]["pbrMetallicRoughness"]["metallicRoughnessTexture"] =
+            json!({"index":0});
+        doc["textures"] = json!([{"source":0}]);
+        doc["images"] = json!([{"bufferView":6,"mimeType":"image/png"}]);
+        edit(&mut doc, &mut encoded);
+        bin.extend(encoded);
+        doc["buffers"][0]["byteLength"] = json!(bin.len());
+        bin.resize(bin.len().next_multiple_of(4), 0);
+        pack_glb(&doc, &bin)
+    }
+
+    #[test]
+    fn packed_glb_roughness_upgrades_old_catalog_and_preserves_exact_green_in_exports() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("paint.glb");
+        let pixels = [1, 20, 122, 2, 40, 123, 3, 60, 124, 4, 80, 125];
+        let bytes = packed_fixture(&pixels, |_, _| {});
+        fs::write(&source, &bytes).unwrap();
+        let mut store = AssetStore::open(root.path()).unwrap();
+        let decoded = glb::decode_without_packed_roughness("paint", "paint.glb", &bytes).unwrap();
+        let prior = decoded.info.clone();
+        let mut registry = store.registry.clone();
+        registry.models.insert("paint".into(), prior.clone());
+        let registry = mutations::encode_registry(registry).unwrap();
+        let mut published = false;
+        store
+            .publish_model_if(
+                PreparedModel {
+                    bytes,
+                    decoded,
+                    registry: Some(registry),
+                },
+                &mut published,
+                || true,
+            )
+            .unwrap();
+        assert!(published);
+        let base_id = prior.materials["Paint"].base_color_texture.clone().unwrap();
+        assert!(prior.materials["Paint"].roughness_texture.is_none());
+        drop(store);
+
+        let mut store = AssetStore::open(root.path()).unwrap();
+        assert_eq!(store.model("paint"), Some(&prior));
+        let accepted = store.refresh_glb_at(1, "paint").unwrap();
+        assert_eq!(store.revision(), 2);
+        assert_eq!(accepted.hash, prior.hash);
+        assert_eq!(accepted.nodes, prior.nodes);
+        assert_eq!(
+            accepted.materials["Paint"].base_color_texture.as_ref(),
+            Some(&base_id)
+        );
+        let roughness_id = accepted.materials["Paint"]
+            .roughness_texture
+            .clone()
+            .unwrap();
+        assert_ne!(roughness_id, base_id);
+        let color = store.texture(&base_id).unwrap();
+        assert_eq!(color.role, TextureRole::BaseColor);
+        assert_eq!(&color.mips[0].bytes[..4], &[1, 20, 122, 255]);
+        let roughness = store.texture(&roughness_id).unwrap().clone();
+        assert_eq!(roughness.role, TextureRole::Roughness);
+        assert_eq!(roughness.mips[0].bytes, [20, 40, 60, 80]);
+        assert_eq!(roughness.mips[1].bytes, [50]);
+
+        let export = store
+            .export_snapshot(&BTreeSet::from([base_id.clone(), roughness_id.clone()]))
+            .unwrap();
+        assert_eq!(
+            export.texture_role(&roughness_id),
+            Some(TextureRole::Roughness)
+        );
+        assert_eq!(export.texture_role(&base_id), Some(TextureRole::BaseColor));
+        let sources = export.read_sources().unwrap();
+        assert_eq!(
+            crate::decode_png_with_role(&sources[&roughness_id], TextureRole::Roughness).unwrap(),
+            roughness
+        );
+        assert_eq!(export.read_sources().unwrap(), sources);
+        let newer = [1, 80, 122, 2, 60, 123, 3, 40, 124, 4, 20, 125];
+        fs::write(&source, packed_fixture(&newer, |_, _| {})).unwrap();
+        let refreshed = store.refresh_glb_at(2, "paint").unwrap();
+        assert_eq!(refreshed.materials, accepted.materials);
+        assert_eq!(
+            store.texture(&roughness_id).unwrap().mips[0].bytes,
+            [80, 60, 40, 20]
+        );
+
+        fs::write(&source, packed_fixture(&pixels, |_, png| png[20] ^= 1)).unwrap();
+        assert!(store.refresh_glb_at(3, "paint").is_err());
+        assert_eq!(store.revision(), 3);
+        assert_eq!(
+            AssetStore::open(root.path()).unwrap().model("paint"),
+            Some(&refreshed)
+        );
+    }
+
+    #[test]
+    fn packed_glb_roughness_honors_its_sampler_and_skips_unrepresentable_bindings() {
+        use serde_json::json;
+        let pixels = [1, 20, 122, 2, 40, 123, 3, 60, 124, 4, 80, 125];
+        for (mode, expected) in [
+            ("roughness-only", None),
+            ("incompatible", Some("different sampler from Base Color")),
+            ("uv1", Some("requires TEXCOORD_0")),
+            ("transform", Some("UV transform is unsupported")),
+        ] {
+            let bytes = packed_fixture(&pixels, |doc, _| {
+                doc["samplers"] =
+                    json!([{"magFilter":9728,"minFilter":9984,"wrapS":33071,"wrapT":33071}]);
+                doc["textures"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json!({"source":0,"sampler":0}));
+                let pbr = &mut doc["materials"][0]["pbrMetallicRoughness"];
+                pbr["metallicRoughnessTexture"]["index"] = json!(1);
+                match mode {
+                    "roughness-only" => {
+                        pbr.as_object_mut().unwrap().remove("baseColorTexture");
+                    }
+                    "uv1" => {
+                        pbr["metallicRoughnessTexture"]["texCoord"] = json!(1);
+                        doc["meshes"][0]["primitives"][0]["attributes"]["TEXCOORD_1"] = json!(5);
+                    }
+                    "transform" => {
+                        pbr["metallicRoughnessTexture"]["extensions"] =
+                            json!({"KHR_texture_transform":{"offset":[0.2,0.0]}})
+                    }
+                    _ => {}
+                }
+            });
+            let model = glb::decode("paint", "paint.glb", &bytes).unwrap().info;
+            let material = &model.materials["Paint"];
+            assert_eq!(
+                material.roughness_texture.is_some(),
+                expected.is_none(),
+                "{mode}"
+            );
+            assert_eq!(
+                (material.linear, material.repeat),
+                (expected.is_some(), expected.is_some())
+            );
+            if let Some(expected) = expected {
+                assert!(
+                    model
+                        .warnings
+                        .iter()
+                        .any(|warning| warning.contains(expected)),
+                    "{mode} {:?}",
+                    model.warnings
+                );
+            }
+        }
+    }
+
     #[test]
     fn glb_cameras_keep_shared_lenses_and_last_accepted_catalog() {
         use crate::fixtures::punctual_glb;

@@ -144,6 +144,16 @@ sampler approximations, other material fallbacks, or skipped faces.
 You can still place the model. `asset_inspect` reports
 the light count when present, the warning count, and up to four warnings per model.
 
+Supported glTF metallic-roughness PNGs supply a linear **Roughness Map**
+from the green channel. The material keeps its scalar roughness multiplier.
+Rot renders the surface as dielectric and omits metallic detail. A source PNG
+can also supply a separate sRGB **Base Color** texture. Roughness needs
+`TEXCOORD_0`, identity UV mapping, and a sampler compatible with Base Color
+when both maps are present. Check **Import Warnings** if the map was omitted.
+**Refresh** can add roughness maps to an older accepted import. Place the
+refreshed model to use its updated material defaults, or select **Embedded
+Roughness** in the material editor for an existing placement.
+
 When a file fails to import, select its marked tile under **Assets**. The
 Inspector shows its project-relative path and how to recover. Open **Error
 Details** for the importer message. Replace or restore the source at the

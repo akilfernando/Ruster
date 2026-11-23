@@ -166,7 +166,7 @@ pub fn punctual_glb(edit: impl FnOnce(&mut serde_json::Value)) -> Vec<u8> {
     pack_glb(&document, &template[28 + json_length..])
 }
 
-fn pack_glb(document: &serde_json::Value, bin: &[u8]) -> Vec<u8> {
+pub(crate) fn pack_glb(document: &serde_json::Value, bin: &[u8]) -> Vec<u8> {
     let mut document = serde_json::to_vec(document).expect("fixture JSON");
     document.resize(document.len().next_multiple_of(4), b' ');
     let total = 28 + document.len() + bin.len();

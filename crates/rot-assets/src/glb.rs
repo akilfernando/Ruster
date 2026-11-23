@@ -373,6 +373,8 @@ struct Attributes {
     tangents: Option<usize>,
     #[serde(rename = "TEXCOORD_0")]
     uv: Option<usize>,
+    #[serde(rename = "TEXCOORD_1")]
+    secondary_uv: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -1069,6 +1071,9 @@ impl Decoder<'_> {
             .normals
             .map(|i| self.vectors::<3>(i, "VEC3"))
             .transpose()?;
+        if let Some(index) = primitive.attributes.secondary_uv {
+            at(&self.doc.accessors, index, "TEXCOORD_1 accessor")?;
+        }
         let uv = primitive
             .attributes
             .uv

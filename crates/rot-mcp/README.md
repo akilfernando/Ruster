@@ -149,6 +149,14 @@ connected project.
   clamped to a relative 0–16. Point range defaults to 5 units when
   omitted. Inspect the placed lighting and use shared Undo to remove
   the hierarchy and its lights together.
+- Imported GLB metallic-roughness PNGs expose the green channel as a
+  ready `roughness_linear` asset. The model summary in `asset_inspect`
+  reports `roughness_map_count` and prioritizes omissions such as
+  unsupported UV mapping or an incompatible Base Color sampler.
+  `material_inspect` reports the bound resource and role. Assign it
+  through guarded `scene_material_set` using `roughness_texture`.
+  Refresh can upgrade an older accepted model. Existing placed
+  material settings stay editable in the scene.
 - To change an imported v23 Animator’s clip, call `scene_animation_set`
   with the inspected `expected_session_token`, `expected_revision`,
   `expected_asset_revision`, the placement root’s `owner_id`, and
