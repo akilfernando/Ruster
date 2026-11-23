@@ -403,6 +403,67 @@ mod tests {
         assert_eq!(saved.scene().objects[0].name, "Pending name");
     }
 
+    #[test]
+    fn save_as_keeps_current_edits_in_a_clean_independent_sibling() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut editor = workspace(folder.path());
+        let original_bytes = fs::read(&editor.path).unwrap();
+        editor.command(Action::CreateCube);
+        let id = editor.session.scene().objects[0].id.clone();
+        editor.select(Some(id.clone()));
+        editor.draft.as_mut().unwrap().name = "Draft name".into();
+
+        let mut expected = editor.session.scene().clone();
+        let revision = editor.session.revision();
+        let Ok(OpenedScene::Components(path, mut saved)) = editor.save_variant("Copy.scene.json")
+        else {
+            panic!("Save As should open the saved sibling");
+        };
+        assert_eq!(path, folder.path().join("Copy.scene.json"));
+        assert_ne!(saved.scene().id, expected.id);
+        expected.id.clone_from(&saved.scene().id);
+        expected.objects[0].name = "Draft name".into();
+        assert_eq!(saved.scene(), &expected);
+        assert_eq!(ComponentSession::open(&path).unwrap().scene(), &expected);
+        assert_eq!(saved.revision(), 0);
+        assert!(!saved.is_dirty());
+        assert!(matches!(saved.undo(0), Err(rot_scene::SceneError::NoUndo)));
+        assert_eq!(fs::read(&editor.path).unwrap(), original_bytes);
+        assert_eq!(editor.session.revision(), revision);
+        assert!(editor.selection.contains(&id));
+        assert!(editor.draft_dirty());
+    }
+
+    #[test]
+    fn save_as_refusal_keeps_the_draft_and_original_history() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut editor = workspace(folder.path());
+        let original_bytes = fs::read(&editor.path).unwrap();
+        editor.command(Action::CreateCube);
+        let id = editor.session.scene().objects[0].id.clone();
+        editor.select(Some(id.clone()));
+        let revision = editor.session.revision();
+        let before = editor.session.scene().clone();
+        let occupied = folder.path().join("Occupied.scene.json");
+        fs::write(&occupied, b"competing scene").unwrap();
+        editor.draft.as_mut().unwrap().name = "Draft name".into();
+        assert!(editor.save_variant("Occupied.scene.json").is_err());
+        assert_eq!(fs::read(occupied).unwrap(), b"competing scene");
+
+        editor.draft.as_mut().unwrap().name.clear();
+        assert!(editor.save_variant("Invalid.scene.json").is_err());
+        assert!(!folder.path().join("Invalid.scene.json").exists());
+        assert_eq!(editor.session.scene(), &before);
+        assert_eq!(editor.session.revision(), revision);
+        assert!(editor.selection.contains(&id));
+        assert!(editor.draft.as_ref().unwrap().name.is_empty());
+        assert_eq!(fs::read(&editor.path).unwrap(), original_bytes);
+        #[cfg(unix)]
+        assert!(!editor.revoke_ai_connection);
+        editor.session.undo(revision).unwrap();
+        assert!(editor.session.scene().objects.is_empty());
+    }
+
     #[cfg(unix)]
     #[test]
     fn new_scene_staging_cannot_overwrite_a_racing_file_or_retarget_a_project() {

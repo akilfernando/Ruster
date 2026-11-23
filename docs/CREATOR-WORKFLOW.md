@@ -85,6 +85,20 @@ The new scene uses the existing project Assets and keeps the project's
 startup setting. To edit it with an approved MCP client, connect to the
 newly opened scene and inspect its session and revision before editing.
 
+### Save a scene variant in the current project
+
+Choose **File → Save As…**, use **Ctrl+Shift+S**, or search **Save Scene As**
+in the command palette. Enter a name, check the **Scene File** preview and
+press Enter or choose **Save Scene As**. The sibling includes your committed
+edits and any valid Inspector draft. It opens with its own scene ID and Undo
+history, using the same project Assets. The original stays available through
+**Open Scene**, and the existing project startup and Start Transition settings
+still point to their designated scenes.
+
+If the filename is occupied, choose another name. If an Inspector change
+needs correction, cancel or press Escape to return to the original draft.
+An approved client can reconnect to the newly opened scene and inspect its
+session and revision before making edits.
 
 ### Recover a scene after an unexpected exit
 
