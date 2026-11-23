@@ -90,7 +90,7 @@ pub fn valid(name: &str, args: &Value) -> bool {
         && map.get("start_playback").is_none_or(|wire| {
             use rot_scene::component_scene::AnimatorStart;
             match serde_json::from_value::<AnimatorStart>(wire.clone()) {
-                Ok(AnimatorStart::OnPlay) => true,
+                Ok(AnimatorStart::OnPlay {}) => true,
                 Ok(AnimatorStart::OnButtonPress { action_id }) => {
                     rot_scene::validate_id(&action_id).is_ok()
                 }
@@ -118,6 +118,27 @@ pub fn valid(name: &str, args: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn animator_start_wire_accepts_one_exact_mode_without_an_asset_guard() {
+        let mut args = json!({"expected_session_token":"scene","expected_revision":"7","owner_id":"door",
+            "start_playback":{"type":"on_button_press","action_id":"open"}});
+        assert!(valid("scene_animation_set", &args));
+        args["start_playback"] = json!({"type":"on_play"});
+        assert!(valid("scene_animation_set", &args));
+        for wire in [
+            Value::Null,
+            json!({"type":"on_button_press"}),
+            json!({"type":"on_button_press","action_id":"../open"}),
+            json!({"type":"on_play","action_id":"open"}),
+        ] {
+            args["start_playback"] = wire;
+            assert!(!valid("scene_animation_set", &args), "{args}");
+        }
+        args["start_playback"] = json!({"type":"on_play"});
+        args["remove"] = json!(true);
+        assert!(!valid("scene_animation_set", &args));
+    }
 
     #[test]
     fn preview_has_an_exact_guarded_shape_and_is_additional() {

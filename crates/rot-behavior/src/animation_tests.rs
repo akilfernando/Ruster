@@ -314,3 +314,167 @@ fn transform_camera_pose_commits_with_animated_parent_owner_and_rejected_step() 
         [0.; 3]
     );
 }
+
+#[test]
+fn button_animators_wait_restart_per_placement_and_keep_the_clock_on_rejection() {
+    use rot_scene::{
+        component_scene::{AnimatorStart, Component, ComponentScene},
+        input::{ActionDefinition, ActionKind, ButtonState, InputKey},
+        Session,
+    };
+    let (mut scene, mut engine) = fixture(false);
+    let mut other = scene.objects[0].clone();
+    other.id = "other-arm".into();
+    scene.objects.push(other);
+    scene.hierarchy.groups.insert(
+        "other-root".into(),
+        Group {
+            name: None,
+            transform: Transform::default(),
+        },
+    );
+    scene
+        .hierarchy
+        .parents
+        .insert("other-arm".into(), "other-root".into());
+    let mut second = scene.animations["root"].clone();
+    second.targets.insert("Rig/Arm".into(), "other-arm".into());
+    scene.animations.insert("other-root".into(), second);
+    let mut authored = ComponentScene::from_legacy(&Session::new(scene).unwrap()).unwrap();
+    for (label, action, key) in [
+        ("root", "open", InputKey::F),
+        ("other-root", "close", InputKey::G),
+    ] {
+        authored.actions.insert(
+            action.into(),
+            ActionDefinition {
+                label: None,
+                kind: ActionKind::Button { keys: vec![key] },
+            },
+        );
+        let owner = authored
+            .objects
+            .iter_mut()
+            .find(|object| object.id == label)
+            .unwrap();
+        let Component::Animator { start_playback, .. } = &mut owner.components[0].kind else {
+            panic!("projected Animator");
+        };
+        *start_playback = AnimatorStart::OnButtonPress {
+            action_id: action.into(),
+        };
+    }
+    let mut unavailable = authored.clone();
+    unavailable.actions.remove("close");
+    let Err(error) = unavailable.behavior_projection() else {
+        panic!("missing action must be diagnosed");
+    };
+    assert!(error.to_string().contains("other-root") && error.to_string().contains("close"));
+
+    let projection = authored.behavior_projection().unwrap();
+    let mut runtime = engine
+        .reset_projected(
+            &projection.scene,
+            &projection.authoring,
+            projection.transform_camera.clone(),
+            projection.projection.clone(),
+        )
+        .unwrap();
+    let position = |runtime: &Runtime, object: &str| {
+        runtime
+            .scene()
+            .objects
+            .iter()
+            .find(|entry| entry.id == object)
+            .unwrap()
+            .transform
+            .translation[0]
+    };
+    let input = |values: &[(&str, bool)]| {
+        ActionFrame(
+            values
+                .iter()
+                .map(|&(id, pressed)| {
+                    (
+                        id.to_owned(),
+                        ActionValue::Button(ButtonState {
+                            pressed,
+                            held: true,
+                            released: false,
+                        }),
+                    )
+                })
+                .collect(),
+        )
+    };
+    let initial = runtime.draw_frame.snapshot();
+    assert_eq!(position(&runtime, "arm"), 1.);
+    engine.step(&mut runtime).unwrap();
+    assert!(
+        Arc::ptr_eq(&initial, &runtime.draw_frame.snapshot()),
+        "a waiting tick publishes no newly resolved scene"
+    );
+    engine
+        .step_with_input(&mut runtime, &input(&[("open", true)]))
+        .unwrap();
+    assert_eq!(position(&runtime, "arm"), 1.);
+    engine
+        .step_with_input(&mut runtime, &input(&[("open", false)]))
+        .unwrap();
+    assert_eq!(position(&runtime, "arm"), 2.5);
+    assert_eq!(position(&runtime, "other-arm"), 1.);
+    engine
+        .step_with_input(&mut runtime, &input(&[("close", true)]))
+        .unwrap();
+    assert_eq!(position(&runtime, "arm"), 4.);
+    assert_eq!(position(&runtime, "other-arm"), 1.);
+    engine.step(&mut runtime).unwrap();
+    assert_eq!(position(&runtime, "other-arm"), 2.5);
+    for _ in 0..5 {
+        engine.step(&mut runtime).unwrap();
+    }
+    assert_eq!(position(&runtime, "arm"), 7.);
+    assert_eq!(position(&runtime, "other-arm"), 7.);
+    engine
+        .step_with_input(&mut runtime, &input(&[("open", true)]))
+        .unwrap();
+    assert_eq!(position(&runtime, "arm"), 1.);
+    assert_eq!(position(&runtime, "other-arm"), 7.);
+
+    // An unrelated world-invalid animation runs after the staged press.
+    let mut rejected = projection.scene.clone();
+    rejected.animations.get_mut("root").unwrap().clip = "fault".into();
+    rejected
+        .hierarchy
+        .groups
+        .get_mut("root")
+        .unwrap()
+        .transform
+        .scale = [2.; 3];
+    engine.clips.insert("fault".into(), Arc::new(Clip::decode(br#"{"format":"rot-clip","version":1,"duration":0.25,"tracks":[
+        {"node":"Rig/Arm","property":"translation","interpolation":"linear","times":[0.0,0.25],"values":[[1.0,0.0,0.0],[8000.0,0.0,0.0]]}]}"#).unwrap()));
+    let mut rollback = engine
+        .reset_projected(
+            &rejected,
+            &projection.authoring,
+            projection.transform_camera,
+            projection.projection,
+        )
+        .unwrap();
+    engine
+        .step_with_input(&mut rollback, &input(&[("open", true)]))
+        .unwrap();
+    let committed = rollback.draw_frame.snapshot();
+    let clock = rollback.animation_starts.clone();
+    assert!(engine
+        .step_with_input(&mut rollback, &input(&[("close", true)]))
+        .is_err());
+    assert_eq!(rollback.tick(), 1);
+    assert_eq!(rollback.animation_starts, clock);
+    assert!(Arc::ptr_eq(&committed, &rollback.draw_frame.snapshot()));
+    engine
+        .step_with_input(&mut rollback, &input(&[("open", true), ("close", true)]))
+        .unwrap();
+    assert_eq!(rollback.tick(), 2);
+    assert_eq!(position(&rollback, "other-arm"), 1.);
+}

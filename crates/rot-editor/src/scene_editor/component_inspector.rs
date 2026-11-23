@@ -672,7 +672,7 @@ fn animator_start_fields(
                     .selectable_label(on_play, Text::AnimatorOnPlay.plain())
                     .clicked()
                 {
-                    *start = AnimatorStart::OnPlay;
+                    *start = AnimatorStart::OnPlay {};
                     selected = true;
                     ui.close();
                 }

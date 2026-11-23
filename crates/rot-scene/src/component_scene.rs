@@ -823,19 +823,21 @@ fn available_object_id(objects: &[ObjectNode], stem: &str) -> String {
 }
 
 /// Playback policy of a v23 Animator. Default-On-Play files omit the policy.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AnimatorStart {
-    #[default]
-    OnPlay,
-    OnButtonPress {
-        action_id: String,
-    },
+    OnPlay {},
+    OnButtonPress { action_id: String },
 }
 
+impl Default for AnimatorStart {
+    fn default() -> Self {
+        Self::OnPlay {}
+    }
+}
 impl AnimatorStart {
     pub fn is_on_play(&self) -> bool {
-        matches!(self, Self::OnPlay)
+        matches!(self, Self::OnPlay {})
     }
 
     pub fn validate_action(&self, actions: &ActionMap, owner: &str) -> Result<(), SceneError> {
@@ -1194,7 +1196,7 @@ mod tests {
             rig.components[0].kind,
             Component::Animator {
                 binding: animation,
-                start_playback: AnimatorStart::OnPlay
+                start_playback: AnimatorStart::OnPlay {}
             }
         );
         let camera = &migrated.objects.last().unwrap().components[0];

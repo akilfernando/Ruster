@@ -252,6 +252,15 @@ connected project.
   through guarded `scene_material_set` using `roughness_texture`.
   Refresh can upgrade an older accepted model. Existing placed
   material settings stay editable in the scene.
+- To start a v23 Animator on input, inspect Button actions through
+  `behavior_inspect` with `kind: "actions"`. In a guarded
+  `scene_animation_set` for the Animator's `owner_id`, pass
+  `start_playback: {"type":"on_button_press","action_id":"open-door"}`.
+  Pass `{"type":"on_play"}` to restore automatic playback. Omission keeps
+  the current mode. A trigger-only edit uses the scene guards. Exact
+  component inspection reports `animation.start_playback` and any
+  `start_error`. The Button press commits time zero, then the next
+  successful Step advances the clip.
 - To change an imported v23 Animator’s clip, call `scene_animation_set`
   with the inspected `expected_session_token`, `expected_revision`,
   `expected_asset_revision`, the placement root’s `owner_id`, and

@@ -890,6 +890,16 @@ and loop controls. A target the clip animates cannot also carry a
 transform-writing behavior, and deleting it requires removing the
 animation first.
 
+To open a door or lower a bridge on input, create a **Button** in
+**Project Settings → Input Actions**. Select **On Button Press** under
+**Animator → Start Playback**, choose the Button, and **Apply**. Play starts
+at the clip's first pose and waits there. The press shows that pose for the
+current Step. The next Step advances the clip. Holding the Button continues
+playback, and pressing it again starts the clip over. **Loop** still controls
+whether playback repeats or holds the final pose. Choose **On Play** to
+start automatically. Repair a missing Button by selecting another Button
+or switching to **On Play**.
+
 Choose **Preview** in the v23 Animator to scrub its transform clip in the
 Scene view. Use **Preview Time** or enter an exact **Time (seconds)**. The
 end of the slider shows the final pose even when **Loop** is on.
