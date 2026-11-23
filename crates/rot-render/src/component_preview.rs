@@ -116,6 +116,7 @@ impl ComponentPreview {
     fn draw_scene(&self) -> DrawScene<'_> {
         DrawScene {
             scene: &self.scene,
+            prepared: None,
             matrices: Some(&self.matrices),
             unpickable: (!self.unpickable.is_empty()).then_some(&self.unpickable),
             hidden_mesh_renderers: None,
@@ -552,6 +553,7 @@ mod tests {
         assert_eq!(preview.matrices, [world.as_mat4()]);
         let draw = DrawScene {
             scene: preview.scene(),
+            prepared: None,
             matrices: Some(&preview.matrices),
             unpickable: None,
             hidden_mesh_renderers: None,

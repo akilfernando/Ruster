@@ -1629,6 +1629,16 @@ impl ComponentWorkspace {
                 &mut self.navigation,
                 surface,
             )
+        } else if let Some(draw) = frame.as_ref().and_then(|frame| frame.draw_frame.as_ref()) {
+            rot_render::render_viewport_draw_frame(
+                ui,
+                draw,
+                selection.as_slice(),
+                &self.meshes,
+                &self.textures,
+                &mut self.navigation,
+                surface,
+            )
         } else {
             rot_render::render_viewport_with_materials(
                 ui,

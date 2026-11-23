@@ -41,6 +41,7 @@ fn checked_texture_bytes(current: usize, additional: usize) -> Result<usize, Str
 /// Construct a new Content to replace meshes; this keeps retained GPU identities stable.
 #[derive(Clone)]
 pub struct Content {
+    validation: std::sync::OnceLock<Result<(), String>>,
     transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
     hidden_mesh_renderers: Option<rot_scene::HiddenMeshRenderers>,
     scene: ContentScene,
@@ -50,7 +51,7 @@ pub struct Content {
 
 #[derive(Clone)]
 enum ContentScene {
-    Behavior(Box<Scene>),
+    Behavior(rot_scene::SceneDrawFrame),
     StaticHierarchy(Arc<ComponentPreview>),
 }
 
@@ -66,7 +67,11 @@ impl Content {
         meshes: MeshMap,
         textures: TextureMap,
     ) -> Result<Self, String> {
-        Self::with_scene(ContentScene::Behavior(Box::new(scene)), meshes, textures)
+        Self::with_scene(
+            ContentScene::Behavior(rot_scene::SceneDrawFrame::new(scene, None)),
+            meshes,
+            textures,
+        )
     }
 
     pub fn with_component_preview(
@@ -100,31 +105,30 @@ impl Content {
             checked_texture_bytes(bytes, texture.payload_bytes())
         })?;
         let content = Self {
+            validation: Default::default(),
             hidden_mesh_renderers: None,
             transform_camera: None,
             scene,
             meshes,
             textures,
         };
-        if let ContentScene::Behavior(scene) = &content.scene {
-            scene
-                .validate()
-                .map_err(|e| format!("application scene: {e}"))?;
+        content.validate()?;
+        if matches!(&content.scene, ContentScene::StaticHierarchy(_)) {
+            content.validate_references()?;
         }
-        content.validate_references()?;
         Ok(content)
     }
 
     pub fn scene(&self) -> &Scene {
         match &self.scene {
-            ContentScene::Behavior(scene) => scene,
+            ContentScene::Behavior(scene) => scene.scene(),
             ContentScene::StaticHierarchy(preview) => preview.scene(),
         }
     }
     pub fn has_player_camera(&self) -> bool {
         match &self.scene {
             ContentScene::Behavior(scene) => {
-                self.transform_camera.is_some() || scene.player_view.is_some()
+                self.transform_camera.is_some() || scene.scene().player_view.is_some()
             }
             ContentScene::StaticHierarchy(preview) => preview.has_player_camera(),
         }
@@ -142,8 +146,19 @@ impl Content {
         let ContentScene::Behavior(scene) = &mut self.scene else {
             panic!("component preview content is immutable");
         };
-        scene
+        self.validation.take();
+        scene.scene_mut()
     }
+    pub fn set_behavior_draw_frame(&mut self, frame: &rot_scene::SceneDrawFrame) {
+        let ContentScene::Behavior(scene) = &mut self.scene else {
+            panic!("component preview content is immutable");
+        };
+        if !std::ptr::eq(scene.scene(), frame.scene()) {
+            self.validation.take();
+        }
+        *scene = frame.clone();
+    }
+
     pub fn set_transform_camera(
         &mut self,
         camera: Option<rot_scene::component_scene::TransformCameraPose>,
@@ -169,10 +184,15 @@ impl Content {
             // The component preview and its decoded resources stay immutable.
             return Ok(());
         };
-        scene
-            .validate()
-            .map_err(|e| format!("application scene: {e}"))?;
-        self.validate_references()
+        self.validation
+            .get_or_init(|| {
+                scene
+                    .scene()
+                    .validate()
+                    .map_err(|error| format!("application scene: {error}"))?;
+                self.validate_references()
+            })
+            .clone()
     }
 
     fn validate_references(&self) -> Result<(), String> {

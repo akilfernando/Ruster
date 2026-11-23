@@ -448,7 +448,7 @@ impl Application for GenericMotionLab {
         );
         let candidate = self.report(result)?;
         // Engine validated transforms; meshes remain the same immutable Content resources.
-        *self.content.scene_mut() = candidate.scene().clone();
+        self.content.set_behavior_draw_frame(candidate.draw_frame());
         self.content
             .set_transform_camera(candidate.transform_camera());
         self.content
@@ -585,7 +585,7 @@ impl Application for GenericMotionLab {
         self.report(result)?;
         self.last_input = Some((step.tick, input, origin));
         let runtime = self.runtime.as_ref().expect("active runtime");
-        *self.content.scene_mut() = runtime.scene().clone();
+        self.content.set_behavior_draw_frame(runtime.draw_frame());
         self.content
             .set_transform_camera(runtime.transform_camera());
         self.diagnostic = None;

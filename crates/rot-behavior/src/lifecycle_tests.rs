@@ -266,7 +266,7 @@ fn commands_consume_revision_and_preserve_state_on_every_rejection() {
         ),
         (1, 3, Some(3))
     );
-    assert_eq!(runtime.scene.objects[0].transform.translation[0], 8.0);
+    assert_eq!(runtime.scene().objects[0].transform.translation[0], 8.0);
     let observations = serde_json::to_value(runtime.query_observations()).unwrap();
     assert!(!runtime.query_observations().is_empty());
     engine

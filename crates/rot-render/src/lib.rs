@@ -997,6 +997,7 @@ mod assembly_gate_tests;
 #[derive(Clone, Copy)]
 struct DrawScene<'a> {
     scene: &'a Scene,
+    prepared: Option<&'a rot_scene::HierarchyDraw>,
     matrices: Option<&'a [Mat4]>,
     unpickable: Option<&'a BTreeSet<String>>,
     hidden_mesh_renderers: Option<&'a HashSet<String>>,
@@ -1007,6 +1008,7 @@ impl<'a> From<&'a Scene> for DrawScene<'a> {
     fn from(scene: &'a Scene) -> Self {
         Self {
             scene,
+            prepared: None,
             matrices: None,
             unpickable: None,
             hidden_mesh_renderers: None,
@@ -1729,6 +1731,35 @@ pub fn render_viewport_with_materials(
     )
 }
 
+/// Paint the exact prepared pose data from one committed runtime frame.
+pub fn render_viewport_draw_frame(
+    ui: &mut egui::Ui,
+    frame: &rot_scene::SceneDrawFrame,
+    selected: &[&str],
+    meshes: &BTreeMap<String, Arc<rot_assets::Mesh>>,
+    textures: &BTreeMap<String, Arc<rot_assets::Texture>>,
+    navigation: &mut NavigationOptions,
+    mut surface: ViewportSurface,
+) -> ViewportInteraction {
+    let hidden = surface.hidden_mesh_renderers.take();
+    let prepared = frame.hierarchy().map(Arc::as_ref);
+    render_draw_scene(
+        ui,
+        DrawScene {
+            prepared,
+            matrices: prepared.map(rot_scene::HierarchyDraw::matrices),
+            hidden_mesh_renderers: hidden.as_deref(),
+            transform_camera: surface.transform_camera,
+            ..frame.scene().into()
+        },
+        selected,
+        meshes,
+        textures,
+        navigation,
+        surface,
+    )
+}
+
 fn render_draw_scene(
     ui: &mut egui::Ui,
     draw: DrawScene<'_>,
@@ -1761,7 +1792,11 @@ fn render_draw_scene(
                 })
                 .map(|matrices| (matrices, Vec3::from_array(camera.eye).extend(1.).to_array()))
         } else {
-            scene.resolve_player_view().ok().flatten().and_then(|view| {
+            let view = match draw.prepared {
+                Some(prepared) => prepared.player_view(),
+                None => scene.resolve_player_view().ok().flatten(),
+            };
+            view.and_then(|view| {
                 player_matrices(view, aspect)
                     .map(|matrices| (matrices, player_view_camera(view).eye_mode()))
             })
@@ -1793,7 +1828,28 @@ fn render_draw_scene(
     // persistence/export: Scene remains the owner of authored local topology.
     let mut resolved_input;
     let mut expanded_selection = Vec::new();
-    let scene = if scene.hierarchy.is_empty() {
+    if !scene.hierarchy.is_empty() && !selected.is_empty() {
+        // Selection strings belong to the original scene, not the temporary map.
+        for id in scene
+            .objects
+            .iter()
+            .map(|o| o.id.as_str())
+            .chain(scene.lighting.lights().map(|(id, _)| id))
+        {
+            let mut current = id;
+            loop {
+                if selected.contains(&current) {
+                    expanded_selection.push(id);
+                    break;
+                }
+                let Some(parent) = scene.hierarchy.parents.get(current) else {
+                    break;
+                };
+                current = parent;
+            }
+        }
+    }
+    let scene = if scene.hierarchy.is_empty() || draw.prepared.is_some() {
         scene
     } else {
         let poses = match scene.resolve_poses() {
@@ -1820,25 +1876,6 @@ fn render_draw_scene(
                 };
             }
         };
-        // Selection strings belong to the original scene, not the temporary map.
-        for id in scene
-            .objects
-            .iter()
-            .map(|o| o.id.as_str())
-            .chain(scene.lighting.lights().map(|(id, _)| id))
-        {
-            let mut current = id;
-            loop {
-                if selected.contains(&current) {
-                    expanded_selection.push(id);
-                    break;
-                }
-                let Some(parent) = scene.hierarchy.parents.get(current) else {
-                    break;
-                };
-                current = parent;
-            }
-        }
         resolved_input = scene.clone();
         for object in &mut resolved_input.objects {
             object.transform = poses.transforms[&object.id].clone();
@@ -2051,7 +2088,10 @@ fn render_draw_scene(
         None => data.remove::<egui::Pos2>(box_id),
     });
     let start = Instant::now();
-    let (lighting, invalid_lighting) = match LightingPacket::try_pack(&scene.lighting) {
+    let (lighting, invalid_lighting) = match LightingPacket::try_pack(
+        draw.prepared
+            .map_or(&scene.lighting, rot_scene::HierarchyDraw::lighting),
+    ) {
         Ok(packet) => (packet, false),
         Err(_) => (LightingPacket::authored_dark(), true),
     };

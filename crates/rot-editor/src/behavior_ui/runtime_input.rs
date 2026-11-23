@@ -687,6 +687,7 @@ mod tests {
                     commit_revision: 0,
                     last_step_commit_revision: None,
                     commit_revision_required: false,
+                    draw_frame: None,
                     static_preview: None,
                     resolved_transform_camera: None,
                     hidden_mesh_renderers: None,

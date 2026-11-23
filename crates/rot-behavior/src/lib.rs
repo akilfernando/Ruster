@@ -245,7 +245,7 @@ fn resolve_transform_camera(
 /// No VM handles escape. Authored source/properties stay fixed until explicit Reset.
 #[derive(Clone, Debug)]
 pub struct Runtime {
-    scene: Scene,
+    draw_frame: rot_scene::SceneDrawFrame,
     authoring: Arc<Authoring>,
     tick: u64,
     commit_revision: u64,
@@ -304,7 +304,10 @@ impl Runtime {
             .collect()
     }
     pub fn scene(&self) -> &Scene {
-        &self.scene
+        self.draw_frame.scene()
+    }
+    pub fn draw_frame(&self) -> &rot_scene::SceneDrawFrame {
+        &self.draw_frame
     }
     /// Last fixed Step's successful audio requests. Reset and silent commits have
     /// no batch. Failed updates leave it unchanged and never authorize playback.
@@ -853,9 +856,17 @@ impl Engine {
         });
         let transform_camera =
             resolve_transform_camera(transform_camera_binding.as_deref(), scene, Phase::Setup)?;
+        let hierarchy_draw = if scene.hierarchy.is_empty() {
+            None
+        } else {
+            let (poses, view) = resolve_group_commit(scene)?;
+            Some(Arc::new(rot_scene::HierarchyDraw::resolved(
+                scene, &poses, view,
+            )))
+        };
         self.check_cancelled()?;
         Ok(Runtime {
-            scene: scene.clone(),
+            draw_frame: rot_scene::SceneDrawFrame::new(scene.clone(), hierarchy_draw),
             authoring: Arc::new(authoring.clone()),
             tick: 0,
             commit_revision: 0,
@@ -920,23 +931,25 @@ impl Engine {
             commit_revision,
             false,
         );
-        let snapshot = Arc::new(runtime.scene.clone());
-        let mut staged = runtime.scene.clone();
+        let snapshot = runtime.draw_frame.snapshot();
+        let mut staged = None;
         let mut staged_state = runtime.state.clone();
         let queries = self.query_invocation(
-            &runtime.scene,
+            &snapshot,
             &runtime.authoring,
             runtime.tick,
             runtime.kinematic_owner.as_ref(),
         )?;
         let mut group_changed = !runtime.animations.is_empty();
         let mut changed_leaves = Vec::new();
-        Self::apply_animations(
-            &runtime.animations,
-            next as f64 * self.limits.fixed_dt,
-            &mut staged,
-            Phase::Commit,
-        )?;
+        if group_changed {
+            Self::apply_animations(
+                &runtime.animations,
+                next as f64 * self.limits.fixed_dt,
+                staged.get_or_insert_with(|| (*snapshot).clone()),
+                Phase::Commit,
+            )?;
+        }
         let audio = RefCell::new(Vec::new());
         for (id, binding) in &runtime.authoring.bindings {
             if !binding.enabled {
@@ -958,26 +971,33 @@ impl Engine {
             if let Some(transform) = output.transform {
                 match &binding.target {
                     rot_scene::BindingTarget::Object(object_id) => {
-                        let (index, object) = staged
+                        let index = snapshot
                             .objects
-                            .iter_mut()
-                            .enumerate()
-                            .find(|(_, object)| object.id == *object_id)
+                            .iter()
+                            .position(|object| object.id == *object_id)
                             .expect("validated runtime owner");
-                        if runtime.leaf_parents.is_some() && object.transform != transform {
-                            changed_leaves.push((index, id, binding));
+                        if !same_transform(&snapshot.objects[index].transform, &transform) {
+                            if runtime.leaf_parents.is_some() {
+                                changed_leaves.push((index, id, binding));
+                            }
+                            staged.get_or_insert_with(|| (*snapshot).clone()).objects[index]
+                                .transform = transform;
                         }
-                        object.transform = transform;
                     }
                     rot_scene::BindingTarget::Group(group_id) => {
-                        let group = staged
-                            .hierarchy
-                            .groups
-                            .get_mut(group_id)
-                            .expect("validated Group owner");
-                        group_changed |=
-                            runtime.leaf_parents.is_none() || group.transform != transform;
-                        group.transform = transform;
+                        if !same_transform(
+                            &snapshot.hierarchy.groups[group_id].transform,
+                            &transform,
+                        ) {
+                            group_changed = true;
+                            staged
+                                .get_or_insert_with(|| (*snapshot).clone())
+                                .hierarchy
+                                .groups
+                                .get_mut(group_id)
+                                .expect("validated Group owner")
+                                .transform = transform;
+                        }
                     }
                     rot_scene::BindingTarget::Application => {
                         unreachable!("Application output cannot include a transform")
@@ -992,71 +1012,93 @@ impl Engine {
                 )
             })?;
         }
-        // Returned TRS can invalidate enabled sphere scale even without a query.
-        // Definitions are immutable during a Runtime. Existing objects without
-        // enabled colliders skip collider resolution.
-        if group_changed {
-            validate_group_commit(&staged)?;
-        } else if let Some(paths) = &runtime.leaf_parents {
-            for (index, id, binding) in changed_leaves {
-                let object = &staged.objects[index];
-                let validate = || {
-                    let world = paths
-                        .get(&object.id)
-                        .map(|path| path.resolve(&staged, &object.transform))
-                        .transpose()?;
-                    if let Some(collider) = object.collider {
-                        collider.resolve(world.as_ref().unwrap_or(&object.transform))?;
-                    }
-                    Ok::<_, rot_scene::SceneError>(())
-                };
-                validate().map_err(|error| {
-                    Diagnostic::plain(
-                        DiagnosticCode::InvalidOutput,
-                        Phase::Commit,
-                        &format!("{} world transform: {error}", object.id),
-                    )
-                    .context(
-                        id,
-                        binding,
-                        runtime.authoring.sources.get(&binding.source_id),
-                    )
-                })?;
-            }
-        } else {
-            for object in &staged.objects {
-                if let Some(collider) = object.collider.filter(|collider| collider.enabled) {
-                    collider.resolve(&object.transform).map_err(|error| {
-                        Diagnostic::plain(
-                            DiagnosticCode::InvalidOutput,
-                            Phase::Commit,
-                            &error.to_string(),
-                        )
-                    })?;
+        // A no-op scene keeps the old scene and draw Arcs. Actual local
+        // changes are validated and prepared before publishing either one.
+        let next_draw = staged
+            .as_ref()
+            .map(|staged| {
+                if group_changed {
+                    let (poses, view) = resolve_group_commit(staged)?;
+                    return Ok((!staged.hierarchy.is_empty()).then(|| {
+                        Arc::new(rot_scene::HierarchyDraw::resolved(staged, &poses, view))
+                    }));
                 }
-            }
-        }
-        if !group_changed {
-            if runtime.leaf_parents.is_some() {
-                staged
-                    .validate_player_view_with_follow_path(runtime.follow_parent.as_ref())
-                    .map_err(|error| {
-                        Diagnostic::plain(
-                            DiagnosticCode::InvalidOutput,
-                            Phase::Commit,
-                            &error.to_string(),
-                        )
-                    })?;
-            } else {
-                validate_player_view_commit(&staged)?;
-            }
-        }
+                if let Some(paths) = &runtime.leaf_parents {
+                    let leaves = changed_leaves
+                        .into_iter()
+                        .map(|(index, id, binding)| {
+                            let object = &staged.objects[index];
+                            let validate = || {
+                                let world = paths
+                                    .get(&object.id)
+                                    .map(|path| path.resolve(staged, &object.transform))
+                                    .transpose()?;
+                                let transform = world.as_ref().unwrap_or(&object.transform);
+                                if let Some(collider) = object.collider {
+                                    collider.resolve(transform)?;
+                                }
+                                Ok::<_, rot_scene::SceneError>((
+                                    index,
+                                    rot_scene::draw_matrix(transform),
+                                ))
+                            };
+                            validate().map_err(|error| {
+                                Diagnostic::plain(
+                                    DiagnosticCode::InvalidOutput,
+                                    Phase::Commit,
+                                    &format!("{} world transform: {error}", object.id),
+                                )
+                                .context(
+                                    id,
+                                    binding,
+                                    runtime.authoring.sources.get(&binding.source_id),
+                                )
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let view = staged
+                        .resolve_player_view_with_follow_path(runtime.follow_parent.as_ref())
+                        .map_err(|error| {
+                            Diagnostic::plain(
+                                DiagnosticCode::InvalidOutput,
+                                Phase::Commit,
+                                &error.to_string(),
+                            )
+                        })?;
+                    let mut draw = runtime
+                        .draw_frame
+                        .hierarchy()
+                        .expect("projected hierarchy")
+                        .clone();
+                    Arc::make_mut(&mut draw).update_leaves(leaves, view);
+                    Ok(Some(draw))
+                } else {
+                    for object in &staged.objects {
+                        if let Some(collider) = object.collider.filter(|collider| collider.enabled)
+                        {
+                            collider.resolve(&object.transform).map_err(|error| {
+                                Diagnostic::plain(
+                                    DiagnosticCode::InvalidOutput,
+                                    Phase::Commit,
+                                    &error.to_string(),
+                                )
+                            })?;
+                        }
+                    }
+                    validate_player_view_commit(staged)?;
+                    Ok(None)
+                }
+            })
+            .transpose()?;
         staged_state.validate_total()?;
-        let transform_camera = resolve_transform_camera(
-            runtime.transform_camera_binding.as_deref(),
-            &staged,
-            Phase::Commit,
-        )?;
+        let transform_camera = match &staged {
+            Some(staged) => resolve_transform_camera(
+                runtime.transform_camera_binding.as_deref(),
+                staged,
+                Phase::Commit,
+            )?,
+            None => runtime.transform_camera,
+        };
         self.check_cancelled()?;
         let observations =
             queries.map_or_else(Vec::new, |queries| queries.observations.into_inner());
@@ -1067,7 +1109,9 @@ impl Engine {
             cues,
         });
         runtime.transform_camera = transform_camera;
-        runtime.scene = staged;
+        if let (Some(scene), Some(hierarchy)) = (staged, next_draw) {
+            runtime.draw_frame = rot_scene::SceneDrawFrame::new(scene, hierarchy);
+        }
         runtime.tick = next;
         runtime.commit_revision = commit_revision;
         runtime.last_step_commit_revision = Some(commit_revision);
@@ -1371,17 +1415,37 @@ fn validate_player_view_commit(scene: &Scene) -> Result<(), Diagnostic> {
     })
 }
 
+fn same_transform(a: &Transform, b: &Transform) -> bool {
+    a.translation.map(f32::to_bits) == b.translation.map(f32::to_bits)
+        && a.rotation.map(f32::to_bits) == b.rotation.map(f32::to_bits)
+        && a.scale.map(f32::to_bits) == b.scale.map(f32::to_bits)
+}
+
 fn validate_group_commit(scene: &Scene) -> Result<(), Diagnostic> {
-    scene
-        .resolve_poses()
-        .and_then(|poses| scene.validate_player_view_with_poses(&poses))
-        .map_err(|error| {
-            Diagnostic::plain(
-                DiagnosticCode::InvalidOutput,
-                Phase::Commit,
-                &error.to_string(),
-            )
-        })
+    resolve_group_commit(scene).map(|_| ())
+}
+
+fn resolve_group_commit(
+    scene: &Scene,
+) -> Result<
+    (
+        rot_scene::ResolvedPoses,
+        Option<rot_scene::ResolvedPlayerView>,
+    ),
+    Diagnostic,
+> {
+    let resolve = || {
+        let poses = scene.resolve_poses()?;
+        let view = scene.resolve_player_view_with_poses(&poses)?;
+        Ok::<_, rot_scene::SceneError>((poses, view))
+    };
+    resolve().map_err(|error| {
+        Diagnostic::plain(
+            DiagnosticCode::InvalidOutput,
+            Phase::Commit,
+            &error.to_string(),
+        )
+    })
 }
 
 fn read_group_rotation(output: &Table, input: &Transform) -> mlua::Result<BindingOutput> {

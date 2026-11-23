@@ -42,6 +42,7 @@ pub(super) struct Frame {
     pub command_schema_hash: Option<String>,
     pub authoring: Arc<Authoring>,
     pub scene: Arc<Scene>,
+    pub draw_frame: Option<rot_scene::SceneDrawFrame>,
     pub static_preview: Option<Arc<ComponentPreview>>,
     pub resolved_transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
     pub hidden_mesh_renderers: Option<rot_scene::HiddenMeshRenderers>,
@@ -1036,7 +1037,6 @@ struct Execution {
     playing: bool,
     due: Option<Instant>,
     last_input: Option<Arc<LastConsumedInput>>,
-    published_scene: Option<Arc<Scene>>,
     published_queries: Option<Arc<[rot_behavior::QueryObservation]>>,
     audio: AudioOutput,
     audio_enabled: bool,
@@ -1085,7 +1085,6 @@ impl Execution {
         self.hidden_mesh_renderers = None;
         self.key = None;
         self.last_input = None;
-        self.published_scene = None;
         self.published_queries = None;
         *shared.input.lock().unwrap_or_else(|p| p.into_inner()) = None;
         if let Some(engine) = self.engine.as_mut() {
@@ -1133,16 +1132,9 @@ fn frame(shared: &Shared, execution: &mut Execution, repaint: &Option<Repaint>, 
         .as_ref()
         .expect("run info includes runtime");
     if !state_only {
-        execution.published_scene = Some(Arc::new(runtime.scene().clone()));
         let observations = runtime.query_observations();
         execution.published_queries = (!observations.is_empty()).then(|| Arc::from(observations));
     }
-    let scene = Arc::clone(
-        execution
-            .published_scene
-            .as_ref()
-            .expect("Reset publishes scene before commands"),
-    );
     let query_observations = execution.published_queries.clone();
     publish_frame(
         shared,
@@ -1171,7 +1163,8 @@ fn frame(shared: &Shared, execution: &mut Execution, repaint: &Option<Repaint>, 
                 .and_then(|(id, _)| runtime.command_schema_hash(id))
                 .map(str::to_owned),
             authoring: Arc::clone(execution.runtime.as_ref().unwrap().authoring_snapshot()),
-            scene,
+            scene: runtime.draw_frame().snapshot(),
+            draw_frame: Some(runtime.draw_frame().clone()),
             static_preview: None,
             resolved_transform_camera: runtime.transform_camera(),
             hidden_mesh_renderers: execution.hidden_mesh_renderers.clone(),
@@ -1233,6 +1226,7 @@ fn process(
                 command_schema_hash: None,
                 scene: preview.scene_snapshot(),
                 static_preview: Some(preview),
+                draw_frame: None,
                 resolved_transform_camera: None,
                 hidden_mesh_renderers: None,
                 authoring: Arc::default(),
@@ -1874,7 +1868,6 @@ fn run(
         playing: false,
         due: None,
         last_input: None,
-        published_scene: None,
         published_queries: None,
         audio: AudioOutput::default(),
         audio_enabled: false,

@@ -148,25 +148,34 @@ impl Scene {
         }
     }
 
-    /// Validate the same Follow anchor using a path captured from validated topology.
-    pub fn validate_player_view_with_follow_path(
+    /// Resolve the same Follow anchor using a path captured from validated topology.
+    pub fn resolve_player_view_with_follow_path(
         &self,
         path: Option<&ParentPath>,
-    ) -> Result<(), SceneError> {
-        if let Some(view) = &self.player_view {
-            view.resolve_following(self, |_, local| match path {
-                Some(path) => Ok(path.resolve(self, local)?.translation),
-                None => Ok(local.translation),
-            })?;
-        }
-        Ok(())
+    ) -> Result<Option<ResolvedPlayerView>, SceneError> {
+        self.player_view
+            .as_ref()
+            .map(|view| {
+                view.resolve_following(self, |_, local| match path {
+                    Some(path) => Ok(path.resolve(self, local)?.translation),
+                    None => Ok(local.translation),
+                })
+            })
+            .transpose()
+    }
+
+    pub fn resolve_player_view_with_poses(
+        &self,
+        poses: &ResolvedPoses,
+    ) -> Result<Option<ResolvedPlayerView>, SceneError> {
+        self.player_view
+            .as_ref()
+            .map(|view| view.resolve(self, Some(poses)))
+            .transpose()
     }
 
     pub fn validate_player_view_with_poses(&self, poses: &ResolvedPoses) -> Result<(), SceneError> {
-        if let Some(view) = &self.player_view {
-            view.resolve(self, Some(poses))?;
-        }
-        Ok(())
+        self.resolve_player_view_with_poses(poses).map(|_| ())
     }
 }
 

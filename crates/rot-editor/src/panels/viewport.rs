@@ -180,23 +180,35 @@ impl SceneEditor {
             self.error = error;
         }
         surface.input_owned = hud_owns;
-        let viewport = rot_render::render_viewport_with_materials(
-            ui,
-            shown_scene,
-            &selected,
-            if self.runtime.visible {
-                &self.preview_assets
-            } else {
-                &self.resolved
-            },
-            if self.runtime.visible {
-                &self.preview_textures
-            } else {
-                &self.resolved_textures
-            },
-            &mut self.navigation,
-            surface,
-        );
+        let (meshes, textures) = if self.runtime.visible {
+            (&self.preview_assets, &self.preview_textures)
+        } else {
+            (&self.resolved, &self.resolved_textures)
+        };
+        let viewport = if let Some(draw) = shown_frame
+            .as_ref()
+            .and_then(|frame| frame.draw_frame.as_ref())
+        {
+            rot_render::render_viewport_draw_frame(
+                ui,
+                draw,
+                &selected,
+                meshes,
+                textures,
+                &mut self.navigation,
+                surface,
+            )
+        } else {
+            rot_render::render_viewport_with_materials(
+                ui,
+                shown_scene,
+                &selected,
+                meshes,
+                textures,
+                &mut self.navigation,
+                surface,
+            )
+        };
         // The wheel changes fly speed while the right button is held.
         self.workspace
             .set_movement_speed(self.navigation.movement_speed);
