@@ -383,6 +383,7 @@ pub(super) struct StartTarget {
 
 pub(super) struct StartTransition {
     pub action_id: String,
+    pub destination_file: String,
     pub target: Result<StartTarget, String>,
     pub observation: Option<crate::scene_editor::project_startup::Observation>,
 }
@@ -1844,11 +1845,14 @@ fn transition_on_press(
     let (behavior, preview) = match staged {
         Ok(value) => value,
         Err(error) => {
-            let reason = format!(
-                "Start Transition failed. {error} Repair the destination and restart Play."
-            );
+            let reason = if error == crate::scene_editor::project_startup::CHANGED {
+                format!("Start Transition to {} could not use the saved scenes or route. Check Project Settings and restart Play.", route.destination_file)
+            } else {
+                format!("Start Transition to {} failed. {error} Repair the destination and restart Play.", route.destination_file)
+            };
             execution.start_transition = Some(StartTransition {
                 action_id: route.action_id,
+                destination_file: route.destination_file,
                 target: Err(error),
                 observation: route.observation,
             });
@@ -2554,6 +2558,7 @@ mod tests {
                 key,
                 Some(StartTransition {
                     action_id: "fire".into(),
+                    destination_file: "Destination.scene.json".into(),
                     target: if failed {
                         Err("Destination is missing.".into())
                     } else {

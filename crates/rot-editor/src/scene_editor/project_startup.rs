@@ -7,7 +7,7 @@ use std::path::{Component, Path, PathBuf};
 
 const SETTINGS: &str = ".rot-project.json";
 const LIMIT: u64 = 4096;
-const CHANGED: &str = "Project Startup changed. Close and reopen this panel.";
+pub(crate) const CHANGED: &str = "Project Startup changed. Close and reopen this panel.";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -628,7 +628,7 @@ impl Observation {
         &self,
         active: &Path,
         scene: &ComponentScene,
-    ) -> Option<(String, Result<TransitionInput, String>)> {
+    ) -> Option<(String, String, Result<TransitionInput, String>)> {
         let (startup, _) = self.target.as_ref().ok()?.as_ref()?;
         let (transition, _) = self.transition.as_ref()?;
         if active.file_name().and_then(|name| name.to_str()) != Some(&startup.file)
@@ -641,7 +641,11 @@ impl Observation {
             self.load_transition(scene)?
                 .ok_or_else(|| "The Start Transition is unavailable.".into())
         });
-        Some((transition.action_id.clone(), destination))
+        Some((
+            transition.action_id.clone(),
+            transition.target_scene.file.clone(),
+            destination,
+        ))
     }
 
     pub(super) fn has_transition(&self) -> bool {

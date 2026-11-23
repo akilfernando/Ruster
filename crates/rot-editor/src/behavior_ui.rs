@@ -2308,7 +2308,7 @@ fn prepare_start_target(
     let dependencies = runtime.draw_dependencies()?;
     for id in &dependencies.meshes {
         if assets.and_then(|store| store.mesh(id)).is_none() {
-            return Err(format!("Import destination mesh {id} and restart Play."));
+            return Err(format!("Import destination mesh {id}."));
         }
     }
     for (id, role) in &dependencies.texture_roles {
@@ -2317,7 +2317,7 @@ fn prepare_start_target(
             .is_some_and(|texture| texture.role == *role)
         {
             return Err(format!(
-                "Import destination texture {id} with the required role and restart Play."
+                "Import destination texture {id} with the required role."
             ));
         }
     }
@@ -2328,7 +2328,7 @@ fn prepare_start_target(
             .unwrap_or_default();
         for id in &sounds.assets {
             if !accepted.contains_key(id) {
-                return Err(format!("Import destination sound {id} and restart Play."));
+                return Err(format!("Import destination sound {id}."));
             }
         }
         accepted
@@ -2339,7 +2339,7 @@ fn prepare_start_target(
         Default::default()
     } else {
         let accepted = assets
-            .ok_or("Import destination animations and restart Play.")?
+            .ok_or("Import destination animations.")?
             .clip_snapshots();
         rot_behavior::decode_clips(&accepted)?
     };
@@ -2627,6 +2627,7 @@ impl RuntimeUi {
                         observation.active_transition(path, session.scene())?;
                     Some(crate::behavior_worker::StartTransition {
                         action_id,
+                        destination_file,
                         target: target.and_then(|target| {
                             prepare_start_target(target.session.scene(), assets)
                         }),
