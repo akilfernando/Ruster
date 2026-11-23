@@ -1970,16 +1970,18 @@ impl ComponentWorkspace {
         #[cfg(target_os = "linux")]
         self.asset_import_frame(&ctx, blocked);
         let asset_dialog = self.asset_browser.file_dialog_open();
-        if blocked
+        let interrupted = blocked
             || asset_dialog
+            || ctx.input(|input| !input.focused || input.viewport().close_requested());
+        if interrupted
             || self.runtime.in_play_mode()
-            || ctx.input(|input| {
-                !input.focused
-                    || input.key_pressed(egui::Key::Escape)
-                    || input.viewport().close_requested()
-            })
+            || ctx.input(|input| input.key_pressed(egui::Key::Escape))
         {
             self.transform_tool.cancel();
+        }
+        if self.runtime.in_play_mode() {
+            self.collider_tool.exit();
+        } else if interrupted {
             self.collider_tool.cancel();
         }
         let transform_active = self.viewport_edit_active();

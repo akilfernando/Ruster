@@ -525,6 +525,167 @@ mod tests {
     use rot_scene::{component_scene::ComponentScene, Scene, Session};
 
     #[test]
+    fn collider_face_drag_owns_the_viewport_and_commits_one_exact_component() {
+        use crate::workspace::Action;
+        use glam::{DMat4, DVec3};
+        use rot_scene::component_scene::{Component, ComponentInstance, ComponentSession};
+        use rot_scene::{ColliderRole, ColliderShape};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("collider.scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let object = &mut scene.objects[0];
+        object.transform.scale = [2.0, 0.8, 1.25];
+        object.transform.rotation[1] = 0.3;
+        for (id, role, center) in [
+            ("edited-box", ColliderRole::Blocker, [0.25, 0.0, 0.0]),
+            ("other-box", ColliderRole::Sensor, [0.0, 0.0, 3.0]),
+        ] {
+            object.components.push(ComponentInstance {
+                id: id.into(),
+                enabled: true,
+                kind: Component::Collider {
+                    role,
+                    offset: center,
+                    shape: ColliderShape::Box {
+                        half_extents: [0.5; 3],
+                    },
+                },
+            });
+        }
+        let object_id = object.id.clone();
+        scene.save_new(&path).unwrap();
+        let saved = std::fs::read(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.select(Some(object_id.clone()));
+        editor.toggle_collider_mode("edited-box".into());
+        let authored = &scene.objects[0].components[1];
+        let local = super::super::component_collider::box_component(authored).unwrap();
+        let world = editor.collider_for_viewport(0, local).unwrap();
+        editor.navigation.camera = Some(rot_render::CameraState {
+            target: world.center.as_vec3().to_array(),
+            yaw: 0.54,
+            pitch: 0.38,
+            distance: 6.0,
+            orthographic: true,
+        });
+        editor.navigation.reset = false;
+        let ctx = egui::Context::default();
+        let authority = Authority::test_approved();
+        let draw = |editor: &mut ComponentWorkspace, events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 800.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    editor.show_workspace(ui, true);
+                },
+            );
+            output.textures_delta.clear();
+        };
+        draw(&mut editor, vec![]);
+        let view = editor.capture.view.unwrap();
+        let camera = DMat4::from_cols_array_2d(&view.matrices.0.map(|col| col.map(f64::from)));
+        let projection = DMat4::from_cols_array_2d(&view.matrices.1.map(|col| col.map(f64::from)));
+        let direction = world.rotation * DVec3::X;
+        let pos = |local_delta: f64| {
+            let ndc = (projection * camera).project_point3(
+                world.center + direction * (world.half_extents.x + local_delta * 2.0),
+            );
+            view.viewport_rect.center()
+                + egui::vec2(
+                    ndc.x as f32 * view.viewport_rect.width() * 0.5,
+                    -ndc.y as f32 * view.viewport_rect.height() * 0.5,
+                )
+        };
+        let button = |point, pressed| egui::Event::PointerButton {
+            pos: point,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let press = |editor: &mut ComponentWorkspace| {
+            draw(editor, vec![egui::Event::PointerMoved(pos(0.0))]);
+            draw(editor, vec![button(pos(0.0), true)]);
+            assert!(
+                editor.collider_tool.active(),
+                "did not acquire the actual +X face"
+            );
+        };
+        let inspect = |editor: &mut ComponentWorkspace| {
+            editor.ai_command(
+                "scene",
+                "scene_components_inspect",
+                &json!({
+                    "object_id":object_id, "component_id":"edited-box",
+                }),
+            )["result"]
+                .clone()
+        };
+        press(&mut editor);
+        draw(&mut editor, vec![button(pos(0.0), false)]);
+        assert_eq!(editor.session.revision(), 0);
+        assert!(editor.selection.contains(&object_id));
+        press(&mut editor);
+        draw(&mut editor, vec![egui::Event::PointerMoved(pos(0.5))]);
+        assert_eq!(inspect(&mut editor)["component"], json!(authored));
+        assert_eq!(inspect(&mut editor)["collider_world"]["status"], "resolved");
+        assert_eq!(
+            editor.ai_capture_command(&authority, "scene", "viewport_inspect", &json!({}))["error"]
+                ["code"],
+            "view_busy"
+        );
+        assert!(!editor.save());
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+        draw(&mut editor, vec![button(pos(0.5), false)]);
+        assert_eq!(editor.session.revision(), 1);
+        assert!(!editor.collider_tool.active());
+        let committed = &editor.session.scene().objects[0];
+        assert_eq!(committed.components[2], scene.objects[0].components[2]);
+        let resized =
+            super::super::component_collider::box_component(&committed.components[1]).unwrap();
+        let ColliderShape::Box { half_extents } = resized.shape else {
+            unreachable!()
+        };
+        assert!((resized.offset[0] - 0.5).abs() < 1e-5);
+        assert!((half_extents[0] - 0.75).abs() < 1e-5);
+        assert_eq!(resized.offset[0] - half_extents[0], -0.25);
+        assert_eq!(committed.transform, scene.objects[0].transform);
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene(), &scene);
+
+        press(&mut editor);
+        draw(&mut editor, vec![egui::Event::PointerMoved(pos(0.4))]);
+        draw(
+            &mut editor,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        draw(&mut editor, vec![button(pos(0.4), false)]);
+        assert!(!editor.collider_tool.active());
+        assert_eq!(editor.session.revision(), 2);
+        assert_eq!(editor.session.scene(), &scene);
+        assert!(editor.selection.contains(&object_id));
+        assert_eq!(editor.collider_tool.mode(), Some("edited-box"));
+
+        press(&mut editor);
+        draw(&mut editor, vec![button(pos(0.0), false)]);
+        assert_eq!(editor.session.revision(), 2);
+    }
+
+    #[test]
     fn viewport_move_handles_preview_descendants_and_cancel_without_mutating_authored_state() {
         use crate::workspace::Action;
         use glam::{DMat4, DQuat, DVec3};

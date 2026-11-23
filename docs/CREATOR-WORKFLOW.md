@@ -341,6 +341,20 @@ object’s local transform. The parent determines how a local movement appears
 in the world. If a step would move a child outside the world limits, Play
 keeps the previous committed frame and reports the error.
 
+## Edit a Box Collider in Scene view
+
+Select an object with an enabled Box Collider and choose **Edit Collider**
+on its Inspector component. Orbit until you can see a face handle, then
+drag it along its local axis. The opposite face stays fixed. Release to
+commit the center and size together in one Undo. Escape cancels. For
+keyboard entry, use **Center** and **Size** in the same Inspector section.
+
+A box can follow rotated and scaled objects. If a parent transform shears
+the box, the viewport cannot draw handles that match the runtime box.
+Adjust the parent rotation or scale, or edit the local numeric fields.
+For collider participation in Play, the scene must also meet the runtime's
+existing behavior requirements.
+
 ## Reuse a hierarchy as a prefab
 
 1. In a v23 project, create an empty root and use **Create Child** to build
