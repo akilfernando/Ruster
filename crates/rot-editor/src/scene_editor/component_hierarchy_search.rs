@@ -182,8 +182,11 @@ impl ComponentWorkspace {
                             let response = ui
                                 .add_enabled(
                                     !blocked,
-                                    egui::Button::selectable(row == search.active, &object.name)
-                                        .truncate(),
+                                    egui::Button::selectable(
+                                        row == search.active,
+                                        format!("{} · {}", object.name, object.id),
+                                    )
+                                    .truncate(),
                                 )
                                 .on_hover_text(format!(
                                     "{}\n{breadcrumb}\n{}",
