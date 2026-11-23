@@ -537,6 +537,13 @@ The optional `{workspace}` points to the project directory. Save the file in
 your code editor. An active Play keeps its starting code. Stop and Play
 again to use the saved changes, or build to package them.
 
+After a project Lua compile or runtime error, expand **Error Details** in
+the Game toolbar's **…** menu. **Open Error Line** opens the verified project
+file at the location reported by Play. **Open File** opens the source when
+the error has no line or your editor arguments omit `{line}`. A renamed
+asset can still open if its saved contents match the run. If the source
+changed, run Play again for a current error location.
+
 For a v23 **Button**, select **Primary Mouse** to bind the primary button
 alongside any keyboard keys. In Play, click the Game view to give it control,
 then press inside the game image. The claim click never fires the action.

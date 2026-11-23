@@ -383,6 +383,13 @@ connected project.
   pending human edits before writes. Each mutation shares Undo. Test input
   in an active run using `behavior_runtime_step` and its admitted action
   frames. Under a v23 transform-only group with positive uniform scale,
+  For a file-backed Lua error, `behavior_runtime_inspect.diagnostic.project_source`
+  identifies the run's `asset_id`, project-relative `source` and `accepted_hash`.
+  `current_source` and `status` (`ready`, `changed` or `unavailable`) describe
+  the current accepted catalog. The diagnostic's `line` belongs to the
+  captured source. An identical rename retains it. Request a new Play
+  after a source change for a current position. Code-editor launch is native.
+
   Object Lua API1/2 reads and returns local TRS. `behavior_runtime_inspect`
   reports committed child transforms in that same space. If a Step would
   exceed the composed world bounds, the previous tick, transforms and

@@ -237,8 +237,17 @@ mod tests {
             });
         }
         scene.validate().unwrap();
-        let baked = resolved(&scene, Some(&store), true).unwrap().unwrap();
+        let (baked, provenance) = resolved_for_play(&scene, Some(&store)).unwrap();
+        let baked = baked.unwrap();
         assert_eq!(baked.sources.len(), 1);
+        let track = &provenance[baked.sources.keys().next().unwrap()];
+        assert_eq!(track.asset_id, "shared");
+        assert_eq!(track.source, "Assets/shared.lua");
+        assert_eq!(
+            track.accepted_hash,
+            rot_behavior::source_hash(store.script("shared").unwrap())
+        );
+        assert!(track.observe(Some(&store)).status == SourceStatus::Ready);
         let session = Session::from_component_runtime(&baked).unwrap();
         assert_eq!(
             session.sound_asset_references().assets,
@@ -366,6 +375,69 @@ mod tests {
         assert!((pose.translation[0] - 0.1).abs() < 0.000001);
         assert!((pose.rotation[1] - std::f32::consts::FRAC_PI_6).abs() < 0.000001);
         assert!(scene.sources.is_empty());
+    }
+
+    #[test]
+    fn separately_baked_movement_modes_share_stable_diagnostic_provenance() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir(root.join("Assets")).unwrap();
+        std::fs::write(root.join("Assets/drive.lua"), "return {}").unwrap();
+        let mut assets = AssetStore::open(root).unwrap();
+        assets.import("drive", "Assets/drive.lua").unwrap();
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        for (index, object) in scene.objects.iter_mut().take(2).enumerate() {
+            object.components.push(ComponentInstance {
+                id: format!("drive-{index}"),
+                enabled: true,
+                kind: Component::Script {
+                    source_kind: Some(ScriptSourceKind::Asset),
+                    movement: if index == 0 {
+                        Default::default()
+                    } else {
+                        rot_scene::component_scene::ScriptMovement::KinematicSphere
+                    },
+                    binding: BehaviorBinding {
+                        target: BindingTarget::Object(object.id.clone()),
+                        source_id: "drive".into(),
+                        enabled: true,
+                        properties: Default::default(),
+                        commands: Default::default(),
+                        state_defaults: Default::default(),
+                    },
+                },
+            });
+        }
+        let (baked, provenance) = resolved_for_play(&scene, Some(&assets)).unwrap();
+        let baked = baked.unwrap();
+        assert_eq!(provenance.len(), 2);
+        for (key, source) in baked.sources {
+            let original = &provenance[&key];
+            assert_eq!(original.asset_id, "drive");
+            assert_eq!(
+                original.accepted_hash,
+                rot_behavior::source_hash(&source.text)
+            );
+        }
+
+        let diagnostic_source = provenance.values().next().unwrap();
+        std::fs::rename(
+            root.join("Assets/drive.lua"),
+            root.join("Assets/drive renamed.lua"),
+        )
+        .unwrap();
+        assets.import("drive", "Assets/drive renamed.lua").unwrap();
+        let renamed = diagnostic_source.observe(Some(&assets));
+        assert_eq!(renamed.current_source, Some("Assets/drive renamed.lua"));
+        assert!(renamed.status == SourceStatus::Ready);
+        std::fs::write(
+            root.join("Assets/drive renamed.lua"),
+            "return { other = true }",
+        )
+        .unwrap();
+        assets.import("drive", "Assets/drive renamed.lua").unwrap();
+        assert!(diagnostic_source.observe(Some(&assets)).status == SourceStatus::Changed);
+        assert!(diagnostic_source.observe(None).status == SourceStatus::Unavailable);
     }
 
     #[test]

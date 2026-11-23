@@ -890,7 +890,7 @@ fn project_script_command(
     if at::FileType::from_raw_mode(stat.st_mode) != at::FileType::RegularFile {
         return Err("Expected a regular Lua file in Assets.".into());
     }
-    if let Some(location) = diagnostic {
+    let verified = if let Some(location) = diagnostic {
         let changed =
             "The Lua source changed since this error. Run Play again for a current location.";
         let info = store.asset_info(id).expect("registered Lua asset");
@@ -912,7 +912,8 @@ fn project_script_command(
             return Err(changed.into());
         }
         let mut bytes = Vec::new();
-        file.take((rot_assets::MAX_LUA_SOURCE_BYTES + 1) as u64)
+        (&file)
+            .take((rot_assets::MAX_LUA_SOURCE_BYTES + 1) as u64)
             .read_to_end(&mut bytes)
             .map_err(|error| error.to_string())?;
         if bytes.len() > rot_assets::MAX_LUA_SOURCE_BYTES
@@ -920,7 +921,10 @@ fn project_script_command(
         {
             return Err(changed.into());
         }
-    }
+        Some(opened)
+    } else {
+        None
+    };
     let absolute = store.root().join(source);
     let command = launch
         .project_command(
@@ -931,7 +935,15 @@ fn project_script_command(
         .map_err(|error| error.to_string())?;
     if !active()
         || !fs::symlink_metadata(&absolute).is_ok_and(|current| {
-            current.is_file() && current.ino() == stat.st_ino && current.dev() == stat.st_dev
+            current.is_file()
+                && current.ino() == stat.st_ino
+                && current.dev() == stat.st_dev
+                && verified.as_ref().is_none_or(|before| {
+                    current.len() == before.len()
+                        && current.modified().ok() == before.modified().ok()
+                        && current.ctime() == before.ctime()
+                        && current.ctime_nsec() == before.ctime_nsec()
+                })
         })
     {
         return Err("The project or script path changed. Try again.".into());
@@ -1449,6 +1461,50 @@ mod tests {
             || true
         )
         .is_err());
+    }
+
+    #[test]
+    fn error_location_opens_as_one_argument_only_when_run_bytes_match() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        let path = Path::new("Assets/Code & Rail.lua");
+        fs::create_dir(root.join("Assets")).unwrap();
+        fs::write(root.join(path), "return {}\n").unwrap();
+        let mut store = AssetStore::open(root).unwrap();
+        store.import("rail", path.to_str().unwrap()).unwrap();
+        let held = fs::File::open(root).unwrap();
+        let launch = LaunchSpec {
+            executable: "example-editor".into(),
+            args: vec!["--new".into(), "{file}:{line}".into()],
+        };
+        let mut location = ScriptLocation {
+            expected_hash: store.asset_info("rail").unwrap().hash.clone().unwrap(),
+            line: Some(8),
+        };
+        let resolve = |location| {
+            project_script_command(&store, &held, "rail", path, &launch, Some(location), || {
+                true
+            })
+        };
+        let absolute = root.join(path);
+        let line = format!("{}:8", absolute.display());
+        assert_eq!(
+            resolve(&location).unwrap().get_args().collect::<Vec<_>>(),
+            ["--new", &line]
+        );
+        location.line = None;
+        assert_eq!(
+            resolve(&location).unwrap().get_args().collect::<Vec<_>>(),
+            ["--new", absolute.to_str().unwrap()]
+        );
+
+        // The watcher is deliberately held at the original Ready generation.
+        fs::write(&absolute, "return []\n").unwrap();
+        assert!(resolve(&location)
+            .unwrap_err()
+            .contains("changed since this error"));
+        fs::remove_file(&absolute).unwrap();
+        assert!(resolve(&location).is_err());
     }
 
     #[test]

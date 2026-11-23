@@ -2903,6 +2903,11 @@ impl RuntimeUi {
                             last_good,
                             ..
                         } => {
+                            // The transition may already have published its new frame
+                            // when a destination Step reports its first error.
+                            if self.transition_source.is_some() {
+                                self.accept_latest_frame();
+                            }
                             self.playing = false;
                             if operation == Operation::Reset {
                                 self.clear_reset();
@@ -2966,6 +2971,14 @@ impl RuntimeUi {
                 _ => break,
             }
         }
+        self.accept_latest_frame();
+        self.flush();
+        self.show_new_debug_stop();
+        if self.pending.is_some() || self.reset_ack.is_some() || self.hud_activation_busy() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        }
+    }
+    fn accept_latest_frame(&mut self) {
         let frame = self.worker.as_ref().and_then(VmWorker::take_latest);
         if let Some(frame) = frame {
             if self
@@ -2975,11 +2988,6 @@ impl RuntimeUi {
             {
                 self.accept_frame(frame);
             }
-        }
-        self.flush();
-        self.show_new_debug_stop();
-        if self.pending.is_some() || self.reset_ack.is_some() || self.hud_activation_busy() {
-            ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
     }
     pub fn stop(&mut self, generation: u64, revision: u64) {
