@@ -3892,10 +3892,11 @@ mod tests {
         );
 
         // Additive camera/instance ABI protects old custom shaders and verifies
-        // that opt-in fragment view data and scalar material data are present.
-        assert_eq!(size_of::<Instance>(), 160);
+        // that opt-in fragment view data and material inputs are present.
+        assert_eq!(size_of::<Instance>(), 172);
         assert_eq!(offset_of!(Instance, base_color), 128);
         assert_eq!(offset_of!(Instance, response), 144);
+        assert_eq!(offset_of!(Instance, emission_color), 160);
         for source in [surface_shader(), include_str!("composite.wgsl")] {
             let module =
                 wgpu::naga::front::wgsl::parse_str(source).expect("surface/display WGSL parses");
