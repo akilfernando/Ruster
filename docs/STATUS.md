@@ -80,6 +80,14 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+**Animator Button triggers** start an imported clip on a committed press.
+The Inspector and approved MCP share the setting and Undo. Two Blender
+drawbridges verified independent starting, holding, restarting, looping and
+final poses, with rollback on a rejected Step. Save and reopen, a native repair
+for a missing action, and relocated Linux playback passed. With 16 placements,
+median release Step p95 was 0.40 µs waiting, 194 µs with one active and 200 µs
+with On Play. Waiting placements reused the draw snapshot.
+
 **Linux archive (.tar.gz)** packages an ordinary Linux Build as one
 file. Folder stays the default and can launch through **Build and Run**.
 System tar extracted the same 11 files and modes as the folder build.
