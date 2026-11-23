@@ -33,7 +33,10 @@ impl ComponentWorkspace {
             self.display_command(token, args)
         } else if matches!(
             op,
-            "material_inspect" | "scene_material_set" | "scene_material_assign"
+            "material_inspect"
+                | "scene_material_set"
+                | "scene_material_assign"
+                | "scene_material_copy"
         ) {
             self.material_command(token, op, args)
         } else {

@@ -35,7 +35,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("material_inspect", "List committed materials, textures, users and display settings. A pending_material summary, when present, reports a human edit's intent, IDs and affected object count."),
     ("scene_material_set", "Set a shared material. assign_object_id assigns a new material. In v23, use component_id for multiple Mesh Renderers."),
     ("scene_material_assign", "Assign or clear a material. In v23, use component_id for multiple Mesh Renderers."),
-    ("scene_material_copy", "Copy a material under a new ID."),
+    ("scene_material_copy", "Copy a material. In v23, provide assign_object_id and component_id for Make Unique on the renderer bound to source_id. Legacy copies without assigning."),
     ("scene_material_remove", "Delete a material that no object uses."),
     ("lighting_inspect", "List the scene's lights, ambient light and shadow settings."),
     ("scene_light_create", "Create a directional or point light. A scene has at most one directional and four point lights."),

@@ -163,6 +163,7 @@ editor_text! {
     MaterialNew => "New Material",
     MaterialNewFor => "New material for {object}",
     MaterialMakeUnique => "Make Unique",
+    MaterialAssignBeforeCopy => "Assign a material before making it unique.",
     MaterialUniqueFor => "Unique copy for {object}",
     MaterialUniqueHint => "Copy the material for the selected object.",
     MaterialManage => "Manage Materials",

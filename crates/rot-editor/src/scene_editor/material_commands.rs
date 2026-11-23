@@ -44,7 +44,7 @@ pub(super) fn id(value: &Value) -> Result<&str, CommandError> {
     Ok(id)
 }
 
-fn optional_name(value: Option<&Value>) -> Result<Option<String>, CommandError> {
+pub(super) fn optional_name(value: Option<&Value>) -> Result<Option<String>, CommandError> {
     match value {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(name)) => {

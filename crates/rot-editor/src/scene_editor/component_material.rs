@@ -65,6 +65,7 @@ impl Usage {
 pub(in crate::scene_editor) enum Intent {
     Create,
     Edit(String),
+    MakeUnique(String),
 }
 
 pub(in crate::scene_editor) struct Request {
@@ -288,6 +289,7 @@ impl ComponentWorkspace {
         id: &str,
         value: OpaqueMaterial,
         assign: Option<(&str, &str)>,
+        inherited_from: Option<&str>,
     ) -> Result<u64, SceneError> {
         self.ensure_material_prefabs();
         if self.material_usage.prefab_materials.contains(id) {
@@ -296,9 +298,26 @@ impl ComponentWorkspace {
             ));
         }
         value.validate()?;
-        self.ensure_material_usage();
+        if assign.is_none() {
+            self.ensure_material_usage();
+        }
         let scene = self.session.scene();
-        let previous = scene.materials.get(id);
+        let previous = if let Some(source) = inherited_from {
+            let (owner, component) = assign.expect("copy has an exact destination");
+            if self.material_usage.prefab_objects.contains(owner) {
+                return Err(SceneError::Invalid(
+                    Text::ComponentPrefabMaterialSource.plain().into(),
+                ));
+            }
+            if scene.materials.contains_key(id) {
+                return Err(SceneError::Invalid(
+                    "Choose a new material ID to create and assign.".into(),
+                ));
+            }
+            Some(bound_copy_source(scene, owner, component, source)?)
+        } else {
+            scene.materials.get(id)
+        };
         let mut introduced = false;
         for ((texture, role), old) in textures(&value)
             .into_iter()
@@ -355,7 +374,9 @@ impl ComponentWorkspace {
             return;
         };
         self.ensure_material_prefabs();
-        self.ensure_material_usage();
+        if matches!(request.intent, Intent::Edit(_)) {
+            self.ensure_material_usage();
+        }
         let scene = self.session.scene();
         let object = &scene.objects[index].id;
         let Ok((_, renderer)) = material_target(scene, object, Some(&request.component)) else {
@@ -375,6 +396,19 @@ impl ComponentWorkspace {
                         ..Default::default()
                     },
                 )
+            }
+            Intent::MakeUnique(source) => {
+                if self.material_usage.prefab_objects.contains(object) {
+                    self.error = Some(Text::ComponentPrefabMaterialSource.plain().into());
+                    return;
+                }
+                let Ok(value) = bound_copy_source(scene, object, &request.component, source) else {
+                    self.error = Some(Text::MaterialTargetChanged.plain().into());
+                    return;
+                };
+                let mut value = value.clone();
+                value.name = Some(copy_display_name(scene, source, value.name.as_deref()));
+                (1, value)
             }
             Intent::Edit(id) => {
                 if !matches!(&renderer.kind, Component::MeshRenderer { material: Some(bound), .. } if bound == id)
@@ -417,7 +451,7 @@ impl ComponentWorkspace {
         }
         let scene = self.session.scene();
         let (id, assign) = match &draft.intent {
-            Intent::Create => {
+            Intent::Create | Intent::MakeUnique(_) => {
                 let id = (1..)
                     .map(|i| format!("material-{i}"))
                     .find(|id| !scene.materials.contains_key(id))
@@ -426,7 +460,17 @@ impl ComponentWorkspace {
             }
             Intent::Edit(id) => (id.clone(), None),
         };
-        self.commit_material(draft.revision, &id, draft.value.clone(), assign)?;
+        let inherited_from = match &draft.intent {
+            Intent::MakeUnique(source) => Some(source.as_str()),
+            _ => None,
+        };
+        self.commit_material(
+            draft.revision,
+            &id,
+            draft.value.clone(),
+            assign,
+            inherited_from,
+        )?;
         Ok(())
     }
 
@@ -457,6 +501,7 @@ impl ComponentWorkspace {
                 ui.heading(match draft.intent {
                     Intent::Create => Text::MaterialNew.plain(),
                     Intent::Edit(_) => Text::MaterialEdit.plain(),
+                    Intent::MakeUnique(_) => Text::MaterialMakeUnique.plain(),
                 });
                 let affected = draft.affected.to_string();
                 ui.label(if draft.affected == 1 {
@@ -644,6 +689,46 @@ fn material_target<'a>(
     Ok((object, mesh))
 }
 
+fn bound_copy_source<'a>(
+    scene: &'a ComponentScene,
+    owner: &str,
+    component: &str,
+    source: &str,
+) -> Result<&'a OpaqueMaterial, SceneError> {
+    let (_, renderer) = material_target(scene, owner, Some(component))?;
+    if !matches!(&renderer.kind, Component::MeshRenderer { material: Some(id), .. } if id == source)
+    {
+        return Err(SceneError::Invalid(
+            "The Mesh Renderer uses a different material. Inspect its current assignment and try again.".into(),
+        ));
+    }
+    scene
+        .materials
+        .get(source)
+        .ok_or_else(|| SceneError::Invalid(format!("Material {source} does not exist.")))
+}
+
+fn copy_display_name(scene: &ComponentScene, source: &str, name: Option<&str>) -> String {
+    let base = name.unwrap_or(source);
+    (1..)
+        .map(|index| {
+            let suffix = if index == 1 {
+                " Copy".into()
+            } else {
+                format!(" Copy {index}")
+            };
+            let end = base.floor_char_boundary(128 - suffix.len());
+            format!("{}{suffix}", base[..end].trim_end())
+        })
+        .find(|candidate| {
+            !scene
+                .materials
+                .values()
+                .any(|material| material.name.as_ref() == Some(candidate))
+        })
+        .expect("bounded scene material names")
+}
+
 #[cfg(unix)]
 impl ComponentWorkspace {
     pub(super) fn material_command(
@@ -652,7 +737,9 @@ impl ComponentWorkspace {
         op: &str,
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, (String, String)> {
-        use crate::scene_editor::material_commands::{exact_keys, id, material, number};
+        use crate::scene_editor::material_commands::{
+            exact_keys, id, material, number, optional_name,
+        };
         use serde_json::json;
 
         let fail = |code: &str, message: &str| (code.to_owned(), message.to_owned());
@@ -675,14 +762,25 @@ impl ComponentWorkspace {
             "expected_session_token",
             "expected_revision",
             "expected_asset_revision",
-            "material_id",
         ];
-        let optional = if op == "scene_material_set" {
-            required.push("material");
-            &["assign_object_id", "component_id"][..]
-        } else {
-            required.push("object_id");
-            &["component_id"][..]
+        let optional = match op {
+            "scene_material_set" => {
+                required.extend(["material_id", "material"]);
+                &["assign_object_id", "component_id"][..]
+            }
+            "scene_material_copy" => {
+                required.extend([
+                    "source_id",
+                    "new_material_id",
+                    "assign_object_id",
+                    "component_id",
+                ]);
+                &["name"][..]
+            }
+            _ => {
+                required.extend(["object_id", "material_id"]);
+                &["component_id"][..]
+            }
         };
         if !exact_keys(map, &required, optional) {
             return Err(invalid());
@@ -718,11 +816,13 @@ impl ComponentWorkspace {
         }
         let component_id = args.get("component_id").map(id).transpose()?;
         let assignment = args
-            .get(if op == "scene_material_set" {
-                "assign_object_id"
-            } else {
-                "object_id"
-            })
+            .get(
+                if matches!(op, "scene_material_set" | "scene_material_copy") {
+                    "assign_object_id"
+                } else {
+                    "object_id"
+                },
+            )
             .map(id)
             .transpose()?;
         if component_id.is_some() && assignment.is_none() {
@@ -738,6 +838,32 @@ impl ComponentWorkspace {
             (code.to_owned(), error.to_string())
         };
         let scene = self.session.scene();
+        if op == "scene_material_copy" {
+            let owner = assignment.ok_or_else(invalid)?;
+            let component = component_id.ok_or_else(invalid)?;
+            let source = id(&args["source_id"])?;
+            let destination = id(&args["new_material_id"])?;
+            let mut unique = bound_copy_source(scene, owner, component, source)
+                .map_err(domain_error)?
+                .clone();
+            unique.name = Some(
+                optional_name(args.get("name"))?
+                    .unwrap_or_else(|| copy_display_name(scene, source, unique.name.as_deref())),
+            );
+            let next = self
+                .commit_material(
+                    revision,
+                    destination,
+                    unique,
+                    Some((owner, component)),
+                    Some(source),
+                )
+                .map_err(domain_error)?;
+            return Ok(json!({
+                "source_id":source, "material_id":destination, "object_id":owner, "component_id":component,
+                "asset_revision":asset_revision.to_string(), "changed":next != revision, "dirty":self.session.is_dirty(),
+            }));
+        }
         let target = assignment
             .map(|object| material_target(scene, object, component_id))
             .transpose()
@@ -752,6 +878,7 @@ impl ComponentWorkspace {
                 material_id.ok_or_else(invalid)?,
                 material(&args["material"])?,
                 assignment.zip(exact.as_deref()),
+                None,
             )
             .map_err(domain_error)?
         } else {
@@ -865,12 +992,19 @@ impl ComponentWorkspace {
             result["pending_display"] = json!(true);
         }
         if let Some(draft) = &self.material_draft {
+            let intent = match draft.intent {
+                Intent::Create => "create",
+                Intent::Edit(_) => "edit_shared",
+                Intent::MakeUnique(_) => "make_unique",
+            };
             let mut pending = json!({
-                "intent":if matches!(draft.intent, Intent::Create) {"create"} else {"edit_shared"},
-                "object_id":draft.object, "component_id":draft.component, "affected_object_count":draft.affected,
+                "intent":intent, "object_id":draft.object, "component_id":draft.component,
+                "affected_object_count":draft.affected,
             });
-            if let Intent::Edit(id) = &draft.intent {
-                pending["material_id"] = json!(id);
+            match &draft.intent {
+                Intent::Edit(id) => pending["material_id"] = json!(id),
+                Intent::MakeUnique(id) => pending["source_material_id"] = json!(id),
+                Intent::Create => {}
             }
             result["pending_material"] = pending;
         }
@@ -1238,7 +1372,7 @@ mod tests {
         };
         assert_eq!(
             editor
-                .commit_material(1, "ready", ready_material, None)
+                .commit_material(1, "ready", ready_material, None, None)
                 .unwrap(),
             2
         );

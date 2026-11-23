@@ -19,7 +19,7 @@ const TOOLS: &[(&str, &str, &[&str])] = &[
     ),
     (
         "scene_material_copy",
-        "Copy one material into a fresh scene-owned ID with an optional display name. Does not assign objects. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry. Source imports/refresh remain outside scene Undo.",
+        "Copy one material into a fresh scene-owned ID. In v23, assign_object_id and component_id are both required and the exact Mesh Renderer must use source_id. Copies and assigns in one Undo. Legacy copies without assigning. Requires current scene and asset guards.",
         &["source_id", "new_material_id"],
     ),
     (
@@ -50,7 +50,7 @@ fn optional(name: &str) -> &'static [&'static str] {
         "material_inspect" => &["offset", "limit"],
         "scene_material_set" => &["assign_object_id", "component_id"],
         "scene_material_assign" => &["component_id"],
-        "scene_material_copy" => &["name"],
+        "scene_material_copy" => &["name", "assign_object_id", "component_id"],
         _ => &[],
     }
 }
@@ -100,7 +100,7 @@ fn shape(tool: &str, field: &str) -> Value {
         }
         "name" if tool == "scene_material_copy" => {
             let mut schema = name_schema();
-            schema["description"] = json!("Omitted or null preserves the source display name. A replacement uses1..128 UTF-8 bytes without surrounding whitespace or control characters. Clear a name with scene_material_set.");
+            schema["description"] = json!("Omitted or null uses a unique Copy name in v23 and preserves the source name in legacy. A replacement uses 1..128 UTF-8 bytes without surrounding whitespace or control characters.");
             schema
         }
         "name" => name_schema(),
@@ -217,7 +217,9 @@ pub fn valid(name: &str, arguments: &Value) -> bool {
     let Some(args) = arguments.as_object() else {
         return false;
     };
-    super::exact_keys(args, &required, optional(name))
+    (name != "scene_material_copy"
+        || args.contains_key("assign_object_id") == args.contains_key("component_id"))
+        && super::exact_keys(args, &required, optional(name))
         && args.iter().all(|(field, value)| match field.as_str() {
             "expected_revision" | "expected_asset_revision" | "offset" => {
                 super::canonical_u64(value)
