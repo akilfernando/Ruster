@@ -78,8 +78,13 @@ Build retains assets referenced by disabled geometry. A relocated Vulkan
 player loaded a 1.44 MB v23 scene with 5,000 objects and an imported mesh. Build failures
 offer keyboard-accessible Error Details.
 v23 point, spot, and directional lights can be created as objects or attached to meshes.
-The Inspector and approved MCP clients edit the same component. The editor warns
-at the render budget and keeps extra lights editable. Static Linux builds preserve
+The Inspector and approved MCP clients edit the same component. Aim at
+Object rotates a Spot Light owner toward a target pivot with one Undo.
+The selected Scene view guide shows the ray and both half-angles while
+the owner is being rotated. Approved MCP reads the authored world origin
+and aim. A scaled, parented Blender scene kept the aimed beam through
+save, reopen and a relocated Vulkan startup build. The editor warns at
+the render budget and keeps extra lights editable. Static Linux builds preserve
 attached lights and a parented sun's direction and shadow settings.
 Approved MCP clients see v23 scene context, share hierarchy Undo and can save
 with inspected guards. Three linked cottages survived reopen and a relocated build.

@@ -484,7 +484,7 @@ zero at **Outer Half-Angle**. The fields are in degrees. Set the inner value fro
 Parent scale affects the light's position. Spot angles stay in degrees and range stays in world units. Spot Lights render in the Scene view and in static Play and
 Linux builds.
 
-Select a Spot Light to see its forward ray, dashed inner ring and solid
+Select an active Spot Light to see its forward ray, dashed inner ring and solid
 outer ring in the Scene view. In its Inspector, choose **Aim at Object…**,
 search by object name or ID, and choose the target. Use the arrow keys to
 choose a result, Enter to aim, or Escape to close the picker. The edit points
