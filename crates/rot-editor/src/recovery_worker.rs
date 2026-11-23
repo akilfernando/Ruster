@@ -18,6 +18,7 @@ pub(super) enum Command {
         id: u64,
         epoch: u64,
         adopt: Option<Journal>,
+        retire: bool,
     },
     Shutdown,
 }
@@ -64,14 +65,26 @@ impl Worker {
                                     }
                                     // A boundary may be requested once this write has
                                     // entered; the serial boundary retires it afterward.
-                                    journal.as_mut().unwrap().checkpoint(snapshot)
+                                    journal.as_mut().unwrap().checkpoint_current(snapshot, || {
+                                        current.load(Ordering::Acquire) == epoch
+                                    })
                                 })
                             };
                             (Reply::Checkpoint { epoch, result }, false)
                         }
-                        Command::Boundary { id, epoch, adopt } => {
-                            let result = journal.take().map(Journal::retire).unwrap_or(Ok(()));
-                            journal = adopt;
+                        Command::Boundary {
+                            id,
+                            epoch,
+                            adopt,
+                            retire,
+                        } => {
+                            let result = if retire {
+                                let previous = journal.take();
+                                journal = adopt;
+                                previous.map(Journal::retire).unwrap_or(Ok(()))
+                            } else {
+                                Ok(())
+                            };
                             (Reply::Boundary { id, epoch, result }, false)
                         }
                         Command::Shutdown => (Reply::Shutdown, true),

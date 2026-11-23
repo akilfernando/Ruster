@@ -373,10 +373,13 @@ impl Drop for StagedScene {
     }
 }
 
+pub(super) const SCENE_FILENAME_TAKEN: &str =
+    "That scene filename already exists. Choose another name.";
+
 fn scene_create_error(failure: impl Into<io::Error>) -> String {
     let failure = failure.into();
     if failure.kind() == io::ErrorKind::AlreadyExists {
-        "That scene filename already exists. Choose another name.".into()
+        SCENE_FILENAME_TAKEN.into()
     } else {
         failure.to_string()
     }

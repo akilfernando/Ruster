@@ -38,7 +38,7 @@ pub(super) mod component_collider;
 #[path = "component_display.rs"]
 mod component_display;
 #[path = "component_new_scene.rs"]
-mod component_new_scene;
+pub(super) mod component_new_scene;
 #[path = "component_player.rs"]
 mod component_player;
 #[path = "component_spot.rs"]
@@ -313,6 +313,7 @@ pub(super) struct ComponentWorkspace {
     build: super::component_build::BuildUi,
     close_pending: bool,
     close_approved: bool,
+    pub(super) recovery_requested: bool,
     #[cfg(unix)]
     capture: capture::ComponentCapture,
     #[cfg(unix)]
@@ -489,6 +490,7 @@ impl ComponentWorkspace {
             build: Default::default(),
             close_pending: false,
             close_approved: false,
+            recovery_requested: false,
             #[cfg(unix)]
             capture: Default::default(),
             #[cfg(unix)]
@@ -1050,6 +1052,39 @@ impl ComponentWorkspace {
         }
     }
 
+    pub(super) fn recovery_status(&self) -> (u64, u64, bool) {
+        (
+            self.session.revision(),
+            self.session.save_generation(),
+            self.session.is_dirty(),
+        )
+    }
+
+    pub(super) fn recovery_capture(&self) -> Option<crate::recovery_worker::Capture> {
+        let project = self.startup_project.as_ref().ok()?.clone();
+        let (path, digest, scene) = self.session.recovery_snapshot()?;
+        let revision = self.session.revision();
+        Some(Box::new(move || {
+            if !project.direct_sibling(&path) {
+                return Err(
+                    "The scene must be in the original project folder for recovery.".into(),
+                );
+            }
+            crate::recovery::Snapshot::capture_component(&scene, path, digest, revision)
+        }))
+    }
+
+    pub(super) fn can_recover_scene(&self) -> bool {
+        !self.session.is_dirty()
+            && !self.authored_edit_pending()
+            && !self.ai_transition_pending()
+            && !self.runtime.in_play_mode()
+    }
+
+    pub(super) fn take_recovery_close(&mut self) -> bool {
+        std::mem::take(&mut self.close_approved)
+    }
+
     fn save(&mut self) -> bool {
         if !self.apply() {
             return false;
@@ -1602,6 +1637,10 @@ impl ComponentWorkspace {
             Action::FindContent => {
                 self.asset_browser.open = true;
                 self.asset_browser.focus_search = true;
+                return;
+            }
+            Action::RecoveryCheckpoints => {
+                self.recovery_requested = true;
                 return;
             }
             Action::Save => {
@@ -2430,15 +2469,18 @@ impl ComponentWorkspace {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
         if !build_open
+            && !publishing
             && !surface_close_pending
-            && !self.close_approved
-            && (self.session.is_dirty() || self.draft_dirty())
             && ctx.input(|input| input.viewport().close_requested())
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.open_path = None;
             self.scene_picker = None;
-            self.close_pending = true;
+            if self.session.is_dirty() || self.draft_dirty() {
+                self.close_pending = true;
+            } else {
+                self.close_approved = true;
+            }
         }
         self.poll_runtime(&ctx);
         self.validate_animation_preview();
@@ -2501,6 +2543,7 @@ impl ComponentWorkspace {
                     self.menu_action(ui, Action::New);
                     self.menu_action(ui, Action::Open);
                     self.menu_action(ui, Action::Save);
+                    self.menu_action(ui, Action::RecoveryCheckpoints);
                     #[cfg(target_os = "linux")]
                     self.menu_action(ui, Action::Export);
                 });
@@ -2702,6 +2745,7 @@ impl ComponentWorkspace {
                         Action::New
                             | Action::Open
                             | Action::Save
+                            | Action::RecoveryCheckpoints
                             | Action::Move
                             | Action::Rotate
                             | Action::Scale
@@ -3322,7 +3366,6 @@ impl ComponentWorkspace {
                         || ui.button(Text::ComponentDiscardClose.plain()).clicked()
                     {
                         self.close_approved = true;
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                     if ui.button(Text::ComponentCancel.plain()).clicked()
                         || ui.input_mut(|input| {

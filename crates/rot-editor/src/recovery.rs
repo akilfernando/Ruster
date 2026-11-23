@@ -10,7 +10,9 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-const MAX_RECORD_BYTES: u64 = 1536 * 1024;
+const MAX_LEGACY_RECORD_BYTES: u64 = 1536 * 1024;
+const MAX_COMPONENT_DOCUMENT_BYTES: usize = 64 * 1024 * 1024;
+const MAX_RECORD_BYTES: u64 = MAX_COMPONENT_DOCUMENT_BYTES as u64 + 16 * 1024;
 const MAX_DRAFT_BYTES: usize = 256 * 1024;
 const MAX_RECORDS: usize = 16;
 const RECORD_FILE: &str = "checkpoint.json";
@@ -18,6 +20,13 @@ const RECORD_FILE: &str = "checkpoint.json";
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
+fn valid_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+}
+
 fn regular(path: &Path) -> Result<(), String> {
     match path.symlink_metadata() {
         Ok(meta) if meta.is_file() => Ok(()),
@@ -41,7 +50,7 @@ fn read_optional(path: &Path) -> Result<Option<Vec<u8>>, String> {
         .read_to_end(&mut bytes)
         .map_err(|e| e.to_string())?;
     if bytes.len() as u64 > MAX_RECORD_BYTES {
-        return Err("Recovery record exceeds1.5MiB; original preserved.".into());
+        return Err("Recovery record exceeds its size limit; original preserved.".into());
     }
     Ok(Some(bytes))
 }
@@ -74,13 +83,33 @@ impl Drop for Lock {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ComponentStamp {
+    scene_id: String,
+    revision: u64,
+    saved_sha256: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Snapshot {
     pub origin: Option<PathBuf>,
     pub asset_origin: Option<PathBuf>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_component"
+    )]
+    component: Option<ComponentStamp>,
     document_sha256: String,
     document: Box<RawValue>,
     drafts: Box<RawValue>,
 }
+fn present_component<'de, D: serde::Deserializer<'de>>(
+    input: D,
+) -> Result<Option<ComponentStamp>, D::Error> {
+    ComponentStamp::deserialize(input).map(Some)
+}
+
 impl Snapshot {
     pub fn capture(
         session: &rot_scene::Session,
@@ -95,6 +124,7 @@ impl Snapshot {
         let snapshot = Self {
             origin: session.path().map(Path::to_path_buf),
             asset_origin,
+            component: None,
             document_sha256,
             document,
             drafts,
@@ -102,15 +132,90 @@ impl Snapshot {
         snapshot.validate_metadata()?;
         Ok(snapshot)
     }
+    pub fn capture_component(
+        scene: &rot_scene::component_scene::ComponentScene,
+        origin: PathBuf,
+        saved_digest: [u8; 32],
+        revision: u64,
+    ) -> Result<Self, String> {
+        struct Bounded(Vec<u8>);
+        impl Write for Bounded {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if self.0.len().saturating_add(bytes.len()) > MAX_COMPONENT_DOCUMENT_BYTES {
+                    return Err(std::io::Error::other(
+                        "Scene exceeds the recovery size limit.",
+                    ));
+                }
+                self.0.write(bytes)
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut bytes = Bounded(Vec::new());
+        scene
+            .write_json(&mut bytes)
+            .map_err(|error| error.to_string())?;
+        let document_sha256 = digest(&bytes.0);
+        let document =
+            RawValue::from_string(String::from_utf8(bytes.0).map_err(|error| error.to_string())?)
+                .map_err(|error| error.to_string())?;
+        let snapshot = Self {
+            origin: Some(origin),
+            asset_origin: None,
+            component: Some(ComponentStamp {
+                scene_id: scene.id.clone(),
+                revision,
+                saved_sha256: format!("{:x}", sha2::digest::Output::<Sha256>::from(saved_digest)),
+            }),
+            document_sha256,
+            document,
+            drafts: RawValue::from_string("{}".into()).expect("empty draft object"),
+        };
+        snapshot.validate_metadata()?;
+        Ok(snapshot)
+    }
+
+    pub fn is_component(&self) -> bool {
+        self.component.is_some()
+    }
+
+    pub fn restore_component(&self) -> Result<rot_scene::component_scene::ComponentScene, String> {
+        let stamp = self
+            .component
+            .as_ref()
+            .ok_or("Expected a committed Scene checkpoint.")?;
+        let scene =
+            rot_scene::component_scene::ComponentScene::read_json(self.document.get().as_bytes())
+                .map_err(|error| error.to_string())?;
+        if scene.id != stamp.scene_id {
+            return Err("Recovery scene identity does not match its checkpoint.".into());
+        }
+        Ok(scene)
+    }
+
     fn validate_metadata(&self) -> Result<(), String> {
         for path in [&self.origin, &self.asset_origin].into_iter().flatten() {
             if !path.is_absolute() || path.as_os_str().as_encoded_bytes().len() > 4096 {
                 return Err("Recovery origins must be bounded absolute paths.".into());
             }
         }
-        if self.document.get().len() as u64 > rot_scene::MAX_FILE_BYTES
-            || self.drafts.get().len() > MAX_DRAFT_BYTES
-        {
+        let limit = if let Some(stamp) = &self.component {
+            if self.origin.is_none()
+                || self.asset_origin.is_some()
+                || self.drafts.get() != "{}"
+                || rot_scene::validate_id(&stamp.scene_id).is_err()
+                || !valid_digest(&stamp.saved_sha256)
+            {
+                return Err(
+                    "Invalid committed Scene checkpoint metadata; original preserved.".into(),
+                );
+            }
+            MAX_COMPONENT_DOCUMENT_BYTES
+        } else {
+            rot_scene::MAX_FILE_BYTES as usize
+        };
+        if self.document.get().len() > limit || self.drafts.get().len() > MAX_DRAFT_BYTES {
             return Err(
                 "Recovery document/draft bounds exceeded; existing checkpoint preserved.".into(),
             );
@@ -142,7 +247,11 @@ impl Record {
     fn decode(bytes: &[u8]) -> Result<Self, String> {
         let record: Self =
             serde_json::from_slice(bytes).map_err(|e| format!("Invalid recovery record: {e}"))?;
-        if record.format != "rot-editor-recovery" || record.version != 1 || record.sequence == 0 {
+        if record.format != "rot-editor-recovery"
+            || record.version != if record.snapshot.is_component() { 2 } else { 1 }
+            || record.sequence == 0
+            || (!record.snapshot.is_component() && bytes.len() as u64 > MAX_LEGACY_RECORD_BYTES)
+        {
             return Err("Unsupported recovery format/version/sequence; original preserved.".into());
         }
         record.snapshot.validate_metadata()?;
@@ -161,6 +270,7 @@ pub struct Candidate {
     pub timestamp: u64,
     pub sequence: Option<u64>,
     pub revision: Option<u64>,
+    pub component: bool,
     pub error: Option<String>,
 }
 impl Store {
@@ -243,6 +353,7 @@ impl Store {
                 timestamp: 0,
                 sequence: None,
                 revision: None,
+                component: false,
                 error: None,
             };
             if !path.symlink_metadata().map_err(|e| e.to_string())?.is_dir() {
@@ -269,12 +380,18 @@ impl Store {
                     candidate.origin = record.snapshot.origin.clone();
                     candidate.timestamp = record.timestamp;
                     candidate.sequence = Some(record.sequence);
-                    match record.snapshot.restore() {
-                        Ok(session) => {
-                            candidate.scene_id = Some(session.scene().id.clone());
-                            candidate.revision = Some(session.scene().revision);
+                    if let Some(stamp) = &record.snapshot.component {
+                        candidate.component = true;
+                        candidate.scene_id = Some(stamp.scene_id.clone());
+                        candidate.revision = Some(stamp.revision);
+                    } else {
+                        match record.snapshot.restore() {
+                            Ok(session) => {
+                                candidate.scene_id = Some(session.scene().id.clone());
+                                candidate.revision = Some(session.scene().revision);
+                            }
+                            Err(error) => candidate.error = Some(error),
                         }
-                        Err(error) => candidate.error = Some(error),
                     }
                 }
                 Err(error) => candidate.error = Some(error),
@@ -291,7 +408,9 @@ impl Store {
         let bytes = read_optional(&path.join(RECORD_FILE))?
             .ok_or("Recovery has no completed checkpoint.")?;
         let record = Record::decode(&bytes)?;
-        record.snapshot.restore()?;
+        if !record.snapshot.is_component() {
+            record.snapshot.restore()?;
+        }
         Ok((
             Journal {
                 store: self.clone(),
@@ -318,7 +437,15 @@ pub struct Journal {
     sequence: u64,
 }
 impl Journal {
+    #[cfg(test)]
     pub fn checkpoint(&mut self, snapshot: Snapshot) -> Result<(), String> {
+        self.checkpoint_current(snapshot, || true)
+    }
+    pub fn checkpoint_current(
+        &mut self,
+        snapshot: Snapshot,
+        current: impl Fn() -> bool,
+    ) -> Result<(), String> {
         snapshot.validate_metadata()?;
         let sequence = self
             .sequence
@@ -326,7 +453,7 @@ impl Journal {
             .ok_or("Recovery sequence exhausted; keep the existing checkpoint.")?;
         let record = Record {
             format: "rot-editor-recovery".into(),
-            version: 1,
+            version: if snapshot.is_component() { 2 } else { 1 },
             sequence,
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -335,8 +462,15 @@ impl Journal {
             snapshot,
         };
         let bytes = serde_json::to_vec(&record).map_err(|e| e.to_string())?;
-        if bytes.len() as u64 > MAX_RECORD_BYTES {
-            return Err("Recovery record exceeds1.5MiB; previous checkpoint preserved.".into());
+        let limit = if record.version == 2 {
+            MAX_RECORD_BYTES
+        } else {
+            MAX_LEGACY_RECORD_BYTES
+        };
+        if bytes.len() as u64 > limit {
+            return Err(
+                "Recovery record exceeds its size limit; previous checkpoint preserved.".into(),
+            );
         }
         let path = self.path.join(RECORD_FILE);
         if read_optional(&path)?.as_deref().map(digest) != self.expected {
@@ -351,9 +485,16 @@ impl Journal {
             .and_then(|()| temporary.flush())
             .and_then(|()| temporary.as_file().sync_all())
             .map_err(|e| e.to_string())?;
+        if !current() {
+            return Ok(());
+        }
         temporary.persist(&path).map_err(|e| e.to_string())?;
         self.expected = Some(digest(&bytes));
         self.sequence = sequence;
+        #[cfg(unix)]
+        File::open(&self.path)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
     pub fn retire(self) -> Result<(), String> {

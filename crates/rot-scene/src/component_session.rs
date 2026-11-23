@@ -17,9 +17,10 @@ use std::sync::Arc;
 /// In-memory editing state for a v23 scene. History is never serialized.
 #[derive(Clone)]
 pub struct ComponentSession {
-    scene: ComponentScene,
+    scene: Arc<ComponentScene>,
     revision: u64,
     state: u64,
+    save_generation: u64,
     saved_state: Option<u64>,
     undo: Vec<HistoryEntry>,
     redo: Vec<HistoryEntry>,
@@ -221,9 +222,10 @@ impl ComponentSession {
     pub fn new(scene: ComponentScene) -> Result<Self, SceneError> {
         scene.validate()?;
         Ok(Self {
-            scene,
+            scene: Arc::new(scene),
             revision: 0,
             state: 0,
+            save_generation: 0,
             saved_state: None,
             undo: Vec::new(),
             redo: Vec::new(),
@@ -285,9 +287,10 @@ impl ComponentSession {
 
     fn from_saved(scene: ComponentScene, saved: SavedDocument) -> Self {
         Self {
-            scene,
+            scene: Arc::new(scene),
             revision: 0,
             state: 0,
+            save_generation: 0,
             saved_state: Some(0),
             undo: Vec::new(),
             redo: Vec::new(),
@@ -416,6 +419,17 @@ impl ComponentSession {
             input::MAX_ACTIONS,
             self.action_ids().collect(),
         )
+    }
+
+    /// Cheap committed-scene pin for a background checkpoint.
+    pub fn recovery_snapshot(&self) -> Option<(PathBuf, [u8; 32], Arc<ComponentScene>)> {
+        let saved = self.saved.as_ref()?;
+        Some((saved.path.clone(), saved.digest, Arc::clone(&self.scene)))
+    }
+
+    /// Advances only after successfully publishing the current state.
+    pub fn save_generation(&self) -> u64 {
+        self.save_generation
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -1559,7 +1573,7 @@ impl ComponentSession {
             .revision
             .checked_add(1)
             .ok_or(SceneError::RevisionOverflow)?;
-        let mut inverse = apply_changes(changes, &mut self.scene);
+        let mut inverse = apply_changes(changes, Arc::make_mut(&mut self.scene));
         let mut released = HashSet::new();
         for change in &inverse {
             if let SceneChange::Prefab {
@@ -1604,7 +1618,7 @@ impl ComponentSession {
                 .filter(|id| self.scene.materials.contains_key(id))
                 .map(|id| SceneChange::Material { id, value: None })
                 .collect::<Vec<_>>();
-            inverse.splice(..0, apply_changes(cleanup, &mut self.scene));
+            inverse.splice(..0, apply_changes(cleanup, Arc::make_mut(&mut self.scene)));
         }
         if self.scene.gameplay_camera.as_deref().is_some_and(|id| {
             !inverse
@@ -1622,7 +1636,7 @@ impl ComponentSession {
         }) {
             inverse.insert(
                 0,
-                SceneChange::GameplayCamera(self.scene.gameplay_camera.take()),
+                SceneChange::GameplayCamera(Arc::make_mut(&mut self.scene).gameplay_camera.take()),
             );
         }
         if let Err(error) = self
@@ -1631,7 +1645,7 @@ impl ComponentSession {
             .and_then(|_| file.as_ref().map_or(Ok(()), publish))
         {
             for change in inverse {
-                change.apply(&mut self.scene);
+                change.apply(Arc::make_mut(&mut self.scene));
             }
             return Err(error);
         }
@@ -1693,7 +1707,7 @@ impl ComponentSession {
             file.path_hint = path;
         }
         to.push(HistoryEntry {
-            changes: apply_changes(entry.changes, &mut self.scene),
+            changes: apply_changes(entry.changes, Arc::make_mut(&mut self.scene)),
             state: std::mem::replace(&mut self.state, entry.state),
             prefab_file: entry.prefab_file.map(PrefabFileEdit::inverse),
         });
@@ -1777,6 +1791,7 @@ impl ComponentSession {
             bytes,
         });
         self.saved_state = Some(self.state);
+        self.save_generation = self.save_generation.wrapping_add(1);
         SavedComponentScene {
             sha256: format!("{:x}", sha2::digest::Output::<Sha256>::from(digest)),
             bytes,
@@ -1828,7 +1843,7 @@ pub struct ComponentSave {
     baseline: [u8; 32],
     revision: u64,
     state: u64,
-    scene: ComponentScene,
+    scene: Arc<ComponentScene>,
 }
 
 #[cfg(unix)]

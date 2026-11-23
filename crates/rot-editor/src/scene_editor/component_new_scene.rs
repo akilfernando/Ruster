@@ -13,7 +13,7 @@ pub(super) struct NewScene {
     error: Option<String>,
 }
 
-fn filename(name: &str) -> Result<String, &'static str> {
+pub(in crate::scene_editor) fn filename(name: &str) -> Result<String, &'static str> {
     let name = name.trim();
     let name = name.strip_suffix(".scene.json").unwrap_or(name);
     let stem = name
@@ -46,7 +46,7 @@ fn filename(name: &str) -> Result<String, &'static str> {
     Ok(format!("{name}.scene.json"))
 }
 
-fn new_scene_id() -> String {
+pub(in crate::scene_editor) fn new_scene_id() -> String {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

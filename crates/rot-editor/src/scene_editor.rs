@@ -444,6 +444,7 @@ enum RecoveryTransition {
         target: ReplacementTarget,
         clipboard: bool,
         shader: bool,
+        parked: bool,
     },
     Close {
         request: u64,
@@ -545,6 +546,8 @@ pub struct SceneEditor {
     recovery: crate::recovery_ui::RecoveryUi,
     // Read-only source lease. Only the separate working journal is retired.
     recovery_source: Option<crate::recovery::Journal>,
+    recovered_component: Option<crate::recovery::Journal>,
+    component_recovery_close: Option<u64>,
     recovered_input: Option<crate::input_ui::Draft>,
     recovered_input_open: bool,
     recovered_input_focused: bool,
@@ -797,6 +800,8 @@ impl SceneEditor {
             workspace,
             recovery: crate::recovery_ui::RecoveryUi::disabled(),
             recovery_source: None,
+            recovered_component: None,
+            component_recovery_close: None,
             recovered_input: None,
             recovered_input_open: false,
             recovered_input_focused: false,
@@ -1720,9 +1725,104 @@ impl SceneEditor {
         self.begin_replacement(next, Some(working), false, true);
         Ok(())
     }
+    fn recover_component_checkpoint(&mut self, id: &str) -> Result<(), String> {
+        if self.recovery.boundary_pending()
+            || self.recovery_transition.is_some()
+            || self.component.as_ref().map_or_else(
+                || self.needs_recovery() || self.pending_recovery_drafts() || self.close_pending,
+                |component| !component.can_recover_scene(),
+            )
+        {
+            return Err("Finish or save the current scene before recovering another.".into());
+        }
+        let (journal, snapshot) = self
+            .recovery
+            .store
+            .as_ref()
+            .ok_or("Recovery store unavailable.")?
+            .claim(id)?;
+        let mut scene = snapshot.restore_component()?;
+        let origin = snapshot
+            .origin
+            .as_ref()
+            .ok_or("Recovery source filename is unavailable.")?;
+        let root = origin
+            .parent()
+            .ok_or("Recovery source project is unavailable.")?;
+        let project = project_startup::ProjectDirectory::capture(root)?;
+        let stem = origin
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| {
+                name.strip_suffix(".scene.json")
+                    .or_else(|| name.strip_suffix(".json"))
+                    .unwrap_or(name)
+            })
+            .unwrap_or("Scene");
+        use component_workspace::component_new_scene::{filename, new_scene_id};
+        scene.id = new_scene_id();
+        for attempt in 1..=32 {
+            let suffix = if attempt == 1 {
+                " Recovered".into()
+            } else {
+                format!(" Recovered {attempt}")
+            };
+            let filename = filename(&format!("{stem}{suffix}"))
+                .or_else(|_| filename(&format!("Scene{suffix}")))?;
+            let result = project
+                .prepare_scene(&filename, &scene)
+                .and_then(|staged| staged.publish());
+            match result {
+                Ok((path, session)) => {
+                    if let Some(component) = &mut self.component {
+                        self.workspace = component.take_workspace();
+                    }
+                    let mut next =
+                        self.prepare_document(OpenedScene::Components(path, Box::new(session)))?;
+                    next.recovered_component = Some(journal);
+                    self.project_picker = None;
+                    self.begin_replacement(next, None, false, false);
+                    return Ok(());
+                }
+                Err(error) if error == project_startup::SCENE_FILENAME_TAKEN => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        Err("Recovery filenames are already in use. Rename a recovered scene and try again.".into())
+    }
+
+    fn component_close_maintenance(&mut self, ctx: &egui::Context) {
+        if let Some(request) = self.component_recovery_close {
+            if let Some((id, result)) = self.recovery.take_ack() {
+                debug_assert_eq!(id, request);
+                self.component_recovery_close = None;
+                match result {
+                    Ok(()) => {
+                        self.close_ready_to_exit = true;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    Err(error) => {
+                        if let Some(component) = &mut self.component {
+                            component.report_scene_open_error(error);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn recovery_frame(&mut self, ctx: &egui::Context) {
         if let Some(intent) = self.recovery.ui(ctx) {
             let result = match intent {
+                crate::recovery_ui::Intent::Restore(id)
+                    if self
+                        .recovery
+                        .candidates
+                        .iter()
+                        .any(|candidate| candidate.id == id && candidate.component) =>
+                {
+                    self.recover_component_checkpoint(&id)
+                }
                 crate::recovery_ui::Intent::Restore(id) => self.restore_checkpoint(&id),
                 crate::recovery_ui::Intent::Discard(id) => self
                     .recovery
@@ -1753,6 +1853,24 @@ impl SceneEditor {
     }
     fn recovery_maintenance(&mut self, ctx: &egui::Context) {
         let now = Instant::now();
+        if self.recovery_transition.is_some() || self.component_recovery_close.is_some() {
+            return;
+        }
+        if let Some(component) = &self.component {
+            let (revision, saved, dirty) = component.recovery_status();
+            self.recovery.observe_component(revision, saved, dirty, now);
+            if dirty && self.recovery.due(now) {
+                if let Some(capture) = component.recovery_capture() {
+                    if let Err(error) = self.recovery.dispatch(capture) {
+                        self.recovery.set_warning(error);
+                    }
+                } else {
+                    self.recovery.cancel_schedule();
+                }
+            }
+            self.recovery.schedule(ctx, now);
+            return;
+        }
         let pending = self.observe_recovery(now);
         if self.recovery.due(now)
             && pending
@@ -1812,8 +1930,10 @@ impl SceneEditor {
         self.recovery.open = false;
         self.dialog = None;
         self.new_scene_pending = false;
+        let parked = self.component.is_some() && matches!(target, ReplacementTarget::Picked(..));
         let request = match adopt {
             Some(journal) => self.recovery.adopt(journal),
+            None if parked => self.recovery.fence(),
             None => self.recovery.retire(),
         };
         self.recovery_transition = Some(RecoveryTransition::Replace {
@@ -1821,6 +1941,7 @@ impl SceneEditor {
             target,
             clipboard,
             shader,
+            parked,
         });
         self.process_recovery_ack();
     }
@@ -1847,6 +1968,7 @@ impl SceneEditor {
                 target,
                 clipboard,
                 shader,
+                parked,
             } if request == id => {
                 let mut next = match target {
                     ReplacementTarget::Prepared(next) => next,
@@ -1924,6 +2046,18 @@ impl SceneEditor {
                     component.set_metrics(self.navigation.metrics.clone());
                 }
                 *self = *next;
+                self.recovery.reset_document();
+                if parked {
+                    self.recovery.retire();
+                }
+                if let Some(journal) = self.recovered_component.take() {
+                    if let Err(error) = journal.retire() {
+                        self.recovery.set_warning(format!(
+                            "The recovered scene is saved. Couldn't remove its checkpoint: {error}"
+                        ));
+                    }
+                    self.recovery.refresh();
+                }
                 if self.recovery_source.is_some() && self.observe_recovery(Instant::now()) {
                     self.recovery.checkpoint_now();
                 }
@@ -5902,6 +6036,14 @@ impl Host {
     }
 
     fn editor_logic(&mut self, ctx: &egui::Context) {
+        if self.editor.close_ready_to_exit && self.editor.component.is_some() {
+            return;
+        }
+        if self.editor.component_recovery_close.is_some() {
+            self.editor.recovery.poll(ctx);
+            self.editor.component_close_maintenance(ctx);
+            return;
+        }
         // The current component remains installed until the old connection and
         // recovery boundary drain. Its normal fast path skips this work.
         if self.component_replacement_pending() {
@@ -5914,9 +6056,11 @@ impl Host {
             component.poll_build();
             #[cfg(unix)]
             component.retire_ai_capture();
-            if !self.input.human_pending {
+            if !self.input.human_pending && !self.editor.recovery.open {
                 self.service_bridge(ctx);
             }
+            self.editor.recovery.poll(ctx);
+            self.editor.recovery_maintenance(ctx);
             return;
         }
         if self
@@ -5956,8 +6100,11 @@ impl eframe::App for Host {
         self.editor_logic(ctx);
     }
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        if self.component_replacement_pending() {
+        if self.component_replacement_pending() || self.editor.component_recovery_close.is_some() {
             self.editor.close_finalization_ui(ui.ctx());
+            return;
+        }
+        if self.editor.close_ready_to_exit && self.editor.component.is_some() {
             return;
         }
         #[cfg(unix)]
@@ -5968,6 +6115,10 @@ impl eframe::App for Host {
         }
         if let Some(component) = &mut self.editor.component {
             let document = component.show(ui);
+            let close = component.take_recovery_close();
+            if std::mem::take(&mut component.recovery_requested) {
+                self.editor.recovery.show_picker();
+            }
             #[cfg(unix)]
             let revoke = std::mem::take(&mut component.revoke_ai_connection);
             #[cfg(unix)]
@@ -5982,13 +6133,21 @@ impl eframe::App for Host {
             if revoke {
                 self.disconnect_adapter();
             }
-            if let Some(document) = document {
+            if close {
+                self.editor.recovery.open = false;
+                self.editor.component_recovery_close = Some(self.editor.recovery.retire());
+                self.editor.component_close_maintenance(ui.ctx());
+            } else if let Some(document) = document {
                 self.input = Default::default();
                 self.editor.open_document(document);
                 ui.ctx().request_repaint();
             } else {
+                self.editor.recovery_frame(ui.ctx());
                 self.input.human_pending = false;
-                self.service_bridge(ui.ctx());
+                if !self.editor.recovery.open && !self.component_replacement_pending() {
+                    self.service_bridge(ui.ctx());
+                    self.editor.recovery_maintenance(ui.ctx());
+                }
             }
             return;
         }
@@ -6013,6 +6172,9 @@ impl eframe::App for Host {
                     }
                 } else if !back {
                     self.editor.project_picker = Some(picker);
+                }
+                if self.editor.recovery.open && self.editor.project_picker.is_some() {
+                    self.editor.recovery_frame(ui.ctx());
                 }
                 self.input.human_pending = false;
                 if self.editor.project_picker.is_none() {

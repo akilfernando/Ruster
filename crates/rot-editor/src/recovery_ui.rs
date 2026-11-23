@@ -24,6 +24,7 @@ pub(super) struct RecoveryUi {
     submitted: Option<(Option<Stamp>, u64)>,
     deadline: crate::recovery::Deadline,
     observed: Option<Stamp>,
+    component_save_generation: Option<u64>,
     wanted: bool,
     busy: bool,
     focused: bool,
@@ -52,6 +53,7 @@ impl RecoveryUi {
             submitted: None,
             deadline: crate::recovery::Deadline::default(),
             observed: None,
+            component_save_generation: None,
             wanted: false,
             busy: false,
             focused: false,
@@ -159,7 +161,34 @@ impl RecoveryUi {
         pending: bool,
         now: Instant,
     ) {
-        let next = (revision, draft_generation, name_generation, pending);
+        self.observe_stamp(
+            (revision, draft_generation, name_generation, pending),
+            now,
+            true,
+        );
+    }
+    pub fn observe_component(
+        &mut self,
+        revision: u64,
+        save_generation: u64,
+        dirty: bool,
+        now: Instant,
+    ) {
+        if self
+            .component_save_generation
+            .replace(save_generation)
+            .is_some_and(|old| old != save_generation)
+        {
+            self.retire();
+        }
+        self.observe_stamp((revision, 0, 0, dirty), now, false);
+    }
+    pub fn reset_document(&mut self) {
+        self.component_save_generation = None;
+        self.observed = None;
+    }
+    fn observe_stamp(&mut self, next: Stamp, now: Instant, retire_clean: bool) {
+        let (_, _, _, pending) = next;
         if self.observed != Some(next) {
             self.observed = Some(next);
             if pending && self.store.is_some() && !self.shutdown {
@@ -168,7 +197,7 @@ impl RecoveryUi {
             } else {
                 self.wanted = false;
                 self.deadline.clear();
-                if self.boundary.is_none() && (self.busy || self.worker.is_some()) {
+                if retire_clean && self.boundary.is_none() && (self.busy || self.worker.is_some()) {
                     self.retire();
                 }
                 self.observed = Some(next);
@@ -234,12 +263,15 @@ impl RecoveryUi {
         }
     }
     pub fn retire(&mut self) -> u64 {
-        self.boundary(None)
+        self.boundary(None, true)
     }
     pub fn adopt(&mut self, journal: Journal) -> u64 {
-        self.boundary(Some(journal))
+        self.boundary(Some(journal), true)
     }
-    fn boundary(&mut self, adopt: Option<Journal>) -> u64 {
+    pub fn fence(&mut self) -> u64 {
+        self.boundary(None, false)
+    }
+    fn boundary(&mut self, adopt: Option<Journal>, retire: bool) -> u64 {
         if let Some(id) = self.boundary {
             assert!(adopt.is_none(), "adoption requires a free boundary");
             return id;
@@ -267,6 +299,7 @@ impl RecoveryUi {
                 id,
                 epoch: self.epoch,
                 adopt,
+                retire,
             });
             self.flush_control();
         } else {
@@ -454,6 +487,10 @@ impl RecoveryUi {
                             None => "Recorded time is later than the system clock".into(),
                         };
                         ui.weak(saved);
+                        if candidate.component {
+                            ui.label(Text::RecoveryComponentScope.plain())
+                                .on_hover_text(Text::RecoveryComponentScopeHint.plain());
+                        }
                         egui::CollapsingHeader::new(Text::RecoveryDetails.plain())
                             .id_salt(&candidate.id)
                             .show(ui, |ui| {
@@ -481,9 +518,17 @@ impl RecoveryUi {
                             let restore = ui
                                 .add_enabled(
                                     candidate.error.is_none(),
-                                    egui::Button::new(Text::RecoveryRestore.plain()),
+                                    egui::Button::new(if candidate.component {
+                                        Text::RecoveryAsNewScene.plain()
+                                    } else {
+                                        Text::RecoveryRestore.plain()
+                                    }),
                                 )
-                                .on_hover_text(Text::RecoveryCopyHint.plain());
+                                .on_hover_text(if candidate.component {
+                                    Text::RecoveryComponentCopyHint.plain()
+                                } else {
+                                    Text::RecoveryCopyHint.plain()
+                                });
                             if !self.focused && candidate.error.is_none() {
                                 restore.request_focus();
                                 self.focused = true;
