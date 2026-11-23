@@ -1828,6 +1828,9 @@ mod input_tests {
             r#"
             return {update = function(object, properties, dt, host)
                 object.translation[1] = object.translation[1] + host.axis("move")
+                if properties.is_trolley then
+                    object.rotation[2] = object.rotation[2] + 0.1 * host.axis("move")
+                end
                 if properties.is_trolley and host.button("fire").pressed then
                     object.translation[1] = 9000
                 end
@@ -1945,6 +1948,8 @@ mod input_tests {
         assert!(light_matrix
             .z_axis
             .abs_diff_eq(owner_matrix.z_axis / 1.25, 1e-6));
+        let prior_direction = initial_draw.hierarchy().unwrap().matrices()[1].z_axis / 1.25;
+        assert!(!light_matrix.z_axis.abs_diff_eq(prior_direction, 0.01));
         assert!(runtime.scene().lighting.light("b").is_none());
         let poses = runtime.scene().resolve_poses().unwrap();
         assert_eq!(
