@@ -2623,7 +2623,7 @@ impl RuntimeUi {
         let route = match source {
             RuntimeSource::Components(session, Some((project, path))) => {
                 project.observe().ok().and_then(|observation| {
-                    let (action_id, target) =
+                    let (action_id, destination_file, target) =
                         observation.active_transition(path, session.scene())?;
                     Some(crate::behavior_worker::StartTransition {
                         action_id,
