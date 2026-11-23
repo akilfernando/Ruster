@@ -128,7 +128,9 @@ impl Content {
     pub fn has_player_camera(&self) -> bool {
         match &self.scene {
             ContentScene::Behavior(scene) => {
-                self.transform_camera.is_some() || scene.scene().player_view.is_some()
+                self.transform_camera.is_some()
+                    || scene.transform_camera().is_some()
+                    || scene.scene().player_view.is_some()
             }
             ContentScene::StaticHierarchy(preview) => preview.has_player_camera(),
         }
@@ -136,7 +138,7 @@ impl Content {
 
     pub fn transform_camera(&self) -> Option<rot_scene::component_scene::TransformCameraPose> {
         match &self.scene {
-            ContentScene::Behavior(_) => self.transform_camera,
+            ContentScene::Behavior(scene) => self.transform_camera.or(scene.transform_camera()),
             ContentScene::StaticHierarchy(preview) => preview.transform_camera(),
         }
     }

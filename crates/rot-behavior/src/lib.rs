@@ -262,12 +262,11 @@ pub struct Runtime {
     /// Clip bindings resolved at Reset; fixed for this Runtime.
     animations: Arc<Vec<(AnimationBinding, Arc<Clip>)>>,
     transform_camera_binding: Option<Arc<TransformCameraBinding>>,
-    transform_camera: Option<TransformCameraPose>,
     state: Arc<RuntimeState>,
 }
 impl Runtime {
     pub fn transform_camera(&self) -> Option<TransformCameraPose> {
-        self.transform_camera
+        self.draw_frame.transform_camera()
     }
     pub fn authoring_snapshot(&self) -> &Arc<Authoring> {
         &self.authoring
@@ -712,14 +711,17 @@ impl Engine {
         transform_camera_binding: Option<Arc<TransformCameraBinding>>,
         projection: RuntimeProjection,
     ) -> Result<Runtime, Diagnostic> {
-        scene
-            .validate()
-            .and_then(|()| projection.validate_authoring(scene, authoring))
-            .map_err(|e| {
+        let mut poses = scene
+            .validate_with_poses()
+            .and_then(|poses| {
+                projection.validate_authoring(scene, authoring)?;
+                Ok(poses)
+            })
+            .map_err(|error| {
                 Diagnostic::plain(
                     DiagnosticCode::InvalidAuthoring,
                     Phase::Setup,
-                    &e.to_string(),
+                    &error.to_string(),
                 )
             })?;
         let input = ValidatedActionFrame::neutral(&authoring.actions).map_err(|e| {
@@ -734,7 +736,7 @@ impl Engine {
         } else {
             let mut staged = scene.clone();
             Self::apply_animations(&animations, 0.0, &mut staged, Phase::Setup)?;
-            validate_group_commit(&staged)?;
+            poses = resolve_group_commit(&staged)?.0;
             posed = staged;
             &posed
         };
@@ -859,14 +861,23 @@ impl Engine {
         let hierarchy_draw = if scene.hierarchy.is_empty() {
             None
         } else {
-            let (poses, view) = resolve_group_commit(scene)?;
+            let view = scene
+                .resolve_player_view_with_poses(&poses)
+                .map_err(|error| {
+                    Diagnostic::plain(
+                        DiagnosticCode::InvalidOutput,
+                        Phase::Setup,
+                        &error.to_string(),
+                    )
+                })?;
             Some(Arc::new(rot_scene::HierarchyDraw::resolved(
                 scene, &poses, view,
             )))
         };
         self.check_cancelled()?;
         Ok(Runtime {
-            draw_frame: rot_scene::SceneDrawFrame::new(scene.clone(), hierarchy_draw),
+            draw_frame: rot_scene::SceneDrawFrame::from_snapshot(snapshot, hierarchy_draw)
+                .with_transform_camera(transform_camera),
             authoring: Arc::new(authoring.clone()),
             tick: 0,
             commit_revision: 0,
@@ -888,7 +899,6 @@ impl Engine {
             kinematic_owner,
             animations,
             transform_camera_binding,
-            transform_camera,
             state,
         })
     }
@@ -1097,7 +1107,7 @@ impl Engine {
                 staged,
                 Phase::Commit,
             )?,
-            None => runtime.transform_camera,
+            None => runtime.transform_camera(),
         };
         self.check_cancelled()?;
         let observations =
@@ -1108,9 +1118,9 @@ impl Engine {
             commit_revision,
             cues,
         });
-        runtime.transform_camera = transform_camera;
         if let (Some(scene), Some(hierarchy)) = (staged, next_draw) {
-            runtime.draw_frame = rot_scene::SceneDrawFrame::new(scene, hierarchy);
+            runtime.draw_frame = rot_scene::SceneDrawFrame::new(scene, hierarchy)
+                .with_transform_camera(transform_camera);
         }
         runtime.tick = next;
         runtime.commit_revision = commit_revision;
@@ -1843,6 +1853,16 @@ mod input_tests {
                 session.runtime_projection(),
             )
             .unwrap();
+        let initial_draw = runtime.draw_frame().clone();
+        engine.step(&mut runtime).unwrap();
+        assert!(Arc::ptr_eq(
+            &initial_draw.snapshot(),
+            &runtime.draw_frame().snapshot()
+        ));
+        assert!(Arc::ptr_eq(
+            initial_draw.hierarchy().unwrap(),
+            runtime.draw_frame().hierarchy().unwrap()
+        ));
         let frame = |pressed| {
             ActionFrame(BTreeMap::from([
                 ("move".into(), ActionValue::Axis1d { value: 1 }),
@@ -1857,6 +1877,21 @@ mod input_tests {
             ]))
         };
         engine.step_with_input(&mut runtime, &frame(false)).unwrap();
+        let committed_draw = runtime.draw_frame().clone();
+        let poses = runtime.scene().resolve_poses().unwrap();
+        assert_eq!(
+            committed_draw.hierarchy().unwrap().matrices(),
+            runtime
+                .scene()
+                .objects
+                .iter()
+                .map(|object| rot_scene::draw_matrix(&poses.transforms[&object.id]))
+                .collect::<Vec<_>>()
+        );
+        assert!(!Arc::ptr_eq(
+            &initial_draw.snapshot(),
+            &committed_draw.snapshot()
+        ));
         let start = runtime.scene().clone();
         let tick = runtime.tick();
         let receipt = runtime.last_step_commit_revision();
@@ -1874,6 +1909,14 @@ mod input_tests {
         assert_eq!(runtime.tick(), tick);
         assert_eq!(runtime.last_step_commit_revision(), receipt);
         assert_eq!(runtime.transform_camera(), Some(camera));
+        assert!(Arc::ptr_eq(
+            committed_draw.hierarchy().unwrap(),
+            runtime.draw_frame().hierarchy().unwrap()
+        ));
+        assert!(Arc::ptr_eq(
+            &committed_draw.snapshot(),
+            &runtime.draw_frame().snapshot()
+        ));
         engine.step_with_input(&mut runtime, &frame(false)).unwrap();
         assert_eq!(runtime.tick(), tick + 1);
         assert_eq!(
@@ -1904,6 +1947,10 @@ mod input_tests {
             )
             .unwrap();
         engine.step_with_input(&mut runtime, &frame(false)).unwrap();
+        assert_eq!(
+            runtime.draw_frame().hierarchy().unwrap().player_view(),
+            runtime.scene().resolve_player_view().unwrap()
+        );
         let committed = runtime.scene().clone();
         let error = engine
             .step_with_input(&mut runtime, &frame(false))

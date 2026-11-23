@@ -1,4 +1,5 @@
 //! Immutable runtime scene data shared by simulation and viewport consumers.
+use crate::component_scene::TransformCameraPose;
 use crate::{Lighting, ResolvedPlayerView, ResolvedPoses, Scene, Transform};
 use glam::{EulerRot, Mat4, Quat, Vec3};
 use std::sync::Arc;
@@ -7,13 +8,19 @@ use std::sync::Arc;
 pub struct SceneDrawFrame {
     scene: Arc<Scene>,
     hierarchy: Option<Arc<HierarchyDraw>>,
+    transform_camera: Option<TransformCameraPose>,
 }
 
 impl SceneDrawFrame {
     pub fn new(scene: Scene, hierarchy: Option<Arc<HierarchyDraw>>) -> Self {
+        Self::from_snapshot(Arc::new(scene), hierarchy)
+    }
+
+    pub fn from_snapshot(scene: Arc<Scene>, hierarchy: Option<Arc<HierarchyDraw>>) -> Self {
         Self {
-            scene: Arc::new(scene),
+            scene,
             hierarchy,
+            transform_camera: None,
         }
     }
 
@@ -29,9 +36,19 @@ impl SceneDrawFrame {
         self.hierarchy.as_ref()
     }
 
+    pub fn with_transform_camera(mut self, camera: Option<TransformCameraPose>) -> Self {
+        self.transform_camera = camera;
+        self
+    }
+
+    pub fn transform_camera(&self) -> Option<TransformCameraPose> {
+        self.transform_camera
+    }
+
     /// Unrestricted mutation invalidates prepared matrices before any write.
     pub fn scene_mut(&mut self) -> &mut Scene {
         self.hierarchy = None;
+        self.transform_camera = None;
         Arc::make_mut(&mut self.scene)
     }
 }

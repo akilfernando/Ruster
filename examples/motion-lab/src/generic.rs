@@ -450,8 +450,6 @@ impl Application for GenericMotionLab {
         // Engine validated transforms; meshes remain the same immutable Content resources.
         self.content.set_behavior_draw_frame(candidate.draw_frame());
         self.content
-            .set_transform_camera(candidate.transform_camera());
-        self.content
             .set_hidden_mesh_renderers(self.session.hidden_mesh_renderers().cloned());
         self.hud_cache.clear();
         self.runtime = Some(candidate);
@@ -586,8 +584,6 @@ impl Application for GenericMotionLab {
         self.last_input = Some((step.tick, input, origin));
         let runtime = self.runtime.as_ref().expect("active runtime");
         self.content.set_behavior_draw_frame(runtime.draw_frame());
-        self.content
-            .set_transform_camera(runtime.transform_camera());
         self.diagnostic = None;
         Ok(())
     }

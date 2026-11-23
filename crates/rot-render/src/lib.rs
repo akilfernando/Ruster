@@ -1749,7 +1749,7 @@ pub fn render_viewport_draw_frame(
             prepared,
             matrices: prepared.map(rot_scene::HierarchyDraw::matrices),
             hidden_mesh_renderers: hidden.as_deref(),
-            transform_camera: surface.transform_camera,
+            transform_camera: surface.transform_camera.or(frame.transform_camera()),
             ..frame.scene().into()
         },
         selected,

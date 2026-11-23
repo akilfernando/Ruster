@@ -1,5 +1,67 @@
 use super::*;
 
+#[test]
+fn draw_frame_validation_uses_snapshot_identity_and_invalidates_on_mutable_access() {
+    let mut scene = Scene::demo();
+    let child = scene.objects[0].id.clone();
+    scene.hierarchy.groups.insert(
+        "group".into(),
+        rot_scene::Group {
+            name: None,
+            transform: Default::default(),
+        },
+    );
+    scene
+        .hierarchy
+        .parents
+        .insert(child.clone(), "group".into());
+
+    let prepared = |local: Scene| {
+        let poses = local.validate_with_poses().unwrap();
+        let world = rot_scene::HierarchyDraw::resolved(&local, &poses, None);
+        rot_scene::SceneDrawFrame::new(local, Some(Arc::new(world)))
+    };
+    let old = prepared(scene.clone());
+    let mut content = Content::new(scene.clone(), MeshMap::new()).unwrap();
+    content.set_behavior_draw_frame(&old);
+    content.validate().unwrap();
+    assert!(content.validation.get().is_some());
+
+    scene
+        .hierarchy
+        .groups
+        .get_mut("group")
+        .unwrap()
+        .transform
+        .translation[0] = 4.0;
+    let next = prepared(scene);
+    assert_eq!(old.scene().revision, next.scene().revision);
+    content.set_behavior_draw_frame(&next);
+    assert!(content.validation.get().is_none());
+    let ContentScene::Behavior(frame) = &content.scene else {
+        unreachable!()
+    };
+    assert!(Arc::ptr_eq(
+        frame.hierarchy().unwrap(),
+        next.hierarchy().unwrap()
+    ));
+    assert_ne!(
+        frame.hierarchy().unwrap().matrices(),
+        old.hierarchy().unwrap().matrices()
+    );
+    content.validate().unwrap();
+    content.set_behavior_draw_frame(&next);
+    assert!(content.validation.get().is_some());
+
+    content.scene_mut().objects[0].transform.translation[0] = 20_000.0;
+    let ContentScene::Behavior(frame) = &content.scene else {
+        unreachable!()
+    };
+    assert!(frame.hierarchy().is_none());
+    assert!(content.validate().is_err());
+    assert_ne!(content.scene(), next.scene());
+}
+
 struct Counter {
     content: Content,
     count: u64,

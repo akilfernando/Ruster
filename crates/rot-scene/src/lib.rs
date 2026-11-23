@@ -366,6 +366,11 @@ impl Scene {
     }
 
     pub fn validate(&self) -> Result<(), SceneError> {
+        self.validate_with_poses().map(|_| ())
+    }
+
+    /// Return the same poses used to admit the scene for downstream consumers.
+    pub fn validate_with_poses(&self) -> Result<ResolvedPoses, SceneError> {
         validate_id(&self.id)?;
         if self.objects.len() > MAX_OBJECTS {
             return Err(SceneError::Invalid(format!(
@@ -429,7 +434,7 @@ impl Scene {
                 )));
             }
         }
-        Ok(())
+        Ok(poses)
     }
 
     /// Deterministic noncryptographic FNV-1a checksum of canonical JSON field order.
