@@ -38,6 +38,7 @@ editor_text! {
     PrimitiveCapsule => "Procedural Capsule",
     Welcome => "Welcome to Rot Engine",
     NoRecentProjects => "No recent projects",
+    HierarchySearchEmpty => "No matching objects.",
     EmptyHierarchy => "This scene is empty. Add an object with Create.",
     NewGroup => "New Group",
     NewGroupHint => "Create an empty group.",

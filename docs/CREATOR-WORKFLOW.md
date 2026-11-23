@@ -575,6 +575,14 @@ its child are selected, the child stays attached to the ancestor. Finish pending
 Inspector edits and unlock the affected objects before grouping. You can undo or
 redo the entire group in one step.
 
+In a v23 scene, type in **Search Hierarchy** or press **Ctrl+F** to focus
+it. Search matches part of an object name or stable ID, regardless of case.
+Results include hidden and disabled objects. Parent breadcrumbs distinguish
+repeated names, and hovering shows the exact ID. Use the arrow keys and
+Enter, or click a result, to select and reveal it in the tree. Escape
+restores the tree and leaves the selection where it was. The usual
+Inspector validation still applies when you select a result.
+
 Press **Ctrl+D** to duplicate the selection, or choose **Duplicate** in
 **Object**, the Hierarchy row menu, or the command palette. Each selected
 root is copied beside its original, and the copies become selected. A selected

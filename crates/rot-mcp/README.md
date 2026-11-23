@@ -349,6 +349,14 @@ connected project.
 - Changes stay unsaved until `scene_save` (read its token with
   `scene_persistence_inspect`). Asset imports are saved to the project at
   once.
+- In v23, `scene_inspect {"search":"wheel"}` finds a case-insensitive
+  name or stable ID substring in Hierarchy order, including disabled or
+  hidden objects. Results include exact IDs, immediate `parent_id`, and
+  up to four parent names in `parent_path`. Use `match_count` for the total.
+  Continue with the same search and the returned `next_offset` as `offset`,
+  plus `expected_session_token` and `expected_revision` from the first page.
+  A changed scene requires a new first page. Search leaves native selection,
+  editor drafts, and the scene unchanged.
 - In v23, use `scene_inspect` for exact object IDs, `session_token` and
   `revision`. Call `rot_tools` with
   `{"action":"call","name":"scene_duplicate","arguments":{"object_ids":["rig","marker"],"expected_session_token":"<session_token>","expected_revision":"<revision>"}}`.

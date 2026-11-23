@@ -196,6 +196,9 @@ impl ComponentWorkspace {
             return Ok(self.inspect_gameplay_camera());
         }
         if op == "scene_inspect" {
+            if map.contains_key("search") {
+                return self.inspect_hierarchy_search(token, args);
+            }
             if map.keys().any(|key| key != "offset") {
                 return Err(invalid());
             }

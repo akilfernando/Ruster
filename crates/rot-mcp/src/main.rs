@@ -574,6 +574,28 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
             return args.is_empty();
         }
         if name == "scene_inspect" {
+            if args.contains_key("search") {
+                let offset = args.get("offset");
+                let pinned = args.contains_key("expected_revision")
+                    || args.contains_key("expected_session_token");
+                return exact_keys(
+                    args,
+                    &["search"],
+                    &["offset", "expected_session_token", "expected_revision"],
+                ) && args["search"].as_str().is_some_and(|query| {
+                    !query.trim().is_empty()
+                        && query.trim().len() <= 128
+                        && !query.trim().chars().any(char::is_control)
+                }) && offset.is_none_or(canonical_u64)
+                    && if pinned || offset.is_some_and(|offset| offset != "0") {
+                        canonical_u64(&args["expected_revision"])
+                            && args["expected_session_token"]
+                                .as_str()
+                                .is_some_and(|token| !token.is_empty() && token.len() <= 256)
+                    } else {
+                        true
+                    };
+            }
             return exact_keys(args, &[], &["offset"])
                 && args.get("offset").is_none_or(canonical_u64);
         }
@@ -671,6 +693,11 @@ fn tools() -> Value {
         }
         if name == "scene_inspect" || name == "asset_inspect" {
             properties.insert("offset".into(), decimal.clone());
+        }
+        if name == "scene_inspect" {
+            properties.insert("search".into(), json!({"type":"string","description":"v23 name or ID substring, case-insensitive."}));
+            properties.insert("expected_session_token".into(), json!({"type":"string"}));
+            properties.insert("expected_revision".into(), decimal.clone());
         }
         if matches!(name,"asset_import"|"asset_refresh"|"asset_rename"|"scene_mesh"|"scene_model_place") {
             properties.insert("expected_asset_revision".into(),decimal.clone());required.push("expected_asset_revision");
@@ -833,7 +860,10 @@ fn listed() -> Value {
         let name = tool["name"].as_str().unwrap().to_owned();
         let schema = &mut tool["inputSchema"];
         if name != "scene_save" {
-            if !matches!(name.as_str(), "scene_components_edit" | "asset_inspect") {
+            if !matches!(
+                name.as_str(),
+                "scene_components_edit" | "asset_inspect" | "scene_inspect"
+            ) {
                 if let Some(properties) =
                     schema.get_mut("properties").and_then(Value::as_object_mut)
                 {
@@ -1824,6 +1854,40 @@ mod tests {
         assert_eq!(tool["annotations"]["readOnlyHint"], true);
         assert_eq!(
             tool["inputSchema"]["properties"]["expected_asset_revision"]["type"],
+            "string"
+        );
+    }
+
+    #[test]
+    fn scene_inspect_search_continuation_requires_both_scene_guards() {
+        assert!(valid_arguments("scene_inspect", &json!({"offset":"16"})));
+        assert!(valid_arguments("scene_inspect", &json!({"search":"Étage"})));
+        assert!(!valid_arguments(
+            "scene_inspect",
+            &json!({"search":"Étage","offset":"16"})
+        ));
+        assert!(!valid_arguments(
+            "scene_inspect",
+            &json!({"search":"Étage","expected_revision":"0"})
+        ));
+        assert!(valid_arguments(
+            "scene_inspect",
+            &json!({"search":"Étage","offset":"16","expected_revision":"0","expected_session_token":"s"})
+        ));
+        let list = listed();
+        let tool = list["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "scene_inspect")
+            .unwrap();
+        assert_eq!(tool["annotations"]["readOnlyHint"], true);
+        assert_eq!(
+            tool["inputSchema"]["properties"]["search"]["type"],
+            "string"
+        );
+        assert_eq!(
+            tool["inputSchema"]["properties"]["expected_session_token"]["type"],
             "string"
         );
     }

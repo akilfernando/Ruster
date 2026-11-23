@@ -44,6 +44,9 @@ mod component_player;
 #[path = "component_spot.rs"]
 mod component_spot;
 
+#[path = "component_hierarchy_search.rs"]
+mod component_hierarchy_search;
+
 #[path = "component_hud.rs"]
 mod component_hud;
 
@@ -271,6 +274,9 @@ pub(super) struct ComponentWorkspace {
     transform_tool: TransformTool,
     collider_tool: component_collider::ColliderTool,
     rows: Vec<(usize, usize)>,
+    hierarchy_search: component_hierarchy_search::Search,
+    hierarchy_search_index: component_hierarchy_search::SearchIndex,
+    hierarchy_search_reveal: Option<String>,
     parents: Vec<Option<usize>>,
     scene_view: SceneViewState,
     view_flags: Vec<ViewFlags>,
@@ -385,6 +391,9 @@ impl ComponentWorkspace {
             transform_tool: TransformTool::default(),
             collider_tool: Default::default(),
             rows,
+            hierarchy_search: Default::default(),
+            hierarchy_search_index: Default::default(),
+            hierarchy_search_reveal: None,
             parents,
             scene_view: SceneViewState::default(),
             view_flags: Vec::new(),
@@ -1583,6 +1592,10 @@ impl ComponentWorkspace {
                 self.palette = Some(Default::default());
                 return;
             }
+            Action::FindObjects => {
+                self.hierarchy_search.focus_requested = true;
+                return;
+            }
             Action::GroupSelection => {
                 self.group_selection_from_ui(None);
                 return;
@@ -2406,6 +2419,7 @@ impl ComponentWorkspace {
         self.poll_runtime(&ctx);
         self.validate_animation_preview();
         if self.current_animation_preview().is_some()
+            && !self.hierarchy_search.is_active()
             && !self.authored_edit_pending()
             && !self.ai_transition_pending()
             && self.project_settings.is_none()
@@ -2469,6 +2483,7 @@ impl ComponentWorkspace {
                 editor_theme::text_menu(ui, Text::ComponentEditMenu.plain(), |ui| {
                     self.menu_action(ui, Action::Undo);
                     self.menu_action(ui, Action::Redo);
+                    self.menu_action(ui, Action::FindObjects);
                     self.menu_action(ui, Action::ProjectSettings);
                     ui.separator();
                     if ui
@@ -2668,6 +2683,7 @@ impl ComponentWorkspace {
                             | Action::Delete
                             | Action::Frame
                             | Action::SetGameCameraFromView
+                            | Action::FindObjects
                             | Action::FindContent
                             | Action::ToggleAssets
                             | Action::KeyboardShortcuts
@@ -2712,6 +2728,9 @@ impl ComponentWorkspace {
                 editor_theme::text_menu(ui, Text::ComponentCreate.plain(), |ui| {
                     self.create_menu(ui)
                 });
+                if self.show_hierarchy_search(ui, blocked || transform_active) {
+                    return;
+                }
                 let root = ui
                     .selectable_label(self.selection.is_empty(), Text::ComponentSceneRoot.plain());
                 if self.rows.is_empty() {
@@ -2728,9 +2747,20 @@ impl ComponentWorkspace {
                 let mut view_change = None;
                 let revision = self.session.revision();
                 let mut moved = hierarchy_drop(ui, &root, None, revision, &self.selection);
-                let mut scroll = egui::ScrollArea::vertical();
-                if let Some((index, _)) = &self.texture_use_reveal {
-                    if let Some(row) = self.rows.iter().position(|(row, _)| row == index) {
+                let mut scroll = egui::ScrollArea::vertical().id_salt("hierarchy_tree");
+                let reveal = self
+                    .hierarchy_search_reveal
+                    .take()
+                    .and_then(|id| {
+                        self.session
+                            .scene()
+                            .objects
+                            .iter()
+                            .position(|object| object.id == id)
+                    })
+                    .or_else(|| self.texture_use_reveal.as_ref().map(|(index, _)| *index));
+                if let Some(index) = reveal {
+                    if let Some(row) = self.rows.iter().position(|&(row, _)| row == index) {
                         scroll = scroll.vertical_scroll_offset(
                             row as f32 * (ROW_HEIGHT + ui.spacing().item_spacing.y),
                         );
