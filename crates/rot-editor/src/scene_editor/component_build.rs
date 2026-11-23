@@ -1235,6 +1235,129 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn linux_archive_matches_the_folder_and_never_overwrites_a_competing_output() {
+        use std::io::Read;
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        let source = root.join("source.scene.json");
+        let scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.save_new(&source).unwrap();
+        let session = ComponentSession::open(&source).unwrap();
+        let player = root.join("player");
+        fs::write(&player, b"#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&player, fs::Permissions::from_mode(0o751)).unwrap();
+        let capture = || BuildRequest::capture(&session, None).unwrap();
+        let cancel = AtomicBool::new(false);
+        let folder = root.join("folder");
+        capture().publish(&folder, &player, &cancel).unwrap();
+
+        let top = "Long Game ".repeat(12).trim_end().to_owned();
+        let destination = root.join(format!("{top}.tar.gz"));
+        let BuildArtifact::Archive(artifact) = capture()
+            .publish_output(
+                &destination,
+                &player,
+                &cancel,
+                OutputFormat::LinuxArchive,
+                || {},
+            )
+            .unwrap()
+        else {
+            panic!("expected a Linux archive");
+        };
+        assert_eq!(artifact.path, destination);
+        assert_eq!(artifact.bytes, fs::metadata(&destination).unwrap().len());
+        let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(
+            fs::File::open(&destination).unwrap(),
+        ));
+        let mut paths = Vec::new();
+        for entry in archive.entries().unwrap() {
+            let mut entry = entry.unwrap();
+            let path = entry.path().unwrap().into_owned();
+            let leaf = path.strip_prefix(&top).unwrap();
+            if leaf.as_os_str().is_empty() {
+                assert!(entry.header().entry_type().is_dir());
+                continue;
+            }
+            assert!(entry.header().entry_type().is_file());
+            assert!(leaf
+                .components()
+                .all(|part| matches!(part, std::path::Component::Normal(_))));
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes).unwrap();
+            let staged = folder.join(leaf);
+            assert_eq!(bytes, fs::read(&staged).unwrap(), "{}", leaf.display());
+            assert_eq!(
+                entry.header().mode().unwrap(),
+                staged.metadata().unwrap().permissions().mode() & 0o777
+            );
+            paths.push(leaf.to_path_buf());
+        }
+        let mut expected = fs::read_dir(&folder)
+            .unwrap()
+            .map(|entry| PathBuf::from(entry.unwrap().file_name()))
+            .collect::<Vec<_>>();
+        expected.sort_unstable();
+        assert_eq!(paths, expected);
+
+        let raced = root.join("race.tar.gz");
+        assert!(matches!(capture().publish_output(
+            &raced, &player, &cancel, OutputFormat::LinuxArchive, || fs::write(&raced, b"competitor").unwrap(),
+        ), Err(PublishError::Failed(failure)) if failure.kind == BuildFailureKind::DestinationOccupied));
+        assert_eq!(fs::read(&raced).unwrap(), b"competitor");
+        let cancelled = root.join("cancelled.tar.gz");
+        assert!(matches!(
+            capture().publish_output(
+                &cancelled,
+                &player,
+                &cancel,
+                OutputFormat::LinuxArchive,
+                || cancel.store(true, Ordering::Relaxed),
+            ),
+            Err(PublishError::Cancelled)
+        ));
+        assert!(!cancelled.exists());
+        assert!(fs::read_dir(root).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".rot-")
+        }));
+    }
+
+    #[test]
+    fn archive_progress_and_receipt_report_the_selected_format() {
+        let mut ui = BuildUi::default();
+        assert_eq!(ui.inspect()["output_format"], "folder");
+        ui.format = OutputFormat::LinuxArchive;
+        let (send, result) = mpsc::sync_channel(1);
+        ui.worker = Some(BuildWorker {
+            result,
+            cancel: Arc::new(AtomicBool::new(false)),
+            compressing: Arc::new(AtomicBool::new(true)),
+            run: false,
+        });
+        let running = ui.inspect();
+        assert_eq!(running["state"], "compressing");
+        assert_eq!(running["output_format"], "linux_archive");
+        assert_eq!(running["published"], false);
+        assert!(running["archive_bytes"].is_null());
+        assert!(send
+            .send(Ok(BuildArtifact::Archive(ArchiveArtifact {
+                path: "/tmp/Build.tar.gz".into(),
+                bytes: 241,
+            })))
+            .is_ok());
+        ui.poll();
+        let published = ui.inspect();
+        assert_eq!(published["state"], "built");
+        assert_eq!(published["output_format"], "linux_archive");
+        assert_eq!(published["published"], true);
+        assert_eq!(published["archive_bytes"], "241");
+    }
+
+    #[test]
     fn configured_transition_packages_two_exact_closures_and_rejects_changed_target() {
         use super::super::project_startup::ProjectDirectory;
         use rot_scene::input::{ActionDefinition, ActionKind, InputKey};
@@ -2146,7 +2269,7 @@ f 1 2 3
                 run: true,
             });
             assert_eq!(ui.inspect()["state"], "building");
-            sender.send(result).unwrap();
+            assert!(sender.send(result).is_ok());
             ui.poll();
         };
 

@@ -796,6 +796,13 @@ Renderers, use `scene_components_edit` with the component ID.
 On Linux, save the v23 scene, then use **File → Build…**. Choose a new
 folder and select **Build** or **Build and Run**. The folder contains an
 `application` executable, the saved v23 scene, and its project assets.
+To share one file, select **Linux archive (.tar.gz)** under **Output
+Format**. Enter a new **Archive File** path and choose **Build**. After
+compression, **Show Archive** opens its containing folder. The archive
+extracts to one game folder containing the same executable and resources
+as a folder build. Extract it before running `application`. You can cancel
+during **Compressing Archive…**. A cancellation leaves no new archive.
+
 The Linux player accepts v23 scene files larger than 1 MiB.
 Run `application --headless --ticks 16` to check it without opening a window.
 In a supported static scene, Play and Build use the same world transforms and

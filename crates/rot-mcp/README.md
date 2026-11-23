@@ -324,6 +324,11 @@ connected project.
   surface. The existing registered connection remains pinned to its
   approved scene path, regardless of the startup selection. During startup
   preparation, the Linux build status is `preparing`.
+- In `creation_export_inspect.build`, `output_format` is `folder` or
+  `linux_archive`. Archive builds report `state: "compressing"` while the
+  worker is compressing the staged game. After publication, `archive_bytes`
+  reports the final compressed byte count as a decimal string. Choose the
+  output format and start publication in the editor's Build dialog.
 - For a v23 Linux player, read `project_startup.player_window` for the
   effective `title` and logical `initial_size` (`width`, `height`).
   `title_source` and `size_source` identify `default` or `project_settings`.

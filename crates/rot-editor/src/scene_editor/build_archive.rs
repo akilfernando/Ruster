@@ -180,3 +180,27 @@ fn check_cancel(cancel: &AtomicBool) -> io::Result<()> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn archive_reads_stop_on_the_next_chunk_after_cancel() {
+        use std::io::{Seek, Write};
+        let mut file = tempfile::tempfile().unwrap();
+        file.write_all(&[42; CHUNK_BYTES * 2]).unwrap();
+        file.rewind().unwrap();
+        let cancel = AtomicBool::new(false);
+        let mut reader = Chunks {
+            file: &file,
+            remaining: (CHUNK_BYTES * 2) as u64,
+            cancel: &cancel,
+        };
+        let mut buffer = vec![0; CHUNK_BYTES * 2];
+        assert_eq!(reader.read(&mut buffer).unwrap(), CHUNK_BYTES);
+        cancel.store(true, Ordering::Relaxed);
+        assert!(reader.read(&mut buffer).is_err());
+        assert_eq!(reader.remaining, CHUNK_BYTES as u64);
+    }
+}
