@@ -2055,13 +2055,12 @@ fn render_draw_scene(
         Ok(packet) => (packet, false),
         Err(_) => (LightingPacket::authored_dark(), true),
     };
-    let mut grouped =
-        BTreeMap::<(Option<String>, Option<rot_scene::Primitive>, BindingKey), DrawGroup>::new();
+    let mut grouped = BTreeMap::new();
     let mut triangles = 0u64;
     for (object, matrix) in draw.objects() {
         let mesh = object_mesh(object, meshes);
         triangles += mesh.map_or(12, |mesh| mesh.indices.len() as u64 / 3);
-        let key = mesh.and_then(|_| object.mesh.clone());
+        let key = mesh.and(object.mesh.as_deref());
         let primitive = object.mesh.is_none().then_some(object.primitive).flatten();
         let material = object
             .material
@@ -2080,25 +2079,23 @@ fn render_draw_scene(
             0.0
         };
         let group = grouped
-            .entry((key.clone(), primitive, binding.clone()))
+            .entry((key, primitive, binding))
             .or_insert_with(|| DrawGroup {
-                key,
+                key: key.map(str::to_owned),
                 primitive,
                 texture: binding
                     .texture
-                    .as_ref()
                     .and_then(|id| (!binding.missing).then(|| textures.get(id)).flatten())
                     .cloned(),
                 roughness: binding
                     .roughness
-                    .as_ref()
                     .and_then(|id| {
                         (!binding.missing_roughness)
                             .then(|| textures.get(id))
                             .flatten()
                     })
                     .cloned(),
-                binding,
+                binding: binding.into_owned(),
                 mesh: mesh.cloned(),
                 instances: Vec::new(),
                 range: 0..0,
@@ -2262,17 +2259,17 @@ fn draw_mesh_has_complete_uvs(object: &Object, mesh: Option<&Arc<rot_assets::Mes
     mesh.map_or(object.mesh.is_none(), |mesh| mesh.has_complete_uvs())
 }
 
-fn draw_material_binding(
+fn draw_material_binding<'a>(
     object: &Object,
     mesh: Option<&Arc<rot_assets::Mesh>>,
-    material: Option<&rot_scene::OpaqueMaterial>,
-) -> BindingKey {
+    material: Option<&'a rot_scene::OpaqueMaterial>,
+) -> BindingKey<&'a str> {
     let has_uvs = material.is_some_and(|material| {
         material.base_color_texture.is_some() || material.roughness_texture.is_some()
     }) && draw_mesh_has_complete_uvs(object, mesh);
     BindingKey {
-        texture: material.and_then(|material| material.base_color_texture.clone()),
-        roughness: material.and_then(|material| material.roughness_texture.clone()),
+        texture: material.and_then(|material| material.base_color_texture.as_deref()),
+        roughness: material.and_then(|material| material.roughness_texture.as_deref()),
         missing_roughness: material.is_some_and(|material| material.roughness_texture.is_some())
             && !has_uvs,
         missing: material.is_some_and(|material| material.base_color_texture.is_some()) && !has_uvs,

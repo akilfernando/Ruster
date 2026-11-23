@@ -2,15 +2,27 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Weak};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) struct BindingKey {
-    pub texture: Option<String>,
-    pub roughness: Option<String>,
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct BindingKey<Id = String> {
+    pub texture: Option<Id>,
+    pub roughness: Option<Id>,
     pub missing_roughness: bool,
     /// Missing UVs are a per-draw diagnostic, not global texture unavailability.
     pub missing: bool,
     // bit0: linear filtering; bit1: clamp addressing.
     pub sampling: u8,
+}
+
+impl BindingKey<&str> {
+    pub(super) fn into_owned(self) -> BindingKey {
+        BindingKey {
+            texture: self.texture.map(str::to_owned),
+            roughness: self.roughness.map(str::to_owned),
+            missing_roughness: self.missing_roughness,
+            missing: self.missing,
+            sampling: self.sampling,
+        }
+    }
 }
 
 #[derive(Clone)]
