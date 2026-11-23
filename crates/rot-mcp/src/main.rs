@@ -588,7 +588,7 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
                         && !query.trim().chars().any(char::is_control)
                 }) && offset.is_none_or(canonical_u64)
                     && if pinned || offset.is_some_and(|offset| offset != "0") {
-                        canonical_u64(&args["expected_revision"])
+                        args.get("expected_revision").is_some_and(canonical_u64)
                             && args["expected_session_token"]
                                 .as_str()
                                 .is_some_and(|token| !token.is_empty() && token.len() <= 256)
