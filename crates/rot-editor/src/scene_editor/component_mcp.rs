@@ -40,6 +40,11 @@ impl ComponentWorkspace {
                 | "hud_panel_move"
         ) {
             self.game_hud_command(token, op, args)
+        } else if matches!(
+            op,
+            "play_check_inspect" | "play_check_start" | "play_check_cancel"
+        ) {
+            self.component_play_check_command(token, op, args)
         } else if op == "scene_display_set" {
             self.display_command(token, args)
         } else if matches!(

@@ -547,6 +547,14 @@ impl ExportSnapshot {
 
     /// Verify the accepted closure before pinning payload and interpretation.
     pub fn resource_identity(&self) -> Result<String, AssetError> {
+        self.resource_identity_with_scripts(|_, _| {})
+    }
+
+    /// Visit verified Lua sources while hashing the whole closure once.
+    pub fn resource_identity_with_scripts(
+        &self,
+        mut script: impl FnMut(&str, String),
+    ) -> Result<String, AssetError> {
         let mut resources = BTreeMap::new();
         self.read_verified_sources(|id, bytes| {
             let pin = if let Some(policy) = self.mesh_normal_policy(id) {
@@ -555,6 +563,15 @@ impl ExportSnapshot {
                 ResourcePin::texture(&bytes, role)
             } else if self.kind(id) == Some(AssetKind::Sound) {
                 ResourcePin::sound(&bytes)
+            } else if self.kind(id) == Some(AssetKind::Script) {
+                let pin = ResourcePin {
+                    source_sha256: Sha256::digest(&bytes).into(),
+                    interpretation: 7,
+                };
+                let source =
+                    String::from_utf8(bytes).map_err(|_| error("verified Lua must be UTF-8"))?;
+                script(id, source);
+                pin
             } else {
                 return Err(error(format!(
                     "resource {id:?} has no accepted interpretation"

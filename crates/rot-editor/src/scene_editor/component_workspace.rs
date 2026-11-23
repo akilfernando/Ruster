@@ -268,6 +268,7 @@ pub(super) struct ComponentWorkspace {
     startup_project: Result<super::project_startup::ProjectDirectory, String>,
     #[cfg(unix)]
     startup_context_cache: std::cell::RefCell<Option<super::project_startup::Observation>>,
+    pub(super) play_checks: super::play_checks::Host,
     input_actions: crate::input_ui::InputUi,
     meshes: rot_app::MeshMap,
     textures: rot_app::TextureMap,
@@ -420,6 +421,7 @@ impl ComponentWorkspace {
             startup_project,
             #[cfg(unix)]
             startup_context_cache: Default::default(),
+            play_checks: Default::default(),
             input_actions: Default::default(),
             session,
             path,
@@ -532,11 +534,34 @@ impl ComponentWorkspace {
         );
     }
 
+    pub(super) fn play_check_workspace(
+        &self,
+    ) -> (&ComponentSession, Option<&rot_assets::AssetStore>) {
+        (&self.session, self.assets.as_ref())
+    }
+
+    pub(super) fn play_check_blocked(&self) -> bool {
+        let blocked = self.authored_edit_pending()
+            || self.close_pending
+            || self.close_approved
+            || self.open_path.is_some()
+            || self.scene_picker.is_some()
+            || self.new_scene.is_some();
+        #[cfg(target_os = "linux")]
+        let blocked = blocked
+            || self.asset_publish_pending()
+            || self.asset_import.is_some()
+            || self.ai_asset_write.is_some()
+            || self.build.is_open();
+        blocked
+    }
+
     fn assets_loading(&self) -> bool {
         self.assets.is_none() && self.asset_error.is_none()
     }
 
     pub(super) fn poll_runtime(&mut self, ctx: &egui::Context) {
+        self.play_checks.poll();
         #[cfg(target_os = "linux")]
         self.poll_assets(ctx);
         self.observe_runtime();
@@ -1644,6 +1669,11 @@ impl ComponentWorkspace {
         }
         let revision = self.session.revision();
         let result = match action {
+            Action::PlayChecks => {
+                self.play_checks
+                    .open(self.session.path().map(std::path::Path::to_owned));
+                return;
+            }
             Action::ProjectSettings | Action::InputActions => {
                 if self.draft_dirty() {
                     self.error = Some("Apply or cancel the Inspector changes first.".into());
@@ -2649,7 +2679,8 @@ impl ComponentWorkspace {
             || build_open
             || publishing
             || self.surface_edit_pending()
-            || self.texture_uses_dialog.is_some();
+            || self.texture_uses_dialog.is_some()
+            || self.play_checks.open;
         #[cfg(target_os = "linux")]
         self.asset_import_frame(&ctx, blocked);
         let asset_dialog = self.asset_browser.file_dialog_open();
@@ -2779,6 +2810,7 @@ impl ComponentWorkspace {
                 });
                 editor_theme::text_menu(ui, "Window", |ui| {
                     self.menu_action(ui, Action::ToggleAssets);
+                    self.menu_action(ui, Action::PlayChecks);
                     if ui
                         .add_enabled(
                             !blocked
@@ -2930,6 +2962,7 @@ impl ComponentWorkspace {
                             | Action::KeyboardShortcuts
                             | Action::ProjectSettings
                             | Action::InputActions
+                            | Action::PlayChecks
                             | Action::Play
                             | Action::Pause
                             | Action::Step
@@ -3474,6 +3507,7 @@ impl ComponentWorkspace {
             self.build
                 .show(&ctx, &self.session, self.assets.as_ref(), draft_dirty);
         }
+        self.component_play_checks_ui(&ctx);
         self.show_project_settings(&ctx);
         self.show_material_draft(&ctx);
         self.show_sound_cue(&ctx);

@@ -443,7 +443,7 @@ impl DrawDependencies {
         Self::collect(meshes, materials)
     }
 
-    fn from_components(scene: &ComponentScene) -> Result<Self, String> {
+    pub fn from_components(scene: &ComponentScene) -> Result<Self, String> {
         let renderers = || {
             scene.objects.iter().flat_map(|object| {
                 object

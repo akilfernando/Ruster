@@ -1,17 +1,18 @@
 //! One isolated play-check job shared by the ordinary editor and native bridge.
-use super::SceneEditor;
+use super::{component_workspace::ComponentWorkspace, SceneEditor};
 use crate::strings::Text;
 use eframe::egui;
 use rot_behavior::play_check::{
     self as check, CheckIdentity, Comparison, Expectation, PlayCheck, Report, Selection,
 };
 use rot_scene::{
+    component_scene::{Component, SavedComponentPin},
     input::{ActionFrame, ActionValue, ButtonState},
     Session, StateValue,
 };
 use serde_json::{json, Value};
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, BTreeSet, VecDeque},
     io::Write,
     path::PathBuf,
     sync::{
@@ -77,10 +78,102 @@ enum Work {
     Save(Box<PlayCheck>, Option<Vec<u8>>),
     Run,
 }
+enum SavedScene {
+    Legacy(Box<Session>),
+    Components(SavedComponentPin),
+}
+
 struct Snapshot {
-    session: Session,
+    saved: SavedScene,
     path: PathBuf,
-    assets: Option<rot_assets::ExportSnapshot>,
+    assets: Result<Option<rot_assets::ExportSnapshot>, String>,
+}
+
+impl SavedScene {
+    fn verify<T>(&self, path: &std::path::Path, run: impl FnOnce() -> T) -> Result<T, String> {
+        match self {
+            Self::Components(pin) => pin
+                .with_verified_saved(run)
+                .map_err(|error| error.to_string()),
+            Self::Legacy(session) => {
+                let disk = Session::open(path).map_err(|error| error.to_string())?;
+                if disk.snapshot_bytes().map_err(|error| error.to_string())?
+                    != session
+                        .snapshot_bytes()
+                        .map_err(|error| error.to_string())?
+                {
+                    return Err("scene contents differ".into());
+                }
+                Ok(run())
+            }
+        }
+    }
+}
+
+fn component_check_assets(
+    scene: &rot_scene::component_scene::ComponentScene,
+    store: Option<&rot_assets::AssetStore>,
+) -> Result<Option<rot_assets::ExportSnapshot>, String> {
+    let dependencies = rot_app::creation::DrawDependencies::from_components(scene)?;
+    let mut ids = dependencies.meshes.clone();
+    ids.extend(dependencies.texture_roles.keys().cloned());
+    let scripts = scene.script_asset_ids();
+    let mut clips = BTreeSet::new();
+    let mut sounds = BTreeSet::new();
+    for component in scene
+        .objects
+        .iter()
+        .filter(|object| object.enabled)
+        .flat_map(|object| {
+            object
+                .components
+                .iter()
+                .filter(|component| component.enabled)
+        })
+    {
+        match &component.kind {
+            Component::Animator { binding, .. } => {
+                clips.insert(binding.clip.as_str());
+            }
+            Component::Script { binding, .. } if binding.enabled => {
+                sounds.extend(binding.properties.values().filter_map(|value| match value {
+                    rot_scene::PropertyValue::SoundRef(cue) => cue.asset_id.as_deref(),
+                    _ => None,
+                }));
+            }
+            _ => {}
+        }
+    }
+    if ids.is_empty() && scripts.is_empty() && clips.is_empty() && sounds.is_empty() {
+        return Ok(None);
+    }
+    ids.extend(
+        scripts
+            .iter()
+            .chain(&clips)
+            .chain(&sounds)
+            .map(|id| (*id).to_owned()),
+    );
+    let store = store.ok_or("Project assets unavailable; reopen or repair content first.")?;
+    let snapshot = store
+        .export_snapshot(&ids)
+        .map_err(|error| error.to_string())?;
+    for (asset, role) in dependencies.texture_roles {
+        if snapshot.texture_role(&asset) != Some(role) {
+            return Err(format!("Texture {asset} needs the {role:?} import role."));
+        }
+    }
+    for (assets, kind) in [
+        (&scripts, rot_assets::AssetKind::Script),
+        (&sounds, rot_assets::AssetKind::Sound),
+    ] {
+        for &id in assets {
+            if snapshot.kind(id) != Some(kind) {
+                return Err(format!("Asset {id} needs the {kind:?} import type."));
+            }
+        }
+    }
+    Ok(Some(snapshot))
 }
 impl Drop for Host {
     fn drop(&mut self) {
@@ -146,7 +239,7 @@ impl Host {
         self.message = format!("Play check {kind} in progress…");
         Ok(id)
     }
-    fn poll(&mut self) {
+    pub(super) fn poll(&mut self) {
         let Some(job) = &self.active else { return };
         let result = match job.receiver.try_recv() {
             Ok(result) => result,
@@ -255,26 +348,47 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
         let case = PlayCheck::decode(&bytes)?;
         return Ok(Completion::Loaded(case, bytes));
     }
-    // Read saved state independently: external replacement cannot silently change
-    // which scene a case is captured against or executed against.
-    let disk = Session::open(&snapshot.path).map_err(|e| e.to_string())?;
-    if disk.snapshot_bytes().map_err(|e| e.to_string())?
-        != snapshot
-            .session
-            .snapshot_bytes()
-            .map_err(|e| e.to_string())?
-    {
+    if snapshot.saved.verify(&snapshot.path, || ()).is_err() {
         return Ok(Completion::Refused {
             status: "stale",
             diagnostic: "The saved scene changed outside the editor. Reopen it.".into(),
         });
     }
-    let resources = match snapshot.assets {
-        Some(ref assets) => assets.resource_identity().map_err(|e| e.to_string())?,
-        None => rot_assets::empty_resource_identity(),
+    let mut script_sources = BTreeMap::new();
+    let resources =
+        snapshot
+            .assets
+            .as_ref()
+            .map_err(Clone::clone)
+            .and_then(|assets| match assets {
+                Some(assets) => assets
+                    .resource_identity_with_scripts(|id, text| {
+                        let path = assets.script_path(id).expect("verified script path");
+                        script_sources
+                            .insert(id.to_owned(), super::script_assets::source(path, text));
+                    })
+                    .map_err(|error| error.to_string()),
+                None => Ok(rot_assets::empty_resource_identity()),
+            });
+    let resources = match resources {
+        Ok(resources) => resources,
+        Err(error)
+            if matches!(snapshot.saved, SavedScene::Components(_)) && matches!(work, Work::Run) =>
+        {
+            return Ok(Completion::Refused {
+                status: "stale",
+                diagnostic: format!("Check resources changed or are unavailable. {error}"),
+            });
+        }
+        Err(error) => return Err(error),
     };
     let tick = rot_behavior::DEFAULT_FIXED_TICK.as_nanos() as u64;
-    let identity = CheckIdentity::capture(&snapshot.session, resources.clone(), tick)?;
+    let identity = match &snapshot.saved {
+        SavedScene::Legacy(session) => CheckIdentity::capture(session, resources, tick)?,
+        SavedScene::Components(pin) => {
+            CheckIdentity::for_saved_scene(pin.sha256(), &pin.scene().actions, resources, tick)?
+        }
+    };
     if cancel.load(Ordering::Acquire) {
         return Ok(Completion::Refused {
             status: "cancelled",
@@ -294,15 +408,27 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
                     });
                 }
             };
-            let clips = match &snapshot.assets {
+            let session = match snapshot.saved {
+                SavedScene::Legacy(session) => session,
+                SavedScene::Components(pin) => {
+                    let stale = case.identity.stale_fields(&identity);
+                    if !stale.is_empty() {
+                        return Ok(Completion::Refused {
+                            status: "stale",
+                            diagnostic: format!("Changed {}; re-pin the case explicitly without replacing its expectations.", stale.join(", ")),
+                        });
+                    }
+                    Box::new(component_check_session(pin, script_sources)?)
+                }
+            };
+            let clips = match snapshot.assets.expect("verified resources") {
                 Some(assets) => rot_behavior::decode_clips(assets.clips())?,
                 None => Default::default(),
             };
-            Ok(Completion::Ran(check::run(
-                &snapshot.session,
+            Ok(Completion::Ran(check::run_with_identity(
+                &session,
                 &case,
-                &resources,
-                tick,
+                Ok(identity),
                 &clips,
                 cancel,
             )))
@@ -343,29 +469,40 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
                     "Saved check changed during preparation. Reopen before replacing it.".into(),
                 );
             }
-            let latest_scene = Session::open(&snapshot.path).map_err(|e| e.to_string())?;
-            if latest_scene.snapshot_bytes().map_err(|e| e.to_string())?
-                != snapshot
-                    .session
-                    .snapshot_bytes()
-                    .map_err(|e| e.to_string())?
-            {
-                return Err("Saved scene changed during check preparation; reopen before saving this check.".into());
-            }
-            if cancel.load(Ordering::Acquire) {
-                return Err("Check save cancelled.".into());
-            }
-            if baseline.is_none() {
-                temporary
-                    .persist_noclobber(&sidecar)
-                    .map_err(|e| e.to_string())?;
-            } else {
-                temporary.persist(&sidecar).map_err(|e| e.to_string())?;
-            }
+            snapshot
+                .saved
+                .verify(&snapshot.path, || {
+                    if cancel.load(Ordering::Acquire) {
+                        return Err("Check save cancelled.".into());
+                    }
+                    if baseline.is_none() {
+                        temporary
+                            .persist_noclobber(&sidecar)
+                            .map_err(|e| e.to_string())?;
+                    } else {
+                        temporary.persist(&sidecar).map_err(|e| e.to_string())?;
+                    }
+                    Ok::<_, String>(())
+                })
+                .map_err(|_| {
+                    "Saved scene changed during check preparation; reopen before saving this check."
+                        .to_owned()
+                })??;
             Ok(Completion::Saved(*case, bytes))
         }
         Work::Load => unreachable!(),
     }
+}
+
+fn component_check_session(
+    pin: SavedComponentPin,
+    scripts: BTreeMap<String, rot_scene::BehaviorSource>,
+) -> Result<Session, String> {
+    let mut scene = pin.scene().clone();
+    scene
+        .bake_script_assets(scripts)
+        .map_err(|error| error.to_string())?;
+    Session::from_component_runtime(&scene).map_err(|error| error.to_string())
 }
 
 impl SceneEditor {
@@ -428,9 +565,9 @@ impl SceneEditor {
             }
         };
         Ok(Snapshot {
-            session: self.session.clone(),
+            saved: SavedScene::Legacy(Box::new(self.session.clone())),
             path,
-            assets,
+            assets: Ok(assets),
         })
     }
     pub(super) fn play_check_write_busy(&self) -> bool {
@@ -445,7 +582,61 @@ impl SceneEditor {
         op: &str,
         args: &Value,
     ) -> CommandResult {
+        let mut host = std::mem::take(&mut self.play_checks);
+        let result = host.command(
+            token,
+            op,
+            args,
+            (
+                self.session.scene().revision,
+                asset_revision(self.assets.as_ref()),
+            ),
+            || self.check_snapshot(),
+            self.export_context.clone(),
+        );
+        self.play_checks = host;
+        result
+    }
+    pub(super) fn poll_play_checks(&mut self) {
         self.play_checks.poll();
+    }
+    pub(super) fn open_play_checks(&mut self) {
+        self.play_checks
+            .open(self.session.path().map(std::path::Path::to_owned));
+    }
+
+    pub(super) fn play_checks_ui(&mut self, ctx: &egui::Context) {
+        if !self.play_checks.open {
+            return;
+        }
+        let mut host = std::mem::take(&mut self.play_checks);
+        host.show(
+            ctx,
+            self.session.path(),
+            &self.session.authoring().actions,
+            |saving| {
+                if saving && self.creation_export.busy() {
+                    return Err("Wait for the active export before saving a play check.".into());
+                }
+                self.check_snapshot()
+            },
+        );
+        self.play_checks = host;
+    }
+}
+
+impl Host {
+    fn command(
+        &mut self,
+        token: &str,
+        op: &str,
+        args: &Value,
+        current: (u64, u64),
+        snapshot: impl FnOnce() -> Result<Snapshot, String>,
+        ctx: Option<egui::Context>,
+    ) -> CommandResult {
+        let (current_revision, current_asset_revision) = current;
+        self.poll();
         let map = args
             .as_object()
             .ok_or_else(|| fail("invalid_arguments", "Expected object arguments"))?;
@@ -499,7 +690,6 @@ impl SceneEditor {
                 .transpose()?
                 .unwrap_or(false);
             return self
-                .play_checks
                 .inspect(id, details)
                 .map_err(|e| fail("unknown_operation", e));
         }
@@ -511,11 +701,10 @@ impl SceneEditor {
         }
         if op == "play_check_cancel" {
             let id = id.expect("required operation id");
-            if let Some(job) = self.play_checks.active.as_ref().filter(|job| job.id == id) {
+            if let Some(job) = self.active.as_ref().filter(|job| job.id == id) {
                 job.cancel.store(true, Ordering::Release);
             }
             return self
-                .play_checks
                 .inspect(Some(id), false)
                 .map_err(|e| fail("unknown_operation", e));
         }
@@ -531,46 +720,104 @@ impl SceneEditor {
                 "expected_asset_revision requires canonical decimal",
             )
         })?;
-        if revision != self.session.scene().revision {
+        if revision != current_revision {
             return Err(fail("stale_revision", "Inspect authored scene again"));
         }
-        if assets
-            != self
-                .assets
-                .as_ref()
-                .map_or(0, rot_assets::AssetStore::revision)
-        {
+        if assets != current_asset_revision {
             return Err(fail("stale_asset_revision", "Inspect asset catalog again"));
         }
-        let snapshot = self
-            .check_snapshot()
-            .map_err(|e| fail("play_check_unavailable", e))?;
+        let snapshot = snapshot().map_err(|error| fail("play_check_unavailable", error))?;
         let id = self
-            .play_checks
-            .start(snapshot, Work::Run, self.export_context.clone())
+            .start(snapshot, Work::Run, ctx)
             .map_err(|e| fail("play_check_busy", e))?;
         Ok(json!({"operation_id":id.to_string(),"state":"running"}))
     }
-    pub(super) fn poll_play_checks(&mut self) {
-        self.play_checks.poll();
-    }
-    pub(super) fn open_play_checks(&mut self) {
-        self.play_checks.open = true;
-        let path = self.session.path().map(std::path::Path::to_owned);
-        if self.play_checks.draft_path != path {
-            self.play_checks.draft = None;
-            self.play_checks.baseline = None;
+}
+
+fn asset_revision(assets: Option<&rot_assets::AssetStore>) -> u64 {
+    assets.map_or(0, rot_assets::AssetStore::revision)
+}
+
+impl ComponentWorkspace {
+    fn check_snapshot(&self) -> Result<Snapshot, String> {
+        if self.play_check_blocked() {
+            return Err(
+                "Apply or cancel pending edits and wait for project operations first.".into(),
+            );
         }
-        self.play_checks.draft_path = path;
+        let (session, store) = self.play_check_workspace();
+        let pin = session
+            .saved_pin()
+            .ok_or("Save the scene before using its play check.")?;
+        if pin
+            .scene()
+            .objects
+            .iter()
+            .any(|object| object.parent.is_some())
+        {
+            return Err("Play checks currently require a flat scene.".into());
+        }
+        let path = session
+            .path()
+            .ok_or("Save the scene before creating a play check.")?;
+        let assets = component_check_assets(pin.scene(), store);
+        Ok(Snapshot {
+            saved: SavedScene::Components(pin),
+            path: path.to_owned(),
+            assets,
+        })
     }
-    fn new_play_check(&mut self) {
+
+    pub(super) fn component_play_check_command(
+        &mut self,
+        token: &str,
+        op: &str,
+        args: &Value,
+    ) -> CommandResult {
+        let mut host = std::mem::take(&mut self.play_checks);
+        let (session, store) = self.play_check_workspace();
+        let result = host.command(
+            token,
+            op,
+            args,
+            (session.revision(), asset_revision(store)),
+            || self.check_snapshot(),
+            None,
+        );
+        self.play_checks = host;
+        result
+    }
+
+    pub(super) fn component_play_checks_ui(&mut self, ctx: &egui::Context) {
+        if !self.play_checks.open {
+            return;
+        }
+        let mut host = std::mem::take(&mut self.play_checks);
+        let (session, _) = self.play_check_workspace();
+        host.show(ctx, session.path(), &session.scene().actions, |_| {
+            self.check_snapshot()
+        });
+        self.play_checks = host;
+    }
+}
+
+impl Host {
+    pub(super) fn open(&mut self, path: Option<PathBuf>) {
+        self.open = true;
+        if self.draft_path != path {
+            self.draft = None;
+            self.baseline = None;
+        }
+        self.draft_path = path;
+    }
+    fn new_play_check(&mut self, path: Option<&std::path::Path>) {
         let identity = CheckIdentity {
             scene_sha256: String::new(),
             action_map_sha256: String::new(),
             resources_sha256: String::new(),
             tick_nanos: rot_behavior::DEFAULT_FIXED_TICK.as_nanos() as u64,
         };
-        self.play_checks.draft = Some(PlayCheck {
+        self.draft = Some(PlayCheck {
             format: check::FORMAT.into(),
             version: check::VERSION,
             name: "Movement check".into(),
@@ -584,12 +831,18 @@ impl SceneEditor {
                 },
             }],
         });
-        self.play_checks.baseline = None;
-        self.play_checks.draft_path = self.session.path().map(std::path::Path::to_owned);
-        self.play_checks.message = Text::PlayChecksNewCheckAddInput.plain().into();
+        self.baseline = None;
+        self.draft_path = path.map(std::path::Path::to_owned);
+        self.message = Text::PlayChecksNewCheckAddInput.plain().into();
     }
-    pub(super) fn play_checks_ui(&mut self, ctx: &egui::Context) {
-        if !self.play_checks.open {
+    fn show(
+        &mut self,
+        ctx: &egui::Context,
+        path: Option<&std::path::Path>,
+        actions: &rot_scene::input::ActionMap,
+        snapshot: impl FnOnce(bool) -> Result<Snapshot, String>,
+    ) {
+        if !self.open {
             return;
         }
         let mut action = None;
@@ -598,10 +851,10 @@ impl SceneEditor {
         if !popup
             && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
-            self.play_checks.open = false;
+            self.open = false;
             return;
         }
-        let busy = self.play_checks.active.is_some();
+        let busy = self.active.is_some();
         egui::Modal::new(egui::Id::unique("play_checks_dialog")).show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 48.).clamp(280., 620.));
             ui.heading(Text::PlayChecks.plain());
@@ -639,18 +892,10 @@ impl SceneEditor {
                 .max_height((ctx.content_rect().height() * 0.24).clamp(60., 180.))
                 .show(ui, |ui| {
                     ui.add(
-                        egui::Label::new(
-                            self.play_checks
-                                .message
-                                .chars()
-                                .take(160)
-                                .collect::<String>(),
-                        )
-                        .wrap(),
+                        egui::Label::new(self.message.chars().take(160).collect::<String>()).wrap(),
                     )
-                    .on_hover_text(&self.play_checks.message);
+                    .on_hover_text(&self.message);
                     if let Some(receipt) = self
-                        .play_checks
                         .receipts
                         .iter()
                         .rev()
@@ -693,14 +938,14 @@ impl SceneEditor {
                 .max_height((ctx.content_rect().height() - ui.min_rect().height() - 110.).max(80.))
                 .show(ui, |ui| {
                     ui.add_enabled_ui(!busy, |ui| {
-                        if let Some(case) = &mut self.play_checks.draft {
+                        if let Some(case) = &mut self.draft {
                             ui.label(Text::CheckName.plain());
                             ui.add(
                                 egui::TextEdit::singleline(&mut case.name)
                                     .char_limit(128)
                                     .id(egui::Id::unique("play_check_name")),
                             );
-                            edit_frames(ui, &mut case.frames, &self.session.authoring().actions);
+                            edit_frames(ui, &mut case.frames, actions);
                             edit_expectations(ui, &mut case.expectations);
                             ui.label(if case.identity.scene_sha256.is_empty() {
                                 Text::PlayCheckNoScene.plain()
@@ -725,45 +970,37 @@ impl SceneEditor {
             }
         });
         if close {
-            self.play_checks.open = false;
+            self.open = false;
         }
         if let Some(action) = action {
             if action == "new" {
-                self.new_play_check();
+                self.new_play_check(path);
                 return;
             }
             if action == "cancel" {
-                if let Some(job) = &self.play_checks.active {
+                if let Some(job) = &self.active {
                     job.cancel.store(true, Ordering::Release);
                 }
                 return;
             }
             let result = (|| {
-                if action == "save" && self.creation_export.busy() {
-                    return Err("Wait for the active export before saving a play check.".into());
-                }
-                let snapshot = self.check_snapshot()?;
-                self.play_checks.draft_path = Some(snapshot.path.clone());
+                let snapshot = snapshot(action == "save")?;
+                self.draft_path = Some(snapshot.path.clone());
                 let work = match action {
                     "load" => Work::Load,
                     "capture" => Work::Capture,
                     "run" => Work::Run,
                     "save" => Work::Save(
-                        Box::new(
-                            self.play_checks
-                                .draft
-                                .clone()
-                                .ok_or("Create or reopen a check first")?,
-                        ),
-                        self.play_checks.baseline.clone(),
+                        Box::new(self.draft.clone().ok_or("Create or reopen a check first")?),
+                        self.baseline.clone(),
                     ),
                     _ => return Err("Unknown play-check action".into()),
                 };
-                self.play_checks.start(snapshot, work, Some(ctx.clone()))?;
+                self.start(snapshot, work, Some(ctx.clone()))?;
                 Ok::<(), String>(())
             })();
             if let Err(error) = result {
-                self.play_checks.message = error;
+                self.message = error;
             }
         }
     }
@@ -1252,7 +1489,7 @@ mod tests {
         ));
         let ctx = egui::Context::default();
         let mut editor = SceneEditor::new(Session::new(rot_scene::Scene::demo()).unwrap());
-        editor.new_play_check();
+        editor.play_checks.new_play_check(editor.session.path());
         editor.play_checks.open = true;
         editor.play_checks.draft.as_mut().unwrap().frames = vec![ActionFrame::default(); 120];
         editor.play_checks.message = "Check failed; expected 3, observed 2.".into();
@@ -1292,7 +1529,7 @@ mod tests {
             .save(&path)
             .unwrap();
         let mut editor = SceneEditor::test_loaded(Session::open(&path).unwrap());
-        editor.new_play_check();
+        editor.play_checks.new_play_check(editor.session.path());
         let Completion::Captured(identity) = execute(
             editor.check_snapshot().unwrap(),
             Work::Capture,

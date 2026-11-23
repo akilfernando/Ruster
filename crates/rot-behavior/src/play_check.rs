@@ -51,25 +51,41 @@ impl CheckIdentity {
         resources_sha256: String,
         tick_nanos: u64,
     ) -> Result<Self, String> {
-        if !is_hash(&resources_sha256) || !(1_000_000..=1_000_000_000).contains(&tick_nanos) {
-            return Err(
-                "play check requires a resource closure digest and fixed tick of 1ms..=1s".into(),
-            );
-        }
         let bytes = session
             .snapshot_bytes()
             .map_err(|error| error.to_string())?;
-        let actions =
-            serde_json::to_vec(&session.authoring().actions).map_err(|error| error.to_string())?;
+        Self::for_saved_scene(
+            hash(&bytes),
+            &session.authoring().actions,
+            resources_sha256,
+            tick_nanos,
+        )
+    }
+
+    pub fn for_saved_scene(
+        scene_sha256: String,
+        actions: &rot_scene::input::ActionMap,
+        resources_sha256: String,
+        tick_nanos: u64,
+    ) -> Result<Self, String> {
+        if !is_hash(&scene_sha256)
+            || !is_hash(&resources_sha256)
+            || !(1_000_000..=1_000_000_000).contains(&tick_nanos)
+        {
+            return Err(
+                "play check requires scene and resource digests and fixed tick of 1ms..=1s".into(),
+            );
+        }
+        let actions = serde_json::to_vec(actions).map_err(|error| error.to_string())?;
         Ok(Self {
-            scene_sha256: hash(&bytes),
+            scene_sha256,
             action_map_sha256: hash(&actions),
             resources_sha256,
             tick_nanos,
         })
     }
 
-    fn stale_fields(&self, current: &Self) -> Vec<&'static str> {
+    pub fn stale_fields(&self, current: &Self) -> Vec<&'static str> {
         [
             (self.scene_sha256 != current.scene_sha256, "scene/source"),
             (
@@ -343,6 +359,17 @@ pub fn run(
     clips: &crate::Clips,
     cancel: Arc<AtomicBool>,
 ) -> Report {
+    let identity = CheckIdentity::capture(session, resources_sha256.into(), tick_nanos);
+    run_with_identity(session, case, identity, clips, cancel)
+}
+
+pub fn run_with_identity(
+    session: &Session,
+    case: &PlayCheck,
+    identity: Result<CheckIdentity, String>,
+    clips: &crate::Clips,
+    cancel: Arc<AtomicBool>,
+) -> Report {
     let deadline = Instant::now() + MAX_RUN_TIME;
     let mut report = Report {
         status: Status::InvalidCase,
@@ -363,7 +390,7 @@ pub fn run(
         Err(error) => return report.finish(Status::InvalidCase, error),
     };
     report.case_sha256 = hash(&bytes);
-    let current = match CheckIdentity::capture(session, resources_sha256.into(), tick_nanos) {
+    let current = match identity {
         Ok(identity) => identity,
         Err(error) => return report.finish(Status::InvalidCase, error),
     };
@@ -407,7 +434,7 @@ pub fn run(
         return report.finish(status, message);
     }
     let limits = Limits {
-        fixed_dt: Duration::from_nanos(tick_nanos).as_secs_f64(),
+        fixed_dt: Duration::from_nanos(current.tick_nanos).as_secs_f64(),
         ..Limits::default()
     };
     let mut engine = match Engine::with_cancellation(limits, cancel.clone()) {
@@ -415,7 +442,12 @@ pub fn run(
         Err(failure) => return report.script_error(failure),
     };
     engine.set_clips(clips.clone());
-    let mut runtime = match engine.reset(session.scene(), session.authoring()) {
+    let mut runtime = match engine.reset_projected(
+        session.scene(),
+        session.authoring(),
+        session.transform_camera_binding().cloned(),
+        session.runtime_projection(),
+    ) {
         Ok(runtime) => runtime,
         Err(failure) => return report.script_error(failure),
     };

@@ -24,7 +24,9 @@ pub use behavior::{AttachedLights, RuntimeProjection, TransformCameraBinding};
 mod session;
 #[cfg(unix)]
 pub use session::{ComponentSave, PreparedComponentSave};
-pub use session::{ComponentSession, DuplicatedObjects, PrefabFileEdit, SavedComponentScene};
+pub use session::{
+    ComponentSession, DuplicatedObjects, PrefabFileEdit, SavedComponentPin, SavedComponentScene,
+};
 #[path = "component_prefab.rs"]
 mod prefab;
 pub use prefab::{PrefabFields, PrefabInstance, PrefabPart, PrefabProperty, PrefabSource};

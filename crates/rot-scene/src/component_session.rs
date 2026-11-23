@@ -34,6 +34,53 @@ struct SavedDocument {
     bytes: u64,
 }
 
+/// Cheap snapshot of a clean saved scene for a background reader.
+pub struct SavedComponentPin {
+    saved: SavedDocument,
+    scene: Arc<ComponentScene>,
+}
+
+impl SavedComponentPin {
+    pub fn scene(&self) -> &ComponentScene {
+        &self.scene
+    }
+
+    pub fn sha256(&self) -> String {
+        format!(
+            "{:x}",
+            sha2::digest::Output::<Sha256>::from(self.saved.digest)
+        )
+    }
+
+    pub fn with_verified_saved<T>(&self, run: impl FnOnce() -> T) -> Result<T, SceneError> {
+        self.saved.with_verified_saved(run)
+    }
+}
+
+impl SavedDocument {
+    fn with_verified_saved<T>(&self, run: impl FnOnce() -> T) -> Result<T, SceneError> {
+        self.with_file(|saved, file| {
+            if digest(file.take(saved.bytes.saturating_add(1)))? != saved.digest {
+                return Err(SceneError::Conflict);
+            }
+            Ok(run())
+        })
+    }
+
+    fn with_file<T>(
+        &self,
+        read: impl FnOnce(&SavedDocument, File) -> Result<T, SceneError>,
+    ) -> Result<T, SceneError> {
+        let lock = SceneLock::acquire(&self.path)?;
+        let file = File::open(&lock.path)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() || metadata.len() != self.bytes {
+            return Err(SceneError::Conflict);
+        }
+        read(self, file)
+    }
+}
+
 /// Stable identities assigned in one duplicate transaction.
 pub struct DuplicatedObjects {
     pub root_ids: Vec<String>,
@@ -436,6 +483,14 @@ impl ComponentSession {
         self.saved_state != Some(self.state)
     }
 
+    pub fn saved_pin(&self) -> Option<SavedComponentPin> {
+        let saved = self.saved.as_ref().filter(|_| !self.is_dirty())?;
+        Some(SavedComponentPin {
+            saved: saved.clone(),
+            scene: Arc::clone(&self.scene),
+        })
+    }
+
     /// Capture the exact bytes of the saved v23 document. The recorded length
     /// bounds the read even if the scene has since been replaced or grown.
     pub fn saved_bytes(&self) -> Result<Vec<u8>, SceneError> {
@@ -461,30 +516,21 @@ impl ComponentSession {
     /// Keep the saved document's cooperative lock through an adjacent publish
     /// after comparing the exact bytes without allocating a second copy.
     pub fn with_verified_saved<T>(&self, publish: impl FnOnce() -> T) -> Result<T, SceneError> {
-        self.with_saved_file(|saved, file| {
-            if digest(file.take(saved.bytes.saturating_add(1)))? != saved.digest {
-                return Err(SceneError::Conflict);
-            }
-            Ok(publish())
-        })
+        self.clean_saved()?.with_verified_saved(publish)
+    }
+
+    fn clean_saved(&self) -> Result<&SavedDocument, SceneError> {
+        self.saved
+            .as_ref()
+            .filter(|_| !self.is_dirty())
+            .ok_or_else(|| SceneError::Invalid("Save the scene before building.".into()))
     }
 
     fn with_saved_file<T>(
         &self,
         read: impl FnOnce(&SavedDocument, File) -> Result<T, SceneError>,
     ) -> Result<T, SceneError> {
-        let saved = self
-            .saved
-            .as_ref()
-            .filter(|_| !self.is_dirty())
-            .ok_or_else(|| SceneError::Invalid("Save the scene before building.".into()))?;
-        let lock = SceneLock::acquire(&saved.path)?;
-        let file = File::open(&lock.path)?;
-        let metadata = file.metadata()?;
-        if !metadata.is_file() || metadata.len() != saved.bytes {
-            return Err(SceneError::Conflict);
-        }
-        read(saved, file)
+        self.clean_saved()?.with_file(read)
     }
 
     /// Insert a new object or replace the authored data for an existing ID.
