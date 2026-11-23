@@ -212,7 +212,19 @@ connected project.
   `binding.properties` to an empty object. Supply the session, scene
   and asset revision guards. The edit shares Undo with the editor.
   A new Play run uses the latest accepted file. Build embeds the accepted
-  source. File-backed object scripts use the Lua transform API.
+  source. File-backed object scripts use Lua host API 2 with the same
+  object transform return contract and `host.button(id)` / `host.axis(id)`.
+- For v23 keyboard actions, call `behavior_inspect` with `kind: "actions"`
+  to find stable IDs and the current session token and revision. To read or
+  remove one action, send those guards as `expected_session_token` and
+  `expected_revision` with its `action_id` to `behavior_action` or
+  `behavior_action_remove`. To add or replace one, use
+  `behavior_action_set` with the same guards and a `definition` like
+  `{"label":"Move","kind":{"type":"axis1d","negative":["a"],"positive":["d"]}}`
+  or `{"kind":{"type":"button","keys":["space"]}}`. Stop Play and finish
+  pending human edits before writes. Each mutation shares Undo. Test input
+  in an active run using `behavior_runtime_step` and its admitted action
+  frames.
 - In legacy scenes, `scene_inspect` reports `group_creation_blockers` for
   `scene_group_create`. Each entry includes a `code` and can include a named
   `example`. Codes are `input_actions`, `hud`, `script_sources`,

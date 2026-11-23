@@ -1426,6 +1426,13 @@ impl ComponentWorkspace {
                 return;
             }
             Action::Redo if self.draft_dirty() => return,
+            Action::Undo | Action::Redo
+                if self.runtime.in_play_mode()
+                    && self.session.action_history_pending(action == Action::Undo) =>
+            {
+                self.error = Some(Text::InputActionsStopPlay.plain().into());
+                return;
+            }
             Action::Undo => self.prefab_history(revision, true),
             Action::Redo => self.prefab_history(revision, false),
             _ => return,
@@ -1819,6 +1826,17 @@ impl ComponentWorkspace {
         self.build.poll();
     }
 
+    fn input_action_editable(&self) -> bool {
+        !self.runtime.in_play_mode()
+            && !self.runtime.command_draft_pending()
+            && !self.ai_transition_pending()
+            && self.material_draft.is_none()
+            && self.display_draft.is_none()
+            && !self.camera_authoring.pending()
+            && !self.transform_tool.active()
+            && !self.draft_dirty()
+    }
+
     fn show_project_settings(&mut self, ctx: &egui::Context) {
         let Some(mut page) = self.project_settings else {
             return;
@@ -1833,11 +1851,10 @@ impl ComponentWorkspace {
             self.project_settings = None;
             return;
         }
-        let editable = !self.runtime.in_play_mode() && !self.draft_dirty();
-        #[cfg(unix)]
-        let editable = editable && !self.ai_transition_pending();
+        let editable = self.input_action_editable();
         let mut edit = None;
         let mut open = true;
+        #[cfg(target_os = "linux")]
         let mut build = false;
         project_settings::settings_window(
             ctx,
@@ -1848,7 +1865,7 @@ impl ComponentWorkspace {
                 ProjectPage::Project => project_settings::project_page(ui, Some(&self.path)),
                 ProjectPage::InputActions => {
                     if !editable {
-                        ui.weak("Stop Play and finish pending changes to edit Input Actions.");
+                        ui.weak(Text::InputActionsStopPlay.plain());
                     }
                     edit = self.input_actions.show(ui, &self.session, editable);
                     if let Some(error) = &self.error {
@@ -1885,9 +1902,10 @@ impl ComponentWorkspace {
         }
         if !open && self.input_actions.pending() {
             self.input_actions.cancel_capture();
-            self.error = Some("Apply or cancel the Input Action changes before closing.".into());
+            self.error = Some(Text::InputActionsCloseDraft.plain().into());
         }
         self.project_settings = (open || self.input_actions.pending()).then_some(page);
+        #[cfg(target_os = "linux")]
         if build {
             self.project_settings = None;
             self.command(Action::Export);
@@ -1904,7 +1922,7 @@ impl ComponentWorkspace {
         let publishing = self.asset_publish_pending();
         #[cfg(not(target_os = "linux"))]
         let publishing = false;
-        if publishing {
+        if publishing || self.project_settings.is_some() {
             ui.disable();
         }
         let surface_close_pending = self.defer_material_close(&ctx)
@@ -1914,7 +1932,7 @@ impl ComponentWorkspace {
                 && ctx.input(|input| input.viewport().close_requested()));
         if self.input_actions.pending() && surface_close_pending {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.error = Some("Apply or cancel the Input Action changes before closing.".into());
+            self.error = Some(Text::InputActionsCloseDraft.plain().into());
         }
         if (build_open || publishing) && ctx.input(|input| input.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -2153,6 +2171,8 @@ impl ComponentWorkspace {
                             | Action::FindContent
                             | Action::ToggleAssets
                             | Action::KeyboardShortcuts
+                            | Action::ProjectSettings
+                            | Action::InputActions
                             | Action::Play
                             | Action::Pause
                             | Action::Step

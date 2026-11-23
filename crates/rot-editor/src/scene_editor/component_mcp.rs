@@ -359,12 +359,15 @@ impl ComponentWorkspace {
             ));
         }
 
+        if matches!(op, "scene_undo" | "scene_redo")
+            && self.runtime.in_play_mode()
+            && self.session.action_history_pending(op == "scene_undo")
+        {
+            return Err(("play_active", Text::InputActionsStopPlay.plain().into()));
+        }
         if matches!(op, "behavior_action_set" | "behavior_action_remove") {
-            if self.runtime.in_play_mode() || self.runtime.command_draft_pending() {
-                return Err((
-                    "play_active",
-                    "Stop Play and finish runtime changes before editing Input Actions.".into(),
-                ));
+            if !self.input_action_editable() {
+                return Err(("play_active", Text::InputActionsStopPlay.plain().into()));
             }
             let id = args["action_id"]
                 .as_str()
@@ -381,11 +384,13 @@ impl ComponentWorkspace {
             let next = self
                 .session
                 .set_action(revision, id, definition)
-                .map_err(|error| ("invalid_action", error.to_string()))?;
+                .map_err(|error| ("invalid_arguments", error.to_string()))?;
             if next != revision {
                 self.refresh();
             }
-            return Ok(json!({"action_id":id,"changed":next != revision}));
+            return Ok(
+                json!({"action_id":id,"changed":next != revision,"dirty":self.session.is_dirty()}),
+            );
         }
 
         if op == "scene_animation_set" {
@@ -1431,6 +1436,68 @@ mod tests {
         component_scene::{ComponentScene, ComponentSession},
         Scene, Session,
     };
+
+    #[test]
+    fn component_action_edits_use_guarded_shared_history_and_save() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("keys.scene");
+        let scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("keys")).unwrap()).unwrap();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let command =
+            |editor: &mut ComponentWorkspace, op, args| editor.ai_command("session", op, &args);
+        let edit = |revision, negative, positive| {
+            json!({
+                "expected_session_token":"session","expected_revision":revision,"action_id":"move",
+                "definition":{"label":"Move","kind":{"type":"axis1d","negative":[negative],"positive":[positive]}}
+            })
+        };
+        assert_eq!(
+            command(&mut editor, "behavior_inspect", json!({"kind":"actions"}))["result"]["page"]
+                ["total"],
+            0
+        );
+        assert_eq!(
+            command(&mut editor, "behavior_action_set", edit("1", "a", "d"))["error"]["code"],
+            "stale_revision"
+        );
+        assert_eq!(
+            command(&mut editor, "behavior_action_set", edit("0", "a", "escape"))["error"]["code"],
+            "invalid_arguments"
+        );
+        let set = command(&mut editor, "behavior_action_set", edit("0", "a", "d"));
+        assert_eq!(set["result"]["revision"], "1", "{set}");
+        let exact = |revision| json!({"expected_session_token":"session","expected_revision":revision,"action_id":"move"});
+        assert_eq!(
+            command(&mut editor, "behavior_action", exact("1"))["result"]["definition"],
+            edit("1", "a", "d")["definition"]
+        );
+        assert_eq!(
+            command(&mut editor, "behavior_action_set", edit("1", "a", "d"))["result"]["changed"],
+            false
+        );
+        let removed = command(&mut editor, "behavior_action_remove", exact("1"));
+        assert_eq!(removed["result"]["revision"], "2", "{removed}");
+        assert_eq!(
+            command(&mut editor, "behavior_action_set", edit("2", "a", "l"))["error"]["code"],
+            "invalid_arguments"
+        );
+        editor.command(Action::Undo);
+        assert_eq!(
+            command(&mut editor, "behavior_action", exact("3"))["result"]["definition"],
+            edit("3", "a", "d")["definition"]
+        );
+        editor.command(Action::Redo);
+        assert!(editor.session.scene().actions.is_empty());
+        editor.command(Action::Undo);
+        assert!(editor.save());
+        assert_eq!(
+            ComponentSession::open(&path).unwrap().scene().actions,
+            editor.session.scene().actions
+        );
+    }
 
     #[test]
     fn inspect_first_page_reports_live_context_and_bounds_selection() {

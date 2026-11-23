@@ -304,6 +304,39 @@ A linked prefab can reuse the same asset. Saving the scene records the
 asset reference. Linux Build verifies the accepted source and embeds it
 in the packaged scene so the standalone can run independently.
 
+## Bind keyboard actions to Lua in v23
+
+Open **Edit → Project Settings… → Input Actions**, or find **Input Actions…**
+in the command palette. Choose **Add Button** for an on/off action or **Add Axis**
+for a 1D axis with negative and positive keys. Give each action a stable ID
+such as `fire` or `move`, capture the keys, then choose **Apply**. Tab moves
+between controls and Escape cancels capture or the edit. Each Apply shares
+one Undo. You can bind up to four logical keys per action and author up to
+32 actions. Escape and Tab are reserved.
+
+In a file attached through the Script component, read the stable IDs using
+the fourth `update` argument. Button state includes `held`, `pressed`, and
+`released`. An axis returns −1, 0, or +1. Opposite sides held together cancel
+out. Return the updated object transform as before.
+
+```lua
+return {
+    update = function(object, properties, dt, host)
+        object.translation[1] = object.translation[1] + 6 * host.axis("move") * dt
+        if host.button("fire").pressed then
+            object.rotation[2] = object.rotation[2] + math.pi / 6
+        end
+        return object
+    end
+}
+```
+
+Choose **Control runtime** in the Game view to give it keyboard input.
+Stop before editing the bindings. Each Play run uses its starting action
+map and accepted Lua source. Save the scene before building. The Linux
+player uses the saved bindings and compiled runtime package. This workflow
+works in supported flat scripted scenes.
+
 ## Reuse a hierarchy as a prefab
 
 1. In a v23 project, create an empty root and use **Create Child** to build

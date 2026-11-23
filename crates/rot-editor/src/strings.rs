@@ -1245,6 +1245,8 @@ editor_text! {
     GameCameraFinishBeforeClose => "Apply or cancel the Game Camera edit before closing.",
     GameControlsRelease => "Press Escape to return to editor shortcuts.",
     HistoryChanged => "History changed.",
+    InputActionsStopPlay => "Stop Play and finish pending changes to edit Input Actions.",
+    InputActionsCloseDraft => "Apply or cancel the Input Action changes before closing.",
     InputActionApplied => "Input action applied.",
     NewSceneFinishBeforeClose => "Finish or cancel New Scene before closing.",
     ParentChangedWorldTransformPreserved => "Parent changed. World transform preserved.",

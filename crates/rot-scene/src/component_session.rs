@@ -1352,6 +1352,17 @@ impl ComponentSession {
         Ok(next)
     }
 
+    /// Whether the next history command changes the authored input map.
+    pub fn action_history_pending(&self, undo: bool) -> bool {
+        let history = if undo { &self.undo } else { &self.redo };
+        history.last().is_some_and(|entry| {
+            entry
+                .changes
+                .iter()
+                .any(|change| matches!(change, SceneChange::Action { .. }))
+        })
+    }
+
     pub fn undo(&mut self, expected: u64) -> Result<u64, SceneError> {
         self.move_history(expected, true, no_prefab_publisher)
     }
