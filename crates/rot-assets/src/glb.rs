@@ -1342,8 +1342,11 @@ impl Decoder<'_> {
         let mut definition = node
             .placement(index, parent, becomes_group)
             .map_err(|e| error(format!("GLB node {path:?}: {e}")))?;
-        if let Some(light) = &node.extensions {
-            let index = light.index();
+        if let Some(index) = node
+            .extensions
+            .as_ref()
+            .and_then(punctual::NodeExtensions::index)
+        {
             definition.light = self.light_definitions[index].placement;
             self.used_lights.insert(index);
         }

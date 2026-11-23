@@ -1,7 +1,7 @@
 //! Admission and bounded conversion of KHR_lights_punctual definitions.
 use super::{error, present, AssetError, MAX_MODEL_ITEMS};
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use serde::{de::IgnoredAny, Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
 const EXTENSION: &str = "KHR_lights_punctual";
@@ -39,30 +39,52 @@ impl ModelLight {
     }
 }
 
+pub(super) type RootExtensions = Extensions<Definitions>;
+pub(super) type NodeExtensions = Extensions<LightReference>;
+
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct RootExtensions {
-    #[serde(rename = "KHR_lights_punctual")]
-    punctual: Definitions,
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
+pub(super) struct Extensions<T> {
+    #[serde(default, rename = "KHR_lights_punctual", deserialize_with = "present")]
+    punctual: Option<T>,
+    #[serde(flatten)]
+    optional: BTreeMap<String, IgnoredAny>,
+}
+
+impl<T> Extensions<T> {
+    fn validate_declarations(&self, used: &BTreeSet<&str>) -> Result<(), AssetError> {
+        let undeclared = self
+            .optional
+            .keys()
+            .find(|name| !used.contains(name.as_str()));
+        if let Some(name) = undeclared {
+            return Err(error(format!(
+                "GLB extension {name:?} is undeclared in extensionsUsed"
+            )));
+        }
+        if self.punctual.is_some() && !used.contains(EXTENSION) {
+            return Err(error(
+                "GLB KHR_lights_punctual is undeclared in extensionsUsed",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Definitions {
+pub(super) struct Definitions {
     lights: Vec<Definition>,
+    #[serde(default, rename = "extras")]
+    _extras: Option<IgnoredAny>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct NodeExtensions {
-    #[serde(rename = "KHR_lights_punctual")]
-    punctual: LightReference,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct LightReference {
+pub(super) struct LightReference {
     light: usize,
+    #[serde(default, rename = "extras")]
+    _extras: Option<IgnoredAny>,
 }
 
 #[derive(Deserialize)]
@@ -80,6 +102,8 @@ struct Definition {
     range: Option<f64>,
     #[serde(default, deserialize_with = "present")]
     spot: Option<Spot>,
+    #[serde(default, rename = "extras")]
+    _extras: Option<IgnoredAny>,
 }
 
 #[derive(Deserialize)]
@@ -97,6 +121,8 @@ struct Spot {
     inner_cone_angle: Option<f64>,
     #[serde(default, deserialize_with = "present")]
     outer_cone_angle: Option<f64>,
+    #[serde(default, rename = "extras")]
+    _extras: Option<IgnoredAny>,
 }
 
 pub(super) struct AdmittedLight {
@@ -218,26 +244,21 @@ pub(super) fn admit<'a>(
             )));
         }
     }
-    if root.is_some() && !used_set.contains(EXTENSION) {
-        return Err(error(
-            "GLB KHR_lights_punctual is undeclared in extensionsUsed",
-        ));
+    if let Some(root) = root {
+        root.validate_declarations(&used_set)?;
     }
-    let definitions = root.map_or(&[][..], |root| root.punctual.lights.as_slice());
-    if root.is_some() && !(1..=MAX_MODEL_ITEMS).contains(&definitions.len()) {
+    let punctual = root.and_then(|root| root.punctual.as_ref());
+    let definitions = punctual.map_or(&[][..], |punctual| punctual.lights.as_slice());
+    if punctual.is_some() && !(1..=MAX_MODEL_ITEMS).contains(&definitions.len()) {
         return Err(error("GLB KHR_lights_punctual requires 1..64 definitions"));
     }
     for (index, node) in nodes.enumerate() {
         if let Some(node) = node {
-            if !used_set.contains(EXTENSION) {
+            node.validate_declarations(&used_set)
+                .map_err(|failure| error(format!("GLB node {index}: {failure}")))?;
+            if let Some(light) = node.index().filter(|&light| light >= definitions.len()) {
                 return Err(error(format!(
-                    "GLB node {index} uses undeclared KHR_lights_punctual"
-                )));
-            }
-            if node.index() >= definitions.len() {
-                return Err(error(format!(
-                    "GLB node {index} light index {} is out of range",
-                    node.index()
+                    "GLB node {index} light index {light} is out of range"
                 )));
             }
         }
@@ -250,8 +271,8 @@ pub(super) fn admit<'a>(
 }
 
 impl NodeExtensions {
-    pub(super) fn index(&self) -> usize {
-        self.punctual.light
+    pub(super) fn index(&self) -> Option<usize> {
+        self.punctual.as_ref().map(|reference| reference.light)
     }
 }
 

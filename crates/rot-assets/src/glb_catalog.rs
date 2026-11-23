@@ -440,7 +440,23 @@ mod tests {
         use serde_json::json;
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("lantern.glb");
-        fs::write(&path, punctual_glb(|_| {})).unwrap();
+        fs::write(
+            &path,
+            punctual_glb(|document| {
+                document["extensionsUsed"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json!("EXT_unknown_optional"));
+                document["extensions"]["EXT_unknown_optional"] = json!({"unused": true});
+                document["nodes"][1]["extensions"]["EXT_unknown_optional"] =
+                    json!({"note":"ignored"});
+                let punctual = &mut document["extensions"]["KHR_lights_punctual"];
+                punctual["extras"] = json!({"metadata": [1,2,3]});
+                punctual["lights"][0]["extras"] = json!({"blender_name":"Paint Lamp"});
+                punctual["lights"][2]["spot"]["extras"] = json!({"optional":"metadata"});
+            }),
+        )
+        .unwrap();
         let mut store = AssetStore::open(root.path()).unwrap();
         let first = store.import_glb_at(0, "lantern", "lantern.glb").unwrap();
         assert_eq!(first.nodes["Rig/Arm"].light, first.nodes["Rig/Base"].light);

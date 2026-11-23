@@ -152,7 +152,7 @@ pub fn punctual_glb(edit: impl FnOnce(&mut serde_json::Value)) -> Vec<u8> {
     document["nodes"][2]["extensions"] = node_extension(0);
     let nodes = document["nodes"].as_array_mut().unwrap();
     nodes.push(json!({"name":"Sun","extensions":node_extension(1),
-        "rotation":[-0.7071067811865475,0,0,0.7071067811865476]}));
+        "rotation":[-std::f64::consts::FRAC_1_SQRT_2,0,0,std::f64::consts::FRAC_1_SQRT_2]}));
     nodes.push(json!({"name":"Spot","extensions":node_extension(2),"translation":[1,2,3]}));
     document["nodes"][0]["children"] = json!([1, 2, 3, 4]);
     edit(&mut document);
