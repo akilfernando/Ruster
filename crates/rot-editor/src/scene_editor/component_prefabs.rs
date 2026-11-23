@@ -11,6 +11,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub(super) struct UnpackDraft {
+    root: String,
+    name: String,
+    count: usize,
+    revision: u64,
+    asset: String,
+    source_hash: String,
+    focus_cancel: bool,
+    error: Option<String>,
+}
+
 fn invalid(message: impl Into<String>) -> SceneError {
     SceneError::Invalid(message.into())
 }
@@ -339,6 +350,78 @@ impl ComponentWorkspace {
         Ok(())
     }
 
+    pub(super) fn unpack_prefab(
+        &mut self,
+        revision: u64,
+        root: &str,
+        asset: &str,
+        source_hash: &str,
+    ) -> Result<usize, SceneError> {
+        let count = self
+            .session
+            .scene()
+            .prefabs
+            .get(root)
+            .map_or(0, |link| link.parts.len());
+        self.session
+            .unpack_prefab(revision, root, asset, source_hash)?;
+        self.refresh();
+        Ok(count)
+    }
+
+    pub(super) fn show_unpack_prefab(&mut self, ctx: &egui::Context) {
+        let Some(mut draft) = self.unpack_prefab_draft.take() else {
+            return;
+        };
+        let modal = egui::Modal::new(egui::Id::unique("unpack_prefab_instance"))
+            .frame(editor_theme::dialog_frame(ctx))
+            .show(ctx, |ui| {
+                ui.set_width(ui.available_width().min(420.0));
+                ui.heading(Text::PrefabUnpackTitle.plain());
+                ui.label(&draft.name);
+                ui.label(format!("ID {}", draft.root));
+                ui.label(
+                    Text::PrefabUnpackEffect
+                        .plain()
+                        .replace("{count}", &draft.count.to_string()),
+                );
+                if let Some(error) = &draft.error {
+                    ui.colored_label(ui.visuals().error_fg_color, error);
+                }
+                ui.horizontal(|ui| {
+                    let cancel = ui.button(Text::ComponentCancel.plain());
+                    if draft.focus_cancel {
+                        cancel.request_focus();
+                        draft.focus_cancel = false;
+                    }
+                    let unpack =
+                        editor_theme::primary_button(ui, Text::PrefabUnpackConfirm.plain());
+                    (cancel.clicked(), unpack.clicked())
+                })
+                .inner
+            });
+        let (cancel, unpack) = modal.inner;
+        if cancel
+            || modal.is_top_modal
+                && ctx
+                    .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            return;
+        }
+        if unpack {
+            match self.unpack_prefab(
+                draft.revision,
+                &draft.root,
+                &draft.asset,
+                &draft.source_hash,
+            ) {
+                Ok(_) => return,
+                Err(error) => draft.error = Some(error.to_string()),
+            }
+        }
+        self.unpack_prefab_draft = Some(draft);
+    }
+
     pub(super) fn prefab_inspector(&mut self, ui: &mut egui::Ui) {
         let Some(object) = self.draft.as_ref() else {
             return;
@@ -354,6 +437,25 @@ impl ComponentWorkspace {
         let file = self.prefab_files.get(&link.asset);
         ui.separator();
         ui.strong(Text::Prefab.plain());
+        if self.session.scene().prefabs.contains_key(&object.id)
+            && ui
+                .add_enabled(
+                    !self.authored_edit_pending() && !self.runtime.in_play_mode(),
+                    egui::Button::new(Text::PrefabUnpackAction.plain()),
+                )
+                .clicked()
+        {
+            self.unpack_prefab_draft = Some(UnpackDraft {
+                root: object.id.clone(),
+                name: object.name.clone(),
+                count: link.parts.len(),
+                revision: self.session.revision(),
+                asset: link.asset.clone(),
+                source_hash: link.source_hash.clone(),
+                focus_cancel: true,
+                error: None,
+            });
+        }
         if let Some(file) = file {
             ui.label(
                 Path::new(&file.source)

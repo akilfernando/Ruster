@@ -458,6 +458,14 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
                 .as_str()
                 .is_some_and(|value| !value.is_empty() && value.len() <= limit)
         };
+        let has_source_hash = || {
+            args["expected_source_hash"].as_str().is_some_and(|hash| {
+                hash.len() == 64
+                    && hash
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            })
+        };
         return bounded("object_id", 128)
             && match action {
                 "save" => {
@@ -469,16 +477,16 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
                         && bounded("asset_id", 128)
                         && hierarchy_tools::valid_creation_options(args)
                 }
+                "unpack" => {
+                    keys(&["asset_id", "expected_source_hash"], &[])
+                        && bounded("asset_id", 128)
+                        && has_source_hash()
+                }
                 "apply" | "revert" => {
                     if args["property"] == "material" {
                         keys(&["property", "component_id", "expected_source_hash"], &[])
                             && bounded("component_id", 128)
-                            && args["expected_source_hash"].as_str().is_some_and(|hash| {
-                                hash.len() == 64
-                                    && hash.bytes().all(|byte| {
-                                        byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
-                                    })
-                            })
+                            && has_source_hash()
                     } else if args["property"] == "tint" {
                         keys(&["property", "component_id"], &[]) && bounded("component_id", 128)
                     } else {
@@ -664,7 +672,7 @@ fn tools() -> Value {
         ("asset_refresh", "Reimport one registered mesh, texture or static GLB model, retaining last-good accepted content on failure. Model refresh accepts geometry/normal/UV/image changes only with the same named structure, transforms and material settings; it updates resources without rewriting placed scene copies. Catalog persists independently of scene history."),
         ("asset_rename", "Rename one registered OBJ or PNG source within the project without overwrite or changing its extension/kind, preserving stable asset ID; catalog update is independent of scene undo."),
         ("scene_model_place", "Place a registered static GLB model as ordinary editable scene hierarchy/material copies under a creator-owned root. Requires inspected session, scene and asset revisions plus clean human drafts. Optional name labels the root. One atomic unsaved Undo entry; does not reimport or save. Reimport updates shared resources, not local scene values."),
-        ("scene_prefab", "Save, place, apply or revert a v23 prefab."),
+        ("scene_prefab", "Save, place, apply, revert or unpack a v23 prefab."),
         ("scene_mesh", "Assign a registered mesh ID or null for procedural cube to one scene object; revisioned shared authored undo. A changed mesh beneath a textured material requires complete UVs; clear the material first to repair. Preview snapshot unchanged."),
         ("shader_refresh", "Refresh the fixed project-local scene.wgsl trusted shader, validating a candidate pipeline and keeping the last good pipeline on error."),
         ("scene_inspect", "Inspect one page of at most 16 authored scene objects, session/revision and mutation guards. Start without offset; use next_offset for subsequent pages."),
@@ -718,13 +726,13 @@ fn tools() -> Value {
         if name == "scene_model_place" { properties.insert("name".into(), json!({"type":"string","minLength":1,"maxLength":128,"description":"Optional display name for the creator-owned placement root."})); }
         if name == "scene_prefab" {
             let id = json!({"type":"string","minLength":1,"maxLength":128});
-            properties.insert("action".into(), json!({"enum":["save","place","apply","revert"]}));
-            properties.insert("object_id".into(), json!({"type":"string","minLength":1,"maxLength":128,"description":"Selection or override target, or the new instance root ID for place."}));
+            properties.insert("action".into(), json!({"enum":["save","place","apply","revert","unpack"]}));
+            properties.insert("object_id".into(), json!({"type":"string","minLength":1,"maxLength":128,"description":"Selection or override target. Use the instance root for unpack or a new root ID for place."}));
             properties.insert("asset_id".into(), id.clone());
             properties.insert("source".into(), json!({"type":"string","maxLength":256,"description":"Optional new Assets/*.prefab path for save."}));
             properties.insert("property".into(), json!({"enum":["position","rotation","scale","tint","material"]}));
             properties.insert("component_id".into(), id);
-            properties.insert("expected_source_hash".into(), json!({"type":"string","pattern":"^[0-9a-f]{64}$","description":"Required for material Apply/Revert. Read from prefab_material in scene_components_inspect."}));
+            properties.insert("expected_source_hash".into(), json!({"type":"string","pattern":"^[0-9a-f]{64}$","description":"For unpack read prefab_instance in scene_components_inspect and supply asset_id. Material Apply/Revert reads prefab_material."}));
             hierarchy_tools::creation_properties(&mut properties);
             required.extend(["action","object_id"]);
         }

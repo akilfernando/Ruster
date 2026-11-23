@@ -1440,6 +1440,29 @@ impl ComponentSession {
         )
     }
 
+    /// Detach one accepted instance without changing its materialized scene data.
+    pub fn unpack_prefab(
+        &mut self,
+        expected_revision: u64,
+        root: &str,
+        asset: &str,
+        source_hash: &str,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        if self.prefab_instance(root, source_hash)?.asset != asset {
+            return Err(SceneError::Conflict);
+        }
+        // All material overrides remain bound to their existing renderers.
+        self.commit_with_file(
+            [SceneChange::Prefab {
+                root: root.to_owned(),
+                value: None,
+            }],
+            None,
+            no_prefab_publisher,
+        )
+    }
+
     fn prefab_instance(&self, root: &str, hash: &str) -> Result<&PrefabInstance, SceneError> {
         let instance = self
             .scene

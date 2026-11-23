@@ -318,6 +318,7 @@ impl ComponentWorkspace {
         let prefab_fields: &[&str] = match args["action"].as_str() {
             Some("save") => &["object_id", "source"],
             Some("place") => &["asset_id", "object_id", "parent_id", "transform"],
+            Some("unpack") => &["object_id", "asset_id", "expected_source_hash"],
             Some("apply" | "revert") if args["property"] == "material" => &[
                 "object_id",
                 "property",
@@ -552,6 +553,20 @@ impl ComponentWorkspace {
                     self.place_prefab(asset, Some(object), transform, parent)
                         .map(|id| json!({"asset_id":asset,"object_id":id}))
                 }
+                "unpack" => {
+                    let asset = string("asset_id")?;
+                    let hash = string("expected_source_hash")?;
+                    if hash.len() != 64
+                        || !hash
+                            .bytes()
+                            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                    {
+                        return Err(invalid());
+                    }
+                    self.unpack_prefab(revision, object, asset, hash).map(
+                        |count| json!({"object_id":object,"asset_id":asset,"object_count":count}),
+                    )
+                }
                 action @ ("apply" | "revert") => {
                     let property = match string("property")? {
                         "position" if !map.contains_key("component_id") => {
@@ -591,7 +606,14 @@ impl ComponentWorkspace {
                     response
                 })
                 .map_err(|error| {
-                    if args["property"] == "material" && matches!(error, SceneError::Conflict) {
+                    if args["action"] == "unpack" && matches!(error, SceneError::Conflict) {
+                        (
+                            "stale_prefab_instance",
+                            "Inspect the current prefab instance before unpacking.".into(),
+                        )
+                    } else if args["property"] == "material"
+                        && matches!(error, SceneError::Conflict)
+                    {
                         (
                             "stale_source_hash",
                             "Inspect the prefab renderer and current source again.".into(),
@@ -1270,6 +1292,20 @@ impl ComponentWorkspace {
             .enumerate()
             .find(|(_, object)| object.id == id)
             .ok_or_else(object_not_found)?;
+        let instance = self
+            .session
+            .scene()
+            .prefabs
+            .iter()
+            .find(|(root, link)| {
+                root.as_str() == id || link.parts.values().any(|part| part.object == id)
+            })
+            .map(|(root, link)| {
+                json!({
+                    "root_id": root, "asset_id": link.asset, "source_hash": link.source_hash,
+                    "object_count": link.parts.len(),
+                })
+            });
         if let Some(component_id) = args.get("component_id") {
             let component_id = component_id
                 .as_str()
@@ -1288,6 +1324,9 @@ impl ComponentWorkspace {
                 ));
             }
             let mut response = json!({"object_id":id,"component":component});
+            if let Some(instance) = instance {
+                response["prefab_instance"] = instance;
+            }
             if super::component_sound::sound_script(component).is_some() {
                 if let Component::Script { movement, .. } = &component.kind {
                     response["movement"] = json!(movement);
@@ -1407,10 +1446,14 @@ impl ComponentWorkspace {
             }
             summary
         }).collect();
-        Ok(json!({
+        let mut response = json!({
             "object_id":id, "components":components, "component_count":object.components.len(),
             "next_offset":(rest.len() > components.len()).then(|| (offset + components.len()).to_string())
-        }))
+        });
+        if let Some(instance) = instance {
+            response["prefab_instance"] = instance;
+        }
+        Ok(response)
     }
 
     fn component_edits(

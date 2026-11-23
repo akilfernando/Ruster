@@ -10,7 +10,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("asset_refresh", "Reimport an asset after its file changed. Keeps the previous version if the new file fails."),
     ("asset_rename", "Rename an asset file inside the project, keeping its asset ID."),
     ("scene_model_place", "Place a GLB as editable objects under a new parent. v23 places Point, Spot, Directional and inactive perspective cameras. Legacy places geometry."),
-    ("scene_prefab", "Save a v23 hierarchy as a prefab, place a linked copy, or apply/revert one override. Place needs asset_id. Material needs component_id and expected_source_hash."),
+    ("scene_prefab", "Save, place, apply, revert or unpack a v23 prefab. Unpack needs root object_id, asset_id and expected_source_hash from scene_components_inspect prefab_instance."),
     ("scene_mesh", "Give an object an imported mesh, or null for the built-in cube."),
     ("shader_refresh", "Reload the project's scene.wgsl shader, keeping the last working one on error. builtin true switches back to the built-in shader."),
     ("scene_inspect", "Page objects via next_offset. v23 search matches name or ID. Pin both scene guards for search continuation."),

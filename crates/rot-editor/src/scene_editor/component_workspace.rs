@@ -239,6 +239,7 @@ pub(super) struct ComponentWorkspace {
     prefab_refresh_pending: bool,
     prefab_feedback: Option<prefabs::PrefabFeedback>,
     prefab_details_open: bool,
+    unpack_prefab_draft: Option<prefabs::UnpackDraft>,
     #[cfg(target_os = "linux")]
     asset_watcher: Option<super::project_assets::ProjectAssets>,
     #[cfg(target_os = "linux")]
@@ -441,6 +442,7 @@ impl ComponentWorkspace {
             prefab_refresh_pending: false,
             prefab_feedback: None,
             prefab_details_open: false,
+            unpack_prefab_draft: None,
             #[cfg(target_os = "linux")]
             asset_watcher: prior.and_then(|prior| prior.asset_watcher.take()),
             #[cfg(target_os = "linux")]
@@ -940,6 +942,7 @@ impl ComponentWorkspace {
             || self.player_pending()
             || self.camera_authoring.pending()
             || self.spot_aim.is_some()
+            || self.unpack_prefab_draft.is_some()
     }
 
     fn viewport_edit_active(&self) -> bool {
@@ -3535,6 +3538,7 @@ impl ComponentWorkspace {
         self.show_display_draft(&ctx);
         self.show_camera_draft(&ctx);
         self.show_spot_aim(&ctx);
+        self.show_unpack_prefab(&ctx);
         self.texture_use_reveal = None;
         self.show_texture_uses(&ctx);
         if let Some(document) = self.show_new_scene(&ctx) {
