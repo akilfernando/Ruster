@@ -6,7 +6,7 @@ use crate::{editor_theme, strings::Text};
 use eframe::egui;
 use rot_scene::{
     component_scene::{Component, ObjectNode, ScriptMovement, ScriptSourceKind},
-    ColliderRole, ColliderShape, PropertyValue,
+    PropertyValue,
 };
 
 pub(in crate::scene_editor) struct Request {
@@ -27,31 +27,7 @@ pub(super) struct Draft {
 }
 
 fn eligible(object: &ObjectNode, owner: &str, parents: &HashSet<&str>) -> bool {
-    if object.id == owner
-        || !object.enabled
-        || object.parent.is_some()
-        || parents.contains(object.id.as_str())
-    {
-        return false;
-    }
-    let mut renderers = 0;
-    let mut colliders = 0;
-    for component in &object.components {
-        match &component.kind {
-            Component::MeshRenderer { .. } => renderers += 1,
-            Component::Collider {
-                role: ColliderRole::Sensor,
-                shape: ColliderShape::Box { .. },
-                ..
-            } if component.enabled => colliders += 1,
-            Component::Collider { .. } | Component::Light { .. } => return false,
-            Component::Script { .. } | Component::Animator { .. } if component.enabled => {
-                return false
-            }
-            _ => {}
-        }
-    }
-    renderers <= 1 && colliders == 1
+    object.id != owner && !parents.contains(object.id.as_str()) && object.is_stationary_box_sensor()
 }
 
 pub(super) fn parent_ids(objects: &[ObjectNode]) -> HashSet<&str> {

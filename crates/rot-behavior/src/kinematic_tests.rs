@@ -428,7 +428,28 @@ end}
     authored.objects[1]
         .components
         .retain(|component| !matches!(component.kind, Component::MeshRenderer { .. }));
+    let mut unused = authored.objects[1].clone();
+    unused.id = "unused-gate".into();
+    unused.components[0].id = "unused-collider".into();
+    authored.objects.push(unused);
+    let mut stale = authored.clone();
+    stale.objects.retain(|object| object.id != "gate");
+    let error = stale
+        .behavior_projection()
+        .err()
+        .expect("deleted sensor")
+        .to_string();
+    assert!(
+        error.contains("controller-component") && error.contains("checkpoint"),
+        "{error}"
+    );
+
     let projected = authored.behavior_projection().unwrap();
+    assert!(projected
+        .hidden_mesh_renderers
+        .as_ref()
+        .unwrap()
+        .contains("unused-gate"));
     assert!(projected
         .hidden_mesh_renderers
         .as_ref()

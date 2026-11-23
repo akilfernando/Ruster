@@ -11,6 +11,33 @@ use glam::{DMat4, DQuat, DVec3, EulerRot};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
+impl ObjectNode {
+    /// Eligible authored shape and composition for a stationary kinematic sensor.
+    /// Callers also rule out children and self-binding.
+    pub fn is_stationary_box_sensor(&self) -> bool {
+        if !self.enabled || self.parent.is_some() {
+            return false;
+        }
+        let mut renderers = 0;
+        let mut colliders = 0;
+        for component in &self.components {
+            match &component.kind {
+                Component::MeshRenderer { .. } => renderers += 1,
+                Component::Collider {
+                    role: crate::ColliderRole::Sensor,
+                    shape: crate::ColliderShape::Box { .. },
+                    ..
+                } if component.enabled => colliders += 1,
+                Component::Collider { .. } | Component::Light { .. } => return false,
+                Component::Script { binding, .. } if binding.enabled => return false,
+                Component::Animator { .. } if component.enabled => return false,
+                _ => {}
+            }
+        }
+        renderers <= 1 && colliders == 1
+    }
+}
+
 /// Runtime-only immutable lookup for a component camera's projected transform chain.
 #[derive(Clone, Debug)]
 pub struct TransformCameraBinding {
@@ -342,15 +369,31 @@ impl ComponentScene {
             None => None,
         };
         let mut positional_audio = false;
-        let mut named_sensors = HashSet::new();
+        let mut named_sensors = false;
+        let mut kinematic_lane = false;
+        let mut active_sensors = Vec::new();
         for (index, object) in self.objects.iter().enumerate() {
             for component in &object.components {
                 let Component::Script { binding, .. } = &component.kind else {
                     continue;
                 };
+                let kinematic = binding.enabled
+                    && hierarchy.effectively_enabled[index]
+                    && self.sources.get(&binding.source_id).is_some_and(|source| {
+                        source.host_api_version == crate::KINEMATIC_HOST_API_VERSION
+                    });
+                kinematic_lane |= kinematic;
                 for (name, property) in &binding.properties {
                     if let crate::PropertyValue::SensorRef(id) = property {
-                        named_sensors.insert(id.as_str());
+                        named_sensors = true;
+                        if kinematic {
+                            active_sensors.push((
+                                object.id.as_str(),
+                                component.id.as_str(),
+                                name,
+                                id,
+                            ));
+                        }
                     }
                     let crate::PropertyValue::SoundRef(cue) = property else {
                         continue;
@@ -386,6 +429,25 @@ impl ComponentScene {
             .iter()
             .filter_map(|node| node.parent.as_deref())
             .collect();
+        if !active_sensors.is_empty() {
+            let owners: BTreeMap<_, _> = self
+                .objects
+                .iter()
+                .map(|object| (object.id.as_str(), object))
+                .collect();
+            for (owner, binding, name, target) in active_sensors {
+                if target == owner
+                    || parents.contains(target.as_str())
+                    || !owners
+                        .get(target.as_str())
+                        .is_some_and(|object| object.is_stationary_box_sensor())
+                {
+                    return Err(SceneError::Invalid(format!(
+                        "Binding {binding}, sensor {name:?} targets {target:?}: choose an enabled, stationary Box Collider Sensor."
+                    )));
+                }
+            }
+        }
         for object in &self.objects {
             let unsupported = |reason: &str| {
                 SceneError::Invalid(format!(
@@ -557,16 +619,9 @@ impl ComponentScene {
                     "Light {component}: remove the Collider from the light owner for behavior Play and Build"
                 ))),
                 (None, None, Some(collider))
-                    if named_sensors.contains(object.id.as_str())
-                        && object.parent.is_none()
+                    if kinematic_lane
                         && !parents.contains(object.id.as_str())
-                        && collider.enabled
-                        && collider.role == crate::ColliderRole::Sensor
-                        && matches!(collider.shape, crate::ColliderShape::Box { .. })
-                        && !object.components.iter().any(|component| {
-                            component.enabled
-                                && matches!(component.kind, Component::Script { .. } | Component::Animator { .. })
-                        }) =>
+                        && object.is_stationary_box_sensor() =>
                 {
                     // Give the behavior collision engine an owner without submitting a mesh.
                     let mut proxy = Object::cube(object.id.clone(), Some(object.name.clone()));
@@ -602,7 +657,7 @@ impl ComponentScene {
         scene.validate()?;
         let projection = RuntimeProjection {
             positional_audio,
-            named_sensors: !named_sensors.is_empty(),
+            named_sensors,
             local_leaf_scripts: !scene.hierarchy.is_empty()
                 && authoring.group_creation_blockers(&scene).next().is_some(),
             attached_lights: (!attached.is_empty()).then(|| Arc::new(AttachedLights(attached))),
