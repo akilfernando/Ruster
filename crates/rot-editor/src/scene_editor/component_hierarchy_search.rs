@@ -343,16 +343,20 @@ mod tests {
         editor.draft.as_mut().unwrap().name.clear();
         let ctx = egui::Context::default();
         let frame = |editor: &mut ComponentWorkspace, events| {
-            let _ = ctx.run_ui(
+            let mut output = ctx.run_ui(
                 egui::RawInput {
                     events,
                     focused: true,
                     ..Default::default()
                 },
                 |ui| {
+                    if let Some(action) = editor.workspace.component_shortcuts(ui.ctx(), false) {
+                        editor.command(action);
+                    }
                     editor.show_hierarchy_search(ui, false);
                 },
             );
+            output.textures_delta.clear();
         };
         let press = |key| egui::Event::Key {
             key,
@@ -361,8 +365,18 @@ mod tests {
             repeat: false,
             modifiers: egui::Modifiers::NONE,
         };
-        editor.command(Action::FindObjects);
-        frame(&mut editor, vec![]);
+        let shortcut = || egui::Event::Key {
+            key: egui::Key::F,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers {
+                ctrl: true,
+                command: true,
+                ..egui::Modifiers::NONE
+            },
+        };
+        frame(&mut editor, vec![shortcut()]);
         frame(&mut editor, vec![egui::Event::Text("étaGE".into())]);
         assert_eq!(editor.hierarchy_search.results.len(), 21);
         assert_eq!(editor.selection_anchor.as_deref(), Some("z"));
@@ -406,8 +420,7 @@ mod tests {
         assert_eq!(editor.session.scene(), &scene);
 
         editor.command(Action::Undo);
-        editor.command(Action::FindObjects);
-        frame(&mut editor, vec![]);
+        frame(&mut editor, vec![shortcut()]);
         frame(&mut editor, vec![egui::Event::Text("WHEEL-Z".into())]);
         frame(&mut editor, vec![press(egui::Key::Enter)]);
         assert_eq!(editor.selection_anchor.as_deref(), Some("wheel-z"));
