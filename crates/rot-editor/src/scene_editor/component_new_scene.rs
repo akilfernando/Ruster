@@ -169,37 +169,218 @@ impl ComponentWorkspace {
             Session::new(Scene::empty(new_scene_id())).map_err(|error| error.to_string())?;
         let scene = ComponentScene::from_legacy(&empty).map_err(|error| error.to_string())?;
         let prepared = project.prepare_scene(filename, &scene)?;
-        // Commit pending Inspector values only in an isolated copy. A failed
-        // old-scene save must leave the active draft and history intact.
-        let saved = if save {
-            let mut pending = self.session.clone();
-            if self.draft_dirty() {
-                let edits = self.draft_objects().map_err(|error| error.to_string())?;
-                Self::put_draft(&mut pending, edits).map_err(|error| error.to_string())?;
-            }
+        if save {
             project.verify()?;
-            pending
-                .save_recorded(&self.path)
-                .map_err(|error| error.to_string())?;
-            Some(pending)
-        } else {
-            None
-        };
+            self.save_before_new_scene()?;
+        }
         let (path, session) = match prepared.publish() {
             Ok(result) => result,
-            Err(error) => {
-                if let Some(saved) = saved {
-                    self.session = saved;
-                    self.refresh();
-                    return Err(format!("The current scene was saved. {error}"));
-                }
-                return Err(error);
+            Err(error) if save => {
+                self.refresh();
+                return Err(format!("The current scene was saved. {error}"));
             }
+            Err(error) => return Err(error),
         };
         #[cfg(unix)]
         {
             self.revoke_ai_connection = true;
         }
         Ok(OpenedScene::Components(path, Box::new(session)))
+    }
+    fn save_before_new_scene(&mut self) -> Result<(), String> {
+        #[cfg(unix)]
+        let sequence = self.next_save_sequence().map_err(|(_, message)| message)?;
+        let saved = if self.draft_dirty() {
+            // Apply Inspector values privately so a failed save preserves the
+            // complete authored workspace and its uncommitted draft.
+            let mut pending = self.session.clone();
+            let edits = self.draft_objects().map_err(|error| error.to_string())?;
+            Self::put_draft(&mut pending, edits).map_err(|error| error.to_string())?;
+            let saved = pending
+                .save_recorded(&self.path)
+                .map_err(|error| error.to_string())?;
+            self.session = pending;
+            saved
+        } else {
+            self.session
+                .save_recorded(&self.path)
+                .map_err(|error| error.to_string())?
+        };
+        #[cfg(unix)]
+        self.record_save(sequence, saved);
+        #[cfg(not(unix))]
+        let _ = saved;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workspace::Action;
+    use rot_scene::component_scene::ComponentSession;
+    use std::{fs, path::Path};
+
+    fn workspace(root: &Path) -> ComponentWorkspace {
+        let path = root.join("scene.json");
+        let original =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("original")).unwrap()).unwrap();
+        original.save_new(&path).unwrap();
+        ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap())
+    }
+
+    #[test]
+    fn new_scene_name_preview_and_keyboard_create_an_empty_saved_scene() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut editor = workspace(folder.path());
+        for bad in [
+            "",
+            "..",
+            ".secret",
+            "a/b",
+            "a\\b",
+            "aux.scene.json",
+            "COM9.level",
+            "a:scene",
+            "a.",
+            "a\u{202e}",
+        ] {
+            assert!(filename(bad).is_err(), "{bad}");
+        }
+        let full = format!("{}.scene.json", "a".repeat(120));
+        assert_eq!(filename(&full).unwrap(), full);
+
+        let ctx = egui::Context::default();
+        let mut opened = None;
+        let mut frame = |editor: &mut ComponentWorkspace, events| {
+            ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    if let Some(document) = editor.show_new_scene(ui.ctx()) {
+                        opened = Some(document);
+                    }
+                },
+            )
+            .textures_delta
+            .clear();
+        };
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        editor.command(Action::New);
+        frame(&mut editor, vec![]);
+        frame(&mut editor, vec![key(egui::Key::Escape)]);
+        assert!(editor.new_scene.is_none());
+        assert!(!folder.path().join("Title Card.scene.json").exists());
+
+        editor.command(Action::New);
+        frame(&mut editor, vec![]);
+        frame(
+            &mut editor,
+            vec![egui::Event::Text(" Title Card – 夜 ".into())],
+        );
+        assert_eq!(
+            filename(&editor.new_scene.as_ref().unwrap().name).unwrap(),
+            "Title Card – 夜.scene.json"
+        );
+        frame(&mut editor, vec![key(egui::Key::Enter)]);
+        let Some(OpenedScene::Components(path, mut session)) = opened else {
+            panic!("Enter creates a component sibling");
+        };
+        assert_eq!(path, folder.path().join("Title Card – 夜.scene.json"));
+        assert!(session.scene().objects.is_empty());
+        assert_ne!(session.scene().id, editor.session.scene().id);
+        assert_eq!(session.revision(), 0);
+        assert_eq!(
+            session.scene(),
+            ComponentSession::open(&path).unwrap().scene()
+        );
+        assert!(!session.is_dirty());
+        assert!(matches!(
+            session.undo(0),
+            Err(rot_scene::SceneError::NoUndo)
+        ));
+    }
+
+    #[test]
+    fn new_scene_save_conflict_preserves_draft_and_discard_waits_for_publication() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut editor = workspace(folder.path());
+        let old_path = editor.path.clone();
+        let original = fs::read(&old_path).unwrap();
+        editor.command(Action::CreateCube);
+        let id = editor.session.scene().objects[0].id.clone();
+        editor.select(Some(id.clone()));
+        editor.draft.as_mut().unwrap().name = "Pending name".into();
+        let before = editor.session.scene().clone();
+        let revision = editor.session.revision();
+        let side = folder.path().join("Title.scene.json");
+        fs::write(&old_path, b"external current scene edit").unwrap();
+        assert!(editor.create_sibling("Title.scene.json", true).is_err());
+        assert!(!side.exists());
+        assert_eq!(editor.session.revision(), revision);
+        assert_eq!(editor.session.scene(), &before);
+        assert!(editor.selection.contains(&id));
+        assert_eq!(editor.draft.as_ref().unwrap().name, "Pending name");
+        assert!(editor.draft_dirty());
+
+        fs::write(&side, b"other creator's scene").unwrap();
+        assert!(editor.create_sibling("Title.scene.json", false).is_err());
+        assert_eq!(fs::read(&side).unwrap(), b"other creator's scene");
+        assert_eq!(editor.session.scene(), &before);
+        assert!(editor.draft_dirty());
+        assert!(matches!(
+            editor.create_sibling("Discard Target.scene.json", false),
+            Ok(OpenedScene::Components(_, _))
+        ));
+        assert_eq!(fs::read(&old_path).unwrap(), b"external current scene edit");
+
+        fs::write(&old_path, original).unwrap();
+        assert!(matches!(
+            editor.create_sibling("Save Target.scene.json", true),
+            Ok(OpenedScene::Components(_, _))
+        ));
+        let saved = ComponentSession::open(old_path).unwrap();
+        assert_eq!(saved.scene().objects[0].name, "Pending name");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn new_scene_staging_cannot_overwrite_a_racing_file_or_retarget_a_project() {
+        use super::super::super::project_startup::ProjectDirectory;
+        use std::os::unix::fs::symlink;
+        let folder = tempfile::tempdir().unwrap();
+        let root = folder.path().join("Project");
+        fs::create_dir(&root).unwrap();
+        let editor = workspace(&root);
+        let scene = editor.session.scene();
+        let project = ProjectDirectory::capture(&root).unwrap();
+        let target = root.join("Title.scene.json");
+        let staged = project.prepare_scene("Title.scene.json", scene).unwrap();
+        assert!(!target.exists());
+        fs::write(&target, b"winning publication").unwrap();
+        assert!(staged.publish().is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"winning publication");
+
+        let link = root.join("Alias.scene.json");
+        symlink(&target, &link).unwrap();
+        assert!(project.prepare_scene("Alias.scene.json", scene).is_err());
+        assert!(fs::symlink_metadata(&link).unwrap().is_symlink());
+
+        let staged = project.prepare_scene("Late.scene.json", scene).unwrap();
+        let moved = folder.path().join("Moved Project");
+        fs::rename(&root, &moved).unwrap();
+        fs::create_dir(&root).unwrap();
+        assert!(staged.publish().is_err());
+        assert!(!root.join("Late.scene.json").exists());
+        assert!(!moved.join("Late.scene.json").exists());
     }
 }

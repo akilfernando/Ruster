@@ -153,11 +153,13 @@ impl ProjectDirectory {
         file.rewind().map_err(error)?;
         let session = ComponentSession::from_open_file(&path, file.try_clone().map_err(error)?)
             .map_err(error)?;
+        let stamp = stamp(file)?;
         self.verify()?;
         Ok(PreparedSibling {
             project: self.clone(),
             path,
             session,
+            stamp,
             staged,
         })
     }
@@ -175,6 +177,7 @@ pub(super) struct PreparedSibling {
     project: ProjectDirectory,
     path: PathBuf,
     session: ComponentSession,
+    stamp: Stamp,
     #[cfg(unix)]
     staged: StagedScene,
     #[cfg(not(unix))]
@@ -225,7 +228,10 @@ impl PreparedSibling {
         self.project.verify()?;
         #[cfg(unix)]
         {
-            use rustix::fs::{linkat, AtFlags};
+            use rustix::fs::{linkat, openat, AtFlags, Mode, OFlags};
+            if stamp(&self.staged.file)? != self.stamp {
+                return Err("The prepared scene changed before it could be created.".into());
+            }
             let name = self.path.file_name().expect("a validated direct filename");
             #[cfg(target_os = "linux")]
             {
@@ -250,6 +256,17 @@ impl PreparedSibling {
                 AtFlags::empty(),
             )
             .map_err(scene_create_error)?;
+            let published = openat(
+                &self.staged.directory,
+                name,
+                OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+                Mode::empty(),
+            )
+            .map(File::from)
+            .map_err(error)?;
+            if stamp(&published)? != stamp(&self.staged.file)? {
+                return Err("The new scene was replaced before it could be opened.".into());
+            }
             self.staged.directory.sync_all().map_err(|failure| {
                 format!(
                     "The scene was created, but the project folder could not be synced: {failure}"
@@ -257,9 +274,20 @@ impl PreparedSibling {
             })?;
         }
         #[cfg(not(unix))]
-        self.staged
-            .persist_noclobber(&self.path)
-            .map_err(|failure| scene_create_error(failure.error))?;
+        {
+            if stamp(self.staged.as_file())? != self.stamp {
+                return Err("The prepared scene changed before it could be created.".into());
+            }
+            let published = self
+                .staged
+                .persist_noclobber(&self.path)
+                .map_err(|failure| scene_create_error(failure.error))?;
+            if !self.path.symlink_metadata().map_err(error)?.is_file()
+                || stamp(&File::open(&self.path).map_err(error)?)? != stamp(&published)?
+            {
+                return Err("The new scene was replaced before it could be opened.".into());
+            }
+        }
         self.project
             .verify()
             .map_err(|error| format!("The scene was written to the original folder. {error}"))?;
