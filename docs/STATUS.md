@@ -69,8 +69,12 @@ textures. Base-color textures support indexed PNG. Import reports sampler
 approximations, other material fallbacks and skipped triangles in the Assets
 Inspector and MCP. Static GLBs import point and directional lights as
 editable v23 components on their source nodes. Diagnostics report
-photometric approximations, defaults, clamps, and skipped spots. Failed
-imports show the source path, recovery, last working
+photometric approximations, defaults, clamps, and skipped spots. GLB
+perspective cameras retain parented rotation, vertical lens, finite or
+infinite clipping, and authored framing through editor Play and Linux
+Build. Native placement keeps the current Game Camera active. Asset
+inspection and MCP explain when a lens is skipped. Failed imports show
+the source path, recovery, last working
 version availability and separate Error Details in the Inspector. Approved MCP
 clients can page the same issues, including sources with no asset ID. A
 relocated build loaded 80 meshes.
