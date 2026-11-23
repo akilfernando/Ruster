@@ -225,6 +225,9 @@ fn resize(original: Collider, face: Face, delta: f64) -> Option<Collider> {
     let fixed = center - sign * extent;
     let new_extent = extent + sign * delta * 0.5;
     let new_center = fixed + sign * new_extent;
+    if !(0.001..=1000.0).contains(&new_extent) || new_center.abs() > 10_000.0 {
+        return None;
+    }
     half_extents[i] = new_extent as f32;
     next.offset[i] = new_center as f32;
     next.shape = ColliderShape::Box { half_extents };
@@ -551,7 +554,11 @@ fn paint_box(
             if hot { highlight } else { color },
         );
         if hot {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            ui.ctx().set_cursor_icon(if active.is_some() {
+                egui::CursorIcon::Grabbing
+            } else {
+                egui::CursorIcon::Grab
+            });
             painter.text(
                 point + egui::vec2(8.0, -8.0),
                 egui::Align2::LEFT_BOTTOM,
