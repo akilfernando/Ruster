@@ -2,7 +2,7 @@ use super::ComponentWorkspace;
 use crate::{editor_theme, strings::Text, ui_kit};
 use eframe::egui;
 use rot_scene::{
-    component_scene::{Component, ComponentInstance, ObjectNode},
+    component_scene::{CameraView, Component, ComponentInstance, ObjectNode},
     PlayerAnchor, PlayerView, SceneError, Transform,
 };
 use std::collections::HashMap;
@@ -156,11 +156,7 @@ impl ComponentWorkspace {
         self.session
             .scene()
             .designated_camera()
-            .and_then(|(_, component, view)| {
-                view.followed_target()
-                    .is_none()
-                    .then(|| component.id.clone())
-            })
+            .and_then(|(_, component, view)| view.is_fixed().then(|| component.id.clone()))
     }
 
     pub(super) fn begin_camera_capture(&mut self) {
@@ -219,7 +215,7 @@ impl ComponentWorkspace {
                 .iter_mut()
                 .find(|component| component.id == id)
                 .expect("camera owner was found");
-            camera.kind = Component::Camera { view };
+            camera.kind = Component::Camera { view: view.into() };
             (id.to_owned(), object)
         } else {
             let stamp = std::time::SystemTime::now()
@@ -247,7 +243,7 @@ impl ComponentWorkspace {
                 components: vec![ComponentInstance {
                     id: id.clone(),
                     enabled: true,
-                    kind: Component::Camera { view },
+                    kind: Component::Camera { view: view.into() },
                 }],
             };
             (id, object)
@@ -431,11 +427,11 @@ impl ComponentWorkspace {
     }
 }
 
-pub(in crate::scene_editor) fn camera_mode(view: &PlayerView) -> &'static str {
-    if view.followed_target().is_some() {
-        Text::CameraFollow.plain()
-    } else {
-        Text::CameraFixed.plain()
+fn camera_mode(view: &CameraView) -> &'static str {
+    match view {
+        CameraView::Transform(_) => Text::CameraTransformPerspective.plain(),
+        CameraView::Orbit(view) if view.followed_target().is_some() => Text::CameraFollow.plain(),
+        CameraView::Orbit(_) => Text::CameraFixed.plain(),
     }
 }
 

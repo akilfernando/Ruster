@@ -62,9 +62,75 @@ struct SceneFile<S> {
     scene: S,
 }
 
+/// A v23 camera either uses the legacy orbit parameters or the owner's pose.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum CameraView {
+    Orbit(PlayerView),
+    Transform(TransformPerspective),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TransformPerspective {
+    #[serde(rename = "type")]
+    kind: PerspectiveKind,
+    pub vertical_fov_degrees: f32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PerspectiveKind {
+    TransformPerspective,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct TransformCameraPose {
+    pub eye: [f32; 3],
+    pub forward: [f32; 3],
+    pub up: [f32; 3],
+    pub vertical_fov_degrees: f32,
+}
+
+impl From<PlayerView> for CameraView {
+    fn from(value: PlayerView) -> Self {
+        Self::Orbit(value)
+    }
+}
+
+impl CameraView {
+    pub fn transform_perspective(vertical_fov_degrees: f32) -> Self {
+        Self::Transform(TransformPerspective {
+            kind: PerspectiveKind::TransformPerspective,
+            vertical_fov_degrees,
+        })
+    }
+
+    pub fn followed_target(&self) -> Option<&str> {
+        match self {
+            Self::Orbit(view) => view.followed_target(),
+            Self::Transform(_) => None,
+        }
+    }
+
+    pub fn is_fixed(&self) -> bool {
+        matches!(self, Self::Orbit(view) if view.followed_target().is_none())
+    }
+
+    pub fn validate_settings(&self) -> Result<(), SceneError> {
+        match self {
+            Self::Orbit(view) => view.validate_settings(),
+            Self::Transform(lens) if (10. ..=120.).contains(&lens.vertical_fov_degrees) => Ok(()),
+            Self::Transform(_) => Err(SceneError::Invalid(
+                "Transform Perspective requires vertical FOV 10..120 degrees.".into(),
+            )),
+        }
+    }
+}
+
 impl ComponentScene {
     /// Return the designated Camera's owner index, component and authored settings.
-    pub fn designated_camera(&self) -> Option<(usize, &ComponentInstance, &PlayerView)> {
+    pub fn designated_camera(&self) -> Option<(usize, &ComponentInstance, &CameraView)> {
         let id = self.gameplay_camera.as_deref()?;
         self.objects.iter().enumerate().find_map(|(index, object)| {
             object
@@ -79,10 +145,10 @@ impl ComponentScene {
         })
     }
 
-    pub fn effective_camera(&self, hierarchy: &ObjectHierarchy) -> Option<&PlayerView> {
+    pub fn effective_camera(&self, hierarchy: &ObjectHierarchy) -> Option<(usize, &CameraView)> {
         let (index, component, view) = self.designated_camera()?;
         (component.enabled && hierarchy.effectively_enabled.get(index) == Some(&true))
-            .then_some(view)
+            .then_some((index, view))
     }
 
     pub fn validate(&self) -> Result<ObjectHierarchy, SceneError> {
@@ -399,7 +465,9 @@ impl ComponentScene {
                 components: vec![ComponentInstance {
                     id: camera.clone(),
                     enabled: true,
-                    kind: Component::Camera { view: view.clone() },
+                    kind: Component::Camera {
+                        view: view.clone().into(),
+                    },
                 }],
             });
             camera
@@ -423,8 +491,13 @@ impl ComponentScene {
     /// Resolve indexed world matrices in parent-first order without recursion.
     pub fn world_matrices(&self) -> Result<Vec<DMat4>, SceneError> {
         let hierarchy = ObjectHierarchy::build(&self.objects)?;
+        self.world_matrices_in(&hierarchy)
+    }
+
+    /// Reuse the hierarchy already validated by the projection caller.
+    pub fn world_matrices_in(&self, hierarchy: &ObjectHierarchy) -> Result<Vec<DMat4>, SceneError> {
         let mut world = vec![DMat4::IDENTITY; self.objects.len()];
-        for index in hierarchy.order {
+        for &index in &hierarchy.order {
             let local = self.objects[index].transform.affine_matrix();
             let matrix = hierarchy.parents[index].map_or(local, |parent| world[parent] * local);
             if !matrix.is_finite() {
@@ -436,6 +509,38 @@ impl ComponentScene {
             world[index] = matrix;
         }
         Ok(world)
+    }
+
+    /// The eye uses the full affine position. Compose authored rotations
+    /// separately so scale and shear never change the lens orientation.
+    pub fn transform_camera_pose(
+        &self,
+        index: usize,
+        hierarchy: &ObjectHierarchy,
+        world: &[DMat4],
+        lens: &TransformPerspective,
+    ) -> Result<TransformCameraPose, SceneError> {
+        use glam::{DQuat, DVec3, EulerRot};
+        let eye = world[index].w_axis.truncate().as_vec3();
+        if !eye.is_finite() {
+            return Err(SceneError::Invalid(
+                "Game Camera position exceeds renderer precision.".into(),
+            ));
+        }
+        let mut rotation = DQuat::IDENTITY;
+        let mut current = Some(index);
+        while let Some(index) = current {
+            let [x, y, z] = self.objects[index].transform.rotation.map(f64::from);
+            rotation = DQuat::from_euler(EulerRot::ZYX, z, y, x) * rotation;
+            current = hierarchy.parents[index];
+        }
+        let rotation = rotation.normalize();
+        Ok(TransformCameraPose {
+            eye: eye.to_array(),
+            forward: (rotation * -DVec3::Z).as_vec3().to_array(),
+            up: (rotation * DVec3::Y).as_vec3().to_array(),
+            vertical_fov_degrees: lens.vertical_fov_degrees,
+        })
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SceneError> {
@@ -508,7 +613,7 @@ pub struct ComponentInstance {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Component {
     Camera {
-        view: PlayerView,
+        view: CameraView,
     },
     Animator {
         binding: AnimationBinding,
@@ -711,7 +816,7 @@ mod tests {
         );
         let camera = &migrated.objects.last().unwrap().components[0];
         assert_eq!(migrated.gameplay_camera.as_ref(), Some(&camera.id));
-        assert_eq!(camera.kind, Component::Camera { view });
+        assert_eq!(camera.kind, Component::Camera { view: view.into() });
         let mut json = Vec::new();
         migrated.write_json(&mut json).unwrap();
         assert_eq!(

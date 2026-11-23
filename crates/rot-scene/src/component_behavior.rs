@@ -114,7 +114,13 @@ impl ComponentScene {
         let mut hidden_mesh_renderers = None;
         let mut scene = Scene::empty(self.id.clone());
         scene.display = self.display;
-        scene.player_view = self.effective_camera(&hierarchy).cloned();
+        scene.player_view = match self.effective_camera(&hierarchy) {
+            Some((_, super::CameraView::Orbit(view))) => Some(view.clone()),
+            Some((_, super::CameraView::Transform(_))) => return Err(SceneError::Invalid(
+                "Transform Perspective cameras require a static scene. Activate a Fixed or Follow camera, or clear the Game Camera before Play or Build.".into(),
+            )),
+            None => None,
+        };
         scene.materials.clone_from(&self.materials);
         let mut authoring = Authoring {
             sources: self.sources.clone(),

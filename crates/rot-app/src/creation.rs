@@ -723,7 +723,7 @@ impl CreationManifest {
         match &scene {
             RuntimeScene::Behavior(session) => self.validate_behavior_scene(session)?,
             RuntimeScene::StaticHierarchy { scene, preview } => {
-                if self.initial_camera.is_some() && preview.scene().player_view.is_some() {
+                if self.initial_camera.is_some() && preview.has_player_camera() {
                     return Err(
                         "Remove legacy initial camera framing when the scene owns a player view."
                             .into(),

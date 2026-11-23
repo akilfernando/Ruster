@@ -4,7 +4,7 @@ use crate::ui_kit;
 use crate::workspace::Action;
 use eframe::egui;
 use rot_scene::component_scene::{
-    Component, ComponentInstance, Geometry, ObjectNode, ScriptSourceKind,
+    CameraView, Component, ComponentInstance, Geometry, ObjectNode, ScriptSourceKind,
 };
 use rot_scene::{
     BehaviorBinding, BindingTarget, ColliderRole, ColliderShape, Light, LightKind, OpaqueMaterial,
@@ -15,6 +15,7 @@ use std::{collections::BTreeMap, ops::RangeInclusive};
 pub(super) enum AddComponent {
     MeshRenderer,
     Collider,
+    Camera,
     Light,
     DirectionalLight,
     Script { source: String, owner: String },
@@ -25,6 +26,7 @@ impl AddComponent {
         match self {
             Self::MeshRenderer => Text::ComponentMeshRenderer,
             Self::Collider => Text::ComponentCollider,
+            Self::Camera => Text::ComponentCamera,
             Self::Light => Text::ComponentLight,
             Self::DirectionalLight => Text::LabelCreateDirectionalLight,
             Self::Script { .. } => Text::ComponentScript,
@@ -45,6 +47,9 @@ impl AddComponent {
                     role: ColliderRole::Blocker,
                     offset: [0.0; 3],
                     shape: ColliderShape::default(),
+                },
+                Self::Camera => Component::Camera {
+                    view: CameraView::transform_perspective(45.0),
                 },
                 Self::Script { source, owner } => Component::Script {
                     binding: BehaviorBinding {
@@ -255,7 +260,28 @@ pub(super) fn components(
                         kind,
                     } => submit |= light_fields(ui, color, intensity, kind),
                     Component::Camera { view } => {
-                        let mode = super::component_workspace::component_camera::camera_mode(view);
+                        if let CameraView::Transform(lens) = view {
+                            ui_kit::property_row(ui, Text::ComponentCamera.plain(), |ui| {
+                                ui.label(Text::CameraTransformPerspective.plain());
+                            });
+                            submit |= number_field(
+                                ui,
+                                Text::CameraVerticalFov,
+                                &mut lens.vertical_fov_degrees,
+                                0.25,
+                                10.0..=120.0,
+                                Text::CameraTransformFovHint,
+                            );
+                            return;
+                        }
+                        let CameraView::Orbit(view) = view else {
+                            unreachable!()
+                        };
+                        let mode = if view.followed_target().is_some() {
+                            Text::CameraFollow.plain()
+                        } else {
+                            Text::CameraFixed.plain()
+                        };
                         ui_kit::property_row(ui, Text::ComponentCamera.plain(), |ui| {
                             ui.label(mode);
                         });
@@ -679,6 +705,7 @@ impl ComponentPicker {
             for kind in [
                 AddComponent::MeshRenderer,
                 AddComponent::Collider,
+                AddComponent::Camera,
                 AddComponent::Light,
                 AddComponent::DirectionalLight,
             ] {

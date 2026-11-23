@@ -727,7 +727,18 @@ fn execute_static_hierarchy(
             "runtime_scene": scene,
             "world_matrices": world_matrices,
         });
-        if let Some(camera) = player_view_report(runtime.app().content().scene())? {
+        let content = runtime.app().content();
+        if let Some(camera) = content.transform_camera() {
+            let matrices = [4.0 / 3.0, 16.0 / 9.0].into_iter().map(|aspect| {
+                let projection = rot_app::transform_camera_projection(camera, aspect)
+                    .ok_or("Transform Perspective camera could not be projected")?;
+                Ok(serde_json::json!({"aspect":aspect, "view":projection.view, "projection":projection.projection}))
+            }).collect::<Result<Vec<_>, &str>>()?;
+            output["player_view"] = serde_json::json!({
+                "type":"transform_perspective", "eye":camera.eye, "forward":camera.forward,
+                "up":camera.up, "vertical_fov_degrees":camera.vertical_fov_degrees, "matrices":matrices,
+            });
+        } else if let Some(camera) = player_view_report(content.scene())? {
             output["player_view"] = camera;
         }
         println!(

@@ -2,7 +2,7 @@
 #[cfg(feature = "audio-output")]
 pub mod audio;
 pub mod creation;
-pub use rot_render::player_view_projection;
+pub use rot_render::{player_view_projection, transform_camera_projection};
 mod host;
 pub mod hud;
 mod resources;
@@ -117,6 +117,20 @@ impl Content {
             ContentScene::StaticHierarchy(preview) => preview.scene(),
         }
     }
+    pub fn has_player_camera(&self) -> bool {
+        match &self.scene {
+            ContentScene::Behavior(scene) => scene.player_view.is_some(),
+            ContentScene::StaticHierarchy(preview) => preview.has_player_camera(),
+        }
+    }
+
+    pub fn transform_camera(&self) -> Option<rot_scene::component_scene::TransformCameraPose> {
+        match &self.scene {
+            ContentScene::Behavior(_) => None,
+            ContentScene::StaticHierarchy(preview) => preview.transform_camera(),
+        }
+    }
+
     /// Edit legacy behavior scene data. Panics for immutable component content.
     pub fn scene_mut(&mut self) -> &mut Scene {
         let ContentScene::Behavior(scene) = &mut self.scene else {

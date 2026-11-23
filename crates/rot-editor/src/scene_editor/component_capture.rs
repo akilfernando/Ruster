@@ -25,6 +25,7 @@ struct View {
     dpi: f32,
     matrices: rot_render::CameraMatrices,
     camera: Option<rot_render::CameraState>,
+    transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
     scene_revision: u64,
     asset_revision: Option<u64>,
     epoch: u64,
@@ -123,6 +124,9 @@ impl ComponentWorkspace {
                     .navigation
                     .camera
                     .filter(|_| !self.navigation.player_view),
+                transform_camera: frame
+                    .and_then(|frame| frame.static_preview.as_ref())
+                    .and_then(|preview| preview.transform_camera()),
                 scene_revision: self.session.revision(),
                 asset_revision: self.assets.as_ref().map(rot_assets::AssetStore::revision),
                 epoch: self.capture.epoch,
@@ -471,7 +475,7 @@ impl ComponentWorkspace {
             })
         });
         let reason = view.grounding_refusal();
-        let Value::Object(fields) = json!({
+        let Value::Object(mut fields) = json!({
             "view_revision":self.capture.view_revision.to_string(),
             "camera":camera,
             "view_matrix":view.matrices.0,
@@ -492,6 +496,15 @@ impl ComponentWorkspace {
         }) else {
             unreachable!()
         };
+        if let Some(camera) = view.transform_camera {
+            fields.insert(
+                "player_camera".into(),
+                json!({
+                    "type":"transform_perspective", "eye":camera.eye, "forward":camera.forward,
+                    "up":camera.up, "vertical_fov_degrees":camera.vertical_fov_degrees,
+                }),
+            );
+        }
         fields
     }
 }
@@ -940,6 +953,7 @@ mod tests {
             dpi: 1.,
             matrices: Default::default(),
             camera: None,
+            transform_camera: None,
             scene_revision: workspace.session.revision(),
             asset_revision: workspace
                 .assets

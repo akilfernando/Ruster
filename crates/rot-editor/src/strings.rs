@@ -87,6 +87,8 @@ editor_text! {
     CameraSuspended => "Camera Suspended",
     CameraMakeActive => "Make Active",
     CameraFixed => "Fixed",
+    CameraTransformPerspective => "Transform Perspective",
+    CameraTransformFovHint => "Vertical field of view in degrees (10 to 120).",
     CameraFollow => "Follow",
     CameraWorldTarget => "World Target",
     CameraYaw => "Yaw",

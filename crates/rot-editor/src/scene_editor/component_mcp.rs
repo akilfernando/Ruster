@@ -216,6 +216,7 @@ impl ComponentWorkspace {
                 result["selected_object_ids"] = json!(selected_ids);
                 result["assembly_guidance"] = json!("When building repeated structures, use viewport_frame and viewport_screenshot to check one complete assembly from the front, side, and top before making linked copies with scene_prefab.");
                 result["primitive_guidance"] = json!("triangular_prism is 1 unit per axis (local bounds -0.5 to 0.5), with a bounding-box center pivot, +Y up, and its ridge along local Z. With parent_id, the whole transform is parent-local.");
+                result["camera_guidance"] = json!("A v23 Transform Perspective camera uses its owner's world position and authored rotation; local -Z is forward and +Y is up. Parent scale affects position, never orientation or FOV.");
             }
             return Ok(result);
         }
@@ -696,14 +697,23 @@ impl ComponentWorkspace {
 
     fn inspect_gameplay_camera(&self) -> Value {
         use super::super::player_view::{camera_observation, resolved_camera_observation};
-        use rot_scene::{PlayerAnchor, ResolvedPlayerView};
+        use rot_scene::{component_scene::CameraView, PlayerAnchor, ResolvedPlayerView};
 
         let scene = self.session.scene();
         let designated = scene.designated_camera();
         let active = designated.is_some_and(|(index, component, _)| {
             component.enabled && self.camera_owner_enabled(index)
         });
+        let mode = designated.map(|(_, _, view)| match view {
+            CameraView::Transform(_) => "transform_perspective",
+            CameraView::Orbit(view) if view.followed_target().is_some() => "follow",
+            CameraView::Orbit(_) => "fixed",
+        });
         let authored = designated.filter(|_| active).and_then(|(_, _, view)| {
+            let CameraView::Orbit(view) = view else {
+                let camera = self.preview.as_ref().ok()?.transform_camera()?;
+                return Some(transform_camera_observation(camera));
+            };
             let anchor = match &view.anchor {
                 PlayerAnchor::Fixed { position } => *position,
                 PlayerAnchor::Follow { target_id, offset } => {
@@ -733,7 +743,9 @@ impl ComponentWorkspace {
         });
         let runtime = self.runtime.displayed_frame().map(|frame| json!({
             "tick":frame.tick.to_string(),"authored_revision":frame.key.authored_revision.to_string(),
-            "stale":self.runtime.stale,"camera":camera_observation(&frame.scene),
+            "stale":self.runtime.stale,"camera":frame.static_preview.as_ref()
+                .and_then(|preview| preview.transform_camera())
+                .map_or_else(|| camera_observation(&frame.scene), transform_camera_observation),
         }));
         json!({
             "mode": if self.navigation.player_view {"player"} else {"scene"},
@@ -741,6 +753,7 @@ impl ComponentWorkspace {
             "component_id": designated.map(|(_, component, _)| &component.id),
             "effective_state": if active {"active"} else if designated.is_some() {"suspended"} else {"unset"},
             "player_view": designated.map(|(_, _, view)| view),
+            "camera_mode": mode,
             "authored_camera": authored,
             "runtime":runtime, "dirty":self.session.is_dirty(),
         })
@@ -989,6 +1002,14 @@ fn single_renderer_geometry(
         ));
     }
     Ok((component_id, geometry))
+}
+
+fn transform_camera_observation(camera: rot_scene::component_scene::TransformCameraPose) -> Value {
+    let matrices: Vec<_> = [4. / 3., 16. / 9.].into_iter()
+        .filter_map(|aspect| rot_render::transform_camera_projection(camera, aspect).map(|projection|
+            json!({"aspect": aspect, "eye":projection.eye, "view":projection.view, "projection":projection.projection})))
+        .collect();
+    json!({"resolved":camera, "matrices":matrices})
 }
 
 type CommandError = (&'static str, String);

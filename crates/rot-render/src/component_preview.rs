@@ -23,11 +23,20 @@ pub struct ComponentPreview {
     matrices: Vec<Mat4>,
     unpickable: BTreeSet<String>,
     light_budget_exceeded: bool,
+    transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
 }
 
 impl ComponentPreview {
     pub fn scene(&self) -> &Scene {
         &self.scene
+    }
+
+    pub fn has_player_camera(&self) -> bool {
+        self.transform_camera.is_some() || self.scene.player_view.is_some()
+    }
+
+    pub fn transform_camera(&self) -> Option<rot_scene::component_scene::TransformCameraPose> {
+        self.transform_camera
     }
 
     pub fn scene_snapshot(&self) -> Arc<Scene> {
@@ -110,6 +119,7 @@ impl ComponentPreview {
             matrices: Some(&self.matrices),
             unpickable: (!self.unpickable.is_empty()).then_some(&self.unpickable),
             hidden_mesh_renderers: None,
+            transform_camera: self.transform_camera,
         }
     }
 
@@ -264,14 +274,21 @@ pub fn project_editor_with_world(
     unpickable: BTreeSet<String>,
 ) -> Result<(ComponentPreview, Vec<DMat4>), SceneError> {
     let hierarchy = component_scene.validate()?;
-    let world = component_scene.world_matrices()?;
+    use rot_scene::component_scene::CameraView;
+    let world = component_scene.world_matrices_in(&hierarchy)?;
     let mut scene = Scene::empty(component_scene.id.clone());
     scene.materials.clone_from(&component_scene.materials);
     scene.display = component_scene.display;
-    scene.player_view = component_scene
-        .effective_camera(&hierarchy)
-        .filter(|view| view.followed_target().is_none())
-        .cloned();
+    let transform_camera = match component_scene.effective_camera(&hierarchy) {
+        Some((index, CameraView::Transform(lens))) => {
+            Some(component_scene.transform_camera_pose(index, &hierarchy, &world, lens)?)
+        }
+        Some((_, CameraView::Orbit(view))) if view.followed_target().is_none() => {
+            scene.player_view = Some(view.clone());
+            None
+        }
+        _ => None,
+    };
     let mut lights = BTreeMap::new();
     let mut matrices = Vec::new();
     let mut point_lights = 0;
@@ -356,6 +373,7 @@ pub fn project_editor_with_world(
             matrices,
             unpickable,
             light_budget_exceeded,
+            transform_camera,
         },
         world,
     ))
@@ -473,6 +491,7 @@ mod tests {
             matrices: Some(&preview.matrices),
             unpickable: None,
             hidden_mesh_renderers: None,
+            transform_camera: None,
         };
         let meshes = BTreeMap::new();
         let camera = super::super::Camera::fit_objects(draw.objects(), &meshes, 1.0).unwrap();
@@ -504,6 +523,7 @@ mod tests {
         let draw = DrawScene {
             unpickable: Some(&locked),
             hidden_mesh_renderers: None,
+            transform_camera: None,
             ..draw
         };
         let locked_preview = project_editor(&components, &BTreeSet::new(), locked.clone()).unwrap();

@@ -1488,7 +1488,9 @@ mod tests {
             components: vec![ComponentInstance {
                 id: "shot".into(),
                 enabled: true,
-                kind: Component::Camera { view: view.clone() },
+                kind: Component::Camera {
+                    view: view.clone().into(),
+                },
             }],
         };
         assert_eq!(
@@ -1507,8 +1509,10 @@ mod tests {
             let scene = session.scene();
             assert_eq!(scene.gameplay_camera.as_deref(), Some("shot"));
             assert_eq!(
-                scene.effective_camera(&scene.validate().unwrap()),
-                expected.then_some(&view)
+                scene
+                    .effective_camera(&scene.validate().unwrap())
+                    .map(|(_, view)| view.clone()),
+                expected.then(|| view.clone().into())
             );
         };
         active(&session, true);

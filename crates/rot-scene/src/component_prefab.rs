@@ -473,7 +473,9 @@ impl PrefabSource {
                             }
                         }
                     }
-                    Component::Camera { view } => {
+                    Component::Camera {
+                        view: super::CameraView::Orbit(view),
+                    } => {
                         if let PlayerAnchor::Follow { target_id, .. } = &mut view.anchor {
                             *target_id = scene_id(target_id)?;
                         }

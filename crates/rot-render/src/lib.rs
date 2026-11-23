@@ -461,6 +461,42 @@ pub fn player_view_projection(
     })
 }
 
+fn transform_camera_matrices(
+    camera: rot_scene::component_scene::TransformCameraPose,
+    aspect: f32,
+) -> Option<(Mat4, Mat4, Mat4)> {
+    if !(0.01..=100.0).contains(&aspect) || !(10.0..=120.0).contains(&camera.vertical_fov_degrees) {
+        return None;
+    }
+    let eye = Vec3::from_array(camera.eye);
+    let forward = Vec3::from_array(camera.forward);
+    let up = Vec3::from_array(camera.up);
+    if !eye.is_finite()
+        || !forward.is_normalized()
+        || !up.is_normalized()
+        || forward.dot(up).abs() > 1.0e-4
+    {
+        return None;
+    }
+    let fov = camera.vertical_fov_degrees.to_radians();
+    let view = Mat4::look_to_rh(eye, forward, up);
+    let projection = Mat4::perspective_rh(fov, aspect, 0.1, 1000.0);
+    let overlay = Mat4::perspective_rh_gl(fov, aspect, 0.1, 1000.0);
+    view.is_finite().then_some((view, projection, overlay))
+}
+
+pub fn transform_camera_projection(
+    camera: rot_scene::component_scene::TransformCameraPose,
+    aspect: f32,
+) -> Option<PlayerViewProjection> {
+    let (view, projection, _) = transform_camera_matrices(camera, aspect)?;
+    Some(PlayerViewProjection {
+        eye: camera.eye,
+        view: view.to_cols_array_2d(),
+        projection: projection.to_cols_array_2d(),
+    })
+}
+
 #[cfg(test)]
 #[test]
 fn player_view_keeps_vertical_fov_and_rejects_invalid_lenses() {
@@ -881,6 +917,7 @@ struct DrawScene<'a> {
     matrices: Option<&'a [Mat4]>,
     unpickable: Option<&'a BTreeSet<String>>,
     hidden_mesh_renderers: Option<&'a HashSet<String>>,
+    transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
 }
 
 impl<'a> From<&'a Scene> for DrawScene<'a> {
@@ -890,6 +927,7 @@ impl<'a> From<&'a Scene> for DrawScene<'a> {
             matrices: None,
             unpickable: None,
             hidden_mesh_renderers: None,
+            transform_camera: None,
         }
     }
 }
@@ -1608,9 +1646,17 @@ fn render_draw_scene(
 ) -> ViewportInteraction {
     let scene = draw.scene;
     let player_view = if navigation.player_view {
-        match scene.resolve_player_view().ok().flatten().and_then(|view| {
-            player_matrices(view, surface.rect.aspect_ratio()).map(|matrices| (view, matrices))
-        }) {
+        let aspect = surface.rect.aspect_ratio();
+        let camera = if let Some(camera) = draw.transform_camera {
+            transform_camera_matrices(camera, aspect)
+                .map(|matrices| (matrices, Vec3::from_array(camera.eye).extend(1.).to_array()))
+        } else {
+            scene.resolve_player_view().ok().flatten().and_then(|view| {
+                player_matrices(view, aspect)
+                    .map(|matrices| (matrices, player_view_camera(view).eye_mode()))
+            })
+        };
+        match camera {
             Some(view) => Some(view),
             None => {
                 let message = navigation.wording.camera_error;
@@ -1818,10 +1864,10 @@ fn render_draw_scene(
             }
         }
     }
-    let (view, projection, gizmo_projection) = if let Some((player, matrices)) = player_view {
-        camera = player_view_camera(player);
+    let ((view, projection, gizmo_projection), camera_eye_mode) = if let Some(camera) = player_view
+    {
         fit_error = None;
-        matrices
+        camera
     } else {
         let matrices = match camera.checked_matrices(rect.aspect_ratio()) {
             Some(matrices) => matrices,
@@ -1835,7 +1881,7 @@ fn render_draw_scene(
             .data_mut(|data| data.insert_temp(camera_id, camera));
         ui.ctx()
             .data_mut(|data| data.insert_temp(error_id, fit_error));
-        matrices
+        (matrices, camera.eye_mode())
     };
     let view_projection = projection * view;
     let picked = if !navigation.player_view && !input_owned && response.clicked() {
@@ -1996,7 +2042,7 @@ fn render_draw_scene(
             groups,
             camera: view_projection.to_cols_array(),
             show_editor_grid: navigation.show_editor_grid && !navigation.player_view,
-            camera_eye_mode: camera.eye_mode(),
+            camera_eye_mode,
             display: scene.display,
             lighting,
             size: rect.size(),

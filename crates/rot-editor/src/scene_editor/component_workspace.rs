@@ -1508,7 +1508,14 @@ impl ComponentWorkspace {
         let playing = frame.is_some() && self.runtime.is_playing();
         self.camera_authoring
             .begin_frame(frame.is_some(), &mut self.navigation);
-        self.navigation.player_view = frame.is_some() && scene.player_view.is_some();
+        self.navigation.player_view = frame.as_ref().is_some_and(|frame| {
+            frame
+                .static_preview
+                .as_ref()
+                .map_or(scene.player_view.is_some(), |preview| {
+                    preview.has_player_camera()
+                })
+        });
         self.navigation.capture_camera_label =
             (!self.runtime.in_play_mode()).then_some(Text::SetGameCameraFromView.plain());
         self.navigation.focusable = playing && !self.session.scene().actions.is_empty();
