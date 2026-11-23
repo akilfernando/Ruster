@@ -192,6 +192,15 @@ connected project.
   Scene view and static Play/Build use the first four enabled visible
   Point or Spot Lights in scene order. See first-page `scene_inspect`
   for this guidance and any budget warning.
+- For a one-time Spot aim, inspect `scene_components_inspect` with the exact
+  owner and component IDs. Its `spot_world` reports the committed world
+  origin, unit forward direction, range and half-angles. Submit a single
+  edit to `scene_components_edit` using the scene guards:
+  `{"operation":"aim_spot_at_object","object_id":"lamp","component_id":"spot","target_object_id":"plate"}`.
+  The command rotates the whole object, including its mesh and children.
+  It aims local −Z at the target's current world pivot. It adds no live
+  target link. A target on the same object, in its subtree, or sharing
+  its world pivot is refused. An already aligned beam adds no Undo entry.
 - Behavior Play and Build can attach one Point or Spot to a Mesh Renderer
   leaf with an Object Lua API 1 or 2 script. Enable the light and mesh
   independently. The light follows the same committed transform as the
