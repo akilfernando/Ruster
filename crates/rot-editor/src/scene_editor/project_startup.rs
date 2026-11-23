@@ -118,7 +118,7 @@ impl ScenePin {
     }
 
     pub fn verify(&self) -> Result<PathBuf, String> {
-        let observed = self.project.observe()?;
+        let observed = Observation::rooted(&self.project.root, Some(&self.project.identity))?;
         self.verify_in(&observed)
     }
 
@@ -137,7 +137,7 @@ impl ScenePin {
     }
 
     pub fn load(&self, destination: bool) -> Result<super::OpenedScene, String> {
-        let observed = self.project.observe()?;
+        let observed = Observation::rooted(&self.project.root, Some(&self.project.identity))?;
         let path = self.verify_in(&observed)?;
         let file = observed.open_regular(&self.filename).map_err(error)?;
         if stamp(&file)? != self.stamp {
@@ -149,7 +149,11 @@ impl ScenePin {
                 if !destination
                     && version < u64::from(rot_scene::component_scene::FORMAT_VERSION) =>
             {
-                rot_scene::Session::open(&path)
+                let file = observed.open_regular(&self.filename).map_err(error)?;
+                if stamp(&file)? != self.stamp {
+                    return Err(CHANGED.into());
+                }
+                rot_scene::Session::from_open_file(&path, file)
                     .map(Box::new)
                     .map(super::OpenedScene::Legacy)
                     .map_err(error)?
@@ -247,12 +251,19 @@ impl ProjectDirectory {
         const MAX_ENTRIES: usize = 32_768;
         const MAX_SCENES: usize = 4_096;
         use std::sync::atomic::Ordering::Relaxed;
-        let observed = self.observe()?;
-        let startup = observed
-            .startup_locator
+        let observed = Observation::rooted(&self.root, Some(&self.identity))?;
+        let settings: Option<Settings> = observed
+            .read_settings()
+            .ok()
+            .flatten()
+            .and_then(|file| serde_json::from_slice(&file.bytes).ok());
+        let startup = settings
             .as_ref()
-            .map(|startup| startup.file.as_str());
-        let destination = observed.transition_value().map(|(_, target, _)| target);
+            .map(|settings| settings.startup_scene.file.as_str());
+        let destination = settings
+            .as_ref()
+            .and_then(|settings| settings.startup_transition.as_ref())
+            .map(|route| route.target_scene.file.as_str());
         let mut rows = Vec::new();
         for (index, entry) in std::fs::read_dir(&self.root).map_err(error)?.enumerate() {
             if cancelled.load(Relaxed) {
@@ -279,6 +290,9 @@ impl ProjectDirectory {
                 if folded != "scene.json" && !folded.ends_with(".scene.json") {
                     continue;
                 }
+            }
+            if !entry.file_type().is_ok_and(|kind| kind.is_file()) {
+                continue;
             }
             let Ok(stamp) = observed.child_stamp(&filename) else {
                 continue;
@@ -526,29 +540,7 @@ impl Observation {
     }
 
     fn read_expected(root: &Path, expected: Option<&Identity>) -> Result<Self, String> {
-        let (root, identity) = directory(root)?;
-        if expected.is_some_and(|expected| expected != &identity) {
-            return Err(CHANGED.into());
-        }
-        #[cfg(unix)]
-        let parent = open_project_directory(&root)?;
-        #[cfg(unix)]
-        if Identity::new(&parent.metadata().map_err(error)?) != identity {
-            return Err(CHANGED.into());
-        }
-        let mut observed = Self {
-            root,
-            identity,
-            #[cfg(unix)]
-            directory: parent,
-            settings: None,
-            target: Ok(None),
-            startup_locator: None,
-            validation_error: None,
-            transition: None,
-            transition_error: None,
-            buttons: Vec::new(),
-        };
+        let mut observed = Self::rooted(root, expected)?;
         observed.settings = observed.read_settings()?;
         if let Some(file) = &observed.settings {
             match serde_json::from_slice::<Settings>(&file.bytes) {
@@ -574,6 +566,32 @@ impl Observation {
         }
         observed.verify_root()?;
         Ok(observed)
+    }
+
+    fn rooted(root: &Path, expected: Option<&Identity>) -> Result<Self, String> {
+        let (root, identity) = directory(root)?;
+        if expected.is_some_and(|expected| expected != &identity) {
+            return Err(CHANGED.into());
+        }
+        #[cfg(unix)]
+        let parent = open_project_directory(&root)?;
+        #[cfg(unix)]
+        if Identity::new(&parent.metadata().map_err(error)?) != identity {
+            return Err(CHANGED.into());
+        }
+        Ok(Self {
+            root,
+            identity,
+            #[cfg(unix)]
+            directory: parent,
+            settings: None,
+            target: Ok(None),
+            startup_locator: None,
+            validation_error: None,
+            transition: None,
+            transition_error: None,
+            buttons: Vec::new(),
+        })
     }
 
     fn open_regular(&self, name: &str) -> io::Result<File> {
@@ -1242,6 +1260,10 @@ mod tests {
         let malformed = root.join("Broken.scene.json");
         scene(&good, "stage");
         scene(&active, "current");
+        rot_scene::Session::new(rot_scene::Scene::empty("legacy"))
+            .unwrap()
+            .save(root.join("Legacy.scene.json"))
+            .unwrap();
         fs::write(&malformed, "broken scene").unwrap();
         fs::create_dir(root.join("nested.scene.json")).unwrap();
         fs::write(root.join("notes.json"), "{}").unwrap();
@@ -1257,11 +1279,18 @@ mod tests {
             [
                 ("Broken.scene.json", ""),
                 ("current.json", "Open"),
+                ("Legacy.scene.json", ""),
                 ("Étage.SCENE.JSON", "")
             ]
         );
         assert!(project.pin_scene(&rows[0]).load(false).is_err());
-        let pin = project.pin_scene(&rows[2]);
+        let legacy = project.pin_scene(&rows[2]);
+        assert!(matches!(
+            legacy.load(false),
+            Ok(super::super::OpenedScene::Legacy(session)) if session.scene().id == "legacy"
+        ));
+        assert!(legacy.load(true).is_err());
+        let pin = project.pin_scene(&rows[3]);
         assert!(matches!(
             pin.load(false),
             Ok(super::super::OpenedScene::Components(..))

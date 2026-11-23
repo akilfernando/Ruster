@@ -1525,10 +1525,11 @@ impl Document {
     }
     fn load(path: &Path) -> Result<Self, SceneError> {
         reject_nonregular(path)?;
+        Self::read(File::open(path)?)
+    }
+    fn read(file: File) -> Result<Self, SceneError> {
         let mut bytes = Vec::new();
-        File::open(path)?
-            .take(MAX_FILE_BYTES + 1)
-            .read_to_end(&mut bytes)?;
+        file.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes)?;
         Self::decode(&bytes)
     }
     fn decode(bytes: &[u8]) -> Result<Self, SceneError> {
@@ -2300,7 +2301,21 @@ impl Session {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SceneError> {
         let lock = SceneLock::acquire(path.as_ref())?;
         let document = Document::load(&lock.path)?;
-        Ok(Self {
+        Ok(Self::from_saved_document(&lock.path, document))
+    }
+
+    /// Decode a saved legacy scene from the caller's pinned regular file.
+    pub fn from_open_file(path: &Path, file: File) -> Result<Self, SceneError> {
+        if !path.is_absolute() || !file.metadata()?.is_file() {
+            return Err(SceneError::Invalid(
+                "Expected an absolute saved scene and a regular file.".into(),
+            ));
+        }
+        Ok(Self::from_saved_document(path, Document::read(file)?))
+    }
+
+    fn from_saved_document(path: &Path, document: Document) -> Self {
+        Self {
             loaded_format_version: document.format_version,
             history_evictions: 0,
             hidden_mesh_renderers: None,
@@ -2308,8 +2323,8 @@ impl Session {
             runtime_projection: Default::default(),
             saved: Some(document.clone()),
             document,
-            path: Some(lock.path.clone()),
-        })
+            path: Some(path.to_path_buf()),
+        }
     }
     /// Complete admitted authored document without changing save authority or history.
     pub fn snapshot_bytes(&self) -> Result<Vec<u8>, SceneError> {

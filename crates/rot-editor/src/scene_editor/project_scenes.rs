@@ -212,6 +212,19 @@ impl Picker {
                 ui.set_width((ctx.content_rect().width() - 48.0).clamp(260.0, 480.0));
                 ui.heading("Project Scenes");
                 if let Some((pin, _)) = &self.chosen {
+                    ui.input_mut(|input| {
+                        input.events.retain(|event| {
+                            !matches!(
+                                event,
+                                egui::Event::Key {
+                                    key: egui::Key::Enter,
+                                    pressed: true,
+                                    repeat: true,
+                                    ..
+                                }
+                            )
+                        });
+                    });
                     ui.label(pin.filename());
                     ui.label(Text::ComponentUnsaved.plain());
                     ui.horizontal_wrapped(|ui| {
@@ -245,14 +258,16 @@ impl Picker {
                     } else {
                         (false, false)
                     };
-                    let edit = ui.add_enabled(
-                        self.loading.is_none(),
-                        egui::TextEdit::singleline(&mut self.search)
-                            .id(search_id)
-                            .char_limit(255)
-                            .hint_text("Search Scenes")
-                            .desired_width(f32::INFINITY),
-                    );
+                    let search_label = ui.label("Search Scenes");
+                    let edit = ui
+                        .add_enabled(
+                            self.loading.is_none(),
+                            egui::TextEdit::singleline(&mut self.search)
+                                .id(search_id)
+                                .char_limit(255)
+                                .desired_width(f32::INFINITY),
+                        )
+                        .labelled_by(search_label.id);
                     if self.search_focus && self.loading.is_none() {
                         edit.request_focus();
                         self.search_focus = false;
@@ -282,7 +297,7 @@ impl Picker {
                         ui.label("No scenes found.");
                     }
                     let max_height = (ctx.content_rect().height() * 0.42).clamp(96.0, 310.0);
-                    let row_height = 36.0;
+                    let row_height = 28.0;
                     let mut list = egui::ScrollArea::vertical().max_height(max_height);
                     if std::mem::take(&mut self.scroll_to_selection) {
                         let step = row_height + ui.spacing().item_spacing.y;
@@ -292,17 +307,16 @@ impl Picker {
                     list.show_rows(ui, row_height, self.matches.len(), |ui, visible| {
                         for index in visible {
                             let row = &self.rows[self.matches[index]];
-                            let title = title(&row.filename);
                             let text = if row.markers.is_empty() {
-                                format!("{title}\n{}", row.filename)
+                                row.filename.clone()
                             } else {
-                                format!("{title}  ·  {}\n{}", row.markers, row.filename)
+                                format!("{}  ·  {}", row.filename, row.markers)
                             };
                             let response = ui
                                 .add_enabled(
                                     self.loading.is_none(),
                                     egui::Button::selectable(self.selected == index, text)
-                                        .min_size(egui::vec2(ui.available_width(), 36.0))
+                                        .min_size(egui::vec2(ui.available_width(), row_height))
                                         .truncate(),
                                 )
                                 .on_hover_text(&row.filename);
@@ -355,15 +369,4 @@ impl Picker {
         self.error = Some(error);
         self.search_focus = true;
     }
-}
-
-fn title(filename: &str) -> &str {
-    let end = if filename.to_ascii_lowercase().ends_with(".scene.json") {
-        filename.len() - ".scene.json".len()
-    } else if filename.to_ascii_lowercase().ends_with(".json") {
-        filename.len() - ".json".len()
-    } else {
-        filename.len()
-    };
-    &filename[..end]
 }
