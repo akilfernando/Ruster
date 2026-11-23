@@ -274,6 +274,11 @@ pub trait Application: 'static {
     fn content(&self) -> &Content;
     fn tick(&mut self, step: Step) -> Result<(), String>;
     fn reset(&mut self) -> Result<(), String>;
+    /// A scene switch starts a new simulation. Drop old catch-up debt so the
+    /// first presented scene is its initial committed frame.
+    fn take_scene_switch(&mut self) -> bool {
+        false
+    }
     /// A committed host transition. Live output may pause or resume here.
     fn playback_changed(&mut self, _playing: bool) {}
     /// Called after a running Step and Content validation both succeed.
@@ -412,6 +417,10 @@ impl<A: Application> Runtime<A> {
             self.app.tick(Step { tick, dt: self.dt })?;
             self.app.content().validate()?;
             self.tick = tick;
+            if self.app.take_scene_switch() {
+                self.accumulator = Duration::ZERO;
+                self.app.playback_changed(self.running);
+            }
             if self.running {
                 self.app.live_step_committed();
             }

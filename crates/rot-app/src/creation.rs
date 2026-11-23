@@ -30,7 +30,7 @@ const STARTUP_TARGET_MANIFEST: &str = "transition/app.json";
 const STARTUP_TRANSITION_BYTES: usize = 4096;
 
 /// Optional once-per-launch metadata for the single packaged Start Button edge.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct StartupTransition {
     version: u32,

@@ -641,6 +641,11 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
             "runtime_scene": app.content().scene(),
             "input": input,
         });
+        if let Some(scene) = app.static_destination() {
+            let scene = serde_json::to_value(scene).map_err(|error| error.to_string())?;
+            output["authored_scene"] = scene.clone();
+            output["runtime_scene"] = scene;
+        }
         if routed {
             output["transition_phase"] = serde_json::json!(if app.switched_scene() {
                 "destination"
@@ -672,6 +677,9 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
     } else {
         // The host preserves callers' reset policy. Validate authored behavior at dt0 before
         // opening a running creation; its new host Runtime and behavior both begin at tick0.
+        if routed {
+            app.prepare_start_on_worker();
+        }
         app.reset()?;
         rot_app::run(
             app,
