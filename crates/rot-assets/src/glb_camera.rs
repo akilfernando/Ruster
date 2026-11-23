@@ -122,11 +122,6 @@ impl SourceCamera {
                 let near = p.znear as f32;
                 let far = p.zfar.map(|far| far as f32);
                 let aspect_ratio = p.aspect_ratio.map(|ratio| ratio as f32);
-                if near == 0. || far.is_some_and(|far| far == near) || aspect_ratio == Some(0.) {
-                    return Err(reject(
-                        "perspective clip planes or aspect collapse at scene precision",
-                    ));
-                }
                 let lens = ModelCamera {
                     vertical_fov_degrees: p.yfov.to_degrees() as f32,
                     aspect_ratio,

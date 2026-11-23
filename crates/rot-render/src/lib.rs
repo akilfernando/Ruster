@@ -1735,7 +1735,6 @@ fn render_draw_scene(
                     ui.ctx().pixels_per_point(),
                     camera.aspect_ratio,
                 )
-                .map(|(_, rect)| rect)
             } else {
                 Some(surface.rect)
             };
