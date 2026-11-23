@@ -190,13 +190,14 @@ pub(super) fn components(
     materials: &BTreeMap<String, OpaqueMaterial>,
     allow_new_material: bool,
     diagnostic: Option<&rot_behavior::Diagnostic>,
-    animator_draft_revision: &mut Option<u64>,
 ) -> (
     bool,
     Option<super::component_workspace::component_material::Request>,
+    Option<u64>,
 ) {
     use super::component_workspace::component_material::{Intent, Request};
     let mut material_request = None;
+    let mut animator_revision = None;
     let mut submit = false;
     let mut remove = None;
     for (index, component) in draft.components.iter_mut().enumerate() {
@@ -356,7 +357,7 @@ pub(super) fn components(
                         }
                     }
                     Component::Animator { binding } => {
-                        animator_fields(ui, binding, assets, animator_draft_revision);
+                        animator_fields(ui, binding, assets, &mut animator_revision);
                         if ui.button(Text::ComponentRemove.plain()).clicked() {
                             remove = Some(index);
                         }
@@ -404,7 +405,7 @@ pub(super) fn components(
         draft.components.remove(index);
         submit = true;
     }
-    (submit, material_request)
+    (submit, material_request, animator_revision)
 }
 
 fn animator_fields(

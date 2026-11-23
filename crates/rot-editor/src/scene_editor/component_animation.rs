@@ -4,6 +4,7 @@ use rot_scene::{
     component_scene::{Component, ObjectNode},
     AnimationBinding,
 };
+#[cfg(unix)]
 use serde_json::{json, Value};
 
 pub(super) type Error = (&'static str, String);
@@ -85,6 +86,7 @@ pub(super) fn validate_binding(
     Ok(())
 }
 
+#[cfg(unix)]
 pub(super) fn observe(store: Option<&AssetStore>, binding: &AnimationBinding) -> Value {
     let source = store.and_then(|store| store.clip_owner(&binding.clip)).map(|(model, name)| {
         json!({"model_id":model.id, "clip_name":name, "duration":model.clips[name].duration})

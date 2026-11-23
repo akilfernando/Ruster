@@ -2350,7 +2350,7 @@ impl ComponentWorkspace {
                                 ui.separator();
                                 if self.draft.is_some() {
                                     let allow_new = self.material_controls();
-                                    let (component_submit, material_request) =
+                                    let (component_submit, material_request, animator_revision) =
                                         component_inspector::components(
                                             ui,
                                             self.draft.as_mut().expect("selected draft"),
@@ -2359,9 +2359,11 @@ impl ComponentWorkspace {
                                             &self.session.scene().materials,
                                             allow_new,
                                             self.runtime.diagnostic.as_ref(),
-                                            &mut self.animator_draft_revision,
                                         );
                                     submit |= component_submit;
+                                    if let Some(revision) = animator_revision {
+                                        self.animator_draft_revision = Some(revision);
+                                    }
                                     self.camera_controls(ui);
                                     if let Some(request) = material_request {
                                         self.begin_material(request);
