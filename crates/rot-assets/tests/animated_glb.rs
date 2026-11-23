@@ -23,6 +23,7 @@ fn unsupported_material_settings_import_with_persistent_warnings() {
     let model = store.import_glb_at(0, "rig", "rig.glb").unwrap();
 
     assert_eq!(model.materials["Material 1"].roughness, 0.08);
+    assert_eq!(model.materials["Material 1"].emission_color, [0.2, 0.1, 0.0]);
     assert_eq!(
         model.nodes["Rig/Arm"].material.as_deref(),
         Some("Material 1")
@@ -30,7 +31,7 @@ fn unsupported_material_settings_import_with_persistent_warnings() {
     assert!(model.clips.contains_key("Swing"));
     assert_eq!(
         model.warnings,
-        ["Material 1: alpha rendered opaque, double-sided surface rendered single-sided, metallic factor rendered as dielectric, roughness raised to 0.08, emissive factor omitted"]
+        ["Material 1: alpha rendered opaque, double-sided surface rendered single-sided, metallic factor rendered as dielectric, roughness raised to 0.08"]
     );
     assert_eq!(
         AssetStore::open(root.path()).unwrap().model("rig"),
