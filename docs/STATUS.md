@@ -46,7 +46,10 @@ Object Lua API1/2 can drive a child under transform-only, positive-uniform
 groups. A trolley moved along a rotated rail without moving the markers.
 World-pose and camera checks run before the tick commits. A rejected Step
 keeps the previous pose and camera. The compact MCP catalog shows button
-and axis input examples.
+and axis input examples. Grouped runtime draws share the committed world
+matrices, lights and camera across unchanged frames. The depth-eight
+release test cut paused CPU extraction p95 from 0.762 to 0.012 ms on
+256 targets. Vulkan GPU scene p95 stayed at 0.128 ms in the same fixture.
 The editor and viewer draw, fit and pick from cached world matrices.
 Play and Linux Build share the same render data for supported static hierarchies,
 including shear. Set Game Camera from View captures a fixed v23 perspective
