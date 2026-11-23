@@ -14,6 +14,13 @@ pub enum ModelLight {
         intensity: f32,
         range: f32,
     },
+    Spot {
+        color: [f32; 3],
+        intensity: f32,
+        range: f32,
+        inner_degrees: f32,
+        outer_degrees: f32,
+    },
     Directional {
         color: [f32; 3],
         intensity: f32,
@@ -29,6 +36,22 @@ impl ModelLight {
                 range,
             } => {
                 if !(0.1..=10_000.).contains(&range) {
+                    return false;
+                }
+                (color, intensity)
+            }
+            Self::Spot {
+                color,
+                intensity,
+                range,
+                inner_degrees,
+                outer_degrees,
+            } => {
+                if !(0.1..=10_000.).contains(&range)
+                    || !(0. <= inner_degrees
+                        && inner_degrees < outer_degrees
+                        && outer_degrees <= 90.)
+                {
                     return false;
                 }
                 (color, intensity)
@@ -131,7 +154,7 @@ pub(super) struct AdmittedLight {
 }
 
 impl Definition {
-    fn admit(&self, index: usize) -> Result<AdmittedLight, AssetError> {
+    fn admit(&self, index: usize, place_spots: bool) -> Result<AdmittedLight, AssetError> {
         let name = self.name.trim();
         let name = if name.is_empty() || name.len() > 128 || name.chars().any(char::is_control) {
             format!("Light {}", index + 1)
@@ -159,7 +182,7 @@ impl Definition {
         if !matches!(self.kind, Kind::Spot) && self.spot.is_some() {
             return Err(invalid("spot cone belongs to a spot light"));
         }
-        if matches!(self.kind, Kind::Spot) {
+        let cone = if matches!(self.kind, Kind::Spot) {
             let spot = self
                 .spot
                 .as_ref()
@@ -169,13 +192,28 @@ impl Definition {
             if !(0. <= inner && inner < outer && outer <= FRAC_PI_2) {
                 return Err(invalid("cone requires 0 <= inner < outer <= pi/2"));
             }
-            return Ok(AdmittedLight {
-                placement: None,
-                warning: Some(format!(
-                    "Light {name:?}: Skipped spot light. Its node is kept."
-                )),
-            });
-        }
+            if !place_spots {
+                return Ok(AdmittedLight {
+                    placement: None,
+                    warning: Some(format!(
+                        "Light {name:?}: Skipped spot light. Its node is kept."
+                    )),
+                });
+            }
+            let inner = inner.to_degrees() as f32;
+            let outer = outer.to_degrees() as f32;
+            if inner >= outer {
+                return Ok(AdmittedLight {
+                    placement: None,
+                    warning: Some(format!(
+                        "Light {name:?}: Spot half-angles exceed Rot precision. Its node is kept."
+                    )),
+                });
+            }
+            Some((inner, outer))
+        } else {
+            None
+        };
         let mut warnings = Vec::new();
         let scale = if matches!(self.kind, Kind::Directional) {
             1000.
@@ -189,7 +227,7 @@ impl Definition {
         let intensity = intensity.min(16.) as f32;
         let color = color.map(|value| value as f32);
         let placement = match self.kind {
-            Kind::Point => {
+            Kind::Point | Kind::Spot => {
                 let range = match self.range {
                     Some(range) => {
                         if range < 0.1 {
@@ -204,14 +242,23 @@ impl Definition {
                         5.
                     }
                 };
-                ModelLight::Point {
-                    color,
-                    intensity,
-                    range: range as f32,
+                if let Some((inner_degrees, outer_degrees)) = cone {
+                    ModelLight::Spot {
+                        color,
+                        intensity,
+                        range: range as f32,
+                        inner_degrees,
+                        outer_degrees,
+                    }
+                } else {
+                    ModelLight::Point {
+                        color,
+                        intensity,
+                        range: range as f32,
+                    }
                 }
             }
             Kind::Directional => ModelLight::Directional { color, intensity },
-            Kind::Spot => unreachable!("spots handled before conversion"),
         };
         Ok(AdmittedLight {
             placement: Some(placement),
@@ -226,6 +273,7 @@ pub(super) fn admit<'a>(
     required: &[String],
     root: Option<&RootExtensions>,
     nodes: impl Iterator<Item = Option<&'a NodeExtensions>>,
+    place_spots: bool,
 ) -> Result<Vec<AdmittedLight>, AssetError> {
     let used_set: BTreeSet<_> = used.iter().map(String::as_str).collect();
     let required_set: BTreeSet<_> = required.iter().map(String::as_str).collect();
@@ -266,7 +314,7 @@ pub(super) fn admit<'a>(
     definitions
         .iter()
         .enumerate()
-        .map(|(index, definition)| definition.admit(index))
+        .map(|(index, definition)| definition.admit(index, place_spots))
         .collect()
 }
 

@@ -611,15 +611,20 @@ impl ComponentScene {
         world: &[DMat4],
         lens: &TransformPerspective,
     ) -> Result<TransformCameraPose, SceneError> {
+        lens.resolve_pose(world[index], self.world_rotation(index, &hierarchy.parents))
+    }
+
+    /// Compose rotations from the authored hierarchy independently of scale.
+    pub fn world_rotation(&self, index: usize, parents: &[Option<usize>]) -> glam::DQuat {
         use glam::{DQuat, EulerRot};
         let mut rotation = DQuat::IDENTITY;
         let mut current = Some(index);
         while let Some(index) = current {
             let [x, y, z] = self.objects[index].transform.rotation.map(f64::from);
             rotation = DQuat::from_euler(EulerRot::ZYX, z, y, x) * rotation;
-            current = hierarchy.parents[index];
+            current = parents[index];
         }
-        lens.resolve_pose(world[index], rotation)
+        rotation
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SceneError> {

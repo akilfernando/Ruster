@@ -335,6 +335,9 @@ impl ComponentScene {
                         intensity,
                         kind,
                     } => {
+                        if matches!(kind, crate::LightKind::Spot { .. }) {
+                            return Err(unsupported("Spot Lights require static Play and Build"));
+                        }
                         detached_only = false;
                         if light
                             .replace(Light {

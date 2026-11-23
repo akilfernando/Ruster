@@ -120,16 +120,22 @@ pub(super) fn read_accepted(root: &Path, info: &ModelInfo) -> Result<DecodedMode
         .materials
         .keys()
         .any(|name| old_omitted_roughness(info, name));
-    let decoded = if omitted
-        && info
+    let packed_roughness = !omitted
+        || info
             .materials
             .values()
-            .all(|material| material.roughness_texture.is_none())
-    {
-        glb::decode_without_packed_roughness(&info.id, &info.source, &bytes)?
-    } else {
-        glb::decode(&info.id, &info.source, &bytes)?
-    };
+            .any(|material| material.roughness_texture.is_some());
+    let place_spots = !info.warnings.iter().any(|warning| {
+        warning.starts_with("Light ")
+            && warning.ends_with(": Skipped spot light. Its node is kept.")
+    });
+    let decoded = glb::decode_accepted(
+        &info.id,
+        &info.source,
+        &bytes,
+        packed_roughness,
+        place_spots,
+    )?;
     if &decoded.info != info {
         return Err(error(format!(
             "model {:?} accepted GLB structure does not match its catalog",
@@ -568,7 +574,7 @@ mod tests {
         let bytes = packed_fixture(&pixels, |_, _| {});
         fs::write(&source, &bytes).unwrap();
         let mut store = AssetStore::open(root.path()).unwrap();
-        let decoded = glb::decode_without_packed_roughness("paint", "paint.glb", &bytes).unwrap();
+        let decoded = glb::decode_accepted("paint", "paint.glb", &bytes, false, true).unwrap();
         let prior = decoded.info.clone();
         let mut registry = store.registry.clone();
         registry.models.insert("paint".into(), prior.clone());
@@ -757,6 +763,46 @@ mod tests {
     }
 
     #[test]
+    fn accepted_spot_omission_reopens_and_same_byte_refresh_admits_spot() {
+        let root = tempfile::tempdir().unwrap();
+        let bytes = crate::fixtures::punctual_glb(|_| {});
+        fs::write(root.path().join("light.glb"), &bytes).unwrap();
+        let decoded = glb::decode_accepted("light", "light.glb", &bytes, true, false).unwrap();
+        let old = decoded.info.clone();
+        let mut store = AssetStore::open(root.path()).unwrap();
+        let mut registry = store.registry.clone();
+        registry.models.insert("light".into(), old.clone());
+        let mut published = false;
+        store
+            .publish_model_if(
+                PreparedModel {
+                    bytes,
+                    decoded,
+                    registry: Some(mutations::encode_registry(registry).unwrap()),
+                },
+                &mut published,
+                || true,
+            )
+            .unwrap();
+        assert!(published);
+        let mut reopened = AssetStore::open(root.path()).unwrap();
+        assert_eq!(reopened.model("light"), Some(&old));
+        assert!(old.nodes["Rig/Spot"].light.is_none());
+        let upgraded = reopened
+            .refresh_glb_at(reopened.revision(), "light")
+            .unwrap();
+        assert_eq!(upgraded.hash, old.hash);
+        assert!(matches!(
+            upgraded.nodes["Rig/Spot"].light,
+            Some(crate::ModelLight::Spot { .. })
+        ));
+        assert_eq!(
+            AssetStore::open(root.path()).unwrap().model("light"),
+            Some(&upgraded)
+        );
+    }
+
+    #[test]
     fn punctual_refresh_keeps_last_good_and_reuses_model_paths() {
         use crate::fixtures::punctual_glb;
         use crate::ModelLight;
@@ -799,7 +845,16 @@ mod tests {
             })
         );
         assert_eq!(first.nodes["Rig/Spot"].translation, [1., 2., 3.]);
-        assert!(first.nodes["Rig/Spot"].light.is_none());
+        assert_eq!(
+            first.nodes["Rig/Spot"].light,
+            Some(ModelLight::Spot {
+                color: [1.; 3],
+                intensity: 0.01,
+                range: 5.,
+                inner_degrees: 0.,
+                outer_degrees: 45.,
+            })
+        );
         assert!(first
             .nodes
             .iter()
@@ -814,7 +869,7 @@ mod tests {
             1
         );
         assert!(first.warnings[1].contains("intensity clamped to 16, range clamped to 0.1"));
-        assert!(first.warnings[2].contains("Skipped spot light"));
+        assert!(first.warnings[2].contains("range omitted; using 5 units"));
 
         for (path_segments, invalid) in [
             (

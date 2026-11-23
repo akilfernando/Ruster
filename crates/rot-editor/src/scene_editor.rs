@@ -303,6 +303,7 @@ impl HierarchySearch {
                 let kind = match light.kind {
                     rot_scene::LightKind::Directional { .. } => "Directional light",
                     rot_scene::LightKind::Point { .. } => "Point light",
+                    rot_scene::LightKind::Spot { .. } => "Spot light",
                 };
                 HierarchyRow {
                     id: id.into(),
@@ -4768,6 +4769,7 @@ impl SceneEditor {
             Action::RefreshShader => self.refresh_shader_command(),
             Action::CreateEmpty => self.create_empty(),
             Action::GroupSelection => {}
+            Action::CreateSpotLight => {}
             Action::CreateDirectionalLight => {
                 self.create_light_ui(rot_scene::LightKind::Directional {
                     shadow: Default::default(),
@@ -4973,7 +4975,7 @@ impl SceneEditor {
     fn command_enabled(&self, action: Action) -> bool {
         match action {
             Action::GameUi => self.hud_draft.is_some() || self.hud_editable(),
-            Action::GroupSelection => false,
+            Action::GroupSelection | Action::CreateSpotLight => false,
             Action::AiConnection => cfg!(unix),
             Action::Duplicate | Action::Delete | Action::Copy | Action::Frame => {
                 !self.manipulation.ids.is_empty()

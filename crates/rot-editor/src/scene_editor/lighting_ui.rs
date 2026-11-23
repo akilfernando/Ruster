@@ -82,6 +82,9 @@ fn rgb(text: &[String; 3]) -> Result<[f32; 3], String> {
 impl LightingDraft {
     pub(super) fn light(scene: &Scene, id: &str) -> Option<Self> {
         let baseline = scene.lighting.light(id)?.clone();
+        if matches!(baseline.kind, LightKind::Spot { .. }) {
+            return None;
+        }
         Some(Self::Light {
             id: id.into(),
             revision: scene.revision,
@@ -89,12 +92,12 @@ impl LightingDraft {
             color: baseline.color.map(|value| value.to_string()),
             intensity: baseline.intensity.to_string(),
             range: match baseline.kind {
-                LightKind::Directional { .. } => None,
+                LightKind::Directional { .. } | LightKind::Spot { .. } => None,
                 LightKind::Point { range } => Some(range.to_string()),
             },
             shadow: match baseline.kind {
                 LightKind::Directional { shadow } => Some(shadow.into()),
-                LightKind::Point { .. } => None,
+                LightKind::Point { .. } | LightKind::Spot { .. } => None,
             },
             baseline,
         })
@@ -220,6 +223,7 @@ impl LightingDraft {
                     .ok_or("Sun shadow settings are missing.")?
                     .value()?;
             }
+            LightKind::Spot { .. } => return Err("Spot Lights require a component scene.".into()),
             LightKind::Point { range: target } => {
                 if shadow.is_some() {
                     return Err("Point lights cannot have Sun shadow settings.".into());
@@ -379,6 +383,9 @@ impl SceneEditor {
                     Light::directional(Some("Directional light".into()))
                 }
                 LightKind::Point { .. } => Light::point(Some("Point light".into())),
+                LightKind::Spot { .. } => {
+                    return Err("Spot Lights require a component scene.".into())
+                }
             };
             let edit = self
                 .session
@@ -438,6 +445,7 @@ impl SceneEditor {
                     Text::DirectionalRotationSetsEmittedDirection.plain()
                 }
                 LightKind::Point { .. } => Text::LightingUiPointPositionSetsSource.plain(),
+                LightKind::Spot { .. } => Text::SpotConeHint.plain(),
             },
         );
         if !self.shader_builtin {

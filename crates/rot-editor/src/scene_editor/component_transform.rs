@@ -98,6 +98,7 @@ struct TransformRoot {
     parent_basis: DMat3,
     parent_inverse: DMat3,
     parent_world: Option<DMat4>,
+    parent_rotation: Option<DQuat>,
     origin: DVec3,
     original: Transform,
     local: Transform,
@@ -121,9 +122,10 @@ struct Settings {
 struct PreviewNode {
     parent: Option<usize>,
     authored_local: DMat4,
+    authored_rotation: [f32; 3],
     world: DMat4,
     draws: Vec<usize>,
-    lights: Vec<String>,
+    lights: Vec<(String, bool)>,
 }
 
 #[derive(Clone, Copy)]
@@ -244,6 +246,7 @@ impl ComponentWorkspace {
                     parent_basis,
                     parent_inverse: parent_basis.inverse(),
                     parent_world,
+                    parent_rotation: None,
                     origin: self.preview_world[index].w_axis.truncate(),
                     local: original.clone(),
                     candidate: original.clone(),
@@ -280,11 +283,12 @@ impl ComponentWorkspace {
                 let owner = &objects[index];
                 let world = self.preview_world[index];
                 let lights = owner.components.iter().filter_map(|component| {
-                    preview
-                        .scene()
-                        .lighting
-                        .light(&component.id)
-                        .map(|_| component.id.clone())
+                    preview.scene().lighting.light(&component.id).map(|light| {
+                        (
+                            component.id.clone(),
+                            matches!(light.kind, rot_scene::LightKind::Spot { .. }),
+                        )
+                    })
                 });
                 let selected = &mut roots[root];
                 let position = selected.nodes.len();
@@ -292,7 +296,7 @@ impl ComponentWorkspace {
                 if moving {
                     selected
                         .lights
-                        .extend(lights.map(|id| (id, world.w_axis.truncate())));
+                        .extend(lights.map(|(id, _)| (id, world.w_axis.truncate())));
                 } else {
                     let parent = if index == selected.index {
                         None
@@ -300,12 +304,21 @@ impl ComponentWorkspace {
                         self.parents[index].map(|parent| positions[parent])
                     };
                     positions[index] = position;
+                    let lights: Vec<_> = lights.collect();
+                    if selected.parent_rotation.is_none() && lights.iter().any(|(_, spot)| *spot) {
+                        selected.parent_rotation = Some(
+                            self.parents[selected.index].map_or(DQuat::IDENTITY, |parent| {
+                                self.session.scene().world_rotation(parent, &self.parents)
+                            }),
+                        );
+                    }
                     selected.nodes.push(PreviewNode {
                         parent,
                         authored_local: owner.transform.affine_matrix(),
+                        authored_rotation: owner.transform.rotation,
                         world,
                         draws: Vec::new(),
-                        lights: lights.collect(),
+                        lights,
                     });
                 }
             }
@@ -735,10 +748,24 @@ impl TransformRoot {
                 .nodes
                 .iter()
                 .flat_map(|node| node.draws.iter().map(|&row| (row, node.world)));
-            let lights = self
-                .nodes
-                .iter()
-                .flat_map(|node| node.lights.iter().map(|id| (id.as_str(), node.world)));
+            let nodes = &self.nodes;
+            let parent_rotation = self.parent_rotation;
+            let lights = nodes.iter().enumerate().flat_map(|(index, node)| {
+                node.lights.iter().map(move |(id, spot)| {
+                    let rotation = spot.then(|| {
+                        let mut local = DQuat::IDENTITY;
+                        let mut current = index;
+                        while let Some(parent) = nodes[current].parent {
+                            local = euler_rotation(nodes[current].authored_rotation) * local;
+                            current = parent;
+                        }
+                        parent_rotation.expect("spot root orientation")
+                            * rotation(candidate)
+                            * local
+                    });
+                    (id.as_str(), node.world, rotation)
+                })
+            });
             if preview.set_transformed_rows(draws, lights).is_err() {
                 return false;
             }

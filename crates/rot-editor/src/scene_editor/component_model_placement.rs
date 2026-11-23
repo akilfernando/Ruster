@@ -168,6 +168,21 @@ impl ComponentWorkspace {
                         intensity,
                         range,
                     } => (color, intensity, LightKind::Point { range }),
+                    ModelLight::Spot {
+                        color,
+                        intensity,
+                        range,
+                        inner_degrees,
+                        outer_degrees,
+                    } => (
+                        color,
+                        intensity,
+                        LightKind::Spot {
+                            range,
+                            inner_degrees,
+                            outer_degrees,
+                        },
+                    ),
                     ModelLight::Directional { color, intensity } => (
                         color,
                         intensity,

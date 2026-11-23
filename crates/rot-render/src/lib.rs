@@ -3855,8 +3855,9 @@ mod tests {
             offset_of!(LightingPacket, direction_to_light),
             offset_of!(LightingPacket, directional_color_intensity),
             offset_of!(LightingPacket, points),
+            offset_of!(LightingPacket, spot_cones),
         ];
-        assert_eq!(offsets, [0, 16, 32, 48, 64]);
+        assert_eq!(offsets, [0, 16, 32, 48, 64, 192]);
         let module = wgpu::naga::front::wgsl::parse_str(default_shader())
             .expect("built-in lighting WGSL parses");
         wgpu::naga::valid::Validator::new(

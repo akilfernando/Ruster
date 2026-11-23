@@ -582,6 +582,17 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
     // Pixel centers under the identity camera: worldx=1/64,worldy=-1/64.
     let xy = 1.0_f32 / 64.;
     let near = point([xy, -xy, 1.5], 4., 1., [1.; 3]);
+    let spot = |angle_degrees: f32, inner_degrees: f32, outer_degrees: f32| {
+        let mut light = Light::spot(None);
+        light.transform.translation = [xy, -xy, 1.5];
+        light.transform.rotation = [0., angle_degrees.to_radians(), 0.];
+        light.kind = LightKind::Spot {
+            range: 4.,
+            inner_degrees,
+            outer_degrees,
+        };
+        light
+    };
     let mut renamed = Lighting::authored_default("sun");
     if let Lighting::Authored { lights, .. } = &mut renamed {
         lights.get_mut("sun").unwrap().name = Some("Renamed only".into());
@@ -611,6 +622,17 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
         ("ambient-only", ambient([0.3, 0.5, 0.8], 0.5)),
         ("disabled-sun", authored(vec![("sun", disabled)])),
         ("rotated-sun", authored(vec![("sun", rotated_sun)])),
+        ("spot-axis", authored(vec![("spot", spot(0., 10., 35.))])),
+        ("spot-inner", authored(vec![("spot", spot(7., 10., 35.))])),
+        (
+            "spot-falloff",
+            authored(vec![("spot", spot(25., 10., 35.))]),
+        ),
+        (
+            "spot-outside",
+            authored(vec![("spot", spot(50., 10., 35.))]),
+        ),
+        ("spot-tiny", authored(vec![("spot", spot(0., 0., 0.0001))])),
         ("point-distance1", authored(vec![("point", near)])),
         (
             "point-distance2",
@@ -882,6 +904,11 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
         }
         eprintln!("GPU lighting probe {name}: expected={expected:?} actual={actual:?} lighting_uploads={} lighting_upload_bytes={} mesh_uploads={} texture_uploads={}",after.lighting_uploads,after.lighting_upload_bytes,after.mesh_uploads,after.texture_uploads);
     }
+    assert_eq!(observations["spot-axis"], observations["point-distance1"]);
+    assert_eq!(observations["spot-axis"], observations["spot-inner"]);
+    assert_eq!(observations["spot-axis"], observations["spot-tiny"]);
+    assert!(observations["spot-axis"][0] > observations["spot-falloff"][0]);
+    assert!(observations["spot-falloff"][0] > observations["spot-outside"][0]);
     assert!(observations["point-distance1"][0] > observations["point-distance2"][0]);
     assert!(observations["point-range-inside"][0] > observations["point-range-edge"][0]);
     for name in [
@@ -897,7 +924,7 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
             "{name} must remain dark"
         );
     }
-    eprintln!("GPU lighting probe: Legacy/Authored modes, ambient/sun/point distance/range/near/coincident/overlap/max5/SDR, inverse-transpose normals,192byte changed-only uploads and no light-only mesh/texture upload passed");
+    eprintln!("GPU lighting probe: Legacy/Authored modes, ambient/sun/point distance/range/near/coincident/overlap/max5/SDR, inverse-transpose normals,changed-only uploads and no light-only mesh/texture upload passed");
 }
 
 // Independent f64 oracle: transform triangle vertices by explicit Rx/Ry/Rz,
@@ -952,7 +979,7 @@ fn reference_lighting(
                     LightKind::Directional { .. } => normal
                         .dot(rotate(glam::DVec3::Z, light.transform.rotation).normalize())
                         .max(0.),
-                    LightKind::Point { range } => {
+                    LightKind::Point { range } | LightKind::Spot { range, .. } => {
                         let delta =
                             glam::DVec3::from_array(light.transform.translation.map(f64::from))
                                 - world;
@@ -960,7 +987,25 @@ fn reference_lighting(
                         let cosine = normal.dot(delta / distance.max(0.0001)).max(0.);
                         let ratio = (distance / f64::from(range)).min(1.);
                         let window = (1. - ratio.powi(4)).powi(2);
-                        cosine * window / (1. + distance.powi(2))
+                        let angular = match light.kind {
+                            LightKind::Spot {
+                                inner_degrees,
+                                outer_degrees,
+                                ..
+                            } if distance > 0. => {
+                                let axis =
+                                    rotate(glam::DVec3::Z, light.transform.rotation).normalize();
+                                let cone_inner = f64::from(inner_degrees).to_radians().cos();
+                                let cone_outer = f64::from(outer_degrees).to_radians().cos();
+                                ((axis.dot(delta / distance) - cone_outer)
+                                    / (cone_inner - cone_outer))
+                                    .clamp(0., 1.)
+                                    .powi(2)
+                            }
+                            LightKind::Spot { .. } => 0.,
+                            _ => 1.,
+                        };
+                        cosine * window / (1. + distance.powi(2)) * angular
                     }
                 };
                 sum += glam::DVec3::from_array(light.color.map(f64::from))

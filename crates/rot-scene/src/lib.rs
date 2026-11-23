@@ -383,6 +383,15 @@ impl Scene {
             )));
         }
         self.lighting.validate()?;
+        if self
+            .lighting
+            .lights()
+            .any(|(_, light)| matches!(light.kind, LightKind::Spot { .. }))
+        {
+            return Err(SceneError::Invalid(
+                "Spot Lights require a component scene".into(),
+            ));
+        }
         self.display.validate()?;
         if self.target_count() > MAX_OBJECTS {
             return Err(SceneError::Invalid(format!(

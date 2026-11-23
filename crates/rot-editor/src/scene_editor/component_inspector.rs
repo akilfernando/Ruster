@@ -18,6 +18,7 @@ pub(super) enum AddComponent {
     Camera,
     Light,
     DirectionalLight,
+    SpotLight,
     Script { source: String, owner: String },
 }
 
@@ -29,6 +30,7 @@ impl AddComponent {
             Self::Camera => Text::ComponentCamera,
             Self::Light => Text::ComponentLight,
             Self::DirectionalLight => Text::LabelCreateDirectionalLight,
+            Self::SpotLight => Text::LabelCreateSpotLight,
             Self::Script { .. } => Text::ComponentScript,
         }
     }
@@ -62,9 +64,10 @@ impl AddComponent {
                     },
                     source_kind: Some(ScriptSourceKind::Asset),
                 },
-                Self::Light | Self::DirectionalLight => {
+                Self::Light | Self::DirectionalLight | Self::SpotLight => {
                     let light = match self {
                         Self::DirectionalLight => Light::directional(None),
+                        Self::SpotLight => Light::spot(None),
                         _ => Light::point(None),
                     };
                     Component::Light {
@@ -177,6 +180,10 @@ pub(super) fn component_label(component: &Component) -> Text {
             kind: LightKind::Point { .. },
             ..
         } => Text::LabelCreateLight,
+        Component::Light {
+            kind: LightKind::Spot { .. },
+            ..
+        } => Text::LabelCreateSpotLight,
         Component::Light { .. } => Text::LabelCreateDirectionalLight,
         Component::Collider { .. } => Text::ComponentCollider,
     }
@@ -647,16 +654,43 @@ fn light_fields(
     );
     submit
         | match kind {
-            LightKind::Point { range } => number_field(
-                ui,
-                Text::Range,
+            LightKind::Point { range } => light_range(ui, range),
+            LightKind::Spot {
                 range,
-                0.1,
-                0.1..=10_000.0,
-                Text::LightingUiSmoothInfluenceDistanceFrom,
-            ),
+                inner_degrees,
+                outer_degrees,
+            } => {
+                light_range(ui, range)
+                    | number_field(
+                        ui,
+                        Text::SpotInnerAngle,
+                        inner_degrees,
+                        0.25,
+                        0.0..=90.0,
+                        Text::SpotConeHint,
+                    )
+                    | number_field(
+                        ui,
+                        Text::SpotOuterAngle,
+                        outer_degrees,
+                        0.25,
+                        0.0..=90.0,
+                        Text::SpotConeHint,
+                    )
+            }
             LightKind::Directional { shadow } => shadow_fields(ui, shadow),
         }
+}
+
+fn light_range(ui: &mut egui::Ui, range: &mut f32) -> bool {
+    number_field(
+        ui,
+        Text::Range,
+        range,
+        0.1,
+        0.1..=10_000.0,
+        Text::LightingUiSmoothInfluenceDistanceFrom,
+    )
 }
 
 fn shadow_fields(ui: &mut egui::Ui, shadow: &mut SunShadow) -> bool {
@@ -887,6 +921,7 @@ impl ComponentPicker {
                 AddComponent::Camera,
                 AddComponent::Light,
                 AddComponent::DirectionalLight,
+                AddComponent::SpotLight,
             ] {
                 if kind.label().plain().to_ascii_lowercase().contains(&search)
                     && (ui.button(kind.label().plain()).clicked() || submit && add.is_none())

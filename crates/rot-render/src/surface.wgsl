@@ -8,12 +8,13 @@ struct PointLight {
     color_intensity: vec4<f32>,
 };
 struct Lighting {
-    // x:0 legacy/1 authored, y:enabled points, z:enabled directional, w:0.
+    // x:legacy/authored, y:enabled local count, z:enabled sun, w:has spots.
     mode_counts: vec4<u32>,
     ambient: vec4<f32>,
     direction_to_light: vec4<f32>,
     directional_color_intensity: vec4<f32>,
     points: array<PointLight, 4>,
+    spot_cones: array<vec4<f32>, 4>,
 };
 @group(2) @binding(0) var<uniform> lighting: Lighting;
 struct Vertex {
@@ -124,7 +125,15 @@ fn hdr_storage(radiance: vec3<f32>) -> vec4<f32> {
         let direction = delta / sqrt(max(d2, 1e-8));
         let q = min(d2 * point.position_inverse_range_squared.w, 1.0);
         let smooth_range = 1.0 - q * q;
-        let attenuation = smooth_range * smooth_range / (1.0 + d2);
+        var attenuation = smooth_range * smooth_range / (1.0 + d2);
+        if lighting.mode_counts.w != 0u && point.color_intensity.w > 0.0 {
+            let cone = lighting.spot_cones[i];
+            // Squared chord equals 2(1 - cos(theta)) for unit vectors.
+            // Normalize independently of the distance attenuation's near floor.
+            let chord = delta / sqrt(max(d2, 1e-38)) - cone.xyz;
+            let angular = clamp((cone.w - dot(chord, chord)) * point.color_intensity.w, 0.0, 1.0);
+            attenuation *= angular * angular;
+        }
         result += point.color_intensity.rgb * direct_response(highlighted, n, view, direction, response) * attenuation;
     }
     return vec4<f32>(hdr_storage(result).rgb, selection_alpha);

@@ -1731,15 +1731,17 @@ impl Decoder<'_> {
 }
 
 pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedModel, AssetError> {
-    decode_model(id, source, bytes, true)
+    decode_model(id, source, bytes, true, true)
 }
 
-pub(super) fn decode_without_packed_roughness(
+pub(super) fn decode_accepted(
     id: &str,
     source: &str,
     bytes: &[u8],
+    packed_roughness: bool,
+    place_spots: bool,
 ) -> Result<DecodedModel, AssetError> {
-    decode_model(id, source, bytes, false)
+    decode_model(id, source, bytes, packed_roughness, place_spots)
 }
 
 fn decode_model(
@@ -1747,6 +1749,7 @@ fn decode_model(
     source: &str,
     bytes: &[u8],
     packed_roughness: bool,
+    place_spots: bool,
 ) -> Result<DecodedModel, AssetError> {
     let (json, bin) = chunks(bytes)?;
     let doc: Document<'_> = serde_json::from_slice(json)
@@ -1785,6 +1788,7 @@ fn decode_model(
         &doc.extensions_required,
         doc.extensions.as_ref(),
         doc.nodes.iter().map(|node| node.extensions.as_ref()),
+        place_spots,
     )?;
     for (index, node) in doc.nodes.iter().enumerate() {
         if node

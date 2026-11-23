@@ -4,8 +4,8 @@ use glam::{EulerRot, Quat, Vec3};
 use rot_scene::{LightKind, Lighting, SceneError};
 use wgpu::util::DeviceExt;
 
-pub(super) const LIGHTING_BYTES: u64 = 192;
-const POINTS: usize = 4;
+pub(super) const LIGHTING_BYTES: u64 = size_of::<LightingPacket>() as u64;
+const LOCAL_LIGHTS: usize = rot_scene::MAX_POINT_LIGHTS;
 
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -17,12 +17,14 @@ pub(super) struct PointPacket {
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(super) struct LightingPacket {
-    /// x:0 legacy/1 authored, y:enabled points, z:enabled directional, w:0.
+    /// x:legacy/authored, y:enabled local count, z:enabled sun, w:has spots.
     pub mode_counts: [u32; 4],
     pub ambient: [f32; 4],
     pub direction_to_light: [f32; 4],
     pub directional_color_intensity: [f32; 4],
-    pub points: [PointPacket; POINTS],
+    pub points: [PointPacket; LOCAL_LIGHTS],
+    /// Local +Z (toward the spot source) and squared chord at the outer edge.
+    pub spot_cones: [[f32; 4]; LOCAL_LIGHTS],
 }
 
 impl LightingPacket {
@@ -51,29 +53,51 @@ impl LightingPacket {
             let color = (Vec3::from(light.color) * light.intensity).to_array();
             match light.kind {
                 LightKind::Directional { .. } => {
-                    let rotation = light.transform.rotation;
-                    // Transform's fixed-axisXYZ is Rz*Ry*Rx. Local-Z is the
-                    // emitted ray; local+Z is the direction toward its source.
-                    let incoming =
-                        (Quat::from_euler(EulerRot::ZYX, rotation[2], rotation[1], rotation[0])
-                            * Vec3::Z)
-                            .normalize();
+                    let incoming = incoming_direction(light.transform.rotation);
                     packet.direction_to_light[..3].copy_from_slice(&incoming.to_array());
                     packet.directional_color_intensity[..3].copy_from_slice(&color);
                     packet.mode_counts[2] = 1;
                 }
-                LightKind::Point { range } => {
-                    let point = &mut packet.points[packet.mode_counts[1] as usize];
+                LightKind::Point { range } | LightKind::Spot { range, .. } => {
+                    let index = packet.mode_counts[1] as usize;
+                    let point = &mut packet.points[index];
                     point.position_inverse_range_squared[..3]
                         .copy_from_slice(&light.transform.translation);
                     point.position_inverse_range_squared[3] = range.recip().powi(2);
                     point.color_intensity[..3].copy_from_slice(&color);
+                    if let LightKind::Spot {
+                        inner_degrees,
+                        outer_degrees,
+                        ..
+                    } = light.kind
+                    {
+                        let axis = incoming_direction(light.transform.rotation);
+                        let chord_squared = |degrees: f32| {
+                            4.0 * (0.5 * f64::from(degrees).to_radians()).sin().powi(2)
+                        };
+                        let outer = chord_squared(outer_degrees);
+                        let width = outer - chord_squared(inner_degrees);
+                        let outer = (outer as f32).max(f32::MIN_POSITIVE);
+                        // A floor keeps nearly coincident cones finite. The
+                        // chord form avoids subtracting two cosines near one.
+                        let inverse_width = (width as f32)
+                            .max((outer * f32::EPSILON).max(f32::MIN_POSITIVE))
+                            .recip();
+                        packet.spot_cones[index] = axis.extend(outer).to_array();
+                        point.color_intensity[3] = inverse_width;
+                        packet.mode_counts[3] = 1;
+                    }
                     packet.mode_counts[1] += 1;
                 }
             }
         }
         Ok(packet)
     }
+}
+
+fn incoming_direction([x, y, z]: [f32; 3]) -> Vec3 {
+    // Transform's fixed-axis XYZ is Rz*Ry*Rx. Local -Z is the emitted ray.
+    (Quat::from_euler(EulerRot::ZYX, z, y, x) * Vec3::Z).normalize()
 }
 
 pub(super) struct LightingGpu {
@@ -100,7 +124,7 @@ impl LightingGpu {
         });
         let current = LightingPacket::legacy();
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("fixed192byte scene lighting"),
+            label: Some("scene light packet"),
             contents: bytemuck::bytes_of(&current),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });

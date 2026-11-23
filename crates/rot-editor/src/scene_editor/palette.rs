@@ -44,6 +44,7 @@ pub(super) fn palette_label(action: Action) -> String {
         | CreateTriangularPrism
         | CreateLight
         | CreateDirectionalLight
+        | CreateSpotLight
         | Front
         | Back
         | Left

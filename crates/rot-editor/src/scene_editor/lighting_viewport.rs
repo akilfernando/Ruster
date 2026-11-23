@@ -314,7 +314,7 @@ pub(super) fn paint_and_pick(
                 }
                 "Sun"
             }
-            LightKind::Point { .. } => {
+            LightKind::Point { .. } | LightKind::Spot { .. } => {
                 painter.circle_stroke(center, 6.0, stroke);
                 painter.circle_filled(center, 2.0, color);
                 "Point"

@@ -87,7 +87,7 @@ impl ComponentPreview {
     pub fn set_transformed_rows<'a>(
         &mut self,
         draws: impl Iterator<Item = (usize, DMat4)>,
-        lights: impl Iterator<Item = (&'a str, DMat4)>,
+        lights: impl Iterator<Item = (&'a str, DMat4, Option<glam::DQuat>)>,
     ) -> Result<(), SceneError> {
         for (row, world) in draws {
             let object = &self.scene.objects[row];
@@ -101,9 +101,9 @@ impl ComponentPreview {
             else {
                 unreachable!("preview light IDs require authored lighting");
             };
-            for (id, world) in lights {
+            for (id, world, rotation) in lights {
                 let light = authored.get_mut(id).expect("preview light ID");
-                light.transform = light_transform(world, &light.kind, id)?;
+                light.transform = light_transform(world, &light.kind, id, rotation)?;
             }
         }
         Ok(())
@@ -208,12 +208,20 @@ fn draw_matrix(world: DMat4, id: &str) -> Result<Mat4, SceneError> {
     Ok(matrix)
 }
 
-fn light_transform(world: DMat4, kind: &LightKind, id: &str) -> Result<Transform, SceneError> {
+fn light_transform(
+    world: DMat4,
+    kind: &LightKind,
+    id: &str,
+    rotation: Option<glam::DQuat>,
+) -> Result<Transform, SceneError> {
     let mut transform = Transform {
         translation: world.w_axis.truncate().as_vec3().to_array(),
         ..Transform::default()
     };
-    if matches!(kind, LightKind::Directional { .. }) {
+    if let Some(rotation) = rotation {
+        let (z, y, x) = rotation.normalize().to_euler(EulerRot::ZYX);
+        transform.rotation = [x as f32, y as f32, z as f32];
+    } else if matches!(kind, LightKind::Directional { .. }) {
         let direction = world.z_axis.truncate();
         let magnitude = direction.abs().max_element();
         if !magnitude.is_finite() || magnitude == 0.0 {
@@ -331,7 +339,9 @@ pub fn project_editor_with_world(
                     kind,
                 } => {
                     let (count, limit) = match kind {
-                        LightKind::Point { .. } => (&mut point_lights, MAX_POINT_LIGHTS),
+                        LightKind::Point { .. } | LightKind::Spot { .. } => {
+                            (&mut point_lights, MAX_POINT_LIGHTS)
+                        }
                         LightKind::Directional { .. } => {
                             (&mut directional_lights, MAX_DIRECTIONAL_LIGHTS)
                         }
@@ -341,7 +351,9 @@ pub fn project_editor_with_world(
                         continue;
                     }
                     *count += 1;
-                    let transform = light_transform(world[index], kind, &object.id)?;
+                    let rotation = matches!(kind, LightKind::Spot { .. })
+                        .then(|| component_scene.world_rotation(index, &hierarchy.parents));
+                    let transform = light_transform(world[index], kind, &object.id, rotation)?;
                     lights.insert(
                         component.id.clone(),
                         Light {

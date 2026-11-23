@@ -943,6 +943,9 @@ impl ComponentWorkspace {
         use component_inspector::AddComponent;
         let light = match action {
             Action::CreateLight => Some((AddComponent::Light, rot_scene::Light::point(None))),
+            Action::CreateSpotLight => {
+                Some((AddComponent::SpotLight, rot_scene::Light::spot(None)))
+            }
             Action::CreateDirectionalLight => Some((
                 AddComponent::DirectionalLight,
                 rot_scene::Light::directional(None),
@@ -1293,6 +1296,7 @@ impl ComponentWorkspace {
         ui.menu_button(Text::ComponentLight.plain(), |ui| {
             self.menu_action(ui, Action::CreateDirectionalLight);
             self.menu_action(ui, Action::CreateLight);
+            self.menu_action(ui, Action::CreateSpotLight);
         });
     }
 
@@ -1439,7 +1443,8 @@ impl ComponentWorkspace {
             | Action::CreateCapsule
             | Action::CreateTriangularPrism
             | Action::CreateLight
-            | Action::CreateDirectionalLight => {
+            | Action::CreateDirectionalLight
+            | Action::CreateSpotLight => {
                 self.create(action, None);
                 return;
             }
@@ -2288,6 +2293,7 @@ impl ComponentWorkspace {
                             | Action::CreateTriangularPrism
                             | Action::CreateLight
                             | Action::CreateDirectionalLight
+                            | Action::CreateSpotLight
                             | Action::GroupSelection
                             | Action::Delete
                             | Action::Frame
@@ -2436,6 +2442,7 @@ impl ComponentWorkspace {
                                             Action::CreateTriangularPrism,
                                             Action::CreateLight,
                                             Action::CreateDirectionalLight,
+                                            Action::CreateSpotLight,
                                         ] {
                                             if action_menu_item(
                                                 ui,

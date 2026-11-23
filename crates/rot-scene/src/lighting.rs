@@ -80,12 +80,12 @@ impl Lighting {
             light.validate()?;
             match light.kind {
                 LightKind::Directional { .. } => directional_count += 1,
-                LightKind::Point { .. } => point_count += 1,
+                LightKind::Point { .. } | LightKind::Spot { .. } => point_count += 1,
             }
         }
         if directional_count > MAX_DIRECTIONAL_LIGHTS || point_count > MAX_POINT_LIGHTS {
             return Err(SceneError::Invalid(format!(
-                "lighting permits at most {MAX_DIRECTIONAL_LIGHTS} directional and {MAX_POINT_LIGHTS} point lights (including disabled lights)"
+                "lighting permits at most {MAX_DIRECTIONAL_LIGHTS} directional and {MAX_POINT_LIGHTS} local lights (Point or Spot, including disabled lights)"
             )));
         }
         Ok(())
@@ -172,6 +172,17 @@ impl Light {
         }
     }
 
+    pub fn spot(name: Option<String>) -> Self {
+        Self {
+            kind: LightKind::Spot {
+                range: 5.0,
+                inner_degrees: 0.0,
+                outer_degrees: 45.0,
+            },
+            ..Self::point(name)
+        }
+    }
+
     pub fn display_name<'a>(&'a self, id: &'a str) -> &'a str {
         self.name.as_deref().unwrap_or(id)
     }
@@ -191,15 +202,33 @@ impl Light {
         match self.kind {
             LightKind::Directional { shadow } => shadow.validate()?,
             LightKind::Point { range } => {
-                if !range.is_finite() || !(0.1..=10_000.0).contains(&range) {
+                validate_range(range, "point")?;
+            }
+            LightKind::Spot {
+                range,
+                inner_degrees,
+                outer_degrees,
+            } => {
+                validate_range(range, "spot")?;
+                if !(0.0 <= inner_degrees && inner_degrees < outer_degrees && outer_degrees <= 90.0)
+                {
                     return Err(SceneError::Invalid(
-                        "point light range must be finite in 0.1..=10000".into(),
+                        "spot light half-angles require 0 <= inner < outer <= 90 degrees".into(),
                     ));
                 }
             }
         }
         Ok(())
     }
+}
+
+fn validate_range(range: f32, kind: &str) -> Result<(), SceneError> {
+    if !(0.1..=10_000.0).contains(&range) {
+        return Err(SceneError::Invalid(format!(
+            "{kind} light range must be finite in 0.1..=10000"
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -211,6 +240,11 @@ pub enum LightKind {
     },
     Point {
         range: f32,
+    },
+    Spot {
+        range: f32,
+        inner_degrees: f32,
+        outer_degrees: f32,
     },
 }
 
