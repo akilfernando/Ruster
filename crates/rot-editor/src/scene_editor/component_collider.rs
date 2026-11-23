@@ -228,14 +228,15 @@ fn resize(original: Collider, face: Face, delta: f64) -> Option<Collider> {
     if !(0.001..=1000.0).contains(&new_extent) || new_center.abs() > 10_000.0 {
         return None;
     }
-    half_extents[i] = new_extent as f32;
     next.offset[i] = new_center as f32;
+    // Round the center first, then derive the extent from the actual stored
+    // center. A large center's ULP must not shift the stationary face.
+    half_extents[i] = (sign * (f64::from(next.offset[i]) - fixed)) as f32;
     next.shape = ColliderShape::Box { half_extents };
     next.validate().ok()?;
-    let stored_face = f64::from(next.offset[i]) - sign * f64::from(half_extents[i]);
-    // A tiny numerical shift from independently rounded center and size is
-    // allowed only within the authored f32 precision of the edited values.
-    let precision = f64::from(f32::EPSILON) * new_center.abs().max(new_extent).max(1.0);
+    let stored_extent = f64::from(half_extents[i]);
+    let stored_face = f64::from(next.offset[i]) - sign * stored_extent;
+    let precision = f64::from(f32::EPSILON) * stored_extent;
     ((stored_face - fixed).abs() <= precision).then_some(next)
 }
 
@@ -503,10 +504,10 @@ fn face_at(world_box: WorldBox, projector: Projector, cursor: egui::Pos2) -> Opt
             let origin = world_box.face(face);
             let (point, depth) = projector.screen(origin)?;
             let distance = point.distance_sq(cursor);
+            let axis = world_box.axis(face.axis);
             if distance > 9.0_f32.powi(2)
-                || projector
-                    .axis_at(cursor, origin, world_box.axis(face.axis))
-                    .is_none()
+                || projector.axis_at(point, origin, axis).is_none()
+                || projector.axis_at(cursor, origin, axis).is_none()
             {
                 return None;
             }
@@ -576,6 +577,39 @@ fn paint_box(
                 face.label(),
                 egui::FontId::proportional(12.0),
                 highlight,
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rot_scene::ColliderRole;
+
+    #[test]
+    fn rounded_center_retains_the_stationary_face_at_large_offsets() {
+        let original = Collider {
+            enabled: true,
+            role: ColliderRole::Sensor,
+            offset: [8192.0, 0.0, 0.0],
+            shape: ColliderShape::Box {
+                half_extents: [0.5; 3],
+            },
+        };
+        for positive in [false, true] {
+            let face = Face { axis: 0, positive };
+            let result = resize(original, face, face.sign() * 0.0033).unwrap();
+            assert_ne!(result, original);
+            assert_eq!(result.role, original.role);
+            let ColliderShape::Box { half_extents } = result.shape else {
+                unreachable!()
+            };
+            let fixed =
+                |center: f32, extent: f32| f64::from(center) - face.sign() * f64::from(extent);
+            assert_eq!(
+                fixed(original.offset[0], 0.5),
+                fixed(result.offset[0], half_extents[0])
             );
         }
     }
