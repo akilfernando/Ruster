@@ -328,3 +328,225 @@ fn local_rotation(rotation: [f32; 3]) -> DQuat {
     let [x, y, z] = rotation.map(f64::from);
     DQuat::from_euler(glam::EulerRot::ZYX, z, y, x)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rot_scene::component_scene::{
+        ComponentInstance, ComponentScene, ComponentSession, ObjectNode,
+    };
+    use rot_scene::{Scene, Session};
+
+    fn workspace(path: &std::path::Path) -> ComponentWorkspace {
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("aim")).unwrap()).unwrap();
+        let mut node = |id: &str, name: &str, parent: Option<&str>, transform| {
+            scene.objects.push(ObjectNode {
+                id: id.into(),
+                name: name.into(),
+                enabled: true,
+                parent: parent.map(str::to_owned),
+                transform,
+                components: Vec::new(),
+            });
+        };
+        node(
+            "rig",
+            "Rig",
+            None,
+            Transform {
+                translation: [5., -1., 2.],
+                rotation: [0.22, 0.6, 0.],
+                scale: [2., 1., 3.],
+            },
+        );
+        node(
+            "lamp",
+            "Lamp",
+            Some("rig"),
+            Transform {
+                translation: [1., 2., 3.],
+                rotation: [0.3, 0.2, 0.1],
+                scale: [1.5, 1., 0.5],
+            },
+        );
+        node("child", "Housing", Some("lamp"), Transform::default());
+        node(
+            "target",
+            "Yellow Plate",
+            None,
+            Transform {
+                translation: [5., 4., -6.],
+                ..Default::default()
+            },
+        );
+        scene.objects[1].components = vec![ComponentInstance {
+            id: "spot".into(),
+            enabled: true,
+            kind: Component::Light {
+                color: [1.; 3],
+                intensity: 1.,
+                kind: LightKind::Spot {
+                    range: 12.,
+                    inner_degrees: 12.,
+                    outer_degrees: 90.,
+                },
+            },
+        }];
+        ComponentWorkspace::new(path.to_path_buf(), ComponentSession::new(scene).unwrap())
+    }
+
+    #[test]
+    fn spot_aim_handles_aligned_coincident_and_antiparallel_directions() {
+        let before = Transform::default();
+        assert!(aimed_rotation(&before, DQuat::IDENTITY, DVec3::NEG_Z)
+            .unwrap()
+            .is_none());
+        assert!(aimed_rotation(&before, DQuat::IDENTITY, DVec3::ZERO).is_err());
+        let rotation = aimed_rotation(&before, DQuat::IDENTITY, DVec3::Z)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            rotation,
+            aimed_rotation(&before, DQuat::IDENTITY, DVec3::Z)
+                .unwrap()
+                .unwrap()
+        );
+        let aimed = local_rotation(rotation);
+        assert!((aimed * DVec3::NEG_Z).abs_diff_eq(DVec3::Z, 1e-6));
+        assert!((aimed * DVec3::Y).abs_diff_eq(DVec3::Y, 1e-6));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spot_aim_pins_mcp_revision_and_records_linked_rotation_only() {
+        use rot_scene::component_scene::{PrefabFields, PrefabSource};
+        use serde_json::json;
+        let folder = tempfile::tempdir().unwrap();
+        let mut editor = workspace(&folder.path().join("scene.json"));
+        let source = PrefabSource::from_selection(editor.session.scene(), "rig").unwrap();
+        editor
+            .session
+            .link_prefab(
+                0,
+                "rig-prefab".into(),
+                "Assets/rig.prefab".into(),
+                &source,
+                |_| Ok(()),
+            )
+            .unwrap();
+        editor.refresh();
+        let before = editor.session.scene().clone();
+        let request = |revision: u64, target: &str| {
+            json!({
+                "expected_session_token": "session", "expected_revision": revision.to_string(),
+                "edits": [{"operation":"aim_spot_at_object","object_id":"lamp","component_id":"spot","target_object_id":target}]
+            })
+        };
+        let revision = editor.session.revision();
+        for (expected, target, code) in [
+            (0, "target", "stale_revision"),
+            (revision, "child", "invalid_arguments"),
+        ] {
+            assert_eq!(
+                editor.ai_command(
+                    "session",
+                    "scene_components_edit",
+                    &request(expected, target)
+                )["error"]["code"],
+                code
+            );
+            assert_eq!(editor.session.scene(), &before);
+        }
+        let reply = editor.ai_command(
+            "session",
+            "scene_components_edit",
+            &request(revision, "target"),
+        );
+        assert_eq!(reply["result"]["changed"], true, "{reply}");
+        let scene = editor.session.scene();
+        let part = scene.prefabs["rig"]
+            .parts
+            .values()
+            .find(|part| part.object == "lamp")
+            .unwrap();
+        assert_eq!(part.transform_overrides, [PrefabFields::Rotation].into());
+        let lamp = &scene.objects[1];
+        assert_eq!(
+            lamp.transform.translation,
+            before.objects[1].transform.translation
+        );
+        assert_eq!(lamp.transform.scale, before.objects[1].transform.scale);
+        assert_eq!(lamp.components, before.objects[1].components);
+        assert_eq!(scene.objects[2], before.objects[2]);
+
+        let spot = editor.ai_command(
+            "session",
+            "scene_components_inspect",
+            &json!({"object_id":"lamp","component_id":"spot"}),
+        );
+        let observation = &spot["result"]["spot_world"];
+        let forward: [f64; 3] = serde_json::from_value(observation["forward"].clone()).unwrap();
+        let origin: [f64; 3] = serde_json::from_value(observation["origin"].clone()).unwrap();
+        let world_pivot = before.objects[0]
+            .transform
+            .affine_matrix()
+            .transform_point3(DVec3::new(1., 2., 3.));
+        let direction = (DVec3::new(5., 4., -6.) - world_pivot).normalize();
+        assert!(DVec3::from(origin).abs_diff_eq(world_pivot, 1e-9));
+        assert!(DVec3::from(forward).abs_diff_eq(direction, 2e-6));
+        assert_eq!(observation["outer_degrees"], 90.);
+        let next = editor.session.revision();
+        let aligned =
+            editor.ai_command("session", "scene_components_edit", &request(next, "target"));
+        assert_eq!(aligned["result"]["changed"], false);
+        assert_eq!(editor.session.revision(), next);
+        editor.session.undo(next).unwrap();
+        assert_eq!(editor.session.scene(), &before);
+    }
+
+    #[test]
+    fn spot_aim_picker_accepts_search_enter_and_cancels_escape() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut editor = workspace(&folder.path().join("scene.json"));
+        editor.select(Some("lamp".into()));
+        let ctx = egui::Context::default();
+        let frame = |editor: &mut ComponentWorkspace, events| {
+            ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    editor.show_spot_aim(ui.ctx());
+                },
+            )
+            .textures_delta
+            .clear();
+        };
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        editor.begin_spot_aim("spot".into());
+        frame(&mut editor, vec![]);
+        frame(&mut editor, vec![key(egui::Key::Escape)]);
+        assert!(editor.spot_aim.is_none());
+        assert_eq!(editor.session.revision(), 0);
+
+        editor.begin_spot_aim("spot".into());
+        frame(&mut editor, vec![]);
+        frame(&mut editor, vec![egui::Event::Text("Yellow Plate".into())]);
+        assert_eq!(editor.spot_aim.as_ref().unwrap().filtered, [3]);
+        frame(&mut editor, vec![key(egui::Key::Enter)]);
+        assert!(
+            editor.spot_aim.is_none(),
+            "Enter commits the selected pivot"
+        );
+        assert_eq!(editor.session.revision(), 1);
+    }
+}
