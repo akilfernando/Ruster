@@ -132,16 +132,17 @@ transform clip. Place, Undo, and Redo operate on the hierarchy and its
 materials together. An approved MCP client can use `scene_model_place` with
 the model ID and current asset revision.
 
-For a static GLB with **KHR_lights_punctual**, point and directional
+For a static GLB with **KHR_lights_punctual**, point, spot, and directional
 lights become editable v23 Light components on their source nodes.
 They keep their linear colors and follow the imported hierarchy. Rot
-divides point intensity in candela by 100 and directional intensity in
-lux by 1,000, then clamps the relative result to 0–16. Point range keeps
-the source distance within 0.1–10,000 units. An unspecified range uses
-5 units. Inspect the built-in Light fields to adjust the result. Skipped
-spots keep their nodes and geometry. **Import Warnings** reports the
-approximation, range substitutions, clamps, and skipped spots. GLBs
-with both transform clips and lights carry a static playback warning.
+divides point and spot intensity in candela by 100 and directional intensity
+in lux by 1,000, then clamps the relative result to 0–16. Point and spot
+range keeps the source distance within 0.1–10,000 units. An unspecified range
+uses 5 units. Spot cone angles convert from radians to degrees. **Import
+Warnings** reports the brightness approximation, range substitutions and
+clamps. If an older catalog skipped a spot, choose **Refresh** and place the
+model again to use that light. Objects already placed keep their components.
+GLBs with both transform clips and lights carry a static playback warning.
 
 A placed GLB in a v23 scene adds a **Transform Perspective** Camera to
 each source node that references a supported perspective lens. Shared
@@ -471,22 +472,30 @@ applies either setting to the selection. You can still select objects in the
 Hierarchy and edit them in the Inspector. These settings are saved on this
 machine for the scene. Play and exported games use the scene's authored state.
 
-Choose **Object → Light → Point Light** or **Directional Light** to create a
-light with its own Transform. Attach a light to an existing object through
-**Add Component → Light** for a point light or **Directional Light** for a sun.
-Edit **Color**, **Intensity**, or **Range** (point lights), then choose **Apply**.
-Rotate a directional light or its parent to aim it. Light travels along the
-light's local −Z axis. Use **Shadows** and **Quality** to configure the sun's
-shadow. **Advanced Shadows** exposes depth bias and normal offset in shadow
-texels. Turning shadows off keeps those settings. Approved AI clients can
-inspect and edit the same component with `scene_components_inspect` and
+Choose **Object → Light** and select **Point Light**, **Spot Light**, or
+**Directional Light** to create a light with its own Transform. Use **Add
+Component** to attach a light to an existing object. Edit **Color** and
+**Intensity**, or **Range** for point and spot lights, then choose **Apply**.
+
+Rotate a spot or directional light or its parent to aim it along local −Z.
+A spot reaches full brightness inside **Inner Half-Angle** and fades to zero
+at **Outer Half-Angle**. The fields are in degrees. Set the inner value from
+0° up to the outer value and keep the outer value at or below 90°.
+Parent scale affects the light's position. Spot angles stay in degrees and range stays in world units. Spot Lights render in the Scene view and in static Play and
+Linux builds.
+
+Use **Shadows** and **Quality** to configure a directional light's shadow.
+**Advanced Shadows** exposes depth bias and normal offset in shadow texels.
+Turning shadows off keeps those settings. Approved AI clients can inspect
+and edit a light with `scene_components_inspect` and the guarded
 `scene_components_edit`.
 
-The renderer uses up to four enabled point lights and one enabled directional
-light in scene order. The editor keeps extra lights and shows a warning.
-Approved clients see the warning in the first page of `scene_inspect`. Disable
-an earlier light to preview the next one. The editor's visibility controls also
-affect the preview. A static Linux build uses the authored enabled states.
+The renderer uses the first four enabled point or spot lights and the first
+enabled directional light in scene order. The editor keeps extra lights and
+shows a warning. Approved clients see the warning in the first page of
+`scene_inspect`. Disable an earlier light to preview the next one. The
+editor's visibility controls also affect the preview. A static Linux build
+uses the authored enabled states.
 
 **File → Save** writes the edits to the v23 file. An approved MCP client
 can call `scene_persistence_inspect`, then `scene_save` with the inspected
