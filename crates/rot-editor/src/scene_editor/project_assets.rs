@@ -714,23 +714,26 @@ fn file_action(
             create_script(store, held_root, &parent, &name, active)
         }
         FileAction::OpenScript { id, source, launch } => {
-            store
+            let mut child = store
                 .with_current_catalog(|| {
-                    let failure = |reason: String| {
-                        rot_assets::AssetError(format!(
-                            "Couldn't open {} in the code editor: {reason}",
-                            source.display()
-                        ))
-                    };
                     let mut command =
                         project_script_command(store, held_root, &id, &source, &launch, active)
-                            .map_err(failure)?;
+                            .map_err(rot_assets::AssetError)?;
                     command
                         .spawn()
-                        .map_err(|error| failure(error.to_string()))?;
-                    Ok(())
+                        .map_err(|error| rot_assets::AssetError(error.to_string()))
                 })
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| {
+                    format!(
+                        "Couldn't open {} in the code editor: {error}",
+                        source.display()
+                    )
+                })?;
+            // Wait away from the asset worker and catalog lock. Closing the
+            // project does not stop an external editor that is still running.
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
             Ok(source)
         }
         FileAction::CreateFolder { parent, name } => {
