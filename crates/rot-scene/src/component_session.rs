@@ -84,6 +84,7 @@ enum SceneChange {
         object: ObjectNode,
     },
     Display(DisplayProfile),
+    Hud(crate::hud::Hud),
     GameplayCamera(Option<String>),
     Action {
         id: String,
@@ -119,6 +120,7 @@ impl SceneChange {
                 index,
                 object: std::mem::replace(&mut objects[index], object),
             },
+            Self::Hud(value) => Self::Hud(std::mem::replace(&mut scene.hud, value)),
             Self::Display(value) => Self::Display(std::mem::replace(&mut scene.display, value)),
             Self::GameplayCamera(value) => {
                 Self::GameplayCamera(std::mem::replace(&mut scene.gameplay_camera, value))
@@ -260,6 +262,67 @@ impl ComponentSession {
 
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    fn retained_huds(&self) -> impl Iterator<Item = &crate::hud::Hud> {
+        self.undo
+            .iter()
+            .chain(&self.redo)
+            .flat_map(|entry| &entry.changes)
+            .filter_map(|change| match change {
+                SceneChange::Hud(hud) => Some(hud),
+                _ => None,
+            })
+    }
+
+    pub fn allocate_hud_id(
+        &self,
+        panel: bool,
+        draft: &crate::hud::Hud,
+    ) -> Result<String, SceneError> {
+        let mut used = std::collections::HashSet::new();
+        for hud in [&self.scene.hud, draft]
+            .into_iter()
+            .chain(self.retained_huds())
+        {
+            if panel {
+                used.extend(hud.panels.iter().map(|panel| panel.id.as_str()));
+            } else {
+                used.extend(hud.elements().map(|label| label.id.as_str()));
+            }
+        }
+        crate::allocate_ids(if panel { "panel" } else { "label" }, 1, 1, used)
+            .map(|mut ids| ids.remove(0))
+    }
+
+    pub fn set_hud(&mut self, expected: u64, hud: crate::hud::Hud) -> Result<u64, SceneError> {
+        self.check_revision(expected)?;
+        if self.scene.hud == hud {
+            return Ok(self.revision);
+        }
+        for panel in &hud.panels {
+            if !self.scene.hud.panels.iter().any(|old| old.id == panel.id)
+                && self
+                    .retained_huds()
+                    .any(|old| old.panels.iter().any(|old| old.id == panel.id))
+            {
+                return Err(SceneError::Invalid(
+                    "HUD panel ID is reserved by Undo history. Choose a fresh ID.".into(),
+                ));
+            }
+        }
+        for label in hud.elements() {
+            if self.scene.hud.panel_for_label(&label.id).is_none()
+                && self
+                    .retained_huds()
+                    .any(|old| old.panel_for_label(&label.id).is_some())
+            {
+                return Err(SceneError::Invalid(
+                    "HUD label ID is reserved by Undo history. Choose a fresh ID.".into(),
+                ));
+            }
+        }
+        self.commit(vec![SceneChange::Hud(hud)])
     }
 
     pub fn set_action(

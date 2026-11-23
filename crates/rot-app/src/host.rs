@@ -527,6 +527,10 @@ impl<A: Application> Host<A> {
                     }
                 }
                 let painter = ui.painter().with_clip_rect(viewport.rect);
+                if let Some((hud, resolved)) = self.runtime.app().content().static_hud() {
+                    crate::hud::paint_hud(&painter, viewport.rect, hud, resolved,
+                        crate::hud::HudPresentationMode::Committed);
+                }
                 let overlay = self.runtime.app_mut().viewport_overlay(&painter, viewport.rect);
                 self.report(overlay);
                 if let Some(id) = viewport.picked {

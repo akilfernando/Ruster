@@ -24,6 +24,7 @@ pub struct ComponentPreview {
     unpickable: BTreeSet<String>,
     light_budget_exceeded: bool,
     transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
+    static_hud: Option<Arc<(rot_scene::hud::Hud, rot_scene::hud::ResolvedHud)>>,
 }
 
 impl ComponentPreview {
@@ -37,6 +38,12 @@ impl ComponentPreview {
 
     pub fn transform_camera(&self) -> Option<rot_scene::component_scene::TransformCameraPose> {
         self.transform_camera
+    }
+
+    pub fn static_hud(&self) -> Option<(&rot_scene::hud::Hud, &rot_scene::hud::ResolvedHud)> {
+        self.static_hud
+            .as_deref()
+            .map(|(hud, resolved)| (hud, resolved))
     }
 
     pub fn scene_snapshot(&self) -> Arc<Scene> {
@@ -382,6 +389,17 @@ pub fn project_editor_with_world(
     scene.lighting.validate()?;
     Ok((
         ComponentPreview {
+            static_hud: (component_scene.hud.enabled
+                && component_scene.hud.is_static()
+                && component_scene.hud.elements().next().is_some())
+            .then(|| {
+                let hud = component_scene.hud.clone();
+                let resolved =
+                    rot_scene::hud::resolve_hud(&hud, &rot_scene::Authoring::default(), |_, _| {
+                        None
+                    });
+                Arc::new((hud, resolved))
+            }),
             scene: Arc::new(scene),
             matrices,
             unpickable,

@@ -421,6 +421,17 @@ Changes share Undo. Save before Linux Build, which verifies and packages the
 referenced WAVs. Play emits sounds when a simulation step succeeds.
 Paused Step exposes the committed cue without playing it.
 
+## Add a Game HUD label
+
+Choose **Window → Game HUD…**. Select **Add Label**, enter the text, and set
+the panel's **Anchor**. **Show in Game** controls visibility and keeps the
+authored text and layout. **Apply** commits the change as one Undo step.
+Use **Remove Label** to delete a row, or Escape to cancel the draft.
+
+Labels appear in the Game view and in a saved Linux build. They leave keyboard
+and pointer input available to the game. Existing buttons and state-bound
+rows remain in their panels.
+
 ## Edit a Box Collider in Scene view
 
 Select an object with an enabled Box Collider and choose **Edit Collider**

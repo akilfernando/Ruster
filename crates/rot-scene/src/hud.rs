@@ -414,6 +414,16 @@ impl Hud {
         self == &Self::default()
     }
 
+    /// Static presentation needs only authored labels and the global visibility flag.
+    pub fn is_static(&self) -> bool {
+        self.panels.iter().all(|panel| {
+            panel.visible_when.is_none()
+                && panel.elements.iter().all(|label| {
+                    label.enabled_when.is_none() && matches!(label.source, HudSource::Static { .. })
+                })
+        })
+    }
+
     pub fn elements(&self) -> impl Iterator<Item = &HudLabel> {
         self.panels.iter().flat_map(|panel| &panel.elements)
     }

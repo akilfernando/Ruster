@@ -412,7 +412,7 @@ pub fn static_component_preview(
 fn supports_static_preview(scene: &ComponentScene) -> bool {
     scene.sources.is_empty()
         && scene.actions == Default::default()
-        && scene.hud.is_default()
+        && scene.hud.is_static()
         && scene.objects.iter().all(|object| {
             object.components.iter().all(|component| {
                 !matches!(
@@ -1029,6 +1029,61 @@ impl CreationManifest {
 mod tests {
     use super::*;
     use crate::Content;
+
+    #[test]
+    fn dense_static_label_hud_keeps_the_component_preview() {
+        use rot_scene::component_scene::{ComponentInstance, Geometry, ObjectNode};
+        use rot_scene::hud::{Hud, HudAnchor, HudLabel, HudPanel, HudSource};
+
+        let base = Session::new(Scene::empty("hud")).unwrap();
+        let mut scene = ComponentScene::from_legacy(&base).unwrap();
+        scene.objects = (0..5_000)
+            .map(|index| ObjectNode {
+                id: format!("node-{index}"),
+                name: format!("Node {index}"),
+                enabled: true,
+                parent: (index != 0).then(|| "node-0".into()),
+                transform: Default::default(),
+                components: if index != 0 {
+                    vec![ComponentInstance {
+                        id: format!("mesh-{index}"),
+                        enabled: true,
+                        kind: Component::MeshRenderer {
+                            geometry: Geometry::Cube,
+                            tint: [1.0; 4],
+                            material: None,
+                        },
+                    }]
+                } else {
+                    Vec::new()
+                },
+            })
+            .collect();
+        scene.hud = Hud {
+            enabled: true,
+            panels: vec![HudPanel {
+                anchor: HudAnchor::BottomRight,
+                elements: vec![HudLabel {
+                    id: "notice".into(),
+                    source: HudSource::Static {
+                        text: "Rail Service".into(),
+                    },
+                    enabled_when: None,
+                }],
+                ..HudPanel::default()
+            }],
+        };
+        let RuntimeScene::StaticHierarchy { preview, .. } =
+            RuntimeScene::from_components(Box::new(scene)).unwrap()
+        else {
+            panic!("static labels must not downgrade a dense scene to behavior projection");
+        };
+        assert_eq!(preview.scene().objects.len(), 4_999);
+        let (hud, resolved) = preview.static_hud().unwrap();
+        assert_eq!(hud.panels[0].anchor, HudAnchor::BottomRight);
+        assert_eq!(resolved.panels[0].labels[0].text, "Rail Service");
+        assert!(std::ptr::eq(resolved, preview.static_hud().unwrap().1));
+    }
 
     #[test]
     fn behavior_accepts_active_and_dormant_transform_lenses() {

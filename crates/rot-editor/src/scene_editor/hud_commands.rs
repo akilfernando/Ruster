@@ -63,7 +63,7 @@ fn observation_rows(observation: &Value) -> Vec<(&Value, Option<&Value>)> {
     rows
 }
 
-fn observation_page(mut observation: Value, ids: &[&str]) -> Value {
+pub(super) fn observation_page(mut observation: Value, ids: &[&str]) -> Value {
     let selected: Vec<_> = observation_rows(&observation)
         .into_iter()
         .filter(|(label, _)| label["id"].as_str().is_some_and(|id| ids.contains(&id)))
@@ -105,13 +105,13 @@ fn inspection_ids(definition: &Hud, model: &Value, prepared: Option<&Value>) -> 
     ids
 }
 
-fn panel_header(panel: &HudPanel) -> Value {
+pub(super) fn panel_header(panel: &HudPanel) -> Value {
     json!({"id":panel.id,"name":panel.name,"visible_when":panel.visible_when,
         "anchor":panel.anchor,"width":panel.width,"margin":panel.margin,"spacing":panel.spacing,
         "font_size":panel.font_size,"text_color":panel.text_color,"background":panel.background})
 }
 
-fn legacy_definition(hud: &Hud, panel: Option<&HudPanel>, ids: &[&str]) -> Value {
+pub(super) fn legacy_definition(hud: &Hud, panel: Option<&HudPanel>, ids: &[&str]) -> Value {
     let default_panel = HudPanel::default();
     let panel = panel.unwrap_or(&default_panel);
     let labels: Vec<_> = panel
@@ -124,7 +124,7 @@ fn legacy_definition(hud: &Hud, panel: Option<&HudPanel>, ids: &[&str]) -> Value
         "background":panel.background,"elements":labels})
 }
 
-fn panel_observation(mut observation: Value) -> Value {
+pub(super) fn panel_observation(mut observation: Value) -> Value {
     let panels: Vec<_> = observation["resolved"]["panels"]
         .as_array()
         .into_iter()

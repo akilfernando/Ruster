@@ -125,6 +125,13 @@ impl Content {
             ContentScene::StaticHierarchy(preview) => preview.scene(),
         }
     }
+    pub fn static_hud(&self) -> Option<(&rot_scene::hud::Hud, &rot_scene::hud::ResolvedHud)> {
+        match &self.scene {
+            ContentScene::StaticHierarchy(preview) => preview.static_hud(),
+            ContentScene::Behavior(_) => None,
+        }
+    }
+
     pub fn has_player_camera(&self) -> bool {
         match &self.scene {
             ContentScene::Behavior(scene) => {

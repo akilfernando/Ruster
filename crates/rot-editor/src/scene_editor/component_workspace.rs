@@ -38,6 +38,9 @@ mod component_new_scene;
 #[path = "component_spot.rs"]
 mod component_spot;
 
+#[path = "component_hud.rs"]
+mod component_hud;
+
 #[path = "component_material.rs"]
 pub(super) mod component_material;
 
@@ -234,6 +237,7 @@ pub(super) struct ComponentWorkspace {
     #[cfg(all(target_os = "linux", feature = "inspection"))]
     inspection_asset_drop: bool,
     runtime: RuntimeUi,
+    game_hud: Option<component_hud::Draft>,
     hud_cache: rot_scene::hud::HudCache,
     hud_controls: hud_interaction::HudControls,
     workspace: Workspace,
@@ -410,6 +414,7 @@ impl ComponentWorkspace {
             #[cfg(all(target_os = "linux", feature = "inspection"))]
             inspection_asset_drop: false,
             runtime: RuntimeUi::default(),
+            game_hud: None,
             hud_cache: Default::default(),
             hud_controls: Default::default(),
             workspace: Workspace::detached(),
@@ -783,6 +788,7 @@ impl ComponentWorkspace {
 
     pub(super) fn surface_edit_pending(&self) -> bool {
         self.material_draft.is_some()
+            || self.game_hud.is_some()
             || self.sound_cue.is_some()
             || self.display_draft.is_some()
             || self.input_actions.pending()
@@ -1693,7 +1699,10 @@ impl ComponentWorkspace {
         let rect = surface.rect;
         self.viewport_aspect = rect.is_positive().then(|| rect.width() / rect.height());
         let mut hud_owns = false;
-        if let Some(frame) = &frame {
+        if let Some(frame) = frame
+            .as_ref()
+            .filter(|frame| frame.static_preview.is_none())
+        {
             let (owned, error) = hud_interaction::interact(
                 ui,
                 hud_interaction::HudViewport {
@@ -1810,7 +1819,18 @@ impl ComponentWorkspace {
             .input_finish(&ctx, &interaction.response, blocked || hud_owns);
         if let Some(frame) = &frame {
             let hud = &frame.authoring.hud;
-            if let Some(prepared) = self.hud_controls.prepared.take() {
+            let mode = if self.runtime.stale {
+                rot_app::hud::HudPresentationMode::Stale
+            } else {
+                rot_app::hud::HudPresentationMode::Committed
+            };
+            if let Some((hud, rows)) = frame
+                .static_preview
+                .as_ref()
+                .and_then(|preview| preview.static_hud())
+            {
+                rot_app::hud::paint_hud(ui.painter(), rect, hud, rows, mode);
+            } else if let Some(prepared) = self.hud_controls.prepared.take() {
                 rot_app::hud::paint_prepared_hud(ui.painter(), &prepared);
             } else if hud.enabled {
                 let rows = self
@@ -1818,11 +1838,6 @@ impl ComponentWorkspace {
                     .prepare(hud, &frame.authoring, |binding, field| {
                         frame.state.binding(binding)?.get(field)
                     });
-                let mode = if self.runtime.stale {
-                    rot_app::hud::HudPresentationMode::Stale
-                } else {
-                    rot_app::hud::HudPresentationMode::Committed
-                };
                 rot_app::hud::paint_hud(ui.painter(), rect, hud, rows, mode);
             }
         } else if !blocked && !moving {
@@ -2404,6 +2419,18 @@ impl ComponentWorkspace {
                 });
                 editor_theme::text_menu(ui, "Window", |ui| {
                     self.menu_action(ui, Action::ToggleAssets);
+                    if ui
+                        .add_enabled(
+                            !blocked
+                                && !self.authored_edit_pending()
+                                && !self.runtime.in_play_mode(),
+                            egui::Button::new("Game HUD…"),
+                        )
+                        .clicked()
+                    {
+                        self.open_game_hud();
+                        ui.close();
+                    }
                     #[cfg(unix)]
                     if ui.button(Action::AiConnection.label()).clicked() {
                         self.request_connection = true;
@@ -2930,6 +2957,7 @@ impl ComponentWorkspace {
         self.show_project_settings(&ctx);
         self.show_material_draft(&ctx);
         self.show_sound_cue(&ctx);
+        self.show_game_hud(&ctx);
         self.show_display_draft(&ctx);
         self.show_camera_draft(&ctx);
         self.show_spot_aim(&ctx);

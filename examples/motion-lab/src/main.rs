@@ -775,6 +775,11 @@ fn execute_static_hierarchy(
             "world_matrices": world_matrices,
         });
         let content = runtime.app().content();
+        if let Some((hud, resolved)) = content.static_hud() {
+            output["authored_hud"] =
+                serde_json::to_value(hud).map_err(|error| error.to_string())?;
+            output["hud"] = serde_json::to_value(resolved).map_err(|error| error.to_string())?;
+        }
         if let Some(camera) = content.transform_camera() {
             output["player_view"] = transform_camera_report(camera)?;
         } else if let Some(camera) = player_view_report(content.scene())? {

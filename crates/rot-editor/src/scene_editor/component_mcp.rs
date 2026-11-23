@@ -29,6 +29,17 @@ impl ComponentWorkspace {
                 | "behavior_runtime_stop"
         ) {
             self.execute_ai_runtime(token, op, args)
+        } else if matches!(
+            op,
+            "hud_inspect"
+                | "hud_panel_inspect"
+                | "hud_settings_set"
+                | "hud_panel_set"
+                | "hud_label_set"
+                | "hud_label_move"
+                | "hud_panel_move"
+        ) {
+            self.game_hud_command(token, op, args)
         } else if op == "scene_display_set" {
             self.display_command(token, args)
         } else if matches!(
