@@ -1477,7 +1477,7 @@ mod tests {
             executable: "example-editor".into(),
             args: vec!["--new".into(), "{file}:{line}".into()],
         };
-        let mut location = ScriptLocation {
+        let location = ScriptLocation {
             expected_hash: store.asset_info("rail").unwrap().hash.clone().unwrap(),
             line: Some(8),
         };
@@ -1492,9 +1492,12 @@ mod tests {
             resolve(&location).unwrap().get_args().collect::<Vec<_>>(),
             ["--new", &line]
         );
-        location.line = None;
+        let file_only = ScriptLocation {
+            expected_hash: location.expected_hash.clone(),
+            line: None,
+        };
         assert_eq!(
-            resolve(&location).unwrap().get_args().collect::<Vec<_>>(),
+            resolve(&file_only).unwrap().get_args().collect::<Vec<_>>(),
             ["--new", absolute.to_str().unwrap()]
         );
 

@@ -3261,7 +3261,7 @@ impl RuntimeUi {
                     if let Some(diagnostic) = &self.diagnostic {
                         #[cfg(target_os = "linux")]
                         let mut open = None;
-                        ui.collapsing(Text::ErrorDetails.plain(), |ui| {
+                        let details = ui.collapsing(Text::ErrorDetails.plain(), |ui| {
                             ui.set_max_width(360.0);
                             if let Some(project) = self.project_error_source() {
                                 use crate::scene_editor::script_assets::SourceStatus;
@@ -3323,6 +3323,11 @@ impl RuntimeUi {
                                     ));
                                 });
                         });
+                        if self.project_error_source().is_some()
+                            && details.header_response.clicked()
+                        {
+                            details.header_response.request_focus();
+                        }
                         #[cfg(target_os = "linux")]
                         if open.is_some() {
                             self.open_project_error = open;
