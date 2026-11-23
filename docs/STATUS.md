@@ -50,6 +50,13 @@ A 5,000-object destination is prepared off the standalone render update, cutting
 the worst Start update from 35.819 to 0.108 ms in release. The first
 completed destination frame arrived in 35.0–51.5 ms while Title continued
 rendering.
+File → Open Scene and the Start destination share a searchable Project
+Scenes picker. Open, Startup and Start destination markers identify the
+exact saved siblings. A replaced file is rejected before Open or Set
+Transition. An admitted Open drains the prior AI connection before switching.
+In release tests, the first results appeared in 13.4 ms p95 on the sample
+project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
+validated in 61.6 ms p95, including the native inspection round trip.
 
 The v23 Inspector shows live Transform and script state during Play and Step.
 An imported model's Animator lists same-model clips and their durations.

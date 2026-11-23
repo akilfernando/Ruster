@@ -14,6 +14,15 @@ An open Rust/Vulkan engine for interactive simulation and visualization, where d
 
 User experience is the primary product pillar. Performance, reliability and openness support that experience. AI automation is an interface to the same coherent engine, not a separate required workflow.
 
+## Breadth-first development — 2026-11-23
+
+The user directs Rot Engine to build a well-rounded set of creator
+capabilities. Bring each feature to a usable level through its ordinary
+editor workflow, with approved MCP, Play and Build where applicable.
+Address failures that block that workflow, then move to an underdeveloped
+area. Keep deeper refinements in the backlog. Everyday usability,
+measured performance and the optional Rot style apply across features.
+
 ## Creator-owned application logic clarification — 2026-11-09
 
 The user explicitly confirms that Rot Engine is the foundation through which creators implement their own scoring systems, menus and other application rules. Reusable state, scripting, UI and lifecycle facilities must support creator-defined designs through code, direct editing and native MCP. Example challenges supply acceptance exercises for those capabilities. Their particular scoring/objective/menu rules are application content. The next-work recommendation remains a proposal. Engine architecture and the acceptance exercise require their own bounded selection.
