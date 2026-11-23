@@ -362,7 +362,7 @@ impl ComponentWorkspace {
 
     pub(super) fn begin_material(&mut self, request: Request) {
         if self.material_draft.is_some()
-            || self.transform_tool.active()
+            || self.viewport_edit_active()
             || self.runtime.in_play_mode()
         {
             return;

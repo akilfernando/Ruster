@@ -187,21 +187,35 @@ pub(super) fn mesh_renderer_heading(ordinal: Option<usize>) -> std::borrow::Cow<
     ordinal.map_or_else(|| label.into(), |index| format!("{label} {index}").into())
 }
 
+pub(super) struct ComponentControls<'a> {
+    pub(super) allow_new_material: bool,
+    pub(super) diagnostic: Option<&'a rot_behavior::Diagnostic>,
+    pub(super) collider_edit: &'a super::component_workspace::component_collider::InspectorState,
+}
+
+pub(super) struct ComponentEdits {
+    pub(super) submit: bool,
+    pub(super) material: Option<super::component_workspace::component_material::Request>,
+    pub(super) animator_revision: Option<(String, u64)>,
+    pub(super) collider: Option<String>,
+}
+
 pub(super) fn components(
     ui: &mut egui::Ui,
     draft: &mut ObjectNode,
     meshes: &rot_app::MeshMap,
     assets: Option<&rot_assets::AssetStore>,
     materials: &BTreeMap<String, OpaqueMaterial>,
-    allow_new_material: bool,
-    diagnostic: Option<&rot_behavior::Diagnostic>,
-) -> (
-    bool,
-    Option<super::component_workspace::component_material::Request>,
-    Option<(String, u64)>,
-) {
+    controls: ComponentControls<'_>,
+) -> ComponentEdits {
+    let ComponentControls {
+        allow_new_material,
+        diagnostic,
+        collider_edit,
+    } = controls;
     use super::component_workspace::component_material::{Intent, Request};
     let mut material_request = None;
+    let mut collider_request = None;
     let mut animator_revision = None;
     let mut submit = false;
     let mut remove = None;
@@ -309,6 +323,27 @@ pub(super) fn components(
                         offset,
                         shape,
                     } => {
+                        if matches!(shape, ColliderShape::Box { .. }) {
+                            if let Some((_, reason)) = collider_edit
+                                .entries
+                                .iter()
+                                .find(|(id, _)| id == &component.id)
+                            {
+                                let active = collider_edit.active.as_ref() == Some(&component.id);
+                                let response = ui.add_enabled(
+                                    reason.is_none(),
+                                    egui::Button::selectable(active, Text::EditCollider.plain()),
+                                );
+                                let response = if let Some(reason) = reason {
+                                    response.on_disabled_hover_text(reason.plain())
+                                } else {
+                                    response.on_hover_text(Text::ColliderEditHint.plain())
+                                };
+                                if response.clicked() {
+                                    collider_request = Some(component.id.clone());
+                                }
+                            }
+                        }
                         submit |= collider_fields(ui, role, offset, shape);
                     }
                     Component::Light {
@@ -440,7 +475,12 @@ pub(super) fn components(
         draft.components.remove(index);
         submit = true;
     }
-    (submit, material_request, animator_revision)
+    ComponentEdits {
+        submit,
+        material: material_request,
+        animator_revision,
+        collider: collider_request,
+    }
 }
 
 fn animator_fields(

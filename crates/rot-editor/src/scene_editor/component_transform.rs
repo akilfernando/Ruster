@@ -53,15 +53,22 @@ impl Default for TransformTool {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum PointerRelease {
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum PointerRelease {
+    #[default]
     Idle,
     Pending,
     InFrame(u64),
 }
 
 impl PointerRelease {
-    fn suppress(&mut self, frame: u64, down: bool, pressed: bool, released: bool) -> bool {
+    pub(super) fn suppress(
+        &mut self,
+        frame: u64,
+        down: bool,
+        pressed: bool,
+        released: bool,
+    ) -> bool {
         *self = match *self {
             Self::Pending if released || !down && !pressed => Self::InFrame(frame),
             Self::InFrame(release) if release != frame => Self::Idle,

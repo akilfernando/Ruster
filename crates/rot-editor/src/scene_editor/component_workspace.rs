@@ -25,6 +25,9 @@ use std::path::PathBuf;
 #[path = "component_camera.rs"]
 pub(super) mod component_camera;
 
+#[path = "component_collider.rs"]
+pub(super) mod component_collider;
+
 #[path = "component_display.rs"]
 mod component_display;
 
@@ -234,6 +237,7 @@ pub(super) struct ComponentWorkspace {
     preview: Result<rot_render::component_preview::ComponentPreview, rot_scene::SceneError>,
     preview_world: Vec<DMat4>,
     transform_tool: TransformTool,
+    collider_tool: component_collider::ColliderTool,
     rows: Vec<(usize, usize)>,
     parents: Vec<Option<usize>>,
     scene_view: SceneViewState,
@@ -305,6 +309,7 @@ impl ComponentWorkspace {
             preview,
             preview_world,
             transform_tool: TransformTool::default(),
+            collider_tool: Default::default(),
             rows,
             parents,
             scene_view: SceneViewState::default(),
@@ -712,8 +717,12 @@ impl ComponentWorkspace {
             || self.camera_authoring.pending()
     }
 
+    fn viewport_edit_active(&self) -> bool {
+        self.transform_tool.active() || self.collider_tool.active()
+    }
+
     fn authored_edit_pending(&self) -> bool {
-        self.transform_tool.active() || self.surface_edit_pending() || self.draft_dirty()
+        self.viewport_edit_active() || self.surface_edit_pending() || self.draft_dirty()
     }
 
     fn refresh(&mut self) {
@@ -741,6 +750,7 @@ impl ComponentWorkspace {
 
     fn refresh_view(&mut self) {
         self.transform_tool.cancel();
+        self.collider_tool.cancel();
         self.transform_tool.invalidate_target();
         #[cfg(unix)]
         {
@@ -826,7 +836,7 @@ impl ComponentWorkspace {
     }
 
     fn apply(&mut self) -> bool {
-        if self.transform_tool.active() || self.surface_edit_pending() {
+        if self.viewport_edit_active() || self.surface_edit_pending() {
             return false;
         }
         if !self.draft_dirty() {
@@ -1301,7 +1311,7 @@ impl ComponentWorkspace {
     }
 
     fn command_from_ui(&mut self, ctx: &egui::Context, action: Action) {
-        if self.transform_tool.active() || self.surface_edit_pending() {
+        if self.viewport_edit_active() || self.surface_edit_pending() {
             return;
         }
         #[cfg(not(target_os = "linux"))]
@@ -1323,7 +1333,7 @@ impl ComponentWorkspace {
     }
 
     fn command(&mut self, action: Action) {
-        if self.transform_tool.active() || self.surface_edit_pending() {
+        if self.viewport_edit_active() || self.surface_edit_pending() {
             return;
         }
         let revision = self.session.revision();
@@ -1342,6 +1352,7 @@ impl ComponentWorkspace {
             }
 
             Action::Move | Action::Rotate | Action::Scale => {
+                self.collider_tool.exit();
                 self.transform_tool.enabled = true;
                 self.transform_tool.tool = match action {
                     Action::Rotate => Tool::Rotate,
@@ -1572,7 +1583,7 @@ impl ComponentWorkspace {
             (!self.runtime.in_play_mode()).then_some(Text::SetGameCameraFromView.plain());
         self.navigation.focusable = playing && !self.session.scene().actions.is_empty();
         self.navigation.enabled =
-            !blocked && !self.runtime.input_owned() && !self.transform_tool.active();
+            !blocked && !self.runtime.input_owned() && !self.viewport_edit_active();
         self.navigation.show_editor_grid = frame.is_none();
         let mut surface =
             rot_render::allocate_viewport(ui, scene, selection.as_slice(), &mut self.navigation);
@@ -1598,7 +1609,7 @@ impl ComponentWorkspace {
                 self.error = Some(error);
             }
         }
-        surface.input_owned = hud_owns || self.transform_tool.active();
+        surface.input_owned = hud_owns || self.viewport_edit_active();
         surface.set_hidden_mesh_renderers(
             frame
                 .as_ref()
@@ -1633,16 +1644,14 @@ impl ComponentWorkspace {
         let save_pending = self.pending_save.is_some();
         #[cfg(not(unix))]
         let save_pending = false;
+        let edit_blocked = blocked
+            || save_pending
+            || self.palette.is_some()
+            || self.draft_dirty()
+            || self.runtime.in_play_mode();
         let moving = frame.is_none()
-            && self.draw_transform_tool(
-                ui,
-                &interaction,
-                blocked
-                    || save_pending
-                    || self.palette.is_some()
-                    || self.draft_dirty()
-                    || self.runtime.in_play_mode(),
-            );
+            && (self.draw_collider_tool(ui, &interaction, edit_blocked)
+                || self.draw_transform_tool(ui, &interaction, edit_blocked));
         if frame.is_none() && !moving && !ctx.will_discard() {
             self.camera_authoring
                 .submit_scene_view(self.navigation.camera, &interaction);
@@ -1699,11 +1708,12 @@ impl ComponentWorkspace {
         ui.add_enabled_ui(!blocked, |ui| {
             if ui
                 .selectable_label(
-                    !self.transform_tool.enabled,
+                    !self.transform_tool.enabled && self.collider_tool.mode().is_none(),
                     Text::ComponentSelectTool.plain(),
                 )
                 .clicked()
             {
+                self.collider_tool.exit();
                 self.transform_tool.enabled = false;
                 if self.error.as_deref() == Some(Text::ComponentTransformHidden.plain()) {
                     self.error = None;
@@ -1837,7 +1847,7 @@ impl ComponentWorkspace {
             && self.material_draft.is_none()
             && self.display_draft.is_none()
             && !self.camera_authoring.pending()
-            && !self.transform_tool.active()
+            && !self.viewport_edit_active()
             && !self.draft_dirty()
     }
 
@@ -1970,8 +1980,9 @@ impl ComponentWorkspace {
             })
         {
             self.transform_tool.cancel();
+            self.collider_tool.cancel();
         }
-        let transform_active = self.transform_tool.active();
+        let transform_active = self.viewport_edit_active();
         self.runtime.input_begin(
             &ctx,
             blocked || asset_dialog || self.project_settings.is_some(),
@@ -2484,22 +2495,29 @@ impl ComponentWorkspace {
                                 ui.separator();
                                 if self.draft.is_some() {
                                     let allow_new = self.material_controls();
-                                    let (component_submit, material_request, animator_revision) =
-                                        component_inspector::components(
-                                            ui,
-                                            self.draft.as_mut().expect("selected draft"),
-                                            &self.meshes,
-                                            self.assets.as_ref(),
-                                            &self.session.scene().materials,
-                                            allow_new,
-                                            self.runtime.diagnostic.as_ref(),
-                                        );
-                                    submit |= component_submit;
-                                    if let Some((id, revision)) = animator_revision {
+                                    let collider_edit = self.collider_inspector_state();
+                                    let edits = component_inspector::components(
+                                        ui,
+                                        self.draft.as_mut().expect("selected draft"),
+                                        &self.meshes,
+                                        self.assets.as_ref(),
+                                        &self.session.scene().materials,
+                                        component_inspector::ComponentControls {
+                                            allow_new_material: allow_new,
+                                            diagnostic: self.runtime.diagnostic.as_ref(),
+                                            collider_edit: &collider_edit,
+                                        },
+                                    );
+                                    submit |= edits.submit;
+                                    if let Some(id) = edits.collider.filter(|_| !self.draft_dirty())
+                                    {
+                                        self.toggle_collider_mode(id);
+                                    }
+                                    if let Some((id, revision)) = edits.animator_revision {
                                         self.animator_draft_revisions.insert(id, revision);
                                     }
                                     self.camera_controls(ui);
-                                    if let Some(request) = material_request {
+                                    if let Some(request) = edits.material {
                                         self.begin_material(request);
                                     }
                                 }
@@ -2527,6 +2545,7 @@ impl ComponentWorkspace {
                     && self.open_path.is_none()
                     && !self.surface_edit_pending()
                     && self.project_settings.is_none()
+                    && self.collider_tool.mode().is_none()
                     && !egui::Popup::is_any_open(&ctx)
                     && ui.input_mut(|input| {
                         input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)

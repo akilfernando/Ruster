@@ -1056,12 +1056,13 @@ impl ComponentWorkspace {
         let id = args["object_id"]
             .as_str()
             .ok_or_else(invalid_component_arguments)?;
-        let object = self
+        let (row, object) = self
             .session
             .scene()
             .objects
             .iter()
-            .find(|object| object.id == id)
+            .enumerate()
+            .find(|(_, object)| object.id == id)
             .ok_or_else(object_not_found)?;
         if let Some(component_id) = args.get("component_id") {
             let component_id = component_id
@@ -1081,6 +1082,24 @@ impl ComponentWorkspace {
                 ));
             }
             let mut response = json!({"object_id":id,"component":component});
+            if let Some(collider) = super::component_collider::box_component(component) {
+                let enabled = self.collider_effective(row, collider.enabled);
+                response["collider_world"] = match self.collider_for_viewport(row, collider) {
+                    Ok(world) => json!({
+                        "status": "resolved",
+                        "effective_enabled": enabled,
+                        "center": world.center.to_array(),
+                        "rotation_xyzw": world.rotation.to_array(),
+                        "half_extents": world.half_extents.to_array(),
+                        "corners": world.corners(),
+                    }),
+                    Err(reason) => json!({
+                        "status": if reason == Text::ColliderShear { "unsupported_shear" } else { "unavailable" },
+                        "effective_enabled": enabled,
+                        "reason": reason.plain(),
+                    }),
+                };
+            }
             if let Component::Animator { binding } = &component.kind {
                 response["animation"] = component_animation::observe(self.assets.as_ref(), binding);
             }

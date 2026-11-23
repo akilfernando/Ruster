@@ -289,7 +289,7 @@ impl ComponentWorkspace {
         args: &Value,
     ) -> CaptureResult {
         let map = args.as_object().ok_or_else(|| fail("invalid_arguments"))?;
-        if (self.transform_tool.active() || self.display_draft.is_some())
+        if (self.viewport_edit_active() || self.display_draft.is_some())
             && op != "viewport_capture_inspect"
         {
             return Err(fail("view_busy"));
