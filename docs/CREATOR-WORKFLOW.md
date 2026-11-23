@@ -124,6 +124,16 @@ spots keep their nodes and geometry. **Import Warnings** reports the
 approximation, range substitutions, clamps, and skipped spots. GLBs
 with both transform clips and lights carry a static playback warning.
 
+A placed GLB in a v23 scene adds a **Transform Perspective** Camera to
+each source node that references a supported perspective lens. Shared
+lenses become independently editable Camera components. Choose **Make
+Active** on the desired Camera to use it in Game view. Refresh leaves
+existing placed lens settings intact. Place the refreshed model again
+to use the new lens. **Import Warnings** identifies skipped orthographic
+cameras and perspective lenses outside Rot's supported range. Their
+nodes and geometry still place. Import requires a supported model with
+geometry.
+
 Keep any PNG files a GLB references beside the model or in their original
 subfolder. Rot imports them with the model and refreshes the model when a
 referenced PNG in `Assets/` changes. Base-color textures support 8-bit
@@ -214,7 +224,12 @@ or viewport tools to move, tilt, or roll the shot.
 The camera looks down its local −Z axis with local +Y up. It uses its world
 position, including the effects of parent scale, and its composed authored
 rotation. Parent scale leaves lens orientation and FOV unchanged. The
-perspective clip planes are 0.1 and 1,000 world units.
+native lens follows the viewport with clip planes at 0.1 and 1,000 world
+units. For an imported camera, **Aspect Ratio**, **Near Clip**, and
+**Far Clip** show its authored settings. **Viewport Adaptive** means the
+lens follows the output size. An authored aspect fits the shot in the
+center with black bars where needed. **Infinity** means the lens has
+no far clip plane. Edit **Vertical FOV** in the Camera Inspector.
 
 Static Play and Linux builds use the same camera. Disabling the Camera, its
 object, or an ancestor suspends the designation until it is enabled again.

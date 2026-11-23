@@ -117,6 +117,26 @@ connected project.
   the world eye position. The camera uses composed authored rotations for its
   orientation. Transform Perspective uses static Play and Build. For behavior
   scenes, activate Fixed or Follow or clear the designation.
+- To replace a calibrated Transform Perspective lens through guarded
+  `scene_components_edit`, use
+  `{"type":"transform_perspective","vertical_fov_degrees":49,"aspect_ratio":1.5,"clip":{"near":0.35,"far":21}}`
+  as its `view`. Omit `aspect_ratio` to follow the output or specify
+  0.01–100 to fit a centered shot with black bars. Omit `clip` for
+  native 0.1–1,000 clip planes or omit only `clip.far` for infinite
+  projection. Explicit null is invalid. Near must be positive and
+  finite far must exceed near at scene precision.
+- Game screenshot `player_camera.content_rect` is `[x,y,w,h]`
+  normalized against the returned `source_pixel_rect` physical crop.
+  It intersects the painted shot with that crop, so black bars remain
+  in the image. The transform camera matrices in `player_view_inspect`
+  and packaged headless output include reference `output_pixels` and
+  `content_rect` at 4:3 and 16:9.
+- `scene_model_place` adds inactive editable Camera components to
+  original GLB perspective nodes in v23. `asset_inspect` reports
+  `camera_count` and priority warnings for skipped lenses. The
+  Inspector exposes Vertical FOV, Aspect Ratio, Near Clip and Far Clip.
+  Activate a placed camera by component ID with `scene_player_view_set`.
+  Refresh updates the imported lens for future placements.
 - A static GLB with punctual lights can be placed in v23 using
   `scene_model_place`. `asset_inspect` reports `light_count`, bounded
   warnings and `warnings_truncated`. Point and directional lights are

@@ -440,6 +440,59 @@ mod tests {
     use super::*;
 
     #[test]
+    fn glb_cameras_keep_shared_lenses_and_last_accepted_catalog() {
+        use crate::fixtures::punctual_glb;
+        use serde_json::json;
+
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("director.glb");
+        let write = |edit: &dyn Fn(&mut serde_json::Value)| {
+            fs::write(&source, punctual_glb(|doc| {
+                doc["cameras"] = json!([
+                    {"name":"Director","type":"perspective","perspective":{"yfov":f64::from(49).to_radians(),"aspectRatio":1.5,"znear":0.35}},
+                    {"name":"Ortho","type":"orthographic","orthographic":{"xmag":1,"ymag":1,"znear":0,"zfar":5}},
+                    {"name":"Wide","type":"perspective","perspective":{"yfov":2.25,"znear":2.0,"zfar":2.00000001}},
+                ]);
+                for (node, camera) in [(1,0),(2,0),(3,1),(4,2)] {
+                    doc["nodes"][node]["camera"] = json!(camera);
+                }
+                edit(doc);
+            })).unwrap();
+        };
+        write(&|_| {});
+        let mut store = AssetStore::open(root.path()).unwrap();
+        let first = store.import_glb_at(0, "director", "director.glb").unwrap();
+        let lens = first.nodes["Rig/Arm"].camera.unwrap();
+        assert_eq!(first.nodes["Rig/Base"].camera, Some(lens));
+        assert_eq!(
+            lens,
+            crate::ModelCamera {
+                vertical_fov_degrees: 49.,
+                aspect_ratio: Some(1.5),
+                near: 0.35,
+                far: None
+            }
+        );
+        assert!(first.nodes["Rig/Sun"].camera.is_none());
+        assert!(first.nodes["Rig/Spot"].camera.is_none());
+        assert!(first.warnings[0].contains("skipped orthographic"));
+        assert!(first.warnings[1].contains("skipped perspective"));
+        for edit in [
+            (|doc: &mut serde_json::Value| doc["nodes"][2]["camera"] = json!(3))
+                as fn(&mut serde_json::Value),
+            |doc| doc["nodes"][2]["camera"] = json!(-1),
+            |doc| doc["cameras"][0]["perspective"]["zfar"] = json!(null),
+            |doc| doc["cameras"][0]["perspective"]["zfar"] = json!(0.2),
+        ] {
+            write(&edit);
+            assert!(store.refresh_glb_at(store.revision(), "director").is_err());
+            assert_eq!(store.model("director"), Some(&first));
+        }
+        let reopened = AssetStore::open(root.path()).unwrap();
+        assert_eq!(reopened.model("director"), Some(&first));
+    }
+
+    #[test]
     fn punctual_refresh_keeps_last_good_and_reuses_model_paths() {
         use crate::fixtures::punctual_glb;
         use crate::ModelLight;

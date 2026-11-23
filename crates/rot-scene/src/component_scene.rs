@@ -813,6 +813,36 @@ mod tests {
     }
 
     #[test]
+    fn calibrated_transform_lens_wire_is_strict() {
+        use serde_json::json;
+        let lens = |clip| {
+            json!({"type":"transform_perspective","vertical_fov_degrees":49,
+            "aspect_ratio":1.5,"clip":clip})
+        };
+        let infinite = lens(json!({"near":0.35}));
+        let view: CameraView = serde_json::from_value(infinite).unwrap();
+        view.validate_settings().unwrap();
+        let written = serde_json::to_value(view).unwrap();
+        assert_eq!(written["clip"], json!({"near":0.35_f32}));
+        for clip in [
+            json!(null),
+            json!({"near":0.35,"far":null}),
+            json!({"near":0.35,"extra":3}),
+        ] {
+            assert!(serde_json::from_value::<CameraView>(lens(clip)).is_err());
+        }
+        for clip in [json!({"near":0}), json!({"near":0.35,"far":0.35})] {
+            assert!(serde_json::from_value::<CameraView>(lens(clip))
+                .unwrap()
+                .validate_settings()
+                .is_err());
+        }
+        let mut null_aspect = lens(json!({"near":0.35,"far":21}));
+        null_aspect["aspect_ratio"] = json!(null);
+        assert!(serde_json::from_value::<CameraView>(null_aspect).is_err());
+    }
+
+    #[test]
     fn camera_view_wire_keeps_orbit_and_rejects_mixed_settings() {
         let orbit = |anchor| {
             serde_json::json!({

@@ -3691,6 +3691,49 @@ fn gpu_durations(values: &[u64], shadow: bool, period: f64) -> Option<(f64, f64,
 #[cfg(test)]
 mod tests {
     #[test]
+    fn calibrated_camera_centers_physical_content_and_preserves_depth() {
+        use super::*;
+        use rot_scene::component_scene::{CameraClip, TransformCameraPose};
+        let mut lens = TransformCameraPose {
+            eye: [0.; 3],
+            forward: [0., 0., -1.],
+            up: [0., 1., 0.],
+            vertical_fov_degrees: 49.,
+            aspect_ratio: Some(1.5),
+            clip: Some(CameraClip {
+                near: 0.35,
+                far: Some(21.),
+            }),
+        };
+        assert_eq!(
+            camera_content_pixels([1281, 720], lens.aspect_ratio),
+            [100, 0, 1080, 720]
+        );
+        assert_eq!(
+            camera_content_pixels([960, 721], lens.aspect_ratio),
+            [0, 40, 960, 640]
+        );
+        let wide = transform_camera_output_projection(lens, [1280, 720]).unwrap();
+        let narrow = transform_camera_output_projection(lens, [960, 720]).unwrap();
+        assert_eq!(wide.0, narrow.0);
+        assert_eq!(wide.1, [100. / 1280., 0., 1080. / 1280., 1.]);
+        assert_eq!(narrow.1, [0., 40. / 720., 1., 640. / 720.]);
+        let depth = |p: PlayerViewProjection, z: f32| {
+            Mat4::from_cols_array_2d(&p.projection)
+                .project_point3(Vec3::new(0., 0., -z))
+                .z
+        };
+        assert!(depth(wide.0, 0.35).abs() < 1e-6);
+        assert!((depth(wide.0, 21.) - 1.).abs() < 1e-6);
+        lens.clip.as_mut().unwrap().far = None;
+        let infinite = transform_camera_output_projection(lens, [1280, 720])
+            .unwrap()
+            .0;
+        assert!(depth(infinite, 0.35).abs() < 1e-6);
+        assert!((0.999..1.).contains(&depth(infinite, 10000.)));
+    }
+
+    #[test]
     fn hierarchy_viewport_fit_uses_world_pose_without_editing_locals() {
         let mut scene = Scene::demo();
         scene.objects.truncate(1);
