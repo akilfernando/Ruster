@@ -107,6 +107,14 @@ Inspector and through approved MCP. Two Script components sharing a Lua
 file kept separate WAVs and gain. Editor capture verified silence after a
 rejected Step. A relocated Vulkan build played two horn presses through
 one audio stream and opened the packaged WAV only during startup.
+Positional WAV cues use the active Transform Perspective Game Camera and
+the emitter's committed pose. A moving beacon used its new side on the
+same tick. Private stereo captures in the editor and relocated Linux
+builds showed a 3:1 channel ratio that reversed with the camera. Half
+range gave half amplitude, and the range boundary was silent. Legacy 2D
+matched the reference. Warmed release Step p95 for 0, 1 and 16 positional
+requests was 91–92, 93–94 and 101–102 µs. Matched 2D measured 90–93,
+92–93 and 97–99 µs.
 Window → Game HUD lets creators add, edit, anchor, hide and remove
 static text in v23. Native edits and approved MCP share Undo. The
 grouped horn trolley retained keyboard input with its label visible.
