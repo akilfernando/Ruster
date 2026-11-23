@@ -88,6 +88,19 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+**Unpack Prefab Instance** detaches one v23 root while retaining its
+materialized hierarchy and local edits. The middle cottage kept its roof
+width, local textured material and IDs. It accepted a new chimney. Source
+roof changes reached its two linked neighbors. Approved Claude unpacked the
+exact root, stale replay was refused, and native Undo restored the link and
+overrides. Missing-source recovery, saved reopen and the relocated Vulkan
+player were verified. Unpack and Undo kept the source and asset revision
+intact. The shared confirmation was checked for keyboard focus and readability
+in Rot Dark and Plain Light. In a 5,000-object release scene, median p95 over
+three runs was 2.795 ms to unpack and 2.125 ms to undo for four objects, and
+2.749/2.140 ms for 200 objects. Idle editor CPU through tessellation moved from
+0.461 to 0.453 ms p95 for four objects and 0.483 to 0.488 ms for 200.
+
 **Primary Mouse** can share a v23 Button action with Space in Project
 Settings. Approved Claude added the mouse source while retaining Space.
 A stale edit was refused, native Undo restored the original binding, and

@@ -12,8 +12,6 @@ package in your lane under **Now**. How to work is in the
 - File references were checked on 2026-11-17 and drift; search if a line
   number is off.
 
-- C-16 Unpack Prefab Instance — in progress — Sol, 2026-11-24
-
 ## Needs the user
 
 - **Vetoes.** The [architecture decisions](PARITY-PLAN.md#4-architecture-decisions)
@@ -661,6 +659,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-13 v23 Play Checks | Save and rerun a fixed input and assertion sequence in a flat scene. | done · Native and approved MCP reproduced the same 30-tick conveyor check. Saved scene and Lua changes separately invalidated its pin. Recapture kept the original expectation and produced the same failure as guarded Steps. A 640-object static check ran 120 ticks and verified the last object. |
 | C-14 Scene Background | Author a solid per-scene background with the existing display controls. | done · Native picker and sRGB hex, guarded MCP, shared Undo and saved linear color work in v23. SDR and HDR pixels matched, including after a relocated Vulkan title-to-yard Start. Default images, grid coverage, geometry lighting, HUD and letterbox witnesses were verified. |
 | C-15 Primary Mouse Button | Bind Primary Mouse with keys to the same v23 Button action. | done · Native Project Settings and guarded MCP preserve Space. Editor Play and a relocated Vulkan build verified ownership, combined edges, HUD and letterbox exclusion, release outside and focus cancellation. |
+| C-16 Unpack Prefab Instance | Turn one linked v23 instance into ordinary scene objects. | done · The native confirmation and guarded MCP detach the exact root with shared Undo. The accepted hierarchy, roof and finish overrides, and asset references stay intact, including when the source is missing. Two neighboring links kept receiving source edits. Save, reopen and relocated Vulkan verified the independent cottage. |
 
 ### C-04 implementation brief
 
