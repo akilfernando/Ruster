@@ -29,6 +29,14 @@ Hub's Empty template creates v23. The editor can inspect objects, edit name,
 enabled state and Transform, add Mesh Renderers and Colliders, create,
 move or delete objects together, and save. Inspector edits shared Transform
 and component values. Viewport settings stay local. Automatic upgrades remain open.
+Assets → Move to Folder moves a registered OBJ, Lua or WAV source with its
+sidecar and keeps references on the same ID. A moved vehicle reopened and
+kept its mesh, script and sound through approved MCP and a relocated Linux
+build. Source, sidecar and packaged asset hashes were verified.
+In a 604-asset release project, request-to-catalog p50/p95 was 76/83 ms
+for Move and 61/66 ms for Rename. The first accessibility tree reply
+after submission was 32 ms p95 for Move. Settled editor CPU stayed within
+5–10 ms/s before and after the paired runs.
 Hierarchy search finds names or stable IDs, shows parent paths, and reveals
 the exact object. Approved MCP provides revision-pinned pages. In two
 5,000-object release runs, first results appeared in 21–23 ms, warmed
