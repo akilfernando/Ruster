@@ -29,37 +29,6 @@ impl SceneEditor {
         self.input_actions_open = page == ProjectPage::InputActions;
     }
 
-    fn project_page(&mut self, ui: &mut egui::Ui) {
-        let path = self.session.path().map(Path::to_path_buf);
-        let folder = path
-            .as_ref()
-            .and_then(|p| p.parent())
-            .map(Path::to_path_buf);
-        let name = folder
-            .as_ref()
-            .and_then(|f| f.file_name())
-            .map_or_else(|| "Untitled".into(), |n| n.to_string_lossy().into_owned());
-        let location = folder
-            .as_ref()
-            .map_or_else(|| "Not saved yet".into(), |f| f.display().to_string());
-        let startup = path.as_ref().and_then(|p| p.file_name()).map_or_else(
-            || "Not saved yet".into(),
-            |n| n.to_string_lossy().into_owned(),
-        );
-        crate::ui_kit::property_row(ui, Text::ComponentName.plain(), |ui| {
-            ui.label(name)
-                .on_hover_text(Text::TheProjectFoldersName.plain());
-        });
-        crate::ui_kit::property_row(ui, Text::Location.plain(), |ui| {
-            ui.add(egui::Label::new(&location).truncate())
-                .on_hover_text(&location);
-        });
-        crate::ui_kit::property_row(ui, Text::StartupScene.plain(), |ui| {
-            ui.label(startup)
-                .on_hover_text(Text::StartupSceneHint.plain());
-        });
-    }
-
     fn build_page(&mut self, ui: &mut egui::Ui) {
         crate::ui_kit::property_row(ui, Text::Target.plain(), |ui| {
             ui.label(Text::LinuxX8664.plain());
@@ -98,44 +67,16 @@ impl SceneEditor {
             self.input_actions_open = false;
             return None;
         }
-        let screen = ctx.content_rect();
         let mut open = true;
         let mut edit = None;
-        egui::Window::new(Text::ProjectSettings.plain())
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .fixed_size(egui::vec2(
-                (screen.width() - 64.0).clamp(220.0, 680.0),
-                (screen.height() - 120.0).clamp(160.0, 560.0),
-            ))
-            .show(ctx, |ui| {
-                let body = (ui.available_height() - 8.0).max(48.0);
-                ui.horizontal_top(|ui| {
-                    ui.vertical(|ui| {
-                        ui.set_width(120.0);
-                        for candidate in ProjectPage::ALL {
-                            ui.selectable_value(&mut page, candidate, candidate.label());
-                        }
-                    });
-                    ui.separator();
-                    ui.vertical(|ui| {
-                        egui::ScrollArea::vertical()
-                            .id_salt("project-settings-page")
-                            .max_height(body)
-                            .auto_shrink([false, true])
-                            .show(ui, |ui| match page {
-                                ProjectPage::Project => self.project_page(ui),
-                                ProjectPage::InputActions => {
-                                    let editable = self.input_action_editable();
-                                    edit = self.input_actions.show(ui, &self.session, editable);
-                                }
-                                ProjectPage::Build => self.build_page(ui),
-                            });
-                    });
-                });
-            });
+        settings_window(ctx, &mut page, &mut open, false, |ui, page| match page {
+            ProjectPage::Project => project_page(ui, self.session.path()),
+            ProjectPage::InputActions => {
+                let editable = self.input_action_editable();
+                edit = self.input_actions.show(ui, &self.session, editable);
+            }
+            ProjectPage::Build => self.build_page(ui),
+        });
         if open {
             self.project_settings = Some(page);
             self.input_actions_open = page == ProjectPage::InputActions;
@@ -148,4 +89,74 @@ impl SceneEditor {
         }
         edit
     }
+}
+
+pub(super) fn project_page(ui: &mut egui::Ui, path: Option<&Path>) {
+    let folder = path
+        .as_ref()
+        .and_then(|p| p.parent())
+        .map(Path::to_path_buf);
+    let name = folder
+        .as_ref()
+        .and_then(|f| f.file_name())
+        .map_or_else(|| "Untitled".into(), |n| n.to_string_lossy().into_owned());
+    let location = folder
+        .as_ref()
+        .map_or_else(|| "Not saved yet".into(), |f| f.display().to_string());
+    let startup = path.as_ref().and_then(|p| p.file_name()).map_or_else(
+        || "Not saved yet".into(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    crate::ui_kit::property_row(ui, Text::ComponentName.plain(), |ui| {
+        ui.label(name)
+            .on_hover_text(Text::TheProjectFoldersName.plain());
+    });
+    crate::ui_kit::property_row(ui, Text::Location.plain(), |ui| {
+        ui.add(egui::Label::new(&location).truncate())
+            .on_hover_text(&location);
+    });
+    crate::ui_kit::property_row(ui, Text::StartupScene.plain(), |ui| {
+        ui.label(startup)
+            .on_hover_text(Text::StartupSceneHint.plain());
+    });
+}
+
+pub(super) fn settings_window(
+    ctx: &egui::Context,
+    page: &mut ProjectPage,
+    open: &mut bool,
+    locked: bool,
+    mut body_ui: impl FnMut(&mut egui::Ui, ProjectPage),
+) {
+    let screen = ctx.content_rect();
+    egui::Window::new(Text::ProjectSettings.plain())
+        .open(open)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .fixed_size(egui::vec2(
+            (screen.width() - 64.0).clamp(220.0, 680.0),
+            (screen.height() - 120.0).clamp(160.0, 560.0),
+        ))
+        .show(ctx, |ui| {
+            let body = (ui.available_height() - 8.0).max(48.0);
+            ui.horizontal_top(|ui| {
+                ui.vertical(|ui| {
+                    ui.set_width(120.0);
+                    for candidate in ProjectPage::ALL {
+                        ui.add_enabled_ui(!locked, |ui| {
+                            ui.selectable_value(page, candidate, candidate.label());
+                        });
+                    }
+                });
+                ui.separator();
+                ui.vertical(|ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("project-settings-page")
+                        .max_height(body)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| body_ui(ui, *page));
+                });
+            });
+        });
 }

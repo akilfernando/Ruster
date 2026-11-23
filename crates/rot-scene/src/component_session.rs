@@ -2,6 +2,7 @@ use super::{
     prefab::Materialization, Component, ComponentScene, ObjectHierarchy, ObjectNode,
     PrefabInstance, PrefabProperty, PrefabSource,
 };
+use crate::input::{self, ActionDefinition};
 use crate::{BehaviorSource, DisplayProfile, OpaqueMaterial, SceneError, SceneLock, Transform};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -80,6 +81,10 @@ enum SceneChange {
     },
     Display(DisplayProfile),
     GameplayCamera(Option<String>),
+    Action {
+        id: String,
+        value: Option<ActionDefinition>,
+    },
     Material {
         id: String,
         value: Option<OpaqueMaterial>,
@@ -113,6 +118,13 @@ impl SceneChange {
             Self::Display(value) => Self::Display(std::mem::replace(&mut scene.display, value)),
             Self::GameplayCamera(value) => {
                 Self::GameplayCamera(std::mem::replace(&mut scene.gameplay_camera, value))
+            }
+            Self::Action { id, value } => {
+                let value = match value {
+                    Some(action) => scene.actions.insert(id.clone(), action),
+                    None => scene.actions.remove(&id),
+                };
+                Self::Action { id, value }
             }
             Self::Material { id, value } => {
                 let previous = match value {
@@ -233,6 +245,60 @@ impl ComponentSession {
 
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    pub fn set_action(
+        &mut self,
+        expected: u64,
+        id: &str,
+        value: Option<ActionDefinition>,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected)?;
+        crate::validate_id(id)?;
+        let previous = self.scene.actions.get(id);
+        if previous == value.as_ref() {
+            return Ok(self.revision);
+        }
+        if previous.is_none() && value.is_some() && self.contains_action_id(id) {
+            return Err(SceneError::Invalid(
+                "action identity is reserved by reversible history; Undo or choose a fresh ID"
+                    .into(),
+            ));
+        }
+        self.commit(vec![SceneChange::Action {
+            id: id.into(),
+            value,
+        }])
+    }
+
+    fn action_ids(&self) -> impl Iterator<Item = &str> {
+        self.scene.actions.keys().map(String::as_str).chain(
+            self.undo
+                .iter()
+                .chain(&self.redo)
+                .flat_map(|entry| &entry.changes)
+                .filter_map(|change| match change {
+                    SceneChange::Action { id, .. } => Some(id.as_str()),
+                    _ => None,
+                }),
+        )
+    }
+
+    pub fn contains_action_id(&self, id: &str) -> bool {
+        self.action_ids().any(|used| used == id)
+    }
+
+    pub fn allocate_action_ids(&self, count: usize) -> Result<Vec<String>, SceneError> {
+        let next = self
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| SceneError::Invalid("revision exhausted".into()))?;
+        crate::allocate_ids(
+            &format!("action-{next}"),
+            count,
+            input::MAX_ACTIONS,
+            self.action_ids().collect(),
+        )
     }
 
     pub fn is_dirty(&self) -> bool {

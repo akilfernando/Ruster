@@ -1,10 +1,59 @@
 //! Recoverable action working copies. The caller owns Session/history authority.
 use crate::strings::Text;
 use eframe::egui;
-use rot_scene::input::{validate_action_map, ActionDefinition, ActionKind, InputKey};
-use rot_scene::Session;
+use rot_scene::component_scene::ComponentSession;
+use rot_scene::input::{validate_action_map, ActionDefinition, ActionKind, ActionMap, InputKey};
+use rot_scene::{SceneError, Session};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+pub(super) trait ActionDocument {
+    fn action_scene_id(&self) -> &str;
+    fn action_revision(&self) -> u64;
+    fn action_map(&self) -> &ActionMap;
+    fn contains_action_id(&self, id: &str) -> bool;
+    fn allocate_action_ids(&self, count: usize) -> Result<Vec<String>, SceneError>;
+
+    fn action(&self, id: &str) -> Option<&ActionDefinition> {
+        self.action_map().get(id)
+    }
+}
+
+impl ActionDocument for Session {
+    fn action_scene_id(&self) -> &str {
+        &self.scene().id
+    }
+    fn action_revision(&self) -> u64 {
+        self.scene().revision
+    }
+    fn action_map(&self) -> &ActionMap {
+        &self.authoring().actions
+    }
+    fn contains_action_id(&self, id: &str) -> bool {
+        self.contains_action_id(id)
+    }
+    fn allocate_action_ids(&self, count: usize) -> Result<Vec<String>, SceneError> {
+        self.allocate_action_ids(count)
+    }
+}
+
+impl ActionDocument for ComponentSession {
+    fn action_scene_id(&self) -> &str {
+        &self.scene().id
+    }
+    fn action_revision(&self) -> u64 {
+        self.revision()
+    }
+    fn action_map(&self) -> &ActionMap {
+        &self.scene().actions
+    }
+    fn contains_action_id(&self, id: &str) -> bool {
+        self.contains_action_id(id)
+    }
+    fn allocate_action_ids(&self, count: usize) -> Result<Vec<String>, SceneError> {
+        self.allocate_action_ids(count)
+    }
+}
 
 const RAW_BYTES: usize = 8192;
 
@@ -54,7 +103,11 @@ pub(super) struct Draft {
 }
 
 impl Draft {
-    fn new(session: &Session, edited_id: Option<&str>, kind: ActionKind) -> Result<Self, String> {
+    fn new(
+        session: &impl ActionDocument,
+        edited_id: Option<&str>,
+        kind: ActionKind,
+    ) -> Result<Self, String> {
         let original = edited_id
             .map(|id| session.action(id).ok_or("Action no longer exists"))
             .transpose()?;
@@ -68,8 +121,8 @@ impl Draft {
                 .ok_or("No free action identity")?,
         };
         Ok(Self {
-            scene_id: session.scene().id.clone(),
-            revision: session.scene().revision,
+            scene_id: session.action_scene_id().to_owned(),
+            revision: session.action_revision(),
             edited_id: edited_id.map(str::to_owned),
             base_hash: fingerprint(original),
             id,
@@ -108,13 +161,16 @@ impl Draft {
             && kind_valid
     }
 
-    pub(super) fn validate_recovery_storage(&self, session: &Session) -> Result<(), String> {
+    pub(super) fn validate_recovery_storage(
+        &self,
+        session: &impl ActionDocument,
+    ) -> Result<(), String> {
         if !self.storage_valid() {
             return Err(
                 "Action draft has unsupported bounds or structure; record preserved.".into(),
             );
         }
-        if self.scene_id != session.scene().id || self.revision > session.scene().revision {
+        if self.scene_id != session.action_scene_id() || self.revision > session.action_revision() {
             return Err(
                 "Action draft belongs to another scene or a future revision; record preserved."
                     .into(),
@@ -152,7 +208,7 @@ impl Draft {
         ui.add(egui::Label::new(hint(&self.kind)).wrap());
     }
 
-    pub(super) fn review_recovery(&self, session: &Session) -> Result<(), String> {
+    pub(super) fn review_recovery(&self, session: &impl ActionDocument) -> Result<(), String> {
         self.validate_recovery_storage(session)?;
         if self.base_hash
             != fingerprint(self.edited_id.as_deref().and_then(|id| session.action(id)))
@@ -166,22 +222,22 @@ impl Draft {
         Ok(())
     }
 
-    pub(super) fn resume_recovery(&self, session: &Session) -> Result<Self, String> {
+    pub(super) fn resume_recovery(&self, session: &impl ActionDocument) -> Result<Self, String> {
         self.review_recovery(session)?;
         let mut resumed = self.clone();
-        resumed.revision = session.scene().revision;
+        resumed.revision = session.action_revision();
         Ok(resumed)
     }
 
-    pub(super) fn validate_snapshot(&self, session: &Session) -> Result<(), String> {
+    pub(super) fn validate_snapshot(&self, session: &impl ActionDocument) -> Result<(), String> {
         self.review_recovery(session)?;
-        if self.revision != session.scene().revision {
+        if self.revision != session.action_revision() {
             return Err("Actions changed; cancel this draft and inspect again.".into());
         }
         Ok(())
     }
 
-    fn edit(&self, session: &Session) -> Result<Edit, String> {
+    fn edit(&self, session: &impl ActionDocument) -> Result<Edit, String> {
         self.validate_snapshot(session)?;
         rot_scene::validate_id(&self.id).map_err(|error| error.to_string())?;
         if self.edited_id.as_ref().is_some_and(|id| id != &self.id) {
@@ -204,7 +260,7 @@ impl Draft {
             label: (!self.label.is_empty()).then(|| self.label.clone()),
             kind: self.kind.clone(),
         };
-        let mut candidate = session.authoring().actions.clone();
+        let mut candidate = session.action_map().clone();
         candidate.insert(self.id.clone(), definition.clone());
         validate_action_map(&candidate).map_err(|error| error.to_string())?;
         Ok(Edit::Set {
@@ -310,7 +366,7 @@ impl InputUi {
     pub(super) fn restore_drafts(
         &mut self,
         draft: Option<Draft>,
-        session: &Session,
+        session: &impl ActionDocument,
     ) -> Result<(), String> {
         self.capture = None;
         if let Some(draft) = &draft {
@@ -326,7 +382,7 @@ impl InputUi {
     pub(super) fn resume_recovered(
         &mut self,
         draft: Draft,
-        session: &Session,
+        session: &impl ActionDocument,
         ctx: &egui::Context,
     ) -> Result<(), String> {
         if self.pending() {
@@ -342,7 +398,7 @@ impl InputUi {
 
     fn begin(
         &mut self,
-        session: &Session,
+        session: &impl ActionDocument,
         id: Option<&str>,
         kind: ActionKind,
         intent: Intent,
@@ -508,7 +564,7 @@ impl InputUi {
     pub(super) fn window(
         &mut self,
         ctx: &egui::Context,
-        session: &Session,
+        session: &impl ActionDocument,
         editable: bool,
         opened: &mut bool,
     ) -> Option<Edit> {
@@ -624,12 +680,13 @@ impl InputUi {
     pub(super) fn show(
         &mut self,
         ui: &mut egui::Ui,
-        session: &Session,
+        session: &impl ActionDocument,
         editable: bool,
     ) -> Option<Edit> {
         let pending_at_start = self.pending();
         if self.draft.as_ref().is_some_and(|draft| {
-            draft.scene_id != session.scene().id || draft.revision != session.scene().revision
+            draft.scene_id != session.action_scene_id()
+                || draft.revision != session.action_revision()
         }) {
             self.capture = None;
         }
@@ -672,10 +729,10 @@ impl InputUi {
                             }
                         });
                         {
-                            if session.authoring().actions.is_empty() {
+                            if session.action_map().is_empty() {
                                 ui.weak(Text::InputUiAddAButtonOr.plain());
                             }
-                            for (id, action) in &session.authoring().actions {
+                            for (id, action) in session.action_map() {
                                 ui.separator();
                                 ui.strong(format!(
                                     "{} · {id}",
@@ -748,7 +805,7 @@ impl InputUi {
     fn form(
         &mut self,
         ui: &mut egui::Ui,
-        session: &Session,
+        session: &impl ActionDocument,
         editable: bool,
         capture_owned: bool,
         candidate: CaptureInput,
@@ -1060,9 +1117,9 @@ fn hint(kind: &ActionKind) -> String {
     }
 }
 
-fn conflicts(session: &Session, id: &str, kind: &ActionKind) -> Vec<String> {
+fn conflicts(session: &impl ActionDocument, id: &str, kind: &ActionKind) -> Vec<String> {
     let mut result = Vec::new();
-    for (other, action) in &session.authoring().actions {
+    for (other, action) in session.action_map() {
         if other == id {
             continue;
         }

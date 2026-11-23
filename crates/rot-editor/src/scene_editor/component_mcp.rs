@@ -128,6 +128,44 @@ impl ComponentWorkspace {
         let invalid = || ("invalid_arguments", "Check the tool arguments.".into());
         let map = args.as_object().ok_or_else(invalid)?;
         let revision = self.session.revision();
+        if op == "behavior_inspect" {
+            if args["kind"].as_str() != Some("actions") {
+                return Err((
+                    "unsupported_operation",
+                    "Use behavior_inspect with kind actions for v23 Input Actions.".into(),
+                ));
+            }
+            if map
+                .keys()
+                .any(|key| !matches!(key.as_str(), "kind" | "offset"))
+            {
+                return Err(invalid());
+            }
+            let offset = args
+                .get("offset")
+                .map_or(Some(0), decimal)
+                .and_then(|offset| usize::try_from(offset).ok())
+                .ok_or_else(invalid)?;
+            let actions = &self.session.scene().actions;
+            let items: Vec<_> = actions
+                .iter()
+                .skip(offset)
+                .take(16)
+                .map(|(id, definition)| json!({"id":id,"definition":definition}))
+                .collect();
+            let end = offset.saturating_add(items.len());
+            return Ok(json!({
+                "page":rot_scene::AuthoringPage {
+                    items, total: actions.len(), next_offset: (end < actions.len()).then_some(end),
+                },
+                "guidance": {
+                    "action_limit": rot_scene::input::MAX_ACTIONS,
+                    "keys_per_action": rot_scene::input::MAX_KEYS_PER_ACTION,
+                    "keys": "Use lowercase letters, 0–9, arrow_up, arrow_down, arrow_left, arrow_right, space, enter, navigation keys, or f1–f12. Escape and Tab are reserved.",
+                    "file_lua_api": 2,
+                },
+            }));
+        }
         if op == "player_view_inspect" {
             if !map.is_empty() {
                 return Err(invalid());
@@ -280,6 +318,8 @@ impl ComponentWorkspace {
                     .count()
             }
             "scene_undo" | "scene_redo" => 2,
+            "behavior_action" | "behavior_action_remove" => 3,
+            "behavior_action_set" => 4,
             _ => {
                 return Err((
                     "unsupported_operation",
@@ -299,11 +339,53 @@ impl ComponentWorkspace {
                 "Inspect the current revision again.".into(),
             ));
         }
+        if op == "behavior_action" {
+            let id = args["action_id"]
+                .as_str()
+                .filter(|id| rot_scene::validate_id(id).is_ok())
+                .ok_or_else(invalid)?;
+            let definition = self
+                .session
+                .scene()
+                .actions
+                .get(id)
+                .ok_or(("action_not_found", "This action no longer exists.".into()))?;
+            return Ok(json!({"action_id":id,"definition":definition}));
+        }
         if self.ai_transition_pending() || self.authored_edit_pending() {
             return Err((
                 "drafts_pending",
                 "Finish the pending editor change first.".into(),
             ));
+        }
+
+        if matches!(op, "behavior_action_set" | "behavior_action_remove") {
+            if self.runtime.in_play_mode() || self.runtime.command_draft_pending() {
+                return Err((
+                    "play_active",
+                    "Stop Play and finish runtime changes before editing Input Actions.".into(),
+                ));
+            }
+            let id = args["action_id"]
+                .as_str()
+                .filter(|id| rot_scene::validate_id(id).is_ok())
+                .ok_or_else(invalid)?;
+            let definition = (op == "behavior_action_set")
+                .then(|| {
+                    serde_json::from_value::<rot_scene::input::ActionDefinition>(
+                        args["definition"].clone(),
+                    )
+                })
+                .transpose()
+                .map_err(|error| ("invalid_arguments", error.to_string()))?;
+            let next = self
+                .session
+                .set_action(revision, id, definition)
+                .map_err(|error| ("invalid_action", error.to_string()))?;
+            if next != revision {
+                self.refresh();
+            }
+            return Ok(json!({"action_id":id,"changed":next != revision}));
         }
 
         if op == "scene_animation_set" {

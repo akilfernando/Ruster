@@ -1,8 +1,12 @@
 //! The editor owns v23 scenes through ComponentSession. The viewport receives
 //! a disposable projection and cannot change the authored document.
 use super::{
-    component_inspector, component_live, component_multi::MultiInspector, component_view::Flag,
-    hud_interaction, palette, project_picker, OpenedScene,
+    component_inspector, component_live,
+    component_multi::MultiInspector,
+    component_view::Flag,
+    hud_interaction, palette, project_picker,
+    project_settings::{self, ProjectPage},
+    OpenedScene,
 };
 use crate::behavior_ui::{PlayShortcut, RuntimeSource, RuntimeUi};
 use crate::editor_theme;
@@ -221,6 +225,8 @@ pub(super) struct ComponentWorkspace {
     hud_controls: hud_interaction::HudControls,
     workspace: Workspace,
     palette: Option<palette::Palette>,
+    project_settings: Option<ProjectPage>,
+    input_actions: crate::input_ui::InputUi,
     meshes: rot_app::MeshMap,
     textures: rot_app::TextureMap,
     navigation: rot_render::NavigationOptions,
@@ -304,6 +310,8 @@ impl ComponentWorkspace {
             scene_view: SceneViewState::default(),
             view_flags: Vec::new(),
             palette: None,
+            project_settings: None,
+            input_actions: Default::default(),
             session,
             path,
             #[cfg(unix)]
@@ -700,6 +708,7 @@ impl ComponentWorkspace {
     pub(super) fn surface_edit_pending(&self) -> bool {
         self.material_draft.is_some()
             || self.display_draft.is_some()
+            || self.input_actions.pending()
             || self.camera_authoring.pending()
     }
 
@@ -1319,6 +1328,19 @@ impl ComponentWorkspace {
         }
         let revision = self.session.revision();
         let result = match action {
+            Action::ProjectSettings | Action::InputActions => {
+                if self.draft_dirty() {
+                    self.error = Some("Apply or cancel the Inspector changes first.".into());
+                    return;
+                }
+                self.project_settings = Some(if action == Action::InputActions {
+                    ProjectPage::InputActions
+                } else {
+                    ProjectPage::Project
+                });
+                return;
+            }
+
             Action::Move | Action::Rotate | Action::Scale => {
                 self.transform_tool.enabled = true;
                 self.transform_tool.tool = match action {
@@ -1797,6 +1819,81 @@ impl ComponentWorkspace {
         self.build.poll();
     }
 
+    fn show_project_settings(&mut self, ctx: &egui::Context) {
+        let Some(mut page) = self.project_settings else {
+            return;
+        };
+        self.runtime.release_input(ctx);
+        let pending = self.input_actions.pending();
+        if !pending
+            && !self.input_actions.capturing()
+            && !egui::Popup::is_any_open(ctx)
+            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.project_settings = None;
+            return;
+        }
+        let editable = !self.runtime.in_play_mode() && !self.draft_dirty();
+        #[cfg(unix)]
+        let editable = editable && !self.ai_transition_pending();
+        let mut edit = None;
+        let mut open = true;
+        let mut build = false;
+        project_settings::settings_window(
+            ctx,
+            &mut page,
+            &mut open,
+            pending,
+            |ui, page| match page {
+                ProjectPage::Project => project_settings::project_page(ui, Some(&self.path)),
+                ProjectPage::InputActions => {
+                    if !editable {
+                        ui.weak("Stop Play and finish pending changes to edit Input Actions.");
+                    }
+                    edit = self.input_actions.show(ui, &self.session, editable);
+                    if let Some(error) = &self.error {
+                        ui.colored_label(editor_theme::colors(ui).error, error);
+                    }
+                }
+                ProjectPage::Build => {
+                    ui.label(Text::LinuxX8664.plain());
+                    #[cfg(target_os = "linux")]
+                    {
+                        build = editor_theme::primary_button(ui, Action::Export.label()).clicked();
+                    }
+                }
+            },
+        );
+        if let Some(edit) = edit {
+            use crate::input_ui::Edit;
+            let result = match edit {
+                Edit::Set {
+                    revision,
+                    id,
+                    definition,
+                } => self.session.set_action(revision, &id, Some(definition)),
+                Edit::Remove { revision, id } => self.session.set_action(revision, &id, None),
+            };
+            match result {
+                Ok(_) => {
+                    self.input_actions.clear();
+                    self.refresh();
+                    self.error = None;
+                }
+                Err(error) => self.error = Some(error.to_string()),
+            }
+        }
+        if !open && self.input_actions.pending() {
+            self.input_actions.cancel_capture();
+            self.error = Some("Apply or cancel the Input Action changes before closing.".into());
+        }
+        self.project_settings = (open || self.input_actions.pending()).then_some(page);
+        if build {
+            self.project_settings = None;
+            self.command(Action::Export);
+        }
+    }
+
     fn show_workspace(&mut self, ui: &mut egui::Ui, draw_viewport: bool) -> Option<OpenedScene> {
         let ctx = ui.ctx().clone();
         #[cfg(target_os = "linux")]
@@ -1812,7 +1909,13 @@ impl ComponentWorkspace {
         }
         let surface_close_pending = self.defer_material_close(&ctx)
             || self.defer_display_close(&ctx)
-            || self.defer_camera_close(&ctx);
+            || self.defer_camera_close(&ctx)
+            || (self.input_actions.pending()
+                && ctx.input(|input| input.viewport().close_requested()));
+        if self.input_actions.pending() && surface_close_pending {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.error = Some("Apply or cancel the Input Action changes before closing.".into());
+        }
         if (build_open || publishing) && ctx.input(|input| input.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
@@ -1847,11 +1950,15 @@ impl ComponentWorkspace {
             self.transform_tool.cancel();
         }
         let transform_active = self.transform_tool.active();
-        self.runtime.input_begin(&ctx, blocked || asset_dialog);
+        self.runtime.input_begin(
+            &ctx,
+            blocked || asset_dialog || self.project_settings.is_some(),
+        );
         if let Some(action) = self.workspace.shortcuts(
             &ctx,
             blocked
                 || asset_dialog
+                || self.project_settings.is_some()
                 || transform_active
                 || self.runtime.input_owned()
                 || self.palette.is_some(),
@@ -1872,6 +1979,7 @@ impl ComponentWorkspace {
                 editor_theme::text_menu(ui, Text::ComponentEditMenu.plain(), |ui| {
                     self.menu_action(ui, Action::Undo);
                     self.menu_action(ui, Action::Redo);
+                    self.menu_action(ui, Action::ProjectSettings);
                     ui.separator();
                     if ui
                         .add_enabled(
@@ -2394,6 +2502,7 @@ impl ComponentWorkspace {
                     && !self.close_pending
                     && self.open_path.is_none()
                     && !self.surface_edit_pending()
+                    && self.project_settings.is_none()
                     && !egui::Popup::is_any_open(&ctx)
                     && ui.input_mut(|input| {
                         input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
@@ -2407,7 +2516,12 @@ impl ComponentWorkspace {
         let viewport = egui::CentralPanel::default()
             .show(ui, |ui| {
                 draw_viewport
-                    .then(|| self.viewport(ui, blocked || asset_dialog))
+                    .then(|| {
+                        self.viewport(
+                            ui,
+                            blocked || asset_dialog || self.project_settings.is_some(),
+                        )
+                    })
                     .flatten()
             })
             .inner;
@@ -2417,6 +2531,7 @@ impl ComponentWorkspace {
             self.build
                 .show(&ctx, &self.session, self.assets.as_ref(), draft_dirty);
         }
+        self.show_project_settings(&ctx);
         self.show_material_draft(&ctx);
         self.show_display_draft(&ctx);
         self.show_camera_draft(&ctx);

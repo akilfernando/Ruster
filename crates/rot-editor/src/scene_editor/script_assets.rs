@@ -21,7 +21,7 @@ pub(super) fn source(path: &str, text: String) -> BehaviorSource {
     BehaviorSource {
         label: Some(label),
         language_id: rot_behavior::LANGUAGE_ID.into(),
-        host_api_version: rot_behavior::HOST_API_VERSION,
+        host_api_version: rot_behavior::INPUT_HOST_API_VERSION,
         text,
     }
 }
