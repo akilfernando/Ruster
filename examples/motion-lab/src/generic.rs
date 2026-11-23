@@ -3,7 +3,9 @@
 use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
 
 use rot_app::audio::{Output as AudioOutput, OutputStatus};
+use rot_app::creation::{RuntimeScene, StartupTransition};
 use rot_app::hud::{paint_hud, HudPresentationMode};
+use rot_app::ResourceRoot;
 use rot_app::{egui, Application, Content, MeshMap, Step, TextureMap};
 use rot_behavior::{Diagnostic, Engine, Limits, Runtime};
 use rot_scene::hud::{resolve_hud, HudCache, ResolvedHud};
@@ -60,6 +62,9 @@ pub struct GenericMotionLab {
     sounds: BTreeMap<String, Arc<rot_assets::AudioClip>>,
     audio: AudioOutput,
     clips: rot_behavior::Clips,
+    start_transition: Option<(ResourceRoot, StartupTransition)>,
+    host_tick_origin: u64,
+    static_destination_tick: Option<u64>,
 }
 
 impl GenericMotionLab {
@@ -106,7 +111,73 @@ impl GenericMotionLab {
             sounds: BTreeMap::new(),
             audio: AudioOutput::default(),
             clips: rot_behavior::Clips::new(),
+            start_transition: None,
+            host_tick_origin: 0,
+            static_destination_tick: None,
         })
+    }
+
+    pub fn set_start_transition(&mut self, root: ResourceRoot, route: StartupTransition) {
+        self.start_transition = Some((root, route));
+    }
+
+    pub fn has_start_transition(&self) -> bool {
+        self.start_transition.is_some()
+    }
+
+    pub fn switched_scene(&self) -> bool {
+        self.host_tick_origin != 0
+    }
+
+    fn apply_start_transition(&mut self, host_tick: u64) -> Result<(), String> {
+        let (root, route) = self
+            .start_transition
+            .as_ref()
+            .expect("transition press matched");
+        let (resources, manifest, scene) = route.load_destination(root)?;
+        let meshes = manifest.load_meshes(&resources)?;
+        let textures = manifest.load_textures(&resources)?;
+        let next_epoch = self
+            .run_epoch
+            .checked_add(1)
+            .ok_or("Runtime identity exhausted")?;
+        let mut candidate = match scene {
+            RuntimeScene::Behavior(session) => {
+                let mut candidate = Self::with_textures(*session, meshes, textures, self.fixed_dt)?;
+                candidate.set_sounds(manifest.load_sounds(&resources)?);
+                candidate.set_clips(rot_behavior::decode_clips(
+                    &manifest.load_animations(&resources)?,
+                )?);
+                candidate.reset()?;
+                candidate
+            }
+            RuntimeScene::StaticHierarchy { preview, .. } => {
+                let content = Content::with_component_preview(preview, meshes, textures)?;
+                let mut candidate = Self::new(
+                    Session::new(rot_scene::Scene::empty("static-destination"))
+                        .map_err(|error| error.to_string())?,
+                    MeshMap::new(),
+                    self.fixed_dt,
+                )?;
+                candidate.content = content;
+                candidate.static_destination_tick = Some(0);
+                candidate.needs_reset = false;
+                candidate
+            }
+        };
+        candidate.physical_input_owned = self.physical_input_owned;
+        candidate.action_keys = std::mem::replace(
+            &mut self.action_keys,
+            KeyEventAccumulator::new(ActionMap::new()).expect("empty map is valid"),
+        );
+        let keys = KeyEventAccumulator::new(candidate.session.authoring().actions.clone())
+            .expect("destination map validated");
+        candidate.action_keys.switch_scene(keys);
+        candidate.creation_title = Some(manifest.title);
+        candidate.run_epoch = next_epoch;
+        candidate.host_tick_origin = host_tick;
+        *self = candidate;
+        Ok(())
     }
 
     pub fn session(&self) -> &Session {
@@ -116,7 +187,8 @@ impl GenericMotionLab {
         self.diagnostic.as_ref()
     }
     pub fn runtime_tick(&self) -> Option<u64> {
-        self.runtime.as_ref().map(Runtime::tick)
+        self.static_destination_tick
+            .or_else(|| self.runtime.as_ref().map(Runtime::tick))
     }
     pub fn runtime_state_report(
         &self,
@@ -200,7 +272,7 @@ impl GenericMotionLab {
     /// One explicit headless/programmatic frame. The caller must own paused
     /// stepping; this never claims native focus or leaves synthetic held state.
     fn supply_next_input(&mut self, frame: ActionFrame) -> Result<(), String> {
-        if self.needs_reset || self.runtime.is_none() {
+        if self.needs_reset || self.runtime_tick().is_none() {
             return Err("Reset before supplying input".into());
         }
         if self.physical_input_owned || self.pending_input.is_some() {
@@ -405,6 +477,11 @@ impl Application for GenericMotionLab {
     }
 
     fn reset(&mut self) -> Result<(), String> {
+        self.host_tick_origin = 0;
+        if let Some(tick) = &mut self.static_destination_tick {
+            *tick = 0;
+            return Ok(());
+        }
         self.audio.stop();
         self.cancel_action_input();
         self.cancel_hud_input();
@@ -558,9 +635,16 @@ impl Application for GenericMotionLab {
         if step.dt != self.fixed_dt {
             return Err("Host Step.dt differs from Motion Lab's configured fixed tick".into());
         }
-        let runtime = self.runtime.as_mut().ok_or("Reset before running")?;
-        if runtime.tick().checked_add(1) != Some(step.tick) {
+        let local_tick = step
+            .tick
+            .checked_sub(self.host_tick_origin)
+            .ok_or("Invalid host tick")?;
+        if self.runtime_tick().and_then(|tick| tick.checked_add(1)) != Some(local_tick) {
             return Err("Host and behavior tick differ; Reset through the host Runtime".into());
+        }
+        if self.static_destination_tick.is_some() {
+            self.static_destination_tick = Some(local_tick);
+            return Ok(());
         }
         let origin = if supplied.is_some() {
             "programmatic"
@@ -570,6 +654,14 @@ impl Application for GenericMotionLab {
             "neutral"
         };
         let input = supplied.unwrap_or_else(|| self.action_keys.take_snapshot().into_frame());
+        if self.start_transition.as_ref().is_some_and(|(_, route)| {
+            matches!(input.0.get(&route.action_id), Some(ActionValue::Button(state)) if state.pressed)
+        }) {
+            return self.apply_start_transition(step.tick).map_err(|reason| {
+                format!("Start Transition failed. {reason} Restore the destination package and retry.")
+            });
+        }
+        let runtime = self.runtime.as_mut().ok_or("Reset before running")?;
         let result = self
             .engine
             .as_mut()
@@ -581,7 +673,7 @@ impl Application for GenericMotionLab {
             self.needs_reset = true;
         }
         self.report(result)?;
-        self.last_input = Some((step.tick, input, origin));
+        self.last_input = Some((local_tick, input, origin));
         let runtime = self.runtime.as_ref().expect("active runtime");
         self.content.set_behavior_draw_frame(runtime.draw_frame());
         self.diagnostic = None;

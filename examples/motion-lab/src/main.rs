@@ -346,6 +346,16 @@ fn read_input_frames(
     ticks: u64,
     actions: &ActionMap,
 ) -> Result<Vec<ActionFrame>, String> {
+    let frames = read_action_frames(path, ticks)?;
+    for (index, frame) in frames.iter().enumerate() {
+        frame
+            .validate_against(actions)
+            .map_err(|error| format!("Input frame {}: {error}", index + 1))?;
+    }
+    Ok(frames)
+}
+
+fn read_action_frames(path: Option<&Path>, ticks: u64) -> Result<Vec<ActionFrame>, String> {
     let Some(path) = path else {
         return Ok(Vec::new());
     };
@@ -355,11 +365,6 @@ fn read_input_frames(
         .map_err(|error| format!("Input frames require a JSON array of action frames: {error}"))?;
     if frames.len() as u64 > ticks {
         return Err("Input frame count exceeds requested headless ticks".into());
-    }
-    for (index, frame) in frames.iter().enumerate() {
-        frame
-            .validate_against(actions)
-            .map_err(|error| format!("Input frame {}: {error}", index + 1))?;
     }
     Ok(frames)
 }
@@ -459,7 +464,11 @@ fn headless_runtime(
     commands_path: Option<&Path>,
     hud_activations_path: Option<&Path>,
 ) -> Result<HeadlessRun, String> {
-    let frames = read_input_frames(path, ticks, &app.session().authoring().actions)?;
+    let frames = if app.has_start_transition() {
+        read_action_frames(path, ticks)?
+    } else {
+        read_input_frames(path, ticks, &app.session().authoring().actions)?
+    };
     let commands = read_commands(commands_path)?;
     let mut hud_activations = read_hud_activations(hud_activations_path, ticks)?
         .into_iter()
@@ -573,6 +582,7 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
     let manifest = CreationManifest::load(&root)?;
     let tick_duration = manifest.tick_duration();
     let scene = manifest.load_runtime_scene(&root)?;
+    let transition = rot_app::creation::StartupTransition::load(&root, &scene)?;
     let meshes = manifest.load_meshes(&root)?;
     let textures = manifest.load_textures(&root)?;
     let session = match scene {
@@ -588,6 +598,10 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
         &manifest.load_animations(&root)?,
     )?);
     app.set_creation_presentation(manifest.title.clone());
+    let routed = transition.is_some();
+    if let Some(route) = transition {
+        app.set_start_transition(root, route);
+    }
     if options.headless {
         let HeadlessRun {
             runtime,
@@ -606,9 +620,9 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
         let mut output = serde_json::json!({
             "mode": "creation",
             "title": manifest.title,
-            "scene_id": app.session().scene().id,
-            "authored_revision": app.session().scene().revision.to_string(),
-            "tick": runtime.tick().to_string(),
+            "scene_id": app.content().scene().id,
+            "authored_revision": app.content().scene().revision.to_string(),
+            "tick": app.runtime_tick().unwrap_or(0).to_string(),
             "fixed_dt": tick_duration.as_secs_f64(),
             "runtime_speed_override": null,
             "authored_scene": app.session().scene(),
@@ -627,6 +641,14 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
             "runtime_scene": app.content().scene(),
             "input": input,
         });
+        if routed {
+            output["transition_phase"] = serde_json::json!(if app.switched_scene() {
+                "destination"
+            } else {
+                "source"
+            });
+            output["host_tick"] = serde_json::json!(runtime.tick().to_string());
+        }
         if let Some(batch) = app.audio_batch() {
             output["audio_batch"] = serde_json::to_value(batch).map_err(|e| e.to_string())?;
         }
