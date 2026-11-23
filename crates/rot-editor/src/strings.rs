@@ -114,7 +114,7 @@ editor_text! {
     ScriptMovement => "Movement",
     ScriptOrdinary => "Ordinary",
     ScriptKinematicSphere => "Kinematic Sphere",
-    ScriptKinematicRequirements => "Use a flat scene, one mover with an enabled uniformly scaled Blocker Sphere, and stationary blockers.",
+    ScriptKinematicRequirements => "Use one uniform Blocker Sphere. Keep the scene flat and other blockers still.",
     ComponentScriptSource => "Source",
     ComponentScriptUnavailable => "Script file unavailable.",
     ComponentNoScriptFiles => "No matching Lua files.",
