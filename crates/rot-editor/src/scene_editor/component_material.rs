@@ -572,6 +572,8 @@ impl ComponentWorkspace {
                         .labelled_by(label)
                         .on_hover_text(Text::DoubleSidedDetail.plain());
                 });
+                material_uv_row(ui, Text::TextureTiling, &mut draft.value.uv_tiling);
+                material_uv_row(ui, Text::TextureOffset, &mut draft.value.uv_offset);
                 texture_choice(
                     ui,
                     Text::BaseColorSrgb,
@@ -657,6 +659,26 @@ impl ComponentWorkspace {
         }
         self.material_draft = Some(draft);
     }
+}
+
+fn material_uv_row(ui: &mut egui::Ui, text: Text, values: &mut [f32; 2]) {
+    ui_kit::property_row_with_label(ui, text.plain(), |ui, label| {
+        ui.horizontal(|ui| {
+            for (axis, value) in ["X", "Y"].into_iter().zip(values) {
+                let field = super::component_inspector::exact_drag_value(ui, value)
+                    .speed(0.01)
+                    .prefix(format!("{axis} "));
+                let name = format!("{} {axis}", text.plain());
+                let response = ui.add(field).labelled_by(label);
+                response.widget_info(|| {
+                    let mut info = egui::WidgetInfo::drag_value(ui.is_enabled(), f64::from(*value));
+                    info.label = Some(name.clone());
+                    info
+                });
+                response.on_hover_text(name);
+            }
+        });
+    });
 }
 
 fn texture_choice(
@@ -1010,7 +1032,7 @@ impl ComponentWorkspace {
                 "material_id":id, "assigned_count":users.len(), "users_truncated":users.len()>4,
                 "user_ids":users.iter().take(4).map(|&index| &scene.objects[index].id).collect::<Vec<_>>(),
                 "material":{
-                    "name":value.name,"tint":value.tint,"emission_color":value.emission_color,"double_sided":value.double_sided,"base_color_texture":value.base_color_texture,
+                    "name":value.name,"tint":value.tint,"emission_color":value.emission_color,"double_sided":value.double_sided,"uv_tiling":value.uv_tiling,"uv_offset":value.uv_offset,"base_color_texture":value.base_color_texture,
                     "roughness_texture":value.roughness_texture,"filter":value.filter,"address":value.address,
                     "response":value.response,
                 },

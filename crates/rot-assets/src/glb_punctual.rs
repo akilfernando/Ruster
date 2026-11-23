@@ -286,7 +286,7 @@ pub(super) fn admit<'a>(
                 "required GLB extension {extension:?} is undeclared"
             )));
         }
-        if extension != EXTENSION {
+        if !matches!(extension, EXTENSION | "KHR_texture_transform") {
             return Err(error(format!(
                 "unsupported required GLB extension {extension:?}"
             )));

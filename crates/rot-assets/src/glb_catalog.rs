@@ -53,15 +53,15 @@ pub(super) fn read_candidate(root: &Path, source: &str) -> Result<Vec<u8>, Asset
 }
 
 fn old_omitted_roughness(info: &ModelInfo, material: &str) -> bool {
+    material_warning(info, material, "metallic-roughness map omitted")
+}
+
+fn material_warning(info: &ModelInfo, material: &str, expected: &str) -> bool {
     info.warnings.iter().any(|warning| {
         warning
             .strip_prefix(material)
             .and_then(|warning| warning.strip_prefix(": "))
-            .is_some_and(|details| {
-                details
-                    .split(", ")
-                    .any(|part| part == "metallic-roughness map omitted")
-            })
+            .is_some_and(|details| details.split(", ").any(|part| part == expected))
     })
 }
 
@@ -82,9 +82,16 @@ fn same_material_structure(old: &ModelInfo, new: &ModelInfo) -> bool {
                 // Material shading flags do not change resources or placed copies.
                 upgraded.emission_color = next.emission_color;
                 upgraded.double_sided = next.double_sided;
+                upgraded.uv_tiling = next.uv_tiling;
+                upgraded.uv_offset = next.uv_offset;
                 if prior.roughness_texture.is_none()
                     && next.roughness_texture.is_some()
-                    && old_omitted_roughness(old, name)
+                    && (old_omitted_roughness(old, name)
+                        || material_warning(
+                            old,
+                            name,
+                            "roughness map omitted because its UV transform is unsupported",
+                        ))
                 {
                     upgraded
                         .roughness_texture
@@ -164,14 +171,25 @@ pub(super) fn read_accepted(root: &Path, info: &ModelInfo) -> Result<DecodedMode
             .materials
             .keys()
             .any(|name| old_single_sided_warning(info, name));
+    let uv_transforms = !info.materials.keys().any(|name| {
+        material_warning(info, name, "base color UV transform omitted")
+            || material_warning(
+                info,
+                name,
+                "roughness map omitted because its UV transform is unsupported",
+            )
+    });
     let decoded = glb::decode_accepted(
         &info.id,
         &info.source,
         &bytes,
-        packed_roughness,
-        place_spots,
-        emission,
-        double_sided,
+        glb::ImportFeatures {
+            packed_roughness,
+            place_spots,
+            emission,
+            double_sided,
+            uv_transforms,
+        },
     )?;
     if &decoded.info != info {
         return Err(error(format!(
@@ -255,6 +273,15 @@ impl Registry {
                     .all(|value| (0.0..=1.0).contains(&value))
             }) {
                 return Err(error("invalid static model emission color"));
+            }
+            if model.materials.values().any(|material| {
+                !material
+                    .uv_tiling
+                    .iter()
+                    .chain(&material.uv_offset)
+                    .all(|value| value.is_finite())
+            }) {
+                return Err(error("invalid static model UV transform"));
             }
             for (resource, _) in model.resources() {
                 validate_id(resource)?;
@@ -639,11 +666,29 @@ mod tests {
         let bytes = packed_fixture(&pixels, |doc, _| {
             doc["materials"][0]["emissiveFactor"] = serde_json::json!([0.25, 0.125, 0.5]);
             doc["materials"][0]["doubleSided"] = serde_json::json!(true);
+            doc["extensionsUsed"] = serde_json::json!(["KHR_texture_transform"]);
+            let surface = &mut doc["materials"][0]["pbrMetallicRoughness"];
+            for slot in ["baseColorTexture", "metallicRoughnessTexture"] {
+                surface[slot]["extensions"] = serde_json::json!({
+                    "KHR_texture_transform":{"scale":[2.0,-1.5],"offset":[0.25,0.125]}
+                });
+            }
         });
         fs::write(&source, &bytes).unwrap();
         let mut store = AssetStore::open(root.path()).unwrap();
-        let decoded =
-            glb::decode_accepted("paint", "paint.glb", &bytes, false, true, false, false).unwrap();
+        let decoded = glb::decode_accepted(
+            "paint",
+            "paint.glb",
+            &bytes,
+            glb::ImportFeatures {
+                packed_roughness: false,
+                place_spots: true,
+                emission: false,
+                double_sided: false,
+                uv_transforms: false,
+            },
+        )
+        .unwrap();
         let prior = decoded.info.clone();
         let mut registry = store.registry.clone();
         registry.models.insert("paint".into(), prior.clone());
@@ -671,6 +716,10 @@ mod tests {
         assert_eq!(store.revision(), 2);
         assert_eq!(prior.materials["Paint"].emission_color, [0.0; 3]);
         assert!(!prior.materials["Paint"].double_sided);
+        assert_eq!(prior.materials["Paint"].uv_tiling, [1.0; 2]);
+        assert_eq!(prior.materials["Paint"].uv_offset, [0.0; 2]);
+        assert_eq!(accepted.materials["Paint"].uv_tiling, [2.0, -1.5]);
+        assert_eq!(accepted.materials["Paint"].uv_offset, [0.25, 0.125]);
         assert!(old_single_sided_warning(&prior, "Paint"));
         assert!(accepted.materials["Paint"].double_sided);
         assert!(!old_single_sided_warning(&accepted, "Paint"));
@@ -745,7 +794,10 @@ mod tests {
             ("roughness-only", None),
             ("incompatible", Some("different sampler from Base Color")),
             ("uv1", Some("requires TEXCOORD_0")),
-            ("transform", Some("UV transform is unsupported")),
+            (
+                "transform",
+                Some("different tiling or offset from Base Color"),
+            ),
         ] {
             let bytes = packed_fixture(&pixels, |doc, _| {
                 doc["samplers"] =
@@ -853,8 +905,19 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let bytes = crate::fixtures::punctual_glb(|_| {});
         fs::write(root.path().join("light.glb"), &bytes).unwrap();
-        let decoded =
-            glb::decode_accepted("light", "light.glb", &bytes, true, false, true, false).unwrap();
+        let decoded = glb::decode_accepted(
+            "light",
+            "light.glb",
+            &bytes,
+            glb::ImportFeatures {
+                packed_roughness: true,
+                place_spots: false,
+                emission: true,
+                double_sided: false,
+                uv_transforms: false,
+            },
+        )
+        .unwrap();
         let old = decoded.info.clone();
         let mut store = AssetStore::open(root.path()).unwrap();
         let mut registry = store.registry.clone();

@@ -169,6 +169,8 @@ editor_text! {
     ComponentGeometry => "Geometry",
     ComponentTint => "Tint",
     EmissionColor => "Emission Color",
+    TextureTiling => "Tiling",
+    TextureOffset => "Offset",
     DoubleSided => "Double Sided",
     DoubleSidedDetail => "Draw both faces of this opaque material.",
     ComponentMaterial => "Material",

@@ -9,7 +9,7 @@ const TOOLS: &[(&str, &str, &[&str])] = &[
     ),
     (
         "scene_material_set",
-        "Create or fully replace a scene-owned opaque material. Shared edits affect every assigned object; object tint remains multiplied into appearance. Optional assign_object_id atomically assigns only a newly created material. New or changed texture slots require matching ready import roles and complete UVs for all users, including inactive roughness maps. Unchanged, recoverable references can be retained. In v23, component_id selects an exact Mesh Renderer for assign_object_id. Omitted emission_color preserves existing linear RGB or defaults to black. Omitted or null roughness_texture clears that slot; assignment never changes the scalar or scene display. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry. Source imports/refresh remain outside scene Undo.",
+        "Create or fully replace a scene-owned opaque material. Shared edits affect every assigned object; object tint remains multiplied into appearance. Optional assign_object_id atomically assigns only a newly created material. New or changed texture slots require matching ready import roles and complete UVs for all users, including inactive roughness maps. Unchanged, recoverable references can be retained. In v23, component_id selects an exact Mesh Renderer for assign_object_id. Omitted emission_color preserves existing linear RGB or defaults to black. Optional uv_tiling and uv_offset are finite [X,Y] pairs shared by both textures. Omission preserves the pair or defaults to [1,1] tiling and [0,0] offset. Omitted or null roughness_texture clears that slot; assignment never changes the scalar or scene display. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry. Source imports/refresh remain outside scene Undo.",
         &["material_id", "material"],
     ),
     (
@@ -108,6 +108,8 @@ fn shape(tool: &str, field: &str) -> Value {
             json!({
                 "name":name_schema(),
                 "tint":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number","minimum":0,"maximum":1},"description":"Finite linear RGB tint; all three channels are required."},
+                "uv_tiling":{"type":"array","minItems":2,"maxItems":2,"items":{"type":"number"}},
+                "uv_offset":{"type":"array","minItems":2,"maxItems":2,"items":{"type":"number"}},
                 "double_sided":{"type":"boolean","description":"Draw both faces. Omission keeps the current value or defaults to false."},
                 "emission_color":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number","minimum":0,"maximum":1},"description":"Linear RGB self-emission. Omitted preserves the edited color or defaults to black on new materials."},
                 "base_color_texture":id_schema(true),
@@ -180,6 +182,8 @@ fn valid_material(value: &Value) -> bool {
             "roughness_texture",
             "emission_color",
             "double_sided",
+            "uv_tiling",
+            "uv_offset",
         ],
     ) && material.get("name").is_none_or(valid_name)
         && material.get("response").is_none_or(valid_response)
@@ -188,6 +192,9 @@ fn valid_material(value: &Value) -> bool {
             .is_none_or(|value| value.is_null() || valid_id(value))
         && valid_rgb(&material["tint"])
         && material.get("emission_color").is_none_or(valid_rgb)
+        && ["uv_tiling", "uv_offset"]
+            .into_iter()
+            .all(|key| material.get(key).is_none_or(valid_uv_pair))
         && material.get("double_sided").is_none_or(Value::is_boolean)
         && (material["base_color_texture"].is_null() || valid_id(&material["base_color_texture"]))
         && material["filter"]
@@ -196,6 +203,17 @@ fn valid_material(value: &Value) -> bool {
         && material["address"]
             .as_str()
             .is_some_and(|address| ["repeat", "clamp"].contains(&address))
+}
+
+fn valid_uv_pair(value: &Value) -> bool {
+    value.as_array().is_some_and(|pair| {
+        pair.len() == 2
+            && pair.iter().all(|value| {
+                value
+                    .as_f64()
+                    .is_some_and(|value| (value as f32).is_finite())
+            })
+    })
 }
 
 fn valid_rgb(value: &Value) -> bool {
@@ -372,6 +390,20 @@ mod tests {
             let mut args = set.clone();
             args["material"]["double_sided"] = flag;
             assert_eq!(valid("scene_material_set", &args), accepted);
+        }
+        for (pair, accepted) in [
+            (json!([-2, 0.125]), true),
+            (json!([0, 0]), true),
+            (json!([1.0e100, 0]), false),
+            (json!([1]), false),
+            (json!(["1", 0]), false),
+            (Value::Null, false),
+        ] {
+            for field in ["uv_tiling", "uv_offset"] {
+                let mut args = set.clone();
+                args["material"][field] = pair.clone();
+                assert_eq!(valid("scene_material_set", &args), accepted);
+            }
         }
         for response in [
             json!({"type":"legacy_diffuse"}),

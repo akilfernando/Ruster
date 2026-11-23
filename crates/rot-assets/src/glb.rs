@@ -133,12 +133,33 @@ pub struct ModelMaterial {
         deserialize_with = "present"
     )]
     pub roughness_texture: Option<String>,
+    #[serde(
+        default = "identity_uv_tiling",
+        skip_serializing_if = "is_identity_uv_tiling"
+    )]
+    pub uv_tiling: [f32; 2],
+    #[serde(default, skip_serializing_if = "is_zero_uv_offset")]
+    pub uv_offset: [f32; 2],
     pub linear: bool,
     pub repeat: bool,
 }
 
 fn black_emission(color: &[f32; 3]) -> bool {
     *color == [0.0; 3]
+}
+
+const IDENTITY_UV: ([f32; 2], [f32; 2]) = ([1.0; 2], [0.0; 2]);
+
+fn identity_uv_tiling() -> [f32; 2] {
+    IDENTITY_UV.0
+}
+
+fn is_identity_uv_tiling(value: &[f32; 2]) -> bool {
+    *value == IDENTITY_UV.0
+}
+
+fn is_zero_uv_offset(value: &[f32; 2]) -> bool {
+    *value == IDENTITY_UV.1
 }
 
 impl ModelMaterial {
@@ -475,6 +496,43 @@ struct TextureTransform {
     rotation: Option<f32>,
     scale: Option<[f32; 2]>,
     tex_coord: Option<usize>,
+}
+
+impl TextureBinding {
+    fn effective_tex_coord(&self) -> usize {
+        self.extensions
+            .transform
+            .as_ref()
+            .and_then(|value| value.tex_coord)
+            .unwrap_or(self.tex_coord)
+    }
+
+    fn uv_transform(&self) -> Result<([f32; 2], [f32; 2]), AssetError> {
+        let Some(transform) = &self.extensions.transform else {
+            return Ok(IDENTITY_UV);
+        };
+        let tiling = transform.scale.unwrap_or(IDENTITY_UV.0);
+        let offset = transform.offset.unwrap_or(IDENTITY_UV.1);
+        if !tiling
+            .into_iter()
+            .chain(offset)
+            .chain(transform.rotation)
+            .all(f32::is_finite)
+        {
+            return Err(error(
+                "GLB texture transform requires finite scale, offset and rotation",
+            ));
+        }
+        Ok((tiling, offset))
+    }
+
+    fn has_uv_rotation(&self) -> bool {
+        self.extensions
+            .transform
+            .as_ref()
+            .and_then(|value| value.rotation)
+            .is_some_and(|angle| angle != 0.0)
+    }
 }
 
 #[derive(Deserialize)]
@@ -947,6 +1005,7 @@ struct Decoder<'a> {
     packed_roughness: bool,
     emission: bool,
     double_sided: bool,
+    uv_transforms: bool,
     mesh_bytes: usize,
     texture_bytes: usize,
     skipped_triangles: usize,
@@ -1276,24 +1335,23 @@ impl Decoder<'_> {
             roughness: roughness.max(MIN_DIELECTRIC_ROUGHNESS),
             base_color_texture: None,
             roughness_texture: None,
+            uv_tiling: IDENTITY_UV.0,
+            uv_offset: IDENTITY_UV.1,
             linear: true,
             repeat: true,
         };
         let mut base_resource = None;
         if let Some(binding) = &surface.base_color_texture {
-            let transform = binding.extensions.transform.as_ref();
-            if transform
-                .and_then(|value| value.tex_coord)
-                .unwrap_or(binding.tex_coord)
-                != 0
-            {
+            let tex_coord = binding.effective_tex_coord();
+            if !self.uv_transforms && tex_coord != 0 {
                 return Err(error("GLB base color requires TEXCOORD_0"));
             }
-            if transform.is_some_and(|value| {
-                value.offset.unwrap_or([0.0; 2]) != [0.0; 2]
-                    || value.rotation.unwrap_or(0.0) != 0.0
-                    || value.scale.unwrap_or([1.0; 2]) != [1.0; 2]
-            }) {
+            let uv = binding.uv_transform()?;
+            if self.uv_transforms && binding.has_uv_rotation() {
+                fallbacks.push("Base Color UV transform omitted because rotation is unsupported");
+            } else if self.uv_transforms && tex_coord == 0 {
+                (definition.uv_tiling, definition.uv_offset) = uv;
+            } else if !self.uv_transforms && (uv != IDENTITY_UV || binding.has_uv_rotation()) {
                 fallbacks.push("base color UV transform omitted");
             }
             let texture = at(&self.doc.textures, binding.index, "texture")?;
@@ -1311,12 +1369,16 @@ impl Decoder<'_> {
                 ));
             }
             let texture = decode_png(bytes)?;
-            let id = resource_id(&self.model.info.id, "base-color", &name);
-            base_resource = Some(ModelResource {
-                bytes: Some(bytes.to_vec()),
-                payload: Payload::Texture(texture),
-            });
-            definition.base_color_texture = Some(id);
+            if tex_coord == 0 {
+                let id = resource_id(&self.model.info.id, "base-color", &name);
+                base_resource = Some(ModelResource {
+                    bytes: Some(bytes.to_vec()),
+                    payload: Payload::Texture(texture),
+                });
+                definition.base_color_texture = Some(id);
+            } else {
+                fallbacks.push("Base Color map omitted because it requires TEXCOORD_0");
+            }
         }
         let mut roughness_sampler_warning = None;
         if let Some(binding) = surface
@@ -1327,20 +1389,18 @@ impl Decoder<'_> {
             let texture = at(&self.doc.textures, binding.index, "roughness texture")?;
             let image = at(&self.doc.images, texture.source, "roughness image")?;
             let (view, bytes) = self.view(image.buffer_view)?;
-            let transform = binding.extensions.transform.as_ref();
+            let uv = binding.uv_transform()?;
             fallbacks.push("metallic-roughness blue channel omitted");
-            if transform
-                .and_then(|value| value.tex_coord)
-                .unwrap_or(binding.tex_coord)
-                != 0
-            {
+            if binding.effective_tex_coord() != 0 {
                 fallbacks.push("roughness map omitted because it requires TEXCOORD_0");
-            } else if transform.is_some_and(|value| {
-                value.offset.unwrap_or([0.; 2]) != [0.; 2]
-                    || value.rotation.unwrap_or(0.) != 0.
-                    || value.scale.unwrap_or([1.; 2]) != [1.; 2]
-            }) {
+            } else if !self.uv_transforms && (uv != IDENTITY_UV || binding.has_uv_rotation()) {
                 fallbacks.push("roughness map omitted because its UV transform is unsupported");
+            } else if binding.has_uv_rotation() {
+                fallbacks.push("roughness map omitted because UV rotation is unsupported");
+            } else if definition.base_color_texture.is_some()
+                && uv != (definition.uv_tiling, definition.uv_offset)
+            {
+                fallbacks.push("roughness map omitted because it needs different tiling or offset from Base Color");
             } else if image.mime_type != "image/png"
                 || view.target.is_some()
                 || view.byte_stride.is_some()
@@ -1360,6 +1420,7 @@ impl Decoder<'_> {
                     fallbacks.push("roughness map omitted because it needs a different sampler from Base Color");
                     roughness_sampler_warning = None;
                 } else {
+                    (definition.uv_tiling, definition.uv_offset) = uv;
                     definition.linear = linear;
                     definition.repeat = repeat;
                     let roughness = texture::decode_glb_roughness(bytes).map_err(|failure| {
@@ -1758,39 +1819,41 @@ impl Decoder<'_> {
     }
 }
 
+pub(super) struct ImportFeatures {
+    pub packed_roughness: bool,
+    pub place_spots: bool,
+    pub emission: bool,
+    pub double_sided: bool,
+    pub uv_transforms: bool,
+}
+
+impl ImportFeatures {
+    const CURRENT: Self = Self {
+        packed_roughness: true,
+        place_spots: true,
+        emission: true,
+        double_sided: true,
+        uv_transforms: true,
+    };
+}
+
 pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedModel, AssetError> {
-    decode_model(id, source, bytes, true, true, true, true)
+    decode_accepted(id, source, bytes, ImportFeatures::CURRENT)
 }
 
 pub(super) fn decode_accepted(
     id: &str,
     source: &str,
     bytes: &[u8],
-    packed_roughness: bool,
-    place_spots: bool,
-    emission: bool,
-    double_sided: bool,
+    features: ImportFeatures,
 ) -> Result<DecodedModel, AssetError> {
-    decode_model(
-        id,
-        source,
-        bytes,
+    let ImportFeatures {
         packed_roughness,
         place_spots,
         emission,
         double_sided,
-    )
-}
-
-fn decode_model(
-    id: &str,
-    source: &str,
-    bytes: &[u8],
-    packed_roughness: bool,
-    place_spots: bool,
-    emission: bool,
-    double_sided: bool,
-) -> Result<DecodedModel, AssetError> {
+        uv_transforms,
+    } = features;
     let (json, bin) = chunks(bytes)?;
     let doc: Document<'_> = serde_json::from_slice(json)
         .map_err(|e| error(format!("unsupported or invalid static GLB document: {e}")))?;
@@ -1857,6 +1920,7 @@ fn decode_model(
         packed_roughness,
         emission,
         double_sided,
+        uv_transforms,
         mesh_bytes: 0,
         texture_bytes: 0,
         skipped_triangles: 0,

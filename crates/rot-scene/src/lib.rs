@@ -126,6 +126,13 @@ pub struct OpaqueMaterial {
     /// Linear roughness-data asset; retained when its surface response is inactive.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub roughness_texture: Option<String>,
+    #[serde(
+        default = "identity_uv_tiling",
+        skip_serializing_if = "is_identity_uv_tiling"
+    )]
+    pub uv_tiling: [f32; 2],
+    #[serde(default, skip_serializing_if = "is_zero_uv_offset")]
+    pub uv_offset: [f32; 2],
     pub filter: TextureFilter,
     pub address: TextureAddress,
     #[serde(default, skip_serializing_if = "MaterialResponse::is_legacy")]
@@ -140,6 +147,8 @@ impl Default for OpaqueMaterial {
             double_sided: false,
             base_color_texture: None,
             roughness_texture: None,
+            uv_tiling: identity_uv_tiling(),
+            uv_offset: [0.0; 2],
             filter: TextureFilter::Linear,
             address: TextureAddress::Repeat,
             response: MaterialResponse::LegacyDiffuse,
@@ -148,6 +157,18 @@ impl Default for OpaqueMaterial {
 }
 fn black_emission(color: &[f32; 3]) -> bool {
     *color == [0.0; 3]
+}
+
+fn identity_uv_tiling() -> [f32; 2] {
+    [1.0; 2]
+}
+
+fn is_identity_uv_tiling(value: &[f32; 2]) -> bool {
+    *value == identity_uv_tiling()
+}
+
+fn is_zero_uv_offset(value: &[f32; 2]) -> bool {
+    *value == [0.0; 2]
 }
 
 impl OpaqueMaterial {
@@ -169,6 +190,16 @@ impl OpaqueMaterial {
         {
             return Err(SceneError::Invalid(
                 "material emission color must be finite in 0..=1".into(),
+            ));
+        }
+        if !self
+            .uv_tiling
+            .iter()
+            .chain(&self.uv_offset)
+            .all(|value| value.is_finite())
+        {
+            return Err(SceneError::Invalid(
+                "material UV tiling and offset must be finite".into(),
             ));
         }
         if let Some(id) = &self.base_color_texture {
@@ -6548,7 +6579,20 @@ mod tests {
         let mut session = Session::new(Scene::demo()).unwrap();
         let original_color = session.scene().objects[0].color;
         let original_authoring = session.authoring().clone();
+        let default = serde_json::to_value(OpaqueMaterial::default()).unwrap();
+        assert!(default.get("uv_tiling").is_none() && default.get("uv_offset").is_none());
+        let restored: OpaqueMaterial = serde_json::from_value(default).unwrap();
+        assert_eq!(restored.uv_tiling, [1.0; 2]);
+        assert_eq!(restored.uv_offset, [0.0; 2]);
+        assert!(OpaqueMaterial {
+            uv_tiling: [1.0, f32::INFINITY],
+            ..restored
+        }
+        .validate()
+        .is_err());
         let material = OpaqueMaterial {
+            uv_tiling: [2.0, -3.0],
+            uv_offset: [0.25, -0.125],
             base_color_texture: Some("unavailable-texture".into()),
             roughness_texture: Some("unavailable-roughness".into()),
             response: MaterialResponse::Dielectric { roughness: 0.08 },

@@ -92,6 +92,13 @@ connected project.
   `double_sided` on the exact shared material. Omission preserves the current
   value or defaults to false on creation. Custom SDR shaders keep their own
   lighting code and can use WGSL `front_facing` to shade back faces.
+- For v23 **Tiling** and **Offset**, read `uv_tiling` and `uv_offset` from
+  the exact `material_inspect` result. Include either finite two-number pair
+  in the existing `scene_material_set` material value under the inspected
+  session, scene and asset guards. Change `uv_tiling` to `[2,1]` for two
+  horizontal repeats on a Repeat material. Each omitted pair keeps its
+  current value. New materials default to `[1,1]` tiling and `[0,0]` offset,
+  and the shared transform affects Base Color and Roughness in one Undo.
 - For v23 **Emission Color**, read `emission_color` from the exact shared
   material and check its assignment count before calling guarded
   `scene_material_set`. Supply three linear RGB channels in `[0, 1]`.

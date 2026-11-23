@@ -106,6 +106,8 @@ pub(super) fn material(
                     "roughness_texture",
                     "emission_color",
                     "double_sided",
+                    "uv_tiling",
+                    "uv_offset",
                 ],
             )
         })
@@ -115,7 +117,21 @@ pub(super) fn material(
                 "Expected the complete opaque material shape",
             )
         })?;
+    let uv_pair = |key: &str, fallback: [f32; 2]| {
+        map.get(key)
+            .map(|value| serde_json::from_value(value.clone()))
+            .transpose()
+            .map(|value| value.unwrap_or(fallback))
+            .map_err(|_| {
+                error(
+                    "invalid_arguments",
+                    format!("{key} must be two finite numbers"),
+                )
+            })
+    };
     let candidate = OpaqueMaterial {
+        uv_tiling: uv_pair("uv_tiling", prior.map_or([1.0; 2], |value| value.uv_tiling))?,
+        uv_offset: uv_pair("uv_offset", prior.map_or([0.0; 2], |value| value.uv_offset))?,
         name: optional_name(map.get("name"))?,
         response: map
             .get("response")
@@ -352,7 +368,7 @@ impl SceneEditor {
                     "material":{
                         "name":value.name, "tint":value.tint,
                         "base_color_texture":value.base_color_texture,
-                        "emission_color":value.emission_color,"double_sided":value.double_sided,"roughness_texture":value.roughness_texture,
+                        "emission_color":value.emission_color,"double_sided":value.double_sided,"uv_tiling":value.uv_tiling,"uv_offset":value.uv_offset,"roughness_texture":value.roughness_texture,
                         "filter":value.filter, "address":value.address, "response":value.response
                     },
                     "assigned_count":users.len(),

@@ -122,7 +122,7 @@ fn enter_commits(ui: &egui::Ui, response: &egui::Response) -> bool {
     response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))
 }
 
-fn exact_drag_value<'a>(ui: &egui::Ui, value: &'a mut f32) -> egui::DragValue<'a> {
+pub(super) fn exact_drag_value<'a>(ui: &egui::Ui, value: &'a mut f32) -> egui::DragValue<'a> {
     let id = ui.next_auto_id();
     let ctx = ui.ctx().clone();
     let formatter = ui.style().number_formatter.clone();

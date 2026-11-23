@@ -32,6 +32,7 @@ struct Vertex {
     @location(11) base_color: vec4<f32>,
     @location(12) response: vec4<f32>,
     @location(13) emission_color: vec3<f32>,
+    @location(14) uv_transform: vec4<f32>,
 };
 struct Output {
     @builtin(position) position: vec4<f32>,
@@ -51,7 +52,7 @@ struct Output {
     o.normal = normal * v.normal;
     o.color = v.color;
     // OBJ V grows upward; decoded PNG rows grow downward. Convert once here.
-    o.uv = vec2<f32>(v.uv.x, 1.0 - v.uv.y);
+    o.uv = vec2<f32>(v.uv.x, 1.0 - v.uv.y) * v.uv_transform.xy + v.uv_transform.zw;
     o.base_color = v.base_color;
     o.response = v.response;
     o.emission_color = v.emission_color;

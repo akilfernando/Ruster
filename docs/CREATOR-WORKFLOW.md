@@ -329,6 +329,19 @@ pick up its factor for new placements. Existing placed materials keep their edit
 Press Enter to apply or Escape to cancel. Apply or cancel before saving.
 Edits to materials copied from GLB models are saved with the scene.
 
+In **Edit Material**, **Tiling** multiplies the X and Y texture coordinates
+and **Offset** shifts them by fractions of the image. These values apply to
+Base Color and Roughness together. For example, Tiling 2 on X repeats twice
+with **Repeat** addressing. A negative axis mirrors that axis, and Offset
+moves the sampled region. The defaults are Tiling (1, 1) and Offset (0, 0).
+Apply commits one shared edit that affects every renderer using the material.
+
+New GLB placements keep compatible TEXCOORD_0 scale and offset. Assets warns
+about rotated mappings, unsupported UV sets, and separate transforms Rot
+cannot share. When both maps need different tiling or offset, Base Color
+takes priority and Roughness uses its scalar. Reimport can update the source
+for new placements without changing existing scene materials.
+
 Enable **Double Sided** under **Edit Material** to draw both faces of an
 opaque surface such as a flat sign or leaf. Applying a shared material
 changes every renderer using it. Use **Make Unique** first to change just

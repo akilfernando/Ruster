@@ -2208,6 +2208,11 @@ fn render_draw_scene(
             color,
             base_color,
             emission_color: material.map_or([0.0; 3], |material| material.emission_color),
+            uv_transform: material.map_or([1.0, 1.0, 0.0, 0.0], |material| {
+                let [x, y] = material.uv_tiling;
+                let [u, v] = material.uv_offset;
+                [x, y, u, v]
+            }),
             response: match material.map(|material| material.response) {
                 Some(rot_scene::MaterialResponse::Dielectric { roughness }) => [
                     1.,
@@ -2567,6 +2572,7 @@ struct Instance {
     base_color: [f32; 4],
     response: [f32; 4],
     emission_color: [f32; 3],
+    uv_transform: [f32; 4],
 }
 fn choose_samples(
     color: wgpu::TextureFormatFeatureFlags,
@@ -3198,7 +3204,7 @@ fn scene_pipeline_format(
     let mesh_attributes = used(&wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3]);
     let uv_attributes = used(&wgpu::vertex_attr_array![10=>Float32x2]);
     let instance_attributes = used(
-        &wgpu::vertex_attr_array![2=>Float32x4,3=>Float32x4,4=>Float32x4,5=>Float32x4,6=>Float32x4,7=>Float32x4,8=>Float32x4,9=>Float32x4,11=>Float32x4,12=>Float32x4,13=>Float32x3],
+        &wgpu::vertex_attr_array![2=>Float32x4,3=>Float32x4,4=>Float32x4,5=>Float32x4,6=>Float32x4,7=>Float32x4,8=>Float32x4,9=>Float32x4,11=>Float32x4,12=>Float32x4,13=>Float32x3,14=>Float32x4],
     );
     let builtin = source == default_shader() || source == surface_shader();
     let create = |uv_stride, double_sided| {
@@ -4014,7 +4020,8 @@ mod tests {
 
         // Additive camera/instance ABI protects old custom shaders and verifies
         // that opt-in fragment view data and material inputs are present.
-        assert_eq!(size_of::<Instance>(), 172);
+        assert_eq!(size_of::<Instance>(), 188);
+        assert_eq!(offset_of!(Instance, uv_transform), 172);
         assert_eq!(offset_of!(Instance, base_color), 128);
         assert_eq!(offset_of!(Instance, response), 144);
         assert_eq!(offset_of!(Instance, emission_color), 160);
@@ -5388,6 +5395,7 @@ mod tests {
                 base_color: [1.0, 1.0, 1.0, 0.0],
                 response: [0.; 4],
                 emission_color: [0.; 3],
+                uv_transform: [1., 1., 0., 0.],
             };
             queue.write_buffer(&r.instances, 0, bytemuck::bytes_of(&object));
             // The second submission replaces attachments while prior work may be pending.

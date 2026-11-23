@@ -203,6 +203,14 @@ impl MaterialDraft {
                     .original_material
                     .as_ref()
                     .is_some_and(|value| value.double_sided),
+            uv_tiling: self
+                .original_material
+                .as_ref()
+                .map_or([1.0; 2], |value| value.uv_tiling),
+            uv_offset: self
+                .original_material
+                .as_ref()
+                .map_or([0.0; 2], |value| value.uv_offset),
             base_color_texture: self.texture.clone(),
             roughness_texture: self.roughness_texture.clone(),
             filter: self.filter,
