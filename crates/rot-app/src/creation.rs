@@ -1464,6 +1464,7 @@ mod tests {
                 PropertyValue::SoundRef(SoundRef {
                     asset_id: None,
                     gain: 1.,
+                    playback: Default::default(),
                 }),
             )]),
             commands: Default::default(),
@@ -1484,6 +1485,7 @@ mod tests {
             PropertyValue::SoundRef(SoundRef {
                 asset_id: Some("beep".into()),
                 gain: 0.5,
+                playback: Default::default(),
             }),
         );
         let revision = session

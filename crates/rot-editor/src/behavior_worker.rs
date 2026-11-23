@@ -1975,12 +1975,12 @@ fn step_with_admitted(
             if execution.audio_enabled {
                 if let Some(batch) = execution.runtime.as_ref()?.audio_batch() {
                     if execution.playing {
-                        execution.audio.consume(
+                        execution.audio.consume_spatial(
                             batch.commit_revision,
                             batch
                                 .cues
                                 .iter()
-                                .map(|cue| (cue.asset_id.as_str(), cue.gain)),
+                                .map(|cue| (cue.asset_id.as_str(), cue.gain, cue.pan)),
                         );
                     }
                     execution.audio_last_batch = Some(Arc::new(batch.clone()));

@@ -227,6 +227,7 @@ impl ValueDraft {
             Self::SoundRef { asset_id, gain } => PropertyValue::SoundRef(rot_scene::SoundRef {
                 asset_id: asset_id.clone(),
                 gain: number(gain)?,
+                playback: Default::default(),
             }),
         };
         value.validate().map_err(|error| error.to_string())?;
@@ -1428,6 +1429,7 @@ impl BehaviorUi {
                                 _ => PropertyValue::SoundRef(rot_scene::SoundRef {
                                     asset_id: None,
                                     gain: 1.0,
+                                    playback: Default::default(),
                                 }),
                             };
                             action = Some(Action::AddProperty(
@@ -4017,6 +4019,7 @@ mod tests {
                 PropertyValue::SoundRef(rot_scene::SoundRef {
                     asset_id: None,
                     gain: 1.0,
+                    playback: Default::default(),
                 }),
                 "-",
                 false,

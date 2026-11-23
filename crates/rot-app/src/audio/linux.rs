@@ -7,7 +7,7 @@ use kira::{
         PlaybackState,
     },
     track::MainTrackBuilder,
-    AudioManager, AudioManagerSettings, Decibels, Frame, Tween,
+    AudioManager, AudioManagerSettings, Decibels, Frame, Panning, Tween,
 };
 use rot_assets::AudioClip;
 use std::{
@@ -132,7 +132,13 @@ impl Device {
         }
     }
 
-    pub(super) fn play(&mut self, asset_id: &str, clip: &AudioClip, gain: f64) -> OutputStatus {
+    pub(super) fn play(
+        &mut self,
+        asset_id: &str,
+        clip: &AudioClip,
+        gain: f64,
+        pan: Option<f64>,
+    ) -> OutputStatus {
         self.active
             .retain(|voice| voice.state() != PlaybackState::Stopped);
         if self.active.len() == MAX_ACTIVE_VOICES {
@@ -156,7 +162,11 @@ impl Device {
         } else {
             Decibels((20.0 * gain.log10()) as f32)
         };
-        match self.manager.play(sound.volume(decibels)) {
+        let mut voice = sound.volume(decibels);
+        if let Some(pan) = pan {
+            voice.settings.panning = Panning(pan as f32).into();
+        }
+        match self.manager.play(voice) {
             Ok(voice) => {
                 self.active.push(voice);
                 OutputStatus::Ready

@@ -1259,7 +1259,7 @@ impl ComponentWorkspace {
                 }
                 response["movement_guidance"] = json!("An exact replace can set component.movement to kinematic_sphere or ordinary (omission keeps it). Kinematic Sphere needs a flat scene, one enabled mover, an enabled uniformly scaled Blocker Sphere, and stationary blockers. Call host.move_and_slide({dx,dy,dz}) once per Step, use suggested_translation, and return {transform=object}.");
                 response["sound_cue_guidance"] = json!(
-                    r#"File-backed Object Lua calls host.play_sound("cue-name"). Use binding.properties with type sound_ref and value {asset_id,gain}. Find ready kind sound via asset_inspect; pin expected_asset_revision when setting a cue."#
+                    r#"File-backed Object Lua calls host.play_sound("cue-name"). Use binding.properties sound_ref value {asset_id,gain}. For positional add playback:{type:"positional",range:10} and activate a Transform Perspective Game Camera. Omit playback for 2D. Find WAVs in asset_inspect and pin expected_asset_revision."#
                 );
             }
             if let Component::Light {

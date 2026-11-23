@@ -1,8 +1,11 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
+use super::{Diagnostic, DiagnosticCode, Phase};
 use mlua::{Table, Value};
-use rot_scene::PropertyValue;
+use rot_scene::{
+    component_scene::TransformCameraPose, Authoring, ParentPath, PropertyValue, Scene,
+};
 use serde::Serialize;
 
 pub const MAX_AUDIO_REQUESTS_PER_STEP: usize = 16;
@@ -14,6 +17,10 @@ pub struct AudioCue {
     pub property_name: String,
     pub asset_id: String,
     pub gain: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pan: Option<f64>,
+    #[serde(skip)]
+    pub(super) range: Option<f64>,
 }
 
 /// Effects published only at the scene/state commit boundary. Delivery owners
@@ -25,6 +32,85 @@ pub struct AudioBatch {
     #[serde(serialize_with = "crate::spatial_host::counter_string")]
     pub commit_revision: u64,
     pub cues: Vec<AudioCue>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct Emitter {
+    index: usize,
+    parents: Option<ParentPath>,
+}
+
+pub(super) fn emitters(
+    scene: &Scene,
+    authoring: &Authoring,
+    listener: Option<TransformCameraPose>,
+) -> Result<BTreeMap<String, Emitter>, Diagnostic> {
+    authoring.bindings.iter().filter(|(_, binding)| binding.enabled).filter_map(|(id, binding)| {
+        let (name, _) = binding.properties.iter().find(|(_, property)|
+            matches!(property, PropertyValue::SoundRef(sound) if sound.playback.range().is_some())
+        )?;
+        let emitter = binding.object_id().and_then(|owner| {
+            let index = scene.objects.iter().position(|object| object.id == owner)?;
+            listener.map(|_| Emitter { index, parents: scene.parent_path(owner) })
+        });
+        Some(emitter.map(|emitter| (id.clone(), emitter)).ok_or_else(|| {
+            Diagnostic::plain(DiagnosticCode::InvalidAuthoring, Phase::Setup,
+                &format!("Cue {name}: positional sound requires an Object Lua owner and an enabled active Transform Perspective Game Camera."))
+                .context(id, binding, authoring.sources.get(&binding.source_id))
+        }))
+    }).collect()
+}
+
+pub(super) fn resolve_cues(
+    cues: &mut [AudioCue],
+    emitters: &BTreeMap<String, Emitter>,
+    listener: Option<TransformCameraPose>,
+    scene: &Scene,
+    authoring: &Authoring,
+) -> Result<(), Diagnostic> {
+    if emitters.is_empty() || !cues.iter().any(|cue| cue.range.is_some()) {
+        return Ok(());
+    }
+    let listener = listener.expect("validated positional listener");
+    let eye = glam::DVec3::from_array(listener.eye.map(f64::from));
+    let forward = glam::DVec3::from_array(listener.forward.map(f64::from));
+    let up = glam::DVec3::from_array(listener.up.map(f64::from));
+    let right = forward.cross(up).normalize();
+    for cue in cues {
+        let Some(range) = cue.range.take() else {
+            continue;
+        };
+        let emitter = &emitters[&cue.binding_id];
+        let local = &scene.objects[emitter.index].transform;
+        let world;
+        let transform = if let Some(parents) = &emitter.parents {
+            world = parents.resolve(scene, local).map_err(|error| {
+                let binding = &authoring.bindings[&cue.binding_id];
+                Diagnostic::plain(
+                    DiagnosticCode::InvalidOutput,
+                    Phase::Commit,
+                    &format!("Cue {}: {error}", cue.property_name),
+                )
+                .context(
+                    &cue.binding_id,
+                    binding,
+                    authoring.sources.get(&binding.source_id),
+                )
+            })?;
+            &world
+        } else {
+            local
+        };
+        let delta = glam::DVec3::from_array(transform.translation.map(f64::from)) - eye;
+        let distance = delta.length();
+        cue.gain *= (1.0 - distance / range).max(0.0);
+        cue.pan = Some(if distance > 0.0 {
+            (delta / distance).dot(right).clamp(-1.0, 1.0)
+        } else {
+            0.0
+        });
+    }
+    Ok(())
 }
 
 pub(super) fn install_sound_host<'scope, 'env: 'scope>(
@@ -71,6 +157,8 @@ pub(super) fn install_sound_host<'scope, 'env: 'scope>(
                 property_name: name.as_ref().to_owned(),
                 asset_id: asset_id.clone(),
                 gain: sound.gain,
+                pan: None,
+                range: sound.playback.range(),
             });
             Ok(())
         })?,

@@ -74,6 +74,17 @@ impl Output {
         commit_revision: u64,
         cues: impl IntoIterator<Item = (&'a str, f64)>,
     ) {
+        self.consume_spatial(
+            commit_revision,
+            cues.into_iter().map(|(id, gain)| (id, gain, None)),
+        );
+    }
+
+    pub fn consume_spatial<'a>(
+        &mut self,
+        commit_revision: u64,
+        cues: impl IntoIterator<Item = (&'a str, f64, Option<f64>)>,
+    ) {
         if self.last_commit.is_some_and(|last| commit_revision <= last) {
             return;
         }
@@ -81,12 +92,15 @@ impl Output {
         if self.paused || self.guard.as_ref().is_some_and(|guard| !guard()) {
             return;
         }
-        for (asset_id, gain) in cues {
+        for (asset_id, gain, pan) in cues {
+            if pan.is_some() && gain <= 0.0 {
+                continue;
+            }
             if !self.sounds.contains_key(asset_id) {
                 self.status = Some(OutputStatus::MissingAsset);
                 continue;
             }
-            self.play(asset_id, gain);
+            self.play(asset_id, gain, pan);
         }
     }
 
@@ -103,7 +117,7 @@ impl Output {
     }
 
     #[cfg(target_os = "linux")]
-    fn play(&mut self, asset_id: &str, gain: f64) {
+    fn play(&mut self, asset_id: &str, gain: f64, pan: Option<f64>) {
         if self.status() == OutputStatus::Unavailable {
             return;
         }
@@ -115,11 +129,11 @@ impl Output {
             self.device = Some(device);
         }
         let device = self.device.as_mut().expect("opened output device");
-        self.status = Some(device.play(asset_id, &self.sounds[asset_id], gain));
+        self.status = Some(device.play(asset_id, &self.sounds[asset_id], gain, pan));
     }
 
     #[cfg(not(target_os = "linux"))]
-    fn play(&mut self, _asset_id: &str, _gain: f64) {
+    fn play(&mut self, _asset_id: &str, _gain: f64, _pan: Option<f64>) {
         self.unavailable = true;
     }
 }

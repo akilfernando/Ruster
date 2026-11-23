@@ -118,6 +118,7 @@ fn missing_camera_transform() -> SceneError {
 #[derive(Clone, Debug, Default)]
 pub struct RuntimeProjection {
     local_leaf_scripts: bool,
+    positional_audio: bool,
     attached_lights: Option<Arc<AttachedLights>>,
 }
 
@@ -146,6 +147,10 @@ impl AttachedLights {
 }
 
 impl RuntimeProjection {
+    pub(crate) fn allows_positional_audio(&self) -> bool {
+        self.positional_audio
+    }
+
     pub fn allows_local_leaf_scripts(&self) -> bool {
         self.local_leaf_scripts
     }
@@ -155,6 +160,12 @@ impl RuntimeProjection {
     }
 
     pub(crate) fn require_legacy_export(&self) -> Result<(), SceneError> {
+        if self.positional_audio {
+            return Err(SceneError::Invalid(
+                "Save the authored component scene to keep positional sound cues.".into(),
+            ));
+        }
+
         if self.attached_lights.is_some() {
             return Err(SceneError::Invalid(
                 "Save the authored component scene to keep attached lights.".into(),
@@ -526,7 +537,28 @@ impl ComponentScene {
             };
         }
         scene.validate()?;
+        let mut positional_audio = false;
+        for (id, binding) in &authoring.bindings {
+            for (name, property) in &binding.properties {
+                let crate::PropertyValue::SoundRef(cue) = property else {
+                    continue;
+                };
+                if cue.playback.range().is_none() {
+                    continue;
+                }
+                positional_audio = true;
+                if binding.enabled
+                    && (!matches!(binding.target, BindingTarget::Object(_))
+                        || transform_camera.is_none())
+                {
+                    return Err(SceneError::Invalid(format!(
+                        "Binding {id}, cue {name}: positional sound requires an Object Lua owner and an enabled active Transform Perspective Game Camera."
+                    )));
+                }
+            }
+        }
         let projection = RuntimeProjection {
+            positional_audio,
             local_leaf_scripts: !scene.hierarchy.is_empty()
                 && authoring.group_creation_blockers(&scene).next().is_some(),
             attached_lights: (!attached.is_empty()).then(|| Arc::new(AttachedLights(attached))),

@@ -663,12 +663,12 @@ impl Application for GenericMotionLab {
             return;
         }
         if let Some(batch) = self.runtime.as_ref().and_then(Runtime::audio_batch) {
-            self.audio.consume(
+            self.audio.consume_spatial(
                 batch.commit_revision,
                 batch
                     .cues
                     .iter()
-                    .map(|cue| (cue.asset_id.as_str(), cue.gain)),
+                    .map(|cue| (cue.asset_id.as_str(), cue.gain, cue.pan)),
             );
         }
     }

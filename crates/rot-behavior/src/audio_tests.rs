@@ -31,6 +31,7 @@ fn fixture(late: &str) -> (Scene, Authoring) {
                 PropertyValue::SoundRef(SoundRef {
                     asset_id: Some("confirm-sound".into()),
                     gain: 0.25,
+                    playback: Default::default(),
                 }),
             )]),
         ),
@@ -96,6 +97,8 @@ fn cue_batch_commits_at_most_once_per_successful_tick_and_rolls_back_late_failur
                 property_name: "confirm".into(),
                 asset_id: "confirm-sound".into(),
                 gain: 0.25,
+                pan: None,
+                range: None,
             }],
         }
     );
@@ -134,6 +137,7 @@ fn cue_admission_refuses_overflow_unknown_and_unassigned_names() {
                 PropertyValue::SoundRef(SoundRef {
                     asset_id: None,
                     gain: 1.0,
+                    playback: Default::default(),
                 }),
             );
         authoring.sources.get_mut("speaker").unwrap().text = format!(

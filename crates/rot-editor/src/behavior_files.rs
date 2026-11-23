@@ -1935,6 +1935,7 @@ mod tests {
                 PropertyValue::SoundRef(rot_scene::SoundRef {
                     asset_id: None,
                     gain: 0.5,
+                    playback: Default::default(),
                 }),
             ),
         ]);

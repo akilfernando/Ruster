@@ -4054,6 +4054,7 @@ mod tests {
             PropertyValue::SoundRef(SoundRef {
                 asset_id,
                 gain: 0.5,
+                playback: Default::default(),
             })
         };
         assert!(serde_json::from_str::<PropertyValue>(

@@ -3,7 +3,7 @@ use crate::editor_theme;
 use eframe::egui;
 use rot_assets::{AssetInfo, AssetKind, AssetStatus, AssetStore};
 use rot_scene::component_scene::{Component, ComponentInstance, ObjectNode, ScriptSourceKind};
-use rot_scene::{PropertyValue, SoundRef};
+use rot_scene::{PropertyValue, SoundPlayback, SoundRef};
 use std::collections::BTreeMap;
 
 pub(super) fn sound_script(
@@ -82,6 +82,8 @@ pub(super) struct Draft {
     name: String,
     asset: Option<String>,
     gain: f64,
+    positional: bool,
+    range: f64,
     revision: u64,
     asset_revision: u64,
     choices: Vec<(String, String)>,
@@ -118,9 +120,11 @@ impl ComponentWorkspace {
                 name = format!("cue-{index}");
             }
         }
-        let (asset, gain) = match cues.get(&name) {
-            Some(PropertyValue::SoundRef(value)) => (value.asset_id.clone(), value.gain),
-            _ => (None, 1.0),
+        let (asset, gain, range) = match cues.get(&name) {
+            Some(PropertyValue::SoundRef(value)) => {
+                (value.asset_id.clone(), value.gain, value.playback.range())
+            }
+            _ => (None, 1.0, None),
         };
         let choices = self.assets.as_ref().map_or_else(Vec::new, |store| {
             store
@@ -137,6 +141,8 @@ impl ComponentWorkspace {
             name,
             asset,
             gain,
+            positional: range.is_some(),
+            range: range.unwrap_or(10.0),
             revision: self.session.revision(),
             asset_revision: self.material_asset_revision(),
             choices,
@@ -226,6 +232,49 @@ impl ComponentWorkspace {
                     && ui.input_mut(|input| {
                         input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
                     });
+                let label = ui.label("Playback");
+                let focus = super::super::combo_focus::ComboFocus::capture(ui, "cue-playback");
+                let mut selected = false;
+                let response = egui::ComboBox::from_id_salt("cue-playback")
+                    .selected_text(if draft.positional { "Positional" } else { "2D" })
+                    .show_ui(ui, |ui| {
+                        for (positional, text) in [(false, "2D"), (true, "Positional")] {
+                            if ui
+                                .selectable_label(draft.positional == positional, text)
+                                .clicked()
+                            {
+                                draft.positional = positional;
+                                selected = true;
+                                ui.close();
+                            }
+                        }
+                    });
+                focus.restore(ui, &response.response, selected);
+                response.response.labelled_by(label.id);
+                if draft.positional {
+                    let label = ui.label("Range");
+                    let precise = ui.memory(|memory| memory.has_focus(ui.next_auto_id()));
+                    let range = ui
+                        .add(
+                            egui::DragValue::new(&mut draft.range)
+                                .speed(0.1)
+                                .custom_formatter(move |value, decimals| {
+                                    if precise {
+                                        value.to_string()
+                                    } else {
+                                        egui::emath::format_with_decimals_in_range(value, decimals)
+                                    }
+                                }),
+                        )
+                        .labelled_by(label.id)
+                        .on_hover_text(
+                            "Scene units. Requires an active Transform Perspective Game Camera.",
+                        );
+                    apply |= (range.has_focus() || range.lost_focus())
+                        && ui.input_mut(|input| {
+                            input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                        });
+                }
                 if rot_scene::validate_id(draft.name.trim()).is_ok() {
                     ui.monospace(format!("host.play_sound({:?})", draft.name.trim()));
                 }
@@ -298,6 +347,11 @@ impl ComponentWorkspace {
             let value = PropertyValue::SoundRef(SoundRef {
                 asset_id: draft.asset.clone(),
                 gain: draft.gain,
+                playback: if draft.positional {
+                    SoundPlayback::Positional { range: draft.range }
+                } else {
+                    SoundPlayback::TwoD
+                },
             });
             validate_cue(name, &value, self.assets.as_ref())?;
             if let Some(old) = &draft.original {

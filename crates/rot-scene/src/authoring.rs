@@ -127,6 +127,31 @@ impl BehaviorSource {
     }
 }
 
+/// Legacy sound cues omit this field and keep their stereo samples.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SoundPlayback {
+    #[default]
+    #[serde(rename = "2d")]
+    TwoD,
+    Positional {
+        range: f64,
+    },
+}
+
+impl SoundPlayback {
+    fn is_2d(&self) -> bool {
+        *self == Self::TwoD
+    }
+
+    pub fn range(self) -> Option<f64> {
+        match self {
+            Self::TwoD => None,
+            Self::Positional { range } => Some(range),
+        }
+    }
+}
+
 /// The authored asset and gain of a named sound cue on one behavior binding.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -134,6 +159,8 @@ pub struct SoundRef {
     #[serde(deserialize_with = "Deserialize::deserialize")]
     pub asset_id: Option<String>,
     pub gain: f64,
+    #[serde(default, skip_serializing_if = "SoundPlayback::is_2d")]
+    pub playback: SoundPlayback,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -171,6 +198,15 @@ impl PropertyValue {
                 if !(0.0..=1.0).contains(&sound.gain) {
                     return Err(SceneError::Invalid(
                         "sound gain requires a finite value in 0..=1".into(),
+                    ));
+                }
+                if sound
+                    .playback
+                    .range()
+                    .is_some_and(|range| !range.is_finite() || range <= 0.0)
+                {
+                    return Err(SceneError::Invalid(
+                        "positional sound range requires a finite positive value".into(),
                     ));
                 }
                 if let Some(id) = &sound.asset_id {
@@ -474,6 +510,11 @@ impl Authoring {
         for (id, binding) in &self.bindings {
             validate_id(id)?;
             let bytes = binding.validate_and_state_bytes()?;
+            if !projection.allows_positional_audio() && binding.properties.values().any(|value| {
+                matches!(value, PropertyValue::SoundRef(sound) if sound.playback.range().is_some())
+            }) {
+                return Err(SceneError::Invalid(format!("Binding {id}: positional sound cues require a v23 component scene.")));
+            }
             match &binding.target {
                 BindingTarget::Object(object_id) => {
                     if !scene.objects.iter().any(|object| &object.id == object_id) {
