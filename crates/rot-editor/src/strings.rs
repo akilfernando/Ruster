@@ -362,7 +362,7 @@ editor_text! {
     TextureFindUses => "Find Uses in Scene",
     TextureUses => "Texture Uses",
     TextureUsesEmpty => "No materials in this scene reference this texture.",
-    TextureUsesMatches => "Uses",
+    TextureUsesMatches => "uses in this scene",
     TextureUsesUnassigned => "Unassigned material",
     TextureUsesReveal => "Reveal in Scene",
     TextureUsesRenderer => "Renderer ID",
