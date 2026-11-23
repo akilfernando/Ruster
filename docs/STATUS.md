@@ -108,6 +108,12 @@ relocated Vulkan build.
 v23 prefabs link reusable hierarchies in the editor and MCP. Child transform
 and mesh tint overrides support Apply, Revert and shared Undo. The cottage
 trial verified a roof fix across three placements and in a relocated build.
+Make Unique on a linked Mesh Renderer creates a local material override.
+Revert restores the current inherited finish. Apply to Prefab updates the
+matching renderer on inheriting copies and preserves independent finishes.
+The Inspector and approved MCP report the exact renderer and its override
+state. Source conflicts preserve the local work. Three imported displays
+retained their finishes and shared textures in a relocated Linux build.
 Prefab failures offer **Error Details**, and the Inspector explains how to
 restore an unavailable source. In legacy scenes, the Material Inspector shows
 unapplied edits, their scope, and **Apply Material** and **Cancel** by the
