@@ -454,6 +454,16 @@ cargo build -p rot-mcp
 ```
 
 
+### Scene Background
+
+For a v23 scene, read the committed `background` and `display` from
+`material_inspect` or the first page of `scene_inspect`. Use
+`scene_display_set` with the current scene session token and revision.
+Supply `background` as three linear RGB values in `[0,1]`, or use
+`background:null` for Engine Default. Supply `display` only when you
+want to change the SDR/HDR profile or exposure. Either field may be
+omitted to preserve its current value. Both changes share one Undo.
+
 ### Saved Play Checks
 
 Create and save a case from **Window → Play Checks…** in a supported flat

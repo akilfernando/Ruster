@@ -350,6 +350,24 @@ mod tests {
             args["display"] = rejected;
             assert!(!valid("scene_display_set", &args), "{args}");
         }
+        for background in [json!([0.2, 0, 1]), Value::Null] {
+            let args = json!({"expected_session_token":"scene","expected_revision":"0","background":background});
+            assert!(valid("scene_display_set", &args));
+        }
+        for background in [
+            json!([0, 1]),
+            json!([-1e-99, 0, 0]),
+            json!([0, 0, 1.000000000001]),
+            json!("blue"),
+        ] {
+            let mut args = display.clone();
+            args["background"] = background;
+            assert!(!valid("scene_display_set", &args));
+        }
+        assert!(!valid(
+            "scene_display_set",
+            &json!({"expected_session_token":"scene","expected_revision":"0"})
+        ));
         let mut extra_authority = display;
         extra_authority["expected_asset_revision"] = json!("0");
         assert!(!valid("scene_display_set", &extra_authority));

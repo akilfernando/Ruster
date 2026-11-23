@@ -100,7 +100,7 @@ fn edit_background(ui: &mut egui::Ui, draft: &mut BackgroundDraft) {
         if ui
             .add(
                 egui::TextEdit::singleline(&mut draft.hex)
-                    .char_limit(7)
+                    .char_limit(16)
                     .desired_width(ui.available_width())
                     .hint_text("#RRGGBB"),
             )
@@ -348,6 +348,82 @@ mod tests {
     use super::*;
     use rot_scene::component_scene::{ComponentScene, ComponentSession};
     use serde_json::json;
+
+    #[test]
+    fn background_edits_preserve_omitted_fields_and_reset_with_shared_undo() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        let legacy = rot_scene::Session::new(rot_scene::Scene::demo()).unwrap();
+        let scene = ComponentScene::from_legacy(&legacy).unwrap();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let scene_display = |editor: &mut ComponentWorkspace,
+                             revision,
+                             patch: serde_json::Value| {
+            let mut args = json!({"expected_session_token":"scene", "expected_revision":revision});
+            args.as_object_mut()
+                .unwrap()
+                .extend(patch.as_object().unwrap().clone());
+            editor.ai_command("scene", "scene_display_set", &args)
+        };
+
+        let hex = from_srgb_hex("#3366CC").unwrap();
+        assert_eq!(srgb_hex(hex), "#3366CC");
+        assert!(from_srgb_hex("#1234567").is_none());
+        assert!((hex.linear()[0] - 0.033_104_766).abs() < 1e-7);
+        let invalid = scene_display(&mut editor, "0", json!({"background":[1.000000000001,0,0]}));
+        assert_eq!(invalid["error"]["code"], "invalid_arguments");
+        let changed = scene_display(&mut editor, "0", json!({"background":hex}));
+        assert_eq!(changed["ok"], true, "{changed}");
+        assert_eq!(changed["result"]["display"], json!({"type":"legacy_sdr"}));
+        assert_eq!(
+            editor.preview.as_ref().unwrap().scene().background,
+            Some(hex)
+        );
+        assert_eq!(
+            editor
+                .session
+                .scene()
+                .behavior_projection()
+                .unwrap()
+                .scene
+                .background,
+            Some(hex)
+        );
+
+        let changed = scene_display(
+            &mut editor,
+            "1",
+            json!({"display":{"type":"surface_hdr","exposure_stops":2}}),
+        );
+        assert_eq!(changed["result"]["background"], json!(hex));
+        let reset = scene_display(&mut editor, "2", json!({"background":null}));
+        assert_eq!(reset["result"]["background"], serde_json::Value::Null);
+        assert_eq!(reset["result"]["display"]["exposure_stops"], 2);
+        let undo = editor.ai_command(
+            "scene",
+            "scene_undo",
+            &json!({"expected_session_token":"scene","expected_revision":"3"}),
+        );
+        assert_eq!(undo["ok"], true, "{undo}");
+        assert_eq!(
+            editor.preview.as_ref().unwrap().scene().background,
+            Some(hex)
+        );
+
+        let persisted = directory.path().join("solid.scene.json");
+        editor.session.scene().save_new(&persisted).unwrap();
+        assert_eq!(
+            ComponentSession::open(&persisted)
+                .unwrap()
+                .scene()
+                .background,
+            Some(hex)
+        );
+        let legacy_json = serde_json::to_value(legacy.scene()).unwrap();
+        assert!(legacy_json.get("background").is_none());
+    }
 
     #[test]
     fn scene_display_modal_guards_committed_state_and_uses_one_shared_undo() {

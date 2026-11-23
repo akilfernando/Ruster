@@ -368,6 +368,12 @@ stops. HDR starts at zero stops when enabled from Legacy SDR. Apply saves
 the change to shared Undo history. Cancel discards the draft. Save the
 scene to retain the display settings for the next open and for builds.
 
+Under **Background**, choose **Solid Color** and use the **Color** picker
+or enter an sRGB **Hex (sRGB)** value such as `#3366CC`. The color fills
+the scene behind its geometry. Surface HDR applies the scene exposure and
+tone map to it, and any letterbox bars stay black. **Engine Default**
+restores the usual background.
+
 ## Set the Game Camera from the Scene view
 
 Frame the shot in the v23 **Perspective** Scene view. In **View Presets**,
