@@ -727,11 +727,15 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
   in-process measurement of a single update, separate from desktop frame
   timing.
 
-## In progress — Phase 4: Play
+## Phase 4 — Play slices
 
-- **Game HUD labels.** in progress — Sol, 2026-11-23. Author static game text
-  in v23 with screen anchors, visibility, shared Undo and approved MCP.
-  Verify scripted and static scenes through editor Play and Linux Build.
+- **Game HUD labels.** done — 2026-11-23, 607fc96. Native v23 anchors,
+  visibility and static text share Undo with guarded MCP. Approved Claude
+  edited one label by stable ID. A grouped horn trolley kept its input
+  while showing the label. Scripted and 5,000-object static Linux builds
+  showed the same anchor at 16:9 and 4:3. Release CPU layout and
+  tessellation p95 was 0.215 ms with HUD off, 0.214 ms with one label
+  and 0.240 ms with 32.
 
 ## Later
 
@@ -747,8 +751,8 @@ One line each until their phase is next. See the
 - **Phase 4 — Play.** Events and coroutines in scripts; Rapier rigid bodies,
   colliders, layers, raycasts, triggers, joints and a character controller;
   skinned meshes, animation state machine and blending; looping, streamed
-  and spatial audio with a mixer; runtime UI with anchors, text, images,
-  buttons and layout; mouse and gamepad input with rebinding; several
+  and spatial audio with a mixer; expanded runtime UI with images, buttons
+  and layout; mouse and gamepad input with rebinding; several
   cameras and follow rigs; scene loading; particles; save data.
 - **Phase 5 — Ship and scale.** Windows editor and builds; profiler; script
   debugger polish; LOD and occlusion culling; terrain; navigation;

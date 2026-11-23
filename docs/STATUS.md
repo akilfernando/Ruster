@@ -75,6 +75,11 @@ Inspector and through approved MCP. Two Script components sharing a Lua
 file kept separate WAVs and gain. Editor capture verified silence after a
 rejected Step. A relocated Vulkan build played two horn presses through
 one audio stream and opened the packaged WAV only during startup.
+Window → Game HUD lets creators add, edit, anchor, hide and remove
+static text in v23. Native edits and approved MCP share Undo. The
+grouped horn trolley retained keyboard input with its label visible.
+A 5,000-object static scene kept its cached presentation. Relocated
+Linux builds matched the bottom-right anchor at 16:9 and 4:3.
 Object Lua API1/2 can drive a child under transform-only, positive-uniform
 groups. A trolley moved along a rotated rail without moving the markers.
 World-pose and camera checks run before the tick commits. A rejected Step
