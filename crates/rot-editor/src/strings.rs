@@ -279,7 +279,7 @@ editor_text! {
     PrefabUnpackTitle => "Unpack Prefab Instance",
     PrefabUnpackConfirm => "Unpack",
     PrefabUnpackEffect => "Keep {count} objects in the scene. This instance stops receiving prefab updates.",
-    PrefabUnpackSource => "The source prefab stays unchanged.",
+    PrefabUnpackSource => "This action affects only this instance.",
     PrefabRecovery => "Restore the prefab file and its .rotmeta sidecar to Assets.",
     PrefabInvalid => "Couldn't read the prefab file.",
     ErrorDetails => "Error Details",
