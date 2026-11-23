@@ -41,9 +41,9 @@ history and cost tens of thousands of tokens.
    MCP → save and reopen → built game, in that order, as far as the package
    reaches. Get one real example working through all of it before widening.
 4. **Use it and look at it.** Drive the real editor. View screenshots at
-   1280×800 and 1920×1080, in the Rot and Plain styles once both exist. Fix
-   what looks or feels wrong. This step is where quality comes from; do not
-   skip it and do not replace it with tests.
+   1280×800 and 1920×1080 in a representative appearance. Check an
+   additional style or mode when the change affects its presentation.
+   Fix what looks or feels wrong. See [testing appearance](TESTING.md#risk-specific-evidence).
 5. **Protect it.** Add one to three tests that would catch a real regression.
    Run the gate.
 6. **Finish.** Tick the package in BACKLOG, update STATUS, update the user

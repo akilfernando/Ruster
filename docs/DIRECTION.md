@@ -22,6 +22,9 @@ editor workflow, with approved MCP, Play and Build where applicable.
 Address failures that block that workflow, then move to an underdeveloped
 area. Keep deeper refinements in the backlog. Everyday usability,
 measured performance and the optional Rot style apply across features.
+The user also wants to minimize the cost of maintaining Rot and Plain.
+They share the editor's functional paths. Verification covers shared
+behavior once and checks presentation differences where affected.
 
 ## Creator-owned application logic clarification — 2026-11-09
 

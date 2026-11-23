@@ -25,8 +25,9 @@ part of the appeal and can be switched off.
    to be understood, redesign the control.
 5. **Fast and quiet.** Instant response, no layout jumps, no repaint when
    nothing changes, no message unless something needs attention.
-6. **One layout, two skins.** The Rot and Plain styles change color, artwork
-   and wording only. They never change layout, sizes or behavior.
+6. **One layout, two skins.** Rot and Plain share widgets, working layouts,
+   control sizes and behavior. Use shared palette tokens, artwork and
+   wording for their presentation differences.
 
 ## 2. Vocabulary
 
@@ -362,5 +363,6 @@ UI work done. View the images; do not judge from code.
 8. Does every control have a tooltip naming it and its shortcut?
 9. Is the empty state designed? The error state? The loading state?
 10. Does it still work at 960×1080 and at UI scale 1.5?
-11. Does it look right in both styles and both modes?
+11. Do the affected appearance variants keep text, control states and
+    focus clear?
 12. Does it stay smooth with a 5,000-object scene?

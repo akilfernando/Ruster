@@ -62,6 +62,12 @@ Formatting uses ordinary `cargo fmt` for the full virtual workspace (which has n
 
 Several later subsystems do not exist yet. Add executable checks alongside the feature they protect; do not prebuild speculative infrastructure. Unavailable required hardware/tools must be recorded as an unresolved validation gap and resolved before claiming that support/release criterion.
 
+Run a shared UI journey in one representative appearance. Add focused
+visual checks for affected palettes, themed copy, artwork or indicator
+animation. For example, check focus contrast in the affected palette or
+wrapping in both wording variants. A shared command, saved result, Play,
+Build, audio or MCP behavior needs one functional proof.
+
 ## Feedback budgets and suite growth
 
 Initial engineering targets, not measured service guarantees: warm local change gate under 30 seconds, typical hosted PR gate under 2 minutes when CI exists. Record cold builds separately. Exceeding a budget triggers investigation, not automatic failure, test deletion or skipped checks. Prefer fixture reuse, less process startup, narrower valid dependency scope and elimination of duplication before adding parallel jobs.
