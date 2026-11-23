@@ -238,6 +238,13 @@ fn positional_cue_uses_same_commit_grouped_emitter_and_moving_camera() {
         .expect("no active Camera");
     assert!(err.to_string().contains("Binding speaker, cue confirm"));
     authored.gameplay_camera = Some("camera".into());
+    authored.objects[1].enabled = false;
+    let err = authored
+        .behavior_projection()
+        .err()
+        .expect("disabled listener owner");
+    assert!(err.to_string().contains("Binding speaker, cue confirm"));
+    authored.objects[1].enabled = true;
     let projected = authored.behavior_projection().unwrap();
     let mut engine = Engine::new(Limits::default()).unwrap();
     let mut runtime = engine

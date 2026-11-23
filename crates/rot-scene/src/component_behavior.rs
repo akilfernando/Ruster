@@ -330,6 +330,33 @@ impl ComponentScene {
             }
             None => None,
         };
+        let mut positional_audio = false;
+        for (index, object) in self.objects.iter().enumerate() {
+            for component in &object.components {
+                let Component::Script { binding, .. } = &component.kind else {
+                    continue;
+                };
+                for (name, property) in &binding.properties {
+                    let crate::PropertyValue::SoundRef(cue) = property else {
+                        continue;
+                    };
+                    if cue.playback.range().is_none() {
+                        continue;
+                    }
+                    positional_audio = true;
+                    if binding.enabled
+                        && hierarchy.effectively_enabled[index]
+                        && (!matches!(binding.target, BindingTarget::Object(_))
+                            || transform_camera.is_none())
+                    {
+                        return Err(SceneError::Invalid(format!(
+                            "Binding {}, cue {name}: positional sound requires an Object Lua owner and an enabled active Transform Perspective Game Camera.",
+                            component.id
+                        )));
+                    }
+                }
+            }
+        }
         scene.materials.clone_from(&self.materials);
         let mut authoring = Authoring {
             sources: self.sources.clone(),
@@ -537,26 +564,6 @@ impl ComponentScene {
             };
         }
         scene.validate()?;
-        let mut positional_audio = false;
-        for (id, binding) in &authoring.bindings {
-            for (name, property) in &binding.properties {
-                let crate::PropertyValue::SoundRef(cue) = property else {
-                    continue;
-                };
-                if cue.playback.range().is_none() {
-                    continue;
-                }
-                positional_audio = true;
-                if binding.enabled
-                    && (!matches!(binding.target, BindingTarget::Object(_))
-                        || transform_camera.is_none())
-                {
-                    return Err(SceneError::Invalid(format!(
-                        "Binding {id}, cue {name}: positional sound requires an Object Lua owner and an enabled active Transform Perspective Game Camera."
-                    )));
-                }
-            }
-        }
         let projection = RuntimeProjection {
             positional_audio,
             local_leaf_scripts: !scene.hierarchy.is_empty()
