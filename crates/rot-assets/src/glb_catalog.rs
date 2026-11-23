@@ -81,6 +81,12 @@ fn same_material_structure(old: &ModelInfo, new: &ModelInfo) -> bool {
                 let mut upgraded = prior.clone();
                 // Constant emission changes no resources, scene-owned copies or placement.
                 upgraded.emission_color = next.emission_color;
+                if !upgraded.double_sided
+                    && next.double_sided
+                    && old_single_sided_warning(old, name)
+                {
+                    upgraded.double_sided = true;
+                }
                 if prior.roughness_texture.is_none()
                     && next.roughness_texture.is_some()
                     && old_omitted_roughness(old, name)
@@ -95,6 +101,19 @@ fn same_material_structure(old: &ModelInfo, new: &ModelInfo) -> bool {
                 }
                 &upgraded == next
             })
+}
+
+fn old_single_sided_warning(info: &ModelInfo, name: &str) -> bool {
+    info.warnings.iter().any(|warning| {
+        warning
+            .strip_prefix(name)
+            .and_then(|details| details.strip_prefix(": "))
+            .is_some_and(|details| {
+                details
+                    .split(", ")
+                    .any(|part| part == "double-sided surface rendered single-sided")
+            })
+    })
 }
 
 pub(super) fn read_accepted(root: &Path, info: &ModelInfo) -> Result<DecodedModel, AssetError> {
@@ -142,6 +161,14 @@ pub(super) fn read_accepted(root: &Path, info: &ModelInfo) -> Result<DecodedMode
                 })
         })
     });
+    let double_sided = info
+        .materials
+        .values()
+        .any(|material| material.double_sided)
+        || !info
+            .materials
+            .keys()
+            .any(|name| old_single_sided_warning(info, name));
     let decoded = glb::decode_accepted(
         &info.id,
         &info.source,
@@ -149,6 +176,7 @@ pub(super) fn read_accepted(root: &Path, info: &ModelInfo) -> Result<DecodedMode
         packed_roughness,
         place_spots,
         emission,
+        double_sided,
     )?;
     if &decoded.info != info {
         return Err(error(format!(
@@ -619,7 +647,7 @@ mod tests {
         fs::write(&source, &bytes).unwrap();
         let mut store = AssetStore::open(root.path()).unwrap();
         let decoded =
-            glb::decode_accepted("paint", "paint.glb", &bytes, false, true, false).unwrap();
+            glb::decode_accepted("paint", "paint.glb", &bytes, false, true, false, false).unwrap();
         let prior = decoded.info.clone();
         let mut registry = store.registry.clone();
         registry.models.insert("paint".into(), prior.clone());
@@ -824,7 +852,7 @@ mod tests {
         let bytes = crate::fixtures::punctual_glb(|_| {});
         fs::write(root.path().join("light.glb"), &bytes).unwrap();
         let decoded =
-            glb::decode_accepted("light", "light.glb", &bytes, true, false, true).unwrap();
+            glb::decode_accepted("light", "light.glb", &bytes, true, false, true, false).unwrap();
         let old = decoded.info.clone();
         let mut store = AssetStore::open(root.path()).unwrap();
         let mut registry = store.registry.clone();

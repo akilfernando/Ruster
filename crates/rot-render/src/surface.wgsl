@@ -93,6 +93,12 @@ fn hdr_storage(radiance: vec3<f32>) -> vec4<f32> {
     return vec4<f32>(clamp(radiance, vec3<f32>(0.0), vec3<f32>(65504.0)), 1.0);
 }
 @fragment fn fs(v: Output) -> @location(0) vec4<f32> {
+    return shade(v, v.normal);
+}
+@fragment fn fs_double_sided(v: Output, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    return shade(v, select(-v.normal, v.normal, front));
+}
+fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
     let sampled = textureSample(base_color_texture, base_color_sampler, v.uv).rgb;
     // Explicit gradients are computed outside the per-primitive map branch.
     // No-map draws preserve scalar arithmetic and avoid an extra texture fetch.
@@ -105,7 +111,7 @@ fn hdr_storage(radiance: vec3<f32>) -> vec4<f32> {
     let albedo = sampled * v.base_color.rgb;
     let selection_alpha = select(1.0, 0.0, v.response.w > 0.5);
     let highlighted = mix(albedo, vec3<f32>(1.0), select(v.base_color.a, 0.0, v.response.w > 0.5));
-    let n = safe_unit(v.normal);
+    let n = safe_unit(normal);
     // w=1: eye position, w=0: parallel orthographic direction to camera.
     let view = safe_unit(camera.eye_mode.xyz - v.world_position * camera.eye_mode.w);
     let ambient_scale = select(1.0, 0.96, response.x > 0.5);

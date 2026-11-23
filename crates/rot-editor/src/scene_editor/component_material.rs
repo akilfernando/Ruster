@@ -567,6 +567,11 @@ impl ComponentWorkspace {
                         draft.value.emission_color = color;
                     }
                 });
+                ui_kit::property_row_with_label(ui, Text::DoubleSided.plain(), |ui, label| {
+                    ui.checkbox(&mut draft.value.double_sided, "")
+                        .labelled_by(label)
+                        .on_hover_text(Text::DoubleSidedDetail.plain());
+                });
                 texture_choice(
                     ui,
                     Text::BaseColorSrgb,
@@ -1005,7 +1010,7 @@ impl ComponentWorkspace {
                 "material_id":id, "assigned_count":users.len(), "users_truncated":users.len()>4,
                 "user_ids":users.iter().take(4).map(|&index| &scene.objects[index].id).collect::<Vec<_>>(),
                 "material":{
-                    "name":value.name,"tint":value.tint,"emission_color":value.emission_color,"base_color_texture":value.base_color_texture,
+                    "name":value.name,"tint":value.tint,"emission_color":value.emission_color,"double_sided":value.double_sided,"base_color_texture":value.base_color_texture,
                     "roughness_texture":value.roughness_texture,"filter":value.filter,"address":value.address,
                     "response":value.response,
                 },
@@ -1086,6 +1091,7 @@ mod tests {
             name: Some("Varnish".into()),
             tint: [0.21, 0.37, 0.59],
             emission_color: [0.11, 0.0, 0.35],
+            double_sided: true,
             base_color_texture: Some("missing-color".into()),
             roughness_texture: Some("ready-color".into()),
             filter: rot_scene::TextureFilter::Nearest,

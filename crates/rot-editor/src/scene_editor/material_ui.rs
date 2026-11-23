@@ -198,6 +198,11 @@ impl MaterialDraft {
                     .as_ref()
                     .map_or([0.0; 3], |value| value.emission_color)
             },
+            double_sided: self.intent != MaterialIntent::Create
+                && self
+                    .original_material
+                    .as_ref()
+                    .is_some_and(|value| value.double_sided),
             base_color_texture: self.texture.clone(),
             roughness_texture: self.roughness_texture.clone(),
             filter: self.filter,

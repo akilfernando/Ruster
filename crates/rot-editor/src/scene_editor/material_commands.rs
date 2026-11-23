@@ -100,7 +100,13 @@ pub(super) fn material(
             exact_keys(
                 map,
                 &["tint", "base_color_texture", "filter", "address"],
-                &["name", "response", "roughness_texture", "emission_color"],
+                &[
+                    "name",
+                    "response",
+                    "roughness_texture",
+                    "emission_color",
+                    "double_sided",
+                ],
             )
         })
         .ok_or_else(|| {
@@ -126,6 +132,12 @@ pub(super) fn material(
         emission_color: match map.get("emission_color") {
             Some(value) => rgb(value, "Emission Color")?,
             None => prior.map_or([0.0; 3], |prior| prior.emission_color),
+        },
+        double_sided: match map.get("double_sided") {
+            Some(value) => value
+                .as_bool()
+                .ok_or_else(|| error("invalid_arguments", "Double Sided must be true or false"))?,
+            None => prior.is_some_and(|material| material.double_sided),
         },
         base_color_texture: if map["base_color_texture"].is_null() {
             None
@@ -340,7 +352,7 @@ impl SceneEditor {
                     "material":{
                         "name":value.name, "tint":value.tint,
                         "base_color_texture":value.base_color_texture,
-                        "emission_color":value.emission_color,"roughness_texture":value.roughness_texture,
+                        "emission_color":value.emission_color,"double_sided":value.double_sided,"roughness_texture":value.roughness_texture,
                         "filter":value.filter, "address":value.address, "response":value.response
                     },
                     "assigned_count":users.len(),

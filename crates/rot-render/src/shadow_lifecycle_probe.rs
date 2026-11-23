@@ -52,6 +52,7 @@ impl Probe {
             meshes: BTreeMap::new(),
             instances,
             groups: vec![DrawGroup {
+                double_sided: false,
                 key: None,
                 primitive: None,
                 binding: BindingKey::default(),
@@ -478,6 +479,7 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
     let first = SceneCallback {
         show_editor_grid: false,
         groups: vec![DrawGroup {
+            double_sided: false,
             key: None,
             primitive: None,
             binding: BindingKey::default(),
@@ -911,6 +913,7 @@ fn verify_asset_submission_backpressure(
         SceneCallback {
             show_editor_grid: false,
             groups: vec![DrawGroup {
+                double_sided: false,
                 key: Some("epoch-mesh".into()),
                 primitive: None,
                 binding: BindingKey {

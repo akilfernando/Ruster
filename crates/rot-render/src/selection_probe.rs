@@ -62,6 +62,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue) {
                         Vec3::new(x, 0., z),
                     );
                     DrawGroup {
+                        double_sided: false,
                         key: Some("selection-plane".into()),
                         primitive: None,
                         binding: BindingKey::default(),

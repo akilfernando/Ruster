@@ -82,6 +82,7 @@ fn verify_case(
                 ),
             );
             DrawGroup {
+                double_sided: false,
                 key: Some(format!("boundary-{index:02}")),
                 primitive: None,
                 binding: BindingKey::default(),

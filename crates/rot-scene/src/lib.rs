@@ -119,6 +119,8 @@ pub struct OpaqueMaterial {
     pub tint: [f32; 3],
     #[serde(default, skip_serializing_if = "black_emission")]
     pub emission_color: [f32; 3],
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub double_sided: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_color_texture: Option<String>,
     /// Linear roughness-data asset; retained when its surface response is inactive.
@@ -135,6 +137,7 @@ impl Default for OpaqueMaterial {
             name: None,
             tint: [1.0; 3],
             emission_color: [0.0; 3],
+            double_sided: false,
             base_color_texture: None,
             roughness_texture: None,
             filter: TextureFilter::Linear,

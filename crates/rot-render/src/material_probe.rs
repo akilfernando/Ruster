@@ -302,6 +302,7 @@ fn verify_mesh_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue) {
     assert!(large.payload_bytes() * 15 > rot_assets::MAX_RESOLVED_BYTES);
     let mut groups = (0..15)
         .map(|index| DrawGroup {
+            double_sided: false,
             key: Some(format!("mesh-{index:02}")),
             primitive: None,
             binding: BindingKey::default(),
@@ -479,7 +480,7 @@ fn render(
             }),
             ..Default::default()
         });
-        pass.set_pipeline(r.pipeline.for_mesh(gpu));
+        pass.set_pipeline(r.pipeline.for_mesh(gpu, false));
         pass.set_bind_group(0, &r.camera_bind, &[]);
         pass.set_bind_group(1, r.materials.bind(key), &[]);
         pass.set_bind_group(2, &r.lighting.bind, &[]);
@@ -782,6 +783,7 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
         let callback = SceneCallback {
             show_editor_grid: false,
             groups: vec![DrawGroup {
+                double_sided: false,
                 key: Some("lighting-plane".into()),
                 primitive: None,
                 binding: key.clone(),
@@ -1243,6 +1245,7 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
                 show_editor_grid: false,
                 groups: (0..if mapped_case { 2 } else { 1 })
                     .map(|index| DrawGroup {
+                        double_sided: false,
                         key: Some("surface-plane".into()),
                         primitive: None,
                         binding: BindingKey {
@@ -1732,6 +1735,7 @@ pub(super) fn verify_cube_material(device: &wgpu::Device, queue: &wgpu::Queue) {
         let callback = SceneCallback {
             show_editor_grid: false,
             groups: vec![DrawGroup {
+                double_sided: false,
                 key: None,
                 primitive: None,
                 texture: binding.texture.as_ref().map(|_| Arc::clone(&texture)),

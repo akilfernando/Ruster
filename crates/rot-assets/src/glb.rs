@@ -123,6 +123,8 @@ pub struct ModelMaterial {
     pub base_color_factor: [f32; 3],
     #[serde(default, skip_serializing_if = "black_emission")]
     pub emission_color: [f32; 3],
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub double_sided: bool,
     pub roughness: f32,
     pub base_color_texture: Option<String>,
     #[serde(
@@ -944,6 +946,7 @@ struct Decoder<'a> {
     used_materials: BTreeMap<String, usize>,
     packed_roughness: bool,
     emission: bool,
+    double_sided: bool,
     mesh_bytes: usize,
     texture_bytes: usize,
     skipped_triangles: usize,
@@ -1216,7 +1219,8 @@ impl Decoder<'_> {
         if alpha != "OPAQUE" {
             fallbacks.push("alpha rendered opaque");
         }
-        if material.double_sided {
+        let double_sided = self.double_sided && material.double_sided && alpha == "OPAQUE";
+        if material.double_sided && !double_sided {
             fallbacks.push("double-sided surface rendered single-sided");
         }
         if metallic != 0. {
@@ -1260,6 +1264,7 @@ impl Decoder<'_> {
         let mut sampler_warning = None;
         let mut definition = ModelMaterial {
             base_color_factor: [rgba[0], rgba[1], rgba[2]],
+            double_sided,
             emission_color: if self.emission && material.emissive_texture.is_none() {
                 material
                     .emissive_factor
@@ -1754,7 +1759,7 @@ impl Decoder<'_> {
 }
 
 pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedModel, AssetError> {
-    decode_model(id, source, bytes, true, true, true)
+    decode_model(id, source, bytes, true, true, true, true)
 }
 
 pub(super) fn decode_accepted(
@@ -1764,8 +1769,17 @@ pub(super) fn decode_accepted(
     packed_roughness: bool,
     place_spots: bool,
     emission: bool,
+    double_sided: bool,
 ) -> Result<DecodedModel, AssetError> {
-    decode_model(id, source, bytes, packed_roughness, place_spots, emission)
+    decode_model(
+        id,
+        source,
+        bytes,
+        packed_roughness,
+        place_spots,
+        emission,
+        double_sided,
+    )
 }
 
 fn decode_model(
@@ -1775,6 +1789,7 @@ fn decode_model(
     packed_roughness: bool,
     place_spots: bool,
     emission: bool,
+    double_sided: bool,
 ) -> Result<DecodedModel, AssetError> {
     let (json, bin) = chunks(bytes)?;
     let doc: Document<'_> = serde_json::from_slice(json)
@@ -1841,6 +1856,7 @@ fn decode_model(
         used_materials: BTreeMap::new(),
         packed_roughness,
         emission,
+        double_sided,
         mesh_bytes: 0,
         texture_bytes: 0,
         skipped_triangles: 0,

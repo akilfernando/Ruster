@@ -108,6 +108,7 @@ fn shape(tool: &str, field: &str) -> Value {
             json!({
                 "name":name_schema(),
                 "tint":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number","minimum":0,"maximum":1},"description":"Finite linear RGB tint; all three channels are required."},
+                "double_sided":{"type":"boolean","description":"Draw both faces. Omission keeps the current value or defaults to false."},
                 "emission_color":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number","minimum":0,"maximum":1},"description":"Linear RGB self-emission. Omitted preserves the edited color or defaults to black on new materials."},
                 "base_color_texture":id_schema(true),
                 "roughness_texture":{
@@ -173,7 +174,13 @@ fn valid_material(value: &Value) -> bool {
     super::exact_keys(
         material,
         &["tint", "base_color_texture", "filter", "address"],
-        &["name", "response", "roughness_texture", "emission_color"],
+        &[
+            "name",
+            "response",
+            "roughness_texture",
+            "emission_color",
+            "double_sided",
+        ],
     ) && material.get("name").is_none_or(valid_name)
         && material.get("response").is_none_or(valid_response)
         && material
@@ -181,6 +188,7 @@ fn valid_material(value: &Value) -> bool {
             .is_none_or(|value| value.is_null() || valid_id(value))
         && valid_rgb(&material["tint"])
         && material.get("emission_color").is_none_or(valid_rgb)
+        && material.get("double_sided").is_none_or(Value::is_boolean)
         && (material["base_color_texture"].is_null() || valid_id(&material["base_color_texture"]))
         && material["filter"]
             .as_str()

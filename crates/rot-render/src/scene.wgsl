@@ -58,7 +58,13 @@ struct Output {
     return o;
 }
 @fragment fn fs(v: Output) -> @location(0) vec4<f32> {
-    let diffuse = max(dot(normalize(v.normal), normalize(vec3<f32>(0.4, 0.8, 0.6))), 0.0);
+    return shade(v, v.normal);
+}
+@fragment fn fs_double_sided(v: Output, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    return shade(v, select(-v.normal, v.normal, front));
+}
+fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
+    let diffuse = max(dot(normalize(normal), normalize(vec3<f32>(0.4, 0.8, 0.6))), 0.0);
     let sampled = textureSample(base_color_texture, base_color_sampler, v.uv).rgb;
     let albedo = sampled * v.base_color.rgb;
     // Opaque target alpha carries visible editor selection, not transparency.
@@ -69,7 +75,7 @@ struct Output {
         // Preserve V1 arithmetic; zero authored lights never select this path.
         return vec4<f32>(highlighted * (0.28 + 0.72 * diffuse) + v.emission_color, selection_alpha);
     }
-    let n = v.normal / sqrt(max(dot(v.normal, v.normal), 1e-8));
+    let n = normal / sqrt(max(dot(normal, normal), 1e-8));
     var light_sum = lighting.ambient.rgb;
     if lighting.mode_counts.z != 0u {
         var direct = lighting.directional_color_intensity.rgb * max(dot(n, lighting.direction_to_light.xyz), 0.0);

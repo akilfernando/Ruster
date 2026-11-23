@@ -100,7 +100,10 @@ impl Probe {
                 },
             ],
         });
-        let camera_layout = resources.pipeline.with_uvs.get_bind_group_layout(0);
+        let camera_layout = resources
+            .pipeline
+            .for_mesh(&resources.builtins.cube, false)
+            .get_bind_group_layout(0);
         let color_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("feasibility compatible color layout"),
             bind_group_layouts: &[
@@ -361,7 +364,7 @@ impl Probe {
             } else {
                 &self.baseline_color
             };
-            pass.set_pipeline(pipelines.for_mesh(&self.resources.builtins.cube));
+            pass.set_pipeline(pipelines.for_mesh(&self.resources.builtins.cube, false));
             pass.set_bind_group(0, &self.resources.camera_bind, &[]);
             pass.set_bind_group(
                 1,

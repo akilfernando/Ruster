@@ -2107,6 +2107,7 @@ fn render_draw_scene(
             .as_ref()
             .and_then(|id| scene.materials.get(id));
         let binding = draw_material_binding(object, mesh, material);
+        let double_sided = material.is_some_and(|material| material.double_sided);
         let mut base_color = object.color;
         if let Some(material) = material {
             for (channel, tint) in base_color[..3].iter_mut().zip(material.tint) {
@@ -2119,9 +2120,10 @@ fn render_draw_scene(
             0.0
         };
         let group = grouped
-            .entry((key, primitive, binding))
+            .entry((key, primitive, binding, double_sided))
             .or_insert_with(|| DrawGroup {
                 key: key.map(str::to_owned),
+                double_sided,
                 primitive,
                 texture: binding
                     .texture
@@ -3038,16 +3040,12 @@ fn instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
 }
 #[derive(Clone)]
 struct ScenePipelines {
-    with_uvs: wgpu::RenderPipeline,
-    without_uvs: wgpu::RenderPipeline,
+    // First index is culling mode, second is presence of the UV stream.
+    sided: [[wgpu::RenderPipeline; 2]; 2],
 }
 impl ScenePipelines {
-    fn for_mesh(&self, mesh: &GpuMesh) -> &wgpu::RenderPipeline {
-        if mesh.uvs.is_some() {
-            &self.with_uvs
-        } else {
-            &self.without_uvs
-        }
+    fn for_mesh(&self, mesh: &GpuMesh, double_sided: bool) -> &wgpu::RenderPipeline {
+        &self.sided[usize::from(double_sided)][usize::from(mesh.uvs.is_some())]
     }
 }
 
@@ -3058,8 +3056,7 @@ fn validated_pipeline(
     sample_count: u32,
 ) -> Result<ScenePipelines, String> {
     let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-    // Both stream layouts are compiled inside the same validation scope. The
-    // caller publishes the pair only after neither variant reported an error.
+    // Compile all stream and culling variants before publishing a shader.
     let candidate = scene_pipeline(device, layout, source, sample_count);
     if let Some(error) = pollster::block_on(scope.pop()) {
         return Err(format!(
@@ -3132,7 +3129,8 @@ fn scene_pipeline_format(
     let instance_attributes = used(
         &wgpu::vertex_attr_array![2=>Float32x4,3=>Float32x4,4=>Float32x4,5=>Float32x4,6=>Float32x4,7=>Float32x4,8=>Float32x4,9=>Float32x4,11=>Float32x4,12=>Float32x4,13=>Float32x3],
     );
-    let create = |uv_stride| {
+    let builtin = source == default_shader() || source == surface_shader();
+    let create = |uv_stride, double_sided| {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Rot Engine shared depth-tested instanced meshes"),
             layout: Some(layout),
@@ -3160,12 +3158,16 @@ fn scene_pipeline_format(
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs"),
+                entry_point: Some(if double_sided && builtin {
+                    "fs_double_sided"
+                } else {
+                    "fs"
+                }),
                 compilation_options: Default::default(),
                 targets: &[Some(format.into())],
             }),
             primitive: wgpu::PrimitiveState {
-                cull_mode: Some(wgpu::Face::Back),
+                cull_mode: (!double_sided).then_some(wgpu::Face::Back),
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
@@ -3184,8 +3186,9 @@ fn scene_pipeline_format(
         })
     };
     ScenePipelines {
-        with_uvs: create(size_of::<[f32; 2]>() as u64),
-        without_uvs: create(0),
+        sided: [false, true].map(|double_sided| {
+            [0, size_of::<[f32; 2]>() as u64].map(|stride| create(stride, double_sided))
+        }),
     }
 }
 
@@ -3331,6 +3334,7 @@ fn prepare_mesh(
     Some(bytes)
 }
 struct DrawGroup {
+    double_sided: bool,
     key: Option<String>,
     /// Built-in shape when `key` is None; None with no key draws the cube.
     primitive: Option<rot_scene::Primitive>,
@@ -3592,7 +3596,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             for group in &self.groups {
                 pass.set_bind_group(1, r.materials.bind(&group.binding), &[]);
                 let mesh = r.builtins.group_mesh(group, &r.meshes);
-                pass.set_pipeline(pipelines.for_mesh(mesh));
+                pass.set_pipeline(pipelines.for_mesh(mesh, group.double_sided));
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_vertex_buffer(2, mesh.uvs.as_ref().unwrap_or(&r.zero_uv).slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -5270,7 +5274,7 @@ mod tests {
                         }),
                         ..Default::default()
                     });
-                    pass.set_pipeline(r.pipeline.for_mesh(&r.builtins.cube));
+                    pass.set_pipeline(r.pipeline.for_mesh(&r.builtins.cube, false));
                     pass.set_bind_group(0, &r.camera_bind, &[]);
                     pass.set_bind_group(1, r.materials.bind(&BindingKey::default()), &[]);
                     pass.set_bind_group(2, &r.lighting.bind, &[]);
