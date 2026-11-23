@@ -16,7 +16,7 @@ pub(super) fn list() -> [Value; 2] {
             "type":{"enum":["mesh_renderer","collider","camera","light","animator","script"]},
             "geometry":{"type":"object","properties":{
                 "type":{"enum":["cube","primitive","imported"]},
-                "shape":{"enum":["sphere","capsule","triangular_prism"]},"asset":id}},
+                "shape":{"enum":["sphere","capsule","triangular_prism","cylinder"]},"asset":id}},
             "tint":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4},
             "material":{"type":["string","null"]},
             "role":{"enum":["blocker","sensor"]},

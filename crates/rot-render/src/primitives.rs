@@ -7,7 +7,7 @@ use glam::Vec3;
 use rot_assets::{Mesh, Vertex};
 use rot_scene::Primitive;
 
-/// Longitude segments shared by the sphere and capsule.
+/// Longitude segments shared by the round primitives.
 pub const SEGMENTS: usize = 32;
 /// Latitude steps from pole to pole on the sphere.
 pub const SPHERE_RINGS: usize = 16;
@@ -23,8 +23,10 @@ const CAPSULE_HALF_CYLINDER: f32 = 0.5;
 pub fn builtin_mesh(primitive: Primitive) -> &'static Arc<Mesh> {
     static SPHERE: OnceLock<Arc<Mesh>> = OnceLock::new();
     static CAPSULE: OnceLock<Arc<Mesh>> = OnceLock::new();
+    static CYLINDER: OnceLock<Arc<Mesh>> = OnceLock::new();
     static TRIANGULAR_PRISM: OnceLock<Arc<Mesh>> = OnceLock::new();
     match primitive {
+        Primitive::Cylinder => CYLINDER.get_or_init(|| Arc::new(cylinder())),
         Primitive::Sphere => SPHERE.get_or_init(|| Arc::new(sphere())),
         Primitive::Capsule => CAPSULE.get_or_init(|| Arc::new(capsule())),
         Primitive::TriangularPrism => TRIANGULAR_PRISM.get_or_init(|| Arc::new(triangular_prism())),
@@ -52,6 +54,63 @@ pub(crate) fn cube() -> Mesh {
             texcoords.push([x * 0.5 + 0.5, y * 0.5 + 0.5]);
         }
         indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+    Mesh {
+        vertices,
+        indices,
+        texcoords: Some(texcoords),
+    }
+}
+
+fn cylinder() -> Mesh {
+    let columns = SEGMENTS + 1;
+    let mut vertices = Vec::with_capacity(4 * columns);
+    let mut texcoords = Vec::with_capacity(4 * columns);
+    let mut indices = Vec::with_capacity(12 * SEGMENTS);
+    // Match the sphere and capsule wrap, and make the seam bit-identical.
+    let radial: [Vec3; SEGMENTS] = std::array::from_fn(|segment| {
+        let (sin, cos) = (segment as f32 / SEGMENTS as f32 * TAU).sin_cos();
+        Vec3::new(-sin, 0., -cos)
+    });
+    for (y, v) in [(-1., 0.), (1., 1.)] {
+        for column in 0..columns {
+            let normal = radial[column % SEGMENTS];
+            vertices.push(Vertex {
+                position: (normal * RADIUS + Vec3::Y * y).to_array(),
+                normal: normal.to_array(),
+            });
+            texcoords.push([column as f32 / SEGMENTS as f32, v]);
+        }
+    }
+    for segment in 0..SEGMENTS as u32 {
+        let upper = segment + columns as u32;
+        indices.extend([segment, segment + 1, upper + 1, segment, upper + 1, upper]);
+    }
+    for y in [-1., 1.] {
+        let normal = Vec3::Y * y;
+        let centre = vertices.len() as u32;
+        vertices.push(Vertex {
+            position: normal.to_array(),
+            normal: normal.to_array(),
+        });
+        texcoords.push([0.5, 0.5]);
+        for direction in radial {
+            let offset = direction * RADIUS;
+            vertices.push(Vertex {
+                position: (normal + offset).to_array(),
+                normal: normal.to_array(),
+            });
+            texcoords.push([0.5 + offset.x, 0.5 - y * offset.z]);
+        }
+        for segment in 0..SEGMENTS as u32 {
+            let a = centre + 1 + segment;
+            let b = centre + 1 + (segment + 1) % SEGMENTS as u32;
+            indices.extend(if y > 0. {
+                [centre, a, b]
+            } else {
+                [centre, b, a]
+            });
+        }
     }
     Mesh {
         vertices,

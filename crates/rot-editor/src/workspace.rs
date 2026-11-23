@@ -69,6 +69,7 @@ pub(super) enum Action {
     CreateSphere,
     CreateCapsule,
     CreateTriangularPrism,
+    CreateCylinder,
     CreateLight,
     Play,
     Pause,
@@ -109,7 +110,7 @@ pub(super) enum Action {
     CommandPalette,
 }
 impl Action {
-    pub const ALL: [Self; 72] = [
+    pub const ALL: [Self; 73] = [
         Self::New,
         Self::Open,
         Self::Save,
@@ -144,6 +145,7 @@ impl Action {
         Self::CreateSphere,
         Self::CreateCapsule,
         Self::CreateTriangularPrism,
+        Self::CreateCylinder,
         Self::CreateLight,
         Self::Play,
         Self::Pause,
@@ -220,6 +222,7 @@ impl Action {
             Self::CreateSphere => Text::ComponentSphere.plain(),
             Self::CreateCapsule => Text::LabelCreateCapsule.plain(),
             Self::CreateTriangularPrism => Text::LabelCreateTriangularPrism.plain(),
+            Self::CreateCylinder => Text::LabelCreateCylinder.plain(),
             Self::CreateLight => Text::LabelCreateLight.plain(),
             Self::Play => Text::LabelPlay.plain(),
             Self::Pause => Text::LabelPause.plain(),
@@ -296,6 +299,7 @@ impl Action {
             Self::CreateSphere => "Create sphere",
             Self::CreateCapsule => "Create capsule",
             Self::CreateTriangularPrism => "Create triangular prism",
+            Self::CreateCylinder => "Create cylinder",
             Self::CreateLight => "Create light",
             Self::Play => "Play",
             Self::Pause => "Pause",
@@ -482,6 +486,7 @@ impl Default for Preferences {
                         Action::CreateSphere,
                         Action::CreateCapsule,
                         Action::CreateTriangularPrism,
+                        Action::CreateCylinder,
                         Action::CreateLight,
                         Action::NewProject,
                         Action::OpenProject,

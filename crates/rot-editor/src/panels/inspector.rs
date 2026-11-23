@@ -339,6 +339,7 @@ impl SceneEditor {
                     primitive.map_or(Text::LabelAssignCube.plain(), |shape| match shape {
                         rot_scene::Primitive::Sphere => Text::PrimitiveSphere.plain(),
                         rot_scene::Primitive::Capsule => Text::PrimitiveCapsule.plain(),
+                        rot_scene::Primitive::Cylinder => Text::LabelCreateCylinder.plain(),
                         rot_scene::Primitive::TriangularPrism => {
                             Text::LabelCreateTriangularPrism.plain()
                         }

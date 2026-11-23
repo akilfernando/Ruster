@@ -668,8 +668,8 @@ fn tools() -> Value {
         ("scene_mesh", "Assign a registered mesh ID or null for procedural cube to one scene object; revisioned shared authored undo. A changed mesh beneath a textured material requires complete UVs; clear the material first to repair. Preview snapshot unchanged."),
         ("shader_refresh", "Refresh the fixed project-local scene.wgsl trusted shader, validating a candidate pipeline and keeping the last good pipeline on error."),
         ("scene_inspect", "Inspect one page of at most 16 authored scene objects, session/revision and mutation guards. Start without offset; use next_offset for subsequent pages."),
-        ("scene_create", "Create one procedural cube (default/null primitive), sphere, capsule or triangular prism with a new immutable object ID and display name. Revisioned, unsaved and shares human undo; preview unchanged."),
-        ("scene_primitive", "Set one object's built-in shape: sphere, capsule, triangular_prism or null for cube. Clears a mesh asset in the same Undo entry. Session/revision and pending-human-draft guards apply; preview unchanged."),
+        ("scene_create", "Create one procedural cube (default/null primitive), sphere, capsule, triangular prism or cylinder with a new immutable object ID and display name. Revisioned, unsaved and shares human undo; preview unchanged."),
+        ("scene_primitive", "Set one object's built-in shape: sphere, capsule, triangular_prism, cylinder or null for cube. Clears a mesh asset in the same Undo entry. Session/revision and pending-human-draft guards apply; preview unchanged."),
         ("scene_rename", "Change an object's display name without changing its stable ID. Shares authored undo; preview unchanged."),
         ("scene_duplicate", "Duplicate one object with a fresh stable ID and display name. Preserves its transform and mesh; shares authored undo."),
         ("scene_delete", "Delete one object, retaining its data and position in bounded authored undo. Preview unchanged."),
@@ -745,7 +745,7 @@ fn tools() -> Value {
             }
         }
         if matches!(name, "scene_create" | "scene_primitive") {
-            properties.insert("primitive".into(), json!({"enum":["sphere","capsule","triangular_prism",null],"description":"Built-in geometry, not a collider or asset. Null means cube."}));
+            properties.insert("primitive".into(), json!({"enum":["sphere","capsule","triangular_prism","cylinder",null],"description":"Built-in geometry, not a collider or asset. Null means cube."}));
             if name == "scene_primitive" {
                 properties.insert("object_id".into(), json!({"type":"string","minLength":1,"maxLength":128}));
                 required.extend(["object_id", "primitive"]);

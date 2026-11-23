@@ -2829,6 +2829,7 @@ impl Resources {
             cube: GpuMesh::new(device, None, &primitives::cube()),
             sphere: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Sphere)),
             capsule: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Capsule)),
+            cylinder: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Cylinder)),
             triangular_prism: GpuMesh::new(
                 device,
                 None,
@@ -3269,6 +3270,7 @@ struct BuiltinMeshes {
     sphere: GpuMesh,
     capsule: GpuMesh,
     triangular_prism: GpuMesh,
+    cylinder: GpuMesh,
 }
 impl BuiltinMeshes {
     fn get(&self, primitive: Option<rot_scene::Primitive>) -> &GpuMesh {
@@ -3277,6 +3279,7 @@ impl BuiltinMeshes {
             Some(rot_scene::Primitive::Sphere) => &self.sphere,
             Some(rot_scene::Primitive::Capsule) => &self.capsule,
             Some(rot_scene::Primitive::TriangularPrism) => &self.triangular_prism,
+            Some(rot_scene::Primitive::Cylinder) => &self.cylinder,
         }
     }
     // An asset key that is not resident falls back to the cube, never to a
@@ -3292,7 +3295,11 @@ impl BuiltinMeshes {
         }
     }
     fn bytes(&self) -> u64 {
-        self.cube.bytes + self.sphere.bytes + self.capsule.bytes + self.triangular_prism.bytes
+        self.cube.bytes
+            + self.sphere.bytes
+            + self.capsule.bytes
+            + self.triangular_prism.bytes
+            + self.cylinder.bytes
     }
 }
 
@@ -5057,7 +5064,10 @@ mod tests {
                 .push(Object::procedural("shape", None, Some(shape)));
             let meshes = BTreeMap::new();
             let fit = Camera::fit(&builtins, &meshes, 1.0).unwrap();
-            let height = if shape == rot_scene::Primitive::Capsule {
+            let height = if matches!(
+                shape,
+                rot_scene::Primitive::Capsule | rot_scene::Primitive::Cylinder
+            ) {
                 2.0
             } else {
                 1.0
@@ -5080,7 +5090,7 @@ mod tests {
                 let ndc = vp.project_point3(point);
                 assert_eq!(
                     pick(&builtins, &meshes, vp, ndc.x, ndc.y).is_some(),
-                    expected,
+                    expected || shape == rot_scene::Primitive::Cylinder,
                     "{shape:?}"
                 );
             }

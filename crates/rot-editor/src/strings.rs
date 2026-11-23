@@ -502,6 +502,7 @@ editor_text! {
     LabelCopy => "Copy",
     LabelCreateCapsule => "Capsule",
     LabelCreateTriangularPrism => "Triangular Prism",
+    LabelCreateCylinder => "Cylinder",
     LegacyModelPlacedWithoutCameras => "Placed geometry. Imported cameras require a v23 scene.",
     LegacyModelPlacedWithoutCamerasAndLights => "Placed geometry. Imported cameras and lights require a v23 scene.",
     LegacyModelPlacedWithoutLights => "Placed model geometry. Import lights in a v23 scene.",

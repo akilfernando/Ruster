@@ -196,14 +196,22 @@ pub enum Primitive {
     Capsule,
     /// Unit XYZ bounds, Y up, with a centred ridge running along local Z.
     TriangularPrism,
+    /// Radius 0.5 and height 2, centered along local Y.
+    Cylinder,
 }
 impl Primitive {
-    pub const ALL: [Self; 3] = [Self::Sphere, Self::Capsule, Self::TriangularPrism];
+    pub const ALL: [Self; 4] = [
+        Self::Sphere,
+        Self::Capsule,
+        Self::TriangularPrism,
+        Self::Cylinder,
+    ];
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Sphere => "sphere",
             Self::Capsule => "capsule",
             Self::TriangularPrism => "triangular_prism",
+            Self::Cylinder => "cylinder",
         }
     }
     pub fn parse(value: &str) -> Option<Self> {
@@ -214,6 +222,7 @@ impl Primitive {
             Self::Sphere => "Sphere",
             Self::Capsule => "Capsule",
             Self::TriangularPrism => "Triangular Prism",
+            Self::Cylinder => "Cylinder",
         }
     }
 }
