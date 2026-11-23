@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-11-23. See the [archive](archive/STATUS-2026-11-17.md) for earlier status.
+Updated 2026-11-24. See the [archive](archive/STATUS-2026-11-17.md) for earlier status.
 
 ## Where to work
 
@@ -87,6 +87,19 @@ Transition. An admitted Open drains the prior AI connection before switching.
 In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
+
+**Primary Mouse** can share a v23 Button action with Space in Project
+Settings. Approved Claude added the mouse source while retaining Space.
+A stale edit was refused, native Undo restored the original binding, and
+an approved logical Step matched the same input contract. The saved Signal
+Box verified matching press and release counts in editor Play and a relocated
+Linux player with Vulkan validation. The ownership claim, HUD button,
+letterbox and Project Settings produced no gameplay press. An outside release
+and focus loss cleared held input. The new checkbox was checked in Rot Dark
+and Plain Light, with one editor gameplay journey. At 32 actions, three warmed
+release runs gave median p95 of 2.923/2.550 µs for keyboard-only/mixed admission,
+latching and snapshot, and 24.267/24.268 µs for fixed Step with the same
+logical frames.
 
 **Scene Background** gives v23 Scene Display a solid color picker and sRGB
 hex entry. Approved Claude changed the background under a scene guard, and
