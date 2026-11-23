@@ -472,7 +472,13 @@ impl ComponentScene {
                         gameplay_camera_found |=
                             self.gameplay_camera.as_deref() == Some(&component.id);
                     }
-                    Component::Animator { binding } => {
+                    Component::Animator {
+                        binding,
+                        start_playback,
+                    } => {
+                        if let AnimatorStart::OnButtonPress { action_id } = start_playback {
+                            validate_id(action_id)?;
+                        }
                         binding.validate_settings()?;
                         for id in binding.targets.values() {
                             let mut ancestor = object_indices
@@ -670,6 +676,7 @@ impl ComponentScene {
                 id: component_id(owner, "animator"),
                 enabled: true,
                 kind: Component::Animator {
+                    start_playback: Default::default(),
                     binding: binding.clone(),
                 },
             });
@@ -815,6 +822,36 @@ fn available_object_id(objects: &[ObjectNode], stem: &str) -> String {
         .expect("finite object list")
 }
 
+/// Playback policy of a v23 Animator. Default-On-Play files omit the policy.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AnimatorStart {
+    #[default]
+    OnPlay,
+    OnButtonPress {
+        action_id: String,
+    },
+}
+
+impl AnimatorStart {
+    pub fn is_on_play(&self) -> bool {
+        matches!(self, Self::OnPlay)
+    }
+
+    pub fn validate_action(&self, actions: &ActionMap, owner: &str) -> Result<(), SceneError> {
+        if let Self::OnButtonPress { action_id } = self {
+            if !actions.get(action_id).is_some_and(|action| {
+                matches!(action.kind, crate::input::ActionKind::Button { .. })
+            }) {
+                return Err(SceneError::Invalid(format!(
+                    "Animator on {owner} needs Button action {action_id:?}. Choose an existing Button or On Play."
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ComponentInstance {
     pub id: String,
@@ -831,6 +868,8 @@ pub enum Component {
     },
     Animator {
         binding: AnimationBinding,
+        #[serde(default, skip_serializing_if = "AnimatorStart::is_on_play")]
+        start_playback: AnimatorStart,
     },
     Script {
         binding: BehaviorBinding,
@@ -1153,7 +1192,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             rig.components[0].kind,
-            Component::Animator { binding: animation }
+            Component::Animator {
+                binding: animation,
+                start_playback: AnimatorStart::OnPlay
+            }
         );
         let camera = &migrated.objects.last().unwrap().components[0];
         assert_eq!(migrated.gameplay_camera.as_ref(), Some(&camera.id));

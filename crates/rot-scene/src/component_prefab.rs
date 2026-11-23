@@ -533,7 +533,7 @@ impl PrefabSource {
                             *target_id = scene_id(target_id)?;
                         }
                     }
-                    Component::Animator { binding } => {
+                    Component::Animator { binding, .. } => {
                         for id in binding.targets.values_mut() {
                             *id = scene_id(id)?;
                         }

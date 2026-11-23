@@ -101,6 +101,7 @@ impl ComponentWorkspace {
                     id: format!("{root}-animator"),
                     enabled: true,
                     kind: Component::Animator {
+                        start_playback: Default::default(),
                         binding: AnimationBinding {
                             clip: clip.id.clone(),
                             looping: true,
@@ -407,7 +408,7 @@ mod tests {
         let owner = workspace.place_model(&model.id, None, None).unwrap();
         let placed = workspace.session.scene().clone();
         let component = placed.objects[0].components[0].clone();
-        let Component::Animator { binding } = &component.kind else {
+        let Component::Animator { binding, .. } = &component.kind else {
             unreachable!()
         };
         let mut request = json!({"expected_session_token":"session", "expected_revision":"1",
@@ -453,7 +454,7 @@ mod tests {
         assert_eq!(reply["ok"], true, "{reply}");
         assert_eq!(reply["result"]["animation"]["source"]["clip_name"], "Raise");
         assert_eq!(reply["result"]["animation"]["looping"], true);
-        let Component::Animator { binding: next } =
+        let Component::Animator { binding: next, .. } =
             &workspace.session.scene().objects[0].components[0].kind
         else {
             unreachable!()
@@ -507,7 +508,7 @@ mod tests {
         let root = &placed.objects[0];
         assert_eq!(root.id, id);
         assert_eq!(root.name, "Sample");
-        let Component::Animator { binding } = &root.components[0].kind else {
+        let Component::Animator { binding, .. } = &root.components[0].kind else {
             panic!("expected imported transform animation");
         };
         assert_eq!(binding.clip, clip_id);

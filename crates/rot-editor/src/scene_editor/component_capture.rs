@@ -576,7 +576,7 @@ mod tests {
                 .iter()
                 .find(|component| matches!(component.kind, Component::Animator { .. }))
                 .unwrap();
-            let Component::Animator { binding } = &component.kind else {
+            let Component::Animator { binding, .. } = &component.kind else {
                 unreachable!()
             };
             assert!(binding.looping);

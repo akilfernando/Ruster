@@ -20,6 +20,10 @@ pub fn list() -> Vec<Value> {
                 "expected_asset_revision":{"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20},
                 "clip_id":{"type":"string","minLength":1,"maxLength":256},
                 "looping":{"type":"boolean"},
+                "start_playback":{"oneOf":[
+                    {"type":"object","additionalProperties":false,"required":["type"],"properties":{"type":{"const":"on_play"}}},
+                    {"type":"object","additionalProperties":false,"required":["type","action_id"],"properties":{"type":{"const":"on_button_press"},"action_id":id}}
+                ],"description":"v23 only. Use an existing Button action ID, or on_play. Omitted keeps the current mode."},
                 "remove":{"const":true}
             }},
         "annotations":{"readOnlyHint":false,"openWorldHint":false}})]
@@ -60,7 +64,13 @@ pub fn valid(name: &str, args: &Value) -> bool {
         || !super::exact_keys(
             map,
             &["expected_session_token", "expected_revision", "owner_id"],
-            &["clip_id", "looping", "remove", "expected_asset_revision"],
+            &[
+                "clip_id",
+                "looping",
+                "remove",
+                "expected_asset_revision",
+                "start_playback",
+            ],
         )
     {
         return false;
@@ -77,14 +87,30 @@ pub fn valid(name: &str, args: &Value) -> bool {
         && map
             .get("expected_asset_revision")
             .is_none_or(super::canonical_u64)
+        && map.get("start_playback").is_none_or(|wire| {
+            use rot_scene::component_scene::AnimatorStart;
+            match serde_json::from_value::<AnimatorStart>(wire.clone()) {
+                Ok(AnimatorStart::OnPlay) => true,
+                Ok(AnimatorStart::OnButtonPress { action_id }) => {
+                    rot_scene::validate_id(&action_id).is_ok()
+                }
+                Err(_) => false,
+            }
+        })
         && match (clip, remove) {
             (Some(clip), None) => {
                 clip.as_str()
                     .is_some_and(|clip| !clip.is_empty() && clip.len() <= 256)
                     && map.get("looping").is_none_or(Value::is_boolean)
             }
-            (None, Some(remove)) => *remove == json!(true) && !map.contains_key("looping"),
-            (None, None) => map.get("looping").is_some_and(Value::is_boolean),
+            (None, Some(remove)) => {
+                *remove == json!(true)
+                    && !map.contains_key("looping")
+                    && !map.contains_key("start_playback")
+            }
+            (None, None) => map
+                .get("looping")
+                .map_or_else(|| map.contains_key("start_playback"), Value::is_boolean),
             _ => false,
         }
 }

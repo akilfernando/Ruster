@@ -66,7 +66,7 @@ impl AnimationPreview {
                 "component_not_found",
                 "Choose an exact Animator component.".into(),
             ))?;
-        let Component::Animator { binding } = &component.kind else {
+        let Component::Animator { binding, .. } = &component.kind else {
             return Err(("invalid_arguments", "Choose an Animator component.".into()));
         };
         if !component.enabled || !owner.enabled {

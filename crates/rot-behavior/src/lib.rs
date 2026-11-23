@@ -268,7 +268,8 @@ pub struct Runtime {
     follow_parent: Option<rot_scene::ParentPath>,
     kinematic_owner: Option<KinematicOwner>,
     /// Clip bindings resolved at Reset; fixed for this Runtime.
-    animations: Arc<Vec<(AnimationBinding, Arc<Clip>)>>,
+    animations: Arc<Vec<ResolvedAnimation>>,
+    animation_starts: Vec<Option<u64>>,
     transform_camera_binding: Option<Arc<TransformCameraBinding>>,
     state: Arc<RuntimeState>,
 }
@@ -362,6 +363,13 @@ pub struct Engine {
     debugger: Rc<RefCell<Option<debug::DebugSession>>>,
     clips: Clips,
 }
+#[derive(Debug)]
+struct ResolvedAnimation {
+    binding: AnimationBinding,
+    clip: Arc<Clip>,
+    button: Option<String>,
+}
+
 impl Engine {
     /// Supply the accepted clip payloads by resource ID. A scene animation whose
     /// clip is absent fails Reset; clips never change inside a Runtime.
@@ -372,7 +380,8 @@ impl Engine {
         &self,
         scene: &Scene,
         authoring: &Authoring,
-    ) -> Result<Vec<(AnimationBinding, Arc<Clip>)>, Diagnostic> {
+        projection: &RuntimeProjection,
+    ) -> Result<Vec<ResolvedAnimation>, Diagnostic> {
         let invalid = |message: String| {
             Diagnostic::plain(DiagnosticCode::InvalidAuthoring, Phase::Setup, &message)
         };
@@ -394,12 +403,16 @@ impl Engine {
                     track.node
                 )));
             }
-            resolved.push((binding.clone(), clip.clone()));
+            resolved.push(ResolvedAnimation {
+                binding: binding.clone(),
+                clip: clip.clone(),
+                button: projection.animator_button(owner).map(str::to_owned),
+            });
         }
         // Only targets a clip actually animates have a second transform writer.
         let driven: std::collections::BTreeSet<&str> = resolved
             .iter()
-            .flat_map(|(binding, clip)| {
+            .flat_map(|ResolvedAnimation { binding, clip, .. }| {
                 clip.tracks()
                     .iter()
                     .map(|track| binding.targets[&track.node].as_str())
@@ -418,18 +431,18 @@ impl Engine {
         }
         Ok(resolved)
     }
-    fn apply_animations(
-        animations: &[(AnimationBinding, Arc<Clip>)],
+    fn apply_animation(
+        animation: &ResolvedAnimation,
         seconds: f64,
         scene: &mut Scene,
         phase: Phase,
     ) -> Result<(), Diagnostic> {
-        for (binding, clip) in animations {
-            clip.apply(binding, seconds, scene).map_err(|error| {
+        animation
+            .clip
+            .apply(&animation.binding, seconds, scene)
+            .map_err(|error| {
                 Diagnostic::plain(DiagnosticCode::InvalidOutput, phase, &error.to_string())
-            })?;
-        }
-        Ok(())
+            })
     }
     pub fn new(limits: Limits) -> Result<Self, Diagnostic> {
         Self::with_cancellation(limits, Arc::new(AtomicBool::new(false)))
@@ -737,13 +750,15 @@ impl Engine {
         })?;
         // Reset shows clip time zero. Authored transforms remain the rest pose
         // and are never written back.
-        let animations = Arc::new(self.resolve_animations(scene, authoring)?);
+        let animations = Arc::new(self.resolve_animations(scene, authoring, &projection)?);
         let posed;
         let scene = if animations.is_empty() {
             scene
         } else {
             let mut staged = scene.clone();
-            Self::apply_animations(&animations, 0.0, &mut staged, Phase::Setup)?;
+            for animation in animations.iter() {
+                Self::apply_animation(animation, 0.0, &mut staged, Phase::Setup)?;
+            }
             poses = resolve_group_commit(&staged)?.0;
             posed = staged;
             &posed
@@ -919,6 +934,14 @@ impl Engine {
             attached_lights,
             follow_parent,
             kinematic_owner,
+            animation_starts: if animations
+                .iter()
+                .any(|animation| animation.button.is_some())
+            {
+                vec![None; animations.len()]
+            } else {
+                Vec::new()
+            },
             animations,
             transform_camera_binding,
             state,
@@ -972,15 +995,30 @@ impl Engine {
             runtime.tick,
             runtime.kinematic_owner.as_ref(),
         )?;
-        let mut group_changed = !runtime.animations.is_empty();
+        let mut group_changed = false;
         let mut changed_leaves = Vec::new();
-        if group_changed {
-            Self::apply_animations(
-                &runtime.animations,
-                next as f64 * self.limits.fixed_dt,
-                staged.get_or_insert_with(|| (*snapshot).clone()),
+        let mut pressed = Vec::new();
+        for (index, animation) in runtime.animations.iter().enumerate() {
+            let ticks = if let Some(action) = &animation.button {
+                if matches!(input.get(action), Some(ActionValue::Button(state)) if state.pressed) {
+                    pressed.push(index);
+                    0
+                } else if let Some(start) = runtime.animation_starts[index] {
+                    next - start
+                } else {
+                    continue;
+                }
+            } else {
+                next
+            };
+            let scene = staged.get_or_insert_with(|| (*snapshot).clone());
+            Self::apply_animation(
+                animation,
+                ticks as f64 * self.limits.fixed_dt,
+                scene,
                 Phase::Commit,
             )?;
+            group_changed = true;
         }
         let audio = RefCell::new(Vec::new());
         for (id, binding) in &runtime.authoring.bindings {
@@ -1011,6 +1049,8 @@ impl Engine {
                         if !same_transform(&snapshot.objects[index].transform, &transform) {
                             if runtime.leaf_parents.is_some() {
                                 changed_leaves.push((index, id, binding));
+                            } else if !snapshot.hierarchy.is_empty() {
+                                group_changed = true;
                             }
                             staged.get_or_insert_with(|| (*snapshot).clone()).objects[index]
                                 .transform = transform;
@@ -1168,6 +1208,9 @@ impl Engine {
         if let (Some(scene), Some(hierarchy)) = (staged, next_draw) {
             runtime.draw_frame = rot_scene::SceneDrawFrame::new(scene, hierarchy)
                 .with_transform_camera(transform_camera);
+        }
+        for index in pressed {
+            runtime.animation_starts[index] = Some(next);
         }
         runtime.tick = next;
         runtime.commit_revision = commit_revision;

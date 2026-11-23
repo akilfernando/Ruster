@@ -4,8 +4,8 @@ use crate::ui_kit;
 use crate::workspace::Action;
 use eframe::egui;
 use rot_scene::component_scene::{
-    CameraClip, CameraView, Component, ComponentInstance, Geometry, ObjectNode, OrthographicClip,
-    ScriptMovement, ScriptSourceKind, TransformLens, TransformOrthographic,
+    AnimatorStart, CameraClip, CameraView, Component, ComponentInstance, Geometry, ObjectNode,
+    OrthographicClip, ScriptMovement, ScriptSourceKind, TransformLens, TransformOrthographic,
 };
 use rot_scene::{
     BehaviorBinding, BindingTarget, ColliderRole, ColliderShape, Light, LightKind, OpaqueMaterial,
@@ -199,6 +199,7 @@ pub(super) fn mesh_renderer_heading(ordinal: Option<usize>) -> std::borrow::Cow<
 use super::component_workspace::component_animation_preview::{self, PreviewEdit};
 
 pub(super) struct ComponentControls<'a> {
+    pub actions: &'a rot_scene::input::ActionMap,
     pub reveal: Option<&'a str>,
     pub(super) animation_preview: Option<(&'a str, f32, f32)>,
     pub(super) allow_animation_preview: bool,
@@ -229,6 +230,7 @@ pub(super) fn components(
     controls: ComponentControls<'_>,
 ) -> ComponentEdits {
     let ComponentControls {
+        actions,
         allow_new_material,
         allow_spot_aim,
         allow_sound_cues,
@@ -436,7 +438,11 @@ pub(super) fn components(
                             });
                         }
                     }
-                    Component::Animator { binding } => {
+                    Component::Animator {
+                        binding,
+                        start_playback,
+                    } => {
+                        animator_start_fields(ui, start_playback, actions);
                         if let Some(revision) = animator_fields(ui, binding, assets) {
                             animator_revision = Some((component.id.clone(), revision));
                         }
@@ -634,6 +640,96 @@ pub(super) fn components(
         spot_aim,
         sound_cue,
         sensor_binding,
+    }
+}
+
+fn animator_start_fields(
+    ui: &mut egui::Ui,
+    start: &mut AnimatorStart,
+    actions: &rot_scene::input::ActionMap,
+) {
+    let buttons = || {
+        actions.iter().filter(|(_, definition)| {
+            matches!(definition.kind, rot_scene::input::ActionKind::Button { .. })
+        })
+    };
+    let first = buttons().next().map(|(id, _)| id);
+    ui_kit::property_row_with_label(ui, Text::AnimatorStartPlayback.plain(), |ui, label| {
+        let focus = super::combo_focus::ComboFocus::capture(ui, "animator_start_playback");
+        let mut selected = false;
+        let on_play = start.is_on_play();
+        let response = egui::ComboBox::from_id_salt("animator_start_playback")
+            .selected_text(
+                if on_play {
+                    Text::AnimatorOnPlay
+                } else {
+                    Text::AnimatorOnButton
+                }
+                .plain(),
+            )
+            .show_ui(ui, |ui| {
+                if ui
+                    .selectable_label(on_play, Text::AnimatorOnPlay.plain())
+                    .clicked()
+                {
+                    *start = AnimatorStart::OnPlay;
+                    selected = true;
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(
+                        first.is_some(),
+                        egui::Button::selectable(!on_play, Text::AnimatorOnButton.plain()),
+                    )
+                    .on_disabled_hover_text(Text::AnimatorCreateButton.plain())
+                    .clicked()
+                {
+                    if on_play {
+                        *start = AnimatorStart::OnButtonPress {
+                            action_id: first.unwrap().clone(),
+                        };
+                    }
+                    selected = true;
+                    ui.close();
+                }
+            });
+        focus.restore(ui, &response.response, selected);
+        response.response.labelled_by(label);
+    });
+    let AnimatorStart::OnButtonPress { action_id } = start else {
+        return;
+    };
+    ui_kit::property_row_with_label(ui, Text::AnimatorButton.plain(), |ui, label| {
+        let focus = super::combo_focus::ComboFocus::capture(ui, "animator_button");
+        let mut selected = false;
+        let response = egui::ComboBox::from_id_salt("animator_button")
+            .selected_text(
+                actions
+                    .get(action_id)
+                    .and_then(|action| action.label.as_deref())
+                    .unwrap_or(action_id),
+            )
+            .show_ui(ui, |ui| {
+                for (id, action) in buttons() {
+                    if ui
+                        .selectable_label(action_id == id, action.label.as_deref().unwrap_or(id))
+                        .on_hover_text(id)
+                        .clicked()
+                    {
+                        action_id.clone_from(id);
+                        selected = true;
+                        ui.close();
+                    }
+                }
+            });
+        focus.restore(ui, &response.response, selected);
+        response.response.labelled_by(label);
+    });
+    if !buttons().any(|(id, _)| id == action_id) {
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            format!("Button {action_id:?} is unavailable."),
+        );
     }
 }
 

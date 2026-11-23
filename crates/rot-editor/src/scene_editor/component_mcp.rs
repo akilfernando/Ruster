@@ -352,6 +352,7 @@ impl ComponentWorkspace {
                     "remove",
                     "component_id",
                     "preview_seconds",
+                    "start_playback",
                 ]
                 .iter()
                 .filter(|key| map.contains_key(**key))
@@ -930,7 +931,7 @@ impl ComponentWorkspace {
         let invalid = || {
             (
                 "invalid_arguments",
-                "Pass owner_id and a clip_id, looping, or remove:true.".into(),
+                "Pass owner_id and clip_id, looping, start_playback, or remove:true.".into(),
             )
         };
         let clip = args
@@ -941,14 +942,24 @@ impl ComponentWorkspace {
             .get("looping")
             .map(|value| value.as_bool().ok_or_else(invalid))
             .transpose()?;
+        let start = args
+            .get("start_playback")
+            .map(|wire| {
+                serde_json::from_value::<rot_scene::component_scene::AnimatorStart>(wire.clone())
+                    .map_err(|_| invalid())
+            })
+            .transpose()?;
         let remove = args.get("remove");
         let asset_revision = args
             .get("expected_asset_revision")
             .map(|value| decimal(value).ok_or_else(invalid))
             .transpose()?;
         if (remove.is_some()
-            && (remove != Some(&Value::Bool(true)) || clip.is_some() || looping.is_some()))
-            || (remove.is_none() && clip.is_none() && looping.is_none())
+            && (remove != Some(&Value::Bool(true))
+                || clip.is_some()
+                || looping.is_some()
+                || start.is_some()))
+            || (remove.is_none() && clip.is_none() && looping.is_none() && start.is_none())
         {
             return Err(invalid());
         }
@@ -984,7 +995,11 @@ impl ComponentWorkspace {
         if remove.is_some() {
             object.components.remove(index);
         } else {
-            let Component::Animator { binding } = &mut object.components[index].kind else {
+            let Component::Animator {
+                binding,
+                start_playback,
+            } = &mut object.components[index].kind
+            else {
                 unreachable!()
             };
             if let Some(clip) = clip {
@@ -996,7 +1011,20 @@ impl ComponentWorkspace {
             if let Some(looping) = looping {
                 binding.looping = looping;
             }
-            animation = observe(self.assets.as_ref(), binding);
+            let actions = &self.session.scene().actions;
+            if let Some(start) = start {
+                start
+                    .validate_action(actions, owner)
+                    .map_err(|error| ("invalid_animation", error.to_string()))?;
+                *start_playback = start;
+            }
+            animation = observe(
+                self.assets.as_ref(),
+                binding,
+                start_playback,
+                actions,
+                owner,
+            );
         }
         let next = self
             .session
@@ -1310,8 +1338,18 @@ impl ComponentWorkspace {
                     }),
                 };
             }
-            if let Component::Animator { binding } = &component.kind {
-                response["animation"] = component_animation::observe(self.assets.as_ref(), binding);
+            if let Component::Animator {
+                binding,
+                start_playback,
+            } = &component.kind
+            {
+                response["animation"] = component_animation::observe(
+                    self.assets.as_ref(),
+                    binding,
+                    start_playback,
+                    &self.session.scene().actions,
+                    id,
+                );
                 response["animation_preview"] =
                     json!(self
                         .current_animation_preview()
@@ -1421,6 +1459,19 @@ impl ComponentWorkspace {
         });
         for object in &changed {
             let before = originals[object.id.as_str()];
+            for component in &object.components {
+                if let Component::Animator { start_playback, .. } = &component.kind {
+                    let unchanged = before.components.iter().any(|prior| {
+                        prior.id == component.id && matches!(&prior.kind,
+                            Component::Animator { start_playback: prior, .. } if prior == start_playback)
+                    });
+                    if !unchanged {
+                        start_playback
+                            .validate_action(&self.session.scene().actions, &object.id)
+                            .map_err(|error| ("invalid_animation", error.to_string()))?;
+                    }
+                }
+            }
             let new_scripts: Vec<_> = object
                 .components
                 .iter()

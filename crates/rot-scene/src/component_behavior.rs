@@ -1,6 +1,6 @@
 //! Temporary input adapter for the legacy behavior runtime.
 use super::{
-    CameraView, Component, ComponentScene, Geometry, ObjectNode, ScriptMovement,
+    AnimatorStart, CameraView, Component, ComponentScene, Geometry, ObjectNode, ScriptMovement,
     TransformCameraPose, TransformLens,
 };
 use crate::{
@@ -144,6 +144,7 @@ pub struct RuntimeProjection {
     positional_audio: bool,
     named_sensors: bool,
     attached_lights: Option<Arc<AttachedLights>>,
+    animator_buttons: BTreeMap<String, String>,
 }
 
 /// A projected mesh leaf owns a distinct, non-targetable local light.
@@ -171,6 +172,10 @@ impl AttachedLights {
 }
 
 impl RuntimeProjection {
+    pub fn animator_button(&self, owner: &str) -> Option<&str> {
+        self.animator_buttons.get(owner).map(String::as_str)
+    }
+
     pub(crate) fn allows_named_sensors(&self) -> bool {
         self.named_sensors
     }
@@ -188,6 +193,11 @@ impl RuntimeProjection {
     }
 
     pub(crate) fn require_legacy_export(&self) -> Result<(), SceneError> {
+        if !self.animator_buttons.is_empty() {
+            return Err(SceneError::Invalid(
+                "Save the component scene to keep Animator button triggers.".into(),
+            ));
+        }
         if self.named_sensors {
             return Err(SceneError::Invalid(
                 "Save the authored component scene to keep named sensors.".into(),
@@ -420,6 +430,7 @@ impl ComponentScene {
         };
         let mut lights = BTreeMap::new();
         let mut attached = Vec::new();
+        let mut animator_buttons = BTreeMap::new();
         let parents: HashSet<_> = self
             .objects
             .iter()
@@ -532,12 +543,19 @@ impl ComponentScene {
                             return Err(duplicate("Light"));
                         }
                     }
-                    Component::Animator { binding } => {
+                    Component::Animator {
+                        binding,
+                        start_playback,
+                    } => {
                         detached_only = false;
                         if !component.enabled {
                             return Err(unsupported(
                                 "disabled animation requires the component runtime",
                             ));
+                        }
+                        start_playback.validate_action(&self.actions, &object.id)?;
+                        if let AnimatorStart::OnButtonPress { action_id } = start_playback {
+                            animator_buttons.insert(object.id.clone(), action_id.clone());
                         }
                         if scene
                             .animations
@@ -652,6 +670,7 @@ impl ComponentScene {
         }
         scene.validate()?;
         let projection = RuntimeProjection {
+            animator_buttons,
             positional_audio,
             named_sensors,
             local_leaf_scripts: !scene.hierarchy.is_empty()

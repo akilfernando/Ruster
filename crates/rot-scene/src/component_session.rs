@@ -888,7 +888,7 @@ impl ComponentSession {
                                 }
                             }
                         }
-                        Component::Animator { binding } => {
+                        Component::Animator { binding, .. } => {
                             binding.targets.values_mut().for_each(remap)
                         }
                         _ => {}
@@ -1977,6 +1977,7 @@ mod tests {
             component(
                 "rig-animator",
                 Component::Animator {
+                    start_playback: Default::default(),
                     binding: AnimationBinding {
                         clip: "bridge-lift".into(),
                         looping: true,
@@ -2061,7 +2062,7 @@ mod tests {
             panic!("copied components")
         };
         assert_eq!(animator.id, result.component_ids["rig-animator"]);
-        let Component::Animator { binding } = &animator.kind else {
+        let Component::Animator { binding, .. } = &animator.kind else {
             panic!("copied animator")
         };
         assert_eq!(binding.targets["Rig/Wheel"], ids["wheel"]);

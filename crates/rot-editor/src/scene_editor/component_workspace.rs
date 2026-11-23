@@ -3144,6 +3144,7 @@ impl ComponentWorkspace {
                                         self.assets.as_ref(),
                                         &self.session.scene().materials,
                                         component_inspector::ComponentControls {
+                                            actions: &self.session.scene().actions,
                                             allow_new_material: allow_new,
                                             allow_spot_aim,
                                             allow_sound_cues: allow_spot_aim,

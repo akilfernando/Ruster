@@ -16,14 +16,16 @@ pub(super) fn changed_bindings<'a>(
     proposed: &'a ObjectNode,
 ) -> impl Iterator<Item = (&'a str, Option<&'a AnimationBinding>, &'a AnimationBinding)> {
     proposed.components.iter().filter_map(move |component| {
-        let Component::Animator { binding } = &component.kind else {
+        let Component::Animator { binding, .. } = &component.kind else {
             return None;
         };
         let old = prior
             .components
             .iter()
             .find_map(|candidate| match &candidate.kind {
-                Component::Animator { binding } if candidate.id == component.id => Some(binding),
+                Component::Animator { binding, .. } if candidate.id == component.id => {
+                    Some(binding)
+                }
                 _ => None,
             });
         old.is_none_or(|old| old.clip != binding.clip || old.targets != binding.targets)
@@ -87,10 +89,17 @@ pub(super) fn validate_binding(
 }
 
 #[cfg(unix)]
-pub(super) fn observe(store: Option<&AssetStore>, binding: &AnimationBinding) -> Value {
+pub(super) fn observe(
+    store: Option<&AssetStore>,
+    binding: &AnimationBinding,
+    start: &rot_scene::component_scene::AnimatorStart,
+    actions: &rot_scene::input::ActionMap,
+    owner: &str,
+) -> Value {
     let source = store.and_then(|store| store.clip_owner(&binding.clip)).map(|(model, name)| {
         json!({"model_id":model.id, "clip_name":name, "duration":model.clips[name].duration})
     });
     json!({"clip_id":binding.clip,"looping":binding.looping,
-        "target_count":binding.targets.len(),"source":source})
+        "target_count":binding.targets.len(),"source":source,"start_playback":start,
+        "start_error":start.validate_action(actions,owner).err().map(|error| error.to_string())})
 }

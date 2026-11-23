@@ -760,6 +760,11 @@ editor_text! {
     AnimationStopAnimatingThisPlacement => "Stop animating this placement. One Undo restores it.",
     Clip => "Clip",
     Loop => "Loop",
+    AnimatorStartPlayback => "Start Playback",
+    AnimatorOnPlay => "On Play",
+    AnimatorOnButton => "On Button Press",
+    AnimatorButton => "Button",
+    AnimatorCreateButton => "Create a Button in Input Actions first.",
     RemoveAnimation => "Remove Animation",
 
     // Asset Commands
