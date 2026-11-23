@@ -80,6 +80,17 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+v23 Transform Game Cameras can use an Orthographic projection with a full
+vertical size, finite near and far planes and optional fixed aspect. Two
+equal rulers at different depths drew equally in native Game view, an
+approved Claude capture and a relocated Linux player. Clipping, foreground
+occlusion and parallel specular response were validated on Vulkan. Native
+Undo restored the saved lens after a guarded AI edit. A committed paused
+audio cue kept the expected pan and gain and emitted no PCM. At 5,000
+objects, median extraction p95 was 1.241 ms for either projection.
+Perspective and Orthographic kept two scene draws and no shadow passes in
+this workload. The GPU scene p95 ranges overlapped.
+
 Double Sided draws both faces of an opaque v23 material. Opaque GLB import
 and explicit Reimport preserve the setting for new placements. Existing
 assignments keep their authored value and share Undo. A Blender sheet
