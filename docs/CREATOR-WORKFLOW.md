@@ -460,6 +460,20 @@ object’s local transform. The parent determines how a local movement appears
 in the world. If a step would move a child outside the world limits, Play
 keeps the previous committed frame and reports the error.
 
+### Create and edit a project script on Linux
+
+Select a folder in **Assets** and choose **Assets → Create → Lua Script…**.
+Enter a name and press Enter. Rot creates the `.lua` file in that folder
+and selects it when it is ready. The starter script returns the object's
+transform unchanged. Attach it with **Add Component → Script**.
+
+Select the script and choose **Asset Actions → Open in Code Editor** to
+open the exact project file. In **Preferences → External Editor**, set your
+editor executable and include `{file}` or `{file}:{line}` as one argument.
+The optional `{workspace}` points to the project directory. Save the file in
+your code editor. An active Play keeps its starting code. Stop and Play
+again to use the saved changes, or build to package them.
+
 ## Slide a scripted sphere along blockers
 
 On a file-backed **Script**, set **Movement** to **Kinematic Sphere** and

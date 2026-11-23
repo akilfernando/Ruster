@@ -1293,6 +1293,90 @@ mod tests {
     }
 
     #[test]
+    fn creates_a_ready_project_script_without_clobber_and_passes_one_exact_file_arg() {
+        use std::os::unix::fs::symlink;
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        let folder = PathBuf::from("Assets/Code");
+        let directory = root.join(&folder);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("Saved.lua"), "return {}").unwrap();
+        fs::write(
+            directory.join("Reserved.lua.rotmeta"),
+            br#"{"id":"reserved"}"#,
+        )
+        .unwrap();
+        let ctx = Context::default();
+        let worker = ProjectAssets::start(root.to_owned(), &ctx).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let next = || loop {
+            if let Some(update) = worker.take_update() {
+                break update.unwrap();
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        let first = next();
+        let create = |name: &str, snapshot: &Snapshot| {
+            worker
+                .file_action(
+                    FileAction::CreateScript {
+                        parent: folder.clone(),
+                        name: name.to_owned(),
+                    },
+                    snapshot.store.state_identity(),
+                )
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap()
+        };
+        let saved = create("Saved", &first);
+        assert!(saved.errors[0].contains("already exists"), "{saved:?}");
+        assert_eq!(
+            fs::read_to_string(directory.join("Saved.lua")).unwrap(),
+            "return {}"
+        );
+        let reserved = create("Reserved.lua", &first);
+        assert!(
+            reserved.errors[0].contains("already has an import sidecar"),
+            "{reserved:?}"
+        );
+        assert!(!directory.join("Reserved.lua").exists());
+
+        let created = create("Track & Rail.lua", &first);
+        assert!(created.errors.is_empty(), "{created:?}");
+        let (id, relative) = created.created_script.unwrap();
+        assert_eq!(relative, folder.join("Track & Rail.lua"));
+        let snapshot = next();
+        let info = snapshot.store.asset_info(&id).unwrap();
+        assert_eq!(info.status, AssetStatus::Ready);
+        assert_eq!(snapshot.store.script(&id), Some(OBJECT_LUA_TEMPLATE));
+        assert_eq!(
+            fs::read_to_string(root.join(&relative)).unwrap(),
+            OBJECT_LUA_TEMPLATE
+        );
+        assert!(directory.join("Track & Rail.lua.rotmeta").is_file());
+
+        let held = fs::File::open(root).unwrap();
+        let launch = LaunchSpec {
+            executable: "example-editor".into(),
+            args: vec!["--new".into(), "{workspace}".into(), "{file}:{line}".into()],
+        };
+        let command =
+            project_script_command(&snapshot.store, &held, &id, &relative, &launch, || true)
+                .unwrap();
+        let expected = format!("{}:1", root.join(&relative).display());
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(args, ["--new", root.to_str().unwrap(), expected.as_str()]);
+        fs::rename(root.join(&relative), directory.join("backup.lua")).unwrap();
+        symlink(directory.join("Saved.lua"), root.join(&relative)).unwrap();
+        assert!(
+            project_script_command(&snapshot.store, &held, &id, &relative, &launch, || true)
+                .is_err()
+        );
+    }
+
+    #[test]
     fn move_to_folder_waits_for_exact_catalog_and_preserves_the_pair() {
         let project = tempfile::tempdir().unwrap();
         let root = project.path();

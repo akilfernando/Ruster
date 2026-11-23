@@ -1429,6 +1429,21 @@ mod tests {
             action, FileAction::CreateFolder { parent, name } if parent == Path::new("Assets") && name == "Props"
         ));
 
+        browser.open_new_script("Assets/Props".into());
+        frame(&mut browser, Vec::new());
+        frame(
+            &mut browser,
+            vec![egui::Event::Text("Rail Signal.lua".into())],
+        );
+        let (_, action) = frame(&mut browser, vec![press(egui::Key::Enter)]).unwrap();
+        assert!(matches!(action, FileAction::CreateScript { parent, name }
+            if parent == Path::new("Assets/Props") && name == "Rail Signal.lua"));
+
+        browser.open_new_script("Assets/Props".into());
+        frame(&mut browser, Vec::new());
+        assert!(frame(&mut browser, vec![press(egui::Key::Escape)]).is_none());
+        assert!(!browser.file_dialog_open());
+
         browser.start_file_dialog(FileDialog::Delete("Assets/Prop.obj".into()));
         frame(&mut browser, Vec::new());
         assert!(frame(&mut browser, vec![press(egui::Key::Escape)]).is_none());
