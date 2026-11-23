@@ -24,28 +24,36 @@ enum CameraTarget {
     Object { index: usize, id: String },
     Group(String),
     Light(String),
+    Detached(TransformCameraPose),
 }
 
 impl TransformCameraBinding {
-    fn bind(scene: &Scene, owner: &str, lens: &TransformPerspective) -> Result<Self, SceneError> {
+    fn bind(
+        scene: &Scene,
+        owner: &ObjectNode,
+        lens: &TransformPerspective,
+    ) -> Result<Self, SceneError> {
+        let id = owner.id.as_str();
         let mut ancestors = Vec::new();
-        let mut current = owner;
+        let mut current = id;
         while let Some(parent) = scene.hierarchy.parents.get(current) {
             ancestors.push(parent.clone());
             current = parent;
         }
-        let owner = if let Some(index) = scene.objects.iter().position(|object| object.id == owner)
-        {
+        let owner = if let Some(index) = scene.objects.iter().position(|object| object.id == id) {
             CameraTarget::Object {
                 index,
-                id: owner.into(),
+                id: id.into(),
             }
-        } else if scene.hierarchy.groups.contains_key(owner) {
-            CameraTarget::Group(owner.into())
-        } else if scene.lighting.light(owner).is_some() {
-            CameraTarget::Light(owner.into())
+        } else if scene.hierarchy.groups.contains_key(id) {
+            CameraTarget::Group(id.into())
+        } else if scene.lighting.light(id).is_some() {
+            CameraTarget::Light(id.into())
         } else {
-            return Err(missing_camera_transform());
+            // A detached camera has no writable runtime transform. Keep its
+            // authored pose without making a flat Object/Lua scene a hierarchy.
+            let (world, rotation) = local_camera_transform(&owner.transform);
+            CameraTarget::Detached(lens.resolve_pose(world, rotation)?)
         };
         Ok(Self {
             lens: lens.clone(),
@@ -64,6 +72,7 @@ impl TransformCameraBinding {
                 .map(|object| &object.transform),
             CameraTarget::Group(id) => scene.hierarchy.groups.get(id).map(|group| &group.transform),
             CameraTarget::Light(id) => scene.lighting.light(id).map(|light| &light.transform),
+            CameraTarget::Detached(pose) => return Ok(*pose),
         }
         .ok_or_else(missing_camera_transform)?;
         let mut world = DMat4::IDENTITY;
@@ -82,18 +91,23 @@ impl TransformCameraBinding {
             })
             .chain([Ok(owner)])
         {
-            let local = local?;
-            let [x, y, z] = local.rotation.map(f64::from);
-            let rotation = DQuat::from_euler(EulerRot::ZYX, z, y, x);
-            world *= DMat4::from_scale_rotation_translation(
-                DVec3::from_array(local.scale.map(f64::from)),
-                rotation,
-                DVec3::from_array(local.translation.map(f64::from)),
-            );
+            let (local, rotation) = local_camera_transform(local?);
+            world *= local;
             orientation *= rotation;
         }
         self.lens.resolve_pose(world, orientation)
     }
+}
+
+fn local_camera_transform(local: &crate::Transform) -> (DMat4, DQuat) {
+    let [x, y, z] = local.rotation.map(f64::from);
+    let rotation = DQuat::from_euler(EulerRot::ZYX, z, y, x);
+    let matrix = DMat4::from_scale_rotation_translation(
+        DVec3::from_array(local.scale.map(f64::from)),
+        rotation,
+        DVec3::from_array(local.translation.map(f64::from)),
+    );
+    (matrix, rotation)
 }
 
 fn missing_camera_transform() -> SceneError {
@@ -212,7 +226,7 @@ impl ComponentScene {
         scene.player_view = match self.effective_camera(&hierarchy) {
             Some((_, CameraView::Orbit(view))) => Some(view.clone()),
             Some((index, CameraView::Transform(lens))) => {
-                transform_camera = Some((self.objects[index].id.as_str(), lens));
+                transform_camera = Some((&self.objects[index], lens));
                 None
             }
             None => None,
@@ -348,11 +362,7 @@ impl ComponentScene {
                     }
                 }
             }
-            if detached_only
-                && object.parent.is_none()
-                && !parents.contains(object.id.as_str())
-                && transform_camera.is_none_or(|(id, _)| id != object.id)
-            {
+            if detached_only && object.parent.is_none() && !parents.contains(object.id.as_str()) {
                 continue;
             }
             if let Some(parent) = &object.parent {

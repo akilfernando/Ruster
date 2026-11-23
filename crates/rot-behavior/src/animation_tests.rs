@@ -171,13 +171,14 @@ fn transform_camera_pose_commits_with_animated_parent_owner_and_rejected_step() 
     use rot_scene::Session;
 
     let mut scene = Scene::empty("animated-camera");
-    scene.objects.push(Object::cube("fault", None));
+
     for (id, transform) in [
         ("rig", Transform::default()),
+        ("fault", Transform::default()),
         (
             "dolly",
             Transform {
-                scale: [2., 1., 1.],
+                scale: [2.; 3],
                 ..Default::default()
             },
         ),
@@ -236,8 +237,8 @@ fn transform_camera_pose_commits_with_animated_parent_owner_and_rejected_step() 
         });
     authored.gameplay_camera = Some("lens".into());
     authored.sources.insert("fault".into(), BehaviorSource {
-        label: None, language_id: LANGUAGE_ID.into(), host_api_version: HOST_API_VERSION,
-        text: "return {update=function(o,p,dt) if o.translation[1]>0 then error('reject') end o.translation[1]=dt; return o end}".into(),
+        label: None, language_id: LANGUAGE_ID.into(), host_api_version: GROUP_ROTATION_HOST_API_VERSION,
+        text: "return {update=function(rotation,p,dt) if rotation[3]>0 then error('reject') end rotation[3]=dt; return rotation end}".into(),
     });
     authored
         .objects
@@ -251,7 +252,7 @@ fn transform_camera_pose_commits_with_animated_parent_owner_and_rejected_step() 
             kind: Component::Script {
                 source_kind: None,
                 binding: BehaviorBinding {
-                    target: BindingTarget::Object("fault".into()),
+                    target: BindingTarget::Group("fault".into()),
                     source_id: "fault".into(),
                     enabled: true,
                     properties: BTreeMap::new(),

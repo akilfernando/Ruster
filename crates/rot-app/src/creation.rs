@@ -940,6 +940,22 @@ mod tests {
                 text: "return {}".into(),
             },
         );
+        let owner = &mut scene.objects[0];
+        owner.components.push(ComponentInstance {
+            id: "object-script".into(),
+            enabled: true,
+            kind: Component::Script {
+                source_kind: None,
+                binding: rot_scene::BehaviorBinding {
+                    target: rot_scene::BindingTarget::Object(owner.id.clone()),
+                    source_id: "source".into(),
+                    enabled: true,
+                    properties: Default::default(),
+                    state_defaults: Default::default(),
+                    commands: Default::default(),
+                },
+            },
+        });
         scene.objects.push(rot_scene::component_scene::ObjectNode {
             id: "detached-camera".into(),
             name: "Detached Camera".into(),
@@ -976,11 +992,7 @@ mod tests {
                 .eye,
             [1., 2., 3.]
         );
-        assert!(session
-            .scene()
-            .hierarchy
-            .groups
-            .contains_key("detached-camera"));
+        assert!(session.scene().hierarchy.is_empty());
         scene.objects.last_mut().unwrap().components[0].enabled = false;
         assert!(
             matches!(RuntimeScene::from_components(Box::new(scene)).unwrap(),
