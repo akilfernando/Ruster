@@ -45,6 +45,9 @@ mod component_hud;
 #[path = "component_material.rs"]
 pub(super) mod component_material;
 
+#[path = "component_texture_uses.rs"]
+mod component_texture_uses;
+
 #[path = "component_sound.rs"]
 pub(super) mod component_sound;
 
@@ -276,6 +279,9 @@ pub(super) struct ComponentWorkspace {
     camera_authoring: component_camera::Authoring,
     spot_aim: Option<component_spot::AimPicker>,
     material_usage: component_material::Usage,
+    texture_uses: Option<component_texture_uses::TextureUses>,
+    texture_uses_dialog: Option<component_texture_uses::Dialog>,
+    texture_use_reveal: Option<(usize, String)>,
     edit_scene_during_play: bool,
     component_picker: component_inspector::ComponentPicker,
     error: Option<String>,
@@ -441,6 +447,9 @@ impl ComponentWorkspace {
             spot_aim: None,
             camera_authoring: Default::default(),
             material_usage: component_material::Usage::default(),
+            texture_uses: None,
+            texture_uses_dialog: None,
+            texture_use_reveal: None,
             edit_scene_during_play: false,
             component_picker: Default::default(),
             error: None,
@@ -2357,7 +2366,8 @@ impl ComponentWorkspace {
             || self.new_scene.is_some()
             || build_open
             || publishing
-            || self.surface_edit_pending();
+            || self.surface_edit_pending()
+            || self.texture_uses_dialog.is_some();
         #[cfg(target_os = "linux")]
         self.asset_import_frame(&ctx, blocked);
         let asset_dialog = self.asset_browser.file_dialog_open();
@@ -2663,158 +2673,153 @@ impl ComponentWorkspace {
                 let mut view_change = None;
                 let revision = self.session.revision();
                 let mut moved = hierarchy_drop(ui, &root, None, revision, &self.selection);
-                egui::ScrollArea::vertical().show_rows(
-                    ui,
-                    ROW_HEIGHT,
-                    self.rows.len(),
-                    |ui, range| {
-                        for row in range {
-                            let (index, depth) = self.rows[row];
-                            let object = &self.session.scene().objects[index];
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = SPACE_XS;
-                                let value = self.view_flags.get(index).copied().unwrap_or_default();
-                                let inherited = self.parents[index]
-                                    .and_then(|parent| self.view_flags.get(parent).copied())
-                                    .unwrap_or_default();
-                                for (flag, set, inherited) in [
-                                    (Flag::Hidden, value.hidden, inherited.hidden),
-                                    (Flag::Locked, value.locked, inherited.locked),
-                                ] {
-                                    if flag.button(ui, &object.name, set, inherited) {
-                                        view_change = Some((flag, !set, object.id.clone()));
-                                    }
+                let mut scroll = egui::ScrollArea::vertical();
+                if let Some((index, _)) = &self.texture_use_reveal {
+                    if let Some(row) = self.rows.iter().position(|(row, _)| row == index) {
+                        scroll = scroll.vertical_scroll_offset(
+                            row as f32 * (ROW_HEIGHT + ui.spacing().item_spacing.y),
+                        );
+                    }
+                }
+                scroll.show_rows(ui, ROW_HEIGHT, self.rows.len(), |ui, range| {
+                    for row in range {
+                        let (index, depth) = self.rows[row];
+                        let object = &self.session.scene().objects[index];
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = SPACE_XS;
+                            let value = self.view_flags.get(index).copied().unwrap_or_default();
+                            let inherited = self.parents[index]
+                                .and_then(|parent| self.view_flags.get(parent).copied())
+                                .unwrap_or_default();
+                            for (flag, set, inherited) in [
+                                (Flag::Hidden, value.hidden, inherited.hidden),
+                                (Flag::Locked, value.locked, inherited.locked),
+                            ] {
+                                if flag.button(ui, &object.name, set, inherited) {
+                                    view_change = Some((flag, !set, object.id.clone()));
                                 }
-                                ui.add_space(SPACE_XS * depth.min(12) as f32);
-                                let active = self.selection.contains(&object.id);
-                                let response = ui
-                                    .add(
-                                        egui::Button::selectable(active, &object.name)
-                                            .truncate()
-                                            .sense(egui::Sense::click_and_drag()),
-                                    )
-                                    .on_hover_text(&object.name);
-                                if response.drag_started() {
-                                    response.dnd_set_drag_payload(HierarchyDrag {
-                                        revision,
-                                        object_id: object.id.clone(),
-                                    });
-                                }
-                                if let Some(asset) = AssetDrag::released(ui, &response) {
-                                    placed = Some((asset, Some(object.id.clone())));
-                                }
-                                if let Some(drop) = hierarchy_drop(
-                                    ui,
-                                    &response,
-                                    Some(&object.id),
+                            }
+                            ui.add_space(SPACE_XS * depth.min(12) as f32);
+                            let active = self.selection.contains(&object.id);
+                            let response = ui
+                                .add(
+                                    egui::Button::selectable(active, &object.name)
+                                        .truncate()
+                                        .sense(egui::Sense::click_and_drag()),
+                                )
+                                .on_hover_text(&object.name);
+                            if response.drag_started() {
+                                response.dnd_set_drag_payload(HierarchyDrag {
                                     revision,
-                                    &self.selection,
-                                ) {
-                                    moved = Some(drop);
+                                    object_id: object.id.clone(),
+                                });
+                            }
+                            if let Some(asset) = AssetDrag::released(ui, &response) {
+                                placed = Some((asset, Some(object.id.clone())));
+                            }
+                            if let Some(drop) = hierarchy_drop(
+                                ui,
+                                &response,
+                                Some(&object.id),
+                                revision,
+                                &self.selection,
+                            ) {
+                                moved = Some(drop);
+                            }
+                            if response.clicked() {
+                                let modifiers = ui.input(|input| {
+                                    input
+                                        .events
+                                        .iter()
+                                        .rev()
+                                        .find_map(|event| match event {
+                                            egui::Event::PointerButton {
+                                                button: egui::PointerButton::Primary,
+                                                pressed: false,
+                                                modifiers,
+                                                ..
+                                            } => Some(*modifiers),
+                                            _ => None,
+                                        })
+                                        .unwrap_or(input.modifiers)
+                                });
+                                selected = Some(Some((row, modifiers)));
+                            }
+                            response.context_menu(|ui| {
+                                if ui
+                                    .add_enabled(
+                                        !blocked && !self.runtime.in_play_mode(),
+                                        egui::Button::new(Text::SaveAsPrefab.plain()),
+                                    )
+                                    .clicked()
+                                {
+                                    prefab = Some(object.id.clone());
+                                    ui.close();
                                 }
-                                if response.clicked() {
-                                    let modifiers = ui.input(|input| {
-                                        input
-                                            .events
-                                            .iter()
-                                            .rev()
-                                            .find_map(|event| match event {
-                                                egui::Event::PointerButton {
-                                                    button: egui::PointerButton::Primary,
-                                                    pressed: false,
-                                                    modifiers,
-                                                    ..
-                                                } => Some(*modifiers),
-                                                _ => None,
-                                            })
-                                            .unwrap_or(input.modifiers)
-                                    });
-                                    selected = Some(Some((row, modifiers)));
-                                }
-                                response.context_menu(|ui| {
-                                    if ui
-                                        .add_enabled(
-                                            !blocked && !self.runtime.in_play_mode(),
-                                            egui::Button::new(Text::SaveAsPrefab.plain()),
-                                        )
-                                        .clicked()
-                                    {
-                                        prefab = Some(object.id.clone());
-                                        ui.close();
-                                    }
-                                    ui.menu_button(Text::ComponentCreateChild.plain(), |ui| {
-                                        for action in [
-                                            Action::CreateEmpty,
-                                            Action::CreateCube,
-                                            Action::CreateSphere,
-                                            Action::CreateCapsule,
-                                            Action::CreateTriangularPrism,
-                                            Action::CreateLight,
-                                            Action::CreateDirectionalLight,
-                                            Action::CreateSpotLight,
-                                        ] {
-                                            if action_menu_item(
-                                                ui,
-                                                &self.workspace,
-                                                action,
-                                                !blocked,
-                                            ) {
-                                                child = Some((action, object.id.clone()));
-                                            }
+                                ui.menu_button(Text::ComponentCreateChild.plain(), |ui| {
+                                    for action in [
+                                        Action::CreateEmpty,
+                                        Action::CreateCube,
+                                        Action::CreateSphere,
+                                        Action::CreateCapsule,
+                                        Action::CreateTriangularPrism,
+                                        Action::CreateLight,
+                                        Action::CreateDirectionalLight,
+                                        Action::CreateSpotLight,
+                                    ] {
+                                        if action_menu_item(ui, &self.workspace, action, !blocked) {
+                                            child = Some((action, object.id.clone()));
                                         }
-                                    });
-                                    if action_menu_item(
-                                        ui,
-                                        &self.workspace,
-                                        Action::GroupSelection,
-                                        !blocked,
-                                    ) {
-                                        grouped = Some(object.id.clone());
-                                    }
-                                    if action_menu_item(
-                                        ui,
-                                        &self.workspace,
-                                        Action::Duplicate,
-                                        !blocked,
-                                    ) {
-                                        duplicated = Some(object.id.clone());
-                                    }
-                                    if ui
-                                        .add(
-                                            egui::Button::new(Action::Frame.label()).shortcut_text(
-                                                self.workspace.shortcut_hint(Action::Frame),
-                                            ),
-                                        )
-                                        .clicked()
-                                    {
-                                        framed = Some(object.id.clone());
-                                        ui.close();
-                                    }
-                                    if ui
-                                        .add(
-                                            egui::Button::new(Action::Delete.label())
-                                                .shortcut_text(
-                                                    self.workspace.shortcut_text(Action::Delete),
-                                                ),
-                                        )
-                                        .clicked()
-                                    {
-                                        deleted = Some(object.id.clone());
-                                        ui.close();
-                                    }
-                                    if let Some(destination) = sibling_move_items(
-                                        ui,
-                                        &self.session.scene().objects,
-                                        index,
-                                        &self.selection,
-                                    ) {
-                                        moved = Some((object.id.clone(), destination));
                                     }
                                 });
+                                if action_menu_item(
+                                    ui,
+                                    &self.workspace,
+                                    Action::GroupSelection,
+                                    !blocked,
+                                ) {
+                                    grouped = Some(object.id.clone());
+                                }
+                                if action_menu_item(
+                                    ui,
+                                    &self.workspace,
+                                    Action::Duplicate,
+                                    !blocked,
+                                ) {
+                                    duplicated = Some(object.id.clone());
+                                }
+                                if ui
+                                    .add(
+                                        egui::Button::new(Action::Frame.label()).shortcut_text(
+                                            self.workspace.shortcut_hint(Action::Frame),
+                                        ),
+                                    )
+                                    .clicked()
+                                {
+                                    framed = Some(object.id.clone());
+                                    ui.close();
+                                }
+                                if ui
+                                    .add(egui::Button::new(Action::Delete.label()).shortcut_text(
+                                        self.workspace.shortcut_text(Action::Delete),
+                                    ))
+                                    .clicked()
+                                {
+                                    deleted = Some(object.id.clone());
+                                    ui.close();
+                                }
+                                if let Some(destination) = sibling_move_items(
+                                    ui,
+                                    &self.session.scene().objects,
+                                    index,
+                                    &self.selection,
+                                ) {
+                                    moved = Some((object.id.clone(), destination));
+                                }
                             });
-                        }
-                    },
-                );
+                        });
+                    }
+                });
                 if let Some((asset, parent)) = placed.filter(|_| !blocked) {
                     self.place_asset(&asset, parent);
                 } else if let Some((flag, set, id)) = view_change {
@@ -2852,6 +2857,17 @@ impl ComponentWorkspace {
                 ui.heading(Text::ComponentInspector.plain());
                 if self.asset_browser.selected.is_some() {
                     let can_place = !blocked && !self.runtime.in_play_mode();
+                    if let Some(id) = self.asset_browser.selected_texture() {
+                        if ui
+                            .add_enabled(
+                                !blocked && !self.authored_edit_pending(),
+                                egui::Button::new(Text::TextureFindUses.plain()),
+                            )
+                            .clicked()
+                        {
+                            self.begin_texture_uses(id.to_owned());
+                        }
+                    }
                     if let Some(asset) = self.asset_browser.inspect(ui, &self.meshes, can_place) {
                         self.place_asset(&asset, None);
                     }
@@ -2945,6 +2961,10 @@ impl ComponentWorkspace {
                                             allow_sound_cues: allow_spot_aim,
                                             diagnostic: self.runtime.diagnostic.as_ref(),
                                             collider_edit: &collider_edit,
+                                            reveal: self
+                                                .texture_use_reveal
+                                                .as_ref()
+                                                .map(|(_, id)| id.as_str()),
                                         },
                                     );
                                     submit |= edits.submit;
@@ -3029,6 +3049,8 @@ impl ComponentWorkspace {
         self.show_display_draft(&ctx);
         self.show_camera_draft(&ctx);
         self.show_spot_aim(&ctx);
+        self.texture_use_reveal = None;
+        self.show_texture_uses(&ctx);
         if let Some(document) = self.show_new_scene(&ctx) {
             return Some(document);
         }

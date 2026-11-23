@@ -277,6 +277,15 @@ pick up its factor for new placements. Existing placed materials keep their edit
 Press Enter to apply or Escape to cancel. Apply or cancel before saving.
 Edits to materials copied from GLB models are saved with the scene.
 
+Select a texture in **Assets**, then choose **Find Uses in Scene** in the
+Inspector. The list shows each material slot and Mesh Renderer that references
+that texture ID, including disabled renderers and linked prefab parts.
+Unassigned materials appear without a renderer. If one PNG has both Base Color
+and Roughness interpretations, select the interpretation you want to check.
+Use the arrow keys to select a result and press Enter, or choose
+**Reveal in Scene**, to select its object and open the exact renderer.
+Escape closes the list. Revealing an object does not change the scene.
+
 ## Set scene display in v23
 
 Open **Edit → Scene Display** with or without an object selected.

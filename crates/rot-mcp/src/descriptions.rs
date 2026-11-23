@@ -1,11 +1,11 @@
 //! What tools/list shows: one or two plain sentences per tool, in the
 //! creator vocabulary. The per-module texts are the detailed contracts.
 pub const DESCRIPTIONS: &[(&str, &str)] = &[
-    ("rot_tools", "List, describe or call additional Rot commands, including scene tools from earlier versions. Availability depends on the open scene."),
+    ("rot_tools", "List, describe or call additional editor tools, including legacy tools."),
     ("project_list", "List the open Rot Engine editors with their project folder and scene."),
-    ("project_connect", "Work with one open editor, chosen by project name, folder, scene file or ID from project_list. A folder or scene that is not open is opened in Rot Engine."),
+    ("project_connect", "Connect by project name, folder, scene or project_list ID. Opens the folder or scene if needed."),
     ("project_disconnect", "Disconnect from the current editor."),
-    ("asset_inspect", "List assets, models, prefabs and import issues. WAVs use kind sound."),
+    ("asset_inspect", "List assets (WAV kind sound). v23 usage_asset_id finds texture uses. Pin all three guards to continue."),
     ("asset_import", "Import an OBJ, PNG, WAV, Lua or GLB project file. GLB supports named or unnamed nodes, TRS matrices, point/spot/sun lights, perspective cameras and packed roughness. Place with scene_model_place."),
     ("asset_refresh", "Reimport an asset after its file changed. Keeps the previous version if the new file fails."),
     ("asset_rename", "Rename an asset file inside the project, keeping its asset ID."),
@@ -13,7 +13,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("scene_prefab", "Save a v23 hierarchy as a prefab, place a linked copy, or apply/revert one override. Place needs asset_id. Material needs component_id and expected_source_hash."),
     ("scene_mesh", "Give an object an imported mesh, or null for the built-in cube."),
     ("shader_refresh", "Reload the project's scene.wgsl shader, keeping the last working one on error. builtin true switches back to the built-in shader."),
-    ("scene_inspect", "List scene objects and transforms 16 at a time. Start without offset for v23 project startup, scene, selection, and assembly guidance. Follow next_offset."),
+    ("scene_inspect", "Page scene objects and transforms via next_offset. First page adds v23 startup, selection and assembly context."),
     ("scene_create", "Create a cube, sphere, capsule or triangular prism. In v23, parent_id and transform place a part using its parent’s local axes and units."),
     ("scene_primitive", "Set built-in geometry: sphere, capsule, triangular_prism or null (cube). Prism: 1 unit per axis, centered pivot, +Y up, ridge along local Z."),
     ("scene_rename", "Rename an object. Its ID stays the same."),
@@ -50,7 +50,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("viewport_capture_start", "Start a screenshot of the viewport; fetch it with viewport_capture_inspect. viewport_screenshot does both."),
     ("viewport_capture_inspect", "Fetch a screenshot started with viewport_capture_start, or its pending state."),
     ("viewport_screenshot", "Take a screenshot of the viewport (at most 512 pixels) and return it as an image."),
-    ("viewport_frame", "Frame a visible v23 object and its descendants from world front, side or top. Changes the editor camera only. Use viewport_screenshot to inspect the result."),
+    ("viewport_frame", "Frame a visible v23 subtree from world front, side or top. Check with viewport_screenshot."),
     ("creation_export_inspect", "Read the current or last v23 Linux editor build, startup scene and recovery guidance with no arguments. For legacy exports, read settings and status, optionally by operation_id."),
     ("creation_export_start", "Build the saved scene as a Linux application. Returns an operation_id; follow it with creation_export_inspect."),
     ("creation_export_cancel", "Cancel the running build."),

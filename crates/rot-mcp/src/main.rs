@@ -398,6 +398,34 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
                     .is_some());
     }
     if name == "asset_inspect" {
+        if args.contains_key("usage_asset_id") {
+            let guards = [
+                "expected_session_token",
+                "expected_revision",
+                "expected_asset_revision",
+            ];
+            let count = guards.iter().filter(|key| args.contains_key(**key)).count();
+            return exact_keys(
+                args,
+                &["usage_asset_id"],
+                &[
+                    "offset",
+                    "expected_session_token",
+                    "expected_revision",
+                    "expected_asset_revision",
+                ],
+            ) && args["usage_asset_id"]
+                .as_str()
+                .is_some_and(|id| rot_scene::validate_id(id).is_ok())
+                && args.get("offset").is_none_or(canonical_u64)
+                && ((count == 0 && args.get("offset").is_none_or(|offset| offset == "0"))
+                    || (count == 3
+                        && args["expected_session_token"]
+                            .as_str()
+                            .is_some_and(|token| !token.is_empty() && token.len() <= 256)
+                        && canonical_u64(&args["expected_revision"])
+                        && canonical_u64(&args["expected_asset_revision"])));
+        }
         return exact_keys(
             args,
             &[],
@@ -654,6 +682,10 @@ fn tools() -> Value {
             properties.insert("model_offset".into(), decimal.clone());
             properties.insert("prefab_offset".into(), decimal.clone());
             properties.insert("issue_offset".into(), decimal.clone());
+            properties.insert("usage_asset_id".into(), json!({"type":"string","description":"Exact v23 texture ID. Use offset for usage pages."}));
+            properties.insert("expected_session_token".into(), json!({"type":"string"}));
+            properties.insert("expected_revision".into(), decimal.clone());
+            properties.insert("expected_asset_revision".into(), decimal.clone());
         }
         if name == "scene_model_place" { properties.insert("name".into(), json!({"type":"string","minLength":1,"maxLength":128,"description":"Optional display name for the creator-owned placement root."})); }
         if name == "scene_prefab" {
@@ -801,7 +833,7 @@ fn listed() -> Value {
         let name = tool["name"].as_str().unwrap().to_owned();
         let schema = &mut tool["inputSchema"];
         if name != "scene_save" {
-            if name != "scene_components_edit" {
+            if !matches!(name.as_str(), "scene_components_edit" | "asset_inspect") {
                 if let Some(properties) =
                     schema.get_mut("properties").and_then(Value::as_object_mut)
                 {
@@ -1765,6 +1797,35 @@ mod tests {
             &json!({"expected_session_token":"s","expected_revision":"0",
             "object_id":"rig","new_object_id":"copy","name":"Copy"})
         ));
+    }
+
+    #[test]
+    fn texture_uses_is_read_only_and_requires_exact_continuation_guards() {
+        let first = json!({"usage_asset_id":"panel"});
+        assert!(valid_arguments("asset_inspect", &first));
+        assert!(!valid_arguments(
+            "asset_inspect",
+            &json!({"usage_asset_id":"panel","offset":"16"})
+        ));
+        assert!(!valid_arguments(
+            "asset_inspect",
+            &json!({"usage_asset_id":"panel","model_offset":"16"})
+        ));
+        let next = json!({"usage_asset_id":"panel","offset":"16",
+            "expected_session_token":"s","expected_revision":"1","expected_asset_revision":"2"});
+        assert!(valid_arguments("asset_inspect", &next));
+        let list = listed();
+        let tool = list["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "asset_inspect")
+            .unwrap();
+        assert_eq!(tool["annotations"]["readOnlyHint"], true);
+        assert_eq!(
+            tool["inputSchema"]["properties"]["expected_asset_revision"]["type"],
+            "string"
+        );
     }
 
     #[test]

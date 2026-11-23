@@ -724,6 +724,11 @@ impl Browser {
         (selected, place)
     }
 
+    pub(super) fn selected_texture(&self) -> Option<&str> {
+        let row = self.rows.get(*self.by_id.get(self.selected.as_ref()?)?)?;
+        (row.registered && row.kind == "Texture").then_some(row.id.as_str())
+    }
+
     pub(super) fn inspect(
         &mut self,
         ui: &mut egui::Ui,

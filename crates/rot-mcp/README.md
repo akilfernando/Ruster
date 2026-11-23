@@ -76,6 +76,17 @@ connected project.
   from `asset_inspect`. Use a separate asset ID if the source is also used
   as Base Color. When the import is ready, set `roughness_texture` on the
   shared material, keeping the existing response and scalar roughness.
+- To find uses of one exact v23 texture, call
+  `asset_inspect {"usage_asset_id":"<texture-id>"}` with the ID from the
+  catalog or a material slot. The reply lists material IDs and slots, exact
+  object and Mesh Renderer IDs, enabled and prefab ownership flags, and
+  unassigned materials with null owner and renderer IDs. Known authored IDs
+  still report uses if their source is missing. Different interpretations
+  of a PNG have different IDs.
+  For the next page, pass the same `usage_asset_id`, `offset` from
+  `next_offset`, and set `expected_session_token`, `expected_revision`,
+  and `expected_asset_revision` from `session_token`, `revision`, and
+  `asset_revision`. Restart from the first page if a guard is stale.
 - For v23 **Emission Color**, read `emission_color` from the exact shared
   material and check its assignment count before calling guarded
   `scene_material_set`. Supply three linear RGB channels in `[0, 1]`.

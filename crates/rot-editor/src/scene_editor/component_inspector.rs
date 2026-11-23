@@ -197,6 +197,7 @@ pub(super) fn mesh_renderer_heading(ordinal: Option<usize>) -> std::borrow::Cow<
 }
 
 pub(super) struct ComponentControls<'a> {
+    pub reveal: Option<&'a str>,
     pub(super) allow_new_material: bool,
     pub(super) allow_spot_aim: bool,
     pub(super) allow_sound_cues: bool,
@@ -227,6 +228,7 @@ pub(super) fn components(
         allow_sound_cues,
         diagnostic,
         collider_edit,
+        reveal,
     } = controls;
     use super::component_workspace::component_material::{Intent, Request};
     use super::component_workspace::component_sound::Request as SoundCueRequest;
@@ -269,6 +271,7 @@ pub(super) fn components(
         let widget = egui::CollapsingHeader::new(heading.as_ref())
             .id_salt((&draft.id, &component.id))
             .default_open(editable)
+            .open((reveal == Some(component.id.as_str())).then_some(true))
             .show(ui, |ui| {
                 ui.checkbox(
                     &mut component.enabled,
@@ -580,6 +583,11 @@ pub(super) fn components(
                 }
             });
         if editable {
+            if reveal == Some(component.id.as_str()) {
+                widget
+                    .header_response
+                    .scroll_to_me(Some(egui::Align::Center));
+            }
             widget.header_response.context_menu(|ui| {
                 if ui.button(Text::ComponentRemove.plain()).clicked() {
                     remove = Some(index);

@@ -284,6 +284,9 @@ impl ComponentWorkspace {
             return self.inspect_components(args);
         }
         if op == "asset_inspect" {
+            if map.contains_key("usage_asset_id") {
+                return self.inspect_texture_uses(token, args);
+            }
             return self.inspect_assets(args);
         }
         #[cfg(target_os = "linux")]
