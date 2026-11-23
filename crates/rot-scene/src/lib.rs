@@ -1638,7 +1638,7 @@ impl Document {
             migrate_legacy_document_huds(&mut value)?;
         }
         if (1..=u64::from(ANIMATION_FORMAT_VERSION)).contains(&version) {
-            reject_legacy_sound_playback_fields(&value)?;
+            reject_legacy_component_cue_fields(&value)?;
         }
         let document: Self = match version {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
@@ -1877,11 +1877,13 @@ fn reject_pre_v14_command_fields(value: &serde_json::Value) -> Result<(), SceneE
     }
 }
 
-fn reject_legacy_sound_playback_fields(value: &serde_json::Value) -> Result<(), SceneError> {
+fn reject_legacy_component_cue_fields(value: &serde_json::Value) -> Result<(), SceneError> {
     let has_playback = |binding: &serde_json::Value| {
         binding["properties"].as_object().is_some_and(|properties| {
             properties.values().any(|property| {
-                property["type"] == "sound_ref" && property["value"].get("playback").is_some()
+                property["type"] == "sensor_ref"
+                    || (property["type"] == "sound_ref"
+                        && property["value"].get("playback").is_some())
             })
         })
     };
@@ -1895,7 +1897,7 @@ fn reject_legacy_sound_playback_fields(value: &serde_json::Value) -> Result<(), 
         .any(|delta| has_playback(&delta["before"]) || has_playback(&delta["after"]));
     if current || historical {
         Err(SceneError::Invalid(
-            "Sound playback mode requires a v23 component scene.".into(),
+            "Positional sound and named sensors require a v23 component scene.".into(),
         ))
     } else {
         Ok(())

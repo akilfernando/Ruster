@@ -423,6 +423,49 @@ impl SpatialWorld {
         unreachable!("bounded solver returns at its contact limit")
     }
 
+    /// Compare two admitted owner positions against a stationary Box Sensor.
+    pub(crate) fn sensor_occupancy(
+        &self,
+        probe_id: &str,
+        sensor_id: &str,
+        endpoint: [f32; 3],
+        cancel: &impl Fn() -> bool,
+    ) -> Result<(bool, bool), String> {
+        let entry = |id: &str| {
+            self.entries
+                .binary_search_by(|entry| entry.id.as_str().cmp(id))
+                .ok()
+                .map(|index| &self.entries[index])
+        };
+        let probe =
+            entry(probe_id).ok_or_else(|| format!("sphere mover {probe_id:?} is unavailable"))?;
+        let sensor = entry(sensor_id)
+            .filter(|entry| {
+                entry.resolved.role == ColliderRole::Sensor
+                    && matches!(entry.resolved.shape, ResolvedShape::Box { .. })
+            })
+            .ok_or_else(|| {
+                format!("sensor {sensor_id:?} requires an enabled Box Collider Sensor")
+            })?;
+        let occupant = |sphere: &ResolvedCollider| -> Result<bool, String> {
+            let result = contact(sphere, &sensor.resolved, 0.0, cancel)?;
+            if result
+                .as_ref()
+                .is_some_and(|contact| !finite_contact(contact))
+            {
+                return Err("sensor query returned non-finite contact geometry".into());
+            }
+            Ok(result.is_some_and(|contact| contact.dist <= 0.0))
+        };
+        let previous = occupant(&probe.resolved)?;
+        let next = if endpoint == probe.owner.translation {
+            previous
+        } else {
+            occupant(&probe.at(endpoint)?)?
+        };
+        Ok((previous, next))
+    }
+
     pub(crate) fn overlap(
         &self,
         probe_id: &str,

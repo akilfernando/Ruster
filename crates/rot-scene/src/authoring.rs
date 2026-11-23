@@ -178,6 +178,7 @@ pub enum PropertyValue {
     ObjectRef(Option<String>),
     AssetRef(Option<String>),
     SoundRef(SoundRef),
+    SensorRef(String),
 }
 impl PropertyValue {
     pub fn validate(&self) -> Result<(), SceneError> {
@@ -193,7 +194,9 @@ impl PropertyValue {
                     "property text exceeds1024 UTF-8 bytes".into(),
                 ))
             }
-            Self::ObjectRef(Some(id)) | Self::AssetRef(Some(id)) => validate_id(id)?,
+            Self::ObjectRef(Some(id)) | Self::AssetRef(Some(id)) | Self::SensorRef(id) => {
+                validate_id(id)?
+            }
             Self::SoundRef(sound) => {
                 if !(0.0..=1.0).contains(&sound.gain) {
                     return Err(SceneError::Invalid(
@@ -510,6 +513,17 @@ impl Authoring {
         for (id, binding) in &self.bindings {
             validate_id(id)?;
             let bytes = binding.validate_and_state_bytes()?;
+            if !projection.allows_named_sensors()
+                && binding
+                    .properties
+                    .values()
+                    .any(|property| matches!(property, PropertyValue::SensorRef(_)))
+            {
+                return Err(SceneError::Invalid(format!(
+                    "Binding {id}: named sensors require a v23 component scene."
+                )));
+            }
+
             if !projection.allows_positional_audio() && binding.properties.values().any(|value| {
                 matches!(value, PropertyValue::SoundRef(sound) if sound.playback.range().is_some())
             }) {
@@ -566,7 +580,9 @@ impl Authoring {
             b.scene_owner_id()
                 .into_iter()
                 .chain(b.properties.values().filter_map(|v| match v {
-                    PropertyValue::ObjectRef(Some(id)) => Some(id.as_str()),
+                    PropertyValue::ObjectRef(Some(id)) | PropertyValue::SensorRef(id) => {
+                        Some(id.as_str())
+                    }
                     _ => None,
                 }))
         })

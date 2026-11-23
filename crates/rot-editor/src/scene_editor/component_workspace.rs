@@ -56,6 +56,9 @@ pub(super) mod component_material;
 #[path = "component_texture_uses.rs"]
 mod component_texture_uses;
 
+#[path = "component_sensor.rs"]
+pub(super) mod component_sensor;
+
 #[path = "component_sound.rs"]
 pub(super) mod component_sound;
 
@@ -290,6 +293,7 @@ pub(super) struct ComponentWorkspace {
     multi_draft: Option<MultiInspector>,
     material_draft: Option<component_material::Draft>,
     sound_cue: Option<component_sound::Draft>,
+    sensor_binding: Option<component_sensor::Draft>,
     display_draft: Option<component_display::Draft>,
     camera_authoring: component_camera::Authoring,
     spot_aim: Option<component_spot::AimPicker>,
@@ -465,6 +469,7 @@ impl ComponentWorkspace {
             multi_draft: None,
             material_draft: None,
             sound_cue: None,
+            sensor_binding: None,
             display_draft: None,
             spot_aim: None,
             camera_authoring: Default::default(),
@@ -830,6 +835,7 @@ impl ComponentWorkspace {
         self.material_draft.is_some()
             || self.game_hud.is_some()
             || self.sound_cue.is_some()
+            || self.sensor_binding.is_some()
             || self.display_draft.is_some()
             || self.input_actions.pending()
             || self.player_pending()
@@ -3085,6 +3091,9 @@ impl ComponentWorkspace {
                                         self.begin_spot_aim(id);
                                     }
                                     self.camera_controls(ui);
+                                    if let Some(request) = edits.sensor_binding {
+                                        self.begin_sensor_binding(request);
+                                    }
                                     if let Some(request) = edits.sound_cue {
                                         self.begin_sound_cue(request);
                                     }
@@ -3151,6 +3160,7 @@ impl ComponentWorkspace {
         self.show_project_settings(&ctx);
         self.show_material_draft(&ctx);
         self.show_sound_cue(&ctx);
+        self.show_sensor_binding(&ctx);
         self.show_game_hud(&ctx);
         self.show_display_draft(&ctx);
         self.show_camera_draft(&ctx);

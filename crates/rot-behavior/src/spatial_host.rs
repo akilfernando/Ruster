@@ -32,6 +32,13 @@ pub enum QueryResult {
     Overlap {
         result: OverlapResult,
     },
+    SensorCrossing {
+        name: String,
+        sensor_id: String,
+        was_inside: bool,
+        is_inside: bool,
+        state: &'static str,
+    },
     MoveAndSlide {
         probe_id: String,
         delta: [f64; 3],
@@ -160,6 +167,27 @@ pub(super) fn kinematic_owner(
             }
         }
     }
+    for (name, property) in &binding.properties {
+        let PropertyValue::SensorRef(id) = property else {
+            continue;
+        };
+        let valid = id != object_id
+            && scene.objects.iter().any(|object| {
+                object.id == *id
+                    && object.collider.is_some_and(|collider| {
+                        collider.enabled
+                            && collider.role == rot_scene::ColliderRole::Sensor
+                            && matches!(collider.shape, rot_scene::ColliderShape::Box { .. })
+                    })
+            })
+            && !authoring
+                .bindings
+                .values()
+                .any(|other| other.enabled && other.object_id() == Some(id));
+        if !valid {
+            return Err(format!("Binding {binding_id}, sensor {name:?} targets {id:?}: choose an enabled, stationary Box Collider Sensor."));
+        }
+    }
     Ok(Some(KinematicOwner {
         binding_id: binding_id.to_owned(),
         object_id: object_id.to_owned(),
@@ -267,6 +295,7 @@ pub(super) fn install_kinematic<'scope, 'env: 'scope>(
     scope: &'scope mlua::Scope<'scope, 'env>,
     host: &Table,
     input: HostInput<'env>,
+    properties: &'env BTreeMap<String, PropertyValue>,
 ) -> mlua::Result<()> {
     let queries = input
         .spatial
@@ -330,6 +359,49 @@ pub(super) fn install_kinematic<'scope, 'env: 'scope>(
                 },
             );
             controller.translation.set(Some(translation));
+            Ok(copied)
+        })?,
+    )?;
+    host.raw_set(
+        "sensor_crossing",
+        scope.create_function(move |lua, name: mlua::LuaString| {
+            let endpoint = controller.translation.get().ok_or_else(|| {
+                mlua::Error::runtime("sensor_crossing requires a successful move_and_slide first")
+            })?;
+            let name = object_id(&name)?;
+            let Some(PropertyValue::SensorRef(sensor_id)) = properties.get(name.as_str()) else {
+                return Err(mlua::Error::runtime(format!(
+                    "unknown named Box Sensor {name:?}"
+                )));
+            };
+            queries.admit()?;
+            let (was_inside, is_inside) = queries
+                .world
+                .sensor_occupancy(&controller.owner.object_id, sensor_id, endpoint, &|| {
+                    queries.cancelled()
+                })
+                .map_err(mlua::Error::runtime)?;
+            let state = match (was_inside, is_inside) {
+                (false, true) => "entered",
+                (true, true) => "inside",
+                (true, false) => "exited",
+                (false, false) => "outside",
+            };
+            let copied = lua.create_table()?;
+            copied.raw_set("state", state)?;
+            copied.raw_set("sensor_id", sensor_id.as_str())?;
+            copied.raw_set("was_inside", was_inside)?;
+            copied.raw_set("is_inside", is_inside)?;
+            queries.observe(
+                input.binding_id,
+                QueryResult::SensorCrossing {
+                    name,
+                    sensor_id: sensor_id.clone(),
+                    was_inside,
+                    is_inside,
+                    state,
+                },
+            );
             Ok(copied)
         })?,
     )

@@ -181,6 +181,7 @@ impl From<&PropertyValue> for ValueDraft {
             PropertyValue::Text(s) => Self::Text(s.clone()),
             PropertyValue::Vec3(v) => Self::Vec3(v.map(|n| n.to_string())),
             PropertyValue::ObjectRef(id) => Self::ObjectRef(id.clone()),
+            PropertyValue::SensorRef(id) => Self::ObjectRef(Some(id.clone())),
             PropertyValue::AssetRef(id) => Self::AssetRef(id.clone()),
             PropertyValue::SoundRef(sound) => Self::SoundRef {
                 asset_id: sound.asset_id.clone(),
@@ -1926,6 +1927,7 @@ fn property_summary(value: &PropertyValue) -> String {
         PropertyValue::Bool(b) => format!("Bool: {b}"),
         PropertyValue::Text(s) => format!("Text: {}", s.chars().take(48).collect::<String>()),
         PropertyValue::Vec3(v) => format!("Vec3: {}, {}, {}", v[0], v[1], v[2]),
+        PropertyValue::SensorRef(id) => format!("Sensor: {id}"),
         PropertyValue::ObjectRef(id) => format!("Object: {}", id.as_deref().unwrap_or("None")),
         PropertyValue::AssetRef(id) => format!("Asset: {}", id.as_deref().unwrap_or("None")),
         PropertyValue::SoundRef(sound) => format!(

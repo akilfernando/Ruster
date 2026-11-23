@@ -318,12 +318,26 @@ impl ComponentScene {
                             && (!matches!(binding.target, BindingTarget::Object(_))
                                 || binding.properties.values().any(|property| {
                                     !matches!(property, crate::PropertyValue::SoundRef(sound) if sound.asset_id.is_some())
+                                        && !matches!(property, crate::PropertyValue::SensorRef(_) if *movement == ScriptMovement::KinematicSphere)
                                 })
                                 || !binding.state_defaults.is_empty()
                                 || !binding.commands.is_empty())
                         {
                             return Err(SceneError::Invalid(format!(
-                                "file-backed script {} requires an object binding with assigned sound cues only",
+                                "file-backed script {} requires assigned sound cues or Kinematic Sphere sensor bindings",
+                                component.id
+                            )));
+                        }
+                        if source_kind.is_none()
+                            && binding.properties.values().any(|property| {
+                                matches!(property, crate::PropertyValue::SensorRef(_))
+                            })
+                            && !self.sources.get(&binding.source_id).is_some_and(|source| {
+                                source.host_api_version == crate::KINEMATIC_HOST_API_VERSION
+                            })
+                        {
+                            return Err(SceneError::Invalid(format!(
+                                "Script {} requires Kinematic Sphere for sensor bindings",
                                 component.id
                             )));
                         }

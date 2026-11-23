@@ -41,11 +41,10 @@ pub(super) fn changed_cues<'a>(
                 .iter()
                 .find(|old| old.id == component.id)
                 .and_then(sound_script);
-            Some(
-                cues.iter().filter(move |(name, value)| {
-                    old.and_then(|old| old.get(*name)) != Some(*value)
-                }),
-            )
+            Some(cues.iter().filter(move |(name, value)| {
+                matches!(value, PropertyValue::SoundRef(_))
+                    && old.and_then(|old| old.get(*name)) != Some(*value)
+            }))
         })
         .flatten()
 }

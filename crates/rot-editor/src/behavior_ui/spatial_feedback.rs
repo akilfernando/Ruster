@@ -21,6 +21,7 @@ fn query_kind(query: &QueryResult) -> u8 {
         QueryResult::Sweep { .. } => 0,
         QueryResult::Overlap { .. } => 1,
         QueryResult::MoveAndSlide { .. } => 2,
+        QueryResult::SensorCrossing { .. } => 3,
     }
 }
 
@@ -62,6 +63,12 @@ fn description(observation: &QueryObservation, scene: &rot_scene::Scene) -> Stri
             result.contacts.len(),
             if result.contacts.len() == 1 { "" } else { "s" }
         ),
+        QueryResult::SensorCrossing {
+            name: cue,
+            sensor_id,
+            state,
+            ..
+        } => format!("{cue} · {} · {state}", name(sensor_id)),
         QueryResult::Overlap { result } => format!(
             "{} · {}",
             name(&result.sensor_id),
@@ -88,9 +95,9 @@ impl RuntimeUi {
         } else {
             // Names and geometry stay in the hover/menu. The primary states must
             // remain readable in the fixed Control row at compact viewport widths.
-            let mut states = Vec::with_capacity(3);
-            let mut details = Vec::with_capacity(3);
-            for kind in 0..3 {
+            let mut states = Vec::with_capacity(4);
+            let mut details = Vec::with_capacity(4);
+            for kind in 0..4 {
                 if let Some(observation) = queries
                     .iter()
                     .rev()
@@ -104,6 +111,12 @@ impl RuntimeUi {
                             SweepOutcome::PrecisionLimited => "Limited",
                         },
                         QueryResult::MoveAndSlide { result, .. } => slide_status(result.outcome),
+                        QueryResult::SensorCrossing { state, .. } => match *state {
+                            "entered" => "Entered",
+                            "inside" => "Inside",
+                            "exited" => "Exited",
+                            _ => "Outside",
+                        },
                         QueryResult::Overlap { result } => {
                             if result.overlapping {
                                 "Occupied"
@@ -261,6 +274,14 @@ impl RuntimeUi {
                                     ));
                                 }
                             });
+                    }
+                    QueryResult::SensorCrossing {
+                        sensor_id,
+                        was_inside,
+                        is_inside,
+                        ..
+                    } => {
+                        ui.label(format!("{sensor_id} · {was_inside} → {is_inside}"));
                     }
                     QueryResult::Overlap { result } => {
                         ui.label(format!(

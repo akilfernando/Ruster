@@ -217,6 +217,7 @@ pub(super) struct ComponentEdits {
     pub(super) collider: Option<String>,
     pub(super) spot_aim: Option<String>,
     pub(super) sound_cue: Option<super::component_workspace::component_sound::Request>,
+    pub(super) sensor_binding: Option<super::component_workspace::component_sensor::Request>,
 }
 
 pub(super) fn components(
@@ -240,6 +241,7 @@ pub(super) fn components(
     use super::component_workspace::component_material::{Intent, Request};
     use super::component_workspace::component_sound::Request as SoundCueRequest;
     let mut sound_cue = None;
+    let mut sensor_binding = None;
     let mut material_request = None;
     let mut collider_request = None;
     let mut spot_aim = None;
@@ -547,6 +549,41 @@ pub(super) fn components(
                             );
                             if *movement == ScriptMovement::KinematicSphere {
                                 ui.weak(Text::ScriptKinematicRequirements.plain());
+                                use super::component_workspace::component_sensor::Request;
+                                ui.strong(Text::SensorCrossings.plain());
+                                for (name, property) in &binding.properties {
+                                    if let rot_scene::PropertyValue::SensorRef(id) = property {
+                                        ui.horizontal_wrapped(|ui| {
+                                            ui.monospace(format!("host.sensor_crossing({name:?})"));
+                                            if ui
+                                                .add_enabled(
+                                                    allow_sound_cues,
+                                                    egui::Button::new(Text::SensorEdit.plain()),
+                                                )
+                                                .on_hover_text(id)
+                                                .clicked()
+                                            {
+                                                sensor_binding = Some(Request {
+                                                    component: component.id.clone(),
+                                                    name: Some(name.clone()),
+                                                });
+                                            }
+                                        });
+                                    }
+                                }
+                                if ui
+                                    .add_enabled(
+                                        allow_sound_cues
+                                            && binding.properties.len() < rot_scene::MAX_PROPERTIES,
+                                        egui::Button::new(Text::SensorAdd.plain()),
+                                    )
+                                    .clicked()
+                                {
+                                    sensor_binding = Some(Request {
+                                        component: component.id.clone(),
+                                        name: None,
+                                    });
+                                }
                             }
                             ui.strong("Sound Cues");
                             for (name, property) in &binding.properties {
@@ -628,6 +665,7 @@ pub(super) fn components(
         collider: collider_request,
         spot_aim,
         sound_cue,
+        sensor_binding,
     }
 }
 

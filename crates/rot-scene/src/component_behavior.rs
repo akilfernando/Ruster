@@ -119,6 +119,7 @@ fn missing_camera_transform() -> SceneError {
 pub struct RuntimeProjection {
     local_leaf_scripts: bool,
     positional_audio: bool,
+    named_sensors: bool,
     attached_lights: Option<Arc<AttachedLights>>,
 }
 
@@ -147,6 +148,10 @@ impl AttachedLights {
 }
 
 impl RuntimeProjection {
+    pub(crate) fn allows_named_sensors(&self) -> bool {
+        self.named_sensors
+    }
+
     pub(crate) fn allows_positional_audio(&self) -> bool {
         self.positional_audio
     }
@@ -160,6 +165,12 @@ impl RuntimeProjection {
     }
 
     pub(crate) fn require_legacy_export(&self) -> Result<(), SceneError> {
+        if self.named_sensors {
+            return Err(SceneError::Invalid(
+                "Save the authored component scene to keep named sensors.".into(),
+            ));
+        }
+
         if self.positional_audio {
             return Err(SceneError::Invalid(
                 "Save the authored component scene to keep positional sound cues.".into(),
@@ -331,12 +342,14 @@ impl ComponentScene {
             None => None,
         };
         let mut positional_audio = false;
+        let mut named_sensors = false;
         for (index, object) in self.objects.iter().enumerate() {
             for component in &object.components {
                 let Component::Script { binding, .. } = &component.kind else {
                     continue;
                 };
                 for (name, property) in &binding.properties {
+                    named_sensors |= matches!(property, crate::PropertyValue::SensorRef(_));
                     let crate::PropertyValue::SoundRef(cue) = property else {
                         continue;
                     };
@@ -566,6 +579,7 @@ impl ComponentScene {
         scene.validate()?;
         let projection = RuntimeProjection {
             positional_audio,
+            named_sensors,
             local_leaf_scripts: !scene.hierarchy.is_empty()
                 && authoring.group_creation_blockers(&scene).next().is_some(),
             attached_lights: (!attached.is_empty()).then(|| Arc::new(AttachedLights(attached))),

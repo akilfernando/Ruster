@@ -804,6 +804,7 @@ impl ComponentSession {
                     // accidentally give an existing dangling reference meaning.
                     used.extend(binding.properties.values().filter_map(|value| match value {
                         PropertyValue::ObjectRef(id) => id.as_deref(),
+                        PropertyValue::SensorRef(id) => Some(id.as_str()),
                         _ => None,
                     }));
                 }
@@ -866,7 +867,9 @@ impl ComponentSession {
                                 remap(id);
                             }
                             for value in binding.properties.values_mut() {
-                                if let PropertyValue::ObjectRef(Some(id)) = value {
+                                if let PropertyValue::ObjectRef(Some(id))
+                                | PropertyValue::SensorRef(id) = value
+                                {
                                     remap(id);
                                 }
                             }

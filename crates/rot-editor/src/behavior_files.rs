@@ -1014,6 +1014,7 @@ fn property_type(value: &PropertyValue) -> (&'static str, bool) {
         PropertyValue::Bool(_) => ("boolean", false),
         PropertyValue::Text(_) => ("string", false),
         PropertyValue::Vec3(_) => ("RotVec3", false),
+        PropertyValue::SensorRef(_) => ("RotObjectId", false),
         PropertyValue::ObjectRef(v) => ("RotObjectId", v.is_none()),
         PropertyValue::AssetRef(v) => ("RotAssetId", v.is_none()),
         PropertyValue::SoundRef(_) => ("RotSoundRef", false),

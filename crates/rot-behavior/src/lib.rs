@@ -1371,6 +1371,10 @@ impl Engine {
                 Ok((|| -> Result<BindingOutput, Diagnostic> {
                     let (environment, host) = environment(&self.lua, scope, &snapshot, host_input)
                         .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
+                    if host_input.api_version == KINEMATIC_HOST_API_VERSION {
+                        install_kinematic(scope, &host, host_input, properties)
+                            .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
+                    }
                     if let Some(cues) = host_input.audio.filter(|_| {
                         matches!(host_input.api_version,
                             INPUT_HOST_API_VERSION | STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION | KINEMATIC_HOST_API_VERSION)
@@ -1747,9 +1751,7 @@ fn environment<'scope, 'env: 'scope>(
     ) {
         install_state_host(scope, &host, input.state, input.binding_id)?;
     }
-    if input.api_version == KINEMATIC_HOST_API_VERSION {
-        install_kinematic(scope, &host, input)?;
-    }
+
     Ok((environment, host))
 }
 fn transform_table(lua: &Lua, transform: &Transform) -> mlua::Result<Table> {
@@ -1776,6 +1778,7 @@ fn property_value(lua: &Lua, property: &PropertyValue) -> mlua::Result<Value> {
             value.raw_set("gain", sound.gain)?;
             Value::Table(value)
         }
+        PropertyValue::SensorRef(id) => Value::String(lua.create_string(id)?),
         PropertyValue::ObjectRef(id) | PropertyValue::AssetRef(id) => match id {
             Some(id) => Value::String(lua.create_string(id)?),
             None => Value::Nil,

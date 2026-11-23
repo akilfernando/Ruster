@@ -1257,6 +1257,15 @@ impl ComponentWorkspace {
                 if let Component::Script { movement, .. } = &component.kind {
                     response["movement"] = json!(movement);
                 }
+                if matches!(
+                    &component.kind,
+                    Component::Script {
+                        movement: rot_scene::component_scene::ScriptMovement::KinematicSphere,
+                        ..
+                    }
+                ) {
+                    response["sensor_guidance"] = json!("Use sensor_ref with the stable owner ID of an enabled stationary Box Collider Sensor. After successful host.move_and_slide, call host.sensor_crossing(name) and read state.");
+                }
                 response["movement_guidance"] = json!("An exact replace can set component.movement to kinematic_sphere or ordinary (omission keeps it). Kinematic Sphere needs a flat scene, one enabled mover, an enabled uniformly scaled Blocker Sphere, and stationary blockers. Call host.move_and_slide({dx,dy,dz}) once per Step, use suggested_translation, and return {transform=object}.");
                 response["sound_cue_guidance"] = json!(
                     r#"File-backed Object Lua calls host.play_sound("cue-name"). Use binding.properties sound_ref value {asset_id,gain}. For positional add playback:{type:"positional",range:10} and activate a Transform Perspective Game Camera. Omit playback for 2D. Find WAVs in asset_inspect and pin expected_asset_revision."#
@@ -1430,6 +1439,34 @@ impl ComponentWorkspace {
                     .then_some(binding.source_id.as_str())
                 })
                 .collect();
+            for component in &object.components {
+                let Component::Script { binding, .. } = &component.kind else {
+                    continue;
+                };
+                let prior = before
+                    .components
+                    .iter()
+                    .find_map(|prior| match &prior.kind {
+                        Component::Script { binding, .. } if prior.id == component.id => {
+                            Some(binding)
+                        }
+                        _ => None,
+                    });
+                for (name, value) in &binding.properties {
+                    let rot_scene::PropertyValue::SensorRef(id) = value else {
+                        continue;
+                    };
+                    if prior.and_then(|prior| prior.properties.get(name)) == Some(value) {
+                        continue;
+                    }
+                    let target = indices
+                        .get(id.as_str())
+                        .map(|&i| &changed[i])
+                        .or_else(|| originals.get(id.as_str()).copied());
+                    super::component_sensor::validate(&object.id, name, id, target)
+                        .map_err(|message| ("sensor_unavailable", message))?;
+                }
+            }
             let mut cues = super::component_sound::changed_cues(before, object).peekable();
             let mut animations = component_animation::changed_bindings(before, object).peekable();
             if self.changes_textured_binding(before, object)

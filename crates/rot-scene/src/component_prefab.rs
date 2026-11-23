@@ -519,7 +519,9 @@ impl PrefabSource {
                             }
                         }
                         for value in binding.properties.values_mut() {
-                            if let PropertyValue::ObjectRef(Some(id)) = value {
+                            if let PropertyValue::ObjectRef(Some(id))
+                            | PropertyValue::SensorRef(id) = value
+                            {
                                 *id = scene_id(id)?;
                             }
                         }
@@ -756,7 +758,7 @@ impl PrefabSource {
                     )));
                 }
                 Component::Script { binding, .. } if binding.properties.values().any(|value| {
-                    matches!(value, PropertyValue::ObjectRef(Some(id)) if !ids.contains(id.as_str()))
+                    matches!(value, PropertyValue::ObjectRef(Some(id)) | PropertyValue::SensorRef(id) if !ids.contains(id.as_str()))
                 }) => {
                     return Err(invalid(format!("Script {} references an object outside the prefab.", component.id)));
                 }
