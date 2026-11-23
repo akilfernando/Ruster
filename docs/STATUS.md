@@ -88,6 +88,21 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+**Save Scene As** creates a v23 sibling with a fresh scene ID, stable object
+and component IDs, and a clean Undo history. Market Night retained the linked
+stalls and their local override, Game Camera and textured banner. It included
+Claude's unsaved move and a valid Inspector name draft. Cancel, invalid name,
+collision and a refused write preserved Market Day's edit context. The original
+scene, project routing and asset bytes and modification times matched after
+publication. Approved Claude reconnected, inspected the fresh ID and edited the
+retained banner. Both scenes reopened independently. The relocated Vulkan build
+rendered the variant after it was chosen as startup. Buffered staging brought
+the first paired 5,000-object dispatch from 464.380 to 45.229 ms p95.
+Across three warmed release runs, Save As reached the first editable frame
+at 49.8–50.2 ms p50 and 51.5–52.0 ms p95. Save then Open reached it at
+53.4–54.1 ms p50 and 54.7–56.2 ms p95. Peak process RSS was 79.5–80.3 MiB
+and 74.4–75.0 MiB, respectively.
+
 **Unpack Prefab Instance** detaches one v23 root while retaining its
 materialized hierarchy and local edits. The middle cottage kept its roof
 width, local textured material and IDs. It accepted a new chimney. Source
