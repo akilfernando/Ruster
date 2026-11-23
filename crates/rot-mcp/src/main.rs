@@ -1925,6 +1925,18 @@ mod tests {
             );
         }
 
+        let create = tools
+            .iter()
+            .find(|tool| tool["name"] == "scene_create")
+            .unwrap();
+        let description = create["description"].as_str().unwrap();
+        assert!(description.contains("radius 0.5 and height 2 along +Y"));
+        assert!(description.contains("parent_id makes transform parent-local"));
+        assert!(create["inputSchema"]["properties"]["primitive"]["enum"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("cylinder")));
+
         let save = tools
             .iter()
             .find(|tool| tool["name"] == "scene_save")

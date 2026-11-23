@@ -156,6 +156,16 @@ mod tests {
             description["result"]["inputSchema"]["required"],
             json!(["object_id", "color"])
         );
+        let primitive = invoke(
+            &mut server,
+            "rot_tools",
+            json!({"action":"describe","name":"scene_primitive"}),
+            &mut local,
+        );
+        assert!(primitive["result"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("radius 0.5 and height 2 along +Y"));
         let mut args = json!({
             "expected_session_token":"owner","expected_revision":2,
             "object_id":"cube","color":[0,0.5,1,1]
