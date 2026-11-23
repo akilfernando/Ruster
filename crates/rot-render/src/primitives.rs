@@ -250,7 +250,7 @@ mod tests {
         );
 
         let mut edges = HashMap::new();
-        for triangle in mesh.indices.chunks_exact(3) {
+        for triangle in mesh.indices.as_chunks::<3>().0 {
             let [a, b, c] = [triangle[0], triangle[1], triangle[2]].map(|id| points[id as usize]);
             let normal = (b - a).cross(c - a).normalize();
             let interior = Vec3::new(0.0, -0.2, 0.0);
