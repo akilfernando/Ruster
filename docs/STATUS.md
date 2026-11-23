@@ -29,6 +29,14 @@ Hub's Empty template creates v23. The editor can inspect objects, edit name,
 enabled state and Transform, add Mesh Renderers and Colliders, create,
 move or delete objects together, and save. Inspector edits shared Transform
 and component values. Viewport settings stay local. Automatic upgrades remain open.
+File → New Scene and the command palette create a named, saved v23 sibling.
+The new scene has its own history and MCP session. Same-project switches keep
+Assets and the startup setting. Competing files and cancelled creation leave
+the original workspace intact. Approved Claude reused an imported Blender
+model across two independently saved scenes, and relocated Vulkan loaded
+the new Title. Release Create reached the first editable tessellated frame
+in 0.867 ms p95. Same-project Open kept the loaded catalog and reduced
+equivalent sibling Open from 5.711 to 0.811 ms p95.
 Project Settings can designate a saved v23 sibling as the startup scene.
 The Hub opens it and Linux Build packages its saved dependency closure.
 Explicit file Open uses the chosen document, and Play runs the active scene.
