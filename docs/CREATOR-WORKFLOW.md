@@ -72,6 +72,21 @@ The new scene uses the existing project Assets and keeps the project's
 startup setting. To edit it with an approved MCP client, connect to the
 newly opened scene and inspect its session and revision before editing.
 
+
+### Recover a scene after an unexpected exit
+
+Rot periodically checkpoints committed changes in the open v23 scene,
+including changes made by an approved AI client. After a crash, choose
+**Recover as New Scene** to open the latest completed checkpoint as a
+separate saved scene in its original project. The original scene and
+project startup selection stay in place. If a recovered filename is already
+taken, Rot tries a numbered sibling.
+
+Checkpoints contain scene changes and asset references. Unapplied edits,
+Undo history, and Play state are outside the checkpoint. Choose **Keep for
+Later** or reopen the list through **File → Recovery Checkpoints…**.
+**Discard Recovery Copy** removes the checkpoint.
+
 ## Choose a project startup scene
 
 Save a v23 scene directly in the project folder. Open **Edit → Project
