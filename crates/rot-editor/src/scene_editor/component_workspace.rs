@@ -2457,7 +2457,7 @@ impl ComponentWorkspace {
             &ctx,
             blocked || asset_dialog || self.project_settings.is_some(),
         );
-        if let Some(action) = self.workspace.shortcuts(
+        if let Some(action) = self.workspace.component_shortcuts(
             &ctx,
             blocked
                 || asset_dialog

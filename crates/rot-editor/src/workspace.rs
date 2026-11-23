@@ -1412,6 +1412,19 @@ impl Workspace {
             .unwrap_or_default()
     }
     pub fn shortcuts(&mut self, ctx: &egui::Context, blocked: bool) -> Option<Action> {
+        self.workspace_shortcuts(ctx, blocked, false)
+    }
+
+    pub fn component_shortcuts(&mut self, ctx: &egui::Context, blocked: bool) -> Option<Action> {
+        self.workspace_shortcuts(ctx, blocked, true)
+    }
+
+    fn workspace_shortcuts(
+        &mut self,
+        ctx: &egui::Context,
+        blocked: bool,
+        component_hierarchy: bool,
+    ) -> Option<Action> {
         if let Some(action) = self.capture {
             if !ctx.input(|i| i.focused) {
                 return None;
@@ -1470,17 +1483,23 @@ impl Workspace {
         if blocked || self.settings_open || !ctx.input(|i| i.focused) {
             return None;
         }
-        // Text fields own typing; only panel switching (F6) passes through.
+        // Text fields own typing. Panel switching and the Hierarchy search
+        // chord may move focus without consuming ordinary text input.
         let text_focused = widget_focused && ctx.text_edit_focused();
         // Match each press exactly, even if its modifiers were released later
         // in this frame. Preserve Ctrl+Shift+S independently from Ctrl+S.
         self.prefs.bindings.iter().find_map(|binding| {
-            // Focus navigation remains reachable from ordinary focused controls.
-            if text_focused && !matches!(binding.action, Action::NextPanel | Action::PreviousPanel)
+            let focus_search = component_hierarchy
+                && binding.action == Action::FindObjects
+                && (!text_focused || binding.ctrl || binding.alt);
+            if text_focused
+                && !focus_search
+                && !matches!(binding.action, Action::NextPanel | Action::PreviousPanel)
             {
                 return None;
             }
             if widget_focused
+                && !focus_search
                 && !matches!(
                     binding.action,
                     Action::FocusRuntime
