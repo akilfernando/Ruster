@@ -80,6 +80,18 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+**Material Tiling, Offset and Wrap** work in v23 Edit Material. Base Color
+and Roughness share the sampled UVs. Compatible Blender scale and offset
+import directly. An earlier accepted file reopened pixel-identically and
+Reimport exposed the new mapping for subsequent placements. Approved Claude
+changed only the offset and native Undo restored it. Repeat and Clamp matched
+independent baked UV frames, and 25 sampled landmarks matched in a relocated
+Linux Vulkan build. At 5,000 visible placements, the median release instance
+upload p95 was 0.156 ms before and 0.168 ms with tiling support. Instance
+payload rose from 860 to 940 KB. Scene GPU p95 was 0.383 ms before and
+0.371–0.381 ms with identity or tiled materials, with one draw and zero warmed
+texture uploads.
+
 **Animator Button triggers** start an imported clip on a committed press.
 The Inspector and approved MCP share the setting and Undo. Two Blender
 drawbridges verified independent starting, holding, restarting, looping and
