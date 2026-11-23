@@ -1663,7 +1663,7 @@ pub(super) fn verify_cube_material(device: &wgpu::Device, queue: &wgpu::Queue) {
         };
         camera.set_preset(preset);
         let (view, projection, _) = camera.matrices(256. / 192.);
-        let binding = draw_material_binding(&cube, None, Some(surface));
+        let binding = draw_material_binding(&cube, None, Some(surface)).into_owned();
         assert!(!binding.missing && !binding.missing_roughness);
         let callback = SceneCallback {
             show_editor_grid: false,
