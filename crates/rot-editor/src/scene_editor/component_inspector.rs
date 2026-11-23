@@ -193,7 +193,7 @@ pub(super) fn components(
 ) -> (
     bool,
     Option<super::component_workspace::component_material::Request>,
-    Option<u64>,
+    Option<(String, u64)>,
 ) {
     use super::component_workspace::component_material::{Intent, Request};
     let mut material_request = None;
@@ -357,7 +357,9 @@ pub(super) fn components(
                         }
                     }
                     Component::Animator { binding } => {
-                        animator_fields(ui, binding, assets, &mut animator_revision);
+                        if let Some(revision) = animator_fields(ui, binding, assets) {
+                            animator_revision = Some((component.id.clone(), revision));
+                        }
                         if ui.button(Text::ComponentRemove.plain()).clicked() {
                             remove = Some(index);
                         }
@@ -412,8 +414,8 @@ fn animator_fields(
     ui: &mut egui::Ui,
     binding: &mut rot_scene::AnimationBinding,
     assets: Option<&rot_assets::AssetStore>,
-    draft_revision: &mut Option<u64>,
-) {
+) -> Option<u64> {
+    let mut draft_revision = None;
     let source = assets.and_then(|store| store.clip_owner(&binding.clip));
     if let Some((model, name)) = source {
         let duration = model.clips[name].duration;
@@ -440,7 +442,7 @@ fn animator_fields(
                             if binding.clip != clip.id {
                                 binding.clip.clone_from(&clip.id);
                             }
-                            *draft_revision = assets.map(rot_assets::AssetStore::revision);
+                            draft_revision = assets.map(rot_assets::AssetStore::revision);
                             selected = true;
                             ui.close();
                         }
@@ -457,6 +459,7 @@ fn animator_fields(
     }
     ui.checkbox(&mut binding.looping, Text::Loop.plain())
         .on_hover_text(Text::AnimationRepeatTheClipOtherwise.plain());
+    draft_revision
 }
 
 pub(super) fn geometry_name<'a>(

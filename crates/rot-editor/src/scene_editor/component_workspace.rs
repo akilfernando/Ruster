@@ -236,7 +236,7 @@ pub(super) struct ComponentWorkspace {
     selection_anchor: Option<String>,
     selected_index: Option<usize>,
     draft: Option<ObjectNode>,
-    animator_draft_revision: Option<u64>,
+    animator_draft_revisions: BTreeMap<String, u64>,
     multi_draft: Option<MultiInspector>,
     material_draft: Option<component_material::Draft>,
     display_draft: Option<component_display::Draft>,
@@ -352,7 +352,7 @@ impl ComponentWorkspace {
             selection: HashSet::new(),
             selection_anchor: None,
             draft: None,
-            animator_draft_revision: None,
+            animator_draft_revisions: BTreeMap::new(),
             multi_draft: None,
             material_draft: None,
             display_draft: None,
@@ -626,7 +626,7 @@ impl ComponentWorkspace {
         } else {
             None
         };
-        self.animator_draft_revision = None;
+        self.animator_draft_revisions.clear();
         self.draft = self.selected_index.map(|index| objects[index].clone());
         self.multi_draft = if self.selection.len() > 1 {
             MultiInspector::new(
@@ -828,9 +828,12 @@ impl ComponentWorkspace {
             let prior = &self.session.scene().objects
                 [self.selected_index.expect("draft requires selection")];
             let check_animation = || {
-                for (old, binding) in super::component_animation::changed_bindings(prior, &draft) {
+                for (id, old, binding) in
+                    super::component_animation::changed_bindings(prior, &draft)
+                {
                     if self.assets_loading()
-                        || self.animator_draft_revision != Some(self.material_asset_revision())
+                        || self.animator_draft_revisions.get(id).copied()
+                            != Some(self.material_asset_revision())
                     {
                         return Err(SceneError::Invalid(
                             Text::AnimatorAssetsChanged.plain().into(),
@@ -2361,8 +2364,8 @@ impl ComponentWorkspace {
                                             self.runtime.diagnostic.as_ref(),
                                         );
                                     submit |= component_submit;
-                                    if let Some(revision) = animator_revision {
-                                        self.animator_draft_revision = Some(revision);
+                                    if let Some((id, revision)) = animator_revision {
+                                        self.animator_draft_revisions.insert(id, revision);
                                     }
                                     self.camera_controls(ui);
                                     if let Some(request) = material_request {

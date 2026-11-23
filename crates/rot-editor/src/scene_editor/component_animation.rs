@@ -14,7 +14,7 @@ pub(super) type Error = (&'static str, String);
 pub(super) fn changed_bindings<'a>(
     prior: &'a ObjectNode,
     proposed: &'a ObjectNode,
-) -> impl Iterator<Item = (Option<&'a AnimationBinding>, &'a AnimationBinding)> {
+) -> impl Iterator<Item = (&'a str, Option<&'a AnimationBinding>, &'a AnimationBinding)> {
     proposed.components.iter().filter_map(move |component| {
         let Component::Animator { binding } = &component.kind else {
             return None;
@@ -27,7 +27,7 @@ pub(super) fn changed_bindings<'a>(
                 _ => None,
             });
         old.is_none_or(|old| old.clip != binding.clip || old.targets != binding.targets)
-            .then_some((old, binding))
+            .then_some((component.id.as_str(), old, binding))
     })
 }
 

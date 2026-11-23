@@ -1067,7 +1067,7 @@ impl ComponentWorkspace {
             {
                 self.require_component_asset_revision(asset_revision)?;
             }
-            for (old, binding) in animations {
+            for (_, old, binding) in animations {
                 component_animation::validate_binding(self.assets.as_ref(), old, binding)?;
             }
             if !new_scripts.is_empty() {
