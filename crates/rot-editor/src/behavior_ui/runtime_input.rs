@@ -571,6 +571,89 @@ mod tests {
     use rot_scene::input::{ActionDefinition, ActionKind};
     use std::time::{Duration, Instant};
 
+    #[test]
+    fn component_game_focus_loss_revokes_keys_even_when_final_focus_is_true() {
+        use rot_scene::component_scene::{ComponentScene, ComponentSession};
+
+        let legacy = Session::new(rot_scene::Scene::empty("focus")).unwrap();
+        let mut scene =
+            ComponentSession::new(ComponentScene::from_legacy(&legacy).unwrap()).unwrap();
+        scene
+            .set_action(
+                0,
+                "move",
+                Some(ActionDefinition {
+                    label: None,
+                    kind: ActionKind::Axis1d {
+                        negative: vec![InputKey::A],
+                        positive: vec![InputKey::D],
+                    },
+                }),
+            )
+            .unwrap();
+        let ctx = egui::Context::default();
+        let mut runtime = RuntimeUi::default();
+        let key = runtime
+            .reset_source(&ctx, RuntimeSource::Components(&scene), 1, None)
+            .unwrap();
+        let wait = |runtime: &mut RuntimeUi, ready: fn(&RuntimeUi) -> bool| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !ready(runtime) {
+                assert!(Instant::now() < deadline, "runtime: {}", runtime.status);
+                runtime.poll(&ctx);
+                std::thread::yield_now();
+            }
+        };
+        wait(&mut runtime, |runtime| runtime.ready);
+        let (tick_reached, resume_tick) =
+            runtime.worker.as_ref().unwrap().gate_input_tick_for_test();
+        runtime.pending = Some(Request::Play(key));
+        runtime.flush();
+        wait(&mut runtime, |runtime| runtime.playing);
+        tick_reached.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        for raw_hook in [true, false] {
+            let worker = runtime.worker.as_ref().unwrap();
+            let meta = worker.current_input_meta(key).unwrap();
+            let lease = worker.claim_input(key, meta.map_identity).unwrap();
+            worker.publish_key_event(lease, InputKey::A, true).unwrap();
+            runtime.input_control.lease = Some(lease);
+            let raw = egui::RawInput {
+                focused: true,
+                events: vec![
+                    egui::Event::WindowFocused(false),
+                    egui::Event::WindowFocused(true),
+                ],
+                ..Default::default()
+            };
+            if raw_hook {
+                runtime.input_raw_focus(&ctx, &raw);
+            } else {
+                ctx.run_ui(raw, |_| {
+                    assert!(ctx.input(|input| input.focused));
+                    runtime.input_begin(&ctx, false);
+                })
+                .textures_delta
+                .clear();
+            }
+            assert!(!runtime.input_owned());
+            let worker = runtime.worker.as_ref().unwrap();
+            let revoked = worker.current_input_meta(key).unwrap();
+            assert!(!revoked.claimed && revoked.epoch > lease.epoch);
+            assert_eq!(
+                worker.publish_key_event(lease, InputKey::A, false),
+                Err(crate::behavior_worker::InputError::StaleLease)
+            );
+        }
+        resume_tick.send(()).unwrap();
+        wait(&mut runtime, |runtime| {
+            runtime.frame.as_ref().is_some_and(|frame| frame.tick > 0)
+        });
+        let input = runtime.frame.as_ref().unwrap().input.as_ref().unwrap();
+        assert_eq!(input.receipt.origin, InputOrigin::Neutral);
+        assert_eq!(input.frame.0["move"], ActionValue::Axis1d { value: 0 });
+    }
+
     // This is the distinct editor boundary: its worker runs independently and
     // early outside cancellation must not turn a Release click into a new claim.
     #[test]
