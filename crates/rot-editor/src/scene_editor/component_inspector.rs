@@ -356,25 +356,31 @@ pub(super) fn components(
                         offset,
                         shape,
                     } => {
-                        if matches!(shape, ColliderShape::Box { .. }) {
-                            if let Some((_, reason)) = collider_edit
-                                .entries
-                                .iter()
-                                .find(|(id, _)| id == &component.id)
-                            {
-                                let active = collider_edit.active.as_ref() == Some(&component.id);
-                                let response = ui.add_enabled(
-                                    reason.is_none(),
-                                    egui::Button::selectable(active, Text::EditCollider.plain()),
-                                );
-                                let response = if let Some(reason) = reason {
-                                    response.on_disabled_hover_text(reason.plain())
-                                } else {
-                                    response.on_hover_text(Text::ColliderEditHint.plain())
-                                };
-                                if response.clicked() {
-                                    collider_request = Some(component.id.clone());
-                                }
+                        if let Some((_, reason)) = collider_edit
+                            .entries
+                            .iter()
+                            .find(|(id, _)| id == &component.id)
+                        {
+                            let active = collider_edit.active.as_ref() == Some(&component.id);
+                            let response = ui.add_enabled(
+                                reason.is_none(),
+                                egui::Button::selectable(active, Text::EditCollider.plain()),
+                            );
+                            let response = if let Some(reason) = reason {
+                                response.on_disabled_hover_text(reason.plain())
+                            } else {
+                                response.on_hover_text(
+                                    match shape {
+                                        ColliderShape::Box { .. } => Text::ColliderEditHint,
+                                        ColliderShape::Sphere { .. } => {
+                                            Text::ColliderRadiusEditHint
+                                        }
+                                    }
+                                    .plain(),
+                                )
+                            };
+                            if response.clicked() {
+                                collider_request = Some(component.id.clone());
                             }
                         }
                         submit |= collider_fields(ui, role, offset, shape);

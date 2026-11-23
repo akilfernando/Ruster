@@ -745,8 +745,12 @@ mod tests {
         editor.select(Some(object_id.clone()));
         editor.toggle_collider_mode("edited-box".into());
         let authored = &scene.objects[0].components[1];
-        let local = super::super::component_collider::box_component(authored).unwrap();
-        let world = editor.collider_for_viewport(0, local).unwrap();
+        let local = super::super::component_collider::collider_component(authored).unwrap();
+        let Ok(super::super::component_collider::WorldCollider::Box(world)) =
+            editor.collider_for_viewport(0, local)
+        else {
+            panic!("fixture box must resolve");
+        };
         editor.navigation.camera = Some(rot_render::CameraState {
             target: world.center.as_vec3().to_array(),
             yaw: 0.54,
@@ -834,7 +838,7 @@ mod tests {
         let committed = &editor.session.scene().objects[0];
         assert_eq!(committed.components[2], scene.objects[0].components[2]);
         let resized =
-            super::super::component_collider::box_component(&committed.components[1]).unwrap();
+            super::super::component_collider::collider_component(&committed.components[1]).unwrap();
         let ColliderShape::Box { half_extents } = resized.shape else {
             unreachable!()
         };

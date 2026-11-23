@@ -1366,10 +1366,11 @@ impl ComponentWorkspace {
                     }
                 );
             }
-            if let Some(collider) = super::component_collider::box_component(component) {
+            if let Some(collider) = super::component_collider::collider_component(component) {
+                use super::component_collider::WorldCollider;
                 let enabled = self.collider_effective(row, collider.enabled);
                 response["collider_world"] = match self.collider_for_viewport(row, collider) {
-                    Ok(world) => json!({
+                    Ok(WorldCollider::Box(world)) => json!({
                         "status": "resolved",
                         "effective_enabled": enabled,
                         "center": world.center.to_array(),
@@ -1377,12 +1378,28 @@ impl ComponentWorkspace {
                         "half_extents": world.half_extents.to_array(),
                         "corners": world.corners(),
                     }),
+                    Ok(WorldCollider::Sphere(world)) => {
+                        let rot_scene::ResolvedShape::Sphere { radius } = world.shape else {
+                            unreachable!("sphere")
+                        };
+                        json!({"status":"resolved", "effective_enabled":enabled,
+                            "center":world.center, "radius":radius})
+                    }
                     Err(reason) => json!({
-                        "status": if reason == Text::ColliderShear { "unsupported_shear" } else { "unavailable" },
+                        "status": match reason {
+                            Text::ColliderShear | Text::ColliderSphereShear => "unsupported_shear",
+                            Text::ColliderSphereScale => "unsupported_scale",
+                            _ => "unavailable",
+                        },
                         "effective_enabled": enabled,
                         "reason": reason.plain(),
                     }),
                 };
+                if let rot_scene::ColliderShape::Sphere { radius } = collider.shape {
+                    response["collider_world"]["shape"] = json!("sphere");
+                    response["collider_world"]["local_radius"] = json!(radius);
+                    response["collider_world"]["local_offset"] = json!(collider.offset);
+                }
             }
             if let Component::Animator {
                 binding,

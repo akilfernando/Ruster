@@ -1,4 +1,4 @@
-//! Viewport editing for one exact authored Box Collider.
+//! Viewport editing for one exact authored Collider.
 use super::{viewport_transform::PointerRelease, ComponentWorkspace};
 use crate::strings::Text;
 use eframe::egui;
@@ -43,13 +43,19 @@ struct Gesture {
     original: Collider,
     staged: Collider,
     world: DMat4,
-    face: Face,
+    grip: Grip,
     origin: DVec3,
     axis: DVec3,
     world_per_local: f64,
     start: f64,
     cursor: egui::Pos2,
     camera: Projector,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Grip {
+    Face(Face),
+    Radius,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -129,11 +135,11 @@ impl Projector {
     }
 }
 
-pub(super) fn box_component(component: &ComponentInstance) -> Option<Collider> {
+pub(super) fn collider_component(component: &ComponentInstance) -> Option<Collider> {
     let Component::Collider {
         role,
         offset,
-        shape: shape @ ColliderShape::Box { .. },
+        shape,
     } = component.kind
     else {
         return None;
@@ -172,11 +178,68 @@ impl WorldBox {
     }
 }
 
-pub(super) fn resolve_box(
+#[derive(Clone, Copy)]
+pub(super) enum WorldCollider {
+    Box(WorldBox),
+    Sphere(rot_scene::ResolvedCollider),
+}
+
+impl WorldCollider {
+    fn grip(
+        self,
+        viewport: &ViewportInteraction,
+        camera: Projector,
+        point: egui::Pos2,
+    ) -> Option<Grip> {
+        match self {
+            Self::Box(world) => face_at(world, camera, point).map(Grip::Face),
+            Self::Sphere(world) => {
+                let (origin, axis) = sphere_axis(world, viewport);
+                let screen = camera.screen(origin)?.0;
+                (screen.distance_sq(point) <= 81.0 && camera.axis_at(point, origin, axis).is_some())
+                    .then_some(Grip::Radius)
+            }
+        }
+    }
+
+    fn axis(
+        self,
+        viewport: &ViewportInteraction,
+        grip: Grip,
+        original: Collider,
+    ) -> (DVec3, DVec3, f64) {
+        match (self, grip, original.shape) {
+            (Self::Box(world), Grip::Face(face), ColliderShape::Box { half_extents }) => (
+                world.face(face),
+                world.axis(face.axis),
+                world.half_extents[face.axis] / f64::from(half_extents[face.axis]),
+            ),
+            (Self::Sphere(world), Grip::Radius, ColliderShape::Sphere { radius }) => {
+                let (origin, axis) = sphere_axis(world, viewport);
+                let ResolvedShape::Sphere {
+                    radius: world_radius,
+                } = world.shape
+                else {
+                    unreachable!("sphere")
+                };
+                (origin, axis, world_radius / f64::from(radius))
+            }
+            _ => unreachable!("grip belongs to resolved collider"),
+        }
+    }
+}
+
+fn resolve_collider(
     object: &ObjectNode,
     world: DMat4,
     mut collider: Collider,
-) -> Result<WorldBox, Text> {
+) -> Result<WorldCollider, Text> {
+    let sphere = matches!(collider.shape, ColliderShape::Sphere { .. });
+    let unavailable = if sphere {
+        Text::ColliderSphereUnavailable
+    } else {
+        Text::ColliderWorldUnavailable
+    };
     let world_pose = if object.parent.is_none() {
         object.transform.clone()
     } else {
@@ -193,24 +256,45 @@ pub(super) fn resolve_box(
             .max(axes[1].dot(axes[2]).abs())
             > 2e-6
         {
-            return Err(Text::ColliderShear);
+            return Err(if sphere {
+                Text::ColliderSphereShear
+            } else {
+                Text::ColliderShear
+            });
         }
-        Transform::try_from_affine(world).map_err(|_| Text::ColliderWorldUnavailable)?
+        Transform::try_from_affine(world).map_err(|_| unavailable)?
     };
-    // Disabled authoring still has a box. Its effective participation is reported separately.
+    if sphere
+        && (world_pose.scale[0] != world_pose.scale[1]
+            || world_pose.scale[0] != world_pose.scale[2])
+    {
+        return Err(Text::ColliderSphereScale);
+    }
+    // Disabled authoring still has a shape. Effective participation is reported separately.
     collider.enabled = true;
     let resolved = collider
         .resolve(&world_pose)
-        .map_err(|_| Text::ColliderWorldUnavailable)?
+        .map_err(|_| unavailable)?
         .expect("enabled collider");
-    let ResolvedShape::Box { half_extents } = resolved.shape else {
-        unreachable!("box component")
-    };
-    Ok(WorldBox {
-        center: DVec3::from_array(resolved.center),
-        rotation: DQuat::from_array(resolved.rotation),
-        half_extents: DVec3::from_array(half_extents),
+    Ok(match resolved.shape {
+        ResolvedShape::Box { half_extents } => WorldCollider::Box(WorldBox {
+            center: DVec3::from_array(resolved.center),
+            rotation: DQuat::from_array(resolved.rotation),
+            half_extents: DVec3::from_array(half_extents),
+        }),
+        ResolvedShape::Sphere { .. } => WorldCollider::Sphere(resolved),
     })
+}
+
+fn resize_radius(mut collider: Collider, delta: f64) -> Option<Collider> {
+    let ColliderShape::Sphere { radius } = collider.shape else {
+        return None;
+    };
+    collider.shape = ColliderShape::Sphere {
+        radius: (f64::from(radius) + delta) as f32,
+    };
+    collider.validate().ok()?;
+    Some(collider)
 }
 
 fn resize(original: Collider, face: Face, delta: f64) -> Option<Collider> {
@@ -266,12 +350,12 @@ impl ComponentWorkspace {
         &self,
         row: usize,
         collider: Collider,
-    ) -> Result<WorldBox, Text> {
+    ) -> Result<WorldCollider, Text> {
         let object = &self.session.scene().objects[row];
         self.preview_world
             .get(row)
             .ok_or(Text::ColliderWorldUnavailable)
-            .and_then(|world| resolve_box(object, *world, collider))
+            .and_then(|world| resolve_collider(object, *world, collider))
     }
 
     fn collider_mode_reason(&self, row: usize, collider: Collider) -> Option<Text> {
@@ -292,7 +376,7 @@ impl ComponentWorkspace {
             .components
             .iter()
             .filter_map(|component| {
-                let collider = box_component(component)?;
+                let collider = collider_component(component)?;
                 let reason = if blocked {
                     Some(Text::ColliderFinishEdit)
                 } else {
@@ -363,13 +447,13 @@ impl ComponentWorkspace {
                     .components
                     .iter()
                     .find(|component| component.id == id)?;
-                Some((row, box_component(component)?))
+                Some((row, collider_component(component)?))
             });
         let Some((row, collider)) = target else {
             self.collider_tool.exit();
             return owned || suppressed;
         };
-        let Ok(world_box) = self.collider_for_viewport(row, collider) else {
+        let Ok(world) = self.collider_for_viewport(row, collider) else {
             self.collider_tool.exit();
             return owned || suppressed;
         };
@@ -387,26 +471,21 @@ impl ComponentWorkspace {
                     && viewport.rect.contains(*point)
                     && viewport.response.contains_pointer()
             })
-            .and_then(|point| face_at(world_box, camera, point));
+            .and_then(|point| world.grip(viewport, camera, point));
         if pressed && !owned {
-            if let Some((face, point)) = hover.zip(cursor) {
-                let origin = world_box.face(face);
-                let axis = world_box.axis(face.axis);
+            if let Some((grip, point)) = hover.zip(cursor) {
+                let (origin, axis, world_per_local) = world.axis(viewport, grip, collider);
                 if let Some(start) = camera.axis_at(point, origin, axis) {
-                    let ColliderShape::Box { half_extents } = collider.shape else {
-                        unreachable!()
-                    };
                     self.collider_tool.gesture = Some(Gesture {
                         revision: self.session.revision(),
                         row,
                         original: collider,
                         staged: collider,
                         world: self.preview_world[row],
-                        face,
+                        grip,
                         origin,
                         axis,
-                        world_per_local: world_box.half_extents[face.axis]
-                            / f64::from(half_extents[face.axis]),
+                        world_per_local,
                         start,
                         cursor: point,
                         camera,
@@ -428,31 +507,58 @@ impl ComponentWorkspace {
                 let at = gesture
                     .camera
                     .axis_at(point, gesture.origin, gesture.axis)?;
-                resize(
-                    gesture.original,
-                    gesture.face,
-                    (at - gesture.start) / gesture.world_per_local,
-                )
+                let delta = (at - gesture.start) / gesture.world_per_local;
+                match gesture.grip {
+                    Grip::Face(face) => resize(gesture.original, face, delta),
+                    Grip::Radius => resize_radius(gesture.original, delta),
+                }
             });
             match staged {
                 Some(staged) => gesture.staged = staged,
                 None => {
+                    let message = match gesture.grip {
+                        Grip::Face(_) => Text::ColliderDragInvalid,
+                        Grip::Radius => Text::ColliderRadiusDragInvalid,
+                    };
                     self.collider_tool.cancel();
-                    self.error = Some(Text::ColliderDragInvalid.plain().into());
+                    self.error = Some(message.plain().into());
                     return true;
                 }
             }
         }
 
-        let mut display = world_box;
-        let mut active = None;
-        if let Some(gesture) = &self.collider_tool.gesture {
-            active = Some(gesture.face);
-            display = self
-                .collider_for_viewport(row, gesture.staged)
-                .unwrap_or(world_box);
+        let (display, active) = if let Some(gesture) = &self.collider_tool.gesture {
+            (
+                self.collider_for_viewport(row, gesture.staged)
+                    .unwrap_or(world),
+                Some(gesture.grip),
+            )
+        } else {
+            (world, None)
+        };
+        match display {
+            WorldCollider::Box(world) => {
+                let face = |grip| match grip {
+                    Grip::Face(face) => Some(face),
+                    Grip::Radius => None,
+                };
+                paint_box(
+                    ui,
+                    camera,
+                    world,
+                    active.and_then(face),
+                    hover.and_then(face),
+                );
+            }
+            WorldCollider::Sphere(world) => paint_sphere(
+                ui,
+                viewport,
+                camera,
+                world,
+                active.is_some(),
+                hover.is_some(),
+            ),
         }
-        paint_box(ui, camera, display, active, hover);
         if !down {
             if let Some(gesture) = self.collider_tool.gesture.take() {
                 self.collider_tool.release = PointerRelease::InFrame(frame);
@@ -476,7 +582,7 @@ impl ComponentWorkspace {
             .iter_mut()
             .find(|component| Some(component.id.as_str()) == self.collider_tool.mode());
         let Some(component) = component else { return };
-        if box_component(component) != Some(gesture.original) {
+        if collider_component(component) != Some(gesture.original) {
             return;
         }
         let Component::Collider { offset, shape, .. } = &mut component.kind else {
@@ -519,6 +625,87 @@ fn face_at(world_box: WorldBox, projector: Projector, cursor: egui::Pos2) -> Opt
                 .then(depth_a.total_cmp(depth_b))
         })
         .map(|(face, _, _)| face)
+}
+
+fn sphere_axis(
+    world: rot_scene::ResolvedCollider,
+    viewport: &ViewportInteraction,
+) -> (DVec3, DVec3) {
+    let ResolvedShape::Sphere { radius } = world.shape else {
+        unreachable!("sphere")
+    };
+    let right = DVec3::from_array(
+        [
+            viewport.view[0][0],
+            viewport.view[1][0],
+            viewport.view[2][0],
+        ]
+        .map(f64::from),
+    )
+    .normalize();
+    (DVec3::from_array(world.center) + radius * right, right)
+}
+
+fn paint_sphere(
+    ui: &egui::Ui,
+    viewport: &ViewportInteraction,
+    camera: Projector,
+    world: rot_scene::ResolvedCollider,
+    active: bool,
+    hover: bool,
+) {
+    let painter = ui.painter().with_clip_rect(camera.rect);
+    let color = ui.visuals().selection.stroke.color;
+    let highlight = ui.visuals().widgets.active.fg_stroke.color;
+    let center = DVec3::from_array(world.center);
+    let ResolvedShape::Sphere { radius } = world.shape else {
+        unreachable!("sphere")
+    };
+    let (origin, right) = sphere_axis(world, viewport);
+    let up = DVec3::from_array(
+        [
+            viewport.view[0][1],
+            viewport.view[1][1],
+            viewport.view[2][1],
+        ]
+        .map(f64::from),
+    )
+    .normalize();
+    let depth = right.cross(up);
+    for (a, b) in [(right, up), (right, depth), (up, depth)] {
+        const SEGMENTS: usize = 32;
+        let mut previous = camera.screen(center + radius * a);
+        for index in 1..=SEGMENTS {
+            let (sin, cos) = (std::f64::consts::TAU * index as f64 / SEGMENTS as f64).sin_cos();
+            let next = camera.screen(center + radius * (cos * a + sin * b));
+            if let (Some((from, _)), Some((to, _))) = (previous, next) {
+                painter.line_segment([from, to], egui::Stroke::new(1.25, color));
+            }
+            previous = next;
+        }
+    }
+    if let Some((point, _)) = camera.screen(origin) {
+        let hot = active || hover;
+        painter.circle_filled(
+            point,
+            if hot { 5.0 } else { 3.5 },
+            if hot { highlight } else { color },
+        );
+        if hot {
+            ui.ctx().set_cursor_icon(if active {
+                egui::CursorIcon::Grabbing
+            } else {
+                egui::CursorIcon::Grab
+            });
+            painter.text(
+                point + egui::vec2(8.0, -8.0),
+                egui::Align2::LEFT_BOTTOM,
+                Text::ColliderRadius.plain(),
+                egui::FontId::proportional(12.0),
+                highlight,
+            );
+        }
+    }
 }
 
 fn paint_box(
