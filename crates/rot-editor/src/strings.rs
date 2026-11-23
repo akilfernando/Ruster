@@ -362,6 +362,7 @@ editor_text! {
     AssetMoveFolderCommand => "Move to Folder…",
     AssetMoveFolderTitle => "Move to Folder",
     AssetMoveFolderLabel => "Folder",
+    AssetMoveNoFolders => "Create another folder in Assets first.",
     AssetMoveChooseFolder => "Choose a folder",
     AssetMoveDestination => "Destination",
     AssetMoveSubmit => "Move",

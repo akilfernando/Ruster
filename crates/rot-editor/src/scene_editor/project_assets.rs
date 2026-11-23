@@ -1106,6 +1106,79 @@ mod tests {
     }
 
     #[test]
+    fn move_to_folder_waits_for_exact_catalog_and_preserves_the_pair() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        let source = PathBuf::from("Assets/Meshes/Profile.obj");
+        let destination = PathBuf::from("Assets/Archive/Profile.obj");
+        fs::create_dir_all(root.join(source.parent().unwrap())).unwrap();
+        fs::create_dir_all(root.join(destination.parent().unwrap())).unwrap();
+        let bytes = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+        fs::write(root.join(&source), bytes).unwrap();
+        let sidecar = source.with_file_name("Profile.obj.rotmeta");
+        let settings = r#"{"id":"profile","mesh_normal_policy":"authored_when_complete"}"#;
+        fs::write(root.join(&sidecar), settings).unwrap();
+        let dest_sidecar = destination.with_file_name("Profile.obj.rotmeta");
+        fs::write(root.join(&dest_sidecar), "orphan sidecar").unwrap();
+        std::os::unix::fs::symlink(root.join("Assets/Archive"), root.join("Assets/Link")).unwrap();
+
+        let ctx = Context::default();
+        let worker = ProjectAssets::start(root.to_owned(), &ctx).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let snapshot = loop {
+            if let Some(update) = worker.take_update() {
+                break update.unwrap();
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        let pinned = snapshot.store.asset_info("profile").unwrap().clone();
+        let run = |folder: &Path| {
+            worker
+                .file_action(
+                    FileAction::Move {
+                        id: "profile".into(),
+                        source: source.clone(),
+                        folder: folder.to_owned(),
+                    },
+                    snapshot.store.state_identity(),
+                )
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap()
+        };
+        assert!(run(Path::new("Assets/Link"))[0].contains("without symlinks"));
+        assert!(
+            run(destination.parent().unwrap())[0].contains("already contains Profile.obj.rotmeta")
+        );
+        assert_eq!(fs::read(root.join(&source)).unwrap(), bytes);
+        assert_eq!(fs::read_to_string(root.join(&sidecar)).unwrap(), settings);
+        assert_eq!(
+            fs::read_to_string(root.join(&dest_sidecar)).unwrap(),
+            "orphan sidecar"
+        );
+        fs::remove_file(root.join(&dest_sidecar)).unwrap();
+
+        let errors = run(destination.parent().unwrap());
+        assert!(errors.is_empty(), "{errors:?}");
+        let moved = worker.take_update().unwrap().unwrap();
+        let info = moved.store.asset_info("profile").unwrap();
+        assert_eq!(info.source, destination.to_str().unwrap());
+        assert_eq!(info.status, AssetStatus::Ready);
+        assert_eq!(info.hash, pinned.hash);
+        assert_eq!(info.mesh_normal_policy, pinned.mesh_normal_policy);
+        assert_eq!(fs::read(root.join(&destination)).unwrap(), bytes);
+        assert_eq!(
+            fs::read_to_string(root.join(&dest_sidecar)).unwrap(),
+            settings
+        );
+        assert!(!root.join(&source).exists());
+        assert!(!root.join(&sidecar).exists());
+        let stale = run(Path::new("Assets"));
+        assert!(stale[0].contains("catalog changed"));
+    }
+
+    #[test]
     fn source_actions_preserve_identity_settings_and_recoverable_files() {
         let project = tempfile::tempdir().unwrap();
         let root = project.path();

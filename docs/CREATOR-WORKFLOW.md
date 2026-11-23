@@ -176,6 +176,12 @@ Choose **Assets → New Folder…** to create a folder. Right-click a file or
 open **Asset Actions** in the Inspector to duplicate it, reimport it, or
 open its containing folder. Duplicates receive new IDs with the original
 import settings. Files under `Assets/` can be renamed with their IDs intact.
+For a ready standalone OBJ, Lua or WAV, choose **Move to Folder…** in
+**Asset Actions**. Pick a different existing folder and check the exact
+destination before choosing **Move**. Rot keeps the filename, source bytes,
+import settings and asset ID, then selects the asset at its new location.
+Existing scene references still use the same ID. An occupied destination,
+including an orphan import sidecar, leaves the source in place.
 **Delete… → Move to Trash** moves the source and sidecar together to
 `.rot-trash/` in the project. Restore both to their original location to
 recover the asset and its existing references.

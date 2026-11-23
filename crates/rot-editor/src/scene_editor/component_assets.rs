@@ -148,6 +148,8 @@ pub(super) struct Browser {
     query: String,
     catalog: Option<AssetStateIdentity>,
     folders: Vec<PathBuf>,
+    #[cfg(target_os = "linux")]
+    move_folders: Vec<PathBuf>,
     rows: Vec<AssetRow>,
     by_id: HashMap<String, usize>,
     visible: Vec<usize>,
@@ -172,6 +174,8 @@ impl Default for Browser {
             query: String::new(),
             catalog: None,
             folders: vec![PathBuf::new(), "Assets".into()],
+            #[cfg(target_os = "linux")]
+            move_folders: Vec::new(),
             rows: Vec::new(),
             by_id: HashMap::new(),
             visible: Vec::new(),
@@ -252,7 +256,7 @@ impl Browser {
                             egui::ScrollArea::vertical()
                                 .max_height(240.0)
                                 .show(ui, |ui| {
-                                    for candidate in &self.folders {
+                                    for candidate in &self.move_folders {
                                         if candidate.starts_with("Assets")
                                             && source.parent() != Some(candidate)
                                             && ui
@@ -274,6 +278,13 @@ impl Browser {
                     let response = response.response.labelled_by(label.id);
                     if focus_name {
                         response.request_focus();
+                    }
+                    if !self
+                        .move_folders
+                        .iter()
+                        .any(|candidate| source.parent() != Some(candidate.as_path()))
+                    {
+                        ui.weak(Text::AssetMoveNoFolders.plain());
                     }
                     if let (Some(folder), Some(leaf)) = (folder.as_ref(), source.file_name()) {
                         ui.label(Text::AssetMoveDestination.plain());
@@ -551,6 +562,14 @@ impl Browser {
         }
         self.rows
             .sort_by(|left, right| left.searchable.cmp(&right.searchable));
+        #[cfg(target_os = "linux")]
+        {
+            self.move_folders = folders
+                .iter()
+                .filter(|folder| folder.starts_with("Assets") && folder.to_str().is_some())
+                .cloned()
+                .collect();
+        }
         let mut folders: BTreeSet<_> = folders.into_iter().collect();
         folders.extend([PathBuf::new(), "Assets".into()]);
         let mut names = HashMap::new();
