@@ -128,6 +128,11 @@ the render budget and keeps extra lights editable. Static Linux builds preserve
 attached lights and a parented sun's direction and shadow settings.
 Approved MCP clients see v23 scene context, share hierarchy Undo and can save
 with inspected guards. Three linked cottages survived reopen and a relocated build.
+Find Uses in Scene reports exact v23 texture slots and renderers. It keeps
+same-PNG import variants separate and shows unassigned, disabled, linked
+and missing uses. Keyboard reveal, approved Claude reassignment, native
+Undo and reopen were verified. At 5,000 objects, release query p95 was
+0.154 ms cold, 0.036 ms for a warm page and 0.174 ms after reassignment.
 Group Selection in v23 inserts a parent around the selected objects with
 world transforms preserved. The Object menu, Hierarchy context menu,
 remappable Ctrl+G and approved MCP clients share one Undo entry.

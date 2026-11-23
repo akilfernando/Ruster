@@ -426,8 +426,13 @@ for native file dialogs everywhere.
 it into the scene, with no form.
 **Not now.** Folder tree, automatic reimport and sidecar files (C-04).
 
-**Follow-up in progress, Sol, 2026-11-23.** Find Uses in Scene for
-v23 textures in the Assets browser and approved MCP.
+**Find Uses in Scene — done, 2026-11-23.** The v23 Assets Inspector and
+approved MCP report exact material slots and renderers, including disabled
+and linked prefab users, unassigned materials and missing sources. Rot and
+Plain keyboard navigation revealed the exact renderer without editing.
+Approved Claude reassignment and native Undo updated the results. Pages
+pin the scene and asset revisions. At 5,000 objects, cold and warm pages
+took 0.154 and 0.036 ms p95.
 
 #### S-13 · Project hub and templates — S — ready
 Status: done — 2026-11-17, Claude Opus 5.5 (UX helper). The list shows Unity Hub's "Modified" (scene file time), not a stored last-opened time (agent choice).
