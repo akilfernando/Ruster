@@ -613,6 +613,10 @@ impl<A: Application> eframe::App for Host<A> {
         }
     }
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        #[cfg(feature = "inspection")]
+        if let Some(mode) = &mut self.window_mode {
+            mode.inspection_input(ctx);
+        }
         if let Some(render) = &self.render {
             let result = rot_render::maintain_assets(render, ctx).map(|_| ());
             self.report(result);

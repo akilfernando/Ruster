@@ -69,7 +69,7 @@ impl WindowMode {
     }
 
     pub(super) fn input(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput, blurred: bool) {
-        let toggle = self.consume_f11(raw, blurred);
+        let toggle = self.consume_f11(&mut raw.events, blurred);
         let now = Instant::now();
         let info = raw.viewport();
         let size = info
@@ -131,7 +131,36 @@ impl WindowMode {
                 }
             }
         }
-        if toggle && self.requested.is_none() {
+        if toggle {
+            self.request_toggle(ctx, now);
+        }
+    }
+
+    #[cfg(feature = "inspection")]
+    pub(super) fn inspection_input(&mut self, ctx: &egui::Context) {
+        // egui-inspection can append scoped events after the native raw hook.
+        let toggle = ctx.input_mut(|input| {
+            let blurred = !input.focused
+                || input
+                    .events
+                    .iter()
+                    .any(|event| matches!(event, egui::Event::WindowFocused(false)));
+            self.consume_f11(&mut input.events, blurred)
+        });
+        if toggle {
+            let now = Instant::now();
+            #[cfg(target_os = "linux")]
+            if let Probe::X11(probe) = &self.probe {
+                self.observed = probe.fullscreen();
+                self.probe_attempted = true;
+                self.next_probe = now + PROBE_INTERVAL;
+            }
+            self.request_toggle(ctx, now);
+        }
+    }
+
+    fn request_toggle(&mut self, ctx: &egui::Context, now: Instant) {
+        if self.requested.is_none() {
             if let Some(actual) = self.observed {
                 self.requested = Some((!actual, now + CONFIRM_TIME));
                 self.warning = None;
@@ -146,12 +175,12 @@ impl WindowMode {
 
     /// Every F11 event belongs here, including releases, repeats and blurred
     /// batches. A held key can request a change at most once.
-    fn consume_f11(&mut self, raw: &mut egui::RawInput, blurred: bool) -> bool {
+    fn consume_f11(&mut self, events: &mut Vec<egui::Event>, blurred: bool) -> bool {
         let mut toggle = false;
         if blurred {
             self.f11_down = false;
         }
-        raw.events.retain(|event| {
+        events.retain(|event| {
             let egui::Event::Key {
                 key: egui::Key::F11,
                 pressed,
