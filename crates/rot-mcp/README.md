@@ -506,6 +506,10 @@ Supply `background` as three linear RGB values in `[0,1]`, or use
 want to change the SDR/HDR profile or exposure. Either field may be
 omitted to preserve its current value. Both changes share one Undo.
 
+WAV rows in `asset_inspect` have `kind:"sound"`. Use `status:"ready"`
+when selecting a new clip, and compare `duration_seconds` or `sample_rate_hz`
+on accepted rows. Audible audition is available from the native Assets Inspector.
+
 ### Game HUD Action Button
 
 In a v23 scene, use `behavior_inspect` with `kind:"actions"` to find a

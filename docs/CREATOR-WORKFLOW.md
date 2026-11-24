@@ -215,6 +215,11 @@ in the Inspector. Double-click a mesh or choose **Place in Scene** to add a
 Mesh Renderer at the origin. Drop a mesh on a Hierarchy row to make it a child
 of that object. Both placement commands support Undo.
 
+Select a ready WAV to see its duration and sample rate. On Linux, choose
+**Preview Sound** to hear it once, or **Stop Preview** to stop early. Selecting
+another asset, changing the accepted sound, closing the project, or starting
+Play stops audition. Previewing a clip is separate from using it as a Sound Cue.
+
 Choose **Assets → New Folder…** to create a folder. Right-click a file or
 open **Asset Actions** in the Inspector to duplicate it, reimport it, or
 open its containing folder. Duplicates receive new IDs with the original

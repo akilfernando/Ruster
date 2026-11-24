@@ -114,3 +114,49 @@ impl ComponentWorkspace {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wav_metadata_and_preview_identity_follow_the_accepted_catalog() {
+        let project = tempfile::tempdir().unwrap();
+        let path = project.path().join("cue.wav");
+        let wav = b"RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\x02\0\0\0\0\0";
+        std::fs::write(&path, wav).unwrap();
+        let mut store = AssetStore::open(project.path()).unwrap();
+        store.import("cue", "cue.wav").unwrap();
+        let profile = crate::scene_editor::asset_inspection::page(&store, 0).unwrap();
+        let row = &profile["assets"][0];
+        assert_eq!(row["status"], "ready");
+        assert_eq!(row["duration_seconds"], 1.0 / 8_000.0);
+        assert_eq!(row["sample_rate_hz"], 8_000);
+
+        // Seed the selected identity without asking for an output device.
+        let mut audition = SoundAudition::default();
+        let accepted = store.sound_snapshot("cue").unwrap();
+        audition.target = Some(("cue".into(), accepted.clone()));
+        let snapshot = store.project_snapshot();
+        audition.poll(Some("cue"), Some(&snapshot));
+        assert!(Arc::ptr_eq(&audition.target.as_ref().unwrap().1, &accepted));
+        audition.poll(None, Some(&snapshot));
+        assert!(audition.target.is_none());
+
+        let mut replacement = *wav;
+        *replacement.last_mut().unwrap() = 1;
+        std::fs::write(&path, replacement).unwrap();
+        store.refresh("cue").unwrap();
+        audition.target = Some(("cue".into(), accepted));
+        audition.poll(Some("cue"), Some(&store));
+        assert!(audition.target.is_none());
+
+        let refreshed = store.sound_snapshot("cue").unwrap();
+        std::fs::remove_file(&path).unwrap();
+        let missing = AssetStore::open(project.path()).unwrap();
+        assert!(missing.sound("cue").is_some(), "retained accepted PCM");
+        audition.target = Some(("cue".into(), refreshed));
+        audition.poll(Some("cue"), Some(&missing));
+        assert!(audition.target.is_none());
+    }
+}

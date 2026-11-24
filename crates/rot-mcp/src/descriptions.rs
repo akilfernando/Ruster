@@ -5,7 +5,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("project_list", "List the open Rot Engine editors with their project folder and scene."),
     ("project_connect", "Connect by project name, folder, scene or project_list ID. Opens the folder or scene if needed."),
     ("project_disconnect", "Disconnect from the current editor."),
-    ("asset_inspect", "List assets (WAV kind sound). v23 usage_asset_id finds texture uses. Pin all three guards to continue."),
+    ("asset_inspect", "List assets (WAV sound rows include duration and rate). v23 usage_asset_id finds texture uses. Pin all three guards to continue."),
     ("asset_import", "Import an OBJ, PNG, WAV, Lua or GLB project file. GLB supports named or unnamed nodes, TRS matrices, lights, perspective/ortho cameras and packed roughness. Place with scene_model_place."),
     ("asset_refresh", "Reimport an asset after its file changed. Keeps the previous version if the new file fails."),
     ("asset_rename", "Rename an asset file inside the project, keeping its asset ID."),
