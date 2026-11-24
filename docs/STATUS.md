@@ -88,6 +88,23 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+**Fit to Mesh** sets a v23 Box Collider's local Center and Size from the
+selected same-object Mesh Renderer. The parented loading-bay barrier's
+center was (1.25, 0.5, 0.25) and Size was (1, 2, 3). All eight world corners
+matched the rotated, scaled outline. A flat sheet used the minimum
+thickness and kept its disabled Sensor state. The picker used the exact
+chosen renderer. Missing geometry and an old asset revision were refused.
+A fresh fit used the reimported wider mesh. Approved Claude fit the original
+barrier and shared native Undo. Save and reopen preserved the fit. The
+kinematic sphere stopped at x = 2.250100 in editor and relocated Vulkan Play,
+compared with x = 1.000100 for the original box. The relocated Build contained
+the exact accepted OBJ bytes. The picker and focus were checked in Plain Light.
+In three 5,000-object release runs, time through the updated tessellated
+outline was 3.278–3.548 ms p50 and 3.358–3.860 ms p95 for the 108-triangle
+mesh. At 23,552 triangles it was 3.614–4.127 ms p50 and 3.920–4.230 ms p95.
+The warmed idle outline scanned zero mesh vertices. Idle CPU frame p95
+was 0.718–0.720 ms before and 0.722–0.733 ms after.
+
 **Game HUD Action Buttons** give a named Button action an on-screen control
 through Window → Game HUD. A completed activation supplies one tap to the next
 simulation Step. The Blender drawbridge matched its keyboard-input pose at
