@@ -13,7 +13,8 @@ change the product, not on supporting process.**
 1. `git status`, `git log --oneline -5`. The **trunk** is the branch named
    under "Where to work" in [STATUS](STATUS.md). Run `git worktree list` if
    anything looks odd; this repository has had stale checkouts.
-2. Read [STATUS](STATUS.md) (one page).
+2. Read the current work and known gaps in [STATUS](STATUS.md). Look up
+   earlier results when they affect the package.
 3. Open [BACKLOG](BACKLOG.md). Take the first open package in your lane
    under **Now**, unless the user asked for something specific. With no lane
    given, use the UX lane. Read only that package, and do only that package.
@@ -28,22 +29,22 @@ history and cost tens of thousands of tokens.
 
 ## 2. The loop for one package
 
-1. **Look at the reference.** Find the official Unity and Unreal
-   documentation page for the feature (search for it;
-   [the editor comparison](research/EDITOR-WORKFLOW-COMPARISON.md) links the
-   main editor pages). Write down, for yourself, how each engine does it:
-   where the control lives, what it is called, its default, its shortcut.
-   That is the specification. Match it unless the package says otherwise.
+1. **Look at the reference.** Reuse an established convention from the
+   [UX standards](UX-STANDARDS.md) or the package brief. For a new or
+   disputed interaction, use official Unity and Unreal documentation to
+   check placement, names, defaults and shortcuts. The
+   [editor comparison](research/EDITOR-WORKFLOW-COMPARISON.md) links
+   the main editor pages.
 2. **Look at what exists.** Run the editor with
    [`scripts/ui_drive.py`](../scripts/ui_drive.py) and view the screenshots.
    Read the code the package lists under *Touch*.
 3. **Build a thin end-to-end version first.** Data → engine → editor control →
    MCP → save and reopen → built game, in that order, as far as the package
    reaches. Get one real example working through all of it before widening.
-4. **Use it and look at it.** Drive the real editor. View screenshots at
-   1280×800 and 1920×1080 in a representative appearance. Check an
-   additional style or mode when the change affects its presentation.
-   Fix what looks or feels wrong. See [testing appearance](TESTING.md#risk-specific-evidence).
+4. **Use it and look at it.** Run the changed journey in a disposable project
+   in one representative appearance. Use a second size for layout or scaling
+   risk. Check the specific controls whose appearance changes in the other
+   theme. See [testing appearance](TESTING.md#risk-specific-evidence).
 5. **Protect it.** Add one to three tests that would catch a real regression.
    Run the gate.
 6. **Finish.** Tick the package in BACKLOG, update STATUS, update the user
@@ -52,6 +53,25 @@ history and cost tens of thousands of tokens.
 
 A package should fit in one working session. If it will not, split it by
 user-visible steps and do the first one completely.
+
+### Autonomous runs
+
+For an authorized breadth-first run, have Astra choose a bounded creator
+workflow from the current product gaps. Favor a missing outcome that unlocks
+a usable editor or game journey. Rotate to another underdeveloped area once
+the current one can serve that journey. Use the parity plan's reference
+projects to tie slices together.
+
+Give Sol the base commit, creator outcome, acceptance scenario, relevant
+risks and the point at which the slice is done. Agree on the performance
+question and measurement boundary before building a benchmark. The
+coordinator owns the integration gate and reuses the implementer's evidence
+where the relevant inputs still match. Share fixtures and builds. Coordinate
+Cargo use and keep competing work away from timed measurements.
+
+Use hosted CI waits for independent review or the next read-only brief when
+authorized. Use the final hosted result for the integrated revision. Check
+any user-set run limit before starting another goal.
 
 ## 3. Definition of done
 
@@ -67,9 +87,9 @@ applies and cannot be met, say so instead of quietly skipping it.
   runtime feature.
 - An AI client can do the same thing through MCP (see §6), unless the package
   is purely visual.
-- It works on real content: an asset from Blender or a public asset pack, and
-  the largest scene today's limits allow (thousands of objects once Phase 2
-  removes the caps). It warns and continues where it can instead of refusing.
+- It works on representative content. Include a real asset for asset-facing
+  changes and a large scene for features that change how work scales with
+  scene size. It warns and continues where it can instead of refusing.
 - It stays inside the [performance budgets](PARITY-PLAN.md#5-performance-budgets)
   for its phase. If you touched a hot path, measure in a release build
   before and after and put both numbers in the commit message.
@@ -139,12 +159,12 @@ Rules that keep the second workflow good:
 | Check | Command | When |
 | --- | --- | --- |
 | Gate: format, Clippy, affected tests, Markdown links | `python3 scripts/check.py --base <trunk>` | Before every merge. Without `--base` it only checks uncommitted changes, so after committing it checks nothing. |
-| One test while iterating | `cargo test -p <crate> <name>` | Constantly |
+| Focused regression while iterating | `cargo test -p <crate> <name>` | When the affected behavior changes |
 | See and drive the editor UI | `cargo build -p rot-editor --features inspection` then `python3 scripts/ui_drive.py --help` | Every UI change |
 | Keyboard reach | `python3 scripts/ui_drive.py … tabwalk:60` and read the order; add `shot:` steps to see the focus ring | Every new panel or dialog |
-| Speed | `python3 scripts/measure_budgets.py --foreground` on a release build, user away (see the performance section of the plan) | When touching rendering, scene updates, import or the per-frame UI |
-| AI route end to end | `python3 scripts/mcp_smoke.py` (editor + `rot-mcp`: tools, read, create, move, screenshot, Undo) | When changing the editor bridge, `rot-mcp` or MCP tools |
-| Real AI client | Claude Code or Codex against the running editor with a private config, e.g. `claude -p "…" --mcp-config mcp.json --strict-mcp-config` in a throwaway project folder | When adding or changing MCP tools |
+| Speed | Measure the changed path in release. Use `scripts/measure_budgets.py` for its relevant workloads and observe the desktop isolation rules | When changing a hot path or making a performance claim |
+| AI transport | `python3 scripts/mcp_smoke.py` or a focused equivalent | When changing the bridge, approval, routing or wire behavior. Reuse a real-client journey that covers the same contract |
+| Real AI client | Claude Code or Codex against a running editor with a private config in a throwaway project | Once per package that adds an authoring surface. Check discovery and the changed action, including shared Undo where applicable |
 
 Tests: write the few that protect behavior a creator depends on. Prefer one
 test through the real command path over many unit tests of internals. Do not
@@ -219,6 +239,9 @@ their branch instead; the coordinating session merges it.
 - Tool-created worktrees (`.claude/worktrees/`, `.codex-attachments/`) are
   local leftovers. Once their branch is merged or pushed, remove them with
   `git worktree remove --force <path>`.
+- After acceptance, retire redundant binaries and delivery copies created
+  for the slice. Keep the fixture, useful logs and any artifact needed for a
+  reproducible result or an open failure.
 
 ## 11a. Known gotchas (found in Phase 1)
 

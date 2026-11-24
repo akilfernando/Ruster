@@ -34,6 +34,7 @@ package in your lane under **Now**. How to work is in the
 
 One line each. Anyone may add; the user or a planning pass orders them.
 
+- CI efficiency (2026-11-24 retrospective): C-26 through C-28 spent about 22 of 29 hosted job minutes outside the change-aware gate. Compare end-to-end timings for the current full `target` cache and a smaller cache, including rebuild and save costs, before changing the workflow.
 - After Import as Roughness succeeds for a grayscale PNG, Assets still warns about the automatically reserved Base Color interpretation and shows two similarly truncated tiles at normal width. Make the intended role easy to identify and let creators resolve an unused failed interpretation without affecting accepted assets (2026-11-23).
 
 - If the project directory is renamed during v23 MCP Save preparation, publication is refused but the moved directory can retain a hidden staging file. Clean up staging through the original directory identity (2026-11-23).

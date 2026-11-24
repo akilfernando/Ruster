@@ -68,6 +68,30 @@ animation. For example, check focus contrast in the affected palette or
 wrapping in both wording variants. A shared command, saved result, Play,
 Build, audio or MCP behavior needs one functional proof.
 
+Use focused tests for permutations that share a code path. Keep native
+checks for distinct ownership or integration boundaries, such as device
+failure or a compositor transition. Combine native, real-client and
+save/reopen or Build checks in one disposable scenario when that covers
+each changed contract. Reuse verified evidence when its relevant inputs
+are unchanged.
+
+## Release measurements
+
+Choose the endpoint that answers the performance question. CPU tessellation,
+rendered capture with readback, and compositor presentation measure
+different work. For a comparison involving GPU, compositor or audio
+behavior, smoke both cases first. Confirm the real backend, matched
+workload and drawable size where applicable, and working timing or output
+capture. Reuse an existing fixture and measurement path when possible.
+If the setup fails repeatedly, switch to a known method that answers the
+same question, or record the gap before claiming support.
+
+Measure repeatable costs on changed hot paths, such as per-tick Lua work or
+scene transactions that scale with selection size. Carry a benchmark over
+to an unchanged path only when it provides a control. An idle benchmark
+needs an idle risk such as a new repaint, poll or scan. Confirm that both
+timed cases still produce the expected result.
+
 ## Feedback budgets and suite growth
 
 Initial engineering targets, not measured service guarantees: warm local change gate under 30 seconds, typical hosted PR gate under 2 minutes when CI exists. Record cold builds separately. Exceeding a budget triggers investigation, not automatic failure, test deletion or skipped checks. Prefer fixture reuse, less process startup, narrower valid dependency scope and elimination of duplication before adding parallel jobs.
@@ -75,6 +99,10 @@ Initial engineering targets, not measured service guarantees: warm local change 
 Each added test must protect a named failure mode. Prefer one table-driven invariant test over many nearly identical examples. End-to-end tests should protect wiring, exit behavior or workflow contracts that lower layers cannot. Do not duplicate a complete input matrix at every layer. No universal coverage threshold, compulsory test for every edit, or mandatory benchmark per PR.
 
 Use focused tests during iteration, then the selected final gate once. Root and worker must not both run the same final suite unless integration changed its inputs or evidence is inadequate. CI may independently validate remote changes; its authoritative result can satisfy review without another local replay on identical inputs.
+
+When hosted checks are slow, compare runner setup, cache restore and save,
+and gate execution separately. Measure total time before changing the
+cache or test selection.
 
 ## Failures and maintenance
 
