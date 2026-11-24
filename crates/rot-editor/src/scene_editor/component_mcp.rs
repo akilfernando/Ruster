@@ -2521,6 +2521,44 @@ mod tests {
     }
 
     #[test]
+    fn copy_local_channels_is_exact_guarded_and_atomic() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.objects[0].transform.rotation = [0.25, -0.125, 0.5];
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let source = &scene.objects[0];
+        let target = &scene.objects[1];
+        let mut args = json!({
+            "expected_session_token":"session","expected_revision":"0",
+            "source_object_id":source.id,"object_ids":[target.id,"missing"],
+            "channels":["rotation"]
+        });
+        let call = |editor: &mut ComponentWorkspace, args: &Value| {
+            editor.ai_command("session", "scene_copy_local_transform", args)
+        };
+        assert_eq!(
+            call(&mut editor, &args)["error"]["code"],
+            "object_not_found"
+        );
+        assert_eq!(editor.session.scene(), &scene);
+        args["object_ids"] = json!([target.id]);
+        let moved = call(&mut editor, &args);
+        assert_eq!(moved["result"]["changed_count"], 1, "{moved}");
+        let mut expected = target.clone();
+        expected.transform.rotation = source.transform.rotation;
+        assert_eq!(editor.session.scene().objects[1], expected);
+        assert_eq!(call(&mut editor, &args)["error"]["code"], "stale_revision");
+        args["expected_revision"] = json!("1");
+        assert_eq!(call(&mut editor, &args)["result"]["changed_count"], 0);
+        assert_eq!(editor.session.revision(), 1);
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene(), &scene);
+    }
+
+    #[test]
     fn object_batches_validate_every_target_and_share_one_undo() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("scene.json");
