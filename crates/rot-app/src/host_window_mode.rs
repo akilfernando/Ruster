@@ -308,6 +308,7 @@ mod tests {
         mode.input(cx, &mut raw, blurred);
         let events = raw.events.clone();
         let mut output = cx.run_ui(raw, |_| {});
+        output.textures_delta.clear();
         let commands = std::mem::take(
             &mut output
                 .viewport_output
