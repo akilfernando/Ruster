@@ -302,6 +302,7 @@ fn execute(options: Options) -> Result<(), String> {
             HostOptions {
                 title: "Motion Lab — Behavior authoring".into(),
                 player_window: Default::default(),
+                player_window_controls: false,
                 app_id: "rot-motion-lab".into(),
                 tick_duration,
                 max_frames: options.frames,
@@ -675,6 +676,8 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
             output["player_window"] = serde_json::json!({
                 "title":manifest.player.effective_title(&manifest.title),
                 "initial_size":manifest.player.effective_size(),
+                "mode":manifest.player.effective_mode(),
+                "mode_source":if manifest.player.mode.is_some() { "project_settings" } else { "default" },
             });
         }
         println!(
@@ -694,6 +697,7 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
             HostOptions {
                 title: manifest.title,
                 player_window: manifest.player,
+                player_window_controls: true,
                 app_id: "rot-creation".into(),
                 tick_duration,
                 max_frames: options.frames,
@@ -798,6 +802,8 @@ fn execute_static_hierarchy(
             output["player_window"] = serde_json::json!({
                 "title":manifest.player.effective_title(&manifest.title),
                 "initial_size":manifest.player.effective_size(),
+                "mode":manifest.player.effective_mode(),
+                "mode_source":if manifest.player.mode.is_some() { "project_settings" } else { "default" },
             });
         }
         println!(
@@ -811,6 +817,7 @@ fn execute_static_hierarchy(
             HostOptions {
                 title: manifest.title,
                 player_window: manifest.player,
+                player_window_controls: true,
                 app_id: "rot-creation".into(),
                 tick_duration,
                 max_frames: options.frames,
@@ -894,6 +901,7 @@ fn execute_generic(options: Options) -> Result<(), String> {
             HostOptions {
                 title: "Motion Lab — Shared behavior comparison".into(),
                 player_window: Default::default(),
+                player_window_controls: false,
                 app_id: "rot-motion-lab".into(),
                 tick_duration,
                 max_frames: options.frames,

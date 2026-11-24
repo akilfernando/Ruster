@@ -555,6 +555,23 @@ pub struct PlayerWindowSize {
     pub height: u32,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlayerWindowMode {
+    #[default]
+    Windowed,
+    BorderlessFullscreen,
+}
+
+impl PlayerWindowMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Windowed => "Windowed",
+            Self::BorderlessFullscreen => "Borderless Fullscreen",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlayerWindow {
@@ -570,6 +587,12 @@ pub struct PlayerWindow {
         deserialize_with = "present_player_value"
     )]
     pub initial_size: Option<PlayerWindowSize>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_player_value"
+    )]
+    pub mode: Option<PlayerWindowMode>,
 }
 
 fn present_player_value<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
@@ -593,7 +616,7 @@ fn validate_title(title: &str) -> Result<(), String> {
 
 impl PlayerWindow {
     pub fn is_default(&self) -> bool {
-        self.title.is_none() && self.initial_size.is_none()
+        self.title.is_none() && self.initial_size.is_none() && self.mode.is_none()
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -620,6 +643,10 @@ impl PlayerWindow {
         self.title
             .clone()
             .unwrap_or_else(|| format!("Rot Engine | {default_title}"))
+    }
+
+    pub fn effective_mode(&self) -> PlayerWindowMode {
+        self.mode.unwrap_or_default()
     }
 
     pub fn effective_size(&self) -> PlayerWindowSize {

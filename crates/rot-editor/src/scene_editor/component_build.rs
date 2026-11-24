@@ -1024,6 +1024,12 @@ impl BuildUi {
                     ui.add(egui::Label::new(&title).truncate())
                         .on_hover_text(&title);
                     ui.label(format!(
+                        "{} · {} ({})",
+                        Text::PlayerWindowMode.plain(),
+                        player.effective_mode().label(),
+                        source(player.mode.is_some())
+                    ));
+                    ui.label(format!(
                         "{} · {} × {} ({})",
                         Text::PlayerInitialSize.plain(),
                         size.width,
@@ -1436,6 +1442,7 @@ mod tests {
             .unwrap();
         let window = PlayerWindow {
             title: Some("Night Rail — 夕方".into()),
+            mode: Some(rot_app::creation::PlayerWindowMode::BorderlessFullscreen),
             initial_size: Some(rot_app::creation::PlayerWindowSize {
                 width: 1280,
                 height: 800,

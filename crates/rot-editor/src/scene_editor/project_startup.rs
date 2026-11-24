@@ -1257,6 +1257,8 @@ pub(super) fn player_context(player: &PlayerWindow, scene_id: &str) -> serde_jso
         "title_source": if player.title.is_some() { "project_settings" } else { "default" },
         "initial_size": player.effective_size(),
         "size_source": if player.initial_size.is_some() { "project_settings" } else { "default" },
+        "mode": player.effective_mode(),
+        "mode_source": if player.mode.is_some() { "project_settings" } else { "default" },
     })
 }
 
@@ -1375,6 +1377,7 @@ mod tests {
         assert!(before.player_window().unwrap().is_default());
         let profile = PlayerWindow {
             title: Some("Rail — 夕方".into()),
+            mode: Some(rot_app::creation::PlayerWindowMode::BorderlessFullscreen),
             initial_size: Some(PlayerWindowSize {
                 width: 1280,
                 height: 800,

@@ -1,16 +1,21 @@
-use crate::creation::{PlayerWindow, MIN_WINDOW_SIZE};
+#[path = "host_window_mode.rs"]
+mod window_mode;
+use crate::creation::{PlayerWindow, PlayerWindowMode, MIN_WINDOW_SIZE};
 use crate::{egui, Application, InputFrame, Runtime};
 use eframe::egui_wgpu::{WgpuSetup, WgpuSetupCreateNew};
 use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+use window_mode::WindowMode;
 
 /// Linux development host options. max_frames bounds UI-frame smoke tests (1..=10000).
 #[derive(Clone, Debug)]
 pub struct HostOptions {
     pub title: String,
     pub player_window: PlayerWindow,
+    /// Enable F11 and compositor status for packaged players.
+    pub player_window_controls: bool,
     pub app_id: String,
     pub tick_duration: Duration,
     pub max_frames: Option<u64>,
@@ -23,6 +28,7 @@ impl Default for HostOptions {
         Self {
             title: "Application".into(),
             player_window: PlayerWindow::default(),
+            player_window_controls: false,
             app_id: "org.rot.application".into(),
             tick_duration: Duration::from_millis(100),
             max_frames: None,
@@ -80,6 +86,9 @@ pub fn run<A: Application>(app: A, options: HostOptions) -> Result<(), String> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([size.width as f32, size.height as f32])
             .with_min_inner_size([MIN_WINDOW_SIZE.width as f32, MIN_WINDOW_SIZE.height as f32])
+            .with_fullscreen(
+                options.player_window.effective_mode() == PlayerWindowMode::BorderlessFullscreen,
+            )
             .with_app_id(&options.app_id)
             .with_icon(rot_render::window_icon()),
         renderer: eframe::Renderer::Wgpu,
@@ -96,6 +105,7 @@ pub fn run<A: Application>(app: A, options: HostOptions) -> Result<(), String> {
         let render = cc.wgpu_render_state.as_ref().ok_or("Vulkan renderer unavailable")?;
         let metrics = rot_render::install(render);
         Ok(Box::new(Host {
+            window_mode: options.player_window_controls.then(|| WindowMode::new(cc, &options.player_window)),
             action_surface: None,
             action_surface_rect: None,
             action_content_rect: None,
@@ -123,6 +133,7 @@ pub fn run<A: Application>(app: A, options: HostOptions) -> Result<(), String> {
 struct Host<A: Application> {
     runtime: Runtime<A>,
     options: HostOptions,
+    window_mode: Option<WindowMode>,
     last_frame: Instant,
     metrics: rot_render::MetricsHandle,
     render: Option<eframe::egui_wgpu::RenderState>,
@@ -394,6 +405,9 @@ impl<A: Application> Host<A> {
                     }
                 }
 
+                if let Some(mode) = &self.window_mode {
+                    mode.show(ui);
+                }
                 if let Some(message) = self.metrics.lock().ok().and_then(|metrics| {
                     (metrics.frames > 0)
                         .then(|| metrics.display_status.warning())
@@ -408,6 +422,9 @@ impl<A: Application> Host<A> {
                     .on_hover_text(message);
                 }
             });
+            if let Some(warning) = self.window_mode.as_ref().and_then(WindowMode::warning) {
+                ui.colored_label(ui.visuals().warn_fg_color, warning);
+            }
             if let Some(error) = &self.error {
                 ui.colored_label(
                     ui.visuals().error_fg_color,
@@ -578,21 +595,18 @@ impl<A: Application> Host<A> {
 
 impl<A: Application> eframe::App for Host<A> {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
-        if !raw.focused
+        let blurred = !raw.focused
             || raw
                 .events
                 .iter()
-                .any(|event| matches!(event, egui::Event::WindowFocused(false)))
-        {
+                .any(|event| matches!(event, egui::Event::WindowFocused(false)));
+        if let Some(mode) = &mut self.window_mode {
+            mode.input(ctx, raw, blurred);
+        }
+        if blurred {
             self.runtime.app_mut().cancel_viewport_input();
         }
-        if self.runtime.app().keyboard_actions().is_some()
-            && (!raw.focused
-                || raw
-                    .events
-                    .iter()
-                    .any(|event| matches!(event, egui::Event::WindowFocused(false))))
-        {
+        if self.runtime.app().keyboard_actions().is_some() && blurred {
             // A coalesced blur/regain batch can end focused while the
             // application's separate held-key latch still needs cancellation.
             self.release_action_control(ctx);
@@ -741,6 +755,7 @@ mod tests {
                 phases: Vec::new(),
             };
             let mut host = Host {
+                window_mode: None,
                 action_surface: None,
                 action_surface_rect: None,
                 action_content_rect: None,
@@ -953,6 +968,7 @@ mod tests {
         };
         let options = HostOptions::default();
         let mut host = Host {
+            window_mode: None,
             action_surface: None,
             action_surface_rect: None,
             action_content_rect: None,
@@ -1308,6 +1324,7 @@ mod tests {
         };
         let options = HostOptions::default();
         let mut host = Host {
+            window_mode: None,
             action_surface: None,
             action_surface_rect: None,
             action_content_rect: None,

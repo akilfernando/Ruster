@@ -3,19 +3,21 @@ use super::super::project_startup::{Observation, ProjectDirectory};
 use super::ComponentWorkspace;
 use crate::{editor_theme, strings::Text, ui_kit};
 use eframe::egui;
-use rot_app::creation::{PlayerWindow, PlayerWindowSize, DEFAULT_WINDOW_SIZE};
+use rot_app::creation::{PlayerWindow, PlayerWindowMode, PlayerWindowSize, DEFAULT_WINDOW_SIZE};
 
 #[derive(Clone, Default, PartialEq, Eq)]
 struct Fields {
     title: String,
     width: String,
     height: String,
+    mode: Option<PlayerWindowMode>,
 }
 
 impl From<&PlayerWindow> for Fields {
     fn from(player: &PlayerWindow) -> Self {
         Self {
             title: player.title.clone().unwrap_or_default(),
+            mode: player.mode,
             width: player
                 .initial_size
                 .map(|size| size.width.to_string())
@@ -46,6 +48,7 @@ impl Fields {
         let window = PlayerWindow {
             title: (!self.title.is_empty()).then(|| self.title.clone()),
             initial_size,
+            mode: self.mode,
         };
         window.validate()?;
         Ok(window)
@@ -139,6 +142,31 @@ impl ComponentWorkspace {
             &DEFAULT_WINDOW_SIZE.height.to_string(),
             32,
         );
+        ui_kit::property_row_with_label(ui, Text::PlayerWindowMode.plain(), |ui, label| {
+            let response = egui::ComboBox::from_id_salt("player-window-mode")
+                .selected_text(draft.fields.mode.unwrap_or_default().label())
+                .show_ui(ui, |ui| {
+                    for mode in [
+                        PlayerWindowMode::Windowed,
+                        PlayerWindowMode::BorderlessFullscreen,
+                    ] {
+                        if ui
+                            .selectable_label(
+                                draft.fields.mode.unwrap_or_default() == mode,
+                                mode.label(),
+                            )
+                            .clicked()
+                        {
+                            if draft.fields.mode.unwrap_or_default() != mode {
+                                draft.fields.mode = Some(mode);
+                            }
+                            ui.close();
+                        }
+                    }
+                })
+                .response;
+            response.labelled_by(label);
+        });
         ui.weak(Text::PlayerWindowHelp.plain());
         if let Some(error) = self.error.as_ref().or(draft.error.as_ref()) {
             ui.colored_label(editor_theme::colors(ui).error, error);
