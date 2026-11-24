@@ -88,6 +88,28 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+**Number Properties** let v23 objects sharing a file-backed Lua script
+use different finite values. The Inspector shows the exact Lua property
+read. Native keyboard entry set two conveyor carriers to 1 and 3 units
+per second, producing 0.2 and 0.6 units in 12 fixed ticks. Nonfinite and
+duplicate names left the prior values intact. Approved Claude changed
+only the first carrier to 2 and preserved its existing sound cue. Native
+Undo, Redo and removal behaved as individual history entries. The Lua
+source hash stayed identical through authoring, Save and Build.
+After reopen, 12 ticks moved the carriers by 0.4 and 0.6 units. The
+relocated Linux build measured 4 and 6 units over 120 ticks. Vulkan
+validation passed, and the visible markers moved 130 and 194 pixels over
+the same sampled interval. Plain Light was checked for numeric field focus.
+A native window close preserved the open draft, and Escape discarded the
+draft without changing the scene.
+Three paired release runs with 240 file-backed Object bindings measured
+warm Step p95 at 2.843–2.874 ms with a constant and 2.905–2.930 ms with
+one Number Property. Median Play preparation was 0.538–0.539 ms and
+0.580–0.583 ms, respectively. Projection through ready runtime was
+3.754–3.759 ms and 3.904–3.908 ms at the median. Each run timed 750
+post-warmup Steps. The original Lua file was offline for Step, and
+the compile cache recorded zero misses.
+
 **Borderless Fullscreen** is available in Project Settings → Player for
 Linux builds. Windowed remains the default for older settings and packages.
 Approved MCP read the configured mode, its source and the published Build
