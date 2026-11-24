@@ -166,6 +166,7 @@ pub(crate) const SCENE_CAPABILITIES: &[&str] = &[
     "scene_model_place",
     "scene_prefab",
     "scene_group_create",
+    "scene_place_on_ground",
     "scene_reparent",
     "scene_create",
     "scene_primitive",
@@ -5009,7 +5010,7 @@ impl SceneEditor {
             Action::CreateShaderSource => self.create_shader_source(),
             Action::RefreshShader => self.refresh_shader_command(),
             Action::CreateEmpty => self.create_empty(),
-            Action::GroupSelection => {}
+            Action::GroupSelection | Action::PlaceSelectionOnGround => {}
             Action::CreateSpotLight => {}
             Action::CreateDirectionalLight => {
                 self.create_light_ui(rot_scene::LightKind::Directional {
@@ -5216,7 +5217,9 @@ impl SceneEditor {
     fn command_enabled(&self, action: Action) -> bool {
         match action {
             Action::GameUi => self.hud_draft.is_some() || self.hud_editable(),
-            Action::GroupSelection | Action::CreateSpotLight => false,
+            Action::GroupSelection | Action::PlaceSelectionOnGround | Action::CreateSpotLight => {
+                false
+            }
             Action::AiConnection => cfg!(unix),
             Action::Duplicate | Action::Delete | Action::Copy | Action::Frame => {
                 !self.manipulation.ids.is_empty()

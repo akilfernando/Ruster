@@ -76,7 +76,9 @@ impl SceneEditor {
             |action| {
                 !matches!(
                     action,
-                    Action::GroupSelection | Action::SetGameCameraFromView
+                    Action::GroupSelection
+                        | Action::PlaceSelectionOnGround
+                        | Action::SetGameCameraFromView
                 )
             },
             |action| self.command_enabled(action),

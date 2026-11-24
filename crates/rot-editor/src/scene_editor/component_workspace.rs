@@ -64,6 +64,9 @@ pub(super) mod component_sensor;
 #[path = "component_sound.rs"]
 pub(super) mod component_sound;
 
+#[path = "component_ground.rs"]
+mod component_ground;
+
 #[path = "component_transform.rs"]
 mod viewport_transform;
 use glam::DMat4;
@@ -1773,6 +1776,10 @@ impl ComponentWorkspace {
                 self.hierarchy_search.focus_requested = true;
                 return;
             }
+            Action::PlaceSelectionOnGround => {
+                self.ground_from_ui(None);
+                return;
+            }
             Action::GroupSelection => {
                 self.group_selection_from_ui(None);
                 return;
@@ -3017,6 +3024,7 @@ impl ComponentWorkspace {
                             | Action::CreateDirectionalLight
                             | Action::CreateSpotLight
                             | Action::GroupSelection
+                            | Action::PlaceSelectionOnGround
                             | Action::Duplicate
                             | Action::Delete
                             | Action::Frame
@@ -3039,6 +3047,7 @@ impl ComponentWorkspace {
                         && (!matches!(
                             action,
                             Action::GroupSelection
+                                | Action::PlaceSelectionOnGround
                                 | Action::Duplicate
                                 | Action::Delete
                                 | Action::Frame
@@ -3081,6 +3090,7 @@ impl ComponentWorkspace {
                 let mut child = None;
                 let mut framed = None;
                 let mut grouped = None;
+                let mut grounded = None;
                 let mut duplicated = None;
                 let mut prefab = None;
                 let mut view_change = None;
@@ -3285,6 +3295,14 @@ impl ComponentWorkspace {
                                     if action_menu_item(
                                         ui,
                                         &self.workspace,
+                                        Action::PlaceSelectionOnGround,
+                                        !blocked && !self.runtime.in_play_mode(),
+                                    ) {
+                                        grounded = Some(object.id.clone());
+                                    }
+                                    if action_menu_item(
+                                        ui,
+                                        &self.workspace,
                                         Action::Duplicate,
                                         !blocked,
                                     ) {
@@ -3339,6 +3357,8 @@ impl ComponentWorkspace {
                     self.create(action, Some(parent));
                 } else if let Some(id) = grouped {
                     self.group_selection_from_ui(Some(&id));
+                } else if let Some(id) = grounded {
+                    self.ground_from_ui(Some(&id));
                 } else if let Some(id) = duplicated {
                     self.duplicate_from_ui(Some(&id));
                 } else if let Some(id) = framed {

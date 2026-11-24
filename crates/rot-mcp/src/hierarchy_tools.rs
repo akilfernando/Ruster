@@ -2,7 +2,10 @@
 use serde_json::{json, Value};
 use std::collections::HashSet;
 pub fn supported(name: &str) -> bool {
-    matches!(name, "scene_group_create" | "scene_reparent")
+    matches!(
+        name,
+        "scene_group_create" | "scene_reparent" | "scene_place_on_ground"
+    )
 }
 
 pub(super) fn valid_creation_options(args: &serde_json::Map<String, Value>) -> bool {
@@ -46,6 +49,26 @@ pub fn valid(name: &str, args: &Value) -> bool {
     };
     if name == "scene_reparent" {
         return valid_reparent(map, args);
+    }
+    if name == "scene_place_on_ground" {
+        return super::exact_keys(
+            map,
+            &["expected_session_token", "expected_revision", "object_ids"],
+            &["expected_asset_revision"],
+        ) && super::canonical_u64(&args["expected_revision"])
+            && args
+                .get("expected_asset_revision")
+                .is_none_or(super::canonical_u64)
+            && args["expected_session_token"]
+                .as_str()
+                .is_some_and(|s| !s.is_empty() && s.len() <= 256)
+            && args["object_ids"].as_array().is_some_and(|ids| {
+                (1..=256).contains(&ids.len())
+                    && ids.iter().all(|id| {
+                        id.as_str()
+                            .is_some_and(|id| rot_scene::validate_id(id).is_ok())
+                    })
+            });
     }
     name == "scene_group_create"
         && super::exact_keys(
@@ -150,6 +173,13 @@ pub fn list() -> Vec<Value> {
         "object_id":id,
     });
     let mut reparent = group.clone();
+    let mut ground = group.clone();
+    ground
+        .as_object_mut()
+        .expect("property map")
+        .remove("object_id");
+    ground["expected_asset_revision"] = ground["expected_revision"].clone();
+    ground["object_ids"] = json!({"type":"array","items":id,"minItems":1,"maxItems":256});
     group["name"] = id.clone();
     creation_properties(group.as_object_mut().expect("property map"));
     group["member_ids"] = json!({"type":"array","items":id,"minItems":1,"maxItems":256});
@@ -167,6 +197,11 @@ pub fn list() -> Vec<Value> {
         })
     };
     vec![
+        tool(
+            "scene_place_on_ground",
+            ground,
+            vec!["expected_session_token", "expected_revision", "object_ids"],
+        ),
         tool(
             "scene_group_create",
             group,

@@ -86,6 +86,7 @@ pub(super) enum Action {
     RefreshShader,
     CreateEmpty,
     GroupSelection,
+    PlaceSelectionOnGround,
     CreateDirectionalLight,
     CreateSpotLight,
     GameCamera,
@@ -110,7 +111,7 @@ pub(super) enum Action {
     CommandPalette,
 }
 impl Action {
-    pub const ALL: [Self; 73] = [
+    pub const ALL: [Self; 74] = [
         Self::New,
         Self::Open,
         Self::Save,
@@ -162,6 +163,7 @@ impl Action {
         Self::RefreshShader,
         Self::CreateEmpty,
         Self::GroupSelection,
+        Self::PlaceSelectionOnGround,
         Self::CreateDirectionalLight,
         Self::CreateSpotLight,
         Self::GameCamera,
@@ -239,6 +241,7 @@ impl Action {
             Self::RefreshShader => Text::LabelRefreshShader.plain(),
             Self::CreateEmpty => Text::LabelCreateEmpty.plain(),
             Self::GroupSelection => Text::LabelGroupSelection.plain(),
+            Self::PlaceSelectionOnGround => Text::LabelPlaceSelectionOnGround.plain(),
             Self::CreateDirectionalLight => Text::LabelCreateDirectionalLight.plain(),
             Self::CreateSpotLight => Text::LabelCreateSpotLight.plain(),
             Self::GameCamera => Text::LabelGameCamera.plain(),
@@ -316,6 +319,7 @@ impl Action {
             Self::RefreshShader => "Refresh scene shader",
             Self::CreateEmpty => "Create empty",
             Self::GroupSelection => "Group selection",
+            Self::PlaceSelectionOnGround => "Place selection on ground",
             Self::CreateDirectionalLight => "Create directional light",
             Self::CreateSpotLight => "Create spot light",
             Self::GameCamera => "Game camera",

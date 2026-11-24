@@ -352,7 +352,9 @@ impl ComponentWorkspace {
             }
             "scene_transform" | "scene_rename" | "scene_reparent" | "scene_primitive" => 4,
             "scene_transform_many" | "scene_delete" | "scene_delete_many" | "scene_duplicate" => 3,
-            "scene_components_edit" => 3 + usize::from(map.contains_key("expected_asset_revision")),
+            "scene_components_edit" | "scene_place_on_ground" => {
+                3 + usize::from(map.contains_key("expected_asset_revision"))
+            }
             "scene_animation_set" => {
                 3 + [
                     "expected_asset_revision",
@@ -729,6 +731,23 @@ impl ComponentWorkspace {
                 .create_object(Some(id), name, geometry, parent, transform)
                 .map_err(|error| ("invalid_arguments", error.to_string()))?;
             return Ok(json!({"object_id":id, "changed":true, "dirty":self.session.is_dirty()}));
+        }
+
+        if op == "scene_place_on_ground" {
+            let ids = batch(&args["object_ids"])
+                .ok_or_else(invalid)?
+                .iter()
+                .map(|id| hierarchy_id(id).ok_or_else(invalid))
+                .collect::<Result<Vec<_>, _>>()?;
+            let asset_revision = map
+                .get("expected_asset_revision")
+                .map(|value| decimal(value).ok_or_else(invalid))
+                .transpose()?;
+            let placed = self.place_on_ground(revision, asset_revision, &ids)?;
+            return Ok(json!({
+                "object_ids":placed.object_ids, "world_delta_y":placed.world_delta_y,
+                "changed":placed.changed,"dirty":self.session.is_dirty()
+            }));
         }
 
         if op == "scene_duplicate" {
