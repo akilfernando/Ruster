@@ -549,6 +549,56 @@ impl AssetStore {
             .map(|_| ())
     }
 
+    /// Clear a failed Base Color reservation beside an accepted Roughness import.
+    pub fn clear_failed_base_color(
+        &self,
+        source: &str,
+        id: &str,
+        active: impl FnOnce() -> bool,
+    ) -> Result<(), AssetError> {
+        Self::project_source_limit(source)?;
+        if !source.ends_with(".png") || !Path::new(source).starts_with("Assets") {
+            return Err(error("Choose a PNG in the Assets folder."));
+        }
+        let sidecar = sidecar_path(&confined_path(&self.root, source, false)?);
+        self.with_current_catalog(|| {
+            let unavailable = || error("No failed Base Color import beside a ready Roughness map.");
+            if self.registry.has_asset_id(id) {
+                return Err(unavailable());
+            }
+            let previous = existing_metadata(&sidecar)?.ok_or_else(unavailable)?;
+            let mut entries = previous.clone();
+            let index = entries
+                .iter()
+                .position(|entry| {
+                    entry.id == id
+                        && entry.mesh_normal_policy.is_none()
+                        && entry.texture_role.unwrap_or(TextureRole::BaseColor)
+                            == TextureRole::BaseColor
+                })
+                .ok_or_else(unavailable)?;
+            let bytes = super::read_source_bytes(&self.root, source, AssetKind::Texture)?;
+            let hash = digest(&bytes);
+            let has_roughness = entries.iter().any(|entry| {
+                entry.texture_role == Some(TextureRole::Roughness)
+                    && self.asset_info(&entry.id).is_some_and(|info| {
+                        info.source == source
+                            && info.texture_role == Some(TextureRole::Roughness)
+                            && info.status == AssetStatus::Ready
+                            && info.hash.as_deref() == Some(hash.as_str())
+                    })
+            });
+            if !has_roughness || super::decode_png(&bytes).is_ok() {
+                return Err(unavailable());
+            }
+            if !active() {
+                return Err(error("Project closed before clearing the failed import."));
+            }
+            entries.remove(index);
+            write_metadata(&sidecar, Some(&previous), &entries)
+        })
+    }
+
     /// Give a copied source new identities while retaining its accepted import settings.
     pub fn duplicate_import_settings(
         &self,
@@ -1160,6 +1210,37 @@ mod tests {
             reopened.asset_info(&roughness.id).unwrap().status,
             AssetStatus::Ready
         );
+        let source_bytes = fs::read(dir.path().join(gray)).unwrap();
+        let accepted = reopened.texture_snapshots()[&roughness.id].clone();
+        let revision = reopened.revision();
+        assert!(reopened
+            .clear_failed_base_color(gray, &roughness.id, || true)
+            .is_err());
+        assert!(reopened
+            .clear_failed_base_color(gray, &reservation.id, || false)
+            .is_err());
+        fs::write(dir.path().join(gray), &original_bytes).unwrap();
+        assert!(reopened
+            .clear_failed_base_color(gray, &reservation.id, || true)
+            .is_err());
+        fs::write(dir.path().join(gray), &source_bytes).unwrap();
+        assert_eq!(load_metadata(&gray_sidecar).unwrap(), gray_roles);
+        reopened
+            .clear_failed_base_color(gray, &reservation.id, || true)
+            .unwrap();
+        assert_eq!(
+            load_metadata(&gray_sidecar).unwrap(),
+            vec![roughness.clone()]
+        );
+        assert_eq!(reopened.revision(), revision);
+        assert!(Arc::ptr_eq(
+            &reopened.texture_snapshots()[&roughness.id],
+            &accepted
+        ));
+        assert_eq!(fs::read(dir.path().join(gray)).unwrap(), source_bytes);
+        let (clean, diagnostics) = AssetStore::open_project(dir.path()).unwrap();
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(clean.texture(&roughness.id), Some(accepted.as_ref()));
     }
 
     #[test]

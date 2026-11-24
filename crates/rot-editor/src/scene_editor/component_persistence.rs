@@ -527,6 +527,49 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
+    fn v23_save_cleans_staging_in_a_renamed_project() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("project");
+        fs::create_dir(&root).unwrap();
+        let (mut editor, path, grant) = setup(&root);
+        let original = fs::read(&path).unwrap();
+        editor.command(Action::CreateCube);
+        let args = arguments(&editor, &grant);
+        let names = |path: &Path| {
+            fs::read_dir(path)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        let original_names = names(&root);
+        let (lease, mut response) = preparing_test_lease(Instant::now() + Duration::from_secs(2));
+        start(&mut editor, &args, Some(&grant), lease);
+        wait_for_preparation(&mut editor);
+        let staged_names = names(&root);
+        let staged: Vec<_> = staged_names.difference(&original_names).collect();
+        assert_eq!(staged.len(), 1);
+
+        let moved = directory.path().join("moved");
+        fs::rename(&root, &moved).unwrap();
+        fs::create_dir(&root).unwrap();
+        fs::write(&path, b"replacement scene").unwrap();
+        let unrelated = root.join(staged[0]);
+        fs::write(&unrelated, b"replacement directory file").unwrap();
+        finish(&mut editor, Some(&grant), false);
+
+        assert_eq!(
+            response().unwrap()["error"]["code"],
+            "save_permission_required"
+        );
+        assert_eq!(names(&moved), original_names);
+        assert_eq!(fs::read(moved.join("scene.json")).unwrap(), original);
+        assert_eq!(fs::read(&path).unwrap(), b"replacement scene");
+        assert_eq!(fs::read(&unrelated).unwrap(), b"replacement directory file");
+        assert!(editor.session.is_dirty());
+    }
+
+    #[test]
     fn v23_save_publication_rechecks_editor_authority_and_disk() {
         let root = tempfile::tempdir().unwrap();
         let (mut editor, path, grant) = setup(root.path());

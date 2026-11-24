@@ -343,6 +343,10 @@ copy becomes a local material override.
 Set the material tint, **Base color (sRGB)**, and nonmetallic roughness in
 the dialog. To use a loose PNG as a roughness map, put it in the project's
 Assets folder, right-click its tile, and choose **Import as Roughness**.
+When the same file has a failed Base Color import beside a ready Roughness
+map, select the **Base Color** tile and choose **Clear Failed Base Color
+Import** in the Inspector. This clears the failed reservation and keeps
+the PNG, the roughness map and its asset ID.
 Choose it under **Roughness map (linear)** in the material dialog. Choose
 **None** to clear the map. The scalar roughness stays available, and
 existing Base Color assignments keep their sRGB interpretation. Textures

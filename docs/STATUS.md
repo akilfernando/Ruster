@@ -29,6 +29,8 @@ Hub's Empty template creates v23. The editor can inspect objects, edit name,
 enabled state and Transform, add Mesh Renderers and Colliders, create,
 move or delete objects together, and save. Inspector edits shared Transform
 and component values. Viewport settings stay local. Automatic upgrades remain open.
+On Linux, when a project directory is renamed during an MCP Save, the save
+is refused and the staging file is removed from the original directory.
 Assets → Move to Folder moves a registered OBJ, Lua or WAV source with its
 sidecar and keeps references on the same ID. A moved vehicle reopened and
 kept its mesh, script and sound through approved MCP and a relocated Linux
@@ -608,7 +610,10 @@ edited finish survives reopen and Linux Build. Native edits and approved MCP
 commands preserve scene
 material edits when the source GLB is reimported. Assets can import an
 additional linear Roughness interpretation of a PNG, and the shared
-material dialog can select, replace or clear it. Edit → Scene Display
+material dialog can select, replace or clear it. Assets puts texture roles
+first when distinguishing PNG imports. On Linux, the Inspector can clear a
+failed Base Color reservation beside a ready Roughness map while preserving
+the PNG and accepted asset ID. Edit → Scene Display
 sets Surface HDR and exposure independently of object selection. Existing
 scenes keep their display settings.
 The built-in Cube samples Base Color and roughness through its existing

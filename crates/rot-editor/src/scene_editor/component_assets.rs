@@ -81,6 +81,8 @@ struct AssetRow {
     settings: Option<&'static str>,
     can_import_roughness: bool,
     #[cfg(target_os = "linux")]
+    failed_base_color: Option<String>,
+    #[cfg(target_os = "linux")]
     source_restore: Option<SourceRestore>,
     model: bool,
     registered: bool,
@@ -106,6 +108,8 @@ impl AssetRow {
             kind,
             settings: None,
             can_import_roughness: false,
+            #[cfg(target_os = "linux")]
+            failed_base_color: None,
             #[cfg(target_os = "linux")]
             source_restore: None,
             model: false,
@@ -511,8 +515,8 @@ impl Browser {
             row.settings = match (info.mesh_normal_policy, info.texture_role) {
                 (Some(MeshNormalPolicy::Flat), _) => Some("Normals: Flat"),
                 (Some(MeshNormalPolicy::AuthoredWhenComplete), _) => Some("Normals: From the file"),
-                (_, Some(TextureRole::BaseColor)) => Some("Base color (sRGB)"),
-                (_, Some(TextureRole::Roughness)) => Some("Roughness map (linear)"),
+                (_, Some(TextureRole::BaseColor)) => Some(Text::BaseColorSrgb.plain()),
+                (_, Some(TextureRole::Roughness)) => Some(Text::RoughnessMapLinear.plain()),
                 _ => None,
             };
             self.rows.push(row);
@@ -616,6 +620,16 @@ impl Browser {
             .iter()
             .filter_map(|issue| issue.asset_id.as_deref().zip(issue.texture_role))
             .collect();
+        #[cfg(target_os = "linux")]
+        let ready_roughness: BTreeSet<_> = self
+            .rows
+            .iter()
+            .filter(|row| {
+                row.status == AssetStatus::Ready
+                    && row.settings == Some(Text::RoughnessMapLinear.plain())
+            })
+            .map(|row| row.source.clone())
+            .collect();
         self.rows
             .extend(self.issues.iter().filter_map(|(source, issue)| {
                 let represented = issue.asset_id.as_deref().map_or_else(
@@ -646,6 +660,13 @@ impl Browser {
                         TextureRole::Roughness => Text::RoughnessMapLinear.plain(),
                     });
                 row.diagnostic.clone_from(&issue.diagnostic);
+                #[cfg(target_os = "linux")]
+                if row.settings == Some(Text::BaseColorSrgb.plain())
+                    && row.status == AssetStatus::Invalid
+                    && ready_roughness.contains(source)
+                {
+                    row.failed_base_color.clone_from(&issue.asset_id);
+                }
                 Some(row)
             }));
         // A reserved sidecar ID can identify a native issue row, but MCP
@@ -688,8 +709,14 @@ impl Browser {
                 && Path::new(&row.source).starts_with("Assets")
                 && row.status != AssetStatus::Missing
                 && !roughness_sources.contains(row.source.as_str());
-            if names[&row.source] > 1 {
-                row.label = format!("{} · {}", row.label, row.settings.unwrap_or(&row.id));
+            if row.settings == Some(Text::RoughnessMapLinear.plain()) {
+                row.label = format!("Roughness · {}", row.label);
+            } else if names[&row.source] > 1 {
+                if row.settings == Some(Text::BaseColorSrgb.plain()) {
+                    row.label = format!("Base Color · {}", row.label);
+                } else {
+                    row.label = format!("{} · {}", row.label, row.settings.unwrap_or(&row.id));
+                }
             }
         }
         self.folders = folders.into_iter().collect();
@@ -969,6 +996,15 @@ impl Browser {
         }
         if row.status != AssetStatus::Ready {
             let (message, recovery) = import_issue_text(&row.status);
+            #[cfg(target_os = "linux")]
+            let (message, recovery) = if row.failed_base_color.is_some() {
+                (
+                    Text::AssetBaseColorImportFailed,
+                    Text::AssetRoughnessStillReady,
+                )
+            } else {
+                (message, recovery)
+            };
             let message = if row.kind == "Prefab" && row.status == AssetStatus::Invalid {
                 Text::PrefabInvalid
             } else {
@@ -1000,6 +1036,17 @@ impl Browser {
                                 );
                             });
                     });
+            }
+            #[cfg(target_os = "linux")]
+            if let Some(id) = row
+                .failed_base_color
+                .as_ref()
+                .filter(|_| ui.button(Text::AssetClearFailedBaseColor.plain()).clicked())
+            {
+                self.context_action = Some(ContextAction::File(FileAction::ClearFailedBaseColor {
+                    source: PathBuf::from(&row.source),
+                    id: id.clone(),
+                }));
             }
         }
         #[cfg(target_os = "linux")]
@@ -1577,9 +1624,13 @@ mod tests {
         let ready = &browser.rows[browser.by_id[&roughness]];
         assert_eq!(ready.status, AssetStatus::Ready);
         assert_eq!(ready.settings, Some(Text::RoughnessMapLinear.plain()));
+        assert_eq!(ready.label, "Roughness · Gray.png");
         let alias = &browser.rows[browser.by_id[source]];
         assert_eq!(alias.settings, Some(Text::BaseColorSrgb.plain()));
         assert_eq!(alias.status, AssetStatus::Invalid);
+        assert_eq!(alias.label, "Base Color · Gray.png");
+        #[cfg(target_os = "linux")]
+        assert_eq!(alias.failed_base_color, issues[0].asset_id);
         assert_eq!(browser.issues[source].asset_id, None);
         assert!(!browser.issues[source].last_good_available);
 

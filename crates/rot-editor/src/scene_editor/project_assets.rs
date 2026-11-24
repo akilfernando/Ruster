@@ -73,6 +73,10 @@ struct AssetJob {
 pub(super) enum FileAction {
     Reimport(PathBuf),
     InterpretRoughness(PathBuf),
+    ClearFailedBaseColor {
+        source: PathBuf,
+        id: String,
+    },
     Duplicate(PathBuf),
     Rename {
         source: PathBuf,
@@ -574,6 +578,12 @@ fn file_action(
                     rot_assets::TextureRole::Roughness,
                     active,
                 )
+                .map_err(|error| error.to_string())?;
+            Ok(source)
+        }
+        FileAction::ClearFailedBaseColor { source, id } => {
+            store
+                .clear_failed_base_color(source.to_str().unwrap_or_default(), &id, active)
                 .map_err(|error| error.to_string())?;
             Ok(source)
         }

@@ -1954,6 +1954,9 @@ pub struct PreparedComponentSave {
     state: u64,
     stamp: DiskStamp,
     temporary: tempfile::NamedTempFile,
+    // Keep the directory descriptor alive until the temporary file is dropped.
+    #[cfg(target_os = "linux")]
+    _staging_directory: File,
     digest: [u8; 32],
     bytes: u64,
 }
@@ -1963,8 +1966,19 @@ impl ComponentSave {
     /// Stage and sync the new file, then verify the original bytes. The disk
     /// stamp lets publication reject later changes without re-reading the file.
     pub fn prepare(self) -> Result<PreparedComponentSave, SceneError> {
+        #[cfg(target_os = "linux")]
+        let (staging_directory, staging_path) = {
+            use std::os::fd::AsRawFd;
+            let parent = self.path.parent().ok_or(SceneError::Conflict)?;
+            let directory = File::open(parent)?;
+            let name = self.path.file_name().ok_or(SceneError::Conflict)?;
+            let path = PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd())).join(name);
+            (directory, path)
+        };
+        #[cfg(not(target_os = "linux"))]
+        let staging_path = &self.path;
         let (temporary, (prepared_digest, bytes)) =
-            crate::prepare_scene_write(&self.path, |writer| {
+            crate::prepare_scene_write(staging_path.as_ref(), |writer| {
                 ComponentSession::write_snapshot(&self.scene, writer)
             })?;
         let stamp = disk_stamp(&self.path)?;
@@ -1983,6 +1997,8 @@ impl ComponentSave {
             state: self.state,
             stamp,
             temporary,
+            #[cfg(target_os = "linux")]
+            _staging_directory: staging_directory,
             digest: prepared_digest,
             bytes,
         })
