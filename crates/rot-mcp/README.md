@@ -252,9 +252,9 @@ connected project.
 - Use `rot_tools` to call `scene_place_on_ground` with `object_ids` and
   the current scene guards. Supply `expected_asset_revision` from
   `asset_inspect` if a selected subtree uses an imported renderer. The
-  result lists normalized root IDs and the common world-Y shift to bring
-  the lowest indexed point to Y=0. An already grounded selection adds no
-  Undo entry.
+  result lists normalized root IDs, the source `minimum_world_y`, and the
+  common `world_delta_y` shift to bring the lowest indexed point to Y=0.
+  An already grounded selection adds no Undo entry.
 - Fit a v23 Box Collider using one guarded `scene_components_edit` edit
   `{"operation":"fit_box_to_mesh","object_id":"barrier","component_id":"box","renderer_component_id":"barrier-mesh"}`.
   Use `scene_components_inspect` for IDs on the same owner. Omit

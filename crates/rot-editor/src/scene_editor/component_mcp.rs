@@ -745,7 +745,8 @@ impl ComponentWorkspace {
                 .transpose()?;
             let placed = self.place_on_ground(revision, asset_revision, &ids)?;
             return Ok(json!({
-                "object_ids":placed.object_ids, "world_delta_y":placed.world_delta_y,
+                "object_ids":placed.object_ids, "minimum_world_y":placed.minimum_world_y,
+                "world_delta_y":placed.world_delta_y,
                 "changed":placed.changed,"dirty":self.session.is_dirty()
             }));
         }

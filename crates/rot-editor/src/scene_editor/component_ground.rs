@@ -3,7 +3,10 @@ use super::ComponentWorkspace;
 use crate::strings::Text;
 use glam::{DMat3, DVec3};
 use rot_assets::Mesh;
-use rot_scene::component_scene::{Component, Geometry};
+use rot_scene::{
+    component_scene::{Component, Geometry},
+    Lighting,
+};
 use std::collections::{HashMap, HashSet};
 
 type GroundError = (&'static str, String);
@@ -11,6 +14,7 @@ const GROUND_EPSILON: f64 = 2e-6;
 
 pub(super) struct Placement {
     pub object_ids: Vec<String>,
+    pub minimum_world_y: f64,
     pub world_delta_y: f64,
     pub changed: bool,
 }
@@ -90,7 +94,7 @@ impl ComponentWorkspace {
                 if self.view_flags.get(index).is_some_and(|flags| flags.locked) {
                     return Err(("objects_locked", Text::GroundUnlock.plain().into()));
                 }
-                affected.push(index);
+                affected.push((index, roots.len() - 1));
             }
         }
         if let Some(id) = ids.iter().find(|id| unknown.contains(**id)) {
@@ -101,7 +105,7 @@ impl ComponentWorkspace {
         // Repeated instances with the same world Y basis share a support value.
         // Translation is applied individually after looking it up.
         let mut support_cache = HashMap::new();
-        for index in affected {
+        for &(index, _) in &affected {
             let node = &objects[index];
             let world = self.preview_world[index];
             let basis = DVec3::new(world.x_axis.y, world.y_axis.y, world.z_axis.y);
@@ -181,18 +185,20 @@ impl ComponentWorkspace {
         if minimum.abs() <= GROUND_EPSILON {
             return Ok(Placement {
                 object_ids,
+                minimum_world_y: minimum,
                 world_delta_y: 0.0,
                 changed: false,
             });
         }
         let world_delta_y = -minimum;
         let mut edits = Vec::with_capacity(roots.len());
+        let mut displacements = Vec::with_capacity(roots.len());
         for index in roots {
             let mut node = objects[index].clone();
             let basis = self.parents[index].map_or(DMat3::IDENTITY, |parent| {
                 DMat3::from_mat4(self.preview_world[parent])
             });
-            node.transform.translation =
+            let (translation, applied) =
                 translate_world_y(basis, node.transform.translation, world_delta_y).ok_or_else(
                     || {
                         (
@@ -201,7 +207,40 @@ impl ComponentWorkspace {
                         )
                     },
                 )?;
+            node.transform.translation = translation;
             edits.push(node);
+            displacements.push(applied);
+        }
+        let preview = self
+            .preview
+            .as_ref()
+            .expect("world matrices require a scene preview");
+        let projected_lights = match &preview.scene().lighting {
+            Lighting::Authored { lights, .. } if !lights.is_empty() => Some(lights),
+            _ => None,
+        };
+        if let Some(lights) = projected_lights {
+            for (index, root) in affected {
+                let node = &objects[index];
+                let position = self.preview_world[index].w_axis.truncate() + displacements[root];
+                for light in node
+                    .components
+                    .iter()
+                    .filter_map(|item| lights.get(&item.id))
+                {
+                    let mut transform = light.transform.clone();
+                    transform.translation = position.as_vec3().to_array();
+                    transform.validate().map_err(|error| {
+                        (
+                            "world_transform_unrepresentable",
+                            format!(
+                                "Placing {} would move its light beyond the world limits. {error}",
+                                node.name
+                            ),
+                        )
+                    })?;
+                }
+            }
         }
         let next = self
             .session
@@ -212,13 +251,14 @@ impl ComponentWorkspace {
         }
         Ok(Placement {
             object_ids,
+            minimum_world_y: minimum,
             world_delta_y,
             changed: next != revision,
         })
     }
 }
 
-fn translate_world_y(parent: DMat3, local: [f32; 3], y: f64) -> Option<[f32; 3]> {
+fn translate_world_y(parent: DMat3, local: [f32; 3], y: f64) -> Option<([f32; 3], DVec3)> {
     let start = DVec3::from_array(local.map(f64::from));
     let displacement = DVec3::new(0.0, y, 0.0);
     let requested = start + parent.inverse() * displacement;
@@ -230,7 +270,7 @@ fn translate_world_y(parent: DMat3, local: [f32; 3], y: f64) -> Option<[f32; 3]>
     // Check world displacement itself so a large world coordinate cannot mask
     // sideways drift or disagreement between independently stored roots.
     ((applied - displacement).abs().max_element() <= GROUND_EPSILON)
-        .then(|| stored.as_vec3().to_array())
+        .then(|| (stored.as_vec3().to_array(), applied))
 }
 
 fn local_support(mesh: &Mesh, basis: DVec3) -> Option<f64> {
@@ -376,12 +416,73 @@ mod tests {
             let delta = (actual.w_axis - original.w_axis).truncate();
             assert!((delta - DVec3::Y * expected_delta).abs().max_element() <= GROUND_EPSILON);
         }
+        assert!(
+            (placed["result"]["minimum_world_y"].as_f64().unwrap() + expected_delta).abs() < 1e-10
+        );
         args["expected_revision"] = json!("1");
-        assert_eq!(submit(&mut editor, &args)["result"]["changed"], false);
+        let no_op = submit(&mut editor, &args);
+        assert_eq!(no_op["result"]["changed"], false);
+        assert_eq!(no_op["result"]["world_delta_y"], 0.0);
+        assert!(
+            (no_op["result"]["minimum_world_y"].as_f64().unwrap()
+                - minimum(editor.preview_world[0]))
+            .abs()
+                < 1e-10
+        );
         assert_eq!(editor.session.revision(), 1);
         editor.command(Action::Undo);
         assert_eq!(editor.session.scene(), &scene);
         assert!(matches!(editor.session.undo(2), Err(SceneError::NoUndo)));
+    }
+
+    #[test]
+    fn grounding_refuses_the_same_projected_light_overflow_as_move() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("lights.scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.objects[0].transform.translation = [0.0, 3.0, 0.0];
+        scene.objects[1].parent = Some("left".into());
+        scene.objects[1].transform.translation = [0.0, -10_000.0, 0.0];
+        let light = rot_scene::Light::point(None);
+        scene.objects[1].components = vec![rot_scene::component_scene::ComponentInstance {
+            id: "lamp".into(),
+            enabled: true,
+            kind: Component::Light {
+                color: light.color,
+                intensity: light.intensity,
+                kind: light.kind,
+            },
+        }];
+        // A mesh-less group between the selected root and light places the
+        // light one metre lower while keeping its local Transform valid.
+        scene.objects.push(ObjectNode {
+            id: "lamp-base".into(),
+            name: "Lamp Base".into(),
+            enabled: true,
+            parent: Some("left".into()),
+            transform: Transform {
+                translation: [0.0, -2.0, 0.0],
+                ..Default::default()
+            },
+            components: vec![],
+        });
+        scene.objects[1].parent = Some("lamp-base".into());
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let mut staged_move = editor.preview.as_ref().unwrap().clone();
+        let origin = editor.preview_world[1].w_axis.truncate();
+        assert_eq!(origin.y, -9_999.0);
+        assert!(staged_move
+            .set_translated_rows(&[], &[("lamp".into(), origin)], DVec3::new(0.0, -2.5, 0.0))
+            .is_err());
+        let failure = editor
+            .place_on_ground(0, None, &["left"])
+            .err()
+            .expect("refuse the same world light bounds");
+        assert_eq!(failure.0, "world_transform_unrepresentable");
+        assert_eq!(editor.session.scene(), &scene);
+        assert!(matches!(editor.session.undo(0), Err(SceneError::NoUndo)));
     }
 
     #[test]

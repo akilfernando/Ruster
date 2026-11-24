@@ -1572,7 +1572,8 @@ pub(crate) mod tests {
             .copied()
             .chain(["inspect", "edit", "undo", "redo", "replay"])
             .collect();
-        assert_eq!(operations.len(), 97);
+        assert_eq!(operations.len(), 98);
+        assert!(operations.contains(&"scene_place_on_ground"));
         for op in operations {
             for bad in ["missing", "wrong", "other_editor"] {
                 let mut request = frame(&handshake_b, op, json!({}));

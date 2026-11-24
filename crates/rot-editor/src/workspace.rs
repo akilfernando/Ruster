@@ -486,6 +486,7 @@ impl Default for Preferences {
                 })
                 .chain(
                     [
+                        Action::PlaceSelectionOnGround,
                         Action::CreateCube,
                         Action::CreateSphere,
                         Action::CreateCapsule,
