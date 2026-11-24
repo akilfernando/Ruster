@@ -12,8 +12,6 @@ package in your lane under **Now**. How to work is in the
 - File references were checked on 2026-11-17 and drift; search if a line
   number is off.
 
-**C-22 Game HUD Action Button** — in progress — Sol, 2026-11-24.
-
 ## Needs the user
 
 - **Vetoes.** The [architecture decisions](PARITY-PLAN.md#4-architecture-decisions)
@@ -667,6 +665,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-19 Sphere Collider radius fitting | Fit a v23 Sphere Collider from its Scene view outline. | done · A viewport drag edits radius with one Undo and Escape cancellation. Perspective and orthographic produced the same fitted radius and preserved the center. Approved Claude set the flat robot radius, and deterministic editor and relocated Vulkan runs stopped 0.5 units farther from the wall. |
 | C-20 Restore Missing Source | Restore an accepted missing v23 project Lua or WAV source from its exact cached bytes. | done · Assets restores the original path under its existing ID and sidecar. A corrupt cache, changed sidecar, unsafe folder or competing destination is refused. Approved Claude inspected both candidates and ran the restored signal, which moved and rang in the relocated Linux player. |
 | C-21 Orthographic GLB cameras | Place static orthographic lenses as editable v23 Cameras on their source nodes. | done · Explicit Reimport upgrades older catalog acceptances from the same bytes. Two Blender nodes sharing a lens kept independent components under their original rig. Approved Claude inspected and activated the exact Game Camera. Save, reopen and the relocated Vulkan player matched the Blender framing. Unsupported lenses leave their nodes with a warning. Invalid refresh retains the last accepted model. |
+| C-22 Game HUD Action Button | Trigger an existing v23 Button action from the Game HUD. | done · Window → Game HUD offers a caption and a Button picker with shared Undo. A click or keyboard activation supplies one tap. A held gameplay key survives the click and the Primary Mouse binding stays quiet. Approved Claude authored a separate button and verified its guarded Step. The Blender bridge matched the keyboard-input pose at tick 13 and ran from a relocated Vulkan build. |
 
 ### C-04 implementation brief
 

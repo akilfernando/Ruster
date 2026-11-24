@@ -88,6 +88,23 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+**Game HUD Action Buttons** give a named Button action an on-screen control
+through Window → Game HUD. A completed activation supplies one tap to the next
+simulation Step. The Blender drawbridge matched its keyboard-input pose at
+tick 13. Releasing outside the button or losing focus kept the bridge still.
+Holding E through a HUD click during Play preserved the held action and did
+not fire a separate Primary Mouse binding. Native edits shared Undo and Redo.
+Approved Claude authored a second button, activated it through guarded MCP
+and verified the applied Step. Missing and Axis targets named the rejected
+action. The saved game reopened, and click and Tab → Enter both moved only
+the intended bridge in a relocated Vulkan build. The editor form's focus
+ring was inspected in Rot Dark and Plain Light. Across three warmed release
+runs, the 5,000-object static-label HUD measured 16.68–17.05 µs CPU p95
+before and 17.07–17.46 µs after. Idle buttons measured 20.35–20.62 µs and
+successful release frames measured 20.79–21.05 µs. Lua Step with the tap
+merged measured 20.96–21.29 µs p95. HUD input and paint reused one prepared
+layout within each frame. The warmed HUD cache reformatted zero strings.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added
