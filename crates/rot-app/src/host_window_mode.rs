@@ -221,7 +221,7 @@ impl WindowMode {
 enum Probe {
     Wayland,
     #[cfg(target_os = "linux")]
-    X11(X11Probe),
+    X11(Box<X11Probe>),
     Unavailable,
 }
 
@@ -240,12 +240,12 @@ impl Probe {
         let atom = |name: &[u8]| Some(connection.intern_atom(false, name).ok()?.reply().ok()?.atom);
         let state = atom(b"_NET_WM_STATE")?;
         let fullscreen = atom(b"_NET_WM_STATE_FULLSCREEN")?;
-        Some(Self::X11(X11Probe {
+        Some(Self::X11(Box::new(X11Probe {
             connection,
             window,
             state,
             fullscreen,
-        }))
+        })))
     }
 }
 
