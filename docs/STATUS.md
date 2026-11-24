@@ -88,6 +88,32 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+**Borderless Fullscreen** is available in Project Settings → Player for
+Linux builds. Windowed remains the default for older settings and packages.
+Approved MCP read the configured mode, its source and the published Build
+receipt. A relocated Vulkan build opened at 1920×1080 on private Xwayland,
+kept the 4:3 camera framing and fullscreen mode through the HUD Start
+transition, and restored the manually resized 1120×680 window after F11.
+Gameplay ticks continued, and the gameplay action bound to F11 received no
+observable press through the press, repeat and release sequence. The older
+package started at its original 960×720 size. Private native Wayland also
+confirmed the fullscreen → windowed → fullscreen round trip. Plain Light
+was checked for selector focus, and Vulkan validation passed for the
+current and older package runs. The editor reopened the saved mode at
+1920×1080. On private Xwayland, 12 warmed launches
+per mode reached first Present at 199.265/219.421 ms p50/p95 windowed and
+188.729/201.991 ms fullscreen. The first Present on all fullscreen
+launches still reported 960×720. The first Present at the confirmed
+1920×1080 fullscreen size was 226.237/240.563 ms. Across 12 warm round
+trips, F11-to-Present at the expected size was 40.259/44.726 ms entering
+fullscreen and 40.473/57.311 ms leaving. Three native Wayland release runs
+per mode used matching 1920×1080 drawables and 1385×1039 scene targets,
+with one draw and five mesh uploads in each. Windowed GPU scene p95 was
+0.455–0.572 ms and fullscreen was 0.584–0.901 ms. CPU scene preparation
+p95 was 0.089–0.092 ms windowed and 0.087–0.091 ms fullscreen. The
+windowed compositor had a larger virtual display to allow the matching
+client size with decorations.
+
 **WAV audition** plays a ready v23 WAV once from the Linux Assets Inspector
 and exposes its duration and sample rate in the editor and approved MCP.
 Selection opened no output stream. The 0.370 s, 32 kHz bell completed
