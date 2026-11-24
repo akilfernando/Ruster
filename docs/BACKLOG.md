@@ -42,8 +42,6 @@ One line each. Anyone may add; the user or a planning pass orders them.
   sources, or object/application script attachments. C-02/C-03 must preserve
   these features alongside hierarchy during migration. Until then, explain
   the specific blocker in the editor.
-- Human walkthrough: material changes are drafts until Apply Material.
-  Make the pending state and commit action clearer.
 - Human walkthrough: ChatGPT requested several write approvals after
   connecting. Consider batched undoable edits in C-06 to reduce tool calls.
 - MCP village test (2026-11-19): “the roofs on the houses look a bit broken.” Open gables were confirmed. Whether rotation order contributed is unproven because geometry and rotations changed together. Prioritize documenting Euler order, local and world axes, handedness, and units with a rotated-and-tilted example, making parent-local assembly straightforward, and framing a selected object from the front, side, and above (C-05/C-06). Triangular Prism gives the editor and MCP a closed roof shape (C-05). For prefabs (C-07), try reusable cottages with per-instance position and heading and fixes that propagate to instances. Verify one complete cottage up close from multiple angles before duplicating it.

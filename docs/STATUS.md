@@ -636,14 +636,15 @@ cover 5,000 and 50,000 objects. Desktop frame rates remain unverified.
 
 ## What a creator can do today
 
-Create a project and a scene; add cubes, spheres, capsules, lights and groups;
-move, rotate and scale with gizmos; assign textures and materials; import OBJ,
-PNG, WAV and simple GLB models, including one transform animation clip;
-attach small Lua scripts; press Play to run the scene; build a Linux
-application through a prepared runtime kit; and let an AI app edit the scene
-through MCP after a scripted setup. Legacy scenes retain a 256-object limit.
-Materials are opaque. The [historical inventory](PARITY-PLAN.md#2-where-we-are)
-records the starting point for the parity plan.
+In v23, create projects and scenes, assemble component hierarchies and
+prefabs, and edit transforms, lighting, cameras, colliders and opaque
+materials. Import OBJ, PNG, WAV and supported GLB assets. Attach Lua files,
+set per-object properties, and test gameplay in Play. Build packages
+supported scenes as a runnable Linux folder or portable archive. Approved
+AI apps can work alongside the editor through MCP and share Undo. Legacy
+scenes retain a 256-object limit and use the prepared runtime kit for
+Build. The [historical inventory](PARITY-PLAN.md#2-where-we-are) records
+the starting point for the parity plan.
 
 ## Installed on this machine
 
