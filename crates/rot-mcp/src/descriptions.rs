@@ -22,7 +22,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("scene_components_inspect", "List v23 components by object_id and optional component_id. Exact Box Collider replies include collider_world; offset and half extents are local. Spot Light detail includes spot_world."),
     ("scene_components_edit", "Edit v23 components in one Undo. fit_box_to_mesh fits local geometry. aim_spot_at_object uses target_object_id. File Lua uses source_kind asset and binding.source_id. Pin scene/asset guards."),
     ("scene_delete", "Delete an object. In v23, also delete its descendants."),
-    ("scene_transform_many", "Set the position, rotation (radians) and scale of up to 256 objects as one Undo step."),
+    ("scene_transform_many", "Set positions, rotations (radians) and scales in one Undo. For world Y=0 placement use rot_tools scene_place_on_ground."),
     ("scene_duplicate_many", "Duplicate up to 256 objects under new IDs as one Undo step."),
     ("scene_delete_many", "Delete up to 256 selected objects as one Undo step. In v23, also delete their descendants."),
     ("scene_transform", "Set an object's position, rotation (Euler radians) and scale."),

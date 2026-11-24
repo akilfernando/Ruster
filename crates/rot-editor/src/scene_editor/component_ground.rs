@@ -250,3 +250,146 @@ fn local_support(mesh: &Mesh, basis: DVec3) -> Option<f64> {
     }
     Some(low)
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use crate::workspace::Action;
+    use rot_scene::{
+        component_scene::{ComponentScene, ComponentSession, ObjectNode},
+        Scene, SceneError, Session, Transform,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn grounded_hierarchies_share_one_world_displacement_and_one_undo() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workshop.scene.json");
+        std::fs::create_dir(directory.path().join("Assets")).unwrap();
+        let vertices = [[1.0, -2.0, 2.0], [2.0, 0.0, -1.0], [0.0, -3.0, 1.0]];
+        std::fs::write(
+            directory.path().join("Assets/Off-center.obj"),
+            "v 1 -2 2\nv 2 0 -1\nv 0 -3 1\nf 1 2 3\n",
+        )
+        .unwrap();
+        let mut store = rot_assets::AssetStore::open(directory.path()).unwrap();
+        store.import("barrier", "Assets/Off-center.obj").unwrap();
+
+        let legacy = Session::new(Scene::demo()).unwrap();
+        let mut scene = ComponentScene::from_legacy(&legacy).unwrap();
+        scene.objects.truncate(2);
+        scene.objects[0].parent = Some("assembly".into());
+        scene.objects[0].transform.translation = [1.0, 2.0, 1.0];
+        scene.objects[0].transform.rotation = [0.2, 0.5, 0.3];
+        scene.objects[0].components[0].enabled = false;
+        let Component::MeshRenderer { geometry, .. } = &mut scene.objects[0].components[0].kind
+        else {
+            panic!("demo cube");
+        };
+        *geometry = Geometry::Imported {
+            asset: "barrier".into(),
+        };
+        scene.objects[1].transform.translation = [4.0, 18.0, -2.0];
+        let empty = |id: &str, parent: Option<&str>, transform| ObjectNode {
+            id: id.into(),
+            name: id.into(),
+            enabled: true,
+            parent: parent.map(str::to_owned),
+            transform,
+            components: vec![],
+        };
+        scene.objects.push(empty(
+            "mount",
+            None,
+            Transform {
+                translation: [0.0, 8.0, 0.0],
+                rotation: [0.31, 0.16, -0.4],
+                scale: [2.0, 0.8, 1.2],
+            },
+        ));
+        scene.objects.push(empty(
+            "assembly",
+            Some("mount"),
+            Transform {
+                translation: [0.25, 0.5, 0.1],
+                rotation: [0.23, 0.12, -0.18],
+                ..Default::default()
+            },
+        ));
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.assets = Some(store.project_snapshot());
+        let start = editor.preview_world.clone();
+        let minimum = |world: glam::DMat4| {
+            vertices
+                .iter()
+                .map(|v| world.transform_point3(DVec3::from_array(*v)).y)
+                .fold(f64::INFINITY, f64::min)
+        };
+        let expected_delta = -minimum(start[0]);
+
+        let submit = |editor: &mut ComponentWorkspace, args: &serde_json::Value| {
+            editor.ai_command("guard", "scene_place_on_ground", args)
+        };
+        let mut args = json!({
+            "expected_session_token":"guard","expected_revision":"0",
+            "object_ids":["assembly","left","center","left"],
+        });
+        assert_eq!(
+            submit(&mut editor, &args)["error"]["code"],
+            "asset_revision_required"
+        );
+        args["expected_asset_revision"] = json!((store.revision() + 1).to_string());
+        assert_eq!(
+            submit(&mut editor, &args)["error"]["code"],
+            "stale_asset_revision"
+        );
+        args["expected_asset_revision"] = json!(store.revision().to_string());
+        editor
+            .view_flags
+            .resize(scene.objects.len(), Default::default());
+        editor.view_flags[0].locked = true;
+        assert_eq!(
+            submit(&mut editor, &args)["error"]["code"],
+            "objects_locked"
+        );
+        editor.view_flags.clear();
+        assert_eq!(editor.session.scene(), &scene);
+        assert!(matches!(editor.session.undo(0), Err(SceneError::NoUndo)));
+
+        let placed = submit(&mut editor, &args);
+        assert_eq!(placed["result"]["revision"], "1", "{placed}");
+        assert_eq!(
+            placed["result"]["object_ids"],
+            json!(["center", "assembly"])
+        );
+        assert!(
+            (placed["result"]["world_delta_y"].as_f64().unwrap() - expected_delta).abs() < 1e-10
+        );
+        assert!(minimum(editor.preview_world[0]).abs() <= GROUND_EPSILON);
+        assert_eq!(editor.session.scene().objects[0], scene.objects[0]);
+        for row in [0, 1, 3] {
+            let actual = editor.preview_world[row];
+            let original = start[row];
+            assert_eq!(actual.x_axis, original.x_axis);
+            assert_eq!(actual.y_axis, original.y_axis);
+            assert_eq!(actual.z_axis, original.z_axis);
+            let delta = (actual.w_axis - original.w_axis).truncate();
+            assert!((delta - DVec3::Y * expected_delta).abs().max_element() <= GROUND_EPSILON);
+        }
+        args["expected_revision"] = json!("1");
+        assert_eq!(submit(&mut editor, &args)["result"]["changed"], false);
+        assert_eq!(editor.session.revision(), 1);
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene(), &scene);
+        assert!(matches!(editor.session.undo(2), Err(SceneError::NoUndo)));
+    }
+
+    #[test]
+    fn grounding_checks_world_precision_after_storing_local_translation() {
+        let parent = DMat3::from_rotation_z(0.3) * DMat3::from_diagonal(DVec3::new(2.0, 0.5, 2.0));
+        assert!(translate_world_y(parent, [0.0; 3], 2.0).is_some());
+        assert!(translate_world_y(parent, [9000.0, 0.0, 0.0], 0.001).is_none());
+    }
+}

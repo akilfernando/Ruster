@@ -653,6 +653,15 @@ then choose **Step**. A keyboard key already holding the action keeps its
 hold, and clicking the HUD does not send Primary Mouse to the scene.
 **Remove Button** deletes the row.
 
+## Place selected objects on the ground
+
+In the Hierarchy, select the objects to move and choose **Place Selection
+on Ground** from the selection's context menu or the command palette. The
+lowest indexed mesh point in the selection and its children lands on
+world Y=0. The whole selection moves by the same amount, including groups.
+A child selected with its parent moves once. Disabled Mesh Renderers count
+toward the fit. One Undo restores the original placement.
+
 ## Edit a collider in Scene view
 
 Select an object with an enabled Box Collider and choose **Edit Collider**

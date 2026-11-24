@@ -224,6 +224,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ground_has_exact_roots_and_optional_asset_guard() {
+        let name = "scene_place_on_ground";
+        let mut args = json!({
+            "expected_session_token":"session","expected_revision":"7",
+            "object_ids":["group","group-child"]
+        });
+        assert!(valid(name, &args));
+        args["expected_asset_revision"] = json!("8");
+        assert!(valid(name, &args));
+        assert!(!super::super::tool_catalog::advertised(name));
+        args["expected_asset_revision"] = json!(8);
+        assert!(!valid(name, &args));
+        args.as_object_mut()
+            .unwrap()
+            .remove("expected_asset_revision");
+        args["object_ids"] = json!(["invalid id"]);
+        assert!(!valid(name, &args));
+    }
+
+    #[test]
     fn reparent_requires_one_source_and_one_destination() {
         let maximum_ids = (0..256).map(|n| format!("id{n:0126}")).collect::<Vec<_>>();
         let args = |fields: Value| {
