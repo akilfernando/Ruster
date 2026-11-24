@@ -885,6 +885,29 @@ fn listed() -> Value {
                 required.retain(|r| !SCENE_GUARDS.iter().any(|(guard, _)| r == *guard));
             }
         }
+        if name == "scene_components_edit" {
+            // Advertise the shared fields once. rot_tools describe retains
+            // each exact operation shape and its required fields.
+            let edits = &mut schema["properties"]["edits"]["items"];
+            let mut properties = serde_json::Map::new();
+            let mut operations = Vec::new();
+            for variant in edits["oneOf"].as_array().expect("component edit variants") {
+                let fields = variant["properties"].as_object().expect("edit fields");
+                let token = &fields["operation"];
+                if let Some(values) = token["enum"].as_array() {
+                    operations.extend(values.iter().cloned());
+                } else {
+                    operations.push(token["const"].clone());
+                }
+                properties.extend(
+                    fields
+                        .iter()
+                        .map(|(name, value)| (name.clone(), value.clone())),
+                );
+            }
+            properties.insert("operation".into(), json!({"enum":operations}));
+            *edits = object_schema(json!(properties), vec!["operation", "object_id"]);
+        }
         compact(schema);
         let read_only = tool["annotations"]["readOnlyHint"] == true;
         let object = tool.as_object_mut().unwrap();
@@ -1971,6 +1994,12 @@ mod tests {
             .find(|tool| tool["name"] == "scene_components_edit")
             .unwrap();
         let schema = &component_edit["inputSchema"];
+        let edit_fields = &schema["properties"]["edits"]["items"]["properties"];
+        assert!(edit_fields["operation"]["enum"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("fit_box_to_mesh")));
+        assert_eq!(edit_fields["renderer_component_id"]["type"], "string");
         let required = schema["required"].as_array().unwrap();
         for (guard, _) in SCENE_GUARDS {
             assert_eq!(schema["properties"][guard]["type"], "string");
