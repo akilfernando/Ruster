@@ -669,6 +669,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-23 Fit Box Collider to Mesh | Fit an existing v23 Box Collider to one same-owner Mesh Renderer. | done · Indexed local geometry sets Center and Size in one Undo. With multiple renderers the Inspector asks which one to fit. Thin axes use the minimum size. Approved Claude fit the Blender barrier through the guarded command. Reimport invalidated the old asset guard, and the saved fit stopped the robot at the expected contact point in editor and relocated Vulkan Play. |
 | C-24 Place Selection on Ground | Place a v23 assembly at world Y=0 using its indexed mesh geometry. | done · Hierarchy, the command palette and guarded MCP move selected roots together in one Undo. The Blender workshop kept world spacing under a rotated, scaled parent and touched the floor in editor Play and a relocated Vulkan build. A stale import, missing mesh and empty assembly were refused. A grounded assembly added no history. |
 | C-25 WAV Audition | Hear an accepted v23 WAV once from the Assets Inspector. | done · Preview and Stop use the accepted decoded clip. The Inspector and approved MCP show duration and sample rate. Selection stays silent, and switching asset, project or entering Play stops audition. Private stereo capture verified the WAV selected by Claude played the matching tone in the relocated Linux build. |
+| C-26 Borderless Fullscreen | Choose and toggle window mode for the Linux player. | in progress — Sol, 2026-11-24 |
 
 ### C-04 implementation brief
 
