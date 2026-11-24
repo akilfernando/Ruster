@@ -8,7 +8,7 @@ mod geometry_probe;
 mod lighting_gpu;
 mod material_gpu;
 mod primitives;
-pub use primitives::builtin_mesh;
+pub use primitives::{builtin_cube, builtin_mesh};
 #[cfg(test)]
 mod material_probe;
 #[cfg(test)]
@@ -2840,7 +2840,7 @@ impl Resources {
             cache: None,
         });
         let builtins = BuiltinMeshes {
-            cube: GpuMesh::new(device, None, &primitives::cube()),
+            cube: GpuMesh::new(device, None, builtin_cube()),
             sphere: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Sphere)),
             capsule: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Capsule)),
             cylinder: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Cylinder)),

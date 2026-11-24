@@ -33,6 +33,12 @@ pub fn builtin_mesh(primitive: Primitive) -> &'static Arc<Mesh> {
     }
 }
 
+/// Shared indexed geometry for the default Cube.
+pub fn builtin_cube() -> &'static Mesh {
+    static CUBE: OnceLock<Mesh> = OnceLock::new();
+    CUBE.get_or_init(cube)
+}
+
 pub(crate) fn cube() -> Mesh {
     let mut vertices = Vec::new();
     let mut texcoords = Vec::new();

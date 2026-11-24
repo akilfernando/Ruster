@@ -19,7 +19,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("scene_rename", "Rename an object. Its ID stays the same."),
     ("scene_duplicate", "In v23 pass object_ids to duplicate selected subtrees as siblings in one Undo. Returns old-to-new IDs. Legacy uses object_id, new_object_id, and name."),
     ("scene_components_inspect", "List v23 components by object_id and optional component_id. Exact Box Collider replies include collider_world; offset and half extents are local. Spot Light detail includes spot_world."),
-    ("scene_components_edit", "Edit v23 components in one Undo. Aim with one aim_spot_at_object edit using object_id, component_id, target_object_id. File Lua uses source_kind asset and binding.source_id. Pin scene/asset guards."),
+    ("scene_components_edit", "Edit v23 components in one Undo. fit_box_to_mesh fits local geometry. aim_spot_at_object uses target_object_id. File Lua uses source_kind asset and binding.source_id. Pin scene/asset guards."),
     ("scene_delete", "Delete an object. In v23, also delete its descendants."),
     ("scene_transform_many", "Set the position, rotation (radians) and scale of up to 256 objects as one Undo step."),
     ("scene_duplicate_many", "Duplicate up to 256 objects under new IDs as one Undo step."),

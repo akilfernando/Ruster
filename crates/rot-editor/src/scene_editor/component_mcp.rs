@@ -447,6 +447,45 @@ impl ComponentWorkspace {
             if let Some(edits) = args["edits"].as_array() {
                 if edits
                     .iter()
+                    .any(|edit| edit["operation"] == "fit_box_to_mesh")
+                {
+                    let [edit] = edits.as_slice() else {
+                        return Err((
+                            "invalid_arguments",
+                            "Fit a Box Collider in its own component edit.".into(),
+                        ));
+                    };
+                    let map = edit.as_object().ok_or_else(invalid)?;
+                    let id = |key| {
+                        edit[key]
+                            .as_str()
+                            .filter(|id| rot_scene::validate_id(id).is_ok())
+                            .ok_or_else(invalid)
+                    };
+                    let renderer = map
+                        .get("renderer_component_id")
+                        .map(|_| id("renderer_component_id"))
+                        .transpose()?;
+                    if map.len() != 3 + usize::from(renderer.is_some()) {
+                        return Err(invalid());
+                    }
+                    let object = id("object_id")?;
+                    let component = id("component_id")?;
+                    let asset_revision = args
+                        .get("expected_asset_revision")
+                        .map(|value| decimal(value).ok_or_else(invalid))
+                        .transpose()?;
+                    let fit = self.fit_box_to_mesh(
+                        revision,
+                        asset_revision,
+                        object,
+                        component,
+                        renderer,
+                    )?;
+                    return Ok(fit.response(object, component, self.session.is_dirty()));
+                }
+                if edits
+                    .iter()
                     .any(|edit| edit["operation"] == "aim_spot_at_object")
                 {
                     let [edit] = edits.as_slice() else {
@@ -1407,6 +1446,9 @@ impl ComponentWorkspace {
                         "reason": reason.plain(),
                     }),
                 };
+                if matches!(collider.shape, rot_scene::ColliderShape::Box { .. }) {
+                    response["fit_to_mesh"] = json!("Use one scene_components_edit fit_box_to_mesh with object_id and this Box Collider component_id. Include renderer_component_id for multiple same-owner Mesh Renderers and expected_asset_revision for an imported mesh. Fits indexed object-local geometry.");
+                }
                 if let rot_scene::ColliderShape::Sphere { radius } = collider.shape {
                     response["collider_world"]["shape"] = json!("sphere");
                     response["collider_world"]["local_radius"] = json!(radius);

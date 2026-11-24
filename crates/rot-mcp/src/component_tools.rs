@@ -33,6 +33,7 @@ pub(super) fn list() -> [Value; 2] {
         object_schema(json!({"operation":{"enum":["add","replace"]},"object_id":id,"component":component}),vec!["operation","object_id","component"]),
         object_schema(json!({"operation":{"const":"remove"},"object_id":id,"component_id":id}),vec!["operation","object_id","component_id"]),
         object_schema(json!({"operation":{"const":"aim_spot_at_object"},"object_id":id,"component_id":id,"target_object_id":id}),vec!["operation","object_id","component_id","target_object_id"]),
+        object_schema(json!({"operation":{"const":"fit_box_to_mesh"},"object_id":id,"component_id":id,"renderer_component_id":id}),vec!["operation","object_id","component_id"]),
         object_schema(json!({"operation":{"const":"set_enabled"},"object_id":id,"component_id":id,"enabled":{"type":"boolean"}}),vec!["operation","object_id","component_id","enabled"])
     ]});
     [
@@ -109,6 +110,16 @@ pub(super) fn valid(name: &str, args: &Value) -> bool {
                                         )
                                         && id(&edit["component_id"])
                                         && id(&edit["target_object_id"])
+                                }
+                                Some("fit_box_to_mesh") => {
+                                    edits.len() == 1
+                                        && exact_keys(
+                                            op,
+                                            &["operation", "object_id", "component_id"],
+                                            &["renderer_component_id"],
+                                        )
+                                        && id(&edit["component_id"])
+                                        && edit.get("renderer_component_id").is_none_or(id)
                                 }
                                 Some("set_enabled") => {
                                     exact_keys(

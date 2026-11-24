@@ -32,6 +32,8 @@ pub(super) mod component_camera;
 #[path = "component_animation_preview.rs"]
 pub(super) mod component_animation_preview;
 
+#[path = "component_box_fit.rs"]
+mod component_box_fit;
 #[path = "component_collider.rs"]
 pub(super) mod component_collider;
 
@@ -280,6 +282,8 @@ pub(super) struct ComponentWorkspace {
     animation_preview: Option<component_animation_preview::AnimationPreview>,
     transform_tool: TransformTool,
     collider_tool: component_collider::ColliderTool,
+    box_fit: Option<component_box_fit::Picker>,
+    box_fit_feedback: Option<(u64, String)>,
     rows: Vec<(usize, usize)>,
     collapsed_objects: HashSet<String>,
     visible_rows: Option<Vec<usize>>,
@@ -402,6 +406,8 @@ impl ComponentWorkspace {
             animation_preview: None,
             transform_tool: TransformTool::default(),
             collider_tool: Default::default(),
+            box_fit: None,
+            box_fit_feedback: None,
             rows,
             collapsed_objects: HashSet::new(),
             visible_rows: None,
@@ -942,6 +948,7 @@ impl ComponentWorkspace {
             || self.player_pending()
             || self.camera_authoring.pending()
             || self.spot_aim.is_some()
+            || self.box_fit.is_some()
             || self.unpack_prefab_draft.is_some()
     }
 
@@ -3473,6 +3480,14 @@ impl ComponentWorkspace {
                                             allow_sound_cues: allow_spot_aim,
                                             diagnostic: self.runtime.diagnostic.as_ref(),
                                             collider_edit: &collider_edit,
+                                            allow_box_fit: allow_spot_aim && !blocked,
+                                            box_fit_feedback: self
+                                                .box_fit_feedback
+                                                .as_ref()
+                                                .filter(|(revision, _)| {
+                                                    *revision == self.session.revision()
+                                                })
+                                                .map(|(_, id)| id.as_str()),
                                             animation_preview,
                                             allow_animation_preview: allow_spot_aim && !blocked,
 
@@ -3494,6 +3509,9 @@ impl ComponentWorkspace {
                                     }
                                     if let Some((id, revision)) = edits.animator_revision {
                                         self.animator_draft_revisions.insert(id, revision);
+                                    }
+                                    if let Some(id) = edits.box_fit {
+                                        self.begin_box_fit(id);
                                     }
                                     if let Some(id) = edits.spot_aim {
                                         self.begin_spot_aim(id);
@@ -3574,6 +3592,7 @@ impl ComponentWorkspace {
         self.show_display_draft(&ctx);
         self.show_camera_draft(&ctx);
         self.show_spot_aim(&ctx);
+        self.show_box_fit(&ctx);
         self.show_unpack_prefab(&ctx);
         self.texture_use_reveal = None;
         self.show_texture_uses(&ctx);

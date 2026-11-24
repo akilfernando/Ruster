@@ -207,6 +207,8 @@ pub(super) struct ComponentControls<'a> {
     pub(super) allow_spot_aim: bool,
     pub(super) allow_sound_cues: bool,
     pub(super) diagnostic: Option<&'a rot_behavior::Diagnostic>,
+    pub(super) allow_box_fit: bool,
+    pub(super) box_fit_feedback: Option<&'a str>,
     pub(super) collider_edit: &'a super::component_workspace::component_collider::InspectorState,
 }
 
@@ -216,6 +218,7 @@ pub(super) struct ComponentEdits {
     pub(super) animation_preview: Option<PreviewEdit>,
     pub(super) animator_revision: Option<(String, u64)>,
     pub(super) collider: Option<String>,
+    pub(super) box_fit: Option<String>,
     pub(super) spot_aim: Option<String>,
     pub(super) sound_cue: Option<super::component_workspace::component_sound::Request>,
     pub(super) sensor_binding: Option<super::component_workspace::component_sensor::Request>,
@@ -236,6 +239,8 @@ pub(super) fn components(
         allow_sound_cues,
         diagnostic,
         collider_edit,
+        allow_box_fit,
+        box_fit_feedback,
         animation_preview,
         allow_animation_preview,
         reveal,
@@ -246,6 +251,7 @@ pub(super) fn components(
     let mut sensor_binding = None;
     let mut material_request = None;
     let mut collider_request = None;
+    let mut fit_request = None;
     let mut spot_aim = None;
     let mut animator_revision = None;
     let mut preview_edit = None;
@@ -381,6 +387,22 @@ pub(super) fn components(
                             };
                             if response.clicked() {
                                 collider_request = Some(component.id.clone());
+                            }
+                        }
+                        if matches!(shape, ColliderShape::Box { .. }) {
+                            if ui
+                                .add_enabled(
+                                    allow_box_fit,
+                                    egui::Button::new(Text::BoxFitToMesh.plain()),
+                                )
+                                .on_hover_text(Text::BoxFitHint.plain())
+                                .on_disabled_hover_text(Text::ColliderFinishEdit.plain())
+                                .clicked()
+                            {
+                                fit_request = Some(component.id.clone());
+                            }
+                            if box_fit_feedback == Some(component.id.as_str()) {
+                                ui.weak(Text::BoxFitMinimumSize.plain());
                             }
                         }
                         submit |= collider_fields(ui, role, offset, shape);
@@ -643,6 +665,7 @@ pub(super) fn components(
         animator_revision,
         animation_preview: preview_edit,
         collider: collider_request,
+        box_fit: fit_request,
         spot_aim,
         sound_cue,
         sensor_binding,
