@@ -1511,9 +1511,12 @@ impl Workspace {
             {
                 return None;
             }
+            let palette_from_row =
+                component_hierarchy && !text_focused && binding.action == Action::CommandPalette;
             if widget_focused
                 && !focus_search
                 && !save_variant
+                && !palette_from_row
                 && !matches!(
                     binding.action,
                     Action::FocusRuntime
