@@ -362,8 +362,11 @@ connected project.
   reports the final compressed byte count as a decimal string. Choose the
   output format and start publication in the editor's Build dialog.
 - For a v23 Linux player, read `project_startup.player_window` for the
-  effective `title` and logical `initial_size` (`width`, `height`).
-  `title_source` and `size_source` identify `default` or `project_settings`.
+  effective `title`, windowed logical `initial_size` (`width`, `height`),
+  and `mode` (`windowed` or `borderless_fullscreen`). The corresponding
+  `title_source`, `size_source` and `mode_source` identify `default` or
+  `project_settings`. These are build settings. Use F11 in the player to
+  change its current window mode.
   Once the native Build panel opens, `creation_export_inspect.build.player_window`
   also shows its pinned settings when available. Set them in
   **Project Settings → Player**.

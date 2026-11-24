@@ -137,12 +137,18 @@ before retrying.
 ## Set the Linux player window
 
 In a v23 project, open **Edit → Project Settings… → Player**. Set
-**Window Title**, **Initial Width**, and **Initial Height**, then choose
-**Apply**. Press Enter in a field to apply or Escape to cancel the draft.
+**Window Title**, **Initial Width**, **Initial Height**, and **Window Mode**,
+then choose **Apply**. Press Enter in a field to apply or Escape to cancel the draft.
 The title accepts 1–128 UTF-8 bytes without controls or surrounding spaces.
 Set both dimensions to request an initial size of 800–3840 wide by
 540–2160 high in logical pixels. The desktop can adjust that request, and
 the player window remains resizable.
+
+**Windowed** is the default. **Borderless Fullscreen** starts on the
+player's current monitor at the desktop's resolution. Press **F11** in the
+Linux player to switch modes. The player asks the desktop to restore the
+last windowed size, or the initial size when it launched fullscreen. The
+desktop can constrain the result. F11 is reserved for the player window.
 
 Leave the title or both dimensions blank to use the default
 **Rot Engine | startup scene ID** or **1100 × 760**. Without a configured

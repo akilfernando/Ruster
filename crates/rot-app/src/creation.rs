@@ -1637,7 +1637,21 @@ mod tests {
         let default = PlayerWindow::default();
         assert_eq!(default.effective_title("rail"), "Rot Engine | rail");
         assert_eq!(default.effective_size(), DEFAULT_WINDOW_SIZE);
+        assert_eq!(default.effective_mode(), PlayerWindowMode::Windowed);
+        assert_eq!(
+            serde_json::to_value(&default).unwrap(),
+            serde_json::json!({})
+        );
+        for mode in ["windowed", "borderless_fullscreen"] {
+            let authored = serde_json::json!({"mode":mode});
+            let decoded: PlayerWindow = serde_json::from_value(authored.clone()).unwrap();
+            assert!(!decoded.is_default());
+            assert_eq!(serde_json::to_value(decoded).unwrap(), authored);
+        }
         for invalid in [
+            r#"{"mode":null}"#,
+            r#"{"mode":"exclusive"}"#,
+            r#"{"mode":"windowed","mode":"borderless_fullscreen"}"#,
             r#"{"title":null}"#,
             r#"{"title":"a","title":"b"}"#,
             r#"{"initial_size":null}"#,

@@ -44,6 +44,10 @@ impl WindowMode {
             }
             _ => Probe::Unavailable,
         };
+        Self::start(probe, player)
+    }
+
+    fn start(probe: Probe, player: &PlayerWindow) -> Self {
         let now = Instant::now();
         let size = player.effective_size();
         Self {
@@ -235,5 +239,140 @@ impl X11Probe {
         }
         let fullscreen = reply.value32()?.any(|state| state == self.fullscreen);
         Some(fullscreen)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{Event, Key, Modifiers, ViewportCommand, ViewportId};
+
+    fn key(key: Key, pressed: bool, repeat: bool) -> Event {
+        Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed,
+            repeat,
+            modifiers: Modifiers::NONE,
+        }
+    }
+
+    fn frame(
+        mode: &mut WindowMode,
+        cx: &egui::Context,
+        fullscreen: Option<bool>,
+        size: egui::Vec2,
+        events: Vec<Event>,
+    ) -> (Vec<Event>, Vec<ViewportCommand>) {
+        let mut raw = egui::RawInput {
+            events,
+            focused: true,
+            ..Default::default()
+        };
+        let info = raw.viewports.get_mut(&ViewportId::ROOT).unwrap();
+        info.fullscreen = fullscreen;
+        info.inner_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size));
+        let blurred = raw
+            .events
+            .iter()
+            .any(|event| matches!(event, Event::WindowFocused(false)));
+        mode.input(cx, &mut raw, blurred);
+        let events = raw.events.clone();
+        let mut output = cx.run_ui(raw, |_| {});
+        let commands = std::mem::take(
+            &mut output
+                .viewport_output
+                .get_mut(&ViewportId::ROOT)
+                .unwrap()
+                .commands,
+        );
+        (events, commands)
+    }
+
+    #[test]
+    fn f11_is_host_owned_and_restore_waits_for_the_compositor() {
+        let mut mode = WindowMode::start(Probe::Wayland, &PlayerWindow::default());
+        let cx = egui::Context::default();
+        let resized = egui::vec2(1030.0, 741.0);
+        let desktop = egui::vec2(1920.0, 1080.0);
+        assert!(frame(&mut mode, &cx, Some(false), resized, vec![])
+            .1
+            .is_empty());
+        let e = key(Key::E, true, false);
+        let (input, commands) = frame(
+            &mut mode,
+            &cx,
+            Some(false),
+            resized,
+            vec![
+                key(Key::F11, true, false),
+                key(Key::F11, true, true),
+                e.clone(),
+            ],
+        );
+        assert_eq!(input, vec![e]);
+        assert!(commands.contains(&ViewportCommand::Fullscreen(true)));
+        assert_eq!(mode.observed, Some(false));
+        let (input, commands) = frame(
+            &mut mode,
+            &cx,
+            Some(true),
+            desktop,
+            vec![key(Key::F11, true, true)],
+        );
+        assert!(input.is_empty() && commands.is_empty());
+        assert_eq!(mode.observed, Some(true));
+        let (input, commands) = frame(
+            &mut mode,
+            &cx,
+            Some(true),
+            desktop,
+            vec![key(Key::F11, false, false), key(Key::F11, true, false)],
+        );
+        assert!(input.is_empty());
+        assert!(commands.contains(&ViewportCommand::Fullscreen(false)));
+        assert!(!commands
+            .iter()
+            .any(|c| matches!(c, ViewportCommand::InnerSize(_))));
+        let (_, commands) = frame(&mut mode, &cx, Some(false), desktop, vec![]);
+        assert!(commands.contains(&ViewportCommand::InnerSize(resized)));
+        assert_eq!(mode.windowed_size, resized);
+        frame(&mut mode, &cx, Some(false), resized, vec![]);
+        assert!(mode.restore_until.is_none());
+    }
+
+    #[test]
+    fn mode_timeout_and_focus_loss_do_not_claim_fullscreen() {
+        let mut mode = WindowMode::start(
+            Probe::Wayland,
+            &PlayerWindow {
+                mode: Some(PlayerWindowMode::BorderlessFullscreen),
+                ..Default::default()
+            },
+        );
+        let cx = egui::Context::default();
+        mode.requested = Some((true, Instant::now() - Duration::from_millis(1)));
+        let (input, commands) = frame(
+            &mut mode,
+            &cx,
+            Some(false),
+            egui::vec2(960.0, 720.0),
+            vec![
+                Event::WindowFocused(false),
+                Event::WindowFocused(true),
+                key(Key::F11, true, false),
+            ],
+        );
+        assert_eq!(
+            input,
+            vec![Event::WindowFocused(false), Event::WindowFocused(true)]
+        );
+        assert!(commands.is_empty());
+        assert_eq!(mode.observed, Some(false));
+        assert!(mode.requested.is_none());
+        assert_eq!(
+            mode.warning(),
+            Some("The desktop did not confirm fullscreen.")
+        );
     }
 }
