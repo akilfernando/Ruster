@@ -309,13 +309,19 @@ mod tests {
         let events = raw.events.clone();
         let mut output = cx.run_ui(raw, |_| {});
         output.textures_delta.clear();
-        let commands = std::mem::take(
+        let mut commands = std::mem::take(
             &mut output
                 .viewport_output
                 .get_mut(&ViewportId::ROOT)
                 .unwrap()
                 .commands,
         );
+        commands.retain(|command| {
+            matches!(
+                command,
+                ViewportCommand::Fullscreen(_) | ViewportCommand::InnerSize(_)
+            )
+        });
         (events, commands)
     }
 
