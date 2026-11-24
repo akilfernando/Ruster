@@ -661,6 +661,12 @@ If a handle is hollow, orbit to see the face from an angle. The opposite face st
 commit the center and size together in one Undo. Escape cancels. For
 keyboard entry, use **Center** and **Size** in the same Inspector section.
 
+Use **Fit to Mesh** on a Box Collider to fill **Center** and **Size** from
+the indexed geometry of a Mesh Renderer on the same object. When the object
+has more than one renderer, choose its exact row. Fitting uses object-local
+bounds and keeps the collider's role and enabled state. Thin axes use the
+minimum supported size. Undo reverses the fit as one edit.
+
 A box can follow rotated and scaled objects. If a parent transform shears
 the box, the viewport cannot draw handles that match the runtime box.
 Adjust the parent rotation or scale, or edit the local numeric fields.

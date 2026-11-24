@@ -343,3 +343,137 @@ fn indexed_bounds(mesh: &Mesh) -> Result<Bounds, FitError> {
     }
     Ok((center, half_extents, minimum_axes))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rot_scene::{
+        component_scene::{ComponentInstance, ComponentScene, ComponentSession},
+        ColliderRole, Scene, SceneError, Session,
+    };
+
+    #[test]
+    fn bounds_use_only_indices_and_refuse_invalid_geometry() {
+        let mut mesh = Mesh {
+            vertices: [
+                [1.5, -2.0, 4.0],
+                [4.5, -2.0, 4.0],
+                [1.5, 1.0, 4.0],
+                [999.0; 3],
+            ]
+            .into_iter()
+            .map(|position| rot_assets::Vertex {
+                position,
+                normal: [0.0, 0.0, 1.0],
+            })
+            .collect(),
+            indices: vec![0, 1, 2],
+            texcoords: None,
+        };
+        assert_eq!(
+            indexed_bounds(&mesh).unwrap(),
+            ([3.0, -0.5, 4.0], [1.5, 1.5, 0.001], vec!["z"])
+        );
+        mesh.vertices[0].position[0] = 9999.0;
+        assert_eq!(indexed_bounds(&mesh).unwrap_err().0, "invalid_fit");
+        mesh.indices[2] = 20;
+        assert_eq!(indexed_bounds(&mesh).unwrap_err().0, "mesh_unavailable");
+    }
+
+    #[test]
+    fn guarded_fit_resolves_exact_renderer_and_changes_only_box_geometry() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("yard.scene.json");
+        std::fs::create_dir(directory.path().join("Assets")).unwrap();
+        std::fs::write(
+            directory.path().join("Assets/Barrier.obj"),
+            "v 1 -2 4\nv 5 -2 4\nv 1 2 4\nf 1 2 3\n",
+        )
+        .unwrap();
+        let mut store = rot_assets::AssetStore::open(directory.path()).unwrap();
+        store.import("barrier", "Assets/Barrier.obj").unwrap();
+        let legacy = Session::new(Scene::demo()).unwrap();
+        let mut scene = ComponentScene::from_legacy(&legacy).unwrap();
+        let renderer = ComponentInstance {
+            id: "barrier-mesh".into(),
+            enabled: false,
+            kind: Component::MeshRenderer {
+                geometry: Geometry::Imported {
+                    asset: "barrier".into(),
+                },
+                material: None,
+                tint: [1.0; 4],
+            },
+        };
+        let sensor = ComponentInstance {
+            id: "trigger".into(),
+            enabled: false,
+            kind: Component::Collider {
+                role: ColliderRole::Sensor,
+                offset: [0.0; 3],
+                shape: ColliderShape::default(),
+            },
+        };
+        scene.objects[0].components.extend([renderer, sensor]);
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.assets = Some(store.project_snapshot());
+
+        let mut args = json!({
+            "expected_session_token":"guard","expected_revision":"0",
+            "edits":[{"operation":"fit_box_to_mesh","object_id":"left","component_id":"trigger"}],
+        });
+        let submit = |editor: &mut ComponentWorkspace, args: &Value| {
+            editor.ai_command("guard", "scene_components_edit", args)
+        };
+        assert_eq!(
+            submit(&mut editor, &args)["error"]["code"],
+            "ambiguous_mesh_renderer"
+        );
+        args["edits"][0]["renderer_component_id"] = json!("trigger");
+        assert_eq!(
+            submit(&mut editor, &args)["error"]["code"],
+            "component_not_found"
+        );
+        args["edits"][0]["renderer_component_id"] = json!("barrier-mesh");
+        assert_eq!(
+            submit(&mut editor, &args)["error"]["code"],
+            "asset_revision_required"
+        );
+        args["expected_asset_revision"] = json!((store.revision() + 1).to_string());
+        assert_eq!(
+            submit(&mut editor, &args)["error"]["code"],
+            "stale_asset_revision"
+        );
+        assert_eq!(editor.session.scene(), &scene);
+        assert!(matches!(editor.session.undo(0), Err(SceneError::NoUndo)));
+
+        args["expected_asset_revision"] = json!(store.revision().to_string());
+        let result = submit(&mut editor, &args);
+        assert_eq!(result["result"]["revision"], "1", "{result}");
+        assert_eq!(result["result"]["renderer_component_id"], "barrier-mesh");
+        assert_eq!(result["result"]["center"], json!([3.0, 0.0, 4.0]));
+        assert_eq!(result["result"]["minimum_axes"], json!(["z"]));
+        let mut expected = scene.clone();
+        expected.objects[0].components.last_mut().unwrap().kind = Component::Collider {
+            role: ColliderRole::Sensor,
+            offset: [3.0, 0.0, 4.0],
+            shape: ColliderShape::Box {
+                half_extents: [2.0, 2.0, 0.001],
+            },
+        };
+        assert_eq!(editor.session.scene(), &expected);
+        args["expected_revision"] = json!("1");
+        let no_op = submit(&mut editor, &args);
+        assert_eq!(no_op["result"]["changed"], false);
+        assert_eq!(editor.session.revision(), 1);
+
+        editor.command(crate::workspace::Action::Undo);
+        assert_eq!(editor.session.scene(), &scene);
+        editor.command(crate::workspace::Action::Redo);
+        assert_eq!(editor.session.scene(), &expected);
+        assert!(editor.save());
+        assert_eq!(ComponentSession::open(path).unwrap().scene(), &expected);
+    }
+}
