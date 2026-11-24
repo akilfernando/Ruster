@@ -88,6 +88,29 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+**Copy and Paste Local Transform** reuses an authored Position, Rotation,
+Scale or all three on selected v23 objects in one Undo. The station fixture
+used four Blender spotlight housings. After the source rotated again,
+native Paste Rotation applied the earlier snapshot to three lamps under
+differently rotated arches. Position, scale, IDs and components stayed
+intact. Approved Claude copied the source's current rotation by exact IDs.
+Stale, missing-target and pending-draft requests left the scene untouched.
+Paste added only the prefab lamp's Rotation override and retained its
+existing Scale override. Source asset bytes were unchanged. After save
+and reopen, Vulkan displayed the three expected beam directions in editor
+Game view and in the relocated Linux player. Plain Light was checked for
+menu focus and readability.
+At 5,000 objects, three paired release runs measured command to first CPU
+tessellation p50/p95 at 4.169/4.925 ms for one existing batch edit and
+4.267/4.483 ms for one paste. For 100 objects, batch measured 4.756/5.235 ms
+and paste 4.649/5.286 ms. With the menu closed, idle median was 0.625 ms
+before Copy and 0.630 ms after. The stored snapshot performs no idle
+polling or scene scans. Native release command to a revision-matched
+rendered capture p50/p95 was 126.8/138.5 ms for one batch edit and
+127.2/135.8 ms for one paste. For 100 objects, batch measured
+129.0/144.8 ms and paste 127.4/141.3 ms. Each group had 12 samples.
+The native metric includes MCP and GPU readback.
+
 **Number Properties** let v23 objects sharing a file-backed Lua script
 use different finite values. The Inspector shows the exact Lua property
 read. Native keyboard entry set two conveyor carriers to 1 and 3 units
