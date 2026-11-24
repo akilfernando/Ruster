@@ -88,13 +88,20 @@ pub(super) fn page(store: &AssetStore, offset: usize) -> Result<Value, &'static 
                 }
                 None => (None, false),
             };
-            json!({
+            let mut asset = json!({
                 "id": info.id, "kind": info.kind, "source": info.source,
                 "hash": info.hash, "status": info.status,
                 "mesh_normal_policy": info.mesh_normal_policy,
                 "texture_role": info.texture_role,
                 "diagnostic": diagnostic, "diagnostic_truncated": truncated,
-            })
+            });
+            if info.kind == rot_assets::AssetKind::Sound {
+                if let Some(clip) = store.sound(&info.id) {
+                    asset["duration_seconds"] = json!(clip.duration_seconds());
+                    asset["sample_rate_hz"] = json!(clip.sample_rate);
+                }
+            }
+            asset
         })
         .collect();
     Ok(json!({

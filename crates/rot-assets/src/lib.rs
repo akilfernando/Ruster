@@ -818,6 +818,9 @@ impl AssetStore {
     pub fn sound(&self, id: &str) -> Option<&AudioClip> {
         self.sounds.get(id).map(Arc::as_ref)
     }
+    pub fn sound_snapshot(&self, id: &str) -> Option<Arc<AudioClip>> {
+        self.sounds.get(id).cloned()
+    }
     pub fn sound_snapshots(&self) -> BTreeMap<String, Arc<AudioClip>> {
         self.sounds.clone()
     }

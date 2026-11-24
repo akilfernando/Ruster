@@ -122,6 +122,12 @@ impl Device {
         self.manager.backend_mut().failed.load(Ordering::Acquire)
     }
 
+    pub(super) fn has_active_voice(&self) -> bool {
+        self.active
+            .iter()
+            .any(|voice| voice.state() != PlaybackState::Stopped)
+    }
+
     pub(super) fn pause(&mut self, paused: bool) {
         for voice in &mut self.active {
             if paused {

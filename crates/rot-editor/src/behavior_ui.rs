@@ -3075,6 +3075,7 @@ impl RuntimeUi {
             blocked,
             assets,
             None,
+            || {},
         )
     }
 
@@ -3089,6 +3090,7 @@ impl RuntimeUi {
         #[cfg_attr(not(target_os = "linux"), allow(unused_variables))] code_editor: Option<
             &crate::behavior_files::LaunchSpec,
         >,
+        mut before_start: impl FnMut(),
     ) -> Option<RunKey> {
         let mut reset = None;
         let focus_controls = std::mem::take(&mut self.focus_controls);
@@ -3109,6 +3111,7 @@ impl RuntimeUi {
             // is not ready for it, they reset from the scene first.
             let ctx = ui.ctx().clone();
             let mut start = |runtime: &mut Self, operation: Operation| {
+                before_start();
                 if let Some(key) = runtime
                     .worker
                     .as_ref()

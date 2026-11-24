@@ -15,6 +15,10 @@ pub struct AudioClip {
 }
 
 impl AudioClip {
+    pub fn duration_seconds(&self) -> f64 {
+        self.frames.len() as f64 / f64::from(self.sample_rate)
+    }
+
     pub fn payload_bytes(&self) -> usize {
         std::mem::size_of_val(self.frames.as_ref())
     }

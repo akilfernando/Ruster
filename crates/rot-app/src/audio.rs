@@ -137,3 +137,157 @@ impl Output {
         self.unavailable = true;
     }
 }
+
+/// One editor preview. It opens output only on explicit request and releases
+/// the stream as soon as the voice ends or its owner cancels it.
+#[derive(Default)]
+pub struct Audition {
+    #[cfg(target_os = "linux")]
+    task: Option<audition::Task>,
+}
+
+impl Audition {
+    pub fn active(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        return self.task.as_ref().is_some_and(|task| task.active());
+        #[cfg(not(target_os = "linux"))]
+        false
+    }
+
+    pub fn play(
+        &mut self,
+        clip: Arc<AudioClip>,
+        wake: impl FnOnce() + Send + 'static,
+    ) -> Result<(), String> {
+        #[cfg(target_os = "linux")]
+        {
+            if self.task.is_some() {
+                return Err("The previous preview is still closing. Try again.".into());
+            }
+            self.task = Some(audition::Task::start(clip, wake)?);
+            Ok(())
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (clip, wake);
+            Err("WAV preview is available on Linux.".into())
+        }
+    }
+
+    pub fn stop(&mut self) {
+        #[cfg(target_os = "linux")]
+        if let Some(task) = &self.task {
+            task.stop();
+        }
+    }
+
+    /// Poll only this preview's completion. No idle timer or device probes.
+    pub fn poll(&mut self) -> Option<Result<(), String>> {
+        #[cfg(target_os = "linux")]
+        {
+            let result = self.task.as_ref()?.completed()?;
+            self.task = None;
+            Some(result)
+        }
+        #[cfg(not(target_os = "linux"))]
+        None
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod audition {
+    use super::{linux, AudioClip, OutputStatus};
+    use std::{
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            mpsc::{self, Receiver, TryRecvError},
+            Arc,
+        },
+        thread::{self, Thread},
+        time::Duration,
+    };
+
+    pub(super) struct Task {
+        live: Arc<AtomicBool>,
+        worker: Thread,
+        result: Receiver<Result<(), String>>,
+    }
+
+    impl Task {
+        pub(super) fn start(
+            clip: Arc<AudioClip>,
+            wake: impl FnOnce() + Send + 'static,
+        ) -> Result<Self, String> {
+            let live = Arc::new(AtomicBool::new(true));
+            let worker_live = live.clone();
+            let (done, result) = mpsc::sync_channel(1);
+            let worker = thread::Builder::new()
+                .name("rot-wav-preview".into())
+                .spawn(move || {
+                    let mut result = audition(&worker_live, &clip);
+                    if !worker_live.load(Ordering::Acquire) {
+                        result = Ok(());
+                    }
+                    let _ = done.send(result);
+                    wake();
+                })
+                .map_err(|error| error.to_string())?;
+            Ok(Self {
+                live,
+                worker: worker.thread().clone(),
+                result,
+            })
+        }
+
+        pub(super) fn active(&self) -> bool {
+            self.live.load(Ordering::Acquire)
+        }
+
+        pub(super) fn stop(&self) {
+            self.live.store(false, Ordering::Release);
+            self.worker.unpark();
+        }
+
+        pub(super) fn completed(&self) -> Option<Result<(), String>> {
+            match self.result.try_recv() {
+                Ok(result) if self.active() => Some(result),
+                Ok(_) => Some(Ok(())),
+                Err(TryRecvError::Empty) => None,
+                Err(TryRecvError::Disconnected) => {
+                    Some(Err("The audio preview could not finish.".into()))
+                }
+            }
+        }
+    }
+
+    impl Drop for Task {
+        fn drop(&mut self) {
+            self.stop();
+        }
+    }
+
+    fn audition(live: &Arc<AtomicBool>, clip: &AudioClip) -> Result<(), String> {
+        if !live.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let guard = live.clone();
+        let mut device =
+            linux::Device::open(Some(Arc::new(move || guard.load(Ordering::Acquire))))?;
+        if !live.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        if device.play("preview", clip, 1.0, None) != OutputStatus::Ready {
+            return Err("The audio output could not start the preview.".into());
+        }
+        while live.load(Ordering::Acquire) {
+            if device.failed() {
+                return Err("The audio output disconnected during preview.".into());
+            }
+            if !device.has_active_voice() {
+                return Ok(());
+            }
+            thread::park_timeout(Duration::from_millis(10));
+        }
+        Ok(())
+    }
+}

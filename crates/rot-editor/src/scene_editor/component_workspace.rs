@@ -61,6 +61,9 @@ mod component_texture_uses;
 #[path = "component_sensor.rs"]
 pub(super) mod component_sensor;
 
+#[path = "component_sound_audition.rs"]
+mod component_sound_audition;
+
 #[path = "component_sound.rs"]
 pub(super) mod component_sound;
 
@@ -305,6 +308,7 @@ pub(super) struct ComponentWorkspace {
     multi_draft: Option<MultiInspector>,
     material_draft: Option<component_material::Draft>,
     sound_cue: Option<component_sound::Draft>,
+    sound_audition: component_sound_audition::SoundAudition,
     sensor_binding: Option<component_sensor::Draft>,
     display_draft: Option<component_display::Draft>,
     camera_authoring: component_camera::Authoring,
@@ -489,6 +493,7 @@ impl ComponentWorkspace {
             multi_draft: None,
             material_draft: None,
             sound_cue: None,
+            sound_audition: Default::default(),
             sensor_binding: None,
             display_draft: None,
             spot_aim: None,
@@ -574,6 +579,7 @@ impl ComponentWorkspace {
         self.play_checks.poll();
         #[cfg(target_os = "linux")]
         self.poll_assets(ctx);
+        self.update_sound_audition();
         self.observe_runtime();
         self.runtime.poll(ctx);
     }
@@ -2929,6 +2935,7 @@ impl ComponentWorkspace {
                     blocked || assets_loading || transform_active || self.draft_dirty(),
                     self.assets.as_ref(),
                     Some(&self.workspace.prefs.external_editor),
+                    || self.sound_audition.stop(),
                 );
             });
         });
@@ -3403,9 +3410,11 @@ impl ComponentWorkspace {
                             self.begin_texture_uses(id.to_owned());
                         }
                     }
+                    self.update_sound_audition();
                     if let Some(asset) = self.asset_browser.inspect(ui, &self.meshes, can_place) {
                         self.place_asset(&asset, None);
                     }
+                    self.sound_audition_controls(ui, blocked);
                     return;
                 }
                 if self.runtime.in_play_mode() {
@@ -3608,6 +3617,7 @@ impl ComponentWorkspace {
         self.show_material_draft(&ctx);
         self.show_sound_cue(&ctx);
         self.show_sensor_binding(&ctx);
+        self.update_sound_audition();
         self.show_game_hud(&ctx);
         self.show_display_draft(&ctx);
         self.show_camera_draft(&ctx);

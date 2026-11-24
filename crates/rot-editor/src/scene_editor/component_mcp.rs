@@ -119,6 +119,12 @@ impl ComponentWorkspace {
                 ));
             }
         }
+        if matches!(
+            op,
+            "behavior_runtime_reset" | "behavior_runtime_play" | "behavior_runtime_step"
+        ) {
+            self.sound_audition.stop();
+        }
         self.observe_runtime();
         let value = self
             .runtime

@@ -1447,6 +1447,13 @@ editor_text! {
     RuntimeInputNoInputHasBeen => "No input has been processed yet.",
 
     // Behavior Ui
+    SoundDuration => "Duration",
+    SoundSampleRate => "Sample Rate",
+    SoundPreview => "Preview Sound",
+    SoundStopPreview => "Stop Preview",
+    SoundPreviewStopPlay => "Stop Play before previewing sound.",
+    SoundPreviewLinux => "Sound preview is available on Linux.",
+    SoundPreviewUnavailable => "Could not preview sound.",
     AudioOutputReady => "Audio: output ready",
     AudioPausedStepIsSilent => "Audio: paused (Step is silent)",
     AudioReadyForFirstCue => "Audio: ready for first cue",
