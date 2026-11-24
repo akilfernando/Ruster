@@ -100,6 +100,18 @@ impl ComponentWorkspace {
         });
     }
 
+    pub(super) fn defer_script_number_close(&mut self, ctx: &egui::Context) -> bool {
+        let Some(draft) = self.script_number.as_mut() else {
+            return false;
+        };
+        if !ctx.input(|input| input.viewport().close_requested()) {
+            return false;
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        draft.error = Some("Apply or cancel the number property before closing.".into());
+        true
+    }
+
     pub(super) fn show_script_number(&mut self, ctx: &egui::Context) {
         let Some(mut draft) = self.script_number.take() else {
             return;

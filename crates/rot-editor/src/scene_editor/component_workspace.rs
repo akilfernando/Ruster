@@ -2691,6 +2691,7 @@ impl ComponentWorkspace {
             || self.defer_display_close(&ctx)
             || self.defer_game_hud_close(&ctx)
             || self.defer_camera_close(&ctx)
+            || self.defer_script_number_close(&ctx)
             || ((self.input_actions.pending() || self.player_pending())
                 && ctx.input(|input| input.viewport().close_requested()));
         if surface_close_pending && (self.input_actions.pending() || self.player_pending()) {
