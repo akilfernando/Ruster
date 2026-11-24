@@ -633,7 +633,7 @@ Changes share Undo. Save before Linux Build, which verifies and packages the
 referenced WAVs. Play emits sounds when a simulation step succeeds.
 Paused Step exposes the committed cue without playing it.
 
-## Add a Game HUD label
+## Add Game HUD text and action buttons
 
 Choose **Window → Game HUD…**. Select **Add Label**, enter the text, and set
 the panel's **Anchor**. **Show in Game** controls visibility and keeps the
@@ -643,6 +643,15 @@ Use **Remove Label** to delete a row, or Escape to cancel the draft.
 Labels appear in the Game view and in a saved Linux build. They leave keyboard
 and pointer input available to the game. Existing buttons and state-bound
 rows remain in their panels.
+
+To trigger a named input from the HUD, choose **Add Action Button**, enter a
+**Caption**, and choose a **Button** action in the **Action** picker. Create
+or edit the action in **Project Settings → Input Actions**. Apply the HUD
+draft and restart Play to use the new button. Activating it sends one tap
+on the next simulation tick, including when you click while paused and
+then choose **Step**. A keyboard key already holding the action keeps its
+hold, and clicking the HUD does not send Primary Mouse to the scene.
+**Remove Button** deletes the row.
 
 ## Edit a collider in Scene view
 

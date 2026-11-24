@@ -1010,6 +1010,110 @@ fn frame_wire(frame: &rot_behavior::debug::Frame) -> Value {
 mod tests {
     use super::*;
     #[test]
+    fn guarded_hud_action_step_retains_submitted_and_committed_input() {
+        use rot_scene::hud::{Hud, HudLabel, HudPanel, HudSource};
+        use rot_scene::input::{ActionDefinition, ActionKind, InputKey};
+        use std::time::{Duration, Instant};
+
+        let legacy = Session::new(rot_scene::Scene::demo()).unwrap();
+        let mut scene = rot_scene::component_scene::ComponentScene::from_legacy(&legacy).unwrap();
+        scene.actions.insert(
+            "confirm".into(),
+            ActionDefinition {
+                label: None,
+                kind: ActionKind::Button {
+                    keys: vec![InputKey::A],
+                    primary_mouse: true,
+                },
+            },
+        );
+        scene.hud = Hud {
+            enabled: true,
+            panels: vec![HudPanel {
+                elements: vec![HudLabel {
+                    id: "confirm-button".into(),
+                    source: HudSource::ActionButton {
+                        caption: "Confirm".into(),
+                        action_id: "confirm".into(),
+                    },
+                    enabled_when: None,
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let session = rot_scene::component_scene::ComponentSession::new(scene).unwrap();
+        let ctx = egui::Context::default();
+        let mut runtime = RuntimeUi::default();
+        let source = RuntimeSource::Components(&session, None);
+        let call = |runtime: &mut RuntimeUi, op: &str, args: &Value| {
+            runtime
+                .runtime_api_for_source(op, args, source, 1, None)
+                .unwrap()
+        };
+        let wait = |runtime: &mut RuntimeUi, predicate: fn(&RuntimeUi) -> bool| {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                runtime.poll(&ctx);
+                if predicate(runtime) {
+                    return;
+                }
+                assert!(Instant::now() < deadline, "{}", runtime.status);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        };
+        runtime.reset_source(&ctx, source, 1, None).unwrap();
+        wait(&mut runtime, |runtime| runtime.ready);
+        let report = call(&mut runtime, "behavior_runtime_inspect", &json!({}));
+        let run = report["run_id"].clone();
+        call(
+            &mut runtime,
+            "hud_activate",
+            &json!({
+                "expected_run_id":run, "button_id":"confirm-button"
+            }),
+        );
+        wait(&mut runtime, |runtime| {
+            runtime.hud_activation_observation()["latest_terminal"]["status"] == "armed"
+        });
+        let request = json!({
+            "expected_run_id":run, "expected_tick":report["tick"],
+            "expected_map_identity":report["input"]["map_identity"],
+            "expected_input_epoch":report["input"]["epoch"], "input_frame":{}
+        });
+        let queued = call(&mut runtime, "behavior_runtime_step", &request);
+        wait(&mut runtime, |runtime| {
+            runtime.awaiting.is_none()
+                && runtime.frame.as_ref().is_some_and(|frame| frame.tick == 1)
+        });
+        let report = call(
+            &mut runtime,
+            "behavior_runtime_inspect",
+            &json!({
+                "operation_id":queued["operation_id"]
+            }),
+        );
+        let operation = &report["operation"];
+        let applied = &report["last_committed_input"];
+        assert_eq!(operation["state"], "completed");
+        assert_eq!(report["busy"], false);
+        assert_ne!(
+            operation["expected_input"]["frame_hash"],
+            operation["committed_input"]["frame_hash"]
+        );
+        assert_eq!(
+            operation["committed_input"]["frame_hash"],
+            applied["frame_hash"]
+        );
+        assert_eq!(
+            applied["frame"]["confirm"],
+            json!({
+                "type":"button", "held":false, "pressed":true, "released":true
+            })
+        );
+    }
+
+    #[test]
     fn asynchronous_receipts_exact_debug_pages_and_stop_preemption() {
         use std::sync::mpsc;
         let mut session = Session::new(rot_scene::Scene::demo()).unwrap();

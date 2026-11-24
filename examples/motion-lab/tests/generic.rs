@@ -362,7 +362,11 @@ fn hud_commands_cross_play_pause_atomic_failure_and_stale_presentation() {
     };
     assert!(dispatch_command(&mut lifecycle, &command).is_err());
     assert!(lifecycle.is_running());
-    let receipt = lifecycle.app_mut().activate_hud_button("add").unwrap();
+    let rot_behavior::HudActivationOutcome::Command(receipt) =
+        lifecycle.app_mut().activate_hud_button("add").unwrap()
+    else {
+        panic!("expected a HUD command receipt");
+    };
     assert_eq!(
         (
             receipt.command.previous_commit_revision,

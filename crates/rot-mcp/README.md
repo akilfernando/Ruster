@@ -494,6 +494,22 @@ Supply `background` as three linear RGB values in `[0,1]`, or use
 want to change the SDR/HDR profile or exposure. Either field may be
 omitted to preserve its current value. Both changes share one Undo.
 
+### Game HUD Action Button
+
+In a v23 scene, use `behavior_inspect` with `kind:"actions"` to find a
+Button ID and `hud_inspect` to obtain the next label ID. Use
+`hud_panel_inspect` to find the panel, then send guarded `hud_label_set`
+with `panel_id`, `label_id`, and
+`source:{"kind":"action_button","caption":"Lift Gate","action_id":"lift"}`.
+Use current `expected_session_token` and `expected_revision` for HUD edits.
+
+After restarting Play, inspect the runtime and use `hud_activate` with the
+displayed `button_id`, current `expected_run_id`, and the authoring guards.
+`hud_inspect.activation.latest_terminal` reports when the tap is armed.
+If paused, step the run once. `behavior_runtime_inspect.last_committed_input`
+then reports the applied input, including the merged tap. An explicit
+input Step receipt separately reports submitted and committed frame hashes.
+
 ### Saved Play Checks
 
 Create and save a case from **Window → Play Checks…** in a supported flat
