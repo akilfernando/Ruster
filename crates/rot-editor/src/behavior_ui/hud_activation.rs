@@ -79,15 +79,24 @@ impl RuntimeUi {
             .iter()
             .find(|label| label.id == button_id)
             .ok_or("button_not_found")?;
-        let command = label.source.command_binding().ok_or("button_not_found")?;
-        rot_scene::hud::validate_hud_button_command(&frame.authoring, command)
-            .map_err(|error| error.to_string())?;
+        let command_schema_hash = if let Some(command) = label.source.command_binding() {
+            rot_scene::hud::validate_hud_button_command(&frame.authoring, command)
+                .map_err(|error| error.to_string())?;
+            frame
+                .command_schema_hash
+                .clone()
+                .ok_or("command_schema_unavailable")?
+        } else if label.source.action_id().is_some() {
+            label
+                .source
+                .validate_action_target(&frame.authoring.actions)
+                .map_err(|error| error.to_string())?;
+            String::new()
+        } else {
+            return Err("button_not_found".into());
+        };
         let definition_hash =
             rot_scene::hud::hud_button_identity(panel, label).map_err(|error| error.to_string())?;
-        let command_schema_hash = frame
-            .command_schema_hash
-            .clone()
-            .ok_or("command_schema_unavailable")?;
         let id = self
             .hud_activation
             .next_id
@@ -146,7 +155,7 @@ impl RuntimeUi {
         key: RunKey,
         activation_id: u64,
         button_id: String,
-        result: Result<rot_behavior::HudActivationReceipt, String>,
+        result: Result<rot_behavior::HudActivationOutcome, String>,
     ) {
         if !self.hud_activation.pending.as_ref().is_some_and(|pending| {
             pending.key == key && pending.id == activation_id && pending.button_id == button_id
@@ -155,7 +164,12 @@ impl RuntimeUi {
         }
         self.hud_activation.pending = None;
         self.hud_activation.latest_terminal = Some(match result {
-            Ok(receipt) => {
+            Ok(rot_behavior::HudActivationOutcome::Action(receipt)) => {
+                self.status = "Action Button ready for the next Step.".into();
+                json!({"run_id":run_id(key), "activation_id":activation_id.to_string(),
+                    "button_id":button_id, "status":"armed", "receipt":receipt})
+            }
+            Ok(rot_behavior::HudActivationOutcome::Command(receipt)) => {
                 self.status = Text::HudButtonRan.plain().replace("{button}", &button_id);
                 json!({"run_id":run_id(key), "activation_id":activation_id.to_string(),
                     "button_id":button_id, "status":"committed", "receipt":receipt})

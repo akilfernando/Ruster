@@ -2,6 +2,7 @@ use super::ComponentWorkspace;
 use crate::editor_theme;
 use eframe::egui;
 use rot_scene::hud::{Hud, HudAnchor, HudLabel, HudPanel, HudSource, MAX_HUD_LABELS};
+use rot_scene::input::ActionKind;
 use serde_json::{json, Value};
 
 type Result<T> = std::result::Result<T, (String, String)>;
@@ -88,6 +89,12 @@ impl ComponentWorkspace {
         let mut apply = false;
         let mut cancel = false;
         let popup_before = egui::Popup::is_any_open(ctx);
+        let actions = &self.session.scene().actions;
+        let buttons = || {
+            actions
+                .iter()
+                .filter(|(_, action)| matches!(action.kind, ActionKind::Button { .. }))
+        };
         egui::Modal::new(egui::Id::unique("component-game-hud"))
             .frame(editor_theme::dialog_frame(ctx))
             .show(ctx, |ui| {
@@ -143,14 +150,22 @@ impl ComponentWorkspace {
                         .max_height((ctx.content_rect().height() * 0.40).clamp(80.0, 280.0))
                         .show(ui, |ui| {
                             for (index, row) in panel.elements.iter_mut().enumerate() {
-                                let HudSource::Static { text } = &mut row.source else {
-                                    continue;
+                                let (caption, action_id) = match &mut row.source {
+                                    HudSource::Static { text } => (text, None),
+                                    HudSource::ActionButton { caption, action_id } => {
+                                        (caption, Some(action_id))
+                                    }
+                                    _ => continue,
                                 };
                                 ui.push_id(&row.id, |ui| {
-                                    let label = ui.label("Text");
+                                    let label = ui.label(if action_id.is_some() {
+                                        "Caption"
+                                    } else {
+                                        "Text"
+                                    });
                                     let edit = ui
                                         .add(
-                                            egui::TextEdit::singleline(text)
+                                            egui::TextEdit::singleline(caption)
                                                 .desired_width(f32::INFINITY)
                                                 .char_limit(
                                                     rot_scene::hud::MAX_HUD_ELEMENT_TEXT_BYTES,
@@ -168,7 +183,51 @@ impl ComponentWorkspace {
                                                 egui::Key::Enter,
                                             )
                                         });
-                                    if ui.button("Remove Label").clicked() {
+                                    let is_button = action_id.is_some();
+                                    if let Some(id) = action_id {
+                                        let action_label = ui.label("Action");
+                                        let selected_label = actions
+                                            .get(id.as_str())
+                                            .and_then(|action| action.label.as_deref())
+                                            .unwrap_or(id);
+                                        let focus = super::super::combo_focus::ComboFocus::capture(
+                                            ui,
+                                            "hud-action",
+                                        );
+                                        let mut selected = false;
+                                        let result = egui::ComboBox::from_id_salt("hud-action")
+                                            .selected_text(selected_label)
+                                            .show_ui(ui, |ui| {
+                                                for (key, action) in buttons() {
+                                                    if ui
+                                                        .selectable_value(
+                                                            id,
+                                                            key.clone(),
+                                                            action.label.as_deref().unwrap_or(key),
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        selected = true;
+                                                        ui.close();
+                                                    }
+                                                }
+                                            });
+                                        focus.restore(ui, &result.response, selected);
+                                        result.response.labelled_by(action_label.id);
+                                        if !actions.get(id.as_str()).is_some_and(|action| {
+                                            matches!(action.kind, ActionKind::Button { .. })
+                                        }) {
+                                            ui.label("Choose an existing Button action.");
+                                        }
+                                    }
+                                    if ui
+                                        .button(if is_button {
+                                            "Remove Button"
+                                        } else {
+                                            "Remove Label"
+                                        })
+                                        .clicked()
+                                    {
                                         remove = Some(index);
                                     }
                                 });
@@ -178,10 +237,36 @@ impl ComponentWorkspace {
                         panel.elements.remove(index);
                     }
                 }
-                if ui
-                    .add_enabled(can_add, egui::Button::new("Add Label"))
-                    .clicked()
-                {
+                let add = ui
+                    .horizontal_wrapped(|ui| {
+                        let label = ui
+                            .add_enabled(can_add, egui::Button::new("Add Label"))
+                            .clicked();
+                        let first = buttons().next().map(|(id, _)| id);
+                        let button = ui
+                            .add_enabled(
+                                can_add && first.is_some(),
+                                egui::Button::new("Add Action Button"),
+                            )
+                            .on_disabled_hover_text(
+                                "Create a Button in Project Settings → Input Actions.",
+                            )
+                            .clicked();
+                        if label {
+                            Some(HudSource::Static {
+                                text: "Label".into(),
+                            })
+                        } else if button {
+                            Some(HudSource::ActionButton {
+                                caption: "Button".into(),
+                                action_id: first.expect("enabled button").clone(),
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .inner;
+                if let Some(source) = add {
                     let first = draft.hud.elements().next().is_none();
                     if self.ensure_hud_panel(&mut draft) {
                         match self.session.allocate_hud_id(false, &draft.hud) {
@@ -192,9 +277,7 @@ impl ComponentWorkspace {
                                 draft.focus_label = Some(id.clone());
                                 draft.hud.panels[draft.panel].elements.push(HudLabel {
                                     id,
-                                    source: HudSource::Static {
-                                        text: "Label".into(),
-                                    },
+                                    source,
                                     enabled_when: None,
                                 });
                             }
@@ -252,7 +335,11 @@ impl ComponentWorkspace {
             if map.keys().any(|key| panel_only || key != "offset") {
                 return Err(invalid("Unexpected HUD inspection arguments."));
             }
-            let mut model = json!({"mode":"authored","resolved":rot_scene::hud::resolve_hud(hud, &rot_scene::Authoring::default(), |_, _| None)});
+            let authored = rot_scene::Authoring {
+                actions: self.session.scene().actions.clone(),
+                ..Default::default()
+            };
+            let mut model = json!({"mode":"authored","resolved":rot_scene::hud::resolve_hud(hud, &authored, |_, _| None)});
             if let Some(frame) = self.runtime.displayed_frame() {
                 let resolved = frame
                     .static_preview
@@ -271,7 +358,7 @@ impl ComponentWorkspace {
                 model =
                     json!({"mode":"committed","tick":frame.tick.to_string(),"resolved":resolved});
             }
-            let guidance = "v23 edits static labels only. Use hud_panel_set for a panel and its anchor, hud_settings_set for enabled, then hud_label_set with source {kind:static,text} or null to remove.";
+            let guidance = "Use hud_label_set with source {kind:static,text}, {kind:action_button,caption,action_id} targeting an existing Button, or null to remove. Use hud_panel_set for the anchor. Activate a committed Action Button with guarded hud_activate.";
             if panel_only {
                 let panels: Vec<_> = hud
                     .panels
@@ -308,7 +395,7 @@ impl ComponentWorkspace {
                 "panel":panel.map(|panel|json!({"id":panel.id,"name":panel.name,"visible_when":panel.visible_when})),
                 "total":total,"authored_total":total,"next_offset":(offset.saturating_add(1)<total).then(|| (offset+1).to_string()),
                 "next_label_id":self.session.allocate_hud_id(false,hud).ok(),
-                "model":observation_page(model,&ids),"last_prepared":null,"activation":null,"guidance":guidance}),
+                "model":observation_page(model,&ids),"last_prepared":null,"activation":self.runtime.hud_activation_observation(),"guidance":guidance}),
             );
         }
         let supported: &[&str] = match op {
@@ -317,7 +404,7 @@ impl ComponentWorkspace {
             _ => {
                 return Err((
                     "unsupported_operation".into(),
-                    "v23 can add, edit and remove static labels.".into(),
+                    "v23 edits static labels and Action Buttons.".into(),
                 ))
             }
         };
@@ -469,8 +556,13 @@ impl ComponentWorkspace {
                 };
                 let rows = &mut hud.panels[panel].elements;
                 if let Some((_, index)) = existing {
-                    if !matches!(rows[index].source, HudSource::Static { .. }) {
-                        return Err(invalid("Only static labels can be changed in v23."));
+                    if !matches!(
+                        rows[index].source,
+                        HudSource::Static { .. } | HudSource::ActionButton { .. }
+                    ) {
+                        return Err(invalid(
+                            "Only static labels and Action Buttons can be changed here.",
+                        ));
                     }
                 }
                 if source.is_null() {
@@ -480,8 +572,11 @@ impl ComponentWorkspace {
                 } else {
                     let source: HudSource = serde_json::from_value(source.clone())
                         .map_err(|error| invalid(error.to_string()))?;
-                    if !matches!(source, HudSource::Static { .. }) {
-                        return Err(invalid("Expected a static label source."));
+                    if !matches!(
+                        source,
+                        HudSource::Static { .. } | HudSource::ActionButton { .. }
+                    ) {
+                        return Err(invalid("Expected a static label or Action Button source."));
                     }
                     let label = HudLabel {
                         id: id.into(),

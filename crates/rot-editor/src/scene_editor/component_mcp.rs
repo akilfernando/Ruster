@@ -21,6 +21,7 @@ impl ComponentWorkspace {
         let result = if matches!(
             op,
             "behavior_runtime_inspect"
+                | "hud_activate"
                 | "behavior_runtime_state"
                 | "behavior_runtime_reset"
                 | "behavior_runtime_play"

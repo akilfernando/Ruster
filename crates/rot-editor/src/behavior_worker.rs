@@ -248,7 +248,7 @@ pub(super) enum Event {
         key: RunKey,
         activation_id: u64,
         button_id: String,
-        result: Result<rot_behavior::HudActivationReceipt, String>,
+        result: Result<rot_behavior::HudActivationOutcome, String>,
     },
     Command {
         key: RunKey,
@@ -1075,6 +1075,7 @@ struct Execution {
     last_input: Option<Arc<LastConsumedInput>>,
     published_queries: Option<Arc<[rot_behavior::QueryObservation]>>,
     start_transition: Option<StartTransition>,
+    native_hud_action_epoch: Option<u64>,
     limits: Limits,
     audio: AudioOutput,
     audio_enabled: bool,
@@ -1488,16 +1489,25 @@ fn process(
                     "Native HUD activation cancelled before execution".into()
                 ));
             }
-            let result = execution
-                .engine
-                .as_mut()
-                .expect("runtime owns engine")
-                .activate_hud(runtime, &activation)
-                .map_err(|diagnostic| diagnostic.message.to_string());
+            use rot_behavior::HudActivationOutcome;
+            let result = if activation.command_schema_hash.is_empty() {
+                runtime.queue_hud_action(&activation).map(|receipt| {
+                    execution.native_hud_action_epoch = native_epoch;
+                    HudActivationOutcome::Action(receipt)
+                })
+            } else {
+                execution
+                    .engine
+                    .as_mut()
+                    .expect("runtime owns engine")
+                    .activate_hud(runtime, &activation)
+                    .map(HudActivationOutcome::Command)
+            }
+            .map_err(|diagnostic| diagnostic.message.to_string());
             if !active(shared, key) || shared.cancel.load(Ordering::SeqCst) {
                 return None;
             }
-            if result.is_ok() {
+            if matches!(result, Ok(HudActivationOutcome::Command(_))) {
                 frame(shared, execution, repaint, true);
             }
             terminal(result)
@@ -1940,11 +1950,24 @@ fn step_with_admitted(
     execution: &mut Execution,
     shared: &Arc<Shared>,
     repaint: &Option<Repaint>,
-    admitted: AdmittedInput,
+    mut admitted: AdmittedInput,
 ) -> Option<Event> {
     let key = execution.key?;
     #[cfg(test)]
     test_gate(&shared.admission_gate);
+    if !active(shared, key) {
+        return None;
+    }
+    if let Some(runtime) = execution.runtime.as_mut() {
+        if execution
+            .native_hud_action_epoch
+            .take()
+            .is_some_and(|epoch| shared.hud_epoch.load(Ordering::SeqCst) != epoch)
+        {
+            runtime.clear_hud_action();
+        }
+        runtime.merge_hud_action(&mut admitted.frame);
+    }
     if let Some(event) = transition_on_press(execution, shared, repaint, &admitted) {
         return Some(event);
     }
@@ -2059,6 +2082,7 @@ fn run(
         last_input: None,
         published_queries: None,
         start_transition: None,
+        native_hud_action_epoch: None,
         limits: limits.clone(),
         audio: AudioOutput::default(),
         audio_enabled: false,
@@ -2326,7 +2350,7 @@ mod tests {
             .unwrap();
         let receipt = match wait_event(&worker, &pulses) {
             Event::HudActivation {
-                result: Ok(receipt),
+                result: Ok(rot_behavior::HudActivationOutcome::Command(receipt)),
                 ..
             } => receipt,
             event => panic!("unexpected terminal {event:?}"),

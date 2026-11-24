@@ -1,8 +1,8 @@
 //! Shared bounded HUD preparation, optional interaction and post-viewport painting.
 use crate::egui::{self, Color32, FontId, Painter, Rect, Vec2};
 use rot_scene::hud::{
-    hud_button_identity, Hud, HudAnchor, HudPanel, HudSource, ResolvedHud, ResolvedHudPanel,
-    MAX_HUD_LABELS, MAX_HUD_PANELS,
+    hud_button_identity, Hud, HudAnchor, HudPanel, ResolvedHud, ResolvedHudPanel, MAX_HUD_LABELS,
+    MAX_HUD_PANELS,
 };
 use std::sync::Arc;
 
@@ -259,10 +259,10 @@ fn prepare_panel(
             break;
         }
         let index = if bottom { count - 1 - offset } else { offset };
-        let definition = hud.elements.get(index).filter(|label| {
-            label.id == resolved.labels[index].id
-                && matches!(label.source, HudSource::Button { .. })
-        });
+        let definition = hud
+            .elements
+            .get(index)
+            .filter(|label| label.id == resolved.labels[index].id && label.source.is_button());
         let button = definition.map(|definition| {
             let identity = hud_button_identity(hud, definition).ok();
             PreparedButton {
@@ -886,7 +886,7 @@ pub fn interact_prepared_hud(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rot_scene::hud::ResolvedHudLabel;
+    use rot_scene::hud::{HudSource, ResolvedHudLabel};
 
     fn button_source(caption: &str) -> HudSource {
         HudSource::Button {
@@ -1018,7 +1018,9 @@ mod tests {
 
         fn add_panel(&mut self, id: &str, anchor: HudAnchor, source: HudSource) -> usize {
             let text = match &source {
-                HudSource::Button { caption, .. } => caption.clone(),
+                HudSource::Button { caption, .. } | HudSource::ActionButton { caption, .. } => {
+                    caption.clone()
+                }
                 HudSource::Static { text } => text.clone(),
                 _ => unreachable!(),
             };
@@ -1469,9 +1471,10 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(index, label)| {
-                let button = hud.elements.get(index).is_some_and(|element| {
-                    element.id == label.id && matches!(element.source, HudSource::Button { .. })
-                });
+                let button = hud
+                    .elements
+                    .get(index)
+                    .is_some_and(|element| element.id == label.id && element.source.is_button());
                 let inset = if button { 6.0 } else { 0.0 };
                 let size = painter
                     .layout(

@@ -438,7 +438,7 @@ fn read_hud_activations(path: Option<&Path>, ticks: u64) -> Result<Vec<(u64, Str
 fn activate_scheduled_hud(
     runtime: &mut Runtime<GenericMotionLab>,
     schedule: &mut std::iter::Peekable<std::vec::IntoIter<(u64, String)>>,
-    receipts: &mut Vec<rot_behavior::HudActivationReceipt>,
+    receipts: &mut Vec<rot_behavior::HudActivationOutcome>,
 ) -> Result<(), String> {
     while schedule
         .peek()
@@ -454,7 +454,7 @@ struct HeadlessRun {
     runtime: Runtime<GenericMotionLab>,
     input: serde_json::Value,
     command_receipts: Vec<serde_json::Value>,
-    hud_activation_receipts: Vec<rot_behavior::HudActivationReceipt>,
+    hud_activation_receipts: Vec<rot_behavior::HudActivationOutcome>,
 }
 
 fn headless_runtime(

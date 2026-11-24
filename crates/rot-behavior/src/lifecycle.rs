@@ -35,6 +35,98 @@ pub struct HudActivationReceipt {
     pub command: CommandReceipt,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct HudActionQueued {
+    #[serde(serialize_with = "crate::spatial_host::counter_string")]
+    pub activation_id: u64,
+    pub button_id: String,
+    pub action_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(untagged)]
+pub enum HudActivationOutcome {
+    Command(HudActivationReceipt),
+    Action(HudActionQueued),
+}
+
+impl Runtime {
+    pub fn queue_hud_action(
+        &mut self,
+        activation: &HudActivation,
+    ) -> Result<HudActionQueued, Diagnostic> {
+        let invalid = |message: &str| command_error(DiagnosticCode::InvalidCommand, message);
+        if activation.activation_id == 0 || activation.activation_id <= self.last_hud_activation {
+            return Err(invalid(
+                "HUD activation identity was consumed or is invalid",
+            ));
+        }
+        if self.pending_hud_action.is_some() {
+            return Err(invalid("A HUD action is already waiting for the next Step"));
+        }
+        let authoring = self.authoring_snapshot();
+        let hud = &authoring.hud;
+        let (panel, row) = hud
+            .enabled
+            .then(|| hud.panel_for_label(&activation.button_id))
+            .flatten()
+            .and_then(|panel| {
+                panel
+                    .elements
+                    .iter()
+                    .find(|row| row.id == activation.button_id)
+                    .map(|row| (panel, row))
+            })
+            .ok_or_else(|| invalid("HUD button is unavailable in this run"))?;
+        let identity = rot_scene::hud::hud_button_identity(panel, row)
+            .map_err(|error| invalid(&error.to_string()))?;
+        if identity != activation.definition_hash
+            || panel.visible_when.is_some()
+            || row.enabled_when.is_some()
+        {
+            return Err(invalid(
+                "HUD Action Button is unavailable or its definition changed",
+            ));
+        }
+        row.source
+            .validate_action_target(&authoring.actions)
+            .map_err(|error| invalid(&error.to_string()))?;
+        let id = row
+            .source
+            .action_id()
+            .ok_or_else(|| invalid("HUD element is not an Action Button"))?
+            .to_owned();
+        self.last_hud_activation = activation.activation_id;
+        self.pending_hud_action = Some(id.clone());
+        Ok(HudActionQueued {
+            activation_id: activation.activation_id,
+            action_id: id,
+            button_id: activation.button_id.clone(),
+        })
+    }
+
+    pub fn clear_hud_action(&mut self) {
+        self.pending_hud_action = None;
+    }
+
+    /// Merge one admitted tap. It doesn't release or retrigger a physical hold.
+    pub fn merge_hud_action(&mut self, input: &mut ActionFrame) {
+        if let Some(id) = self.pending_hud_action.take() {
+            use rot_scene::input::{ActionValue, ButtonState};
+            let state = input
+                .0
+                .entry(id)
+                .or_insert(ActionValue::Button(ButtonState::default()));
+            if let ActionValue::Button(state) = state {
+                if !state.held {
+                    state.pressed = true;
+                    state.released = true;
+                }
+            }
+        }
+    }
+}
+
 pub(super) enum Invocation<'a> {
     Initialize,
     Command {

@@ -36,7 +36,9 @@ pub mod spatial;
 mod state;
 pub use state::RuntimeState;
 mod lifecycle;
-pub use lifecycle::{CommandReceipt, HudActivation, HudActivationReceipt};
+pub use lifecycle::{
+    CommandReceipt, HudActionQueued, HudActivation, HudActivationOutcome, HudActivationReceipt,
+};
 mod spatial_host;
 use spatial_host::{
     install_kinematic, install_spatial, kinematic_owner, KinematicOwner, QueryInvocation,
@@ -257,6 +259,7 @@ pub struct Runtime {
     commit_revision: u64,
     last_step_commit_revision: Option<u64>,
     last_hud_activation: u64,
+    pending_hud_action: Option<String>,
     commit_revision_required: bool,
     command_schema: Option<(String, String)>,
     query_observations: Vec<QueryObservation>,
@@ -918,6 +921,7 @@ impl Engine {
             commit_revision: 0,
             last_step_commit_revision: None,
             last_hud_activation: 0,
+            pending_hud_action: None,
             commit_revision_required: authoring.bindings.values().any(|binding| {
                 binding.enabled
                     && authoring

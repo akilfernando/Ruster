@@ -5,7 +5,7 @@ use eframe::egui;
 use rot_app::hud::{
     interact_prepared_hud, prepare_hud, HudInteractionState, HudPresentationMode, PreparedHud,
 };
-use rot_scene::hud::{HudCache, HudSource};
+use rot_scene::hud::HudCache;
 use rot_scene::Authoring;
 
 #[derive(Default)]
@@ -31,10 +31,7 @@ pub(super) fn interact(
 ) -> (bool, Option<String>) {
     let hud = &view.authoring.hud;
     if (!hud.enabled
-        || (hud.panels.len() <= 1
-            && !hud
-                .elements()
-                .any(|row| matches!(row.source, HudSource::Button { .. }))))
+        || (hud.panels.len() <= 1 && !hud.elements().any(|row| row.source.is_button())))
         && !controls.interaction.has_input_lease()
     {
         controls.prepared = None;

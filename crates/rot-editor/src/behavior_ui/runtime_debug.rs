@@ -851,8 +851,10 @@ impl RuntimeUi {
         if op == "hud_activate" {
             let button_id = args["button_id"].as_str().ok_or("invalid_arguments")?;
             let (key, id) = self.queue_hud_activation(button_id, false)?;
-            return Ok(json!({"run_id":run_id(key),"activation_id":id.to_string(),
-                "button_id":button_id,"status":"queued"}));
+            return Ok(
+                json!({"run_id":self.reported_run_id(key,self.frame.as_ref()),"activation_id":id.to_string(),
+                "button_id":button_id,"status":"queued"}),
+            );
         }
         if op.starts_with("behavior_debug_") {
             let stop = self.debug_snapshot().ok_or("stale_stop")?;

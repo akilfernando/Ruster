@@ -476,7 +476,7 @@ impl Authoring {
     ) -> Result<(), SceneError> {
         if !scene.hierarchy.is_empty() {
             if projection.allows_local_leaf_scripts() {
-                if !self.hud.is_static()
+                if !self.hud.is_static_or_action_buttons()
                     || self.sources.values().any(|source| {
                         !matches!(
                             source.host_api_version,
@@ -489,7 +489,7 @@ impl Authoring {
                         .any(|binding| binding.target == BindingTarget::Application)
                 {
                     return Err(SceneError::Invalid(
-                        "v23 behavior hierarchies support Object Lua API1/2, Group Lua API6, keyboard actions and static HUD labels. Application scripts, other script APIs and HUD buttons, state or visibility conditions require a flat scene.".into(),
+                        "v23 behavior hierarchies support Object Lua API1/2, Group Lua API6, keyboard actions and HUD labels or Action Buttons. Application scripts, other script APIs, HUD command buttons, state or visibility conditions require a flat scene.".into(),
                     ));
                 }
             } else if self.group_creation_blockers(scene).next().is_some() {

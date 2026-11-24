@@ -1656,6 +1656,7 @@ impl Document {
                 "Imported animation bindings or their history require Scene22".into(),
             ));
         }
+        reject_legacy_hud_action_buttons(&value)?;
         if (1..19).contains(&version) {
             hierarchy::reject_legacy_fields(&value)?;
         }
@@ -1875,6 +1876,32 @@ fn migrate_legacy_document_huds(value: &mut serde_json::Value) -> Result<(), Sce
 
 // Scene15 retains its exact label schema. Inspect only HUD element owners,
 // leaving source strings and arbitrary state/property maps opaque.
+fn reject_legacy_hud_action_buttons(value: &serde_json::Value) -> Result<(), SceneError> {
+    let buttons = |hud: &serde_json::Value| {
+        let has_action = |rows: &serde_json::Value| {
+            rows.as_array().is_some_and(|rows| {
+                rows.iter()
+                    .any(|row| row["source"]["kind"] == "action_button")
+            })
+        };
+        has_action(&hud["elements"])
+            || hud["panels"]
+                .as_array()
+                .is_some_and(|panels| panels.iter().any(|panel| has_action(&panel["elements"])))
+    };
+    if buttons(&value["authoring"]["hud"])
+        || ["undo", "redo"]
+            .into_iter()
+            .flat_map(|stack| value[stack].as_array().into_iter().flatten())
+            .any(|change| buttons(&change["hud"]["before"]) || buttons(&change["hud"]["after"]))
+    {
+        return Err(SceneError::Invalid(
+            "HUD Action Buttons require a v23 scene".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn reject_pre_v16_hud_buttons(value: &serde_json::Value) -> Result<(), SceneError> {
     let has_button = |hud: &serde_json::Value| {
         hud["elements"].as_array().is_some_and(|elements| {
@@ -2485,6 +2512,14 @@ impl Session {
     pub fn set_hud(&mut self, expected_revision: u64, hud: hud::Hud) -> Result<u64, SceneError> {
         self.check_revision(expected_revision)?;
         hud.validate()?;
+        if hud
+            .elements()
+            .any(|label| label.source.action_id().is_some())
+        {
+            return Err(SceneError::Invalid(
+                "HUD Action Buttons require a v23 scene".into(),
+            ));
+        }
         if self.hud() == &hud {
             return Ok(self.scene().revision);
         }

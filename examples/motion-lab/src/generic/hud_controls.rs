@@ -4,8 +4,8 @@ use rot_app::hud::{
     interact_prepared_hud, paint_prepared_hud, prepare_hud, HudInteractionState, PreparedHud,
 };
 use rot_app::ViewportInputOwnership;
-use rot_behavior::{HudActivation, HudActivationReceipt};
-use rot_scene::hud::{hud_button_identity, HudSource};
+use rot_behavior::{HudActivation, HudActivationOutcome};
+use rot_scene::hud::hud_button_identity;
 use serde_json::{json, Value};
 
 #[derive(Default)]
@@ -33,10 +33,7 @@ impl GenericMotionLab {
             || self.runtime.as_ref().is_some_and(|runtime| {
                 let hud = &runtime.authoring_snapshot().hud;
                 hud.enabled
-                    && (hud.panels.len() > 1
-                        || hud
-                            .elements()
-                            .any(|row| matches!(row.source, HudSource::Button { .. })))
+                    && (hud.panels.len() > 1 || hud.elements().any(|row| row.source.is_button()))
             })
     }
 
@@ -58,12 +55,21 @@ impl GenericMotionLab {
             .iter()
             .find(|row| row.id == button_id)
             .ok_or("HUD button is unavailable")?;
-        let command = row
-            .source
-            .command_binding()
-            .ok_or("HUD row is not a button")?;
-        rot_scene::hud::validate_hud_button_command(authoring, command)
-            .map_err(|error| error.to_string())?;
+        let command_schema_hash = if let Some(command) = row.source.command_binding() {
+            rot_scene::hud::validate_hud_button_command(authoring, command)
+                .map_err(|error| error.to_string())?;
+            runtime
+                .command_schema_hash(&command.binding_id)
+                .ok_or("HUD command schema is unavailable")?
+                .into()
+        } else if row.source.action_id().is_some() {
+            row.source
+                .validate_action_target(&authoring.actions)
+                .map_err(|error| error.to_string())?;
+            String::new()
+        } else {
+            return Err("HUD row is not a button".into());
+        };
         let id = self
             .hud_controls
             .next_id
@@ -73,10 +79,7 @@ impl GenericMotionLab {
             activation_id: id,
             button_id: button_id.into(),
             definition_hash: hud_button_identity(panel, row).map_err(|error| error.to_string())?,
-            command_schema_hash: runtime
-                .command_schema_hash(&command.binding_id)
-                .ok_or("HUD command schema is unavailable")?
-                .into(),
+            command_schema_hash,
         };
         self.hud_controls.next_id = id;
         Ok(activation)
@@ -85,20 +88,32 @@ impl GenericMotionLab {
     fn execute_hud_activation(
         &mut self,
         activation: HudActivation,
-    ) -> Result<HudActivationReceipt, String> {
+    ) -> Result<HudActivationOutcome, String> {
         let runtime = self
             .runtime
             .as_mut()
             .ok_or("Reset before activating HUD buttons")?;
-        let result = self
-            .engine
-            .as_mut()
-            .ok_or("Reset before activating HUD buttons")?
-            .activate_hud(runtime, &activation)
-            .map_err(|error| error.to_string());
+        let result = if activation.command_schema_hash.is_empty() {
+            runtime
+                .queue_hud_action(&activation)
+                .map(HudActivationOutcome::Action)
+        } else {
+            self.engine
+                .as_mut()
+                .ok_or("Reset before activating HUD buttons")?
+                .activate_hud(runtime, &activation)
+                .map(HudActivationOutcome::Command)
+        }
+        .map_err(|error| error.to_string());
         self.hud_controls.terminal = Some(match &result {
-            Ok(receipt) => json!({"activation_id":activation.activation_id.to_string(),
-                "button_id":activation.button_id,"status":"committed","receipt":receipt}),
+            Ok(HudActivationOutcome::Action(receipt)) => {
+                json!({"activation_id":activation.activation_id.to_string(),
+                "button_id":activation.button_id,"status":"armed","receipt":receipt})
+            }
+            Ok(HudActivationOutcome::Command(receipt)) => {
+                json!({"activation_id":activation.activation_id.to_string(),
+                "button_id":activation.button_id,"status":"committed","receipt":receipt})
+            }
             Err(error) => json!({"activation_id":activation.activation_id.to_string(),
                 "button_id":activation.button_id,"status":"failed","error":error}),
         });
@@ -107,7 +122,7 @@ impl GenericMotionLab {
 
     /// Owner-thread programmatic activation. Arguments come only from captured authoring.
     /// Host playback is independent; this does not relax paused CommandRequest semantics.
-    pub fn activate_hud_button(&mut self, button_id: &str) -> Result<HudActivationReceipt, String> {
+    pub fn activate_hud_button(&mut self, button_id: &str) -> Result<HudActivationOutcome, String> {
         let activation = self.new_hud_activation(button_id)?;
         self.execute_hud_activation(activation)
     }
@@ -121,7 +136,15 @@ impl GenericMotionLab {
 
     pub(super) fn begin_hud_frame(&mut self, ctx: &egui::Context) {
         if self.needs_reset
-            || ctx.input(|input| !input.focused || input.key_pressed(egui::Key::Escape))
+            || ctx.memory(|memory| memory.top_modal_layer().is_some())
+            || ctx.input(|input| {
+                !input.focused
+                    || input.key_pressed(egui::Key::Escape)
+                    || input
+                        .events
+                        .iter()
+                        .any(|event| matches!(event, egui::Event::WindowFocused(false)))
+            })
         {
             self.cancel_hud_input();
             return;
@@ -134,6 +157,9 @@ impl GenericMotionLab {
     }
 
     pub(super) fn cancel_hud_input(&mut self) {
+        if let Some(runtime) = &mut self.runtime {
+            runtime.clear_hud_action();
+        }
         if let Some(activation) = self.hud_controls.pending.take() {
             self.hud_controls.terminal = Some(json!({
                 "activation_id":activation.activation_id.to_string(),

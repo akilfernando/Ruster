@@ -422,7 +422,16 @@ impl ComponentSession {
             }
         }
         for label in hud.elements() {
-            if self.scene.hud.panel_for_label(&label.id).is_none()
+            let previous = self.scene.hud.panel_for_label(&label.id).and_then(|panel| {
+                panel
+                    .elements
+                    .iter()
+                    .find(|previous| previous.id == label.id)
+            });
+            if previous.and_then(|row| row.source.action_id()) != label.source.action_id() {
+                label.source.validate_action_target(&self.scene.actions)?;
+            }
+            if previous.is_none()
                 && self
                     .retained_huds()
                     .any(|old| old.panel_for_label(&label.id).is_some())

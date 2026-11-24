@@ -795,7 +795,10 @@ impl Application for GenericMotionLab {
         } else {
             "neutral"
         };
-        let input = supplied.unwrap_or_else(|| self.action_keys.take_snapshot().into_frame());
+        let mut input = supplied.unwrap_or_else(|| self.action_keys.take_snapshot().into_frame());
+        if let Some(runtime) = &mut self.runtime {
+            runtime.merge_hud_action(&mut input);
+        }
         if self.start_transition.as_ref().is_some_and(|(_, route)| {
             matches!(input.0.get(&route.action_id), Some(ActionValue::Button(state)) if state.pressed)
         }) {

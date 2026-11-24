@@ -95,7 +95,7 @@ impl HudCommandBinding {
 pub fn hud_button_identity(panel: &HudPanel, label: &HudLabel) -> Result<String, SceneError> {
     validate_id(&panel.id)?;
     validate_id(&label.id)?;
-    if !matches!(&label.source, HudSource::Button { .. }) {
+    if !label.source.is_button() {
         return Err(SceneError::Invalid("HUD element is not a button".into()));
     }
     label.validate()?;
@@ -163,6 +163,10 @@ pub enum HudSource {
         caption: String,
         command: HudCommandBinding,
     },
+    ActionButton {
+        caption: String,
+        action_id: String,
+    },
     Static {
         text: String,
     },
@@ -180,6 +184,33 @@ pub enum HudSource {
 }
 
 impl HudSource {
+    pub fn is_button(&self) -> bool {
+        matches!(self, Self::Button { .. } | Self::ActionButton { .. })
+    }
+
+    pub fn action_id(&self) -> Option<&str> {
+        match self {
+            Self::ActionButton { action_id, .. } => Some(action_id),
+            _ => None,
+        }
+    }
+
+    pub fn validate_action_target(
+        &self,
+        actions: &crate::input::ActionMap,
+    ) -> Result<(), SceneError> {
+        if let Some(id) = self.action_id() {
+            if !actions.get(id).is_some_and(|action| {
+                matches!(action.kind, crate::input::ActionKind::Button { .. })
+            }) {
+                return Err(SceneError::Invalid(format!(
+                    "HUD Action Button needs a Button action ({id})."
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Stable reference identity, independent of formatting and label position.
     pub fn state_reference(&self) -> Option<(&str, &str, HudValueType)> {
         match self {
@@ -189,7 +220,7 @@ impl HudSource {
                 value_type,
                 ..
             } => Some((binding_id, field, *value_type)),
-            Self::Static { .. } | Self::Button { .. } => None,
+            Self::Static { .. } | Self::Button { .. } | Self::ActionButton { .. } => None,
         }
     }
 
@@ -216,6 +247,15 @@ impl HudSource {
                     + command.binding_id.len()
                     + command.command_id.len()
                     + command_argument_payload_bytes(&command.arguments)?);
+            }
+            Self::ActionButton { caption, action_id } => {
+                validate_id(action_id)?;
+                if caption.len() > MAX_HUD_ELEMENT_TEXT_BYTES {
+                    return Err(SceneError::Invalid(
+                        "HUD button caption exceeds 1024 UTF-8 bytes".into(),
+                    ));
+                }
+                return Ok(caption.len() + action_id.len());
             }
             Self::Static { text } => text.len(),
             Self::State {
@@ -424,6 +464,19 @@ impl Hud {
         })
     }
 
+    pub(crate) fn is_static_or_action_buttons(&self) -> bool {
+        self.panels.iter().all(|panel| {
+            panel.visible_when.is_none()
+                && panel.elements.iter().all(|row| {
+                    row.enabled_when.is_none()
+                        && matches!(
+                            row.source,
+                            HudSource::Static { .. } | HudSource::ActionButton { .. }
+                        )
+                })
+        })
+    }
+
     pub fn elements(&self) -> impl Iterator<Item = &HudLabel> {
         self.panels.iter().flat_map(|panel| &panel.elements)
     }
@@ -498,7 +551,7 @@ impl Hud {
                     let source = match &row.source {
                         HudSource::State { binding_id, .. } => Some(binding_id.as_str()),
                         HudSource::Button { command, .. } => Some(command.binding_id.as_str()),
-                        HudSource::Static { .. } => None,
+                        HudSource::Static { .. } | HudSource::ActionButton { .. } => None,
                     };
                     source.into_iter().chain(
                         row.enabled_when

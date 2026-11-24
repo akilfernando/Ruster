@@ -138,6 +138,7 @@ impl HudDraft {
                 return false;
             }
             let bytes = match &row.source {
+                HudSource::ActionButton { .. } => return false,
                 HudSource::Button { caption, command } => {
                     button_ids.insert(row.id.as_str());
                     if caption.len() > 1024
@@ -976,6 +977,7 @@ impl SceneEditor {
                         HudSource::Static { .. } => "Static text",
                         HudSource::State { .. } => "State value",
                         HudSource::Button { .. } => "Button",
+                        HudSource::ActionButton { .. } => "Action Button",
                     };
                     let response = ui
                         .scope_builder(
@@ -1183,6 +1185,7 @@ impl SceneEditor {
                         HudSource::Static { .. } => 0,
                         HudSource::State { .. } => 1,
                         HudSource::Button { .. } => 2,
+                        HudSource::ActionButton { .. } => return,
                     };
                     let before_source = source_kind;
                     fields.push(selector(
@@ -1230,6 +1233,7 @@ impl SceneEditor {
                         };
                     }
                     match &mut label.source {
+                        HudSource::ActionButton { .. } => return,
                         HudSource::Static { text } => fields.push(raw_field(
                             ui,
                             "Text",

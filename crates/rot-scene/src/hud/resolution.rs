@@ -24,6 +24,7 @@ pub enum HudDiagnostic {
     NonApplicationBinding,
     UnsupportedCommandApi,
     MissingCommand,
+    MissingButtonAction,
     CommandArgumentsChanged,
 }
 
@@ -39,6 +40,7 @@ impl HudDiagnostic {
             Self::OutputOverflow => "This value exceeds the HUD text limit.",
             Self::NonApplicationBinding => "Choose an Application behavior for this button.",
             Self::UnsupportedCommandApi => "This button requires an API5 Application behavior.",
+            Self::MissingButtonAction => "Choose an existing Button action in Game HUD.",
             Self::MissingCommand => "The command is missing. Choose a command in the HUD editor.",
             Self::CommandArgumentsChanged => {
                 "The command arguments changed. Update this button's constants."
@@ -236,8 +238,7 @@ impl HudCache {
                 if !reusable {
                     self.resolved_changed = true;
                     let text = if source_diagnostic == Some(HudDiagnostic::OutputOverflow)
-                        || (source_diagnostic.is_some()
-                            && !matches!(&label.source, HudSource::Button { .. }))
+                        || (source_diagnostic.is_some() && !label.source.is_button())
                     {
                         UNAVAILABLE.to_owned()
                     } else {
@@ -300,7 +301,9 @@ pub fn resolve_hud<'s>(
 fn authored_text_bytes(label: &HudLabel) -> usize {
     match &label.source {
         HudSource::Static { text } => text.len(),
-        HudSource::Button { caption, .. } => caption.len(),
+        HudSource::Button { caption, .. } | HudSource::ActionButton { caption, .. } => {
+            caption.len()
+        }
         HudSource::State { prefix, suffix, .. } => prefix.len().saturating_add(suffix.len()),
     }
 }
@@ -312,6 +315,13 @@ fn reference<'s>(
 ) -> (Option<&'s StateValue>, Option<HudDiagnostic>) {
     if let HudSource::Button { command, .. } = &label.source {
         return (None, hud_button_command_diagnostic(authoring, command));
+    }
+    if let Some(id) = label.source.action_id() {
+        let valid = authoring
+            .actions
+            .get(id)
+            .is_some_and(|action| matches!(action.kind, crate::input::ActionKind::Button { .. }));
+        return (None, (!valid).then_some(HudDiagnostic::MissingButtonAction));
     }
     let HudSource::State {
         binding_id,
@@ -410,7 +420,9 @@ fn format_label(label: &HudLabel, value: Option<&StateValue>) -> Result<String, 
     let mut output = CappedText(String::new());
     match &label.source {
         HudSource::Static { text } => output.write_str(text)?,
-        HudSource::Button { caption, .. } => output.write_str(caption)?,
+        HudSource::Button { caption, .. } | HudSource::ActionButton { caption, .. } => {
+            output.write_str(caption)?
+        }
         HudSource::State {
             prefix,
             suffix,
