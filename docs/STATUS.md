@@ -88,6 +88,26 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+**Place Selection on Ground** moves a v23 assembly to world Y=0 through
+the Hierarchy context menu, keyboard command palette or guarded MCP. The
+Blender pump and a separate crate moved down 2.523369 units together, with
+their horizontal positions, orientation, scale and spacing preserved. The
+selected pump descendant moved once with its parent. Approved Claude moved
+the below-ground copy up 2.476631 units. Native Undo and Redo reversed and
+restored the whole edit. After save and reopen, the relocated Vulkan build
+matched the editor's side-view landmarks. The pump met the floor within
+one pixel and the crate retained its 0.791631-unit gap. A fresh placement used
+the reimported foot. Stale asset guards, missing geometry and an empty assembly
+left the scene intact. Disabled renderer geometry counted, and a grounded
+assembly added no history. MCP reports the source minimum and displacement.
+The menu was checked in Plain Light. In the 5,000-object release scene,
+the small two-root placement took 3.508–3.908 ms p50 and 3.599–6.342 ms p95
+through the first tessellated frame across three paired runs. Three small-only
+repeats measured 3.789–4.130 ms p95. The 4,999-renderer subtree, including 500
+instances of a 23,552-triangle mesh, took 4.165–4.372 ms p50 and 4.410–4.754 ms
+p95. Idle CPU p95 was 0.642–0.643 ms before and 0.630–0.641 ms after, with
+zero idle geometry scans.
+
 **Fit to Mesh** sets a v23 Box Collider's local Center and Size from the
 selected same-object Mesh Renderer. The parented loading-bay barrier's
 center was (1.25, 0.5, 0.25) and Size was (1, 2, 3). All eight world corners
