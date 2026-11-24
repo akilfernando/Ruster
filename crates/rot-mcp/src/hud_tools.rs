@@ -30,6 +30,8 @@ fn source_schema() -> Value {
             "command":super::object_schema(json!({"binding_id":identifier_schema(),
                 "command_id":identifier_schema(),"arguments":super::behavior_tools::state_arguments_schema()}),
                 vec!["binding_id","command_id","arguments"])}),vec!["kind","caption","command"]),
+        super::object_schema(json!({"kind":{"const":"action_button"},"caption":text_schema(),
+            "action_id":identifier_schema()}),vec!["kind","caption","action_id"]),
         super::object_schema(json!({"kind":{"const":"static"},"text":text_schema()}),vec!["kind","text"]),
         super::object_schema(json!({
             "kind":{"const":"state"},"binding_id":identifier_schema(),"field":identifier_schema(),
@@ -85,7 +87,7 @@ pub fn list() -> Vec<Value> {
     for (name, description, fields, required) in [
         ("hud_settings_set", "Update supplied HUD settings. enabled is global. Layout/style targets optional panel_id, or requires exactly one panel when omitted. Zero or multiple panels return panel_required. Retain omitted settings and all rows. One shared Undo transaction. Requires current session/revision and clean human drafts. Reset captures edits for runtime presentation.",
             json!({"settings":settings_schema(),"panel_id":identifier_schema()}),vec!["settings"]),
-        ("hud_label_set", "Set one static label, typed state label or command button. Existing globally unique IDs retain their panel. Explicit panel_id mismatch rejects; transfer with hud_label_move. New rows require panel_id unless exactly one panel exists. Omitted enabled_when preserves the existing condition, null clears it, and a complete Bool reference replaces it. Clear a button condition explicitly before changing to a nonbutton. Buttons require a caption and complete constant typed arguments for an enabled Application/API5 command. The shared scene owner validates canonical argument payload bytes and aggregate authored bounds. Existing label IDs retain their position, fresh IDs append and explicit null removes. At most32 labels and1024 authored UTF-8 bytes per label, including combined prefix/suffix. New/rebound state references require an enabled existing binding, an existing source and a matching authored default type. Existing broken references remain repairable through unrelated edits. Use next_label_id from hud_inspect for creation or duplication. One shared Undo transaction, current session/revision and clean human drafts required. Reset captures edits for runtime presentation.",
+        ("hud_label_set", "Set one static label, legacy state label or command button, or v23 Action Button with caption and an existing Button action_id. Existing globally unique IDs retain their panel. Explicit panel_id mismatch rejects; transfer with hud_label_move. New rows require panel_id unless exactly one panel exists. Omitted enabled_when preserves the existing condition, null clears it, and a complete Bool reference replaces it. Clear a button condition explicitly before changing to a nonbutton. Buttons require a caption and complete constant typed arguments for an enabled Application/API5 command. The shared scene owner validates canonical argument payload bytes and aggregate authored bounds. Existing label IDs retain their position, fresh IDs append and explicit null removes. At most32 labels and1024 authored UTF-8 bytes per label, including combined prefix/suffix. New/rebound state references require an enabled existing binding, an existing source and a matching authored default type. Existing broken references remain repairable through unrelated edits. Use next_label_id from hud_inspect for creation or duplication. One shared Undo transaction, current session/revision and clean human drafts required. Reset captures edits for runtime presentation.",
             json!({"label_id":identifier_schema(),"source":{"oneOf":[{"type":"null"},source_schema()]},"panel_id":identifier_schema(),"enabled_when":condition_schema()}),vec!["label_id","source"]),
         ("hud_label_move", "Move an existing global row ID in one Undo transaction. Omit panel_id to reorder within its panel, with an existing destination index. Supply panel_id to transfer to another panel, allowing insertion through that panel's row count, including zero for an empty destination. One shared Undo transaction, current session/revision and clean human drafts required. Reset captures edits for runtime presentation.",
             json!({"label_id":identifier_schema(),"index":{"type":"integer","minimum":0,"maximum":31},"panel_id":identifier_schema()}),vec!["label_id","index"]),
@@ -101,12 +103,12 @@ pub fn list() -> Vec<Value> {
     }
     tools.push(json!({
         "name":"hud_activate",
-        "description":"Queue one authored HUD button on the current initialized run, preserving Play/Pause. Pin the current authoring session/revision and run ID. No caller-supplied command target or arguments are accepted. Inspect hud_inspect for the terminal activation receipt before submitting another activation, including an unknown outcome.",
+        "description":"Queue one authored HUD button on the current initialized run, preserving Play/Pause. A v23 Action Button taps on the next Step. Pin the current authoring session/revision and run ID. No caller-supplied command target or arguments are accepted. Inspect hud_inspect for the terminal activation receipt before submitting another activation, including an unknown outcome.",
         "inputSchema":super::object_schema(json!({
             "expected_session_token":{"type":"string","minLength":1,"maxLength":256},
             "expected_revision":{"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20},
-            "expected_run_id":{"type":"string","pattern":"^(0|[1-9][0-9]*):(0|[1-9][0-9]*):(0|[1-9][0-9]*)$","maxLength":62,
-                "description":"Exact inspected run identity as generation:reset_epoch:authored_revision, with three canonical u64 decimal components."},
+            "expected_run_id":{"type":"string","pattern":"^(0|[1-9][0-9]*):(0|[1-9][0-9]*):(0|[1-9][0-9]*)(:destination)?$","maxLength":74,
+                "description":"Exact inspected run identity as generation:reset_epoch:authored_revision, with three canonical u64 decimal components and an optional :destination suffix."},
             "button_id":identifier_schema()
         }),vec!["expected_session_token","expected_revision","expected_run_id","button_id"]),
         "annotations":{"readOnlyHint":false,"destructiveHint":false,"openWorldHint":false}
@@ -145,6 +147,7 @@ fn identifier(value: &Value) -> bool {
 
 fn canonical_run_id(value: &Value) -> bool {
     value.as_str().is_some_and(|run_id| {
+        let run_id = run_id.strip_suffix(":destination").unwrap_or(run_id);
         if run_id.len() > 62 {
             return false;
         }
@@ -188,6 +191,13 @@ fn valid_source(value: &Value) -> bool {
                 .validate()
                 .is_ok()
             }),
+        Some("action_button") => {
+            super::exact_keys(source, &["kind", "caption", "action_id"], &[])
+                && value["caption"]
+                    .as_str()
+                    .is_some_and(|caption| caption.len() <= 1024)
+                && identifier(&value["action_id"])
+        }
         Some("static") => {
             super::exact_keys(source, &["kind", "text"], &[])
                 && value["text"]
@@ -392,6 +402,10 @@ mod tests {
         assert!(!valid("hud_inspect", &json!({"limit":"1"})));
         let mut args = json!({"expected_session_token":"session","expected_revision":"7","label_id":"label","source":null});
         assert!(valid("hud_label_set", &args));
+        args["source"] = json!({"kind":"action_button","caption":"Lift","action_id":"raise"});
+        assert!(valid("hud_label_set", &args));
+        args["source"]["extra"] = json!(true);
+        assert!(!valid("hud_label_set", &args));
         for kind in ["number", "bool", "text", "vec3"] {
             args["source"] =
                 json!({"kind":"state","binding_id":"app","field":"score","value_type":kind});
@@ -422,6 +436,9 @@ mod tests {
         }
         let activation = json!({"expected_session_token":"session","expected_revision":"7","expected_run_id":"1:4:7","button_id":"apply"});
         assert!(valid("hud_activate", &activation));
+        let mut destination = activation.clone();
+        destination["expected_run_id"] = json!("1:4:7:destination");
+        assert!(valid("hud_activate", &destination));
         for run_id in [
             "0:0:0",
             "18446744073709551615:18446744073709551615:18446744073709551615",
