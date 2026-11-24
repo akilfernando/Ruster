@@ -347,8 +347,10 @@ Starting set. Every key has both; the user will refine the Rot column.
 
 ## 10. UI review checklist
 
-Run this on your own screenshots, at 1280×800 and 1920×1080, before calling
-UI work done. View the images; do not judge from code.
+Review the applicable checks on screenshots of the affected UI. Use both
+1280×800 and 1920×1080 for layout and scaling changes. For a change confined
+to one control, use a representative size and check any affected appearance
+variants.
 
 1. Would this surface look at home in Unity or Unreal? Is each control where
    a user of those engines would look first?
