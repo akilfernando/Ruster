@@ -2208,6 +2208,7 @@ mod tests {
                 "scene_components_inspect",
                 "scene_components_edit",
                 "scene_color",
+                "scene_copy_local_transform",
                 "scene_place_on_ground",
                 "scene_group_create",
                 "scene_reparent",
