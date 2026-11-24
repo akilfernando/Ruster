@@ -358,11 +358,13 @@ mod tests {
     fn version_one_roundtrip_preserves_identity_history_and_replay() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("scenario.json");
-        let mut scenario = Scenario::load(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../examples/logistics.scenario.json"
-        ))
+        let fixture = dir.path().join("logistics.scenario.json");
+        std::fs::write(
+            &fixture,
+            include_bytes!("../../../examples/logistics.scenario.json"),
+        )
         .unwrap();
+        let mut scenario = Scenario::load(&fixture).unwrap();
         assert_eq!(
             scenario.replay(10).unwrap(),
             State {

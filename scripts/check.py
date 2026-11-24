@@ -120,6 +120,16 @@ def docs_path(path):
     return Path(path).suffix.lower() == ".md"
 
 
+def ci_setup(paths, full_reason):
+    # Only project docs qualify. Markdown elsewhere can contain vendored
+    # license text used by the dependency inventory.
+    if not full_reason and paths and all(
+        path.startswith("docs/") and docs_path(path) for path in paths
+    ):
+        return "docs"
+    return "rust"
+
+
 def choose_plan(root, paths, full_reason=None, workspace=None):
     if full_reason:
         return Plan("full", full_reason)
@@ -212,12 +222,17 @@ def main(argv=None):
     parser.add_argument("--base", help="compare from merge-base with REF (default: HEAD)")
     parser.add_argument("--full", action="store_true", help="run all workspace checks")
     parser.add_argument("--dry-run", action="store_true", help="print checks without executing them")
+    parser.add_argument("--ci-setup", action="store_true", help="print docs or rust setup scope without invoking Cargo")
     args = parser.parse_args(argv)
     root = Path(__file__).resolve().parent.parent
     started = time.monotonic()
     try:
         paths, reason = changed_files(root, args.base)
-        plan = choose_plan(root, paths, "explicit --full" if args.full else reason)
+        full_reason = "explicit --full" if args.full else reason
+        if args.ci_setup:
+            print(ci_setup(paths, full_reason))
+            return 0
+        plan = choose_plan(root, paths, full_reason)
         print(f"Plan: {plan.scope}: {plan.reason}", flush=True)
         if plan.packages:
             print("Packages: " + ", ".join(plan.packages), flush=True)

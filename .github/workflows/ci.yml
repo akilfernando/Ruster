@@ -24,13 +24,33 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Select CI setup
+        id: setup
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            args=(--base "$PR_BASE")
+          elif [ "$EVENT" = push ] && [ -n "$PUSH_BASE" ] && [ "$PUSH_BASE" != 0000000000000000000000000000000000000000 ]; then
+            args=(--base "$PUSH_BASE")
+          else
+            args=(--full)
+          fi
+          scope="$(python3 scripts/check.py "${args[@]}" --ci-setup)"
+          printf 'scope=%s\n' "$scope" >> "$GITHUB_OUTPUT"
+          printf 'ROT_CI_BASE=%s\n' "${args[1]:-}" >> "$GITHUB_ENV"
       - name: Install native build prerequisites
+        if: steps.setup.outputs.scope != 'docs'
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y pkg-config libwayland-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev libvulkan-dev libasound2-dev
       - name: Install pinned Rust toolchain
+        if: steps.setup.outputs.scope != 'docs'
         run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
       - name: Cache Cargo builds
+        if: steps.setup.outputs.scope != 'docs'
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
@@ -40,17 +60,12 @@ jobs:
           key: ${{ runner.os }}-rust-1.99.1-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
           restore-keys: ${{ runner.os }}-rust-1.99.1-
       - name: Run change-aware gate
-        env:
-          EVENT: ${{ github.event_name }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
-          PUSH_BASE: ${{ github.event.before }}
         run: |
-          if [ "$EVENT" = pull_request ]; then
-            python3 scripts/check.py --base "$PR_BASE"
-          elif [ "$EVENT" = push ] && [ -n "$PUSH_BASE" ] && [ "$PUSH_BASE" != 0000000000000000000000000000000000000000 ]; then
-            python3 scripts/check.py --base "$PUSH_BASE"
+          if [ -n "$ROT_CI_BASE" ]; then
+            python3 scripts/check.py --base "$ROT_CI_BASE"
           else
             python3 scripts/check.py --full
           fi
       - name: Verify dependency inventory and notices
+        if: steps.setup.outputs.scope != 'docs'
         run: python3 scripts/dependency_notices.py --check

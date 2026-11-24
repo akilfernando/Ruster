@@ -63,6 +63,26 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(plan.scope, "docs")
         self.assertEqual(check.commands(plan), [])
 
+    def test_ci_setup_is_conservative_and_does_not_need_cargo(self):
+        self.write("docs/guide.md", "# Guide\n")
+
+        def scope(args):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output), patch.object(
+                check, "__file__", str(self.root / "scripts/check.py")
+            ), patch.object(check, "metadata", side_effect=AssertionError("Cargo was invoked")):
+                self.assertEqual(check.main(["--ci-setup", *args]), 0)
+            return output.getvalue().strip()
+
+        self.assertEqual(scope([]), "docs")
+        self.assertEqual(scope(["--full"]), "rust")
+        self.write("third_party/dependency/LICENSE.md", "License\n")
+        self.assertEqual(scope([]), "rust")
+        self.commit()
+        self.write("docs/guide.md", "# Revised guide\n")
+        self.write("crates/rot-core/src/lib.rs", "// Revised code\n")
+        self.assertEqual(scope([]), "rust")
+
     def test_cli_only_selects_cli(self):
         self.write("crates/rot-cli/src/main.rs", "// Updated\n")
         self.assertEqual(self.plan().packages, ("rot-cli",))

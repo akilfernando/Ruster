@@ -20,6 +20,11 @@ Protect behavior, not test counts. Select checks by changed behavior and depende
 
 The Linux GitHub Actions workflow in `.github/workflows/ci.yml` calls the same runner against the actual PR base SHA or previous push SHA, with full scope for initial publication/manual dispatch. Report hosted results in the commit or handoff; configuration alone is not a pass. There is no merge queue, GPU suite, scheduled job or supported release matrix. CI does not duplicate overlapping checks by default. Full validation is not automatically a GPU/performance/platform audit.
 
+When only Markdown under `docs/` changed, the hosted job runs the Markdown
+gate without native package installation, the Rust toolchain, the Cargo
+cache or dependency inventory generation. Other paths retain normal setup,
+including vendored Markdown that may supply license text.
+
 ## Commands
 
 ```sh
