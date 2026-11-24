@@ -508,7 +508,9 @@ omitted to preserve its current value. Both changes share one Undo.
 
 WAV rows in `asset_inspect` have `kind:"sound"`. Use `status:"ready"`
 when selecting a new clip, and compare `duration_seconds` or `sample_rate_hz`
-on accepted rows. Audible audition is available from the native Assets Inspector.
+on accepted rows. Pass the catalog's `asset_revision` as `expected_asset_revision`
+alongside the scene guards when replacing a file-backed Script's sound cue.
+Audible audition is available from the native Assets Inspector.
 
 ### Game HUD Action Button
 

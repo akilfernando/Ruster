@@ -88,6 +88,26 @@ In release tests, the first results appeared in 13.4 ms p95 on the sample
 project and 43.3 ms p95 with 480 extra scenes. A 5,000-object destination
 validated in 61.6 ms p95, including the native inspection round trip.
 
+**WAV audition** plays a ready v23 WAV once from the Linux Assets Inspector
+and exposes its duration and sample rate in the editor and approved MCP.
+Selection opened no output stream. The 0.370 s, 32 kHz bell completed
+naturally and returned to Preview. Private stereo capture verified Stop,
+selection change, accepted reimport, missing source, project switch,
+close and entering Play. An absent device gave an actionable error.
+Preview and replay opened neither WAV source nor its cache and preserved
+the scene revision and simulation tick. Approved Claude assigned the
+shorter bell by metadata. Shared Undo, save and reopen preserved the
+intended assignment. The relocated Vulkan player played the exact WAV for
+0.37 s and moved the signal. The FFT peaks were within 0.51 Hz of the
+editor preview. The Preview control's focus was checked in Plain Light.
+With a WAV selected in the 5,000-object release scene, idle CPU p95 was
+0.561–0.578 ms before and 0.559–0.568 ms after. During audition of the
+10-second WAV it was 0.632–0.646 ms. Request-to-first-private-PCM p95 was
+60.533 ms cold and 69.418 ms warm for the short clip, and 43.361 ms cold
+and 65.915 ms warm for the 10-second clip. The cold groups had three
+samples each. One device stream was present during audition and zero
+before preview and after Stop.
+
 **Place Selection on Ground** moves a v23 assembly to world Y=0 through
 the Hierarchy context menu, keyboard command palette or guarded MCP. The
 Blender pump and a separate crate moved down 2.523369 units together, with
