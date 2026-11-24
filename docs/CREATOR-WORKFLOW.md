@@ -1128,3 +1128,13 @@ A Linux export with sound uses a kit advertising `one_shot_audio`.
 A saved play check can assert the triggering state or count and runs
 silently. For device playback, run the exported application and use its
 **Control runtime** button to claim keyboard input.
+
+### Tune a project Lua script per object
+
+In the file-backed **Script** Inspector, open **Number Properties** and choose
+**Add Number Property**. Enter a unique name such as `speed` and a finite
+number, then **Apply**. The Script can read it as `properties["speed"]`.
+Attach the same Lua file to another object and set its own value there.
+**Edit Number Property** lets you change the name or value, or **Remove** it.
+The change is one Undo step and the next Play uses the latest values. Add a
+fallback in Lua if you plan to run the script without the property.

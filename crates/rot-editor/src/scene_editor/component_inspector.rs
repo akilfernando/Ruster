@@ -220,6 +220,7 @@ pub(super) struct ComponentEdits {
     pub(super) collider: Option<String>,
     pub(super) box_fit: Option<String>,
     pub(super) spot_aim: Option<String>,
+    pub(super) script_number: Option<super::component_workspace::component_number::Request>,
     pub(super) sound_cue: Option<super::component_workspace::component_sound::Request>,
     pub(super) sensor_binding: Option<super::component_workspace::component_sensor::Request>,
 }
@@ -248,6 +249,7 @@ pub(super) fn components(
     use super::component_workspace::component_material::{Intent, Request};
     use super::component_workspace::component_sound::Request as SoundCueRequest;
     let mut sound_cue = None;
+    let mut script_number = None;
     let mut sensor_binding = None;
     let mut material_request = None;
     let mut collider_request = None;
@@ -587,6 +589,34 @@ pub(super) fn components(
                                     });
                                 }
                             }
+                            use super::component_workspace::component_number::Request as NumberRequest;
+                            ui.strong("Number Properties");
+                            for (name, value) in &binding.properties {
+                                let rot_scene::PropertyValue::Number(value) = value else {
+                                    continue;
+                                };
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.monospace(format!("properties[{name:?}] = {value}"));
+                                    if ui.add_enabled(
+                                        allow_sound_cues,
+                                        egui::Button::new("Edit Number Property"),
+                                    ).clicked() {
+                                        script_number = Some(NumberRequest {
+                                            component: component.id.clone(),
+                                            name: Some(name.clone()),
+                                        });
+                                    }
+                                });
+                            }
+                            if ui.add_enabled(
+                                allow_sound_cues && binding.properties.len() < rot_scene::MAX_PROPERTIES,
+                                egui::Button::new("Add Number Property"),
+                            ).clicked() {
+                                script_number = Some(NumberRequest {
+                                    component: component.id.clone(),
+                                    name: None,
+                                });
+                            }
                             ui.strong("Sound Cues");
                             for (name, property) in &binding.properties {
                                 let rot_scene::PropertyValue::SoundRef(cue) = property else {
@@ -667,6 +697,7 @@ pub(super) fn components(
         collider: collider_request,
         box_fit: fit_request,
         spot_aim,
+        script_number,
         sound_cue,
         sensor_binding,
     }

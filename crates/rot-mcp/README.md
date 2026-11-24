@@ -549,3 +549,13 @@ A v23 Button may bind the primary pointer button with
 Omit `primary_mouse` or use `false` for keyboard-only behavior. Guard the
 edit with the current scene session and revision. The Game view must own
 native input; guarded Steps still use ordinary logical Button frames.
+
+### Number properties on file-backed Object Lua
+
+Call `scene_components_inspect` with exact `object_id` and `component_id` to
+read the Script's typed `binding.properties` and Lua syntax. Use the current
+scene guards with `scene_components_edit`. An example `edits` entry is
+`{"operation":"set_script_number","object_id":"cart","component_id":"cart-script","name":"speed","value":2.5}`.
+Use `value: null` to remove the number. A number-only change requires no asset
+revision pin. The operation retains all other properties, including cues and
+sensor bindings. Property names are unique within a Script component.
