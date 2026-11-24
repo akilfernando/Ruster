@@ -1138,3 +1138,14 @@ Attach the same Lua file to another object and set its own value there.
 **Edit Number Property** lets you change the name or value, or **Remove** it.
 The change is one Undo step and the next Play uses the latest values. Add a
 fallback in Lua if you plan to run the script without the property.
+
+### Copy a local Transform
+
+Select one object and open **Local Transform** in its Inspector. Choose
+**Copy Local Transform**. Select one or more destination objects and choose
+**Paste Position**, **Paste Rotation**, **Paste Scale**, or **Paste All**.
+
+The values are relative to each object's own parent. Two objects with the
+same local values can have different world poses when their parents differ.
+The copied values stay available in the open scene as you change selection
+or edit the source. A paste that changes values is one Undo step.

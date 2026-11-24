@@ -559,3 +559,16 @@ scene guards with `scene_components_edit`. An example `edits` entry is
 Use `value: null` to remove the number. A number-only change requires no asset
 revision pin. The operation retains all other properties, including cues and
 sensor bindings. Property names are unique within a Script component.
+
+### Copy local Transform channels
+
+In v23, inspect the scene for exact IDs and revision, then call
+`rot_tools` with `action: "call"` and `name: "scene_copy_local_transform"`.
+The `arguments` object takes `expected_session_token`, `expected_revision`,
+`source_object_id`, `object_ids` (1–256 unique destinations), and `channels`
+(a nonempty unique subset of `["position","rotation","scale"]`).
+
+The operation copies the currently committed source values. Position maps to
+`transform.translation`. Each pasted value is relative to the destination's
+own parent. One Undo restores all changed objects. Use `changed_count` in
+the receipt to distinguish a paste that already matched.

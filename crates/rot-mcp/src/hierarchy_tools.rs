@@ -4,7 +4,10 @@ use std::collections::HashSet;
 pub fn supported(name: &str) -> bool {
     matches!(
         name,
-        "scene_group_create" | "scene_reparent" | "scene_place_on_ground"
+        "scene_group_create"
+            | "scene_reparent"
+            | "scene_place_on_ground"
+            | "scene_copy_local_transform"
     )
 }
 
@@ -49,6 +52,43 @@ pub fn valid(name: &str, args: &Value) -> bool {
     };
     if name == "scene_reparent" {
         return valid_reparent(map, args);
+    }
+    if name == "scene_copy_local_transform" {
+        let id = |value: &Value| {
+            value
+                .as_str()
+                .is_some_and(|id| rot_scene::validate_id(id).is_ok())
+        };
+        return super::exact_keys(
+            map,
+            &[
+                "expected_session_token",
+                "expected_revision",
+                "source_object_id",
+                "object_ids",
+                "channels",
+            ],
+            &[],
+        ) && super::canonical_u64(&args["expected_revision"])
+            && args["expected_session_token"]
+                .as_str()
+                .is_some_and(|s| !s.is_empty() && s.len() <= 256)
+            && id(&args["source_object_id"])
+            && args["object_ids"].as_array().is_some_and(|ids| {
+                let mut seen = HashSet::new();
+                (1..=256).contains(&ids.len())
+                    && ids
+                        .iter()
+                        .all(|value| id(value) && seen.insert(value.as_str()))
+            })
+            && args["channels"].as_array().is_some_and(|channels| {
+                let mut seen = HashSet::new();
+                (1..=3).contains(&channels.len())
+                    && channels.iter().all(|channel| {
+                        matches!(channel.as_str(), Some("position" | "rotation" | "scale"))
+                            && seen.insert(channel.as_str())
+                    })
+            });
     }
     if name == "scene_place_on_ground" {
         return super::exact_keys(
@@ -172,6 +212,13 @@ pub fn list() -> Vec<Value> {
         "expected_revision":{"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20},
         "object_id":id,
     });
+    let copy = json!({
+        "expected_session_token":group["expected_session_token"],
+        "expected_revision":group["expected_revision"],
+        "source_object_id":id,
+        "object_ids":{"type":"array","items":id,"minItems":1,"maxItems":256,"uniqueItems":true},
+        "channels":{"type":"array","items":{"enum":["position","rotation","scale"]},"minItems":1,"maxItems":3,"uniqueItems":true},
+    });
     let mut reparent = group.clone();
     let mut ground = group.clone();
     ground
@@ -197,6 +244,17 @@ pub fn list() -> Vec<Value> {
         })
     };
     vec![
+        tool(
+            "scene_copy_local_transform",
+            copy,
+            vec![
+                "expected_session_token",
+                "expected_revision",
+                "source_object_id",
+                "object_ids",
+                "channels",
+            ],
+        ),
         tool(
             "scene_place_on_ground",
             ground,

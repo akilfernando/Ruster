@@ -298,6 +298,7 @@ impl ComponentWorkspace {
                 result["selected_object_ids"] = json!(selected_ids);
                 result["assembly_guidance"] = json!("When building repeated structures, use viewport_frame and viewport_screenshot to check one complete assembly from the front, side, and top before making linked copies with scene_prefab.");
                 result["primitive_guidance"] = json!("triangular_prism is 1 unit per axis (local bounds -0.5 to 0.5), with a bounding-box center pivot, +Y up, and its ridge along local Z. cylinder is 2 units tall along +Y with diameter 1 and a centered pivot. With parent_id, the transform is parent-local. For a cylinder on its parent’s local floor, use translation [0,1,0], zero rotation and unit scale. Inspect one exact object with scene_components_inspect; use viewport_frame and viewport_screenshot to check it before duplicating.");
+                result["local_transform_guidance"] = json!("Use rot_tools scene_copy_local_transform with an exact source_object_id, destination object_ids and channels. Values are relative to each object’s own parent.");
                 result["spot_light_guidance"] = json!("Light kind spot uses local -Z, rotated by its owner's authored rotation chain. Range is in world units; inner_degrees and outer_degrees are half-angles, 0 <= inner < outer <= 90. Scene view and static Play/Build share four active Point and Spot slots in scene order. In behavior Play/Build, one Point or Spot can follow a Mesh Renderer leaf with Object Lua API 1/2. Standalone Spot requires static playback.");
                 result["camera_guidance"] = json!("A v23 Transform camera uses its owner's world position and authored rotation; local -Z is forward and +Y is up. Parent scale affects position. Orthographic vertical_size is the full world-space frame height.");
             }
@@ -357,6 +358,7 @@ impl ComponentWorkspace {
                     .count()
             }
             "scene_transform" | "scene_rename" | "scene_reparent" | "scene_primitive" => 4,
+            "scene_copy_local_transform" => 5,
             "scene_transform_many" | "scene_delete" | "scene_delete_many" | "scene_duplicate" => 3,
             "scene_components_edit" | "scene_place_on_ground" => {
                 3 + usize::from(map.contains_key("expected_asset_revision"))
@@ -737,6 +739,29 @@ impl ComponentWorkspace {
                 .create_object(Some(id), name, geometry, parent, transform)
                 .map_err(|error| ("invalid_arguments", error.to_string()))?;
             return Ok(json!({"object_id":id, "changed":true, "dirty":self.session.is_dirty()}));
+        }
+
+        if op == "scene_copy_local_transform" {
+            use super::component_transform_copy::Channels;
+            let source_id = hierarchy_id(&args["source_object_id"]).ok_or_else(invalid)?;
+            let source = self
+                .session
+                .scene()
+                .objects
+                .iter()
+                .find(|object| object.id == source_id)
+                .ok_or_else(object_not_found)?
+                .transform
+                .clone();
+            let ids = batch(&args["object_ids"])
+                .ok_or_else(invalid)?
+                .iter()
+                .map(|id| hierarchy_id(id).ok_or_else(invalid))
+                .collect::<Result<Vec<_>, _>>()?;
+            let channels = Channels::parse(&args["channels"]).ok_or_else(invalid)?;
+            let count = self.paste_local_transform(revision, &source, &ids, channels)?;
+            return Ok(json!({"source_object_id":source_id,"changed_count":count,
+                "changed":count != 0,"dirty":self.session.is_dirty()}));
         }
 
         if op == "scene_place_on_ground" {

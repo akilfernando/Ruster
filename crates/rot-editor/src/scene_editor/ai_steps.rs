@@ -57,6 +57,7 @@ pub(super) fn label(op: &str, args: &Value, scene: &Scene) -> Option<String> {
         "scene_display_set" => "Display Settings",
         "scene_collider_set" => "Edit Collider",
         "scene_group_create" => "Create Group",
+        "scene_copy_local_transform" => "Paste Local Transform",
         "scene_place_on_ground" => "Place Selection on Ground",
         "scene_reparent" => "Reparent",
         "scene_model_place" => "Place Model",

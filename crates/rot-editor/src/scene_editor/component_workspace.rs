@@ -70,6 +70,9 @@ pub(super) mod component_number;
 #[path = "component_sound.rs"]
 pub(super) mod component_sound;
 
+#[path = "component_transform_copy.rs"]
+mod component_transform_copy;
+
 #[path = "component_ground.rs"]
 mod component_ground;
 
@@ -288,6 +291,7 @@ pub(super) struct ComponentWorkspace {
     viewport_aspect: Option<f32>,
     preview: Result<rot_render::component_preview::ComponentPreview, rot_scene::SceneError>,
     preview_world: Vec<DMat4>,
+    local_transform_copy: Option<Transform>,
     animation_preview: Option<component_animation_preview::AnimationPreview>,
     transform_tool: TransformTool,
     collider_tool: component_collider::ColliderTool,
@@ -414,6 +418,7 @@ impl ComponentWorkspace {
         let mut editor = Self {
             preview,
             preview_world,
+            local_transform_copy: None,
             animation_preview: None,
             transform_tool: TransformTool::default(),
             collider_tool: Default::default(),
@@ -1594,6 +1599,7 @@ impl ComponentWorkspace {
             .multi_draft
             .as_mut()
             .is_some_and(|draft| draft.header(ui));
+        self.local_transform_menu(ui);
         self.parent_ui(ui);
         ui.separator();
         if let Some(draft) = &mut self.multi_draft {
@@ -3492,6 +3498,7 @@ impl ComponentWorkspace {
                                 submit |= component_inspector::transform(ui, draft);
                             }
                             if self.selected_index.is_some() {
+                                self.local_transform_menu(ui);
                                 self.parent_ui(ui);
                                 self.prefab_inspector(ui);
                                 ui.separator();

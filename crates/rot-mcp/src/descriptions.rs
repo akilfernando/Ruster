@@ -17,6 +17,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("scene_create", "Create cube, sphere, capsule, triangular prism or cylinder (radius 0.5 and height 2 along +Y). v23 parent_id makes transform parent-local."),
     ("scene_primitive", "Set geometry: sphere, capsule, triangular_prism, cylinder or null (cube). Cylinder has radius 0.5 and height 2 along +Y, with a centered pivot."),
     ("scene_rename", "Rename an object. Its ID stays the same."),
+    ("scene_copy_local_transform", "Copy position, rotation or scale from an exact v23 source to destination object_ids in one Undo. Each value is relative to its own parent."),
     ("scene_place_on_ground", "Move v23 selected subtrees together to world Y=0 using indexed geometry, including disabled renderers. Pass object_ids and pin expected_asset_revision for imported meshes."),
     ("scene_duplicate", "In v23 pass object_ids to duplicate selected subtrees as siblings in one Undo. Returns old-to-new IDs. Legacy uses object_id, new_object_id, and name."),
     ("scene_components_inspect", "List v23 components. Pass component_id for Box collider_world, Spot spot_world or file Lua property guidance."),

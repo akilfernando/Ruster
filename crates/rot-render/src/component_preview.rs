@@ -122,6 +122,18 @@ impl ComponentPreview {
         Ok(())
     }
 
+    /// Check a transformed committed light before editing the authored scene.
+    pub fn validate_light_world(&self, id: &str, world: DMat4) -> Result<(), SceneError> {
+        if let Some(light) = self.scene.lighting.light(id) {
+            // Spot orientation is a finite rigid rotation of authored Euler
+            // values. Its affine position is the only scale-dependent input.
+            let rotation =
+                matches!(light.kind, LightKind::Spot { .. }).then_some(glam::DQuat::IDENTITY);
+            light_transform(world, &light.kind, id, rotation)?;
+        }
+        Ok(())
+    }
+
     /// Apply a prepared animation preview without publishing a partial pose.
     pub fn set_sampled_rows<'a>(
         &mut self,
@@ -237,6 +249,11 @@ impl ComponentPreview {
             surface,
         )
     }
+}
+
+/// Check the same matrix precision required by the editor draw packet.
+pub fn validate_draw_world(world: DMat4, id: &str) -> Result<(), SceneError> {
+    draw_matrix(world, id).map(drop)
 }
 
 fn draw_matrix(world: DMat4, id: &str) -> Result<Mat4, SceneError> {

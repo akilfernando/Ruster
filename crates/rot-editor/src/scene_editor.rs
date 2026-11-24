@@ -167,6 +167,7 @@ pub(crate) const SCENE_CAPABILITIES: &[&str] = &[
     "scene_prefab",
     "scene_group_create",
     "scene_place_on_ground",
+    "scene_copy_local_transform",
     "scene_reparent",
     "scene_create",
     "scene_primitive",

@@ -1572,7 +1572,8 @@ pub(crate) mod tests {
             .copied()
             .chain(["inspect", "edit", "undo", "redo", "replay"])
             .collect();
-        assert_eq!(operations.len(), 98);
+        assert_eq!(operations.len(), 99);
+        assert!(operations.contains(&"scene_copy_local_transform"));
         assert!(operations.contains(&"scene_place_on_ground"));
         for op in operations {
             for bad in ["missing", "wrong", "other_editor"] {
