@@ -1040,7 +1040,6 @@ mod tests {
                 }],
                 ..Default::default()
             }],
-            ..Default::default()
         };
         let session = rot_scene::component_scene::ComponentSession::new(scene).unwrap();
         let ctx = egui::Context::default();
