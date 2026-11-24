@@ -100,7 +100,7 @@ impl ComponentWorkspace {
         let mut minimum = f64::INFINITY;
         // Repeated instances with the same world Y basis share a support value.
         // Translation is applied individually after looking it up.
-        let mut imported_support = HashMap::new();
+        let mut support_cache = HashMap::new();
         for index in affected {
             let node = &objects[index];
             let world = self.preview_world[index];
@@ -109,11 +109,9 @@ impl ComponentWorkspace {
                 let Component::MeshRenderer { geometry, .. } = &component.kind else {
                     continue;
                 };
-                let support = match geometry {
-                    Geometry::Cube => local_support(rot_render::builtin_cube(), basis),
-                    Geometry::Primitive { shape } => {
-                        local_support(rot_render::builtin_mesh(*shape), basis)
-                    }
+                let mesh = match geometry {
+                    Geometry::Cube => rot_render::builtin_cube(),
+                    Geometry::Primitive { shape } => rot_render::builtin_mesh(*shape).as_ref(),
                     Geometry::Imported { asset } => {
                         if asset_revision.is_none() {
                             return Err((
@@ -133,8 +131,7 @@ impl ComponentWorkspace {
                                 "Inspect the project assets again.".into(),
                             ));
                         }
-                        let mesh = self
-                            .assets
+                        self.assets
                             .as_ref()
                             .and_then(|store| store.mesh(asset))
                             .ok_or_else(|| {
@@ -145,21 +142,22 @@ impl ComponentWorkspace {
                                         node.name
                                     ),
                                 )
-                            })?;
-                        *imported_support
-                            .entry((asset.as_str(), basis.to_array().map(f64::to_bits)))
-                            .or_insert_with(|| local_support(mesh, basis))
+                            })?
                     }
-                }
-                .ok_or_else(|| {
-                    (
-                        "mesh_unavailable",
-                        format!(
-                            "Mesh Renderer {} on {} has no usable indexed geometry.",
-                            component.id, node.name
-                        ),
-                    )
-                })?;
+                };
+                let key = (std::ptr::from_ref(mesh), basis.to_array().map(f64::to_bits));
+                let support = support_cache
+                    .entry(key)
+                    .or_insert_with(|| local_support(mesh, basis))
+                    .ok_or_else(|| {
+                        (
+                            "mesh_unavailable",
+                            format!(
+                                "Mesh Renderer {} on {} has no usable indexed geometry.",
+                                component.id, node.name
+                            ),
+                        )
+                    })?;
                 let bottom = support + world.w_axis.y;
                 if !bottom.is_finite() {
                     return Err((
