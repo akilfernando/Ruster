@@ -473,16 +473,17 @@ impl<A: Application> Host<A> {
                         ui, app.content().scene(), selected.as_slice(), &mut self.navigation,
                     )
                 };
-                let ownership = self.runtime.app_mut().viewport_interaction(ui, surface.rect);
+                let game_focus = self.action_surface.filter(|_| self.action_control_owned);
+                let ownership = self.runtime.app_mut().viewport_interaction_with_game_focus(ui, surface.rect, game_focus);
                 let ownership = match ownership {
                     Ok(ownership) => ownership,
                     Err(error) => {
                         self.report(Err(error));
-                        crate::ViewportInputOwnership { pointer: true, keyboard: true }
+                        crate::ViewportInputOwnership { pointer: true, keyboard: true, keep_game_keyboard: false }
                     }
                 };
                 surface.input_owned = ownership.pointer || ownership.keyboard;
-                self.action_content_rect = if native_pointer {
+                self.action_content_rect = if native_pointer && !ownership.pointer {
                     let camera = self.runtime.app().content().transform_camera();
                     match camera.and_then(|camera| camera.aspect_ratio) {
                         Some(aspect) => rot_render::transform_camera_viewport(surface.rect, ctx.pixels_per_point(), aspect)
@@ -494,7 +495,7 @@ impl<A: Application> Host<A> {
                 };
                 if buffered {
                     let frame = ctx.cumulative_frame_nr();
-                    if surface.input_owned {
+                    if surface.input_owned && !ownership.keep_game_keyboard {
                         self.release_action_control(&ctx);
                     } else if self.last_buffered_input_frame != Some(frame) {
                         self.route_keyboard(&ctx);
@@ -529,8 +530,8 @@ impl<A: Application> Host<A> {
                     self.action_surface_rect = Some(viewport.rect);
                     // The activation button is outside the viewport. Request
                     // focus only after its real Response has processed that click.
-                    if self.action_claim_frame == Some(ctx.cumulative_frame_nr())
-                        && self.action_control_owned
+                    if self.action_control_owned && (ownership.keep_game_keyboard
+                        || self.action_claim_frame == Some(ctx.cumulative_frame_nr()))
                     {
                         viewport.response.request_focus();
                     }

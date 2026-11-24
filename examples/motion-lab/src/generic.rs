@@ -707,7 +707,15 @@ impl Application for GenericMotionLab {
         ui: &mut egui::Ui,
         rect: egui::Rect,
     ) -> Result<rot_app::ViewportInputOwnership, String> {
-        Ok(self.interact_hud(ui, rect))
+        Ok(self.interact_hud(ui, rect, None))
+    }
+    fn viewport_interaction_with_game_focus(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        game_focus: Option<egui::Id>,
+    ) -> Result<rot_app::ViewportInputOwnership, String> {
+        Ok(self.interact_hud(ui, rect, game_focus))
     }
     fn cancel_viewport_input(&mut self) {
         self.cancel_hud_input();

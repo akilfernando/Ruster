@@ -163,13 +163,14 @@ impl SceneEditor {
                 ))
             },
         );
-        let (hud_owns, hud_error) = hud_interaction::interact(
+        let (hud_input, hud_error) = hud_interaction::interact(
             ui,
             hud_interaction::HudViewport {
                 rect: hud_rect,
                 frame: shown_frame.as_ref(),
                 authoring,
                 scope,
+                game_focus: None,
             },
             &mut self.hud_cache,
             &mut self.hud_controls,
@@ -179,6 +180,7 @@ impl SceneEditor {
         if let Some(error) = hud_error {
             self.error = error;
         }
+        let hud_owns = hud_input.pointer_owned || hud_input.keyboard_owned;
         surface.input_owned = hud_owns;
         let (meshes, textures) = if self.runtime.visible {
             (&self.preview_assets, &self.preview_textures)

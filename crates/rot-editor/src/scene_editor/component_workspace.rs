@@ -2032,24 +2032,32 @@ impl ComponentWorkspace {
         let rect = surface.rect;
         self.viewport_aspect = rect.is_positive().then(|| rect.width() / rect.height());
         let mut hud_owns = false;
+        let mut keep_game_keyboard = false;
         if let Some(frame) = frame
             .as_ref()
             .filter(|frame| frame.static_preview.is_none())
         {
-            let (owned, error) = hud_interaction::interact(
+            let game_focus = self.runtime.game_keyboard_focus();
+            let (hud_input, error) = hud_interaction::interact(
                 ui,
                 hud_interaction::HudViewport {
                     rect,
                     frame: Some(frame),
                     authoring: &frame.authoring,
-                    scope: egui::Id::unique(("component_game_hud", frame.key.reset_epoch)),
+                    scope: egui::Id::unique((
+                        "component_game_hud",
+                        frame.key.reset_epoch,
+                        &frame.scene.id,
+                    )),
+                    game_focus,
                 },
                 &mut self.hud_cache,
                 &mut self.hud_controls,
                 &mut self.runtime,
                 blocked,
             );
-            hud_owns = owned;
+            hud_owns = hud_input.pointer_owned || hud_input.keyboard_owned;
+            keep_game_keyboard = hud_input.keep_game_keyboard;
             if let Some(error) = error {
                 self.error = Some(error);
             }
@@ -2165,19 +2173,22 @@ impl ComponentWorkspace {
                     .interact_pointer_pos()
                     .is_some_and(|position| rect.contains(position))
             });
+        if keep_game_keyboard {
+            interaction.response.request_focus();
+        }
         self.runtime.input_control_click(
             &ctx,
-            blocked || hud_owns,
+            blocked || hud_owns && !keep_game_keyboard,
             frame
                 .as_ref()
                 .is_some_and(|frame| !frame.authoring.actions.is_empty()),
-            claim_click,
+            claim_click && !hud_owns,
         );
         self.runtime.input_finish(
             &ctx,
             &interaction.response,
-            blocked || hud_owns,
-            primary_content,
+            blocked || hud_owns && !keep_game_keyboard,
+            primary_content.filter(|_| !hud_owns),
         );
         if let Some(frame) = &frame {
             let hud = &frame.authoring.hud;
@@ -2723,6 +2734,20 @@ impl ComponentWorkspace {
             self.collider_tool.cancel();
         }
         let transform_active = self.viewport_edit_active();
+        if blocked
+            || asset_dialog
+            || self.project_settings.is_some()
+            || ctx.input(|input| {
+                !input.focused
+                    || input.key_pressed(egui::Key::Escape)
+                    || input
+                        .events
+                        .iter()
+                        .any(|event| matches!(event, egui::Event::WindowFocused(false)))
+            })
+        {
+            self.runtime.cancel_native_hud_activation();
+        }
         self.runtime.input_begin(
             &ctx,
             blocked || asset_dialog || self.project_settings.is_some(),

@@ -276,6 +276,7 @@ pub struct InputFrame {
 pub struct ViewportInputOwnership {
     pub pointer: bool,
     pub keyboard: bool,
+    pub keep_game_keyboard: bool,
 }
 
 /// Application state and rules remain independent from the host and editor.
@@ -320,6 +321,15 @@ pub trait Application: 'static {
         _rect: egui::Rect,
     ) -> Result<ViewportInputOwnership, String> {
         Ok(ViewportInputOwnership::default())
+    }
+    /// A current Game keyboard lease allows an overlay to own only the pointer.
+    fn viewport_interaction_with_game_focus(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        _game_focus: Option<egui::Id>,
+    ) -> Result<ViewportInputOwnership, String> {
+        self.viewport_interaction(ui, rect)
     }
     /// Discard unexecuted native viewport work on a raw focus-loss boundary.
     fn cancel_viewport_input(&mut self) {}

@@ -1,7 +1,7 @@
 //! Captured button intents and one prepared post-advance presentation.
 use super::*;
 use rot_app::hud::{
-    interact_prepared_hud, paint_prepared_hud, prepare_hud, HudInteractionState, PreparedHud,
+    interact_hud_with_game_focus, paint_prepared_hud, prepare_hud, HudInteractionState, PreparedHud,
 };
 use rot_app::ViewportInputOwnership;
 use rot_behavior::{HudActivation, HudActivationOutcome};
@@ -171,6 +171,7 @@ impl GenericMotionLab {
         &mut self,
         ui: &mut egui::Ui,
         rect: egui::Rect,
+        game_focus: Option<egui::Id>,
     ) -> ViewportInputOwnership {
         if !self.needs_hud_input_phase() {
             self.hud_controls.prepared = None;
@@ -189,22 +190,28 @@ impl GenericMotionLab {
         } else {
             PreparedHud::default()
         };
-        let interaction = interact_prepared_hud(
+        let interaction = interact_hud_with_game_focus(
             ui,
             &mut prepared,
             egui::Id::unique(("creation-hud", self.run_epoch)),
             !self.needs_reset,
             self.hud_controls.pending.is_some(),
             &mut self.hud_controls.interaction,
+            game_focus,
         );
         self.hud_controls.prepared = has_runtime.then_some(prepared);
-        if interaction.pointer_owned || interaction.keyboard_owned {
+        if !interaction.keep_game_keyboard
+            && (interaction.pointer_owned || interaction.keyboard_owned)
+        {
             self.cancel_action_input();
         }
         if interaction.cancelled {
             self.cancel_hud_input();
         } else if let Some(button_id) = interaction.activated {
             match self.new_hud_activation(&button_id) {
+                Ok(activation) if activation.command_schema_hash.is_empty() => {
+                    let _ = self.execute_hud_activation(activation);
+                }
                 Ok(activation) => {
                     self.hud_controls.pending = Some(activation);
                     ui.ctx().request_repaint();
@@ -218,6 +225,7 @@ impl GenericMotionLab {
         ViewportInputOwnership {
             pointer: interaction.pointer_owned,
             keyboard: interaction.keyboard_owned,
+            keep_game_keyboard: interaction.keep_game_keyboard,
         }
     }
 

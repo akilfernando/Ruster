@@ -42,7 +42,10 @@ impl Receipt {
         json!({"operation_id":self.id.to_string(),"run_id":run_id(self.key),"operation":format!("{:?}",self.operation),"state":self.state,
             "command_receipt":self.command.as_ref().map(command_receipt_wire),
             "expected_tick":self.expected_tick.map(|tick|tick.to_string()),
-            "expected_input":self.input.filter(|_|self.expected_tick.is_some()).map(input_receipt_wire),
+            "expected_input":self.input.filter(|_|self.expected_tick.is_some()).map(|mut input| {
+                if let Some(hash) = input.submitted_frame_hash.take() { input.frame_hash = hash; }
+                input_receipt_wire(input)
+            }),
             "committed_input":self.input.filter(|_|self.state=="completed").map(input_receipt_wire)})
     }
 }
@@ -208,9 +211,13 @@ impl RuntimeUi {
                         expected
                     });
                 }
+                let mut admitted = *input;
+                if let Some(hash) = admitted.submitted_frame_hash.take() {
+                    admitted.frame_hash = hash;
+                }
                 if (!transitioned
                     && receipt.expected_tick.and_then(|tick| tick.checked_add(1)) != Some(run.tick))
-                    || expected != Some(*input)
+                    || expected != Some(admitted)
                 {
                     receipt.state = "unverified";
                     return;
@@ -339,6 +346,7 @@ impl RuntimeUi {
             )
             .into(),
             tick: next_tick,
+            submitted_frame_hash: None,
             input_epoch: expected_input_epoch,
             origin: InputOrigin::Programmatic,
         };

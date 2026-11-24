@@ -31,8 +31,15 @@ impl RuntimeUi {
     pub(crate) fn input_owned(&self) -> bool {
         self.input_control.lease.is_some() || self.input_control.intent.is_some()
     }
+    pub(crate) fn game_keyboard_focus(&self) -> Option<egui::Id> {
+        self.input_control
+            .lease
+            .and(self.input_control.surface.map(|(id, _)| id))
+    }
+
     pub(crate) fn input_raw_focus(&mut self, ctx: &egui::Context, raw: &egui::RawInput) {
         if focus_lost(raw.focused, &raw.events) {
+            self.cancel_native_hud_activation();
             self.release_input(ctx);
             self.cancel_control_focus();
         }

@@ -91,6 +91,7 @@ struct PreparedRow {
 #[derive(Clone)]
 struct PreparedButton {
     id: String,
+    action: bool,
     identity: String,
     available: bool,
     unavailable_reason: Option<&'static str>,
@@ -267,6 +268,7 @@ fn prepare_panel(
             let identity = hud_button_identity(hud, definition).ok();
             PreparedButton {
                 id: definition.id.clone(),
+                action: definition.source.action_id().is_some(),
                 available: mode == HudPresentationMode::Committed
                     && resolved.labels[index].available
                     && identity.is_some(),
@@ -503,6 +505,7 @@ pub struct HudInteraction {
     pub activated: Option<String>,
     pub pointer_owned: bool,
     pub keyboard_owned: bool,
+    pub keep_game_keyboard: bool,
     /// Focus/availability loss, Escape or a run boundary invalidated native intent.
     pub cancelled: bool,
 }
@@ -555,6 +558,18 @@ pub fn interact_prepared_hud(
     pending: bool,
     state: &mut HudInteractionState,
 ) -> HudInteraction {
+    interact_hud_with_game_focus(ui, prepared, run_scope, enabled, pending, state, None)
+}
+
+pub fn interact_hud_with_game_focus(
+    ui: &mut egui::Ui,
+    prepared: &mut PreparedHud,
+    run_scope: egui::Id,
+    enabled: bool,
+    pending: bool,
+    state: &mut HudInteractionState,
+    game_focus: Option<egui::Id>,
+) -> HudInteraction {
     let frame = ui.ctx().cumulative_frame_nr();
     let events = ui.input(|input| input.events.clone());
     let previously_owned =
@@ -600,6 +615,7 @@ pub fn interact_prepared_hud(
         ..Default::default()
     };
     let mut responses = Vec::new();
+    let mut has_action = false;
     for (panel_index, panel) in prepared.panels.iter().enumerate() {
         for (row_index, row) in panel.rows.iter().enumerate() {
             let Some(button) = &row.button else {
@@ -611,6 +627,7 @@ pub fn interact_prepared_hud(
             }
             let id = run_scope.with(("hud-button", &panel.report.id, &button.id));
             let available = enabled && button.available;
+            has_action |= available && button.action;
             let builder = egui::UiBuilder::new().id_salt(id).max_rect(rect);
             let mut child = ui.new_child(if available {
                 builder
@@ -781,9 +798,15 @@ pub fn interact_prepared_hud(
                             if response.response.enabled()
                                 && *button == egui::PointerButton::Primary
                             {
-                                response.response.request_focus();
-                                state.focused = Some(response.response.id);
-                                result.keyboard_owned = true;
+                                if let Some(game_focus) = game_focus.filter(|_| definition.action) {
+                                    ui.memory_mut(|memory| memory.request_focus(game_focus));
+                                    state.focused = None;
+                                    result.keyboard_owned = state.activation_keys_blocked;
+                                } else {
+                                    response.response.request_focus();
+                                    state.focused = Some(response.response.id);
+                                    result.keyboard_owned = true;
+                                }
                             }
                             result.pointer_owned = true;
                         } else if prepared.overlap_at(*pos, ui) {
@@ -859,6 +882,11 @@ pub fn interact_prepared_hud(
         result.keyboard_owned |= state.last_keyboard_owned;
         result.cancelled |= state.last_cancelled;
     }
+    result.keep_game_keyboard = game_focus.is_some()
+        && has_action
+        && result.pointer_owned
+        && !result.keyboard_owned
+        && !result.cancelled;
     if result.keyboard_owned {
         ui.input_mut(|input| {
             input.events.retain(|event| {

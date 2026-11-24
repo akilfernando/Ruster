@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 
 struct PendingActivation {
     key: RunKey,
+    run_id: String,
     id: u64,
     button_id: String,
     native: bool,
@@ -14,13 +15,6 @@ pub(super) struct HudActivationControl {
     next_id: u64,
     pending: Option<PendingActivation>,
     latest_terminal: Option<Value>,
-}
-
-fn run_id(key: RunKey) -> String {
-    format!(
-        "{}:{}:{}",
-        key.generation, key.reset_epoch, key.authored_revision
-    )
 }
 
 impl RuntimeUi {
@@ -108,6 +102,8 @@ impl RuntimeUi {
             definition_hash,
             command_schema_hash,
         };
+        let expected_scene_id = frame.scene.id.clone();
+        let observed_run = self.reported_run_id(key, Some(frame));
         let native_epoch = native.then(|| worker.native_hud_epoch()).transpose()?;
         // IDs are allocated once even if the bounded queue rejects admission.
         // There is no hidden retry for button actions.
@@ -115,17 +111,19 @@ impl RuntimeUi {
         if let Err(error) = worker.try_request(VmCommand::ActivateHud {
             key,
             activation,
+            expected_scene_id,
             native_epoch,
         }) {
             let message = error.to_string();
             self.hud_activation.latest_terminal = Some(json!({
-                "run_id":run_id(key), "activation_id":id.to_string(), "button_id":button_id,
+                "run_id":observed_run, "activation_id":id.to_string(), "button_id":button_id,
                 "status":"rejected", "error":message,
             }));
             return Err(message);
         }
         self.hud_activation.pending = Some(PendingActivation {
             key,
+            run_id: observed_run,
             id,
             button_id: button_id.into(),
             native,
@@ -144,7 +142,7 @@ impl RuntimeUi {
         self.cancel_native_hud_activation();
         if let Some(pending) = self.hud_activation.pending.take() {
             self.hud_activation.latest_terminal = Some(json!({
-                "run_id":run_id(pending.key), "activation_id":pending.id.to_string(),
+                "run_id":pending.run_id, "activation_id":pending.id.to_string(),
                 "button_id":pending.button_id, "status":"superseded", "error":reason,
             }));
         }
@@ -162,16 +160,16 @@ impl RuntimeUi {
         }) {
             return;
         }
-        self.hud_activation.pending = None;
+        let observed_run = self.hud_activation.pending.take().unwrap().run_id;
         self.hud_activation.latest_terminal = Some(match result {
             Ok(rot_behavior::HudActivationOutcome::Action(receipt)) => {
                 self.status = "Action Button ready for the next Step.".into();
-                json!({"run_id":run_id(key), "activation_id":activation_id.to_string(),
+                json!({"run_id":observed_run, "activation_id":activation_id.to_string(),
                     "button_id":button_id, "status":"armed", "receipt":receipt})
             }
             Ok(rot_behavior::HudActivationOutcome::Command(receipt)) => {
                 self.status = Text::HudButtonRan.plain().replace("{button}", &button_id);
-                json!({"run_id":run_id(key), "activation_id":activation_id.to_string(),
+                json!({"run_id":observed_run, "activation_id":activation_id.to_string(),
                     "button_id":button_id, "status":"committed", "receipt":receipt})
             }
             Err(error) => {
@@ -179,7 +177,7 @@ impl RuntimeUi {
                     .plain()
                     .replace("{button}", &button_id);
                 self.status = format!("{summary}\n{error}");
-                json!({"run_id":run_id(key), "activation_id":activation_id.to_string(),
+                json!({"run_id":observed_run, "activation_id":activation_id.to_string(),
                     "button_id":button_id, "status":"failed", "error":error})
             }
         });
@@ -188,7 +186,7 @@ impl RuntimeUi {
     pub fn hud_activation_observation(&self) -> Value {
         json!({
             "pending":self.hud_activation.pending.as_ref().map(|pending| json!({
-                "run_id":run_id(pending.key), "activation_id":pending.id.to_string(),
+                "run_id":pending.run_id, "activation_id":pending.id.to_string(),
                 "button_id":pending.button_id, "native":pending.native,
             })),
             "latest_terminal":self.hud_activation.latest_terminal,
@@ -217,6 +215,7 @@ mod tests {
         };
         let pending = || PendingActivation {
             key,
+            run_id: "1:2:3".into(),
             id: 7,
             button_id: "go".into(),
             native: true,

@@ -105,6 +105,10 @@ impl Runtime {
         })
     }
 
+    pub fn has_hud_action(&self) -> bool {
+        self.pending_hud_action.is_some()
+    }
+
     pub fn clear_hud_action(&mut self) {
         self.pending_hud_action = None;
     }

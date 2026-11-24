@@ -81,6 +81,8 @@ pub(super) enum InputOrigin {
 pub(super) struct InputReceipt {
     pub map_identity: InputMapIdentity,
     pub frame_hash: [u8; 32],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub submitted_frame_hash: Option<[u8; 32]>,
     /// The successfully committed tick, not a pending/admitted attempt.
     pub tick: u64,
     pub input_epoch: u64,
@@ -196,6 +198,7 @@ pub(super) enum Command {
     ActivateHud {
         key: RunKey,
         activation: rot_behavior::HudActivation,
+        expected_scene_id: String,
         native_epoch: Option<u64>,
     },
     Dispatch {
@@ -1415,6 +1418,7 @@ fn process(
                         .take()
                         .filter(|(route_key, _)| *route_key == key)
                         .map(|(_, route)| route);
+                    execution.native_hud_action_epoch = None;
                     execution.runtime = Some(runtime);
                     execution.hidden_mesh_renderers = hidden_mesh_renderers;
                     execution.key = Some(key);
@@ -1448,6 +1452,7 @@ fn process(
         }
         Command::ActivateHud {
             activation,
+            expected_scene_id,
             native_epoch,
             ..
         } => {
@@ -1478,6 +1483,18 @@ fn process(
             let Some(runtime) = execution.runtime.as_mut() else {
                 return terminal(Err("Reset before activating a HUD button".into()));
             };
+            if runtime.scene().id != expected_scene_id {
+                return terminal(Err(
+                    "The displayed HUD scene changed. Inspect the current run.".into(),
+                ));
+            }
+            if execution
+                .native_hud_action_epoch
+                .is_some_and(|epoch| shared.hud_epoch.load(Ordering::SeqCst) != epoch)
+            {
+                runtime.clear_hud_action();
+                execution.native_hud_action_epoch = None;
+            }
             #[cfg(test)]
             test_gate(&shared.hud_gate);
             // This is the native cancellation admission boundary. Focus/Escape may
@@ -1823,6 +1840,7 @@ fn transition_on_press(
     shared: &Arc<Shared>,
     repaint: &Option<Repaint>,
     admitted: &AdmittedInput,
+    submitted_frame_hash: Option<[u8; 32]>,
 ) -> Option<Event> {
     let key = execution.key?;
     if !execution.start_transition.as_ref().is_some_and(|route| {
@@ -1935,6 +1953,7 @@ fn transition_on_press(
         )
         .into(),
         tick: 0,
+        submitted_frame_hash,
         input_epoch: admitted.epoch,
         origin: admitted.origin,
     };
@@ -1958,6 +1977,7 @@ fn step_with_admitted(
     if !active(shared, key) {
         return None;
     }
+    let mut submitted_frame_hash = None;
     if let Some(runtime) = execution.runtime.as_mut() {
         if execution
             .native_hud_action_epoch
@@ -1966,9 +1986,19 @@ fn step_with_admitted(
         {
             runtime.clear_hud_action();
         }
+        if runtime.has_hud_action() && admitted.origin == InputOrigin::Programmatic {
+            submitted_frame_hash = Some(
+                Sha256::digest(
+                    serde_json::to_vec(&admitted.frame).expect("validated input frame serializes"),
+                )
+                .into(),
+            );
+        }
         runtime.merge_hud_action(&mut admitted.frame);
     }
-    if let Some(event) = transition_on_press(execution, shared, repaint, &admitted) {
+    if let Some(event) =
+        transition_on_press(execution, shared, repaint, &admitted, submitted_frame_hash)
+    {
         return Some(event);
     }
     if !active(shared, key) {
@@ -1991,6 +2021,7 @@ fn step_with_admitted(
                 )
                 .into(),
                 tick: execution.runtime.as_ref()?.tick(),
+                submitted_frame_hash,
                 input_epoch: admitted.epoch,
                 origin: admitted.origin,
             };
@@ -2310,6 +2341,7 @@ mod tests {
             .try_request(Command::ActivateHud {
                 key,
                 activation: hud_intent(&displayed, 1, "add"),
+                expected_scene_id: displayed.scene.id.clone(),
                 native_epoch: Some(worker.native_hud_epoch().unwrap()),
             })
             .unwrap();
@@ -2329,6 +2361,7 @@ mod tests {
             .try_request(Command::ActivateHud {
                 key,
                 activation: hud_intent(&displayed, 2, "fail"),
+                expected_scene_id: displayed.scene.id.clone(),
                 native_epoch: None,
             })
             .unwrap();
@@ -2345,6 +2378,7 @@ mod tests {
             .try_request(Command::ActivateHud {
                 key,
                 activation: hud_intent(&displayed, 3, "add"),
+                expected_scene_id: displayed.scene.id.clone(),
                 native_epoch: None,
             })
             .unwrap();
@@ -2373,6 +2407,7 @@ mod tests {
             .try_request(Command::ActivateHud {
                 key,
                 activation: hud_intent(&displayed, 3, "add"),
+                expected_scene_id: displayed.scene.id.clone(),
                 native_epoch: None,
             })
             .unwrap();
@@ -2401,6 +2436,7 @@ mod tests {
                 match worker.try_request(Command::ActivateHud {
                     key,
                     activation: hud_intent(&displayed, 0, "add"),
+                    expected_scene_id: displayed.scene.id.clone(),
                     native_epoch: None,
                 }) {
                     Ok(()) => break,
@@ -2420,6 +2456,7 @@ mod tests {
             .try_request(Command::ActivateHud {
                 key,
                 activation: hud_intent(&displayed, 1, "add"),
+                expected_scene_id: displayed.scene.id.clone(),
                 native_epoch: None,
             })
             .unwrap();

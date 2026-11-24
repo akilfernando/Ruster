@@ -3,7 +3,8 @@ use crate::behavior_ui::RuntimeUi;
 use crate::behavior_worker::Frame;
 use eframe::egui;
 use rot_app::hud::{
-    interact_prepared_hud, prepare_hud, HudInteractionState, HudPresentationMode, PreparedHud,
+    interact_hud_with_game_focus, prepare_hud, HudInteraction, HudInteractionState,
+    HudPresentationMode, PreparedHud,
 };
 use rot_scene::hud::HudCache;
 use rot_scene::Authoring;
@@ -19,6 +20,7 @@ pub(super) struct HudViewport<'a> {
     pub frame: Option<&'a Frame>,
     pub authoring: &'a Authoring,
     pub scope: egui::Id,
+    pub game_focus: Option<egui::Id>,
 }
 
 pub(super) fn interact(
@@ -28,14 +30,14 @@ pub(super) fn interact(
     controls: &mut HudControls,
     runtime: &mut RuntimeUi,
     blocked: bool,
-) -> (bool, Option<String>) {
+) -> (HudInteraction, Option<String>) {
     let hud = &view.authoring.hud;
     if (!hud.enabled
         || (hud.panels.len() <= 1 && !hud.elements().any(|row| row.source.is_button())))
         && !controls.interaction.has_input_lease()
     {
         controls.prepared = None;
-        return (false, None);
+        return (HudInteraction::default(), None);
     }
     let current = view
         .frame
@@ -59,20 +61,23 @@ pub(super) fn interact(
         HudPresentationMode::AuthoredPreview
     };
     let mut prepared = prepare_hud(ui.painter(), view.rect, hud, resolved, mode);
-    let input = interact_prepared_hud(
+    let mut input = interact_hud_with_game_focus(
         ui,
         &mut prepared,
         view.scope,
         current && !blocked && runtime.hud_controls_available(),
         runtime.hud_activation_busy(),
         &mut controls.interaction,
+        view.game_focus,
     );
     controls.prepared = Some(prepared);
     let owned = input.pointer_owned || input.keyboard_owned;
-    if owned {
+    if owned && !input.keep_game_keyboard {
         runtime.release_input(ui.ctx());
     }
-    if input.cancelled {
+    if input.cancelled
+        && (!current || blocked || !hud.elements().any(|row| row.source.action_id().is_some()))
+    {
         runtime.cancel_native_hud_activation();
     }
     let error = if input.cancelled {
@@ -80,7 +85,8 @@ pub(super) fn interact(
     } else {
         input
             .activated
+            .take()
             .and_then(|id| runtime.queue_hud_activation(&id, true).err())
     };
-    (owned, error)
+    (input, error)
 }
