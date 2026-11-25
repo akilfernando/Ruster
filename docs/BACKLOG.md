@@ -691,6 +691,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-49 Preview Sound Cue at Draft Gain | Audition a ready WAV inside the v23 Sound Cue editor using its draft gain. | done · 2026-11-25 · Keyboard preview produced quarter amplitude at 0.25 and silence at zero. Escape stopped playback and preserved both cue assignments. Assets stayed full gain, and relocated runtime PCM matched the applied gain. |
 | C-50 Built-in Plane | Create or assign an engine-owned horizontal Plane for floors and blockout. | done · 2026-11-25 · Native Create Child and approved Claude placed explicit Planes under different parents. Undo, Redo, save and reopen kept the same geometry. An asymmetric overhead texture kept its size and orientation in relocated Vulkan. |
 | C-51 F11 Binding Conflict | Explain the Linux player fullscreen shortcut and repair existing F11 Input Actions. | done · 2026-11-25 · Existing Button and Axis bindings remained readable and editable. Native and approved MCP repaired them. Undo, Redo and reopen passed. In a relocated Linux player, F11 toggled fullscreen and the replacement H moved the Lua witness once. |
+| C-52 Select Prefab Root | Reveal the exact owning prefab instance from a linked child in the Inspector. | in progress — Codex Sol, 2026-11-25 |
 
 ### C-04 implementation brief
 
