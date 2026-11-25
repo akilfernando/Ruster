@@ -48,6 +48,9 @@ fn decimal(value: &Value) -> Option<u64> {
 #[derive(Default)]
 pub(super) struct Host {
     pub(super) open: bool,
+    page: Page,
+    latest_run: Option<Result<u64, String>>,
+    edit_message: String,
     next: u64,
     active: Option<Job>,
     receipts: VecDeque<Value>,
@@ -57,6 +60,23 @@ pub(super) struct Host {
     message: String,
     repaint: Option<egui::Context>,
 }
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Page {
+    #[default]
+    Results,
+    Edit,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DialogAction {
+    New,
+    Reopen,
+    Capture,
+    Run,
+    Save,
+    Cancel,
+}
+
 struct Job {
     id: u64,
     kind: &'static str,
@@ -200,6 +220,8 @@ impl Host {
             job.cancel.store(true, Ordering::Release);
         }
         self.open = false;
+        self.latest_run = None;
+        self.edit_message.clear();
         self.repaint = None;
         self.draft = None;
         self.baseline = None;
@@ -250,6 +272,11 @@ impl Host {
             receiver,
         });
         self.message = format!("Play check {kind} in progress…");
+        if kind == "run" {
+            self.latest_run = Some(Ok(id));
+        } else {
+            self.edit_message.clone_from(&self.message);
+        }
         Ok(id)
     }
     pub(super) fn poll(&mut self) {
@@ -298,6 +325,9 @@ impl Host {
                 receipt["state"] = json!("failed");
                 receipt["diagnostic"] = json!(self.message);
             }
+        }
+        if job.kind != "run" {
+            self.edit_message.clone_from(&self.message);
         }
         self.receipts.push_back(receipt);
         while self.receipts.len() > RETAINED {
@@ -760,7 +790,12 @@ impl Host {
         if assets != current_asset_revision {
             return Err(fail("stale_asset_revision", "Inspect asset catalog again"));
         }
-        let snapshot = snapshot().map_err(|error| fail("play_check_unavailable", error))?;
+        let snapshot = snapshot().map_err(|error| {
+            if self.active.is_none() {
+                self.latest_run = Some(Err(error.clone()));
+            }
+            fail("play_check_unavailable", error)
+        })?;
         let id = self
             .start(snapshot, Work::Run, ctx)
             .map_err(|e| fail("play_check_busy", e))?;
@@ -831,9 +866,11 @@ impl ComponentWorkspace {
 impl Host {
     pub(super) fn open(&mut self, path: Option<PathBuf>) {
         self.open = true;
+        self.page = Page::Results;
         if self.draft_path != path {
             self.draft = None;
             self.baseline = None;
+            self.edit_message.clear();
         }
         self.draft_path = path;
     }
@@ -860,7 +897,9 @@ impl Host {
         });
         self.baseline = None;
         self.draft_path = path.map(std::path::Path::to_owned);
+        self.page = Page::Edit;
         self.message = Text::PlayChecksNewCheckAddInput.plain().into();
+        self.edit_message.clear();
     }
     fn show(
         &mut self,
@@ -883,153 +922,225 @@ impl Host {
             return;
         }
         let busy = self.active.is_some();
-        egui::Modal::new(egui::Id::unique("play_checks_dialog")).show(ctx, |ui| {
-            ui.set_width((ctx.content_rect().width() - 48.).clamp(280., 620.));
-            ui.heading(Text::PlayChecks.plain());
-            ui.label(Text::PlayChecksRunsTheCheckIn.plain());
-            ui.horizontal_wrapped(|ui| {
-                if ui
-                    .add_enabled(!busy, egui::Button::new(Text::NewCheck.plain()))
-                    .clicked()
-                {
-                    action = Some("new");
-                }
-                if ui
-                    .add_enabled(!busy, egui::Button::new(Text::ReopenCheck.plain()))
-                    .clicked()
-                {
-                    action = Some("load");
-                }
-                if ui
-                    .add_enabled(!busy, egui::Button::new(Text::RunSavedCheck.plain()))
-                    .clicked()
-                {
-                    action = Some("run");
-                }
-                if ui
-                    .add_enabled(busy, egui::Button::new(Text::CancelOperation.plain()))
-                    .clicked()
-                {
-                    action = Some("cancel");
-                }
-            });
-            // Results keep their own bounded viewport above the potentially long
-            // case form. Scrolling 120 frames cannot hide completion or failure.
-            egui::ScrollArea::vertical()
-                .id_salt("play_check_results")
-                .max_height((ctx.content_rect().height() * 0.24).clamp(60., 180.))
-                .show(ui, |ui| {
-                    ui.add(
-                        egui::Label::new(self.message.chars().take(160).collect::<String>()).wrap(),
-                    )
-                    .on_hover_text(&self.message);
-                    if let Some(receipt) = self
-                        .receipts
-                        .iter()
-                        .rev()
-                        .find(|receipt| receipt.get("report").is_some())
-                    {
-                        let report = &receipt["report"];
-                        let status = status_label(&report["status"]);
-                        if let Some(tick) = report["completed_tick"].as_u64() {
-                            ui.label(format!("Result: {status} · completed tick {tick}"));
-                        } else {
-                            ui.label(format!("Result: {status}"));
-                        }
-                        if let Some(rows) = report["results"].as_array() {
-                            for row in rows
-                                .iter()
-                                .filter(|row| row["passed"] != true)
-                                .chain(rows.iter().filter(|row| row["passed"] == true))
+        egui::Modal::new(egui::Id::unique("play_checks_dialog"))
+            .frame(crate::editor_theme::dialog_frame(ctx))
+            .show(ctx, |ui| {
+                ui.set_width((ctx.content_rect().width() - 72.).clamp(240., 620.));
+                ui.heading(Text::PlayChecks.plain());
+                ui.horizontal(|ui| {
+                    ui.selectable_value(
+                        &mut self.page,
+                        Page::Results,
+                        Text::PlayChecksResults.plain(),
+                    );
+                    ui.selectable_value(&mut self.page, Page::Edit, Text::PlayChecksEdit.plain());
+                });
+                if self.page == Page::Edit {
+                    ui.horizontal_wrapped(|ui| {
+                        for (label, command, available) in [
+                            (Text::NewCheck, DialogAction::New, true),
+                            (Text::ReopenCheck, DialogAction::Reopen, true),
+                            (
+                                Text::CaptureCurrentIdentity,
+                                DialogAction::Capture,
+                                self.draft.is_some(),
+                            ),
+                        ] {
+                            if ui
+                                .add_enabled(!busy && available, egui::Button::new(label.plain()))
+                                .clicked()
                             {
-                                let (summary, values) = assertion_display(row);
-                                if let Some((expected, actual)) = values {
-                                    ui.collapsing(summary, |ui| {
-                                        ui.label(format!("{}: {expected}", Text::Expected.plain()));
-                                        ui.label(format!(
-                                            "{}: {actual}",
-                                            Text::PlayCheckActual.plain()
-                                        ));
-                                    });
-                                } else {
-                                    ui.label(summary);
-                                }
+                                action = Some(command);
                             }
                         }
-                        if let Some(text) = report["diagnostic"].as_str() {
-                            ui.add(egui::Label::new(text).wrap());
-                        }
-                    }
-                });
-            ui.separator();
-            egui::ScrollArea::vertical()
-                .id_salt("play_check_body")
-                .max_height((ctx.content_rect().height() - ui.min_rect().height() - 110.).max(80.))
-                .show(ui, |ui| {
-                    ui.add_enabled_ui(!busy, |ui| {
-                        if let Some(case) = &mut self.draft {
-                            ui.label(Text::CheckName.plain());
-                            ui.add(
-                                egui::TextEdit::singleline(&mut case.name)
-                                    .char_limit(128)
-                                    .id(egui::Id::unique("play_check_name")),
-                            );
-                            edit_frames(ui, &mut case.frames, actions);
-                            edit_expectations(ui, &mut case.expectations);
-                            ui.label(if case.identity.scene_sha256.is_empty() {
-                                Text::PlayCheckNoScene.plain()
-                            } else {
-                                Text::PlayCheckSceneCaptured.plain()
-                            });
-                            ui.horizontal_wrapped(|ui| {
-                                if ui.button(Text::CaptureCurrentIdentity.plain()).clicked() {
-                                    action = Some("capture");
+                    });
+                }
+                ui.separator();
+                let page = self.page;
+                egui::ScrollArea::vertical()
+                    .id_salt(match page {
+                        Page::Results => "play_check_results",
+                        Page::Edit => "play_check_edit",
+                    })
+                    .max_height((ctx.content_rect().height() - 188.).max(90.))
+                    .auto_shrink([false, page == Page::Results])
+                    .show(ui, |ui| match page {
+                        Page::Results => self.show_results(ui),
+                        Page::Edit => {
+                            if !self.edit_message.is_empty() {
+                                ui.label(&self.edit_message);
+                            }
+                            ui.add_enabled_ui(!busy, |ui| {
+                                if let Some(case) = &mut self.draft {
+                                    let label = ui.label(Text::CheckName.plain());
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut case.name).char_limit(128),
+                                    )
+                                    .labelled_by(label.id);
+                                    ui.weak(if case.identity.scene_sha256.is_empty() {
+                                        Text::PlayCheckNoScene.plain()
+                                    } else {
+                                        Text::PlayCheckSceneCaptured.plain()
+                                    });
+                                    egui::CollapsingHeader::new(format!(
+                                        "{} ({})",
+                                        Text::OrderedInputFrames.plain(),
+                                        case.frames.len(),
+                                    ))
+                                    .id_salt("play_check_frames")
+                                    .default_open(case.frames.len() <= 8)
+                                    .show(ui, |ui| edit_frames(ui, &mut case.frames, actions));
+                                    edit_expectations(ui, &mut case.expectations);
+                                } else {
+                                    ui.label(Text::PlayChecksNoDraft.plain());
                                 }
-                                if ui.button(Text::SaveCheck.plain()).clicked() {
-                                    action = Some("save");
-                                }
                             });
-                        } else {
-                            ui.label(Text::PlayChecksCreateACheckOr.plain());
                         }
                     });
-                });
-            if ui.button(Text::ClosePlayChecks.plain()).clicked() {
-                close = true;
-            }
-        });
+                ui.separator();
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), ui.spacing().interact_size.y),
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        let (label, command, enabled) = match page {
+                            Page::Results => (Text::RunSavedCheck, DialogAction::Run, !busy),
+                            Page::Edit => (
+                                Text::SaveCheck,
+                                DialogAction::Save,
+                                !busy && self.draft.is_some(),
+                            ),
+                        };
+                        ui.add_enabled_ui(enabled, |ui| {
+                            if crate::editor_theme::primary_button(ui, label.plain()).clicked() {
+                                action = Some(command);
+                            }
+                        });
+                        if let Some(job) = &self.active {
+                            if ui
+                                .add_enabled(
+                                    !job.cancel.load(Ordering::Acquire),
+                                    egui::Button::new(Text::CancelOperation.plain()),
+                                )
+                                .clicked()
+                            {
+                                action = Some(DialogAction::Cancel);
+                            }
+                        }
+                        close = ui.button(Text::PlayChecksClose.plain()).clicked();
+                    },
+                );
+            });
         if close {
             self.open = false;
         }
         if let Some(action) = action {
-            if action == "new" {
-                self.new_play_check(path);
+            self.dialog_action(ctx, path, action, snapshot);
+        }
+    }
+
+    fn dialog_action(
+        &mut self,
+        ctx: &egui::Context,
+        path: Option<&std::path::Path>,
+        action: DialogAction,
+        snapshot: impl FnOnce(bool) -> Result<Snapshot, String>,
+    ) {
+        if action == DialogAction::New {
+            self.new_play_check(path);
+            return;
+        }
+        if action == DialogAction::Cancel {
+            if let Some(job) = &self.active {
+                job.cancel.store(true, Ordering::Release);
+            }
+            return;
+        }
+        if action == DialogAction::Run {
+            self.page = Page::Results;
+        }
+        let result = (|| {
+            let snapshot = snapshot(action == DialogAction::Save)?;
+            self.draft_path = Some(snapshot.path.clone());
+            let work = match action {
+                DialogAction::Reopen => Work::Load,
+                DialogAction::Capture => Work::Capture,
+                DialogAction::Run => Work::Run,
+                DialogAction::Save => Work::Save(
+                    Box::new(self.draft.clone().ok_or("Create or reopen a check first")?),
+                    self.baseline.clone(),
+                ),
+                DialogAction::New | DialogAction::Cancel => unreachable!(),
+            };
+            self.start(snapshot, work, Some(ctx.clone()))?;
+            Ok::<(), String>(())
+        })();
+        if let Err(error) = result {
+            self.message.clone_from(&error);
+            if action == DialogAction::Run {
+                self.latest_run = Some(Err(error));
+            } else {
+                self.edit_message = error;
+            }
+        }
+    }
+
+    fn show_results(&self, ui: &mut egui::Ui) {
+        let id = match &self.latest_run {
+            None => {
+                ui.label(Text::PlayChecksNoResults.plain());
                 return;
             }
-            if action == "cancel" {
-                if let Some(job) = &self.active {
-                    job.cancel.store(true, Ordering::Release);
+            Some(Err(error)) => {
+                ui.strong(Text::PlayChecksRunFailed.plain());
+                ui.label(error);
+                return;
+            }
+            Some(Ok(id)) => *id,
+        };
+        if let Some(job) = self.active.as_ref().filter(|job| job.id == id) {
+            ui.strong(
+                if job.cancel.load(Ordering::Acquire) {
+                    Text::PlayChecksCancelling
+                } else {
+                    Text::PlayChecksRunning
                 }
-                return;
+                .plain(),
+            );
+            return;
+        }
+        let Some(receipt) = self
+            .receipts
+            .iter()
+            .find(|row| decimal(&row["operation_id"]) == Some(id))
+        else {
+            ui.label(Text::PlayChecksNoResults.plain());
+            return;
+        };
+        let Some(report) = receipt.get("report") else {
+            ui.strong(Text::PlayChecksRunFailed.plain());
+            if let Some(diagnostic) = receipt["diagnostic"].as_str() {
+                ui.label(diagnostic);
             }
-            let result = (|| {
-                let snapshot = snapshot(action == "save")?;
-                self.draft_path = Some(snapshot.path.clone());
-                let work = match action {
-                    "load" => Work::Load,
-                    "capture" => Work::Capture,
-                    "run" => Work::Run,
-                    "save" => Work::Save(
-                        Box::new(self.draft.clone().ok_or("Create or reopen a check first")?),
-                        self.baseline.clone(),
-                    ),
-                    _ => return Err("Unknown play-check action".into()),
-                };
-                self.start(snapshot, work, Some(ctx.clone()))?;
-                Ok::<(), String>(())
-            })();
-            if let Err(error) = result {
-                self.message = error;
+            return;
+        };
+        let name = report["name"]
+            .as_str()
+            .unwrap_or(Text::PlayChecksSavedCheck.plain());
+        let status = status_label(&report["status"]);
+        let summary = if let Some(tick) = report["completed_tick"].as_u64() {
+            format!("{name} · {status} · {} {tick}", Text::CompletedTick.plain())
+        } else {
+            format!("{name} · {status}")
+        };
+        ui.strong(summary);
+        if let Some(text) = report["diagnostic"].as_str() {
+            ui.label(text);
+        }
+        if let Some(rows) = report["results"].as_array() {
+            for passed in [false, true] {
+                for row in rows.iter().filter(|row| (row["passed"] == true) == passed) {
+                    show_assertion(ui, row, passed);
+                }
             }
         }
     }
@@ -1040,8 +1151,6 @@ fn edit_frames(
     frames: &mut Vec<ActionFrame>,
     actions: &rot_scene::input::ActionMap,
 ) {
-    ui.heading(Text::OrderedInputFrames.plain());
-    ui.small(Text::EachRowIsOneTick.plain());
     let mut remove = None;
     for (index, frame) in frames.iter_mut().enumerate() {
         ui.push_id(("check_frame", index), |ui| {
@@ -1362,22 +1471,34 @@ fn state_label(value: &StateValue) -> String {
         StateValue::Text(v) => v.clone(),
     }
 }
-fn assertion_display(row: &Value) -> (String, Option<(String, String)>) {
+fn show_assertion(ui: &mut egui::Ui, row: &Value, passed: bool) {
     let index = row["index"].as_u64().unwrap_or(0) + 1;
-    let state = if row["passed"] == true {
-        "Pass"
+    let state = if passed {
+        Text::PlayChecksPass
     } else {
-        "Fail"
+        Text::PlayChecksFail
     };
     let Ok(expectation) = serde_json::from_value::<Expectation>(row["expectation"].clone()) else {
-        return (format!("Assertion {index}: {state}"), None);
+        ui.label(format!(
+            "{} {index} · {}",
+            Text::PlayChecksAssertion.plain(),
+            state.plain()
+        ));
+        return;
     };
-    let selection = match expectation.select {
-        Selection::Tick => Text::CompletedTick.plain().into(),
-        Selection::Translation { object_id } => {
-            format!("{object_id} · {}", Text::ObjectLocalTranslation.plain())
-        }
-        Selection::State { binding_id, field } => format!("{binding_id}.{field}"),
+    let (selection, ids) = match expectation.select {
+        Selection::Tick => (Text::CompletedTick, Vec::new()),
+        Selection::Translation { object_id } => (
+            Text::ObjectLocalTranslation,
+            vec![(Text::ObjectId, object_id)],
+        ),
+        Selection::State { binding_id, field } => (
+            Text::CreatorState,
+            vec![
+                (Text::ScriptAttachmentId, binding_id),
+                (Text::StateField, field),
+            ],
+        ),
     };
     let expected = match expectation.comparison {
         Comparison::Equals {
@@ -1387,23 +1508,51 @@ fn assertion_display(row: &Value) -> (String, Option<(String, String)>) {
             "{}{}",
             state_label(&expected),
             tolerance
-                .map(|v| format!(" (tolerance {v})"))
+                .map(|v| format!(" ({} {v})", Text::Tolerance.plain()))
                 .unwrap_or_default()
         ),
-        Comparison::Range { min, max } => format!("{min} to {max}"),
+        Comparison::Range { min, max } => format!("{min}–{max}"),
     };
-    let actual = serde_json::from_value::<StateValue>(row["actual"].clone())
+    let mut actual = serde_json::from_value::<StateValue>(row["actual"].clone())
         .map(|v| state_label(&v))
-        .unwrap_or_else(|_| "Missing value".into());
-    let truncated = if row["actual_truncated"] == true {
-        " (truncated)"
-    } else {
-        ""
+        .unwrap_or_else(|_| Text::PlayChecksMissingValue.plain().into());
+    if row["actual_truncated"] == true {
+        actual.push('…');
+    }
+    let summary = format!(
+        "{} {index} · {} · {}",
+        Text::PlayChecksAssertion.plain(),
+        selection.plain(),
+        state.plain()
+    );
+    let values = |ui: &mut egui::Ui| {
+        for (label, value) in [
+            (Text::Expected, &expected),
+            (Text::PlayCheckActual, &actual),
+        ] {
+            ui.label(format!("{}  {value}", label.plain()));
+        }
     };
-    (
-        format!("Assertion {index}: {selection} — {state}"),
-        Some((expected, format!("{actual}{truncated}"))),
-    )
+    ui.push_id(index, |ui| {
+        if passed || !ids.is_empty() {
+            ui.collapsing(summary, |ui| {
+                for (label, id) in ids {
+                    ui.horizontal(|ui| {
+                        ui.label(label.plain());
+                        ui.add(egui::Label::new(id).selectable(true));
+                    });
+                }
+                if passed {
+                    values(ui);
+                }
+            });
+        } else {
+            ui.label(summary);
+        }
+        if !passed {
+            values(ui);
+        }
+    });
 }
 
 #[cfg(test)]
@@ -1437,7 +1586,7 @@ mod tests {
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
-                        egui::vec2(900., 700.),
+                        egui::vec2(960., 600.),
                     )),
                     focused: true,
                     events,
@@ -1520,24 +1669,62 @@ mod tests {
         ));
         let ctx = egui::Context::default();
         let mut editor = SceneEditor::new(Session::new(rot_scene::Scene::demo()).unwrap());
-        editor.play_checks.new_play_check(editor.session.path());
-        editor.play_checks.open = true;
-        editor.play_checks.draft.as_mut().unwrap().frames = vec![ActionFrame::default(); 120];
-        editor.play_checks.message = "Check failed; expected 3, observed 2.".into();
-        editor.play_checks.receipts.push_back(
-            json!({"report":{"status":"assertion_failed","completed_tick":2,"results":[]}}),
-        );
+        let host = &mut editor.play_checks;
+        host.new_play_check(editor.session.path());
+        host.draft.as_mut().unwrap().frames = vec![ActionFrame::default(); 120];
+        host.open(None);
+        host.latest_run = Some(Ok(1));
+        let assertion = Expectation {
+            select: Selection::Translation {
+                object_id: "exact-gate-leaf".into(),
+            },
+            comparison: Comparison::Equals {
+                expected: StateValue::Vec3([3.0, 0.0, 0.0]),
+                tolerance: None,
+            },
+        };
+        host.receipts.push_back(json!({"operation_id":"1","report":{
+            "name":"Gate travel","status":"assertion_failed","completed_tick":2,"results":[
+                {"index":0,"passed":true,"expectation":assertion,"actual":StateValue::Vec3([3.0,0.0,0.0])},
+                {"index":1,"passed":false,"expectation":assertion,"actual":StateValue::Vec3([2.0,0.0,0.0])}
+            ]}}));
+        let paint_host =
+            |editor: &mut SceneEditor, events| frame(&ctx, events, |_| editor.play_checks_ui(&ctx));
         for _ in 0..3 {
-            frame(&ctx, vec![], |_| editor.play_checks_ui(&ctx));
+            paint_host(&mut editor, vec![]);
         }
-        let shapes = frame(&ctx, vec![], |_| editor.play_checks_ui(&ctx));
-        let result = text_rect(&shapes, "Result: Assertion failed");
-        let form = text_rect(&shapes, "Check name");
-        assert!(result.max.y < form.min.y);
+        let shapes = paint_host(&mut editor, vec![]);
+        text_rect(&shapes, "Gate travel · Assertion failed · Completed Tick 2");
+        let failed = text_rect(&shapes, "Assertion 2 · Object Local Translation · Fail");
+        let passed = text_rect(&shapes, "Assertion 1 · Object Local Translation · Pass");
+        assert!(failed.min.y < passed.min.y);
+        text_rect(&shapes, "Expected  (3, 0, 0)");
+        text_rect(&shapes, "Actual  (2, 0, 0)");
         text_rect(&shapes, "Run Saved Check");
-        text_rect(&shapes, "Close Play Checks");
-        frame(
-            &ctx,
+        let has_text = |shapes: &[egui::epaint::ClippedShape], expected: &str| {
+            shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text.contains(expected)))
+        };
+        assert!(!has_text(&shapes, "exact-gate-leaf"));
+        assert!(!has_text(&shapes, "Check Name"));
+        assert!(!has_text(&shapes, "Cancel Operation"));
+
+        let edit = text_rect(&shapes, "Edit Check").center();
+        paint_host(
+            &mut editor,
+            vec![egui::Event::PointerMoved(edit), click(edit, true)],
+        );
+        paint_host(&mut editor, vec![click(edit, false)]);
+        let shapes = paint_host(&mut editor, vec![]);
+        text_rect(&shapes, "Check Name");
+        text_rect(&shapes, "Input Frames (120)");
+        text_rect(&shapes, "Assertions");
+        text_rect(&shapes, "Capture Current Identity");
+        text_rect(&shapes, "Save Check");
+        text_rect(&shapes, "Close");
+        assert!(!has_text(&shapes, "Gate travel · Assertion failed"));
+
+        paint_host(
+            &mut editor,
             vec![egui::Event::Key {
                 key: egui::Key::Escape,
                 physical_key: None,
@@ -1545,10 +1732,46 @@ mod tests {
                 repeat: false,
                 modifiers: egui::Modifiers::NONE,
             }],
-            |_| editor.play_checks_ui(&ctx),
         );
         assert!(!editor.play_checks.open);
         assert_eq!(editor.play_checks.draft.as_ref().unwrap().frames.len(), 120);
+        editor.play_checks.open(None);
+        assert!(editor.play_checks.page == Page::Results);
+        assert_eq!(editor.play_checks.draft.as_ref().unwrap().frames.len(), 120);
+
+        let host = &mut editor.play_checks;
+        let (sender, receiver) = mpsc::sync_channel(1);
+        host.latest_run = Some(Ok(2));
+        host.active = Some(Job {
+            id: 2,
+            kind: "run",
+            path: PathBuf::new(),
+            cancel: Arc::new(AtomicBool::new(false)),
+            receiver,
+        });
+        let pending = paint_host(&mut editor, vec![]);
+        text_rect(&pending, "Running Saved Check");
+        text_rect(&pending, "Cancel Operation");
+        assert!(!has_text(&pending, "Gate travel"));
+        sender
+            .send(Ok(Completion::Refused {
+                status: "stale",
+                diagnostic: "Capture a new identity to run this check.".into(),
+            }))
+            .unwrap();
+        editor.play_checks.poll();
+        let stale = paint_host(&mut editor, vec![]);
+        text_rect(&stale, "Saved Check · Out of date");
+        assert!(!has_text(&stale, "Gate travel"));
+        editor
+            .play_checks
+            .dialog_action(&ctx, None, DialogAction::Run, |_| {
+                Err("Save the scene first.".into())
+            });
+        let failed = paint_host(&mut editor, vec![]);
+        text_rect(&failed, "Couldn’t Run the Saved Check");
+        text_rect(&failed, "Save the scene first.");
+        assert!(!has_text(&failed, "Gate travel"));
     }
 
     #[test]
@@ -1925,6 +2148,7 @@ mod tests {
             panic!("load")
         };
         assert_eq!(loaded.encode().unwrap(), bytes);
+        editor.play_checks = Host::default();
         let token =
             editor.command("test", "scene_inspect", json!({}))["result"]["session_token"].clone();
         let args = json!({"expected_session_token":token,"expected_revision":"0","expected_asset_revision":"0"});
@@ -1951,6 +2175,14 @@ mod tests {
         let receipt = wait(&mut editor, id);
         assert_eq!(receipt["report"]["status"], "passed", "{receipt}");
         assert_eq!(receipt["report"]["completed_tick"], 2);
+        assert!(!editor.play_checks.open);
+        assert!(editor.play_checks.draft_path.is_none());
+        editor.play_checks.open(Some(path.clone()));
+        assert!(editor.play_checks.page == Page::Results);
+        assert_eq!(
+            editor.play_checks.latest_run,
+            Some(Ok(decimal(id).unwrap()))
+        );
         assert_eq!(editor.session.snapshot_bytes().unwrap(), before);
         assert!(editor.draft == draft);
         assert_eq!(editor.preview.tick, 9);
@@ -1968,11 +2200,19 @@ mod tests {
         );
         let sidecar = check::sidecar_path(&path);
         std::fs::write(&sidecar, b"broken case").unwrap();
+        editor.play_checks.page = Page::Edit;
         let started = editor.command("test", "play_check_start", args);
+        assert!(editor.play_checks.page == Page::Edit);
         assert_eq!(
             wait(&mut editor, &started["result"]["operation_id"])["report"]["status"],
             "invalid_case"
         );
+        assert!(editor.play_checks.page == Page::Edit);
+        editor.play_checks.scene_replaced();
+        editor
+            .play_checks
+            .open(Some(root.path().join("another-scene.json")));
+        assert!(editor.play_checks.latest_run.is_none());
         assert!(execute(
             editor.check_snapshot().unwrap(),
             Work::Save(Box::new(case), Some(bytes)),

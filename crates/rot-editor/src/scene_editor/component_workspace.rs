@@ -2743,6 +2743,7 @@ impl ComponentWorkspace {
         self.poll_runtime(&ctx);
         self.validate_animation_preview();
         if self.current_animation_preview().is_some()
+            && !self.play_checks.open
             && !self.hierarchy_search.is_active()
             && !self.authored_edit_pending()
             && !self.ai_transition_pending()
@@ -3627,6 +3628,7 @@ impl ComponentWorkspace {
                 }
                 if !build_open
                     && !asset_dialog
+                    && !self.play_checks.open
                     && !self.close_pending
                     && self.open_path.is_none()
                     && self.scene_picker.is_none()

@@ -113,6 +113,11 @@ rendered capture p50/p95 was 126.8/138.5 ms for one batch edit and
 129.0/144.8 ms and paste 127.4/141.3 ms. Each group had 12 samples.
 The native metric includes MCP and GPU readback.
 
+**Play Checks** opens on Results with one summary and visible failure values.
+Edit Check keeps its draft across tabs and closing. The footer stayed in
+view through frame 120 at 960 × 640. Native keyboard checks and Terra review
+covered the new layout. An MCP run refreshed Results during editing.
+
 **Camera-only GLB rigs** place static perspective and orthographic lenses
 from Blender. The loading dock kept its active camera on placement and
 offered distinct views after activation. Approved MCP and native Undo worked.

@@ -1058,18 +1058,20 @@ Scripted Play supports up to 256 geometry and light targets. Static checks
 support larger scenes and advance one tick per frame. Checks run the fixed
 input frames against the saved scene, including verified Lua files from
 Assets. Your live Play session and scene Undo stay available.
-Create a check, add ordered named-action frames and choose the final tick,
-**Object Local Translation** or typed state values to verify. A translation
-assertion on a modeled child reads its position relative to the parent. **Capture Current Identity**
-pins the current saved scene and its resources. **Save Check** writes the
-sibling `<scene-stem>.play-check.json`. Use **Reopen Check** to continue
-editing the saved case later.
+In **Results**, choose **Run Saved Check** to run isolated playback. Failed
+assertions show their expected and actual values first. Expand an assertion
+to see its details. **Cancel Operation** appears while a check is running.
 
-**Run Saved Check** starts isolated playback and shows expected and actual
-values. **Cancel Operation** stops an active check. When the scene or resources
-change, save the creation, capture its identity again and review the existing
-expectations before saving the check. This keeps failures reproducible while
-you repair the behavior.
+Switch to **Edit Check** and choose **New Check** or **Reopen Check**. Enter
+named actions under **Input Frames**, then add **Assertions** for the final
+tick, **Object Local Translation**, or typed state values. A translation
+assertion on a modeled child reads its position relative to its parent.
+**Capture Current Identity** pins the saved scene and its resources.
+**Save Check** writes the sibling `<scene-stem>.play-check.json`. Switching
+views or closing the dialog keeps the draft.
+
+When the scene or resources change, save the scene and capture its identity
+again. Review the existing assertions before saving the check.
 
 For legacy scenes, export using a matched kit advertising `repeatable_play_checks`. After
 relocation run `application/application --play-check`. The app prints a
