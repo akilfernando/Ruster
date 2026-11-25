@@ -688,6 +688,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-46 Aim Directional Light at Object | Aim a v23 Directional Light along the line from its owner pivot to a selected scene object. | done · 2026-11-25 · Native and approved Claude aimed a sun under a rotated, nonuniform rig. Shadows changed sides. No-op, stale target guard, shared Undo, reopen and relocated Vulkan passed. |
 | C-47 Vector3 Properties for Object Lua | Set three-axis values per v23 file-backed Object Lua binding. | done · 2026-11-25 · Native keyboard and approved Claude configured two carriers on one Lua source. Zero and unset behaved distinctly. Shared Undo, reopen and relocated Vulkan matched the signed three-axis positions. |
 | C-48 Import GLB Triangle Strips and Fans | Import GLB surfaces with strip or fan topology into the existing mesh format. | done · 2026-11-25 · Textured strip and fan renders matched explicit triangles in front and back views. Native and approved Claude placement, last-good refresh, and relocated Vulkan preserved winding and UVs. |
+| C-49 Preview Sound Cue at Draft Gain | Audition a ready WAV inside the v23 Sound Cue editor using its draft gain. | in progress — Codex Sol, 2026-11-25 |
 
 ### C-04 implementation brief
 
