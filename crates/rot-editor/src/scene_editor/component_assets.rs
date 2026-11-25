@@ -51,6 +51,15 @@ enum FileDialog {
 }
 
 const SEARCH: &str = "v23_asset_search";
+const ASSET_TYPES: [Text; 7] = [
+    Text::Mesh,
+    Text::AssetTypeTexture,
+    Text::AssetTypeSound,
+    Text::ComponentScript,
+    Text::Model,
+    Text::Prefab,
+    Text::AssetImportSettings,
+];
 
 #[cfg(target_os = "linux")]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -179,6 +188,7 @@ pub(super) struct Browser {
     size: f32,
     folder: PathBuf,
     query: String,
+    type_filter: Option<Text>,
     catalog: Option<AssetStateIdentity>,
     folders: Vec<PathBuf>,
     #[cfg(target_os = "linux")]
@@ -205,6 +215,7 @@ impl Default for Browser {
             size: 64.0,
             folder: "Assets".into(),
             query: String::new(),
+            type_filter: None,
             catalog: None,
             folders: vec![PathBuf::new(), "Assets".into()],
             #[cfg(target_os = "linux")]
@@ -492,7 +503,9 @@ impl Browser {
             .selected
             .as_ref()
             .and_then(|id| self.by_id.get(id))
-            .map(|&index| self.rows[index].source.clone());
+            .map(|&index| &self.rows[index])
+            .filter(|row| !row.registered)
+            .map(|row| (row.source.clone(), row.kind));
         let project_prefix = format!("{}{}", assets.root().display(), std::path::MAIN_SEPARATOR);
         let diagnostic = |text: &str| -> Arc<str> {
             if text.contains(&project_prefix) {
@@ -729,11 +742,13 @@ impl Browser {
             .as_ref()
             .is_some_and(|id| !self.by_id.contains_key(id))
         {
-            self.selected = selected_source.and_then(|source| {
-                self.rows
+            self.selected = selected_source.and_then(|(source, kind)| {
+                let mut replacements = self
+                    .rows
                     .iter()
-                    .find(|row| row.source == source)
-                    .map(|row| row.id.clone())
+                    .filter(|row| row.source == source && row.kind == kind);
+                let candidate = replacements.next()?;
+                (replacements.next().is_none()).then(|| candidate.id.clone())
             });
         }
         self.filter();
@@ -746,14 +761,22 @@ impl Browser {
             .iter()
             .enumerate()
             .filter(|(_, row)| {
-                if query.is_empty() {
-                    row.folder == self.folder
-                } else {
-                    row.searchable.contains(&query)
-                }
+                self.type_filter.is_none_or(|kind| row.kind == kind.plain())
+                    && if query.is_empty() {
+                        row.folder == self.folder
+                    } else {
+                        row.searchable.contains(&query)
+                    }
             })
             .map(|(index, _)| index)
             .collect();
+        if self.selected.as_ref().is_some_and(|id| {
+            self.by_id
+                .get(id)
+                .is_none_or(|index| self.visible.binary_search(index).is_err())
+        }) {
+            self.selected = None;
+        }
     }
 
     fn show(
@@ -766,7 +789,7 @@ impl Browser {
         can_place: bool,
     ) -> (Option<String>, Option<AssetDrag>) {
         let mut opened_folder = None;
-        let mut query_changed = false;
+        let mut filter_changed = false;
         ui.horizontal_wrapped(|ui| {
             ui.strong(Text::ComponentAssets.plain());
             ui.separator();
@@ -800,7 +823,38 @@ impl Browser {
             if clear {
                 self.query.clear();
             }
-            query_changed = search.changed() || clear;
+            filter_changed = search.changed() || clear;
+            ui.horizontal(|ui| {
+                let label = ui.label(Text::AssetType.plain());
+                let focus =
+                    crate::scene_editor::combo_focus::ComboFocus::capture(ui, "asset_type_filter");
+                let mut selected = false;
+                let prior = self.type_filter;
+                let current = prior.unwrap_or(Text::AssetAllTypes).plain();
+                let combo = egui::ComboBox::from_id_salt("asset_type_filter")
+                    .selected_text(current)
+                    .width(90.0)
+                    .truncate()
+                    .show_ui(ui, |ui| {
+                        for option in std::iter::once(None).chain(ASSET_TYPES.into_iter().map(Some))
+                        {
+                            if ui
+                                .selectable_value(
+                                    &mut self.type_filter,
+                                    option,
+                                    option.unwrap_or(Text::AssetAllTypes).plain(),
+                                )
+                                .clicked()
+                            {
+                                selected = true;
+                                ui.close();
+                            }
+                        }
+                    });
+                focus.restore(ui, &combo.response, selected);
+                combo.response.labelled_by(label.id).on_hover_text(current);
+                filter_changed |= prior != self.type_filter;
+            });
             ui.add(
                 egui::Slider::new(&mut self.size, 40.0..=112.0)
                     .show_value(false)
@@ -873,9 +927,9 @@ impl Browser {
         if let Some(folder) = opened_folder {
             self.folder = folder;
             self.query.clear();
-            query_changed = true;
+            filter_changed = true;
         }
-        if query_changed {
+        if filter_changed {
             self.filter();
         }
         if self.visible.is_empty() {
@@ -883,7 +937,7 @@ impl Browser {
                 Text::ImportingAssets
             } else if failed && self.catalog.is_none() {
                 Text::AssetsUnavailable
-            } else if !self.query.trim().is_empty() {
+            } else if !self.query.trim().is_empty() || self.type_filter.is_some() {
                 Text::NoMatchingAssets
             } else if self.folder == Path::new("Assets") && self.rows.is_empty() {
                 Text::EmptyAssets
@@ -900,7 +954,7 @@ impl Browser {
             .floor()
             .max(1.0) as usize;
         let mut scroll = egui::ScrollArea::vertical().id_salt("v23_asset_tiles");
-        if query_changed {
+        if filter_changed {
             scroll = scroll.vertical_scroll_offset(0.0);
         }
         scroll.show_rows(
@@ -1472,9 +1526,9 @@ impl ComponentWorkspace {
             }
             if let Some(parent) = destination.parent() {
                 self.asset_browser.folder = parent.to_owned();
-                self.asset_browser.filter();
             }
             self.asset_browser.selected = Some(id);
+            self.asset_browser.filter();
         } else {
             self.asset_import_error = Some(
                 if created {
@@ -1596,6 +1650,62 @@ mod tests {
         frame(&mut browser, Vec::new());
         assert!(frame(&mut browser, vec![press(egui::Key::Escape)]).is_none());
         assert!(!browser.file_dialog_open());
+    }
+
+    #[test]
+    fn asset_type_combines_with_folder_search_and_catalog_refresh() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        let nested = root.join("Assets/Depot");
+        fs::create_dir_all(&nested).unwrap();
+        let mesh = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+        let mut store = rot_assets::AssetStore::open(root).unwrap();
+        for (id, source, bytes) in [
+            ("top-mesh", "Assets/Rail.obj", &mesh[..]),
+            ("nested-mesh", "Assets/Depot/Rail.obj", &mesh[..]),
+            ("nested-script", "Assets/Depot/Rail.lua", b"return nil"),
+        ] {
+            fs::write(root.join(source), bytes).unwrap();
+            store.import(id, source).unwrap();
+        }
+
+        let mut browser = Browser::default();
+        let visible = |browser: &Browser| {
+            browser
+                .visible
+                .iter()
+                .map(|&index| browser.rows[index].id.clone())
+                .collect::<Vec<_>>()
+        };
+        browser.refresh(&store, Vec::new(), &[], &[]);
+        assert_eq!(visible(&browser), ["top-mesh"]);
+        browser.selected = Some("top-mesh".into());
+
+        browser.type_filter = Some(Text::ComponentScript);
+        browser.filter();
+        assert!(visible(&browser).is_empty());
+        assert!(browser.selected.is_none());
+        browser.query = "  rAiL  ".into();
+        browser.filter();
+        assert_eq!(visible(&browser), ["nested-script"]);
+        browser.selected = Some("nested-script".into());
+
+        browser.folder = "Assets/Depot".into();
+        browser.query.clear();
+        browser.filter();
+        assert_eq!(visible(&browser), ["nested-script"]);
+        assert_eq!(browser.selected.as_deref(), Some("nested-script"));
+        fs::write(nested.join("Support.lua"), "return nil").unwrap();
+        store.import("support", "Assets/Depot/Support.lua").unwrap();
+        browser.refresh(&store, Vec::new(), &[], &[]);
+        assert_eq!(browser.type_filter, Some(Text::ComponentScript));
+        assert_eq!(visible(&browser), ["nested-script", "support"]);
+        assert_eq!(browser.selected.as_deref(), Some("nested-script"));
+
+        browser.type_filter = None;
+        browser.filter();
+        assert_eq!(visible(&browser).len(), 3);
+        assert_eq!(browser.selected.as_deref(), Some("nested-script"));
     }
 
     #[test]

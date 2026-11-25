@@ -242,6 +242,11 @@ including an orphan import sidecar, leaves the source in place.
 `.rot-trash/` in the project. Restore both to their original location to
 recover the asset and its existing references.
 
+Choose an exact **Type** beside **Search Assets** to filter the browser.
+With an empty search, the filter applies to the current folder. Enter
+a query to search the project within that type. The chosen type stays
+active when you change folders. Choose **All Types** to clear it.
+
 To assign a mesh to an existing object, select the object and choose its file
 in **Mesh Renderer → Geometry**. Click **Apply**, then save the scene.
 

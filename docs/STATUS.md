@@ -113,6 +113,11 @@ rendered capture p50/p95 was 126.8/138.5 ms for one batch edit and
 129.0/144.8 ms and paste 127.4/141.3 ms. Each group had 12 samples.
 The native metric includes MCP and GPU readback.
 
+**Asset Type** filters exact categories alongside folder and text search.
+Sound picked the accepted gate WAV among similarly named OBJ and Lua files.
+Keyboard selection, a new file arriving under the active filter, and
+private WAV audition passed. Terra checked the control at 960 × 640.
+
 **Animator Playback Speed** gives each v23 Animator its own rate. Two lifts
 used the same Blender clip at 0.5× and 2×. Their local X values at tick 16
 were 1.4333 and 2.9333 in Play, saved Play Checks, and a relocated player.
