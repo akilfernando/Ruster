@@ -671,6 +671,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-29 Boolean Properties for Object Lua | Toggle behavior per v23 object using one shared file-backed Lua script. | done · 2026-11-25 · Tab and Space set the Boolean in the Inspector. Approved Claude set an explicit false through MCP. Shared Undo, reopen, and a relocated Vulkan build preserved distinct carrier behavior alongside existing speed and sound properties. |
 | C-30 Frame from Hierarchy | Double-click a v23 Hierarchy object to select and frame its assembly in the Scene view. | done · 2026-11-25 · A folded station arch framed its posts, crossbar and imported lamp with the existing Frame camera. Single click and Ctrl-selection left the camera fixed. Rot and Plain Light confirmed the full assembly and checked that scene bytes and revision stayed the same. |
 | C-31 Legible Scene Overlays | Keep Scene Stats and the projection caption readable over geometry and backgrounds. | done · 2026-11-25 · Opaque themed backgrounds keep Stats, Persp and Ortho readable. Plain Light checks covered dark and bright Scene backgrounds, Stats keyboard activation, projection click targets, and View Presets. |
+| C-32 Find Uses for Lua Sources | Find and reveal Script components that use a registered Lua source in the current v23 scene. | in progress — Codex Sol, 2026-11-25 |
 
 ### C-04 implementation brief
 
