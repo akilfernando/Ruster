@@ -259,6 +259,9 @@ the model ID and current asset revision.
 
 For a static GLB with **KHR_lights_punctual**, point, spot, and directional
 lights become editable v23 Light components on their source nodes.
+Use **Place in Scene** to add a meshless Blender lighting rig to an
+existing set. Select the imported spot and use **Aim at Object…** to
+retarget it.
 They keep their linear colors and follow the imported hierarchy. Rot
 divides point and spot intensity in candela by 100 and directional intensity
 in lux by 1,000, then clamps the relative result to 0–16. Point and spot

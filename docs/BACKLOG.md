@@ -676,7 +676,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-34 Camera-Only GLB Rigs | Import a static camera rig and choose an imported lens to shoot an existing v23 set. | done · 2026-11-25 · Native and approved MCP placed both lenses from a JSON-only Blender rig. Camera activation, Undo and a malformed reimport kept the expected camera. Save, reopen and relocated Vulkan matched the orthographic framing. |
 | C-35 Organize Play Checks | Open on clear results and keep check editing in its own view with stable controls. | done · 2026-11-25 · Results shows one summary and expected/actual values for failures. Edit Check retains drafts and keeps the footer visible at frame 120. Native keyboard checks and Terra review covered the dialog down to 960 × 640. |
 | C-36 Open Build Folder | Open the actual published Linux folder from the editor's build status. | done · 2026-11-25 · Native Tab and Enter sent the exact custom output path to a scoped file-manager opener. Folder, launch-failed and archive flows passed. A relocated build ran headlessly and a redirected path was refused. |
-| C-37 Meshless GLB Lighting Rigs | Place reusable static Blender lights into an existing v23 set. | in progress — Codex Sol, 2026-11-25 |
+| C-37 Meshless GLB Lighting Rigs | Place reusable static Blender lights into an existing v23 set. | done · 2026-11-25 · Native and approved MCP placed a meshless spot-and-fill Blender rig. Native Aim moved the spot to the opposite panel. Undo, malformed refresh, reopen and relocated Vulkan passed. |
 
 ### C-04 implementation brief
 

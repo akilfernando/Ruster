@@ -1905,7 +1905,7 @@ pub(super) fn decode_accepted(
     let (json, bin) = chunks(bytes)?;
     let doc: Document<'_> = serde_json::from_slice(json)
         .map_err(|e| error(format!("unsupported or invalid static GLB document: {e}")))?;
-    let camera_only = doc.meshes.is_empty()
+    let static_rig = doc.meshes.is_empty()
         && doc.buffer_views.is_empty()
         && doc.accessors.is_empty()
         && doc.images.is_empty()
@@ -1920,7 +1920,7 @@ pub(super) fn decode_accepted(
         {
             &bin[..buffer.byte_length]
         }
-        (None, []) if camera_only => &[],
+        (None, []) if static_rig => &[],
         _ => {
             return Err(error(
                 "GLB buffer declarations do not match its embedded BIN data",
@@ -2019,16 +2019,16 @@ pub(super) fn decode_accepted(
         .resources
         .values()
         .any(|resource| matches!(resource.payload, Payload::Mesh(_)));
-    let camera_rig = camera_only
+    let has_rig_content = static_rig
         && decoder
             .model
             .info
             .nodes
             .values()
-            .any(|node| node.camera.is_some());
-    if !has_mesh && !camera_rig {
+            .any(|node| node.camera.is_some() || node.light.is_some());
+    if !has_mesh && !has_rig_content {
         return Err(error(
-            "GLB requires a reachable mesh or a supported camera in a static camera rig",
+            "GLB requires a reachable mesh, supported camera, or supported punctual light",
         ));
     }
     decoder.animations()?;

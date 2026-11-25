@@ -891,6 +891,89 @@ mod tests {
         }
     }
 
+    fn json_only_glb(document: &serde_json::Value) -> Vec<u8> {
+        let mut json = serde_json::to_vec(document).unwrap();
+        json.resize(json.len().next_multiple_of(4), b' ');
+        let mut bytes = Vec::new();
+        bytes.extend(b"glTF");
+        bytes.extend(2_u32.to_le_bytes());
+        bytes.extend(((20 + json.len()) as u32).to_le_bytes());
+        bytes.extend((json.len() as u32).to_le_bytes());
+        bytes.extend(b"JSON");
+        bytes.extend(json);
+        bytes
+    }
+
+    #[test]
+    fn glb_light_rig_has_no_mesh_resources_and_keeps_last_good() {
+        use crate::ModelLight;
+        use serde_json::json;
+
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("lighting.glb");
+        let document = json!({
+            "asset":{"version":"2.0"}, "scene":0, "scenes":[{"nodes":[0]}],
+            "extensionsUsed":["KHR_lights_punctual"],
+            "extensions":{"KHR_lights_punctual":{"lights":[
+                {"type":"point","color":[1,0.5,0.25],"intensity":100,"range":6},
+                {"type":"spot","intensity":200,"range":10,
+                    "spot":{"innerConeAngle":0.1,"outerConeAngle":0.5}},
+                {"type":"directional","intensity":100}
+            ]}},
+            "nodes":[
+                {"name":"Rig","children":[1,2,3],"translation":[4,2,-6]},
+                {"name":"Fill","extensions":{"KHR_lights_punctual":{"light":0}}},
+                {"name":"Key","translation":[1,2,3],"extensions":{"KHR_lights_punctual":{"light":1}}},
+                {"name":"Sun","extensions":{"KHR_lights_punctual":{"light":2}}}
+            ]
+        });
+        fs::write(&path, json_only_glb(&document)).unwrap();
+        let mut store = AssetStore::open(root.path()).unwrap();
+        let accepted = store.import_glb_at(0, "rig", "lighting.glb").unwrap();
+        assert_eq!(accepted.nodes["Rig"].translation, [4.0, 2.0, -6.0]);
+        assert_eq!(accepted.nodes["Rig/Key"].parent.as_deref(), Some("Rig"));
+        assert_eq!(accepted.nodes["Rig/Key"].translation, [1.0, 2.0, 3.0]);
+        assert!(matches!(
+            accepted.nodes["Rig/Fill"].light,
+            Some(ModelLight::Point { range: 6.0, .. })
+        ));
+        assert!(matches!(
+            accepted.nodes["Rig/Key"].light,
+            Some(ModelLight::Spot { range: 10.0, .. })
+        ));
+        assert!(matches!(
+            accepted.nodes["Rig/Sun"].light,
+            Some(ModelLight::Directional { .. })
+        ));
+        assert!(accepted.nodes.values().all(|node| node.camera.is_none()));
+        assert_eq!(accepted.resources().count(), 0);
+        assert!(store.mesh_snapshots().is_empty());
+
+        let mut embedded = document.clone();
+        embedded["buffers"] = json!([{"byteLength":4}]);
+        let bin = [1, 2, 3, 4];
+        fs::write(&path, crate::fixtures::pack_glb(&embedded, &bin)).unwrap();
+        let updated = store.refresh_glb_at(store.revision(), "rig").unwrap();
+        assert_eq!(updated.nodes, accepted.nodes);
+        assert_eq!(updated.resources().count(), 0);
+
+        let mut unreachable = document.clone();
+        unreachable["nodes"][0]["children"] = json!([]);
+        let mut malformed = document;
+        malformed["nodes"][2]["extensions"]["KHR_lights_punctual"]["light"] = json!(99);
+        for invalid in [unreachable, malformed] {
+            fs::write(&path, json_only_glb(&invalid)).unwrap();
+            assert!(store.refresh_glb_at(store.revision(), "rig").is_err());
+            assert_eq!(store.model("rig"), Some(&updated));
+        }
+        embedded["buffers"][0]["byteLength"] = json!(8);
+        fs::write(&path, crate::fixtures::pack_glb(&embedded, &bin)).unwrap();
+        assert!(store.refresh_glb_at(store.revision(), "rig").is_err());
+        let reopened = AssetStore::open(root.path()).unwrap();
+        assert_eq!(reopened.model("rig"), Some(&updated));
+        assert!(reopened.mesh_snapshots().is_empty());
+    }
+
     #[test]
     fn glb_camera_rig_keeps_lenses_without_mesh_resources_after_bad_refresh() {
         use serde_json::{json, Value};
@@ -910,15 +993,7 @@ mod tests {
             ]
         });
         let write = |document: &Value| {
-            let mut json = serde_json::to_vec(document).unwrap();
-            json.resize(json.len().next_multiple_of(4), b' ');
-            let mut bytes = Vec::new();
-            bytes.extend(b"glTF");
-            bytes.extend(2_u32.to_le_bytes());
-            bytes.extend(((20 + json.len()) as u32).to_le_bytes());
-            bytes.extend((json.len() as u32).to_le_bytes());
-            bytes.extend(b"JSON");
-            bytes.extend(json);
+            let bytes = json_only_glb(document);
             fs::write(&path, &bytes).unwrap();
             bytes
         };

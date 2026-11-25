@@ -113,6 +113,11 @@ rendered capture p50/p95 was 126.8/138.5 ms for one batch edit and
 129.0/144.8 ms and paste 127.4/141.3 ms. Each group had 12 samples.
 The native metric includes MCP and GPU readback.
 
+**Meshless GLB lighting rigs** place static lights onto an existing set.
+The Blender spot and fill imported through native and approved MCP.
+Aim at Object moved the warm pool to the right panel in Play, reopen and
+relocated Vulkan. Invalid refresh kept the accepted rig.
+
 **Open Build Folder** reveals the published Linux folder from build status
 or the launch-failure dialog. Accompanying native keyboard checks captured
 the exact destination in a scoped opener, including nested paths with
