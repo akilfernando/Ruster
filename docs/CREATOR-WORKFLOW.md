@@ -807,7 +807,14 @@ edit its name, enabled state, or Transform in Inspector, then choose
 **Apply**. Use **Add Component** to attach a **Mesh Renderer** or
 **Collider**. Expand its section to edit properties or toggle the component.
 Right-click the section header to remove it. Use **Object** or
-**Hierarchy → Create** to add an empty object, cube, sphere, capsule, cylinder, or triangular prism.
+**Hierarchy → Create** to add an empty object, cube, sphere, capsule,
+cylinder, triangular prism, or plane.
+
+**Plane** is a 10 × 10 surface centered on the local XZ plane. Its front
+faces up. Assign a material and use local Scale to size it for a floor or
+courtyard. **Mesh Renderer → Geometry** can also assign Plane to an existing
+object. Creating a Plane adds a Mesh Renderer. Add a Collider separately
+when the floor needs to block movement.
 Drag an object onto another row to parent it, or onto **Scene Root** to
 unparent it. You can also change **Parent** in Inspector. Both preserve the
 object’s world transform. Drag to the top or bottom edge of a row to place

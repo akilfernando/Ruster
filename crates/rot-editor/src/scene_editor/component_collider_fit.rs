@@ -487,6 +487,15 @@ mod tests {
     };
 
     #[test]
+    fn box_fit_to_builtin_plane_uses_existing_minimum_thickness() {
+        let mesh = rot_render::builtin_mesh(rot_scene::Primitive::Plane);
+        let (center, half_extents, minimum_axes) = indexed_bounds(mesh).unwrap();
+        assert_eq!(center, [0.; 3]);
+        assert_eq!(half_extents, [5., 0.001, 5.]);
+        assert_eq!(minimum_axes, ["y"]);
+    }
+
+    #[test]
     fn bounds_use_only_indices_and_refuse_invalid_geometry() {
         let mut mesh = Mesh {
             vertices: [

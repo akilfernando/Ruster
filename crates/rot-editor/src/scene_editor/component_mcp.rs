@@ -297,7 +297,7 @@ impl ComponentWorkspace {
                 result["selected_count"] = json!(self.selection.len());
                 result["selected_object_ids"] = json!(selected_ids);
                 result["assembly_guidance"] = json!("When building repeated structures, use viewport_frame and viewport_screenshot to check one complete assembly from the front, side, and top before making linked copies with scene_prefab.");
-                result["primitive_guidance"] = json!("triangular_prism is 1 unit per axis (local bounds -0.5 to 0.5), with a bounding-box center pivot, +Y up, and its ridge along local Z. cylinder is 2 units tall along +Y with diameter 1 and a centered pivot. With parent_id, the transform is parent-local. For a cylinder on its parent’s local floor, use translation [0,1,0], zero rotation and unit scale. Inspect one exact object with scene_components_inspect; use viewport_frame and viewport_screenshot to check it before duplicating.");
+                result["primitive_guidance"] = json!("triangular_prism is 1 unit per axis (local bounds -0.5 to 0.5), with a bounding-box center pivot, +Y up, and its ridge along local Z. cylinder is 2 units tall along +Y with diameter 1 and a centered pivot. plane is 10×10 in local XZ at y=0, with a centered pivot and a +Y front face. With parent_id, the transform is parent-local. For a cylinder on its parent’s local floor, use translation [0,1,0], zero rotation and unit scale. Inspect one exact object with scene_components_inspect; use viewport_frame and viewport_screenshot to check it before duplicating.");
                 result["local_transform_guidance"] = json!("Use rot_tools scene_copy_local_transform with an exact source_object_id, destination object_ids and channels. Values are relative to each object’s own parent.");
                 result["spot_light_guidance"] = json!("Light kind spot uses local -Z, rotated by its owner's authored rotation chain. Range is in world units; inner_degrees and outer_degrees are half-angles, 0 <= inner < outer <= 90. Scene view and static Play/Build share four active Point and Spot slots in scene order. In behavior Play/Build, one Point or Spot can follow a Mesh Renderer leaf with Object Lua API 1/2. Standalone Spot requires static playback.");
                 result["camera_guidance"] = json!("A v23 Transform camera uses its owner's world position and authored rotation; local -Z is forward and +Y is up. Parent scale affects position. Orthographic vertical_size is the full world-space frame height.");
@@ -2651,6 +2651,76 @@ mod tests {
                 .parent,
             None
         );
+    }
+
+    #[test]
+    fn builtin_plane_uses_guarded_geometry_and_existing_scene_format() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        let scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("floor")).unwrap()).unwrap();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let mut args = json!({
+            "expected_session_token":"session","expected_revision":"0",
+            "object_id":"floor","name":"Floor","primitive":"plane",
+        });
+        let created = editor.ai_command("session", "scene_create", &args);
+        assert_eq!(created["result"]["revision"], "1", "{created}");
+        let [component] = editor.session.scene().objects[0].components.as_slice() else {
+            panic!("a Plane has exactly one Mesh Renderer");
+        };
+        assert!(matches!(
+            component.kind,
+            Component::MeshRenderer {
+                geometry: Geometry::Primitive {
+                    shape: Primitive::Plane
+                },
+                ..
+            }
+        ));
+        let component_id = component.id.clone();
+        let check_projection = |editor: &ComponentWorkspace| {
+            let draw = &editor.preview.as_ref().unwrap().scene().objects[0];
+            assert_eq!(draw.primitive, Some(Primitive::Plane));
+            assert!(draw.mesh.is_none());
+            assert!(draw.collider.is_none());
+        };
+        check_projection(&editor);
+
+        args.as_object_mut().unwrap().remove("name");
+        args["primitive"] = Value::Null;
+        let stale = editor.ai_command("session", "scene_primitive", &args);
+        assert_eq!(stale["error"]["code"], "stale_revision");
+        args["expected_revision"] = json!("1");
+        let cube = editor.ai_command("session", "scene_primitive", &args);
+        assert_eq!(cube["result"]["component_id"], component_id, "{cube}");
+        assert!(editor.preview.as_ref().unwrap().scene().objects[0]
+            .primitive
+            .is_none());
+        args["expected_revision"] = json!("2");
+        args["primitive"] = json!("plane");
+        let plane = editor.ai_command("session", "scene_primitive", &args);
+        assert_eq!(plane["result"]["component_id"], component_id, "{plane}");
+        check_projection(&editor);
+        editor.command(Action::Undo);
+        assert!(editor.preview.as_ref().unwrap().scene().objects[0]
+            .primitive
+            .is_none());
+        editor.command(Action::Redo);
+        check_projection(&editor);
+        assert!(editor.save());
+        let bytes = std::fs::read(&path).unwrap();
+        let saved: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(saved["format_version"], 23);
+        assert_eq!(
+            saved["scene"]["objects"][0]["components"][0]["geometry"],
+            json!({"type":"primitive","shape":"plane"})
+        );
+        let reopened =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        check_projection(&reopened);
     }
 
     #[test]

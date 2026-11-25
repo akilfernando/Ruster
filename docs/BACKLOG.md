@@ -689,7 +689,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-47 Vector3 Properties for Object Lua | Set three-axis values per v23 file-backed Object Lua binding. | done · 2026-11-25 · Native keyboard and approved Claude configured two carriers on one Lua source. Zero and unset behaved distinctly. Shared Undo, reopen and relocated Vulkan matched the signed three-axis positions. |
 | C-48 Import GLB Triangle Strips and Fans | Import GLB surfaces with strip or fan topology into the existing mesh format. | done · 2026-11-25 · Textured strip and fan renders matched explicit triangles in front and back views. Native and approved Claude placement, last-good refresh, and relocated Vulkan preserved winding and UVs. |
 | C-49 Preview Sound Cue at Draft Gain | Audition a ready WAV inside the v23 Sound Cue editor using its draft gain. | done · 2026-11-25 · Keyboard preview produced quarter amplitude at 0.25 and silence at zero. Escape stopped playback and preserved both cue assignments. Assets stayed full gain, and relocated runtime PCM matched the applied gain. |
-| C-50 Built-in Plane | Create or assign an engine-owned horizontal Plane for floors and blockout. | in progress — Codex Sol, 2026-11-25 |
+| C-50 Built-in Plane | Create or assign an engine-owned horizontal Plane for floors and blockout. | done · 2026-11-25 · Native Create Child and approved Claude placed explicit Planes under different parents. Undo, Redo, save and reopen kept the same geometry. An asymmetric overhead texture kept its size and orientation in relocated Vulkan. |
 
 ### C-04 implementation brief
 

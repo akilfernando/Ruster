@@ -365,6 +365,12 @@ long clip and kept both assignments. Assets preview stayed at full gain,
 and ordinary playback in a relocated build matched the applied quarter
 gain. Approved Claude inspected both saved assignments.
 
+**Built-in Plane** adds a 10 × 10 horizontal surface for floors and
+blockout. The editor and approved Claude placed planes under different
+parents. A textured courtyard floor kept its dimensions and orientation
+through shared history, reopen, and a relocated Vulkan build. The build
+included the compass texture and used the built-in geometry directly.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added

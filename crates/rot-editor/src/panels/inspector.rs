@@ -340,6 +340,7 @@ impl SceneEditor {
                         rot_scene::Primitive::Sphere => Text::PrimitiveSphere.plain(),
                         rot_scene::Primitive::Capsule => Text::PrimitiveCapsule.plain(),
                         rot_scene::Primitive::Cylinder => Text::LabelCreateCylinder.plain(),
+                        rot_scene::Primitive::Plane => Text::LabelCreatePlane.plain(),
                         rot_scene::Primitive::TriangularPrism => {
                             Text::LabelCreateTriangularPrism.plain()
                         }

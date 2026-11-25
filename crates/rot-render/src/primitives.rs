@@ -23,9 +23,11 @@ const CAPSULE_HALF_CYLINDER: f32 = 0.5;
 pub fn builtin_mesh(primitive: Primitive) -> &'static Arc<Mesh> {
     static SPHERE: OnceLock<Arc<Mesh>> = OnceLock::new();
     static CAPSULE: OnceLock<Arc<Mesh>> = OnceLock::new();
+    static PLANE: OnceLock<Arc<Mesh>> = OnceLock::new();
     static CYLINDER: OnceLock<Arc<Mesh>> = OnceLock::new();
     static TRIANGULAR_PRISM: OnceLock<Arc<Mesh>> = OnceLock::new();
     match primitive {
+        Primitive::Plane => PLANE.get_or_init(|| Arc::new(plane())),
         Primitive::Cylinder => CYLINDER.get_or_init(|| Arc::new(cylinder())),
         Primitive::Sphere => SPHERE.get_or_init(|| Arc::new(sphere())),
         Primitive::Capsule => CAPSULE.get_or_init(|| Arc::new(capsule())),
@@ -65,6 +67,21 @@ pub(crate) fn cube() -> Mesh {
         vertices,
         indices,
         texcoords: Some(texcoords),
+    }
+}
+
+fn plane() -> Mesh {
+    // Same corner order and UVs as the Cube's top face.
+    Mesh {
+        vertices: [[-5., 0., 5.], [5., 0., 5.], [5., 0., -5.], [-5., 0., -5.]]
+            .into_iter()
+            .map(|position| Vertex {
+                position,
+                normal: [0., 1., 0.],
+            })
+            .collect(),
+        indices: vec![0, 1, 2, 0, 2, 3],
+        texcoords: Some(vec![[0., 0.], [1., 0.], [1., 1.], [0., 1.]]),
     }
 }
 

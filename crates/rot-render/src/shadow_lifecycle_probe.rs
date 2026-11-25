@@ -45,6 +45,7 @@ impl Probe {
                 sphere: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Sphere)),
                 capsule: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Capsule)),
                 cylinder: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Cylinder)),
+                plane: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Plane)),
                 triangular_prism: GpuMesh::new(
                     device,
                     None,

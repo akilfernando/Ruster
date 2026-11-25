@@ -2848,6 +2848,7 @@ impl Resources {
             cube: GpuMesh::new(device, None, builtin_cube()),
             sphere: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Sphere)),
             capsule: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Capsule)),
+            plane: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Plane)),
             cylinder: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Cylinder)),
             triangular_prism: GpuMesh::new(
                 device,
@@ -3290,6 +3291,7 @@ struct BuiltinMeshes {
     capsule: GpuMesh,
     triangular_prism: GpuMesh,
     cylinder: GpuMesh,
+    plane: GpuMesh,
 }
 impl BuiltinMeshes {
     fn get(&self, primitive: Option<rot_scene::Primitive>) -> &GpuMesh {
@@ -3299,6 +3301,7 @@ impl BuiltinMeshes {
             Some(rot_scene::Primitive::Capsule) => &self.capsule,
             Some(rot_scene::Primitive::TriangularPrism) => &self.triangular_prism,
             Some(rot_scene::Primitive::Cylinder) => &self.cylinder,
+            Some(rot_scene::Primitive::Plane) => &self.plane,
         }
     }
     // An asset key that is not resident falls back to the cube, never to a
@@ -3319,6 +3322,7 @@ impl BuiltinMeshes {
             + self.capsule.bytes
             + self.triangular_prism.bytes
             + self.cylinder.bytes
+            + self.plane.bytes
     }
 }
 
@@ -5079,8 +5083,63 @@ mod tests {
     }
 
     #[test]
+    fn builtin_plane_has_cube_top_uvs_and_picks_only_from_above() {
+        use rot_scene::Primitive;
+
+        let mesh = builtin_mesh(Primitive::Plane);
+        assert!(Arc::ptr_eq(mesh, builtin_mesh(Primitive::Plane)));
+        assert_eq!(mesh.vertices.len(), 4);
+        assert_eq!(mesh.indices, [0, 1, 2, 0, 2, 3]);
+        let cube = builtin_cube();
+        assert_eq!(
+            mesh.texcoords.as_ref().unwrap(),
+            &cube.texcoords.as_ref().unwrap()[8..12]
+        );
+        for (vertex, top) in mesh.vertices.iter().zip(&cube.vertices[8..12]) {
+            let [x, _, z] = top.position;
+            assert_eq!(vertex.position, [x * 10., 0., z * 10.]);
+            assert_eq!(vertex.normal, [0., 1., 0.]);
+        }
+        for &[a, b, c] in mesh.indices.as_chunks::<3>().0 {
+            let position = |index| Vec3::from(mesh.vertices[index as usize].position);
+            assert!(
+                (position(b) - position(a))
+                    .cross(position(c) - position(a))
+                    .y
+                    > 0.
+            );
+        }
+
+        let mut scene = Scene::empty("plane");
+        scene
+            .objects
+            .push(Object::procedural("floor", None, Some(Primitive::Plane)));
+        let meshes = BTreeMap::new();
+        let fit = Camera::fit(&scene, &meshes, 1.0).unwrap();
+        assert_eq!(fit.target, Vec3::ZERO);
+        assert!((fit.distance - Vec3::new(10., 0., 10.).length() * 1.5).abs() < 1e-5);
+        let projection = Mat4::orthographic_rh(-6., 6., -6., 6., 0.1, 12.);
+        for side in [-1., 1.] {
+            let vp = projection * Mat4::look_at_rh(Vec3::Y * 6. * side, Vec3::ZERO, Vec3::NEG_Z);
+            for (point, inside) in [
+                (Vec3::new(4.9, 0., -4.8), true),
+                (Vec3::new(5.1, 0., 2.), false),
+            ] {
+                let ndc = vp.project_point3(point);
+                assert_eq!(
+                    pick(&scene, &meshes, vp, ndc.x, ndc.y).as_deref(),
+                    (inside && side > 0.).then_some("floor")
+                );
+            }
+        }
+    }
+
+    #[test]
     fn imported_triangle_controls_pick_and_exact_fit_bounds() {
-        for shape in rot_scene::Primitive::ALL {
+        for shape in rot_scene::Primitive::ALL
+            .into_iter()
+            .filter(|shape| *shape != rot_scene::Primitive::Plane)
+        {
             let mut builtins = Scene::empty("builtin");
             builtins
                 .objects

@@ -153,6 +153,7 @@ impl SceneEditor {
                                 Action::CreateCapsule,
                                 Action::CreateTriangularPrism,
                                 Action::CreateCylinder,
+                                Action::CreatePlane,
                                 Action::CreateDirectionalLight,
                                 Action::CreateLight,
                             ] {
