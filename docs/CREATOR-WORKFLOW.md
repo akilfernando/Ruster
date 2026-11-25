@@ -271,6 +271,9 @@ GLBs with both transform clips and lights carry a static playback warning.
 
 A placed GLB in a v23 scene adds a **Transform Perspective** or
 **Transform Orthographic** Camera to each source node with a supported lens.
+A static camera-only GLB can be imported and placed directly, including a
+Blender export with cameras enabled. Placement keeps the rig hierarchy and
+leaves the current Game Camera active until you choose an imported lens.
 Shared lenses become independently editable Camera components. The
 orthographic lens keeps its full vertical frame size, fixed aspect and
 clip planes. Choose **Make Active** on a Camera to use it in Game view.

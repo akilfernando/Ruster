@@ -892,6 +892,112 @@ mod tests {
     }
 
     #[test]
+    fn glb_camera_rig_keeps_lenses_without_mesh_resources_after_bad_refresh() {
+        use serde_json::{json, Value};
+
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("rig.glb");
+        let document = json!({
+            "asset":{"version":"2.0"}, "scene":0, "scenes":[{"nodes":[0]}],
+            "nodes":[
+                {"name":"Rig","children":[1,2],"translation":[4,2,-6]},
+                {"name":"Perspective","camera":0},
+                {"name":"Orthographic","camera":1,"translation":[1,2,3]}
+            ],
+            "cameras":[
+                {"type":"perspective","perspective":{"yfov":f64::from(45).to_radians(),"znear":0.25}},
+                {"type":"orthographic","orthographic":{"xmag":6,"ymag":4,"znear":0.1,"zfar":40}}
+            ]
+        });
+        let write = |document: &Value| {
+            let mut json = serde_json::to_vec(document).unwrap();
+            json.resize(json.len().next_multiple_of(4), b' ');
+            let mut bytes = Vec::new();
+            bytes.extend(b"glTF");
+            bytes.extend(2_u32.to_le_bytes());
+            bytes.extend(((20 + json.len()) as u32).to_le_bytes());
+            bytes.extend((json.len() as u32).to_le_bytes());
+            bytes.extend(b"JSON");
+            bytes.extend(json);
+            fs::write(&path, &bytes).unwrap();
+            bytes
+        };
+        let valid = write(&document);
+        let mut store = AssetStore::open(root.path()).unwrap();
+        let accepted = store.import_glb_at(0, "rig", "rig.glb").unwrap();
+        assert_eq!(accepted.nodes["Rig"].translation, [4.0, 2.0, -6.0]);
+        let perspective = &accepted.nodes["Rig/Perspective"];
+        assert_eq!(perspective.parent.as_deref(), Some("Rig"));
+        assert_eq!(
+            perspective.camera,
+            Some(crate::ModelCamera::Perspective(
+                crate::ModelPerspectiveCamera {
+                    vertical_fov_degrees: 45.0,
+                    aspect_ratio: None,
+                    near: 0.25,
+                    far: None,
+                }
+            ))
+        );
+        let orthographic = &accepted.nodes["Rig/Orthographic"];
+        assert_eq!(orthographic.translation, [1.0, 2.0, 3.0]);
+        assert_eq!(
+            orthographic.camera,
+            Some(crate::ModelCamera::Orthographic(
+                crate::ModelOrthographicCamera {
+                    vertical_size: 8.0,
+                    aspect_ratio: 1.5,
+                    near: 0.1,
+                    far: 40.0,
+                }
+            ))
+        );
+        assert_eq!(accepted.resources().count(), 0);
+        assert!(store.mesh_snapshots().is_empty());
+
+        for (field, value) in [
+            ("buffers", json!([{"byteLength":4}])),
+            (
+                "accessors",
+                json!([{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"}]),
+            ),
+            ("scenes", json!([{"nodes":[]}])),
+            ("cameras", json!([])),
+        ] {
+            let mut invalid = document.clone();
+            invalid[field] = value;
+            write(&invalid);
+            assert!(
+                store.refresh_glb_at(store.revision(), "rig").is_err(),
+                "{field}"
+            );
+            assert_eq!(store.model("rig"), Some(&accepted));
+        }
+        let mut wrong_length = valid;
+        wrong_length.pop();
+        fs::write(&path, wrong_length).unwrap();
+        assert!(store.refresh_glb_at(store.revision(), "rig").is_err());
+        assert_eq!(store.model("rig"), Some(&accepted));
+
+        let reopened = AssetStore::open(root.path()).unwrap();
+        assert_eq!(reopened.model("rig"), Some(&accepted));
+        assert!(reopened.mesh_snapshots().is_empty());
+
+        let mut embedded = document;
+        embedded["buffers"] = json!([{"byteLength":4}]);
+        let bin = [1, 2, 3, 4];
+        fs::write(&path, crate::fixtures::pack_glb(&embedded, &bin)).unwrap();
+        let updated = store.refresh_glb_at(store.revision(), "rig").unwrap();
+        assert_eq!(updated.nodes, accepted.nodes);
+        assert_eq!(updated.resources().count(), 0);
+
+        embedded["bufferViews"] = json!([{"buffer":0,"byteOffset":4,"byteLength":4}]);
+        fs::write(&path, crate::fixtures::pack_glb(&embedded, &bin)).unwrap();
+        assert!(store.refresh_glb_at(store.revision(), "rig").is_err());
+        assert_eq!(store.model("rig"), Some(&updated));
+    }
+
+    #[test]
     fn glb_cameras_keep_shared_lenses_and_last_accepted_catalog() {
         use crate::fixtures::punctual_glb;
         use serde_json::json;

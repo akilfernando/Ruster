@@ -312,11 +312,15 @@ struct Document<'a> {
     scenes: Vec<SourceScene>,
     #[serde(borrow)]
     nodes: Vec<Node<'a>>,
+    #[serde(default)]
     meshes: Vec<SourceMesh>,
     #[serde(default)]
     cameras: Vec<camera::SourceCamera>,
+    #[serde(default)]
     buffers: Vec<Buffer>,
+    #[serde(default)]
     buffer_views: Vec<BufferView>,
+    #[serde(default)]
     accessors: Vec<Accessor>,
     #[serde(default)]
     materials: Vec<Material>,
@@ -633,8 +637,27 @@ fn u32_at(bytes: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
 }
 
-fn chunks(bytes: &[u8]) -> Result<(&[u8], &[u8]), AssetError> {
-    if bytes.len() < 28
+fn take_chunk<'a>(
+    rest: &mut &'a [u8],
+    tag: &[u8; 4],
+    limit: usize,
+) -> Result<&'a [u8], AssetError> {
+    if rest.len() < 8 || &rest[4..8] != tag {
+        return Err(error(
+            "GLB requires JSON and at most one following BIN chunk",
+        ));
+    }
+    let size = u32_at(rest, 0) as usize;
+    if size == 0 || size > limit || !size.is_multiple_of(4) || size > rest.len() - 8 {
+        return Err(error("invalid GLB chunk length or alignment"));
+    }
+    let result = &rest[8..size + 8];
+    *rest = &rest[size + 8..];
+    Ok(result)
+}
+
+fn chunks(bytes: &[u8]) -> Result<(&[u8], Option<&[u8]>), AssetError> {
+    if bytes.len() < 24
         || bytes.len() > MAX_GLB_SOURCE_BYTES
         || &bytes[..4] != b"glTF"
         || u32_at(bytes, 4) != 2
@@ -645,22 +668,12 @@ fn chunks(bytes: &[u8]) -> Result<(&[u8], &[u8]), AssetError> {
         ));
     }
     let mut rest = &bytes[12..];
-    let mut chunk = |tag: &[u8; 4], limit: usize| {
-        if rest.len() < 8 || &rest[4..8] != tag {
-            return Err(error(
-                "GLB requires JSON followed by one embedded BIN chunk",
-            ));
-        }
-        let size = u32_at(rest, 0) as usize;
-        if size == 0 || size > limit || !size.is_multiple_of(4) || size > rest.len() - 8 {
-            return Err(error("invalid GLB chunk length or alignment"));
-        }
-        let result = &rest[8..size + 8];
-        rest = &rest[size + 8..];
-        Ok(result)
+    let json = take_chunk(&mut rest, b"JSON", MAX_JSON_BYTES)?;
+    let bin = if rest.is_empty() {
+        None
+    } else {
+        Some(take_chunk(&mut rest, b"BIN\0", MAX_GLB_SOURCE_BYTES)?)
     };
-    let json = chunk(b"JSON", MAX_JSON_BYTES)?;
-    let bin = chunk(b"BIN\0", MAX_GLB_SOURCE_BYTES)?;
     if !rest.is_empty() {
         return Err(error("additional GLB chunks are unsupported"));
     }
@@ -688,6 +701,7 @@ pub(super) fn embed_external_images(
     if !probe.images.iter().any(|image| image.uri.is_some()) {
         return Ok(None);
     }
+    let bin = bin.ok_or_else(|| error("GLB external images require an embedded BIN chunk"))?;
     let mut document: Value = serde_json::from_slice(json_chunk)?;
     let [buffer] = document
         .get("buffers")
@@ -1891,8 +1905,27 @@ pub(super) fn decode_accepted(
     let (json, bin) = chunks(bytes)?;
     let doc: Document<'_> = serde_json::from_slice(json)
         .map_err(|e| error(format!("unsupported or invalid static GLB document: {e}")))?;
-    let [buffer] = doc.buffers.as_slice() else {
-        return Err(error("GLB requires exactly one embedded buffer"));
+    let camera_only = doc.meshes.is_empty()
+        && doc.buffer_views.is_empty()
+        && doc.accessors.is_empty()
+        && doc.images.is_empty()
+        && doc.textures.is_empty()
+        && doc.animations.is_empty()
+        && doc.nodes.iter().all(|node| node.mesh.is_none());
+    let bin = match (bin, doc.buffers.as_slice()) {
+        (Some(bin), [buffer])
+            if buffer.byte_length <= bin.len()
+                && bin.len() - buffer.byte_length <= 3
+                && bin[buffer.byte_length..].iter().all(|&byte| byte == 0) =>
+        {
+            &bin[..buffer.byte_length]
+        }
+        (None, []) if camera_only => &[],
+        _ => {
+            return Err(error(
+                "GLB buffer declarations do not match its embedded BIN data",
+            ))
+        }
     };
     if doc.asset.version != "2.0"
         || doc.scenes.len() != 1
@@ -1912,9 +1945,6 @@ pub(super) fn decode_accepted(
         .into_iter()
         .any(|n| n > MAX_MODEL_ITEMS)
         || doc.animations.len() > MAX_MODEL_ITEMS
-        || buffer.byte_length > bin.len()
-        || bin.len() - buffer.byte_length > 3
-        || bin[buffer.byte_length..].iter().any(|b| *b != 0)
     {
         return Err(error(
             "GLB scene, buffer or resource counts exceed the static subset",
@@ -1944,7 +1974,6 @@ pub(super) fn decode_accepted(
         .enumerate()
         .map(|(index, camera)| camera.admit(index, place_orthographic))
         .collect::<Result<Vec<_>, _>>()?;
-    let bin = &bin[..buffer.byte_length];
     let roots = doc.scenes[0].nodes.clone();
     let required_uv_transform = doc
         .extensions_required
@@ -1985,14 +2014,21 @@ pub(super) fn decode_accepted(
     };
     let mut ancestors = Vec::with_capacity(MAX_GROUP_LEVELS);
     decoder.siblings(&roots, None, &mut ancestors)?;
-    if !decoder
+    let has_mesh = decoder
         .model
         .resources
         .values()
-        .any(|resource| matches!(resource.payload, Payload::Mesh(_)))
-    {
+        .any(|resource| matches!(resource.payload, Payload::Mesh(_)));
+    let camera_rig = camera_only
+        && decoder
+            .model
+            .info
+            .nodes
+            .values()
+            .any(|node| node.camera.is_some());
+    if !has_mesh && !camera_rig {
         return Err(error(
-            "GLB requires a selected hierarchy with at least one reachable mesh",
+            "GLB requires a reachable mesh or a supported camera in a static camera rig",
         ));
     }
     decoder.animations()?;

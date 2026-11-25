@@ -113,6 +113,12 @@ rendered capture p50/p95 was 126.8/138.5 ms for one batch edit and
 129.0/144.8 ms and paste 127.4/141.3 ms. Each group had 12 samples.
 The native metric includes MCP and GPU readback.
 
+**Camera-only GLB rigs** place static perspective and orthographic lenses
+from Blender. The loading dock kept its active camera on placement and
+offered distinct views after activation. Approved MCP and native Undo worked.
+Reopen and relocated Vulkan matched the chosen orthographic view. A malformed
+reimport retained the previous rig.
+
 **Play Checks for v23 hierarchies** use the same runtime projection as
 ordinary Play. The Blender gate under a translated parent reached local
 X=3 at tick 32 after a Button press. Native reopen, approved Claude and
