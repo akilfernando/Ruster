@@ -426,13 +426,19 @@ restores the usual background.
 
 ## Set the Game Camera from the Scene view
 
-Frame the shot in the v23 **Perspective** Scene view. In **View Presets**,
-choose **Set Game Camera from View**, or find it with Ctrl+K. Choose a
-Camera and select **Set Camera**. The active fixed Camera is the default
-destination. **New Camera** creates and activates a separate shot, and
-is the default when the active Camera uses an object transform or follows an
-object, and when no Camera is active. The capture keeps the rendered target, yaw, pitch, distance,
-and 45-degree vertical lens. It takes one Undo step.
+Frame the shot in the v23 Scene view. In **View Presets**, choose **Set
+Game Camera from View**, or find it with Ctrl+K. Select **Set Camera** to
+capture the shot in one Undo step.
+
+In **Perspective**, choose an existing Camera or **New Camera**. The active
+fixed Camera is the default destination when available. The capture keeps
+the rendered target, yaw, pitch, distance, and 45-degree vertical lens.
+
+In **Orthographic**, **Set Camera** creates and activates a new root Camera.
+It keeps the view direction, orientation, framing, aspect ratio, and clip
+planes. An approved MCP client can capture the same orthographic view with
+`scene_player_view_set`. Pass `from_scene_view_revision` from
+`viewport_inspect` along with the current scene token and revision.
 
 The Camera Inspector shows its saved world-space shot and active status.
 Use **Make Active** to designate another Camera. **Clear Game Camera**

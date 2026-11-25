@@ -257,6 +257,38 @@ impl ComponentWorkspace {
         Ok(view)
     }
 
+    pub(super) fn capture_orthographic_camera(
+        &mut self,
+        revision: u64,
+        expected_view_revision: u64,
+    ) -> Result<u64, (&'static str, String)> {
+        if expected_view_revision != self.capture.view_revision {
+            return Err(("stale_view", "Inspect the current viewport again.".into()));
+        }
+        let view = self.capture_status().map_err(|code| (code, code.into()))?;
+        if view.runtime_frame.is_some() || view.player_view {
+            return Err((
+                "play_active",
+                "Open the Scene view before setting the Game Camera.".into(),
+            ));
+        }
+        if view.animation_preview || self.current_animation_preview().is_some() {
+            return Err((
+                "view_busy",
+                crate::strings::Text::CameraCapturePreview.plain().into(),
+            ));
+        }
+        if view.camera.is_none_or(|camera| !camera.orthographic) {
+            return Err((
+                "invalid_player_view",
+                crate::strings::Text::CameraCaptureOrthographic
+                    .plain()
+                    .into(),
+            ));
+        }
+        self.create_camera_from_painted_orthographic(revision, view.viewport_rect, view.matrices)
+    }
+
     fn check_capture(&self, request: &Request) -> Result<(), &'static str> {
         if request.started.elapsed() > Duration::from_secs(5) {
             return Err("capture_expired");

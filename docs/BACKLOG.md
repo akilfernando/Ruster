@@ -681,7 +681,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-39 Animator Playback Speed | Reuse one imported clip on v23 objects with independent playback multipliers. | done · 2026-11-25 · Native and approved MCP configured 0.5× and 2× for one shared clip. Exact poses matched in Play, a saved Play Check, and relocated fixed-tick playback. Default-rate poses matched the release baseline. |
 | C-40 Filter Assets by Type | Combine exact asset categories with the existing folder and project text search. | done · 2026-11-25 · Sound plus a name query isolated a WAV from similarly named meshes and Lua. Folder navigation, watcher updates, compact layout, keyboard selection and private audio audition passed. |
 | C-41 Centered Game HUD Edge Anchors | Anchor HUD labels and actions at the top or bottom center of the Game view. | done · 2026-11-25 · Native Bottom Center and approved MCP Top Center share Undo. The saved button reopened in place and activated the intended bridge in relocated Vulkan at 16:9 and 4:3. |
-| C-42 Capture Orthographic Game Camera | Turn a composed v23 orthographic Scene view into a new active Game Camera in one Undo step. | in progress — Codex Sol, 2026-11-25 |
+| C-42 Capture Orthographic Game Camera | Turn a composed v23 orthographic Scene view into a new active Game Camera in one Undo step. | done · 2026-11-25 · Native Isometric and approved MCP Top captured the same framing as the painted Scene view. Stale capture was refused. One Undo restored the earlier camera. Reopen and relocated Vulkan matched all three landmarks. |
 
 ### C-04 implementation brief
 

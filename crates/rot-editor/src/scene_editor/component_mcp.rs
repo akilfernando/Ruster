@@ -348,6 +348,7 @@ impl ComponentWorkspace {
             "scene_player_view_set" => {
                 2 + usize::from(map.contains_key("player_view"))
                     + usize::from(map.contains_key("component_id"))
+                    + usize::from(map.contains_key("from_scene_view_revision"))
             }
             "scene_mesh" => 5,
             "scene_create" | "scene_group_create" => {
@@ -542,6 +543,18 @@ impl ComponentWorkspace {
                     "play_active",
                     "Stop Play before editing the Game Camera.".into(),
                 ));
+            }
+            if let Some(view_revision) = args.get("from_scene_view_revision") {
+                if map.contains_key("player_view") || map.contains_key("component_id") {
+                    return Err(invalid());
+                }
+                let next = self.capture_orthographic_camera(
+                    revision,
+                    decimal(view_revision).ok_or_else(invalid)?,
+                )?;
+                let mut payload = self.inspect_gameplay_camera();
+                payload["changed"] = json!(next != revision);
+                return Ok(payload);
             }
             let destination = match args.get("component_id") {
                 Some(Value::String(id)) if rot_scene::validate_id(id).is_ok() => {

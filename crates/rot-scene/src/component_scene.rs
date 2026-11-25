@@ -211,7 +211,7 @@ impl TransformLens {
         }
     }
 
-    pub(crate) fn resolve_pose(
+    pub fn resolve_pose(
         &self,
         world: DMat4,
         rotation: glam::DQuat,

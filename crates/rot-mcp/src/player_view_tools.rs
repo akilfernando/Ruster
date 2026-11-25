@@ -31,15 +31,21 @@ pub fn list() -> Vec<Value> {
             "inputSchema":{"type":"object","properties":{},"additionalProperties":false},
             "annotations":{"readOnlyHint":true,"openWorldHint":false}}),
         json!({"name":"scene_player_view_set",
-            "description":"Set or clear the optional authored player view as one undoable scene edit. Use the current scene token and revision. Follow an existing Object or Group by world-space offset. Yaw/pitch use radians; vertical FOV uses degrees. Use null to clear.",
+            "description":"Set or clear the optional authored player view as one undoable scene edit. Use the current scene token and revision. Follow an existing Object or Group by world-space offset. Yaw/pitch use radians; vertical FOV uses degrees. Use null to clear. For v23 capture of the painted Orthographic Scene view, use from_scene_view_revision from viewport_inspect.",
             "inputSchema":{"type":"object","additionalProperties":false,
                 "required":["expected_session_token","expected_revision"],
-                "anyOf":[{"required":["player_view"]},{"required":["component_id"]}],
+                "anyOf":[{"required":["player_view"]},{"required":["component_id"]},{"required":["from_scene_view_revision"]}],
+                "not":{
+                    "required":["from_scene_view_revision"],
+                    "anyOf":[{"required":["player_view"]},{"required":["component_id"]}]
+                },
                 "properties":{
                     "expected_session_token":{"type":"string","minLength":1,"maxLength":256},
                     "expected_revision":{"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20},
                     "player_view":{"anyOf":[{"type":"null"},view]},
-                    "component_id":{"type":["string","null"],"minLength":1,"maxLength":128}
+                    "component_id":{"type":["string","null"],"minLength":1,"maxLength":128},
+                    "from_scene_view_revision":{"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20,
+                         "description":"v23 orthographic Scene view revision from viewport_inspect. Exclusive of player_view and component_id."}
                 }},
             "annotations":{"readOnlyHint":false,"openWorldHint":false}}),
     ]
@@ -55,7 +61,7 @@ pub fn valid(name: &str, args: &Value) -> bool {
             super::exact_keys(
                 map,
                 &["expected_session_token", "expected_revision"],
-                &["player_view", "component_id"],
+                &["player_view", "component_id", "from_scene_view_revision"],
             ) && args["expected_session_token"]
                 .as_str()
                 .is_some_and(|s| !s.is_empty() && s.len() <= 256)
@@ -66,14 +72,19 @@ pub fn valid(name: &str, args: &Value) -> bool {
                             .as_str()
                             .is_some_and(|id| rot_scene::validate_id(id).is_ok())
                 })
-                && match args.get("player_view") {
-                    None => args["component_id"].is_string(),
-                    Some(Value::Null) => !map.contains_key("component_id"),
-                    Some(value) => {
-                        serde_json::from_value::<PlayerView>(value.clone()).is_ok_and(|view| {
-                            view.followed_target()
-                                .is_none_or(|id| rot_scene::validate_id(id).is_ok())
-                        })
+                && if let Some(revision) = map.get("from_scene_view_revision") {
+                    super::canonical_u64(revision)
+                        && !map.contains_key("player_view")
+                        && !map.contains_key("component_id")
+                } else {
+                    match args.get("player_view") {
+                        None => args["component_id"].is_string(),
+                        Some(Value::Null) => !map.contains_key("component_id"),
+                        Some(value) => serde_json::from_value::<PlayerView>(value.clone())
+                            .is_ok_and(|view| {
+                                view.followed_target()
+                                    .is_none_or(|id| rot_scene::validate_id(id).is_ok())
+                            }),
                     }
                 }
         }
@@ -95,6 +106,17 @@ mod tests {
         assert!(!valid("scene_player_view_set", &args));
         args["player_view"] = Value::Null;
         assert!(valid("scene_player_view_set", &args));
+        let capture = json!({"expected_session_token":"session","expected_revision":"0","from_scene_view_revision":"1"});
+        assert!(valid("scene_player_view_set", &capture));
+        for (field, value) in [
+            ("player_view", Value::Null),
+            ("component_id", json!("camera")),
+            ("from_scene_view_revision", json!("01")),
+        ] {
+            let mut mixed = capture.clone();
+            mixed[field] = value;
+            assert!(!valid("scene_player_view_set", &mixed));
+        }
         args["expected_revision"] = json!("01");
         assert!(!valid("scene_player_view_set", &args));
     }

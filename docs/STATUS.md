@@ -305,6 +305,13 @@ warmed release runs, preparing 32 wrapped HUD rows took 1.03–1.05 µs p95
 at Top Center and 1.07–1.13 µs at Bottom Center. The previous Top Left
 and Bottom Left equivalents took 1.05–1.09 µs and 1.07–1.11 µs.
 
+**Orthographic Scene view capture** creates and activates a root Game Camera
+with the painted orientation, lens, aspect and clip planes. The native
+Isometric and approved MCP Top shots matched their Scene views within
+1.7 × 10⁻⁶ per view matrix element. A stale viewport revision was refused,
+one Undo restored the original camera, and reopened and relocated Vulkan
+views matched the overhead landmarks.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added
