@@ -730,6 +730,12 @@ in either projection. Release to commit one Undo or press Escape to cancel.
 You can also enter **Radius** directly in the Inspector. The sphere guide
 requires a positive, uniform world scale and a world pose without shear.
 
+Use **Fit to Mesh** on a Sphere Collider to set **Center** to the midpoint
+of the renderer's indexed bounds and **Radius** to enclose its indexed
+vertices. Choose a renderer when the object has more than one. The fit
+uses local coordinates and preserves the collider's role and enabled
+state. One Undo restores the previous center and radius.
+
 ## Reuse a hierarchy as a prefab
 
 1. In a v23 project, create an empty root and use **Create Child** to build

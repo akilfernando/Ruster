@@ -457,14 +457,19 @@ impl ComponentWorkspace {
 
         if op == "scene_components_edit" {
             if let Some(edits) = args["edits"].as_array() {
-                if edits
+                use super::component_collider_fit::FitKind;
+                if let Some(kind) = edits
                     .iter()
-                    .any(|edit| edit["operation"] == "fit_box_to_mesh")
+                    .find_map(|edit| FitKind::from_operation(&edit["operation"]))
                 {
                     let [edit] = edits.as_slice() else {
                         return Err((
                             "invalid_arguments",
-                            "Fit a Box Collider in its own component edit.".into(),
+                            match kind {
+                                FitKind::Box => "Fit a Box Collider in its own component edit.",
+                                FitKind::Sphere => Text::SphereFitSingleEdit.plain(),
+                            }
+                            .into(),
                         ));
                     };
                     let map = edit.as_object().ok_or_else(invalid)?;
@@ -487,7 +492,8 @@ impl ComponentWorkspace {
                         .get("expected_asset_revision")
                         .map(|value| decimal(value).ok_or_else(invalid))
                         .transpose()?;
-                    let fit = self.fit_box_to_mesh(
+                    let fit = self.fit_collider_to_mesh(
+                        kind,
                         revision,
                         asset_revision,
                         object,
@@ -1541,6 +1547,8 @@ impl ComponentWorkspace {
                 };
                 if matches!(collider.shape, rot_scene::ColliderShape::Box { .. }) {
                     response["fit_to_mesh"] = json!("Use one scene_components_edit fit_box_to_mesh with object_id and this Box Collider component_id. Include renderer_component_id for multiple same-owner Mesh Renderers and expected_asset_revision for an imported mesh. Fits indexed object-local geometry.");
+                } else {
+                    response["fit_to_mesh"] = json!("Use one scene_components_edit fit_sphere_to_mesh with object_id and this Sphere Collider component_id. Include renderer_component_id for multiple same-owner Mesh Renderers and expected_asset_revision for an imported mesh. Fits indexed object-local geometry.");
                 }
                 if let rot_scene::ColliderShape::Sphere { radius } = collider.shape {
                     response["collider_world"]["shape"] = json!("sphere");

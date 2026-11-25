@@ -319,6 +319,14 @@ and unchanged names add no history. Focused tests covered remapping and
 temporary window focus loss. Native editing at 960 × 640 and approved
 STDIO MCP shared Undo and survived Save and reopen.
 
+**Fit Sphere Collider to Mesh** fits the center and radius to the indexed
+geometry of the chosen renderer. The native picker and approved STDIO MCP
+used the same Blender mesh. A distant unreferenced vertex did not affect
+the radius. The fitted collider stopped the survey robot at local X=3.572668
+in the editor and relocated Vulkan Build. The warmed release geometry scan
+for 23,552 triangles took 257–258 µs p95 for Sphere and 100–101 µs for Box,
+compared with 172–173 µs for the previous Box scan.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added

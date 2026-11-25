@@ -32,10 +32,10 @@ pub(super) mod component_camera;
 #[path = "component_animation_preview.rs"]
 pub(super) mod component_animation_preview;
 
-#[path = "component_box_fit.rs"]
-mod component_box_fit;
 #[path = "component_collider.rs"]
 pub(super) mod component_collider;
+#[path = "component_collider_fit.rs"]
+mod component_collider_fit;
 
 #[path = "component_display.rs"]
 mod component_display;
@@ -362,8 +362,8 @@ pub(super) struct ComponentWorkspace {
     animation_preview: Option<component_animation_preview::AnimationPreview>,
     transform_tool: TransformTool,
     collider_tool: component_collider::ColliderTool,
-    box_fit: Option<component_box_fit::Picker>,
-    box_fit_feedback: Option<(u64, String)>,
+    collider_fit: Option<component_collider_fit::Picker>,
+    collider_fit_feedback: Option<(u64, String, Text)>,
     rows: Vec<(usize, usize)>,
     collapsed_objects: HashSet<String>,
     visible_rows: Option<Vec<usize>>,
@@ -491,8 +491,8 @@ impl ComponentWorkspace {
             animation_preview: None,
             transform_tool: TransformTool::default(),
             collider_tool: Default::default(),
-            box_fit: None,
-            box_fit_feedback: None,
+            collider_fit: None,
+            collider_fit_feedback: None,
             rows,
             collapsed_objects: HashSet::new(),
             visible_rows: None,
@@ -1088,7 +1088,7 @@ impl ComponentWorkspace {
             || self.player_pending()
             || self.camera_authoring.pending()
             || self.spot_aim.is_some()
-            || self.box_fit.is_some()
+            || self.collider_fit.is_some()
             || self.unpack_prefab_draft.is_some()
     }
 
@@ -3762,14 +3762,14 @@ impl ComponentWorkspace {
                                             allow_sound_cues: allow_spot_aim,
                                             diagnostic: self.runtime.diagnostic.as_ref(),
                                             collider_edit: &collider_edit,
-                                            allow_box_fit: allow_spot_aim && !blocked,
-                                            box_fit_feedback: self
-                                                .box_fit_feedback
+                                            allow_collider_fit: allow_spot_aim && !blocked,
+                                            collider_fit_feedback: self
+                                                .collider_fit_feedback
                                                 .as_ref()
-                                                .filter(|(revision, _)| {
+                                                .filter(|(revision, _, _)| {
                                                     *revision == self.session.revision()
                                                 })
-                                                .map(|(_, id)| id.as_str()),
+                                                .map(|(_, id, hint)| (id.as_str(), *hint)),
                                             animation_preview,
                                             allow_animation_preview: allow_spot_aim && !blocked,
 
@@ -3792,8 +3792,8 @@ impl ComponentWorkspace {
                                     if let Some((id, revision)) = edits.animator_revision {
                                         self.animator_draft_revisions.insert(id, revision);
                                     }
-                                    if let Some(id) = edits.box_fit {
-                                        self.begin_box_fit(id);
+                                    if let Some(id) = edits.collider_fit {
+                                        self.begin_collider_fit(id);
                                     }
                                     if let Some(id) = edits.spot_aim {
                                         self.begin_spot_aim(id);
@@ -3880,7 +3880,7 @@ impl ComponentWorkspace {
         self.show_display_draft(&ctx);
         self.show_camera_draft(&ctx);
         self.show_spot_aim(&ctx);
-        self.show_box_fit(&ctx);
+        self.show_collider_fit(&ctx);
         self.show_unpack_prefab(&ctx);
         self.asset_use_reveal = None;
         self.show_asset_uses(&ctx);

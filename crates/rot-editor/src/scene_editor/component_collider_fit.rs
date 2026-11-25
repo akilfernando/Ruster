@@ -1,4 +1,4 @@
-//! Fit one authored Box Collider using the same indexed geometry the renderer draws.
+//! Fit one authored Collider using the same indexed geometry the renderer draws.
 use super::{
     component_inspector::{geometry_name, mesh_renderer_heading},
     ComponentWorkspace,
@@ -14,17 +14,48 @@ use serde_json::{json, Value};
 
 type FitError = (&'static str, String);
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum FitKind {
+    Box,
+    Sphere,
+}
+
+impl FitKind {
+    fn from_shape(shape: &ColliderShape) -> Self {
+        match shape {
+            ColliderShape::Box { .. } => Self::Box,
+            ColliderShape::Sphere { .. } => Self::Sphere,
+        }
+    }
+
+    pub(super) fn from_operation(operation: &Value) -> Option<Self> {
+        match operation.as_str()? {
+            "fit_box_to_mesh" => Some(Self::Box),
+            "fit_sphere_to_mesh" => Some(Self::Sphere),
+            _ => None,
+        }
+    }
+
+    fn shape_message(self, box_message: &'static str, sphere_message: Text) -> String {
+        match self {
+            Self::Box => box_message.into(),
+            Self::Sphere => sphere_message.plain().into(),
+        }
+    }
+}
+
 pub(super) struct Picker {
     revision: u64,
     asset_revision: u64,
     owner: String,
     collider: String,
+    kind: FitKind,
     choices: Vec<(String, String)>,
     first_frame: bool,
 }
 
 impl ComponentWorkspace {
-    pub(super) fn begin_box_fit(&mut self, collider: String) {
+    pub(super) fn begin_collider_fit(&mut self, collider: String) {
         if self.authored_edit_pending()
             || self.runtime.in_play_mode()
             || self.ai_transition_pending()
@@ -35,6 +66,14 @@ impl ComponentWorkspace {
             return;
         };
         let owner = &self.session.scene().objects[row];
+        let Some(Component::Collider { shape, .. }) = owner
+            .components
+            .iter()
+            .find(|component| component.id == collider)
+            .map(|component| &component.kind)
+        else {
+            return;
+        };
         let choices = owner
             .components
             .iter()
@@ -54,18 +93,19 @@ impl ComponentWorkspace {
             asset_revision: self.material_asset_revision(),
             owner: owner.id.clone(),
             collider,
+            kind: FitKind::from_shape(shape),
             choices,
             first_frame: true,
         };
         if picker.choices.len() <= 1 {
-            self.submit_box_fit(picker, None);
+            self.submit_collider_fit(picker, None);
         } else {
-            self.box_fit = Some(picker);
+            self.collider_fit = Some(picker);
         }
     }
 
-    pub(super) fn show_box_fit(&mut self, ctx: &egui::Context) {
-        let Some(mut picker) = self.box_fit.take() else {
+    pub(super) fn show_collider_fit(&mut self, ctx: &egui::Context) {
+        let Some(mut picker) = self.collider_fit.take() else {
             return;
         };
         if self.session.revision() != picker.revision
@@ -114,15 +154,16 @@ impl ComponentWorkspace {
         }
         if let Some(choice) = response.inner.0 {
             let renderer = picker.choices[choice].0.clone();
-            self.submit_box_fit(picker, Some(&renderer));
+            self.submit_collider_fit(picker, Some(&renderer));
         } else {
             picker.first_frame = false;
-            self.box_fit = Some(picker);
+            self.collider_fit = Some(picker);
         }
     }
 
-    fn submit_box_fit(&mut self, picker: Picker, renderer: Option<&str>) {
-        match self.fit_box_to_mesh(
+    fn submit_collider_fit(&mut self, picker: Picker, renderer: Option<&str>) {
+        match self.fit_collider_to_mesh(
+            picker.kind,
             picker.revision,
             Some(picker.asset_revision),
             &picker.owner,
@@ -131,15 +172,17 @@ impl ComponentWorkspace {
         ) {
             Ok(fit) => {
                 self.error = None;
-                self.box_fit_feedback = (!fit.minimum_axes.is_empty())
-                    .then_some((self.session.revision(), picker.collider));
+                self.collider_fit_feedback = fit
+                    .minimum_size_hint()
+                    .map(|hint| (self.session.revision(), picker.collider, hint));
             }
             Err((_, message)) => self.error = Some(message),
         }
     }
 
-    pub(super) fn fit_box_to_mesh(
+    pub(super) fn fit_collider_to_mesh(
         &mut self,
+        kind: FitKind,
         revision: u64,
         asset_revision: Option<u64>,
         owner_id: &str,
@@ -152,7 +195,10 @@ impl ComponentWorkspace {
         if self.runtime.in_play_mode() {
             return Err((
                 "play_active",
-                "Stop Play before fitting a Box Collider.".into(),
+                kind.shape_message(
+                    "Stop Play before fitting a Box Collider.",
+                    Text::SphereFitStopPlay,
+                ),
             ));
         }
         if self.authored_edit_pending() || self.ai_transition_pending() {
@@ -174,19 +220,23 @@ impl ComponentWorkspace {
             .position(|component| component.id == collider_id)
             .ok_or((
                 "component_not_found",
-                "Choose a Box Collider on this object.".into(),
+                kind.shape_message(
+                    "Choose a Box Collider on this object.",
+                    Text::SphereFitChooseCollider,
+                ),
             ))?;
         let collider = &owner.components[collider_index];
-        let Component::Collider {
-            role,
-            shape: ColliderShape::Box { .. },
-            ..
-        } = collider.kind
-        else {
-            return Err((
-                "invalid_collider",
-                "Fit to Mesh needs a Box Collider.".into(),
-            ));
+        let role = match &collider.kind {
+            Component::Collider { role, shape, .. } if FitKind::from_shape(shape) == kind => *role,
+            _ => {
+                return Err((
+                    "invalid_collider",
+                    kind.shape_message(
+                        "Fit to Mesh needs a Box Collider.",
+                        Text::SphereFitWrongCollider,
+                    ),
+                ))
+            }
         };
         let mut renderers = owner
             .components
@@ -203,7 +253,10 @@ impl ComponentWorkspace {
         } else {
             let renderer = renderers.next().ok_or((
                 "mesh_renderer_required",
-                "Add a Mesh Renderer to the Box Collider's object.".into(),
+                kind.shape_message(
+                    "Add a Mesh Renderer to the Box Collider's object.",
+                    Text::SphereFitNeedsMesh,
+                ),
             ))?;
             if renderers.next().is_some() {
                 return Err((
@@ -242,12 +295,30 @@ impl ComponentWorkspace {
                     ))?
             }
         };
-        let (center, half_extents, minimum_axes) = indexed_bounds(mesh)?;
+        let (center, fitted) = match kind {
+            FitKind::Box => {
+                let (center, half_extents, minimum_axes) = indexed_bounds(mesh)?;
+                (
+                    center,
+                    FittedShape::Box {
+                        half_extents,
+                        minimum_axes,
+                    },
+                )
+            }
+            FitKind::Sphere => {
+                let (center, radius, minimum) = indexed_sphere(mesh)?;
+                (center, FittedShape::Sphere { radius, minimum })
+            }
+        };
         let new_collider = Collider {
             enabled: collider.enabled,
             role,
             offset: center,
-            shape: ColliderShape::Box { half_extents },
+            shape: match fitted {
+                FittedShape::Box { half_extents, .. } => ColliderShape::Box { half_extents },
+                FittedShape::Sphere { radius, .. } => ColliderShape::Sphere { radius },
+            },
         };
         new_collider
             .validate()
@@ -269,31 +340,63 @@ impl ComponentWorkspace {
         Ok(Fit {
             renderer,
             center,
-            half_extents,
-            minimum_axes,
+            fitted,
             changed: next != revision,
         })
     }
 }
 
+enum FittedShape {
+    Box {
+        half_extents: [f32; 3],
+        minimum_axes: Vec<&'static str>,
+    },
+    Sphere {
+        radius: f32,
+        minimum: bool,
+    },
+}
+
 pub(super) struct Fit {
     renderer: String,
     center: [f32; 3],
-    half_extents: [f32; 3],
-    minimum_axes: Vec<&'static str>,
+    fitted: FittedShape,
     changed: bool,
 }
+
 impl Fit {
+    fn minimum_size_hint(&self) -> Option<Text> {
+        match &self.fitted {
+            FittedShape::Box { minimum_axes, .. } if !minimum_axes.is_empty() => {
+                Some(Text::BoxFitMinimumSize)
+            }
+            FittedShape::Sphere { minimum: true, .. } => Some(Text::SphereFitMinimumRadius),
+            _ => None,
+        }
+    }
+
     pub(super) fn response(&self, object: &str, collider: &str, dirty: bool) -> Value {
-        json!({"object_id":object,"component_id":collider,"renderer_component_id":self.renderer,
-            "center":self.center,"half_extents":self.half_extents,"minimum_axes":self.minimum_axes,
-            "changed":self.changed,"dirty":dirty})
+        let mut result = json!({"object_id":object,"component_id":collider,"renderer_component_id":self.renderer,
+            "center":self.center,"changed":self.changed,"dirty":dirty});
+        match &self.fitted {
+            FittedShape::Box {
+                half_extents,
+                minimum_axes,
+            } => {
+                result["half_extents"] = json!(half_extents);
+                result["minimum_axes"] = json!(minimum_axes);
+            }
+            FittedShape::Sphere { radius, .. } => {
+                result["radius"] = json!(radius);
+            }
+        }
+        result
     }
 }
 
 type Bounds = ([f32; 3], [f32; 3], Vec<&'static str>);
 
-fn indexed_bounds(mesh: &Mesh) -> Result<Bounds, FitError> {
+fn indexed_min_max(mesh: &Mesh) -> Result<([f64; 3], [f64; 3]), FitError> {
     let invalid_mesh = || {
         (
             "mesh_unavailable",
@@ -314,8 +417,14 @@ fn indexed_bounds(mesh: &Mesh) -> Result<Bounds, FitError> {
         low = low.min(position);
         high = high.max(position);
     }
-    let low = low.to_array().map(f64::from);
-    let high = high.to_array().map(f64::from);
+    Ok((
+        low.to_array().map(f64::from),
+        high.to_array().map(f64::from),
+    ))
+}
+
+fn indexed_bounds(mesh: &Mesh) -> Result<Bounds, FitError> {
+    let (low, high) = indexed_min_max(mesh)?;
     let mut center = [0.0; 3];
     let mut half_extents = [0.0; 3];
     let mut minimum_axes = Vec::new();
@@ -342,6 +451,31 @@ fn indexed_bounds(mesh: &Mesh) -> Result<Bounds, FitError> {
         half_extents[axis] = enclosing.max(0.001);
     }
     Ok((center, half_extents, minimum_axes))
+}
+
+// Fit again around the quantized center actually stored in the Collider.
+fn indexed_sphere(mesh: &Mesh) -> Result<([f32; 3], f32, bool), FitError> {
+    let (low, high) = indexed_min_max(mesh)?;
+    let center = std::array::from_fn(|axis| ((low[axis] + high[axis]) * 0.5) as f32);
+    let fit_error = || ("invalid_fit", Text::SphereFitLimits.plain().into());
+    if center.iter().any(|coordinate| coordinate.abs() > 10_000.0) {
+        return Err(fit_error());
+    }
+    let stored_center = glam::Vec3::from_array(center).as_dvec3();
+    let mut farthest_squared = 0.0_f64;
+    // The shared bounds pass has already validated every referenced index.
+    for &index in &mesh.indices {
+        let position = glam::Vec3::from_array(mesh.vertices[index as usize].position).as_dvec3();
+        farthest_squared = farthest_squared.max((position - stored_center).length_squared());
+    }
+    if farthest_squared > 1000.0_f64.powi(2) {
+        return Err(fit_error());
+    }
+    let mut radius = farthest_squared.sqrt() as f32;
+    if f64::from(radius).powi(2) < farthest_squared {
+        radius = radius.next_up();
+    }
+    Ok((center, radius.max(0.001), radius < 0.001))
 }
 
 #[cfg(test)]
@@ -381,6 +515,45 @@ mod tests {
     }
 
     #[test]
+    fn sphere_encloses_referenced_points_without_using_the_box_diagonal() {
+        let mut mesh = Mesh {
+            vertices: [
+                [1.5, -0.5, 4.0],
+                [4.5, 0.0, 4.0],
+                [3.0, -2.0, 4.0],
+                [3.0, 1.0, 4.0],
+                [3.0, -0.5, 5.0],
+                [3.0, -0.5, 3.0],
+                [9999.0; 3],
+            ]
+            .into_iter()
+            .map(|position| rot_assets::Vertex {
+                position,
+                normal: [0.0, 0.0, 1.0],
+            })
+            .collect(),
+            indices: vec![0, 3, 4, 1, 2, 5],
+            texcoords: None,
+        };
+        let (center, radius, minimum) = indexed_sphere(&mesh).unwrap();
+        assert_eq!(center, [3.0, -0.5, 4.0]);
+        assert!(!minimum);
+        assert!(f64::from(radius).powi(2) >= 2.5);
+        assert!(f64::from(radius.next_down()).powi(2) < 2.5);
+        assert!(radius < 2.0, "do not fit empty AABB corners");
+
+        mesh.indices = vec![0, 0, 0];
+        assert_eq!(
+            indexed_sphere(&mesh).unwrap(),
+            ([1.5, -0.5, 4.0], 0.001, true)
+        );
+        mesh.indices[2] = 20;
+        assert_eq!(indexed_sphere(&mesh).unwrap_err().0, "mesh_unavailable");
+        mesh.indices[2] = 6;
+        assert_eq!(indexed_sphere(&mesh).unwrap_err().0, "invalid_fit");
+    }
+
+    #[test]
     fn guarded_fit_resolves_exact_renderer_and_changes_only_box_geometry() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("yard.scene.json");
@@ -414,7 +587,18 @@ mod tests {
                 shape: ColliderShape::default(),
             },
         };
-        scene.objects[0].components.extend([renderer, sensor]);
+        let sphere = ComponentInstance {
+            id: "sphere".into(),
+            enabled: false,
+            kind: Component::Collider {
+                role: ColliderRole::Sensor,
+                offset: [1.0; 3],
+                shape: ColliderShape::Sphere { radius: 1.0 },
+            },
+        };
+        scene.objects[0]
+            .components
+            .extend([renderer, sphere, sensor]);
         scene.save_new(&path).unwrap();
         let mut editor =
             ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
@@ -474,6 +658,74 @@ mod tests {
         editor.command(crate::workspace::Action::Redo);
         assert_eq!(editor.session.scene(), &expected);
         assert!(editor.save());
-        assert_eq!(ComponentSession::open(path).unwrap().scene(), &expected);
+        assert_eq!(ComponentSession::open(&path).unwrap().scene(), &expected);
+
+        args["edits"][0]["operation"] = json!("fit_sphere_to_mesh");
+        args["expected_revision"] = json!("3");
+        assert_eq!(
+            submit(&mut editor, &args)["error"]["code"],
+            "invalid_collider"
+        );
+        args["edits"][0]["component_id"] = json!("sphere");
+        args["expected_revision"] = json!("2");
+        assert_eq!(
+            submit(&mut editor, &args)["error"]["code"],
+            "stale_revision"
+        );
+        args["expected_revision"] = json!("3");
+        args["expected_asset_revision"] = json!((store.revision() + 1).to_string());
+        assert_eq!(
+            submit(&mut editor, &args)["error"]["code"],
+            "stale_asset_revision"
+        );
+        assert_eq!(editor.session.scene(), &expected);
+
+        editor.select(Some("left".into()));
+        editor.begin_collider_fit("sphere".into());
+        let picker = editor
+            .collider_fit
+            .take()
+            .expect("multiple renderers use the Inspector picker");
+        assert!(picker.kind == FitKind::Sphere);
+        assert_eq!(picker.choices.len(), 2);
+        editor.submit_collider_fit(picker, Some("barrier-mesh"));
+        let after_sphere = editor.session.scene().clone();
+        assert_eq!(editor.session.revision(), 4);
+        let mut expected_sphere = expected.clone();
+        expected_sphere.objects[0]
+            .components
+            .iter_mut()
+            .find(|component| component.id == "sphere")
+            .unwrap()
+            .kind = Component::Collider {
+            role: ColliderRole::Sensor,
+            offset: [3.0, 0.0, 4.0],
+            shape: ColliderShape::Sphere {
+                radius: 2.0_f32.sqrt().next_up() * 2.0,
+            },
+        };
+        assert_eq!(after_sphere, expected_sphere);
+
+        args["expected_revision"] = json!("4");
+        args["expected_asset_revision"] = json!(store.revision().to_string());
+        let no_op = submit(&mut editor, &args);
+        assert_eq!(no_op["result"]["changed"], false, "{no_op}");
+        assert_eq!(no_op["result"]["renderer_component_id"], "barrier-mesh");
+        assert_eq!(no_op["result"]["center"], json!([3.0, 0.0, 4.0]));
+        assert_eq!(
+            no_op["result"]["radius"].as_f64().unwrap() as f32,
+            2.0_f32.sqrt().next_up() * 2.0
+        );
+        assert!(no_op["result"].get("half_extents").is_none());
+
+        editor.command(crate::workspace::Action::Undo);
+        assert_eq!(editor.session.scene(), &expected);
+        editor.command(crate::workspace::Action::Redo);
+        assert_eq!(editor.session.scene(), &expected_sphere);
+        assert!(editor.save());
+        assert_eq!(
+            ComponentSession::open(path).unwrap().scene(),
+            &expected_sphere
+        );
     }
 }
