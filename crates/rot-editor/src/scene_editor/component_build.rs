@@ -1,5 +1,8 @@
 //! Stage a runnable v23 creation and publish a folder or archive atomically.
-use super::build_archive;
+use super::{
+    build_archive,
+    project_picker::{self, BrowseKind, BrowseResult},
+};
 use crate::{
     editor_theme,
     strings::Text,
@@ -628,6 +631,9 @@ enum BuildOutcome {
 #[derive(Default)]
 pub(super) struct BuildUi {
     path: Option<String>,
+    default_path: PathBuf,
+    browse_result: Option<mpsc::Receiver<BrowseResult>>,
+    browse_error: Option<Text>,
     format: OutputFormat,
     archive: Option<ArchiveArtifact>,
     folder: Option<FolderArtifact>,
@@ -733,18 +739,92 @@ impl BuildUi {
         });
         self.startup = Some(StartupSelection::prepare(startup));
         let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-        self.path = Some(
-            path.parent()
-                .unwrap_or_else(|| Path::new("."))
-                .join(format!("{id}-build"))
-                .to_string_lossy()
-                .into_owned(),
-        );
+        self.default_path = path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(format!("{id}-build"));
+        self.path = Some(self.default_path.to_string_lossy().into_owned());
         self.format = OutputFormat::Folder;
+        self.reset_browse();
         self.focus = true;
         self.show_failure = false;
         self.details_open = false;
         self.folder_open_error = None;
+    }
+
+    fn reset_browse(&mut self) {
+        self.browse_result = None;
+        self.browse_error = None;
+    }
+
+    fn change_destination_format(&mut self, path: &mut String) {
+        self.reset_browse();
+        self.format.update_path(path);
+    }
+
+    fn browse_kind(&self, path: &str) -> BrowseKind {
+        let typed = Path::new(path.trim());
+        let directory = typed
+            .parent()
+            .filter(|parent| parent.is_absolute())
+            .or_else(|| typed.is_absolute().then_some(typed))
+            .or_else(|| self.default_path.parent())
+            .unwrap_or_else(|| Path::new("."))
+            .to_owned();
+        match self.format {
+            OutputFormat::Folder => BrowseKind::BuildParent { directory },
+            OutputFormat::LinuxArchive => {
+                let mut filename = typed
+                    .file_name()
+                    .filter(|name| *name != ".tar.gz")
+                    .or_else(|| self.default_path.file_name())
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
+                self.format.update_path(&mut filename);
+                BrowseKind::BuildArchive {
+                    directory,
+                    filename,
+                }
+            }
+        }
+    }
+
+    fn poll_destination(&mut self, path: &mut String) -> bool {
+        let Some(receiver) = &self.browse_result else {
+            return false;
+        };
+        let result = match receiver.try_recv() {
+            Ok(result) => result.ok(),
+            Err(mpsc::TryRecvError::Empty) => return false,
+            Err(mpsc::TryRecvError::Disconnected) => None,
+        };
+        self.browse_result = None;
+        self.browse_error = None;
+        match result {
+            Some(None) => {}
+            Some(Some(picked)) if picked.is_absolute() => {
+                let picked = match self.format {
+                    OutputFormat::Folder => picked.join(
+                        Path::new(path.trim())
+                            .file_name()
+                            .or_else(|| self.default_path.file_name())
+                            .unwrap_or_default(),
+                    ),
+                    OutputFormat::LinuxArchive => picked,
+                };
+                if let Some(text) = picked.to_str().filter(|_| picked.file_name().is_some()) {
+                    text.clone_into(path);
+                    if self.format == OutputFormat::LinuxArchive {
+                        self.format.update_path(path);
+                    }
+                } else {
+                    self.browse_error = Some(Text::BuildBrowseUnavailable);
+                }
+            }
+            _ => self.browse_error = Some(Text::BuildBrowseUnavailable),
+        }
+        true
     }
 
     pub(super) fn is_open(&self) -> bool {
@@ -939,6 +1019,13 @@ impl BuildUi {
         let Some(mut path) = self.path.take() else {
             return;
         };
+        let chooser_owned = self.browse_result.is_some();
+        if chooser_owned {
+            ctx.input_mut(|input| {
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+            });
+        }
         let mut close = false;
         let mut submit = None;
         egui::Modal::new(egui::Id::unique("component_build"))
@@ -977,8 +1064,9 @@ impl BuildUi {
                     }
                     return;
                 }
-                let failure = self.outcome.as_ref().filter(|_| self.show_failure);
-                if let Some(BuildOutcome::LaunchFailed(failure)) = failure {
+                if let Some(BuildOutcome::LaunchFailed(failure)) =
+                    self.outcome.as_ref().filter(|_| self.show_failure)
+                {
                     Self::show_failure(ui, failure, &mut self.details_open);
                     if let Some(error) = self.show_folder(ui) {
                         self.folder_open_error = Some(error);
@@ -1028,20 +1116,68 @@ impl BuildUi {
                         response.response.labelled_by(label);
                     },
                 );
-                if self.format != old_format {
-                    self.format.update_path(&mut path);
-                }
+                let chooser_returned = if self.format != old_format {
+                    self.change_destination_format(&mut path);
+                    false
+                } else {
+                    self.poll_destination(&mut path)
+                };
                 let archive = self.format == OutputFormat::LinuxArchive;
                 let label = ui.label(if archive {
                     Text::BuildArchiveFile.plain()
                 } else {
                     Text::ComponentBuildFolder.plain()
                 });
-                let edit = ui
-                    .add(egui::TextEdit::singleline(&mut path).desired_width(f32::INFINITY))
-                    .labelled_by(label.id);
-                if std::mem::take(&mut self.focus) {
+                let browsing = self.browse_result.is_some();
+                let (edit, browse_clicked) = ui
+                    .horizontal(|ui| {
+                        let font = egui::TextStyle::Button.resolve(ui.style());
+                        let browse_width = (ui
+                            .painter()
+                            .layout_no_wrap(
+                                Text::Browse.plain().into(),
+                                font,
+                                egui::Color32::PLACEHOLDER,
+                            )
+                            .size()
+                            .x
+                            + 2.0 * ui.spacing().button_padding.x)
+                            .max(MIN_HIT);
+                        let width =
+                            (ui.available_width() - browse_width - ui.spacing().item_spacing.x)
+                                .max(40.0);
+                        let edit = ui
+                            .add_enabled(
+                                !browsing,
+                                egui::TextEdit::singleline(&mut path).desired_width(width),
+                            )
+                            .labelled_by(label.id);
+                        let browse = ui.add_enabled(
+                            !browsing && !chooser_owned,
+                            egui::Button::new(Text::Browse.plain()),
+                        );
+                        let browse = if archive {
+                            browse
+                        } else {
+                            browse.on_hover_text(Text::BuildBrowseParentHint.plain())
+                        };
+                        (edit, browse.clicked())
+                    })
+                    .inner;
+                let edit = edit.on_hover_text(path.as_str());
+                if std::mem::take(&mut self.focus) || chooser_returned {
                     edit.request_focus();
+                }
+                if edit.changed() {
+                    self.browse_error = None;
+                }
+                if browse_clicked {
+                    self.browse_error = None;
+                    self.browse_result =
+                        Some(project_picker::browse(ctx.clone(), self.browse_kind(&path)));
+                }
+                if let Some(error) = self.browse_error {
+                    ui.colored_label(editor_theme::colors(ui).error, error.plain());
                 }
                 let selection = match self.startup.as_ref().expect("opened Build") {
                     StartupSelection::Preparing { file, .. } => {
@@ -1112,11 +1248,15 @@ impl BuildUi {
                         source(player.initial_size.is_some())
                     ));
                 }
-                let enter = (edit.has_focus() || edit.lost_focus())
+                let enter = !chooser_owned
+                    && self.browse_result.is_none()
+                    && (edit.has_focus() || edit.lost_focus())
                     && ui.input_mut(|input| {
                         input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
                     });
-                if let Some(BuildOutcome::Failed(failure)) = failure {
+                if let Some(BuildOutcome::Failed(failure)) =
+                    self.outcome.as_ref().filter(|_| self.show_failure)
+                {
                     Self::show_failure(ui, failure, &mut self.details_open);
                 }
                 let labels: &[Text] = if archive {
@@ -1153,7 +1293,10 @@ impl BuildUi {
                         .on_hover_text(Text::BuildCancelShortcut.plain())
                         .clicked()
                         || escape;
-                    let enabled = saved && !path.trim().is_empty();
+                    let enabled = saved
+                        && !path.trim().is_empty()
+                        && self.browse_result.is_none()
+                        && !chooser_owned;
                     ui.add_enabled_ui(enabled, |ui| {
                         let run = !archive
                             && ui_kit::button(ui, Text::ComponentBuildRun.plain())
@@ -1169,6 +1312,7 @@ impl BuildUi {
                 });
             });
         if close {
+            self.reset_browse();
             self.startup = None;
             self.show_failure = false;
             self.details_open = false;
@@ -1316,6 +1460,111 @@ mod tests {
         Scene, Session, Transform,
     };
     use serde_json::json;
+
+    #[test]
+    fn destination_browse_seeds_and_updates_draft_without_accepting_late_results() {
+        let root = tempfile::tempdir().unwrap();
+        let scene_path = root.path().join("scene.json");
+        let base = root.path().join("alternate parent");
+        let typed_parent = root.path().join("typed parent");
+        let mut build = BuildUi::default();
+        build.open(&scene_path, "demo", Err("fixture".into()));
+        let mut path = typed_parent
+            .join("Custom Game")
+            .to_str()
+            .unwrap()
+            .to_owned();
+        match build.browse_kind(&path) {
+            BrowseKind::BuildParent { directory } => assert_eq!(directory, typed_parent),
+            _ => panic!("expected a parent folder chooser"),
+        }
+        let deliver = |build: &mut BuildUi, result| {
+            let (sender, receiver) = mpsc::sync_channel(1);
+            build.browse_result = Some(receiver);
+            sender.send(Ok(result)).unwrap();
+        };
+        deliver(&mut build, Some(base.clone()));
+        assert!(build.poll_destination(&mut path));
+        assert_eq!(Path::new(&path), base.join("Custom Game"));
+        assert!(build.worker.is_none());
+        deliver(&mut build, None);
+        build.poll_destination(&mut path);
+        assert_eq!(Path::new(&path), base.join("Custom Game"));
+
+        path.clear();
+        deliver(&mut build, Some(base.clone()));
+        build.poll_destination(&mut path);
+        assert_eq!(Path::new(&path), base.join("demo-build"));
+
+        let (sender, receiver) = mpsc::sync_channel(1);
+        build.browse_result = Some(receiver);
+        build.format = OutputFormat::LinuxArchive;
+        build.change_destination_format(&mut path);
+        assert!(sender.send(Ok(Some(typed_parent.clone()))).is_err());
+        assert_eq!(Path::new(&path), base.join("demo-build.tar.gz"));
+        match build.browse_kind(&path) {
+            BrowseKind::BuildArchive {
+                directory,
+                filename,
+            } => {
+                assert_eq!(directory, base);
+                assert_eq!(filename, "demo-build.tar.gz");
+            }
+            _ => panic!("expected an archive Save dialog"),
+        }
+        deliver(&mut build, Some(typed_parent.join("chosen")));
+        build.poll_destination(&mut path);
+        assert_eq!(Path::new(&path), typed_parent.join("chosen.tar.gz"));
+        deliver(&mut build, Some(typed_parent.join("exact.tar.gz")));
+        build.poll_destination(&mut path);
+        assert_eq!(Path::new(&path), typed_parent.join("exact.tar.gz"));
+
+        let (sender, receiver) = mpsc::sync_channel(1);
+        build.browse_result = Some(receiver);
+        build.open(&scene_path, "second", Err("fixture".into()));
+        assert!(sender.send(Ok(Some(base))).is_err());
+        assert_eq!(
+            Path::new(build.path.as_deref().unwrap()),
+            root.path().join("second-build")
+        );
+        assert!(!build.poll_destination(&mut path));
+        let scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("second")).unwrap()).unwrap();
+        let session = ComponentSession::new(scene).unwrap();
+        let ctx = egui::Context::default();
+        build.focus = false;
+        deliver(&mut build, Some(typed_parent.clone()));
+        ctx.run_ui(
+            egui::RawInput {
+                focused: false,
+                events: [egui::Key::Enter, egui::Key::Escape]
+                    .into_iter()
+                    .map(|key| egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    })
+                    .collect(),
+                ..Default::default()
+            },
+            |ui| {
+                build.show(ui.ctx(), &session, None, false);
+                assert!(!ui.input(|input| input.key_pressed(egui::Key::Enter)
+                    || input.key_pressed(egui::Key::Escape)));
+            },
+        )
+        .textures_delta
+        .clear();
+        assert_eq!(
+            Path::new(build.path.as_deref().unwrap()),
+            typed_parent.join("second-build")
+        );
+        assert!(build.browse_result.is_none());
+        assert!(ctx.memory(|memory| memory.focused().is_some()));
+        assert!(build.worker.is_none());
+    }
 
     #[test]
     fn linux_archive_matches_the_folder_and_never_overwrites_a_competing_output() {

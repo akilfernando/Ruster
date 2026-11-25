@@ -407,6 +407,12 @@ without changing the view orientation. Approved Claude framed the rig
 from Top. Hiding a lamp narrowed the fit, and increasing its range left
 the camera unchanged.
 
+**Browse for Build Destination** keeps the output name when choosing an
+existing parent folder and offers a save chooser for a Linux archive.
+Native editor tests with an isolated portal verified focus return,
+cancellation and ignoring stale replies. They published a folder and an
+archive under a path with spaces and preserved an occupied destination.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added

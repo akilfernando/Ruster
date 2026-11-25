@@ -801,16 +801,22 @@ fn create_project(location: &Path, name: &str, template: Template) -> Result<Ope
 }
 
 #[cfg(target_os = "linux")]
-#[derive(Clone, Copy)]
 pub(super) enum BrowseKind {
     Directory,
     OpenScene,
     SaveScene,
     ImportAsset,
+    BuildParent {
+        directory: PathBuf,
+    },
+    BuildArchive {
+        directory: PathBuf,
+        filename: String,
+    },
 }
 
 #[cfg(target_os = "linux")]
-type BrowseResult = Result<Option<String>, String>;
+pub(super) type BrowseResult = Result<Option<PathBuf>, String>;
 
 #[cfg(target_os = "linux")]
 #[derive(Default)]
@@ -836,7 +842,7 @@ impl FileBrowser {
             self.pending = None;
             match result {
                 Ok(Some(picked)) => {
-                    *path = picked;
+                    *path = picked.to_string_lossy().into_owned();
                     error.clear();
                     selected = true;
                 }
@@ -860,7 +866,10 @@ impl FileBrowser {
 /// The system's file dialog (through the desktop portal on Linux), on a
 /// worker thread so the editor keeps drawing while it is open.
 #[cfg(target_os = "linux")]
-fn browse(ctx: egui::Context, kind: BrowseKind) -> std::sync::mpsc::Receiver<BrowseResult> {
+pub(super) fn browse(
+    ctx: egui::Context,
+    kind: BrowseKind,
+) -> std::sync::mpsc::Receiver<BrowseResult> {
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     std::thread::spawn(move || {
         let dialog = rfd::FileDialog::new();
@@ -880,8 +889,20 @@ fn browse(ctx: egui::Context, kind: BrowseKind) -> std::sync::mpsc::Receiver<Bro
                 .set_title(Text::SaveSceneAs.plain())
                 .set_file_name("scene.json")
                 .save_file(),
+            BrowseKind::BuildParent { directory } => dialog
+                .set_title(Text::BuildChooseParentFolder.plain())
+                .set_directory(directory)
+                .pick_folder(),
+            BrowseKind::BuildArchive {
+                directory,
+                filename,
+            } => dialog
+                .set_title(Text::BuildChooseArchiveFile.plain())
+                .set_directory(directory)
+                .set_file_name(filename)
+                .save_file(),
         };
-        let _ = tx.send(Ok(picked.map(|path| path.to_string_lossy().into_owned())));
+        let _ = tx.send(Ok(picked));
         ctx.request_repaint();
     });
     rx

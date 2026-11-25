@@ -283,6 +283,11 @@ editor_text! {
     BuildFolderFormat => "Folder",
     BuildArchiveFormat => "Linux archive (.tar.gz)",
     BuildArchiveFile => "Archive File",
+    BuildChooseParentFolder => "Choose Build Parent Folder",
+    BuildChooseArchiveFile => "Choose Build Archive",
+    BuildBrowseParentHint => "Choose the parent folder. The new build folder keeps its name.",
+    BuildBrowseUnavailable => "Couldn't use the chosen destination. Enter an absolute path.",
+
     BuildCompressingArchive => "Compressing Archive…",
     BuildOpenFolder => "Open Build Folder",
     BuildFolderUnavailable => "The build folder moved or changed. Build again to a new folder.",
