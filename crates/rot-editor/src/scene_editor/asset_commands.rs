@@ -121,7 +121,7 @@ pub(super) fn asset_mutation(
                     source: source.into(),
                     normal_policy,
                 }
-            } else if source.ends_with(".glb") {
+            } else if source.ends_with(".glb") || source.ends_with(".gltf") {
                 AssetMutation::ImportGlb {
                     id,
                     source: source.into(),

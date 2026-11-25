@@ -16,6 +16,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 sha2 = "0.10"
 tempfile = "3"
+zune-jpeg = "0.5"
 
 [lints]
 workspace = true

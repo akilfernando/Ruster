@@ -84,7 +84,7 @@ enum Reconcile {
 
 impl Importer {
     fn from_path(path: &str) -> Option<Self> {
-        if path.ends_with(".glb") {
+        if path.ends_with(".glb") || path.ends_with(".gltf") {
             Some(Self::Model)
         } else {
             AssetKind::from_source(path).ok().map(Self::Asset)
@@ -112,7 +112,9 @@ impl AssetStore {
         match Importer::from_path(source) {
             Some(Importer::Asset(kind)) => Ok(kind.source_limit()),
             Some(Importer::Model) => Ok(super::MAX_GLB_SOURCE_BYTES),
-            None => Err(error("Rot imports OBJ, PNG, WAV, GLB, and prefab files.")),
+            None => Err(error(
+                "Rot imports OBJ, PNG, WAV, GLB, glTF, and prefab files.",
+            )),
         }
     }
 

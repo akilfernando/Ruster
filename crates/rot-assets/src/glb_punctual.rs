@@ -95,7 +95,6 @@ impl<T> Extensions<T> {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(super) struct Definitions {
     lights: Vec<Definition>,
     #[serde(default, rename = "extras")]
@@ -103,7 +102,6 @@ pub(super) struct Definitions {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(super) struct LightReference {
     light: usize,
     #[serde(default, rename = "extras")]
@@ -111,7 +109,6 @@ pub(super) struct LightReference {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Definition {
     #[serde(default)]
     name: String,
@@ -138,7 +135,7 @@ enum Kind {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct Spot {
     #[serde(default, deserialize_with = "present")]
     inner_cone_angle: Option<f64>,

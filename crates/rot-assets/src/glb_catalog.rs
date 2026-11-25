@@ -12,9 +12,10 @@ fn valid_hash(hash: &str) -> bool {
 
 fn validate_glb_path(source: &str) -> Result<(), AssetError> {
     validate_project_relative(source)?;
-    if Path::new(source).extension().and_then(|ext| ext.to_str()) != Some("glb") {
+    let ext = Path::new(source).extension().and_then(|ext| ext.to_str());
+    if !matches!(ext, Some("glb" | "gltf")) {
         return Err(error(
-            "static model import requires a project-relative .glb file",
+            "static model import requires a project-relative .glb or .gltf file",
         ));
     }
     Ok(())
@@ -31,25 +32,67 @@ fn generation_path(directory: &Path, hash: &str) -> PathBuf {
     directory.join(format!("{hash}.glb"))
 }
 
+fn read_uri(
+    root: &Path,
+    source: &str,
+    uri: &str,
+    allowed_exts: Option<&[&str]>,
+    limit: usize,
+) -> Result<Vec<u8>, AssetError> {
+    validate_project_relative(uri)?;
+    if uri.contains([':', '%', '?', '#']) {
+        return Err(error(
+            "GLB external resources require a relative path without URI schemes or queries",
+        ));
+    }
+    if let Some(exts) = allowed_exts {
+        let ext = Path::new(uri)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(str::to_ascii_lowercase);
+        if !ext.as_deref().is_some_and(|ext| exts.contains(&ext)) {
+            return Err(error(
+                "GLB external images require a relative PNG or JPEG path",
+            ));
+        }
+    }
+    let path = source
+        .rsplit_once('/')
+        .map_or_else(|| uri.to_owned(), |(folder, _)| format!("{folder}/{uri}"));
+    read_bounded(&confined_path(root, &path, false)?, limit)
+}
+
 pub(super) fn read_candidate(root: &Path, source: &str) -> Result<Vec<u8>, AssetError> {
     validate_glb_path(source)?;
-    let bytes = read_bounded(&confined_path(root, source, false)?, MAX_GLB_SOURCE_BYTES)?;
-    let embedded = glb::embed_external_images(&bytes, |uri| {
-        validate_project_relative(uri)?;
-        if uri.contains([':', '%', '?', '#'])
-            || Path::new(uri).extension().and_then(|ext| ext.to_str()) != Some("png")
-        {
-            return Err(error("GLB external images require a relative PNG path"));
-        }
-        let path = source
-            .rsplit_once('/')
-            .map_or_else(|| uri.to_owned(), |(folder, _)| format!("{folder}/{uri}"));
-        read_bounded(
-            &confined_path(root, &path, false)?,
-            MAX_TEXTURE_SOURCE_BYTES,
+    let path = confined_path(root, source, false)?;
+    if source.ends_with(".gltf") {
+        let json = read_bounded(&path, glb::MAX_JSON_BYTES)?;
+        glb::pack_gltf(
+            &json,
+            |uri| read_uri(root, source, uri, None, MAX_GLB_SOURCE_BYTES),
+            |uri| {
+                read_uri(
+                    root,
+                    source,
+                    uri,
+                    Some(&["png", "jpg", "jpeg"]),
+                    MAX_TEXTURE_SOURCE_BYTES,
+                )
+            },
         )
-    })?;
-    Ok(embedded.unwrap_or(bytes))
+    } else {
+        let bytes = read_bounded(&path, MAX_GLB_SOURCE_BYTES)?;
+        let embedded = glb::embed_external_images(&bytes, |uri| {
+            read_uri(
+                root,
+                source,
+                uri,
+                Some(&["png", "jpg", "jpeg"]),
+                MAX_TEXTURE_SOURCE_BYTES,
+            )
+        })?;
+        Ok(embedded.unwrap_or(bytes))
+    }
 }
 
 fn old_omitted_roughness(info: &ModelInfo, material: &str) -> bool {

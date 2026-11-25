@@ -400,6 +400,15 @@ fn decode_png_channel(
         }
     }
     drop(raw);
+    build_texture(role, width, height, pixels)
+}
+
+fn build_texture(
+    role: TextureRole,
+    width: u32,
+    height: u32,
+    pixels: Vec<u8>,
+) -> Result<Texture, AssetError> {
     let mut mips = vec![TextureMip {
         width,
         height,
@@ -423,6 +432,74 @@ fn decode_png_channel(
     };
     validate_texture(&texture)?;
     Ok(texture)
+}
+
+/// Package an already admitted RGBA8 level zero as ordinary RGB PNG for export/standalone loading.
+pub(crate) fn encode_rgb_source(texture: &Texture) -> Result<Vec<u8>, AssetError> {
+    let mut rgb = Vec::with_capacity(texture.width as usize * texture.height as usize * 3);
+    for rgba in texture.mips[0].bytes.as_chunks::<4>().0 {
+        rgb.extend_from_slice(&rgba[..3]);
+    }
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, texture.width, texture.height);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_compression(png::Compression::Fast);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| error(format!("RGB PNG encode: {e}")))?;
+        writer
+            .write_image_data(&rgb)
+            .map_err(|e| error(format!("RGB PNG pixels: {e}")))?;
+    }
+    Ok(bytes)
+}
+
+fn decode_jpeg_rgb(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), AssetError> {
+    use zune_jpeg::zune_core::{
+        bytestream::ZCursor, colorspace::ColorSpace, options::DecoderOptions,
+    };
+    let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGB);
+    let mut decoder = zune_jpeg::JpegDecoder::new_with_options(ZCursor::new(bytes), options);
+    decoder
+        .decode_headers()
+        .map_err(|e| error(format!("JPEG header decode: {e}")))?;
+    let (w, h) = decoder
+        .dimensions()
+        .ok_or_else(|| error("JPEG header is missing image dimensions"))?;
+    let width = u32::try_from(w).map_err(|_| error("JPEG width exceeds bounds"))?;
+    let height = u32::try_from(h).map_err(|_| error("JPEG height exceeds bounds"))?;
+    image_bytes(width, height, TextureRole::BaseColor)?;
+    let rgb = decoder
+        .decode()
+        .map_err(|e| error(format!("JPEG decode: {e}")))?;
+    if rgb.len() != w * h * 3 {
+        return Err(error(
+            "JPEG decoded byte count does not match RGB8 dimensions",
+        ));
+    }
+    Ok((width, height, rgb))
+}
+
+pub(crate) fn decode_jpeg(bytes: &[u8]) -> Result<(Texture, Vec<u8>), AssetError> {
+    let (width, height, rgb) = decode_jpeg_rgb(bytes)?;
+    let mut pixels = Vec::with_capacity(image_bytes(width, height, TextureRole::BaseColor)?);
+    for pixel in rgb.as_chunks::<3>().0 {
+        pixels.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
+    }
+    let texture = build_texture(TextureRole::BaseColor, width, height, pixels)?;
+    let png_bytes = encode_rgb_source(&texture)?;
+    Ok((texture, png_bytes))
+}
+
+pub(crate) fn decode_glb_jpeg_roughness(bytes: &[u8]) -> Result<Texture, AssetError> {
+    let (width, height, rgb) = decode_jpeg_rgb(bytes)?;
+    let mut pixels = Vec::with_capacity(image_bytes(width, height, TextureRole::Roughness)?);
+    for pixel in rgb.as_chunks::<3>().0 {
+        pixels.push(pixel[1]);
+    }
+    build_texture(TextureRole::Roughness, width, height, pixels)
 }
 
 fn append_indexed_pixels(
@@ -1023,5 +1100,45 @@ pub(crate) mod tests {
             chain_bytes(2048, 2048, TextureRole::Roughness).unwrap(),
             5_592_405
         );
+    }
+
+    #[test]
+    fn decode_jpeg_smoke() {
+        let jpeg: &[u8] = &[
+            255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 255, 219, 0,
+            67, 0, 2, 1, 1, 1, 1, 1, 2, 1, 1, 1, 2, 2, 2, 2, 2, 4, 3, 2, 2, 2, 2, 5, 4, 4, 3, 4, 6,
+            5, 6, 6, 6, 5, 6, 6, 6, 7, 9, 8, 6, 7, 9, 7, 6, 6, 8, 11, 8, 9, 10, 10, 10, 10, 10, 6,
+            8, 11, 12, 11, 10, 12, 9, 10, 10, 10, 255, 219, 0, 67, 1, 2, 2, 2, 2, 2, 2, 5, 3, 3, 5,
+            10, 7, 6, 7, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+            10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+            10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 255, 192, 0, 17, 8, 0, 1, 0, 1, 3, 1, 34, 0, 2,
+            17, 1, 3, 17, 1, 255, 196, 0, 31, 0, 0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 255, 196, 0, 181, 16, 0, 2, 1, 3, 3, 2, 4, 3, 5, 5,
+            4, 4, 0, 0, 1, 125, 1, 2, 3, 0, 4, 17, 5, 18, 33, 49, 65, 6, 19, 81, 97, 7, 34, 113,
+            20, 50, 129, 145, 161, 8, 35, 66, 177, 193, 21, 82, 209, 240, 36, 51, 98, 114, 130, 9,
+            10, 22, 23, 24, 25, 26, 37, 38, 39, 40, 41, 42, 52, 53, 54, 55, 56, 57, 58, 67, 68, 69,
+            70, 71, 72, 73, 74, 83, 84, 85, 86, 87, 88, 89, 90, 99, 100, 101, 102, 103, 104, 105,
+            106, 115, 116, 117, 118, 119, 120, 121, 122, 131, 132, 133, 134, 135, 136, 137, 138,
+            146, 147, 148, 149, 150, 151, 152, 153, 154, 162, 163, 164, 165, 166, 167, 168, 169,
+            170, 178, 179, 180, 181, 182, 183, 184, 185, 186, 194, 195, 196, 197, 198, 199, 200,
+            201, 202, 210, 211, 212, 213, 214, 215, 216, 217, 218, 225, 226, 227, 228, 229, 230,
+            231, 232, 233, 234, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 255, 196, 0, 31,
+            1, 0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+            11, 255, 196, 0, 181, 17, 0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1, 2, 119, 0, 1, 2, 3,
+            17, 4, 5, 33, 49, 6, 18, 65, 81, 7, 97, 113, 19, 34, 50, 129, 8, 20, 66, 145, 161, 177,
+            193, 9, 35, 51, 82, 240, 21, 98, 114, 209, 10, 22, 36, 52, 225, 37, 241, 23, 24, 25,
+            26, 38, 39, 40, 41, 42, 53, 54, 55, 56, 57, 58, 67, 68, 69, 70, 71, 72, 73, 74, 83, 84,
+            85, 86, 87, 88, 89, 90, 99, 100, 101, 102, 103, 104, 105, 106, 115, 116, 117, 118, 119,
+            120, 121, 122, 130, 131, 132, 133, 134, 135, 136, 137, 138, 146, 147, 148, 149, 150,
+            151, 152, 153, 154, 162, 163, 164, 165, 166, 167, 168, 169, 170, 178, 179, 180, 181,
+            182, 183, 184, 185, 186, 194, 195, 196, 197, 198, 199, 200, 201, 202, 210, 211, 212,
+            213, 214, 215, 216, 217, 218, 226, 227, 228, 229, 230, 231, 232, 233, 234, 242, 243,
+            244, 245, 246, 247, 248, 249, 250, 255, 218, 0, 12, 3, 1, 0, 2, 17, 3, 17, 0, 63, 0,
+            249, 94, 138, 40, 175, 143, 63, 212, 67, 255, 217,
+        ];
+        let (tex, png_bytes) = decode_jpeg(jpeg).unwrap();
+        assert_eq!((tex.width, tex.height), (1, 1));
+        assert!(tex.mips[0].bytes[0] > 170 && tex.mips[0].bytes[2] < 90);
+        assert_eq!(decode_png(&png_bytes).unwrap(), tex);
     }
 }

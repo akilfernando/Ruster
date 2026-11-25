@@ -1199,7 +1199,7 @@ fn copy_source(
     if !folder.starts_with("Assets") {
         return Err("Choose a destination inside Assets.".into());
     }
-    let bad_file = || "Choose a regular OBJ, PNG, WAV or GLB file.".to_owned();
+    let bad_file = || "Choose a regular OBJ, PNG, WAV, GLB or glTF file.".to_owned();
     let leaf = path
         .file_name()
         .and_then(|leaf| leaf.to_str())
@@ -1451,7 +1451,11 @@ impl<'a> WatchTree<'a> {
                         let source = name.strip_suffix(".rotmeta").unwrap_or(name);
                         if source.ends_with(".obj")
                             || source.ends_with(".glb")
+                            || source.ends_with(".gltf")
+                            || source.ends_with(".bin")
                             || source.ends_with(".png")
+                            || source.ends_with(".jpg")
+                            || source.ends_with(".jpeg")
                             || source.ends_with(".wav")
                             || source.ends_with(".lua")
                             || source.ends_with(".prefab")

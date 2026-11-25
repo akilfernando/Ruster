@@ -601,3 +601,354 @@ fn import_refuses_unplaceable_materials_and_transforms_before_publication() {
     assert_eq!(accepted.nodes.values().last().unwrap().scale, [1., 2., 3.]);
     assert_eq!(accepted.materials["Paint"].roughness, 0.08);
 }
+
+const RED_JPEG: &[u8] = &[
+    255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 255, 219, 0, 67, 0, 2,
+    1, 1, 1, 1, 1, 2, 1, 1, 1, 2, 2, 2, 2, 2, 4, 3, 2, 2, 2, 2, 5, 4, 4, 3, 4, 6, 5, 6, 6, 6, 5, 6,
+    6, 6, 7, 9, 8, 6, 7, 9, 7, 6, 6, 8, 11, 8, 9, 10, 10, 10, 10, 10, 6, 8, 11, 12, 11, 10, 12, 9,
+    10, 10, 10, 255, 219, 0, 67, 1, 2, 2, 2, 2, 2, 2, 5, 3, 3, 5, 10, 7, 6, 7, 10, 10, 10, 10, 10,
+    10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+    10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 255, 192,
+    0, 17, 8, 0, 1, 0, 1, 3, 1, 34, 0, 2, 17, 1, 3, 17, 1, 255, 196, 0, 31, 0, 0, 1, 5, 1, 1, 1, 1,
+    1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 255, 196, 0, 181, 16, 0, 2, 1,
+    3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 125, 1, 2, 3, 0, 4, 17, 5, 18, 33, 49, 65, 6, 19, 81, 97,
+    7, 34, 113, 20, 50, 129, 145, 161, 8, 35, 66, 177, 193, 21, 82, 209, 240, 36, 51, 98, 114, 130,
+    9, 10, 22, 23, 24, 25, 26, 37, 38, 39, 40, 41, 42, 52, 53, 54, 55, 56, 57, 58, 67, 68, 69, 70,
+    71, 72, 73, 74, 83, 84, 85, 86, 87, 88, 89, 90, 99, 100, 101, 102, 103, 104, 105, 106, 115,
+    116, 117, 118, 119, 120, 121, 122, 131, 132, 133, 134, 135, 136, 137, 138, 146, 147, 148, 149,
+    150, 151, 152, 153, 154, 162, 163, 164, 165, 166, 167, 168, 169, 170, 178, 179, 180, 181, 182,
+    183, 184, 185, 186, 194, 195, 196, 197, 198, 199, 200, 201, 202, 210, 211, 212, 213, 214, 215,
+    216, 217, 218, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 241, 242, 243, 244, 245, 246,
+    247, 248, 249, 250, 255, 196, 0, 31, 1, 0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1,
+    2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 255, 196, 0, 181, 17, 0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1,
+    2, 119, 0, 1, 2, 3, 17, 4, 5, 33, 49, 6, 18, 65, 81, 7, 97, 113, 19, 34, 50, 129, 8, 20, 66,
+    145, 161, 177, 193, 9, 35, 51, 82, 240, 21, 98, 114, 209, 10, 22, 36, 52, 225, 37, 241, 23, 24,
+    25, 26, 38, 39, 40, 41, 42, 53, 54, 55, 56, 57, 58, 67, 68, 69, 70, 71, 72, 73, 74, 83, 84, 85,
+    86, 87, 88, 89, 90, 99, 100, 101, 102, 103, 104, 105, 106, 115, 116, 117, 118, 119, 120, 121,
+    122, 130, 131, 132, 133, 134, 135, 136, 137, 138, 146, 147, 148, 149, 150, 151, 152, 153, 154,
+    162, 163, 164, 165, 166, 167, 168, 169, 170, 178, 179, 180, 181, 182, 183, 184, 185, 186, 194,
+    195, 196, 197, 198, 199, 200, 201, 202, 210, 211, 212, 213, 214, 215, 216, 217, 218, 226, 227,
+    228, 229, 230, 231, 232, 233, 234, 242, 243, 244, 245, 246, 247, 248, 249, 250, 255, 218, 0,
+    12, 3, 1, 0, 2, 17, 3, 17, 0, 63, 0, 249, 94, 138, 40, 175, 143, 63, 212, 67, 255, 217,
+];
+
+const BLUE_JPEG: &[u8] = &[
+    255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 255, 219, 0, 67, 0, 2,
+    1, 1, 1, 1, 1, 2, 1, 1, 1, 2, 2, 2, 2, 2, 4, 3, 2, 2, 2, 2, 5, 4, 4, 3, 4, 6, 5, 6, 6, 6, 5, 6,
+    6, 6, 7, 9, 8, 6, 7, 9, 7, 6, 6, 8, 11, 8, 9, 10, 10, 10, 10, 10, 6, 8, 11, 12, 11, 10, 12, 9,
+    10, 10, 10, 255, 219, 0, 67, 1, 2, 2, 2, 2, 2, 2, 5, 3, 3, 5, 10, 7, 6, 7, 10, 10, 10, 10, 10,
+    10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+    10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 255, 192,
+    0, 17, 8, 0, 1, 0, 1, 3, 1, 34, 0, 2, 17, 1, 3, 17, 1, 255, 196, 0, 31, 0, 0, 1, 5, 1, 1, 1, 1,
+    1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 255, 196, 0, 181, 16, 0, 2, 1,
+    3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 125, 1, 2, 3, 0, 4, 17, 5, 18, 33, 49, 65, 6, 19, 81, 97,
+    7, 34, 113, 20, 50, 129, 145, 161, 8, 35, 66, 177, 193, 21, 82, 209, 240, 36, 51, 98, 114, 130,
+    9, 10, 22, 23, 24, 25, 26, 37, 38, 39, 40, 41, 42, 52, 53, 54, 55, 56, 57, 58, 67, 68, 69, 70,
+    71, 72, 73, 74, 83, 84, 85, 86, 87, 88, 89, 90, 99, 100, 101, 102, 103, 104, 105, 106, 115,
+    116, 117, 118, 119, 120, 121, 122, 131, 132, 133, 134, 135, 136, 137, 138, 146, 147, 148, 149,
+    150, 151, 152, 153, 154, 162, 163, 164, 165, 166, 167, 168, 169, 170, 178, 179, 180, 181, 182,
+    183, 184, 185, 186, 194, 195, 196, 197, 198, 199, 200, 201, 202, 210, 211, 212, 213, 214, 215,
+    216, 217, 218, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 241, 242, 243, 244, 245, 246,
+    247, 248, 249, 250, 255, 196, 0, 31, 1, 0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1,
+    2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 255, 196, 0, 181, 17, 0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1,
+    2, 119, 0, 1, 2, 3, 17, 4, 5, 33, 49, 6, 18, 65, 81, 7, 97, 113, 19, 34, 50, 129, 8, 20, 66,
+    145, 161, 177, 193, 9, 35, 51, 82, 240, 21, 98, 114, 209, 10, 22, 36, 52, 225, 37, 241, 23, 24,
+    25, 26, 38, 39, 40, 41, 42, 53, 54, 55, 56, 57, 58, 67, 68, 69, 70, 71, 72, 73, 74, 83, 84, 85,
+    86, 87, 88, 89, 90, 99, 100, 101, 102, 103, 104, 105, 106, 115, 116, 117, 118, 119, 120, 121,
+    122, 130, 131, 132, 133, 134, 135, 136, 137, 138, 146, 147, 148, 149, 150, 151, 152, 153, 154,
+    162, 163, 164, 165, 166, 167, 168, 169, 170, 178, 179, 180, 181, 182, 183, 184, 185, 186, 194,
+    195, 196, 197, 198, 199, 200, 201, 202, 210, 211, 212, 213, 214, 215, 216, 217, 218, 226, 227,
+    228, 229, 230, 231, 232, 233, 234, 242, 243, 244, 245, 246, 247, 248, 249, 250, 255, 218, 0,
+    12, 3, 1, 0, 2, 17, 3, 17, 0, 63, 0, 248, 206, 138, 40, 175, 245, 16, 254, 83, 63, 255, 217,
+];
+
+fn encode_test_base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let b0 = u32::from(chunk[0]);
+        let b1 = u32::from(*chunk.get(1).unwrap_or(&0));
+        let b2 = u32::from(*chunk.get(2).unwrap_or(&0));
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((triple >> 18) & 0x3f) as usize] as char);
+        out.push(TABLE[((triple >> 12) & 0x3f) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[((triple >> 6) & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[(triple & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+#[test]
+fn gltf_with_external_bin_and_jpeg_texture_imports_reopens_and_refreshes() {
+    use serde_json::json;
+    let directory = tempfile::tempdir().unwrap();
+    let assets = directory.path().join("Assets");
+    let tex_dir = assets.join("Textures");
+    fs::create_dir_all(&tex_dir).unwrap();
+
+    let positions = [0.0_f32, 0., 0., 1., 0., 0., 0., 1., 0.];
+    let uvs = [0.0_f32, 0., 1., 0., 0., 1.];
+    let mut bin: Vec<u8> = positions.into_iter().flat_map(f32::to_le_bytes).collect();
+    bin.extend(uvs.into_iter().flat_map(f32::to_le_bytes));
+    let bin_len = bin.len();
+    fs::write(assets.join("crate.bin"), &bin).unwrap();
+    fs::write(tex_dir.join("albedo.jpg"), RED_JPEG).unwrap();
+
+    let gltf = json!({
+        "asset":{"version":"2.0","generator":"Blender 4.2"},
+        "scene":0,
+        "scenes":[{"nodes":[0]}],
+        "nodes":[{"name":"Crate","mesh":0}],
+        "meshes":[{"primitives":[{"attributes":{"POSITION":0,"TEXCOORD_0":1},"material":0}]}],
+        "materials":[{"name":"Paint","pbrMetallicRoughness":{"baseColorTexture":{"index":0},"metallicFactor":0,"roughnessFactor":0.6}}],
+        "textures":[{"source":0}],
+        "images":[{"uri":"Textures/albedo.jpg"}],
+        "buffers":[{"uri":"crate.bin","byteLength":bin_len}],
+        "bufferViews":[
+            {"buffer":0,"byteOffset":0,"byteLength":36},
+            {"buffer":0,"byteOffset":36,"byteLength":24}
+        ],
+        "accessors":[
+            {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"},
+            {"bufferView":1,"componentType":5126,"count":3,"type":"VEC2"}
+        ]
+    });
+    fs::write(
+        assets.join("crate.gltf"),
+        serde_json::to_vec(&gltf).unwrap(),
+    )
+    .unwrap();
+
+    // Path traversal from .gltf buffer URI must still refuse cleanly.
+    let mut escaping = gltf.clone();
+    escaping["buffers"][0]["uri"] = json!("../secret.bin");
+    fs::write(directory.path().join("secret.bin"), &bin).unwrap();
+    fs::write(
+        assets.join("escaping.gltf"),
+        serde_json::to_vec(&escaping).unwrap(),
+    )
+    .unwrap();
+
+    let (mut store, issues) = AssetStore::open_project(directory.path()).unwrap();
+    assert_eq!(issues.len(), 1, "{issues:?}");
+    assert!(issues[0].contains("escaping.gltf"));
+
+    let first = store.models().next().unwrap().clone();
+    let tex_id = first.materials["Paint"]
+        .base_color_texture
+        .as_ref()
+        .unwrap()
+        .clone();
+    let initial_tex = store.texture(&tex_id).unwrap().clone();
+    assert!(initial_tex.mips[0].bytes[0] > 170 && initial_tex.mips[0].bytes[2] < 90);
+    let snapshot_png = store
+        .export_snapshot(&BTreeSet::from([tex_id.clone()]))
+        .unwrap()
+        .read_sources()
+        .unwrap()
+        .remove(&tex_id)
+        .unwrap();
+    assert_eq!(rot_assets::decode_png(&snapshot_png).unwrap(), initial_tex);
+
+    // Updating the external JPEG refreshes the accepted model hash.
+    fs::write(tex_dir.join("albedo.jpg"), BLUE_JPEG).unwrap();
+    store.update_project_files(
+        &BTreeSet::from(["Assets/Textures/albedo.jpg".into()]),
+        || true,
+    );
+    let refreshed = store.model(&first.id).unwrap().clone();
+    assert_ne!(refreshed.hash, first.hash);
+    let updated_tex = store.texture(&tex_id).unwrap().clone();
+    assert!(updated_tex.mips[0].bytes[2] > 170 && updated_tex.mips[0].bytes[0] < 90);
+
+    // Accepted model survives deleting source .bin/.jpg and also supports data: URIs.
+    fs::remove_file(assets.join("crate.bin")).unwrap();
+    fs::remove_file(tex_dir.join("albedo.jpg")).unwrap();
+    let reopened = AssetStore::open(directory.path()).unwrap();
+    assert_eq!(reopened.model(&first.id), Some(&refreshed));
+
+    let mut data_uri_gltf = gltf;
+    data_uri_gltf["buffers"][0]["uri"] = json!(format!(
+        "data:application/octet-stream;base64,{}",
+        encode_test_base64(&bin)
+    ));
+    data_uri_gltf["images"][0]["uri"] = json!(format!(
+        "data:image/jpeg;base64,{}",
+        encode_test_base64(RED_JPEG)
+    ));
+    let embedded_path = assets.join("embedded.gltf");
+    fs::write(&embedded_path, serde_json::to_vec(&data_uri_gltf).unwrap()).unwrap();
+    let mut store2 = AssetStore::open(directory.path()).unwrap();
+    let embedded = store2
+        .import_glb_at(store2.revision(), "embedded", "Assets/embedded.gltf")
+        .unwrap();
+    let emb_tex = embedded.materials["Paint"]
+        .base_color_texture
+        .as_ref()
+        .unwrap();
+    assert!(store2.texture(emb_tex).unwrap().mips[0].bytes[0] > 170);
+}
+
+#[test]
+fn blender_and_cc0_real_world_gltf_features_import_with_warnings() {
+    use serde_json::json;
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("prop.glb");
+
+    // 3 positions + 3 non-unit normals + 2 lines + 3 colors + JPEG + WebP + CUBICSPLINE (3*2 VEC4 + 2 times)
+    let mut bin: Vec<u8> = [
+        0.0_f32, 0., 0., 1., 0., 0., 0., 1., 0., // 0..36: positions
+        0., 0., 1.05, 0., 0., 1.05, 0., 0., 1.05, // 36..72: unnormalized normals
+        1., 0., 0., 1., 0., 1., 0., 1., 0., 0., 1., 1., // 72..120: COLOR_0 VEC4
+        0., 1., // 120..128: times
+        // 128..224: CUBICSPLINE 2 keyframes * 3 VEC4 (in, val, out)
+        0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.70710677,
+        0.70710677, 0., 0., 0., 0.,
+    ]
+    .into_iter()
+    .flat_map(f32::to_le_bytes)
+    .collect();
+    let jpg_offset = bin.len();
+    bin.extend(RED_JPEG);
+    let webp_offset = bin.len();
+    bin.extend(b"RIFF\x00\x00\x00\x00WEBP");
+
+    let doc = json!({
+        "asset":{"version":"2.0","generator":"Blender 4.2","extras":{"exporter":"khronos"}},
+        "extensionsUsed":["KHR_materials_ior","KHR_materials_emissive_strength"],
+        "scene":1,
+        "scenes":[{"nodes":[1]},{"nodes":[0],"extras":{"collection":"Props"}}],
+        "skins":[{"joints":[0]}],
+        "nodes":[
+            {"name":"Prop","mesh":0,"skin":0,"extras":{"custom_prop":42}},
+            {"name":"IgnoredSceneNode"}
+        ],
+        "meshes":[{
+            "name":"PropMesh",
+            "extras":{"smooth":true},
+            "primitives":[
+                {
+                    "attributes":{"POSITION":0,"NORMAL":1,"COLOR_0":2},
+                    "material":0,
+                    "targets":[{"POSITION":0}],
+                    "extras":{"slot":0}
+                },
+                {
+                    "attributes":{"POSITION":0},
+                    "mode":1
+                },
+                {
+                    "attributes":{"POSITION":0},
+                    "material":1
+                }
+            ]
+        }],
+        "materials":[
+            {
+                "name":"Wood",
+                "extensions":{"KHR_materials_ior":{"ior":1.45}},
+                "pbrMetallicRoughness":{
+                    "baseColorTexture":{"index":0},
+                    "metallicFactor":0,
+                    "roughnessFactor":0.5
+                }
+            },
+            {
+                "name":"Wood",
+                "pbrMetallicRoughness":{
+                    "metallicRoughnessTexture":{"index":1},
+                    "metallicFactor":0,
+                    "roughnessFactor":0.5
+                }
+            }
+        ],
+        "samplers":[{"wrapS":33648,"wrapT":33648}],
+        "images":[
+            {"bufferView":4,"mimeType":"image/jpeg"},
+            {"bufferView":5,"mimeType":"image/webp"}
+        ],
+        "textures":[{"source":0,"sampler":0},{"source":1}],
+        "buffers":[{"byteLength":bin.len()}],
+        "bufferViews":[
+            {"buffer":0,"byteOffset":0,"byteLength":36},
+            {"buffer":0,"byteOffset":36,"byteLength":36},
+            {"buffer":0,"byteOffset":72,"byteLength":48},
+            {"buffer":0,"byteOffset":120,"byteLength":104},
+            {"buffer":0,"byteOffset":jpg_offset,"byteLength":RED_JPEG.len()},
+            {"buffer":0,"byteOffset":webp_offset,"byteLength":12}
+        ],
+        "accessors":[
+            {"bufferView":0,"byteOffset":0,"componentType":5126,"count":3,"type":"VEC3"},
+            {"bufferView":1,"byteOffset":0,"componentType":5126,"count":3,"type":"VEC3"},
+            {"bufferView":2,"byteOffset":0,"componentType":5126,"count":3,"type":"VEC4"},
+            {"bufferView":3,"byteOffset":0,"componentType":5126,"count":2,"type":"SCALAR"},
+            {"bufferView":3,"byteOffset":8,"componentType":5126,"count":6,"type":"VEC4"}
+        ],
+        "animations":[{
+            "channels":[
+                {"sampler":0,"target":{"node":0,"path":"rotation"}},
+                {"sampler":0,"target":{"node":0,"path":"weights"}}
+            ],
+            "samplers":[{"input":3,"output":4,"interpolation":"CUBICSPLINE"}]
+        }]
+    });
+
+    // Pack GLB inline using JSON + BIN
+    let mut json_bytes = serde_json::to_vec(&doc).unwrap();
+    json_bytes.resize(json_bytes.len().next_multiple_of(4), b' ');
+    bin.resize(bin.len().next_multiple_of(4), 0);
+    let total = 28 + json_bytes.len() + bin.len();
+    let mut glb = b"glTF".to_vec();
+    glb.extend(2_u32.to_le_bytes());
+    glb.extend((total as u32).to_le_bytes());
+    glb.extend((json_bytes.len() as u32).to_le_bytes());
+    glb.extend(b"JSON");
+    glb.extend(json_bytes);
+    glb.extend((bin.len() as u32).to_le_bytes());
+    glb.extend(b"BIN\0");
+    glb.extend(bin);
+    fs::write(&source, glb).unwrap();
+
+    let mut store = AssetStore::open(root.path()).unwrap();
+    let model = store.import_glb_at(0, "prop", "prop.glb").unwrap();
+    assert!(model.materials.contains_key("Wood"));
+    assert!(model.materials.contains_key("Wood (2)"));
+    assert!(model.materials["Wood"].base_color_texture.is_some());
+    assert!(model.materials["Wood (2)"].roughness_texture.is_none());
+    assert!(model.clips.contains_key("Clip 1"));
+
+    for snippet in [
+        "additional scene(s) ignored",
+        "Ignored optional glTF extension(s): KHR_materials_emissive_strength, KHR_materials_ior",
+        "Skeletal skinning omitted",
+        "Morph targets omitted",
+        "Vertex colors omitted",
+        "Generated default UVs",
+        "Skipped 1 non-triangle primitive(s)",
+        "sampler wrap mode approximated as Repeat",
+        "duplicate material name disambiguated",
+        "roughness map omitted (unsupported image format)",
+        "cubic spline interpolation imported as linear keys",
+        "morph target weights omitted",
+    ] {
+        assert!(
+            model
+                .warnings
+                .iter()
+                .any(|warning| warning.contains(snippet)),
+            "missing warning {snippet:?} in {:?}",
+            model.warnings
+        );
+    }
+
+    let reopened = AssetStore::open(root.path()).unwrap();
+    assert_eq!(reopened.model("prop"), Some(&model));
+}

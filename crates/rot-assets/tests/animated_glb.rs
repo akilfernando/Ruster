@@ -203,45 +203,68 @@ fn clip_import_refresh_and_reopen_keep_stable_identity() {
 }
 
 #[test]
-fn unsupported_animation_sources_refuse_before_publication() {
-    for (fixture, diagnostic) in [
+fn non_refusal_animation_variants_import_with_warnings_while_out_of_range_keys_refuse() {
+    for (fixture, expected_clip, warning) in [
         (
             AnimatedFixture {
                 rotation_interpolation: "CUBICSPLINE",
                 ..Default::default()
             },
-            "cubic spline interpolation is unsupported",
+            "Swing",
+            "cubic spline interpolation imported as linear keys",
         ),
         (
             AnimatedFixture {
                 rotation_path: "weights",
                 ..Default::default()
             },
-            "morph target weights are unsupported",
+            "Swing",
+            "morph target weights omitted",
         ),
         (
             AnimatedFixture {
                 clip_name: "bad/name",
                 ..Default::default()
             },
-            "animation clips require a unique",
-        ),
-        (
-            AnimatedFixture {
-                end_x: 20_000.0,
-                ..Default::default()
-            },
-            "translation within ±10000",
+            "bad-name",
+            "normalized clip name",
         ),
     ] {
         let root = tempfile::tempdir().unwrap();
         fs::write(root.path().join("rig.glb"), animated_glb(fixture)).unwrap();
         let mut store = AssetStore::open(root.path()).unwrap();
-        let failure = store.import_glb_at(0, "rig", "rig.glb").unwrap_err();
-        assert!(failure.to_string().contains(diagnostic), "{failure}");
-        assert!(!root.path().join(".rot-assets.json").exists());
-        assert!(!root.path().join(".rot-models").exists());
+        let model = store.import_glb_at(0, "rig", "rig.glb").unwrap();
+        assert!(model.clips.contains_key(expected_clip), "{:?}", model.clips);
+        assert!(
+            model.warnings.iter().any(|item| item.contains(warning)),
+            "{:?}",
+            model.warnings
+        );
+        if fixture.rotation_interpolation == "CUBICSPLINE" {
+            let payload: serde_json::Value =
+                serde_json::from_slice(store.clip(&model.clips["Swing"].id).unwrap()).unwrap();
+            assert_eq!(payload["tracks"][1]["interpolation"], "linear");
+            assert_eq!(payload["tracks"][1]["values"].as_array().unwrap().len(), 3);
+        }
     }
+
+    let root = tempfile::tempdir().unwrap();
+    fs::write(
+        root.path().join("rig.glb"),
+        animated_glb(AnimatedFixture {
+            end_x: 20_000.0,
+            ..Default::default()
+        }),
+    )
+    .unwrap();
+    let mut store = AssetStore::open(root.path()).unwrap();
+    let failure = store.import_glb_at(0, "rig", "rig.glb").unwrap_err();
+    assert!(
+        failure.to_string().contains("translation within ±10000"),
+        "{failure}"
+    );
+    assert!(!root.path().join(".rot-assets.json").exists());
+    assert!(!root.path().join(".rot-models").exists());
 }
 
 // Real exporter boundary: Blender samples every frame and starts keys at frame

@@ -883,7 +883,7 @@ pub(super) fn browse(
                 .pick_file(),
             BrowseKind::ImportAsset => dialog
                 .set_title(Text::ImportAsset.plain())
-                .add_filter("Assets", &["glb", "obj", "png", "wav"])
+                .add_filter("Assets", &["glb", "gltf", "obj", "png", "wav"])
                 .pick_file(),
             BrowseKind::SaveScene => dialog
                 .set_title(Text::SaveSceneAs.plain())

@@ -12,7 +12,7 @@ mod camera;
 pub use camera::{ModelCamera, ModelOrthographicCamera, ModelPerspectiveCamera};
 
 pub const MAX_GLB_SOURCE_BYTES: usize = 16 * 1024 * 1024;
-const MAX_JSON_BYTES: usize = 2 * 1024 * 1024;
+pub(super) const MAX_JSON_BYTES: usize = 2 * 1024 * 1024;
 // Match the scene hierarchy qualification bound, including the creator root
 // and the Group placed around an imported mesh that also has children.
 const MAX_GROUP_LEVELS: usize = 8;
@@ -269,29 +269,26 @@ impl ClipTrack {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Animation {
+    #[serde(default)]
     name: String,
     channels: Vec<Channel>,
     samplers: Vec<AnimationSampler>,
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Channel {
     sampler: usize,
     target: ChannelTarget,
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ChannelTarget {
-    node: usize,
+    node: Option<usize>,
     path: String,
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct AnimationSampler {
     input: usize,
     output: usize,
@@ -299,7 +296,7 @@ struct AnimationSampler {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct Document<'a> {
     asset: Header,
     #[serde(default)]
@@ -309,6 +306,7 @@ struct Document<'a> {
     #[serde(default, deserialize_with = "present")]
     extensions: Option<punctual::RootExtensions>,
     scene: Option<usize>,
+    #[serde(default)]
     scenes: Vec<SourceScene>,
     #[serde(borrow)]
     nodes: Vec<Node<'a>>,
@@ -332,10 +330,12 @@ struct Document<'a> {
     samplers: Vec<Sampler>,
     #[serde(default)]
     animations: Vec<Animation>,
+    #[serde(default)]
+    skins: Vec<serde::de::IgnoredAny>,
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct Header {
     version: String,
     #[serde(default, rename = "generator")]
@@ -345,19 +345,20 @@ struct Header {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct SourceScene {
     #[serde(default, rename = "name")]
     _name: String,
+    #[serde(default)]
     nodes: Vec<usize>,
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Node<'a> {
     #[serde(default)]
     name: String,
     mesh: Option<usize>,
+    #[serde(default)]
+    skin: Option<usize>,
     #[serde(default, deserialize_with = "present")]
     camera: Option<usize>,
     #[serde(default, deserialize_with = "present")]
@@ -379,24 +380,23 @@ fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct SourceMesh {
     #[serde(default, rename = "name")]
     _name: String,
     primitives: Vec<Primitive>,
 }
 
-#[derive(Clone, Copy, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Deserialize)]
 struct Primitive {
     attributes: Attributes,
     indices: Option<usize>,
     material: Option<usize>,
     mode: Option<u32>,
+    #[serde(default)]
+    targets: Vec<serde::de::IgnoredAny>,
 }
 
 #[derive(Clone, Copy, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Attributes {
     #[serde(rename = "POSITION")]
     positions: usize,
@@ -408,16 +408,18 @@ struct Attributes {
     uv: Option<usize>,
     #[serde(rename = "TEXCOORD_1")]
     secondary_uv: Option<usize>,
+    #[serde(rename = "COLOR_0")]
+    color: Option<usize>,
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct Buffer {
     byte_length: usize,
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct BufferView {
     buffer: usize,
     #[serde(default)]
@@ -428,7 +430,7 @@ struct BufferView {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct Accessor {
     buffer_view: usize,
     #[serde(default)]
@@ -446,7 +448,7 @@ struct Accessor {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct Material {
     name: Option<String>,
     #[serde(default)]
@@ -463,7 +465,7 @@ struct Material {
 }
 
 #[derive(Default, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct Surface {
     base_color_factor: Option<[f32; 4]>,
     base_color_texture: Option<TextureBinding>,
@@ -473,7 +475,7 @@ struct Surface {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct TextureBinding {
     index: usize,
     #[serde(default)]
@@ -487,14 +489,13 @@ struct TextureBinding {
 }
 
 #[derive(Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct TextureExtensions {
     #[serde(rename = "KHR_texture_transform")]
     transform: Option<TextureTransform>,
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct TextureTransform {
     offset: Option<[f32; 2]>,
     rotation: Option<f32>,
@@ -554,7 +555,6 @@ impl TextureBinding {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct SourceTexture {
     source: usize,
     sampler: Option<usize>,
@@ -563,7 +563,7 @@ struct SourceTexture {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct Image {
     buffer_view: usize,
     mime_type: String,
@@ -572,7 +572,7 @@ struct Image {
 }
 
 #[derive(Default, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct Sampler {
     mag_filter: Option<u32>,
     min_filter: Option<u32>,
@@ -617,7 +617,7 @@ impl Sampler {
         Ok((linear, warning))
     }
 
-    fn wrapping(&self) -> Result<bool, AssetError> {
+    fn wrapping(&self) -> Result<(bool, Option<&'static str>), AssetError> {
         let s = self.wrap_s.unwrap_or(10497);
         let t = self.wrap_t.unwrap_or(10497);
         for (field, token) in [("wrapS", s), ("wrapT", t)] {
@@ -626,9 +626,9 @@ impl Sampler {
             }
         }
         match (s, t) {
-            (10497, 10497) => Ok(true),
-            (33071, 33071) => Ok(false),
-            _ => Err(error("GLB sampler must repeat or clamp on both axes")),
+            (10497, 10497) => Ok((true, None)),
+            (33071, 33071) => Ok((false, None)),
+            _ => Ok((true, Some("sampler wrap mode approximated as Repeat"))),
         }
     }
 }
@@ -678,6 +678,261 @@ fn chunks(bytes: &[u8]) -> Result<(&[u8], Option<&[u8]>), AssetError> {
         return Err(error("additional GLB chunks are unsupported"));
     }
     Ok((json, bin))
+}
+
+fn decode_base64(input: &str) -> Result<Vec<u8>, AssetError> {
+    let clean: Vec<u8> = input
+        .bytes()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .collect();
+    if !clean.len().is_multiple_of(4) {
+        return Err(error("glTF base64 data has invalid length"));
+    }
+    let estimated = (clean.len() / 4) * 3;
+    if estimated > MAX_GLB_SOURCE_BYTES + 12 {
+        return Err(error("glTF data URI exceeds the model size limit"));
+    }
+    let mut out = Vec::with_capacity(estimated);
+    let (chunks, _) = clean.as_chunks::<4>();
+    let chunk_count = chunks.len();
+    for (chunk_idx, chunk) in chunks.iter().enumerate() {
+        let is_last = chunk_idx + 1 == chunk_count;
+        let mut vals = [0u8; 4];
+        let mut pad = 0usize;
+        for (i, &byte) in chunk.iter().enumerate() {
+            if byte == b'=' {
+                if !is_last || i < 2 || (i == 2 && chunk[3] != b'=') {
+                    return Err(error("glTF base64 data has invalid padding"));
+                }
+                pad += 1;
+                vals[i] = 0;
+            } else {
+                vals[i] = match byte {
+                    b'A'..=b'Z' => byte - b'A',
+                    b'a'..=b'z' => byte - b'a' + 26,
+                    b'0'..=b'9' => byte - b'0' + 52,
+                    b'+' => 62,
+                    b'/' => 63,
+                    _ => return Err(error("glTF base64 data has invalid character")),
+                };
+            }
+        }
+        out.push((vals[0] << 2) | (vals[1] >> 4));
+        if pad < 2 {
+            out.push((vals[1] << 4) | (vals[2] >> 2));
+        }
+        if pad == 0 {
+            out.push((vals[2] << 6) | vals[3]);
+        }
+    }
+    Ok(out)
+}
+
+fn decode_data_uri(uri: &str) -> Result<(Option<&str>, Vec<u8>), AssetError> {
+    let Some((header, payload)) = uri.strip_prefix("data:").and_then(|s| s.split_once(',')) else {
+        return Err(error("invalid glTF data URI"));
+    };
+    let Some(meta) = header.strip_suffix(";base64") else {
+        return Err(error("glTF data URI requires base64 encoding"));
+    };
+    let mime = meta.split(';').next().filter(|mime| !mime.is_empty());
+    Ok((mime, decode_base64(payload)?))
+}
+
+fn resolve_image_mime(uri: &str, declared: Option<&str>, data_mime: Option<&str>) -> String {
+    if let Some(mime) = declared.or(data_mime) {
+        if mime.eq_ignore_ascii_case("image/jpg") {
+            return "image/jpeg".to_owned();
+        }
+        return mime.to_owned();
+    }
+    let ext = Path::new(uri)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase);
+    if matches!(ext.as_deref(), Some("jpg" | "jpeg")) {
+        "image/jpeg".to_owned()
+    } else {
+        "image/png".to_owned()
+    }
+}
+
+fn embed_image_entries(
+    document: &mut serde_json::Value,
+    views: &mut Vec<serde_json::Value>,
+    combined: &mut Vec<u8>,
+    initial_view_count: u64,
+    read_image: &impl Fn(&str) -> Result<Vec<u8>, AssetError>,
+) -> Result<(), AssetError> {
+    use serde_json::{json, Value};
+    let Some(images) = document.get_mut("images").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    if images.len() > MAX_MODEL_ITEMS || views.len() > MAX_MODEL_ITEMS * 5 {
+        return Err(error("GLB image or bufferView count exceeds import limits"));
+    }
+    let mut embedded: BTreeMap<String, (usize, String)> = BTreeMap::new();
+    for image in images {
+        let Some(uri) = image.get("uri") else {
+            if image["bufferView"]
+                .as_u64()
+                .is_none_or(|index| index >= initial_view_count)
+            {
+                return Err(error("GLB image references a missing bufferView"));
+            }
+            continue;
+        };
+        let uri = uri.as_str().ok_or_else(|| error("invalid GLB image URI"))?;
+        if image.get("bufferView").is_some() {
+            return Err(error("GLB image must use either bufferView or uri"));
+        }
+        let declared_mime = image.get("mimeType").and_then(Value::as_str);
+        let (index, mime) = if let Some(entry) = embedded.get(uri) {
+            entry.clone()
+        } else {
+            let (data_mime, image_bytes) = if uri.starts_with("data:") {
+                decode_data_uri(uri)?
+            } else {
+                (None, read_image(uri)?)
+            };
+            let mime = resolve_image_mime(uri, declared_mime, data_mime);
+            let offset = combined.len().next_multiple_of(4);
+            if offset + image_bytes.len() > MAX_GLB_SOURCE_BYTES {
+                return Err(error("GLB and external images exceed the model size limit"));
+            }
+            let index = views.len();
+            views.push(json!({"buffer":0,"byteOffset":offset,"byteLength":image_bytes.len()}));
+            combined.resize(offset, 0);
+            combined.extend(image_bytes);
+            let entry = (index, mime);
+            embedded.insert(uri.to_owned(), entry.clone());
+            entry
+        };
+        let object = image.as_object_mut().expect("image with a URI");
+        object.remove("uri");
+        object.insert("bufferView".into(), json!(index));
+        object.insert("mimeType".into(), json!(mime));
+    }
+    Ok(())
+}
+
+fn assemble_glb(
+    document: &serde_json::Value,
+    mut combined: Vec<u8>,
+) -> Result<Vec<u8>, AssetError> {
+    let mut json = serde_json::to_vec(document)?;
+    json.resize(json.len().next_multiple_of(4), b' ');
+    if combined.is_empty() {
+        let total = 20 + json.len();
+        if total > MAX_GLB_SOURCE_BYTES || json.len() > MAX_JSON_BYTES {
+            return Err(error("glTF document exceeds the model size limit"));
+        }
+        let mut result = Vec::with_capacity(total);
+        result.extend(b"glTF");
+        result.extend(2_u32.to_le_bytes());
+        result.extend((total as u32).to_le_bytes());
+        result.extend((json.len() as u32).to_le_bytes());
+        result.extend(b"JSON");
+        result.extend(json);
+        return Ok(result);
+    }
+    combined.resize(combined.len().next_multiple_of(4), 0);
+    let total = 28 + json.len() + combined.len();
+    if total > MAX_GLB_SOURCE_BYTES || json.len() > MAX_JSON_BYTES {
+        return Err(error("GLB and external images exceed the model size limit"));
+    }
+    let mut result = Vec::with_capacity(total);
+    result.extend(b"glTF");
+    result.extend(2_u32.to_le_bytes());
+    result.extend((total as u32).to_le_bytes());
+    result.extend((json.len() as u32).to_le_bytes());
+    result.extend(b"JSON");
+    result.extend(json);
+    result.extend((combined.len() as u32).to_le_bytes());
+    result.extend(b"BIN\0");
+    result.extend(combined);
+    Ok(result)
+}
+
+/// Convert a JSON `.gltf` asset (external `.bin`/images or `data:` URIs) into a self-contained GLB.
+pub(super) fn pack_gltf(
+    json_bytes: &[u8],
+    read_buffer: impl Fn(&str) -> Result<Vec<u8>, AssetError>,
+    read_image: impl Fn(&str) -> Result<Vec<u8>, AssetError>,
+) -> Result<Vec<u8>, AssetError> {
+    use serde_json::{json, Value};
+    let mut document: Value = serde_json::from_slice(json_bytes)?;
+    let mut combined = Vec::new();
+    let buffers = document
+        .get("buffers")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut buffer_offsets = Vec::with_capacity(buffers.len());
+    let mut buffer_lengths = Vec::with_capacity(buffers.len());
+    for buffer in &buffers {
+        let uri = buffer
+            .get("uri")
+            .and_then(Value::as_str)
+            .ok_or_else(|| error("glTF external or data URI buffer requires a uri"))?;
+        let data = if uri.starts_with("data:") {
+            decode_data_uri(uri)?.1
+        } else {
+            read_buffer(uri)?
+        };
+        let byte_length = buffer
+            .get("byteLength")
+            .and_then(Value::as_u64)
+            .and_then(|size| usize::try_from(size).ok())
+            .filter(|&size| size <= data.len())
+            .ok_or_else(|| error("invalid glTF buffer byteLength"))?;
+        let offset = combined.len().next_multiple_of(4);
+        if offset + byte_length > MAX_GLB_SOURCE_BYTES {
+            return Err(error("glTF buffers exceed the model size limit"));
+        }
+        combined.resize(offset, 0);
+        combined.extend(&data[..byte_length]);
+        buffer_offsets.push(offset);
+        buffer_lengths.push(byte_length);
+    }
+    let mut views = document
+        .get_mut("bufferViews")
+        .and_then(Value::as_array_mut)
+        .map(std::mem::take)
+        .unwrap_or_default();
+    if views.len() > MAX_MODEL_ITEMS * 5 {
+        return Err(error("GLB image or bufferView count exceeds import limits"));
+    }
+    for value in &mut views {
+        let view: BufferView = serde_json::from_value(value.clone())?;
+        let Some(&base_offset) = buffer_offsets.get(view.buffer) else {
+            return Err(error("glTF bufferView references a missing buffer"));
+        };
+        let buf_len = buffer_lengths[view.buffer];
+        if view.byte_offset > buf_len || view.byte_length > buf_len - view.byte_offset {
+            return Err(error("glTF bufferView escapes its buffer"));
+        }
+        let object = value.as_object_mut().expect("bufferView object");
+        object.insert("buffer".into(), json!(0));
+        object.insert("byteOffset".into(), json!(base_offset + view.byte_offset));
+    }
+    let view_count = views.len() as u64;
+    embed_image_entries(
+        &mut document,
+        &mut views,
+        &mut combined,
+        view_count,
+        &read_image,
+    )?;
+    if !views.is_empty() {
+        document["bufferViews"] = json!(views);
+    }
+    document["buffers"] = if combined.is_empty() {
+        json!([])
+    } else {
+        json!([{"byteLength": combined.len()}])
+    };
+    assemble_glb(&document, combined)
 }
 
 /// Pin external images inside the accepted GLB generation so reopening and
@@ -744,76 +999,17 @@ pub(super) fn embed_external_images(
             return Err(error("GLB accessor references a missing bufferView"));
         }
     }
-    let images = document["images"]
-        .as_array_mut()
-        .ok_or_else(|| error("invalid GLB images"))?;
-    if images.len() > MAX_MODEL_ITEMS || views.len() > MAX_MODEL_ITEMS * 5 {
-        return Err(error("GLB image or bufferView count exceeds import limits"));
-    }
     let mut combined = bin[..length].to_vec();
-    let mut embedded = BTreeMap::new();
-    for image in images {
-        let Some(uri) = image.get("uri") else {
-            if image["bufferView"]
-                .as_u64()
-                .is_none_or(|index| index >= view_count)
-            {
-                return Err(error("GLB image references a missing bufferView"));
-            }
-            continue;
-        };
-        let uri = uri.as_str().ok_or_else(|| error("invalid GLB image URI"))?;
-        if image.get("bufferView").is_some()
-            || image
-                .get("mimeType")
-                .is_some_and(|mime| mime != "image/png")
-        {
-            return Err(error(
-                "GLB image must use a bufferView or a relative PNG path",
-            ));
-        }
-        let index = if let Some(&index) = embedded.get(uri) {
-            index
-        } else {
-            let image_bytes = read_image(uri)?;
-            let offset = combined.len().next_multiple_of(4);
-            if offset + image_bytes.len() > MAX_GLB_SOURCE_BYTES {
-                return Err(error("GLB and external images exceed the model size limit"));
-            }
-            let index = views.len();
-            views.push(json!({"buffer":0,"byteOffset":offset,"byteLength":image_bytes.len()}));
-            combined.resize(offset, 0);
-            combined.extend(image_bytes);
-            embedded.insert(uri.to_owned(), index);
-            index
-        };
-        image
-            .as_object_mut()
-            .expect("image with a URI")
-            .remove("uri");
-        image["bufferView"] = json!(index);
-        image["mimeType"] = json!("image/png");
-    }
+    embed_image_entries(
+        &mut document,
+        &mut views,
+        &mut combined,
+        view_count,
+        &read_image,
+    )?;
     document["bufferViews"] = json!(views);
     document["buffers"][0]["byteLength"] = json!(combined.len());
-    let mut json = serde_json::to_vec(&document)?;
-    json.resize(json.len().next_multiple_of(4), b' ');
-    combined.resize(combined.len().next_multiple_of(4), 0);
-    let total = 28 + json.len() + combined.len();
-    if total > MAX_GLB_SOURCE_BYTES || json.len() > MAX_JSON_BYTES {
-        return Err(error("GLB and external images exceed the model size limit"));
-    }
-    let mut result = Vec::with_capacity(total);
-    result.extend(b"glTF");
-    result.extend(2_u32.to_le_bytes());
-    result.extend((total as u32).to_le_bytes());
-    result.extend((json.len() as u32).to_le_bytes());
-    result.extend(b"JSON");
-    result.extend(json);
-    result.extend((combined.len() as u32).to_le_bytes());
-    result.extend(b"BIN\0");
-    result.extend(combined);
-    Ok(Some(result))
+    assemble_glb(&document, combined).map(Some)
 }
 
 fn at<'a, T>(values: &'a [T], index: usize, label: &str) -> Result<&'a T, AssetError> {
@@ -1037,6 +1233,7 @@ struct Decoder<'a> {
     bin: &'a [u8],
     seen: BTreeSet<usize>,
     used_materials: BTreeMap<String, usize>,
+    imported_material_names: BTreeMap<usize, String>,
     packed_roughness: bool,
     emission: bool,
     double_sided: bool,
@@ -1045,6 +1242,12 @@ struct Decoder<'a> {
     mesh_bytes: usize,
     texture_bytes: usize,
     skipped_triangles: usize,
+    skipped_non_surface_primitives: usize,
+    recomputed_normals: bool,
+    generated_default_uvs: bool,
+    has_skins: bool,
+    has_morph_targets: bool,
+    has_vertex_colors: bool,
     light_definitions: Vec<punctual::AdmittedLight>,
     used_lights: BTreeSet<usize>,
     camera_definitions: Vec<camera::AdmittedCamera>,
@@ -1161,7 +1364,7 @@ impl Decoder<'_> {
             .collect()
     }
 
-    fn mesh(&mut self, primitive: Primitive, textured: bool) -> Result<ModelResource, AssetError> {
+    fn mesh(&mut self, primitive: &Primitive, textured: bool) -> Result<ModelResource, AssetError> {
         let topology = match primitive.mode.unwrap_or(4) {
             4 => SurfaceTopology::Triangles,
             5 => SurfaceTopology::Strip,
@@ -1172,13 +1375,19 @@ impl Decoder<'_> {
                 ))
             }
         };
+        if !primitive.targets.is_empty() {
+            self.has_morph_targets = true;
+        }
+        if primitive.attributes.color.is_some() {
+            self.has_vertex_colors = true;
+        }
         let positions = self.vectors::<3>(primitive.attributes.positions, "VEC3")?;
         if let Some(tangents) = primitive.attributes.tangents {
             if self.rows(tangents, "VEC4", 4, 5126)?.len() != positions.len() {
                 return Err(error("GLB tangent count must match positions"));
             }
         }
-        let normal = primitive
+        let mut normal = primitive
             .attributes
             .normals
             .map(|i| self.vectors::<3>(i, "VEC3"))
@@ -1186,21 +1395,38 @@ impl Decoder<'_> {
         if let Some(index) = primitive.attributes.secondary_uv {
             at(&self.doc.accessors, index, "TEXCOORD_1 accessor")?;
         }
-        let uv = primitive
+        let mut uv = primitive
             .attributes
             .uv
             .map(|i| self.vectors::<2>(i, "VEC2"))
             .transpose()?;
-        if normal.as_ref().is_some_and(|n| {
-            n.len() != positions.len()
-                || n.iter()
-                    .any(|v| !(0.999..=1.001).contains(&v.iter().map(|x| x * x).sum::<f32>()))
-        }) || uv.as_ref().is_some_and(|uv| uv.len() != positions.len())
-            || (textured && uv.is_none())
-        {
-            return Err(error(
-                "GLB mesh attribute counts, unit normals or textured TEXCOORD_0 are invalid",
-            ));
+        if let Some(normals) = &mut normal {
+            if normals.len() != positions.len() {
+                return Err(error("GLB mesh attribute counts are invalid"));
+            }
+            let mut valid = true;
+            for vector in normals.iter_mut() {
+                let len_sq = vector.iter().map(|x| x * x).sum::<f32>();
+                if !len_sq.is_finite() || len_sq <= 1e-12 {
+                    valid = false;
+                    break;
+                }
+                if !(0.999..=1.001).contains(&len_sq) {
+                    let inv = 1.0 / len_sq.sqrt();
+                    *vector = [vector[0] * inv, vector[1] * inv, vector[2] * inv];
+                }
+            }
+            if !valid {
+                normal = None;
+                self.recomputed_normals = true;
+            }
+        }
+        if uv.as_ref().is_some_and(|uv| uv.len() != positions.len()) {
+            return Err(error("GLB mesh attribute counts are invalid"));
+        }
+        if textured && uv.is_none() {
+            uv = Some(vec![[0.0, 0.0]; positions.len()]);
+            self.generated_default_uvs = true;
         }
         let mut index_limit = positions.len();
         let indices: Vec<u32> = if let Some(i) = primitive.indices {
@@ -1304,8 +1530,11 @@ impl Decoder<'_> {
     }
 
     fn material(&mut self, index: usize) -> Result<String, AssetError> {
+        if let Some(existing) = self.imported_material_names.get(&index) {
+            return Ok(existing.clone());
+        }
         let material = at(&self.doc.materials, index, "material")?;
-        let name = if let Some(name) = material.name.as_deref() {
+        let base_name = if let Some(name) = material.name.as_deref() {
             named(name)?.to_owned()
         } else {
             (0..)
@@ -1317,23 +1546,32 @@ impl Decoder<'_> {
                     }
                 })
                 .find(|candidate| {
-                    !self
-                        .doc
-                        .materials
-                        .iter()
-                        .any(|entry| entry.name.as_ref() == Some(candidate))
+                    !self.used_materials.contains_key(candidate)
+                        && !self
+                            .doc
+                            .materials
+                            .iter()
+                            .any(|entry| entry.name.as_ref() == Some(candidate))
                 })
                 .expect("finite material names")
         };
-        if let Some(prior) = self.used_materials.get(&name) {
-            return if *prior == index {
-                Ok(name)
-            } else {
-                Err(error(format!(
-                    "GLB used material name {name:?} is ambiguous"
-                )))
-            };
-        }
+        let mut fallbacks = Vec::new();
+        let name = if self.used_materials.contains_key(&base_name) {
+            fallbacks.push("duplicate material name disambiguated");
+            (2..)
+                .map(|suffix| format!("{base_name} ({suffix})"))
+                .find(|candidate| {
+                    !self.used_materials.contains_key(candidate)
+                        && !self
+                            .doc
+                            .materials
+                            .iter()
+                            .any(|entry| entry.name.as_ref() == Some(candidate))
+                })
+                .expect("finite material names")
+        } else {
+            base_name
+        };
         let surface = &material.pbr_metallic_roughness;
         let rgba = surface.base_color_factor.unwrap_or([1.; 4]);
         let roughness = surface.roughness_factor.unwrap_or(1.);
@@ -1352,7 +1590,6 @@ impl Decoder<'_> {
                 "GLB material {name:?} has invalid factors or alpha mode"
             )));
         }
-        let mut fallbacks = Vec::new();
         if alpha != "OPAQUE" {
             fallbacks.push("alpha rendered opaque");
         }
@@ -1425,6 +1662,7 @@ impl Decoder<'_> {
                 return Err(error("GLB base color requires TEXCOORD_0"));
             }
             let uv = binding.uv_transform()?;
+            let mut uv_allowed = true;
             if self.uv_transforms && binding.has_uv_rotation() {
                 unsupported_uv(
                     self.required_uv_transform,
@@ -1436,34 +1674,44 @@ impl Decoder<'_> {
             } else if !self.uv_transforms && (uv != IDENTITY_UV || binding.has_uv_rotation()) {
                 fallbacks.push("base color UV transform omitted");
             }
-            let texture = at(&self.doc.textures, binding.index, "texture")?;
-            if let Some(index) = texture.sampler {
-                let sampler = at(&self.doc.samplers, index, "sampler")?;
-                (definition.linear, sampler_warning) = sampler.filtering()?;
-                definition.repeat = sampler.wrapping()?;
-            }
-            let image = at(&self.doc.images, texture.source, "image")?;
-            let (view, bytes) = self.view(image.buffer_view)?;
-            if image.mime_type != "image/png" || view.target.is_some() || view.byte_stride.is_some()
-            {
-                return Err(error(
-                    "GLB base color requires a tightly stored embedded PNG",
-                ));
-            }
-            let texture = decode_png(bytes)?;
-            if tex_coord == 0 {
-                let id = resource_id(&self.model.info.id, "base-color", &name);
-                base_resource = Some(ModelResource {
-                    bytes: Some(bytes.to_vec()),
-                    payload: Payload::Texture(texture),
-                });
-                definition.base_color_texture = Some(id);
-            } else {
+            if tex_coord != 0 {
+                uv_allowed = false;
                 unsupported_uv(
                     self.required_uv_transform,
                     &mut fallbacks,
                     "Base Color map omitted because it requires TEXCOORD_0",
                 )?;
+            }
+            let texture = at(&self.doc.textures, binding.index, "texture")?;
+            let image = at(&self.doc.images, texture.source, "image")?;
+            let (view, bytes) = self.view(image.buffer_view)?;
+            if view.target.is_some() || view.byte_stride.is_some() {
+                return Err(error(
+                    "GLB base color requires a tightly stored embedded image",
+                ));
+            }
+            let decoded_base = match image.mime_type.as_str() {
+                "image/png" => Some((decode_png(bytes)?, bytes.to_vec())),
+                "image/jpeg" | "image/jpg" => Some(texture::decode_jpeg(bytes)?),
+                _ => {
+                    fallbacks.push("Base Color map omitted (unsupported image format)");
+                    None
+                }
+            };
+            if let Some((decoded_tex, exported_bytes)) = decoded_base.filter(|_| uv_allowed) {
+                if let Some(index) = texture.sampler {
+                    let sampler = at(&self.doc.samplers, index, "sampler")?;
+                    (definition.linear, sampler_warning) = sampler.filtering()?;
+                    let (repeat, wrap_warning) = sampler.wrapping()?;
+                    definition.repeat = repeat;
+                    fallbacks.extend(wrap_warning);
+                }
+                let id = resource_id(&self.model.info.id, "base-color", &name);
+                base_resource = Some(ModelResource {
+                    bytes: Some(exported_bytes),
+                    payload: Payload::Texture(decoded_tex),
+                });
+                definition.base_color_texture = Some(id);
             }
         }
         let mut roughness_sampler_warning = None;
@@ -1495,18 +1743,21 @@ impl Decoder<'_> {
                 && uv != (definition.uv_tiling, definition.uv_offset)
             {
                 unsupported_uv(self.required_uv_transform, &mut fallbacks, "roughness map omitted because it needs different tiling or offset from Base Color")?;
-            } else if image.mime_type != "image/png"
-                || view.target.is_some()
-                || view.byte_stride.is_some()
-            {
-                fallbacks.push("roughness map omitted because it requires a tightly stored PNG");
+            } else if view.target.is_some() || view.byte_stride.is_some() {
+                fallbacks.push("roughness map omitted because it requires a tightly stored image");
+            } else if !matches!(
+                image.mime_type.as_str(),
+                "image/png" | "image/jpeg" | "image/jpg"
+            ) {
+                fallbacks.push("roughness map omitted (unsupported image format)");
             } else {
                 let mut repeat = true;
                 let mut linear = true;
+                let mut wrap_warning = None;
                 if let Some(index) = texture.sampler {
                     let sampler = at(&self.doc.samplers, index, "roughness sampler")?;
                     (linear, roughness_sampler_warning) = sampler.filtering()?;
-                    repeat = sampler.wrapping()?;
+                    (repeat, wrap_warning) = sampler.wrapping()?;
                 }
                 if definition.base_color_texture.is_some()
                     && (linear, repeat) != (definition.linear, definition.repeat)
@@ -1514,11 +1765,19 @@ impl Decoder<'_> {
                     fallbacks.push("roughness map omitted because it needs a different sampler from Base Color");
                     roughness_sampler_warning = None;
                 } else {
+                    fallbacks.extend(wrap_warning);
                     (definition.uv_tiling, definition.uv_offset) = uv;
                     definition.linear = linear;
                     definition.repeat = repeat;
-                    let roughness = texture::decode_glb_roughness(bytes).map_err(|failure| {
-                        error(format!("GLB material {name:?} roughness PNG: {failure}"))
+                    let roughness = if image.mime_type == "image/png" {
+                        texture::decode_glb_roughness(bytes)
+                    } else {
+                        texture::decode_glb_jpeg_roughness(bytes)
+                    }
+                    .map_err(|failure| {
+                        error(format!(
+                            "GLB material {name:?} roughness texture: {failure}"
+                        ))
                     })?;
                     let id = resource_id(&self.model.info.id, "roughness", &name);
                     self.retain(
@@ -1546,6 +1805,7 @@ impl Decoder<'_> {
                 .push(format!("{name}: {}", fallbacks.join(", ")));
         }
         self.used_materials.insert(name.clone(), index);
+        self.imported_material_names.insert(index, name.clone());
         self.model.info.materials.insert(name.clone(), definition);
         Ok(name)
     }
@@ -1554,7 +1814,7 @@ impl Decoder<'_> {
         &mut self,
         node: &mut ModelNode,
         path: &str,
-        primitive: Primitive,
+        primitive: &Primitive,
         material: Option<String>,
     ) -> Result<(), AssetError> {
         let textured = material.as_ref().is_some_and(|material| {
@@ -1577,7 +1837,7 @@ impl Decoder<'_> {
         parent: Option<&str>,
         ancestors: &mut Vec<PlacementPose>,
     ) -> Result<(), AssetError> {
-        let mut unique = [true; MAX_MODEL_ITEMS];
+        let mut unique = vec![true; self.doc.nodes.len()];
         {
             let mut names = BTreeMap::new();
             for &index in indices {
@@ -1621,6 +1881,9 @@ impl Decoder<'_> {
             return Err(error("GLB hierarchy contains a repeated or cyclic node"));
         }
         let node = at(&self.doc.nodes, index, "node")?;
+        if node.skin.is_some() {
+            self.has_skins = true;
+        }
         let primitives = node
             .mesh
             .map(|mesh| at(&self.doc.meshes, mesh, "mesh"))
@@ -1631,8 +1894,16 @@ impl Decoder<'_> {
                 "GLB mesh on node {path:?} has no primitives"
             )));
         }
-        let split = primitives.len() > 1;
-        let becomes_group = split || node.mesh.is_none() || !node.children.is_empty();
+        let mut surface_primitives = Vec::new();
+        for primitive in primitives {
+            if matches!(primitive.mode, Some(0..=3)) {
+                self.skipped_non_surface_primitives += 1;
+            } else {
+                surface_primitives.push(primitive.clone());
+            }
+        }
+        let split = surface_primitives.len() > 1;
+        let becomes_group = split || surface_primitives.is_empty() || !node.children.is_empty();
         let group_levels = 1 + ancestors.len() + usize::from(becomes_group);
         if group_levels > MAX_GROUP_LEVELS {
             return Err(error(format!("GLB node {path:?} exceeds eight Group levels with the placement root; simplify the source hierarchy")));
@@ -1661,9 +1932,8 @@ impl Decoder<'_> {
             .validate_world()
             .map_err(|e| error(format!("GLB node {path:?}: {e}")))?;
         let children = node.children.clone();
-        let primitives = primitives.to_vec();
         let mut occurrences = BTreeMap::new();
-        for primitive in primitives {
+        for primitive in surface_primitives {
             let material = primitive
                 .material
                 .map(|index| self.material(index))
@@ -1687,10 +1957,10 @@ impl Decoder<'_> {
                     light: None,
                     camera: None,
                 };
-                self.attach_primitive(&mut child, &child_path, primitive, material)?;
+                self.attach_primitive(&mut child, &child_path, &primitive, material)?;
                 self.model.info.nodes.insert(child_path, child);
             } else {
-                self.attach_primitive(&mut definition, &path, primitive, material)?;
+                self.attach_primitive(&mut definition, &path, &primitive, material)?;
             }
         }
         self.model.info.nodes.insert(path.clone(), definition);
@@ -1703,40 +1973,62 @@ impl Decoder<'_> {
         ancestors.pop();
         Ok(())
     }
+}
 
+#[derive(Default)]
+struct ClipFallbacks {
+    missing_target: bool,
+    matrix_target: bool,
+    morph_weights: bool,
+    cubic_spline: bool,
+}
+
+impl Decoder<'_> {
     fn track(
         &self,
         clip: &str,
         animation: &Animation,
         channel: &Channel,
-    ) -> Result<ClipTrack, AssetError> {
+        fallbacks: &mut ClipFallbacks,
+    ) -> Result<Option<ClipTrack>, AssetError> {
         let fail = |reason: &str| error(format!("GLB animation {clip:?}: {reason}"));
-        let node = self
-            .paths
-            .get(&channel.target.node)
-            .ok_or_else(|| fail("a channel targets a node outside the imported hierarchy"))?;
-        if self.doc.nodes[channel.target.node].matrix.is_some() {
-            return Err(fail(&format!("node {node:?} must use TRS for animation")));
+        let Some(target_node) = channel.target.node else {
+            fallbacks.missing_target = true;
+            return Ok(None);
+        };
+        let Some(node) = self.paths.get(&target_node) else {
+            fallbacks.missing_target = true;
+            return Ok(None);
+        };
+        if self.doc.nodes[target_node].matrix.is_some() {
+            fallbacks.matrix_target = true;
+            return Ok(None);
         }
         let property = match channel.target.path.as_str() {
             "translation" => ClipProperty::Translation,
             "rotation" => ClipProperty::Rotation,
             "scale" => ClipProperty::Scale,
-            "weights" => return Err(fail(
-                "morph target weights are unsupported; remove shape key animation before export",
-            )),
+            "weights" => {
+                fallbacks.morph_weights = true;
+                return Ok(None);
+            }
             _ => return Err(fail("channels must target translation, rotation or scale")),
         };
         let sampler = at(&animation.samplers, channel.sampler, "animation sampler")?;
-        let interpolation =
-            match sampler.interpolation.as_deref().unwrap_or("LINEAR") {
-                "LINEAR" => "linear",
-                "STEP" => "step",
-                "CUBICSPLINE" => return Err(fail(
-                    "cubic spline interpolation is unsupported; export sampled (baked) LINEAR keys",
-                )),
-                _ => return Err(fail("unknown sampler interpolation")),
-            };
+        let is_cubic = match sampler.interpolation.as_deref().unwrap_or("LINEAR") {
+            "LINEAR" => false,
+            "CUBICSPLINE" => {
+                fallbacks.cubic_spline = true;
+                true
+            }
+            "STEP" => false,
+            _ => return Err(fail("unknown sampler interpolation")),
+        };
+        let interpolation = if sampler.interpolation.as_deref() == Some("STEP") {
+            "step"
+        } else {
+            "linear"
+        };
         let times: Vec<f32> = self
             .rows(sampler.input, "SCALAR", 1, 5126)?
             .map(|row| f32::from_bits(u32_at(row, 0)))
@@ -1751,9 +2043,15 @@ impl Decoder<'_> {
                 "key times must be 1..1024 strictly increasing seconds within 0..600",
             ));
         }
+        let expected_stride = if is_cubic { 3 } else { 1 };
         let values: Vec<Vec<f32>> = if property == ClipProperty::Rotation {
-            self.vectors::<4>(sampler.output, "VEC4")?
-                .into_iter()
+            let raw = self.vectors::<4>(sampler.output, "VEC4")?;
+            if raw.len() != times.len() * expected_stride {
+                return Err(fail("each sampler needs exactly one output per key time"));
+            }
+            raw.into_iter()
+                .skip(usize::from(is_cubic))
+                .step_by(expected_stride)
                 .map(|q| {
                     let q = DQuat::from_array(q.map(f64::from));
                     if (q.length_squared() - 1.).abs() > 1e-3 {
@@ -1763,14 +2061,16 @@ impl Decoder<'_> {
                 })
                 .collect::<Result<_, _>>()?
         } else {
-            self.vectors::<3>(sampler.output, "VEC3")?
-                .into_iter()
+            let raw = self.vectors::<3>(sampler.output, "VEC3")?;
+            if raw.len() != times.len() * expected_stride {
+                return Err(fail("each sampler needs exactly one output per key time"));
+            }
+            raw.into_iter()
+                .skip(usize::from(is_cubic))
+                .step_by(expected_stride)
                 .map(|v| v.to_vec())
                 .collect()
         };
-        if values.len() != times.len() {
-            return Err(fail("each sampler needs exactly one output per key time"));
-        }
         let group = self.group_paths.contains(node);
         for value in &values {
             let valid = match property {
@@ -1785,13 +2085,13 @@ impl Decoder<'_> {
                 return Err(error(format!("GLB animation {clip:?} node {node:?}: keys require translation within ±10000 and scale 0.001..1000, uniform on nodes placed as Groups")));
             }
         }
-        Ok(ClipTrack {
+        Ok(Some(ClipTrack {
             node: node.clone(),
             property,
             interpolation,
             times,
             values,
-        })
+        }))
     }
 
     /// Every key time must leave the whole hierarchy placeable, using the same
@@ -1844,43 +2144,111 @@ impl Decoder<'_> {
         if self.doc.animations.len() > MAX_MODEL_CLIPS {
             return Err(error("GLB models support at most 8 animation clips"));
         }
-        for animation in &self.doc.animations {
-            let name = named(&animation.name)
-                .map_err(|_| error("GLB animation clips require a unique 1..128 byte name with no slash or controls"))?;
-            if self.model.info.clips.contains_key(name) {
-                return Err(error(format!("duplicate GLB animation clip name {name:?}")));
+        for (anim_index, animation) in self.doc.animations.iter().enumerate() {
+            let clean: String = animation
+                .name
+                .trim()
+                .chars()
+                .map(|ch| {
+                    if ch == '/' || ch.is_control() {
+                        '-'
+                    } else {
+                        ch
+                    }
+                })
+                .collect();
+            let mut base = if clean.is_empty() {
+                format!("Clip {}", anim_index + 1)
+            } else {
+                clean
+            };
+            while base.len() > 128 {
+                base.pop();
             }
-            if animation.channels.is_empty() || animation.channels.len() > MAX_CLIP_TRACKS {
+            let base = base.trim().to_owned();
+            let base = if base.is_empty() {
+                format!("Clip {}", anim_index + 1)
+            } else {
+                base
+            };
+            let name = if self.model.info.clips.contains_key(&base) {
+                (2..)
+                    .map(|suffix| format!("{base} ({suffix})"))
+                    .find(|candidate| !self.model.info.clips.contains_key(candidate))
+                    .expect("finite clip names")
+            } else {
+                base
+            };
+            if name != animation.name {
+                self.model.info.warnings.push(format!(
+                    "Animation {:?}: normalized clip name to {name:?}.",
+                    animation.name
+                ));
+            }
+            if animation.channels.len() > MAX_CLIP_TRACKS {
                 return Err(error(format!(
-                    "GLB animation {name:?} requires 1..96 channels"
+                    "GLB animation {name:?} exceeds {MAX_CLIP_TRACKS} channels"
                 )));
             }
-            let mut tracks = animation
-                .channels
-                .iter()
-                .map(|channel| self.track(name, animation, channel))
-                .collect::<Result<Vec<_>, _>>()?;
+            let mut fallbacks = ClipFallbacks::default();
+            let mut tracks = Vec::with_capacity(animation.channels.len());
+            for channel in &animation.channels {
+                if let Some(track) = self.track(&name, animation, channel, &mut fallbacks)? {
+                    tracks.push(track);
+                }
+            }
+            if fallbacks.missing_target {
+                self.model.info.warnings.push(format!(
+                    "Animation {name:?}: skipped channel targeting an unreachable node."
+                ));
+            }
+            if fallbacks.matrix_target {
+                self.model.info.warnings.push(format!(
+                    "Animation {name:?}: skipped channel on matrix-transform node."
+                ));
+            }
+            if fallbacks.morph_weights {
+                self.model
+                    .info
+                    .warnings
+                    .push(format!("Animation {name:?}: morph target weights omitted."));
+            }
+            if fallbacks.cubic_spline {
+                self.model.info.warnings.push(format!(
+                    "Animation {name:?}: cubic spline interpolation imported as linear keys."
+                ));
+            }
             tracks.sort_by(|a, b| (&a.node, a.property).cmp(&(&b.node, b.property)));
-            if tracks
-                .windows(2)
-                .any(|pair| pair[0].node == pair[1].node && pair[0].property == pair[1].property)
-            {
-                return Err(error(format!(
-                    "GLB animation {name:?} animates one node property more than once"
-                )));
+            let before_dedup = tracks.len();
+            tracks.dedup_by(|a, b| a.node == b.node && a.property == b.property);
+            if tracks.len() != before_dedup {
+                self.model.info.warnings.push(format!(
+                    "Animation {name:?}: duplicate animation channel ignored."
+                ));
+            }
+            if tracks.is_empty() {
+                self.model.info.warnings.push(format!(
+                    "Animation {name:?}: skipped clip with no supported transform tracks."
+                ));
+                continue;
             }
             let duration = tracks
                 .iter()
                 .map(|track| *track.times.last().expect("nonempty keys"))
                 .fold(0.0_f32, f32::max);
-            if duration <= 0.
-                || tracks.iter().map(|track| track.times.len()).sum::<usize>() > MAX_CLIP_KEYS
-            {
+            if duration <= 0. {
+                self.model
+                    .info
+                    .warnings
+                    .push(format!("Animation {name:?}: skipped zero-duration clip."));
+                continue;
+            }
+            if tracks.iter().map(|track| track.times.len()).sum::<usize>() > MAX_CLIP_KEYS {
                 return Err(error(format!(
-                    "GLB animation {name:?} requires a positive duration and at most 8192 keys"
+                    "GLB animation {name:?} exceeds {MAX_CLIP_KEYS} total keys"
                 )));
             }
-            self.validate_clip_poses(name, &tracks)?;
+            self.validate_clip_poses(&name, &tracks)?;
             let bytes = serde_json::to_vec(&ClipPayload {
                 format: "rot-clip",
                 version: 1,
@@ -1892,9 +2260,9 @@ impl Decoder<'_> {
                     "GLB animation {name:?} exceeds the 1 MiB clip payload limit"
                 )));
             }
-            let id = resource_id(&self.model.info.id, "clip", name);
+            let id = resource_id(&self.model.info.id, "clip", &name);
             self.model.info.clips.insert(
-                name.to_owned(),
+                name,
                 ModelClip {
                     id: id.clone(),
                     duration,
@@ -1976,9 +2344,10 @@ pub(super) fn decode_accepted(
             ))
         }
     };
+    let scene_index = doc.scene.unwrap_or(0);
     if doc.asset.version != "2.0"
-        || doc.scenes.len() != 1
-        || doc.scene.unwrap_or(0) != 0
+        || doc.scenes.is_empty()
+        || scene_index >= doc.scenes.len()
         || doc.nodes.is_empty()
         || doc.nodes.len() > MAX_MODEL_ITEMS
         || doc.cameras.len() > MAX_MODEL_ITEMS
@@ -2023,7 +2392,7 @@ pub(super) fn decode_accepted(
         .enumerate()
         .map(|(index, camera)| camera.admit(index, place_orthographic))
         .collect::<Result<Vec<_>, _>>()?;
-    let roots = doc.scenes[0].nodes.clone();
+    let roots = doc.scenes[scene_index].nodes.clone();
     let required_uv_transform = doc
         .extensions_required
         .iter()
@@ -2033,6 +2402,7 @@ pub(super) fn decode_accepted(
         bin,
         seen: BTreeSet::new(),
         used_materials: BTreeMap::new(),
+        imported_material_names: BTreeMap::new(),
         packed_roughness,
         emission,
         double_sided,
@@ -2041,6 +2411,12 @@ pub(super) fn decode_accepted(
         mesh_bytes: 0,
         texture_bytes: 0,
         skipped_triangles: 0,
+        skipped_non_surface_primitives: 0,
+        recomputed_normals: false,
+        generated_default_uvs: false,
+        has_skins: false,
+        has_morph_targets: false,
+        has_vertex_colors: false,
         light_definitions,
         used_lights: BTreeSet::new(),
         camera_definitions,
@@ -2081,6 +2457,67 @@ pub(super) fn decode_accepted(
         ));
     }
     decoder.animations()?;
+    if decoder.doc.scenes.len() > 1 {
+        let extra = decoder.doc.scenes.len() - 1;
+        decoder.model.info.warnings.push(format!(
+            "Imported default glTF scene; {extra} additional scene(s) ignored."
+        ));
+    }
+    let mut ignored_extensions: Vec<&str> = decoder
+        .doc
+        .extensions_used
+        .iter()
+        .map(String::as_str)
+        .filter(|ext| !matches!(*ext, "KHR_lights_punctual" | "KHR_texture_transform"))
+        .collect();
+    ignored_extensions.sort_unstable();
+    if !ignored_extensions.is_empty() {
+        decoder.model.info.warnings.push(format!(
+            "Ignored optional glTF extension(s): {}.",
+            ignored_extensions.join(", ")
+        ));
+    }
+    if !decoder.doc.skins.is_empty() || decoder.has_skins {
+        decoder
+            .model
+            .info
+            .warnings
+            .push("Skeletal skinning omitted; meshes imported in bind pose.".into());
+    }
+    if decoder.has_morph_targets {
+        decoder
+            .model
+            .info
+            .warnings
+            .push("Morph targets omitted.".into());
+    }
+    if decoder.has_vertex_colors {
+        decoder
+            .model
+            .info
+            .warnings
+            .push("Vertex colors omitted.".into());
+    }
+    if decoder.recomputed_normals {
+        decoder
+            .model
+            .info
+            .warnings
+            .push("Recomputed invalid vertex normals.".into());
+    }
+    if decoder.generated_default_uvs {
+        decoder
+            .model
+            .info
+            .warnings
+            .push("Generated default UVs for a textured primitive missing TEXCOORD_0.".into());
+    }
+    if decoder.skipped_non_surface_primitives != 0 {
+        decoder.model.info.warnings.push(format!(
+            "Skipped {} non-triangle primitive(s).",
+            decoder.skipped_non_surface_primitives
+        ));
+    }
     if decoder.skipped_triangles != 0 {
         decoder.model.info.warnings.push(format!(
             "Skipped {} degenerate triangle{}.",
@@ -2218,7 +2655,8 @@ mod tests {
         let accepted = store.import_glb_at(0, "surface", "surface.glb").unwrap();
         let too_many = vec![0; MAX_TRIANGLES + 3];
         for (mode, indices, expected) in [
-            (1, &[0, 1, 2][..], "primitive mode must be"),
+            (1, &[0, 1, 2][..], "requires a reachable mesh"),
+            (7, &[0, 1, 2][..], "primitive mode must be"),
             (5, &[0, 1][..], "triangle index count or range"),
             (6, &[0, 1, 3], "triangle index count or range"),
             (5, too_many.as_slice(), "triangle index count or range"),
@@ -2302,13 +2740,17 @@ mod tests {
                 .contains(diagnostic));
         }
         for (wrap_s, wrap_t, expected) in [
-            (None, Some(10497), Ok(true)),
-            (Some(33071), Some(33071), Ok(false)),
-            (Some(33071), None, Err("repeat or clamp on both axes")),
+            (None, Some(10497), Ok((true, None))),
+            (Some(33071), Some(33071), Ok((false, None))),
+            (
+                Some(33071),
+                None,
+                Ok((true, Some("sampler wrap mode approximated as Repeat"))),
+            ),
             (
                 Some(33648),
                 Some(33648),
-                Err("repeat or clamp on both axes"),
+                Ok((true, Some("sampler wrap mode approximated as Repeat"))),
             ),
             (None, Some(1), Err("wrapT 1")),
         ] {

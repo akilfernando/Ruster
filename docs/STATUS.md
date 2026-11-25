@@ -21,12 +21,13 @@ Updated 2026-11-25. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   `C-01` design, `C-04` files-first `Assets/`, `C-07` linked prefabs, `C-11`
   multi-scene projects & `C-11a` crash recovery, `C-12` 5k/50k benchmarks,
   `C-05` Hierarchy & Inspector (live single/multi-object axis scrubbing with
-  one-step Undo; live Play editing deferred to Phase 4), `C-05a`–`d`, `C-09a`,
-  `C-13`–`C-61` authoring slices, and Phase 4 Game HUD labels.
+  one-step Undo; live Play editing deferred to Phase 4), `C-08` General glTF
+  import (non-refusal `.glb`/`.gltf` with external `.bin`/`data:` URIs, JPEG
+  textures, and fallback warnings; full PBR/animated rigs in Phase 3A/3B),
+  `C-05a`–`d`, `C-09a`, `C-13`–`C-61` authoring slices, and Phase 4 Game HUD
+  labels.
 - **Open to exit Phase 2** (new `C-62+` convenience slices are frozen per
   2026-11-25 user approval until `C-EXIT` passes):
-  - `C-08`: confirm non-refusal `.glb`/`.gltf` import with warnings and move
-    full PBR/animated rigs to Phase 3A/3B.
   - `C-02`: automatic v1–v22 → v23 migration, convert tracked `examples/`
     scenes, delete legacy pre-v23 scene editor.
   - `C-06`: retire legacy MCP tools once legacy editor is removed (`C-02`),
@@ -46,7 +47,7 @@ Updated 2026-11-25. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 
 In v23, create projects and scenes, assemble component hierarchies and prefabs,
 and edit transforms, lighting, cameras, colliders and opaque materials. Import
-OBJ, PNG, WAV and supported GLB assets. Attach Lua files, set per-object
+OBJ, PNG, WAV, GLB and glTF assets. Attach Lua files, set per-object
 number, Boolean and Vector3 properties, and test gameplay in Play. Build
 packages supported scenes as a runnable Linux folder or `.tar.gz` archive.
 Approved AI apps work alongside the editor through MCP and share Undo. Legacy

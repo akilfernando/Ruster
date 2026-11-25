@@ -40,7 +40,6 @@ cuts below in order.
 
 | Package | Outcome | Status & remaining gap |
 | --- | --- | --- |
-| `C-08` General glTF import | Non-refusal `.glb`/`.gltf` import with warnings instead of refusals. | `in progress — closing` · Confirm `.glb`/`.gltf` non-refusal import with warnings on the Phase 2 CC0 + Blender content; move full PBR maps, animated lenses, and animated lights to Phase 3A/3B; close `C-08`. |
 | `C-02` Scene crate & v23 cutover | `rot-scene` and `rot-editor` run exclusively on v23 with automatic upgrade on open. | `in progress` · Enable automatic v1–v22 → v23 migration (`ComponentScene::from_legacy`), convert `examples/` tracked scenes to v23, and delete legacy v1–v22 editor paths, `creation_export.rs`, and `scripts/package_creation.py`. See [C-01 brief](plans/C-01-OBJECT-COMPONENT-MODEL.md). |
 | `C-06` General MCP tools | Small general tool set (< 15 KB) using the shared command layer (`A4`). | `in progress — closing` · Retire legacy MCP tools once the legacy editor is deleted (`C-02`), route v23 MCP commands through the shared command/transaction layer, keep catalog `< 15 KB`, close `C-06`. |
 | `C-03` Native component runtime | Runtime, renderer and scripts execute `ComponentScene` flat arrays directly. | `in progress` · Retire `component_behavior.rs` (`behavior_projection()`) and `RuntimeScene::Behavior(Session)` so dynamic hierarchies, renderable parents, multiple components, and >256 objects run natively. |
@@ -91,7 +90,10 @@ completed packages:
   design), `C-04` (files-first `Assets/`), `C-05` (Hierarchy & Inspector with
   live single/multi-object axis scrubbing, parented descendants & lights preview,
   Escape cancel, and one-step Undo; live editing during Play deferred to
-  Phase 4), `C-07` (linked prefabs), `C-11` &
+  Phase 4), `C-07` (linked prefabs), `C-08` (non-refusal `.glb`/`.gltf`
+  import with external `.bin`/image & `data:` URI packing, JPEG textures, and
+  warnings on real-world CC0/Blender fallbacks; full PBR maps, animated
+  lenses, and animated lights tracked in Phase 3A/3B), `C-11` &
   `C-11a` (multi-scene projects & crash recovery), `C-12` (5k/50k benchmark
   scenes), `C-05a`–`d`, `C-09a`, and slices `C-13`–`C-61`.
 - **Phase 4 — Early slice:** Game HUD labels (`2026-11-23`, `607fc96`).

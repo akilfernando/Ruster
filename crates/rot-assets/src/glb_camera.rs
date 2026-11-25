@@ -83,7 +83,6 @@ impl ModelOrthographicCamera {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(super) struct SourceCamera {
     #[serde(rename = "type")]
     kind: Kind,
@@ -107,7 +106,7 @@ enum Kind {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct Perspective {
     yfov: f64,
     znear: f64,
@@ -122,7 +121,6 @@ struct Perspective {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Orthographic {
     xmag: f64,
     ymag: f64,

@@ -862,7 +862,7 @@ editor_text! {
 
     // Assets Browser
     AssetsBrowserAddsASecondAsset => "Adds a second asset that reads this file the other way",
-    AssetsBrowserImportGlbObjPng => "Import .glb, .obj, .png, .wav or .lua files, or drop them here",
+    AssetsBrowserImportGlbObjPng => "Import .glb, .gltf, .obj, .png, .wav or .lua files, or drop them here",
     AssetsBrowserOrDragItFrom => "Or drag it from Assets into the Scene view.",
     AssetsBrowserThisAssetIsNo => "This asset is no longer in the project.",
     Grid => "Grid",

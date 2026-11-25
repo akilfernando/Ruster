@@ -41,29 +41,38 @@ impl Default for AnimatedFixture {
 /// two second clip animating Arm rotation (three keys) and translation (two keys).
 pub fn animated_glb(fixture: AnimatedFixture) -> Vec<u8> {
     let half = fixture.mid_angle / 2.0;
+    let cubic = fixture.rotation_interpolation == "CUBICSPLINE";
+    let rot_keys = [
+        [0., 0., 0., 1.],
+        [0., 0., half.sin(), half.cos()],
+        [0., 0., 0., 1.],
+    ];
+    let rotations: Vec<f32> = rot_keys
+        .into_iter()
+        .flat_map(|key| {
+            if cubic {
+                vec![
+                    0., 0., 0., 0., key[0], key[1], key[2], key[3], 0., 0., 0., 0.,
+                ]
+            } else {
+                key.to_vec()
+            }
+        })
+        .collect();
+    let rot_count = if cubic { 9 } else { 3 };
+    let rot_bytes = rot_count * 16;
+    let trans_time_offset = 48 + rot_bytes;
+    let trans_val_offset = trans_time_offset + 8;
     let floats: Vec<f32> = [
         // 0: positions, 36 bytes
         vec![0., 0., 0., 1., 0., 0., 0., 1., 0.],
         // 36: rotation times, 12 bytes
         vec![0., 1., 2.],
-        // 48: rotation quaternions XYZW, 48 bytes
-        vec![
-            0.,
-            0.,
-            0.,
-            1.,
-            0.,
-            0.,
-            half.sin(),
-            half.cos(),
-            0.,
-            0.,
-            0.,
-            1.,
-        ],
-        // 96: translation times, 8 bytes
+        // 48: rotation quaternions XYZW (3 or 9 VEC4s)
+        rotations,
+        // translation times, 8 bytes
         vec![0., 2.],
-        // 104: translations, 24 bytes
+        // translations, 24 bytes
         vec![0., 0., 0., fixture.end_x, 0., 0.],
     ]
     .concat();
@@ -82,14 +91,14 @@ pub fn animated_glb(fixture: AnimatedFixture) -> Vec<u8> {
         "bufferViews":[
             {"buffer":0,"byteOffset":0,"byteLength":36},
             {"buffer":0,"byteOffset":36,"byteLength":12},
-            {"buffer":0,"byteOffset":48,"byteLength":48},
-            {"buffer":0,"byteOffset":96,"byteLength":8},
-            {"buffer":0,"byteOffset":104,"byteLength":24},
+            {"buffer":0,"byteOffset":48,"byteLength":rot_bytes},
+            {"buffer":0,"byteOffset":trans_time_offset,"byteLength":8},
+            {"buffer":0,"byteOffset":trans_val_offset,"byteLength":24},
         ],
         "accessors":[
             {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"},
             {"bufferView":1,"componentType":5126,"count":3,"type":"SCALAR"},
-            {"bufferView":2,"componentType":5126,"count":3,"type":"VEC4"},
+            {"bufferView":2,"componentType":5126,"count":rot_count,"type":"VEC4"},
             {"bufferView":3,"componentType":5126,"count":2,"type":"SCALAR"},
             {"bufferView":4,"componentType":5126,"count":2,"type":"VEC3"},
         ],

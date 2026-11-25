@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::mpsc;
 
 /// File types the importer reads.
-const IMPORTABLE: [&str; 5] = ["glb", "obj", "png", "wav", "lua"];
+const IMPORTABLE: [&str; 6] = ["glb", "gltf", "obj", "png", "wav", "lua"];
 
 pub(super) type TextureThumbnails =
     BTreeMap<String, (std::sync::Weak<rot_assets::Texture>, egui::TextureHandle)>;
@@ -208,7 +208,7 @@ impl SceneEditor {
                     crate::console::Level::Warning,
                     "Assets",
                     format!(
-                        "Not imported: {} (Rot imports .glb, .obj, .png, .wav and .lua)",
+                        "Not imported: {} (Rot imports .glb, .gltf, .obj, .png, .wav and .lua)",
                         path.display()
                     ),
                 );

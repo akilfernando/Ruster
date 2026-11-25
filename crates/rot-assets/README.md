@@ -148,39 +148,31 @@ bounded `rot-clip` version 1 JSON payload that the editor preview and
 exported runtime sample, and `export_snapshot` captures the payloads of
 requested clip IDs and pins them in the resource identity.
 
-A clip may hold 96 tracks, 1,024 keys per track, 8,192 keys in total,
-600 seconds and a 1 MiB payload. Key times are strictly increasing
-seconds. Every key must respect placement bounds, and scale keys on nodes
-placed as Groups must be uniform. The importer checks the whole hierarchy
-at every key time. It refuses cubic-spline samplers, morph weights,
-unnamed or duplicate clips and repeated channels with a specific message.
-Refresh accepts changed key times and values. A changed clip set or
-animated node property set is structural and needs a fresh import.
-Blender's default export samples every frame as LINEAR keys and is
-accepted; skinned armatures and shape keys are separate future work.
+The importer also accepts `.gltf` JSON assets (resolving relative external
+`.bin` buffers, relative PNG/JPEG textures, and base64 `data:` URIs into an
+accepted GLB generation). It checks the whole hierarchy at every key time and
+warns instead of failing when importing real-world exports with multiple scenes,
+optional extensions, skinning, morph targets, vertex colors, non-triangle helper
+primitives, non-unit normals, missing `TEXCOORD_0` on textured meshes, duplicate
+material names, approximated sampler wrapping, unsupported image formats (such as
+WebP), `CUBICSPLINE` key conversion, or omitted morph-weight/matrix/missing-node
+animation channels. Refresh accepts changed key times and values. A changed
+clip set or animated node property set is structural and needs a fresh import.
+Blender's default exports and common CC0 packs import with warnings; full PBR
+maps, skeletal skinning, animated lenses, and animated lights belong to
+Phases 3–4.
 
-The subset accepts one embedded GLB 2.0 scene and BIN buffer, positive
-bounded TRS, named paths with unique siblings, and triangle primitives
-with base color and roughness. Unnamed materials get generated names. With
-multiple primitives, each surface is a mesh child of the
-original node and keeps its material. Its resource ID follows the material
-and occurrence within that material. A primitive without a material uses
-the scene's default surface. Nodes that become Groups require uniform scale;
-mesh leaves can use nonuniform scale. The hierarchy may have at most eight
-Group levels including the placement root and groups that wrap a mesh with
-children or multiple surfaces. The resolved placement must stay within scene transform bounds.
-Base color uses a compatible PNG with TEXCOORD_0, optional repeat or clamp on
-both axes, and supported matching min/mag/mipmap filters. Textures may be
-embedded or referenced by a plain relative PNG path in the model's directory
-or a subfolder. Import pins the PNG bytes with the model for reopen and
-standalone builds. Editing the PNG in `Assets/` triggers a model refresh.
-Import warns when it renders alpha as opaque, double-sided materials as
-single-sided, or metallic materials as dielectric. It clamps roughness to a
-minimum of 0.08 and warns when it omits normal, emissive, occlusion, and
-metallic-roughness maps, a nonzero emissive factor, or a non-identity base
-color UV transform. Import skips degenerate triangles and reports how many
-it skipped. Tangents can be present and are unused. External buffers, skins,
-morphs and matrices are unsupported. Derived OBJ preserves the order of
-retained triangles and the existing renderer's normal and UV convention.
-The export snapshot passes only the verified generated OBJ/PNG closure to
-the existing standalone resource loader.
+The importer accepts triangle meshes with base color (PNG or JPEG) and
+metallic-roughness textures, positive bounded TRS or TRS-decomposable matrices,
+and `KHR_lights_punctual` / glTF cameras. Textures may be embedded or
+referenced by a plain relative PNG/JPEG path in the model's directory or a
+subfolder (or base64 `data:` URI). Import pins texture bytes with the model for
+reopen and standalone builds. Editing a referenced `.bin` or texture file in
+`Assets/` triggers a model refresh. Import warns when it renders alpha as
+opaque, double-sided materials as single-sided, or metallic materials as
+dielectric. It clamps roughness to a minimum of 0.08 and warns when it omits
+normal, emissive, occlusion, and metallic-roughness maps, a nonzero emissive
+factor, or an unsupported UV transform, and skips degenerate triangles with a
+warning. Derived OBJ preserves the order of retained triangles and the existing
+renderer's normal and UV convention. The export snapshot passes only the
+verified generated OBJ/PNG closure to the existing standalone resource loader.
