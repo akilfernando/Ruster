@@ -1,6 +1,6 @@
 ---
 name: rot-development
-description: Entry point for working on the Rot Engine repository. Points to AGENTS.md, docs/PLAYBOOK.md and docs/BACKLOG.md. Apply only to Rot Engine project work.
+description: Develop Rot Engine and coordinate authorized autonomous development runs. Use for Rot Engine backlog, implementation, and integration work.
 ---
 # Rot Engine development
 

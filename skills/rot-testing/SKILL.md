@@ -12,3 +12,8 @@ This skill is a pointer. Verification is described in the repository:
 Write the few tests that protect behavior a creator depends on, run
 `python3 scripts/check.py` before merging, and look at the editor with
 `scripts/ui_drive.py` for any UI change.
+
+For substantial visual verification, delegate to Terra when available.
+Provide the candidate screenshots or an isolated, app-scoped scenario and
+name the states to inspect. Follow the desktop isolation rules in
+`AGENTS.md`. The coordinator reviews the findings and owns the final gate.

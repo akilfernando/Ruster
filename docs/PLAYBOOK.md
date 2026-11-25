@@ -56,18 +56,31 @@ user-visible steps and do the first one completely.
 
 ### Autonomous runs
 
-For an authorized breadth-first run, have Astra choose a bounded creator
-workflow from the current product gaps. Favor a missing outcome that unlocks
-a usable editor or game journey. Rotate to another underdeveloped area once
-the current one can serve that journey. Use the parity plan's reference
-projects to tie slices together.
+For an authorized autonomous run, repeat this loop while the user’s run
+limit permits new work.
 
-Give Sol the base commit, creator outcome, acceptance scenario, relevant
-risks and the point at which the slice is done. Agree on the performance
-question and measurement boundary before building a benchmark. The
-coordinator owns the integration gate and reuses the implementer's evidence
-where the relevant inputs still match. Share fixtures and builds. Coordinate
-Cargo use and keep competing work away from timed measurements.
+1. **Astra defines the goal.** Check the backlog and current code. Pick one
+   bounded creator workflow, with a clear starting point, a usable outcome,
+   an acceptance scenario, and a stopping point. Rotate to another
+   underdeveloped area once the current area can serve the chosen workflow.
+   Connect related slices through the parity plan's reference projects.
+2. **Sol implements the slice.** Give Sol the base commit, scope, acceptance
+   scenario, relevant risks, and stopping point. Agree on the question and
+   measurement boundary before building a performance check. Share fixtures
+   and builds, coordinate Cargo use, and keep competing work away from
+   timed measurements.
+3. **Terra reviews substantial visual work.** Share screenshots or an
+   isolated app-scoped test of the candidate build. Name the changed
+   controls, appearances and sizes that matter. Ask for concrete findings
+   about layout, states and focus. For a small visual change, the
+   coordinator can review the screenshots directly. Follow AGENTS.md for
+   all desktop interaction.
+4. **The coordinator reviews and integrates.** Review the diff against the
+   goal, reuse applicable verification, close gaps, run the integration
+   gate, and verify the merged revision before claiming the next package.
+
+Use the closest available model or handle that role in the current session
+if a preferred model is unavailable.
 
 Use hosted CI waits for independent review or the next read-only brief when
 authorized. Use the final hosted result for the integrated revision. Check
@@ -213,7 +226,7 @@ Use what your host offers. Do not research or benchmark models.
 | Writing or revising a package brief, architecture, a hard bug, review of a risky change | Fable | Astra |
 | Implementing a package | Opus | Sol |
 | Mechanical edits, renames, fixtures | Sonnet or Haiku | Luna |
-| Judging screenshots | The working model reads the images | Terra, or the working model |
+| Substantial visual verification | A visual-capable model | Terra |
 
 Packages marked **brief needed** must get their brief from the strongest model
 available before anyone implements them. Implementers follow the brief; if it
