@@ -43,8 +43,9 @@ history and cost tens of thousands of tokens.
    reaches. Get one real example working through all of it before widening.
 4. **Use it and look at it.** Run the changed journey in a disposable project
    in one representative appearance. Use a second size for layout or scaling
-   risk. Check the specific controls whose appearance changes in the other
-   theme. See [testing appearance](TESTING.md#risk-specific-evidence).
+   risk. Check a second appearance only when an affected palette, wording,
+   artwork or control state gives a concrete reason. See
+   [testing appearance](TESTING.md#risk-specific-evidence).
 5. **Protect it.** Add one to three tests that would catch a real regression.
    Run the gate.
 6. **Finish.** Tick the package in BACKLOG, update STATUS, update the user

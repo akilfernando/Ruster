@@ -349,8 +349,8 @@ Starting set. Every key has both; the user will refine the Rot column.
 
 Review the applicable checks on screenshots of the affected UI. Use both
 1280×800 and 1920×1080 for layout and scaling changes. For a change confined
-to one control, use a representative size and check any affected appearance
-variants.
+to one control, use a representative size. Check another appearance only
+when a specific difference could affect the changed controls or layout.
 
 1. Would this surface look at home in Unity or Unreal? Is each control where
    a user of those engines would look first?
