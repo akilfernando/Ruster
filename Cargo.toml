@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/rot-core", "crates/rot-cli", "crates/rot-viewer", "crates/rot-editor", "crates/rot-mcp", "crates/rot-scene", "crates/rot-render", "crates/rot-assets", "crates/rot-app", "crates/rot-script", "crates/rot-behavior", "examples/yard-app", "examples/motion-lab"]
+members = ["crates/rot-support", "crates/rot-editor", "crates/rot-mcp", "crates/rot-scene", "crates/rot-render", "crates/rot-assets", "crates/rot-app", "crates/rot-behavior", "examples/motion-lab"]
 resolver = "2"
 exclude = ["third_party/egui_tiles", "third_party/wgpu-hal", "third_party/transform-gizmo", "third_party/transform-gizmo-egui", "third_party/mlua"]
 

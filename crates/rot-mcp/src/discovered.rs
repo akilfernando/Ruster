@@ -194,7 +194,7 @@ fn launch(directory: &Path, target: &str, cwd: Option<&Path>) -> Result<discover
         .unwrap_or_else(|| PathBuf::from("rot-editor"));
     let mut command = std::process::Command::new(editor);
     for (key, _) in std::env::vars_os() {
-        if key.to_string_lossy().starts_with("ROT_MCP_") || key == "ROT_PROJECT_STARTUP" {
+        if key.to_string_lossy().starts_with("ROT_MCP_") {
             command.env_remove(key);
         }
     }

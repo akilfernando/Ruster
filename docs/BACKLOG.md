@@ -40,7 +40,6 @@ cuts below in order.
 
 | Package | Outcome | Status & remaining gap |
 | --- | --- | --- |
-| `C-00a` Legacy retirement | Remove unused legacy logistics crates and superseded MCP enrollment plumbing. | `open` (user-approved 2026-11-25) · Delete `rot-core`, `rot-cli`, `rot-viewer`, `rot-script`, `examples/yard-app`, legacy editor `ui.rs`/`model.rs`/`commands.rs`, `crates/support/{enrollment,project_startup}.rs`, and `scripts/enroll_local_connector.py`; promote `crates/support` to a workspace crate. |
 | `C-05` Hierarchy and Inspector | Rebuilt on components with immediate scrub feedback and standard hierarchy/inspector parity. | `in progress — closing` · Fix live Inspector axis scrubbing (`PARITY-PLAN` §5); explicitly defer live editing during Play to Phase 4; close `C-05`. |
 | `C-06` General MCP tools | Small general tool set (< 15 KB) using the shared command layer (`A4`). | `in progress — closing` · Retire legacy MCP tools once the legacy editor is deleted (`C-02`), route v23 MCP commands through the shared command/transaction layer, keep catalog `< 15 KB`, close `C-06`. |
 | `C-08` General glTF import | Non-refusal `.glb`/`.gltf` import with warnings instead of refusals. | `in progress — closing` · Confirm `.glb`/`.gltf` non-refusal import with warnings on the Phase 2 CC0 + Blender content; move full PBR maps, animated lenses, and animated lights to Phase 3A/3B; close `C-08`. |
@@ -86,8 +85,10 @@ completed packages:
 
 - **Phase 1 — Shell (done 2026-11-17–19):** `S-01`–`S-13`, `T-01`–`T-02`,
   `A-01`–`A-07`, `P-01`–`P-02`.
-- **Phase 2 — Core completed packages:** `C-01` (v23 design), `C-04` (files-first
-  `Assets/`), `C-07` (linked prefabs), `C-11` & `C-11a` (multi-scene projects &
-  crash recovery), `C-12` (5k/50k benchmark scenes), `C-05a`–`d`, `C-09a`, and
-  slices `C-13`–`C-61`.
+- **Phase 2 — Core completed packages:** `C-00a` (retired legacy logistics
+  crates, Rhai mode, legacy editor logistics UI, and superseded MCP
+  enrollment/registry plumbing; promoted `crates/rot-support`), `C-01` (v23
+  design), `C-04` (files-first `Assets/`), `C-07` (linked prefabs), `C-11` &
+  `C-11a` (multi-scene projects & crash recovery), `C-12` (5k/50k benchmark
+  scenes), `C-05a`–`d`, `C-09a`, and slices `C-13`–`C-61`.
 - **Phase 4 — Early slice:** Game HUD labels (`2026-11-23`, `607fc96`).

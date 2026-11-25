@@ -22,9 +22,9 @@ import dependency_notices
 
 ROOT = Path(__file__).resolve().parent.parent
 TARGET = "x86_64-unknown-linux-gnu"
-APP = "rot-yard"
+APP = "rot-motion-lab"
 # Resource additions require deliberate review, never a recursive project copy.
-RESOURCES = ("truck.obj",)
+RESOURCES = ("generic.scene.json",)
 
 
 @dataclass(frozen=True)
@@ -37,13 +37,11 @@ class AppSpec:
     binary_readme: str
 
 
-KIT_CRATES = ("rot-app", "rot-assets", "rot-scene", "rot-render", "rot-core")
+KIT_CRATES = ("rot-app", "rot-assets", "rot-scene", "rot-render", "rot-support")
 APPS = {
-    "yard": AppSpec(APP, "examples/yard-app", KIT_CRATES, RESOURCES,
-                    "packaging/SOURCE-README.md", "packaging/BINARY-README.txt"),
-    "motion-lab": AppSpec("rot-motion-lab", "examples/motion-lab",
-                          KIT_CRATES + ("rot-script", "rot-behavior"),
-                          ("motion.rhai", "generic.scene.json"),
+    "motion-lab": AppSpec(APP, "examples/motion-lab",
+                          KIT_CRATES + ("rot-behavior",),
+                          RESOURCES,
                           "packaging/MOTION-SOURCE-README.md", "packaging/MOTION-BINARY-README.txt"),
 }
 
@@ -131,7 +129,7 @@ def notices(root: Path, packages: list[dict]) -> tuple[bytes, list[dict]]:
         parts += [json.dumps(item, sort_keys=True) + "\n\n", data.decode("utf-8"), "\n\n"]
     inventory = []
     missing = []
-    workspace = set(KIT_CRATES) | {"rot-script", "rot-behavior"} | {spec.package for spec in APPS.values()}
+    workspace = set(KIT_CRATES) | {"rot-behavior"} | {spec.package for spec in APPS.values()}
     for package in packages:
         if package["name"] in workspace and not package.get("source"):
             continue
@@ -189,7 +187,7 @@ def publish_archive(stage: Path, output: Path, application: str = APP) -> None:
         os.link(temp.name, output)
 
 
-def package(root: Path, binary: Path, output: Path, app: str = "yard") -> dict:
+def package(root: Path, binary: Path, output: Path, app: str = "motion-lab") -> dict:
     spec = app_spec(app)
     if platform.system() != "Linux" or platform.machine() != "x86_64":
         raise ValueError("development packaging is currently Linux x86_64 only")
@@ -221,7 +219,7 @@ def package(root: Path, binary: Path, output: Path, app: str = "yard") -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--app", choices=APPS, default="yard", help="owned example to package (default yard)")
+    parser.add_argument("--app", choices=APPS, default="motion-lab", help="owned example to package (default motion-lab)")
     parser.add_argument("--binary", type=Path, help="built executable; defaults to the selected app release path")
     parser.add_argument("--output", type=Path, required=True, help="new .tar.gz path; never overwritten")
     args = parser.parse_args()

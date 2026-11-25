@@ -32,7 +32,6 @@ pub struct Authority(Arc<Mutex<AuthorityState>>);
 struct AuthorityState {
     live: bool,
     approved: bool,
-    grant: Option<crate::enrollment::Grant>,
     owner: Option<(String, u32)>,
     /// The AI app's name and trust token, as its adapter presented them.
     client: Option<(String, String)>,
@@ -43,15 +42,10 @@ struct AuthorityState {
     listener_owned: bool,
     receipts: std::collections::VecDeque<Value>,
     endpoint: Option<(Locator, std::path::PathBuf, u64, u64)>,
-    #[cfg(test)]
-    bind_gate: Option<(mpsc::SyncSender<()>, mpsc::Receiver<()>)>,
 }
 impl AuthorityState {
     fn admitted(&self) -> bool {
-        self.live
-            && self.approved
-            && self.endpoint_valid()
-            && self.grant.as_ref().is_none_or(|g| g.live())
+        self.live && self.approved && self.endpoint_valid()
     }
     fn endpoint_valid(&self) -> bool {
         self.endpoint
@@ -70,7 +64,6 @@ impl Authority {
         Self(Arc::new(Mutex::new(AuthorityState {
             live: true,
             approved: false,
-            grant: None,
             owner: None,
             client: None,
             remembered: false,
@@ -79,8 +72,6 @@ impl Authority {
             listener_owned: false,
             receipts: Default::default(),
             endpoint: None,
-            #[cfg(test)]
-            bind_gate: None,
         })))
     }
     pub fn revoke(&self) {
@@ -89,9 +80,7 @@ impl Authority {
         }
     }
     pub fn live(&self) -> bool {
-        self.0.lock().is_ok_and(|s| {
-            s.live && s.endpoint_valid() && s.grant.as_ref().is_none_or(|g| g.live())
-        })
+        self.0.lock().is_ok_and(|s| s.live && s.endpoint_valid())
     }
     pub(crate) fn authorized(&self) -> bool {
         self.0.lock().is_ok_and(|s| s.admitted())
@@ -139,7 +128,6 @@ pub struct RequestLease {
 /// editor adoption, even if the socket times out or its client disconnects.
 #[must_use]
 pub struct CommitLease {
-    _grant_lock: Option<std::fs::File>,
     shared: Arc<RequestState>,
 }
 
@@ -282,15 +270,6 @@ impl RequestLease {
 
     fn try_commit_with(self, now: impl FnOnce() -> Instant) -> Result<CommitLease, Expired> {
         let mut authority = self.shared.authority.as_ref().map(|a| a.0.lock());
-        let grant_lock = match &authority {
-            Some(Ok(s)) => s
-                .grant
-                .as_ref()
-                .map(|g| g.commit_lock())
-                .transpose()
-                .map_err(|_| Expired)?,
-            _ => None,
-        };
         if authority
             .as_ref()
             .is_some_and(|s| s.as_ref().map_or(true, |s| !s.admitted()))
@@ -314,7 +293,6 @@ impl RequestLease {
             }
         }
         Ok(CommitLease {
-            _grant_lock: grant_lock,
             shared: self.shared.clone(),
         })
     }
@@ -398,161 +376,6 @@ impl Drop for CommitLease {
 
 pub mod browser;
 
-#[cfg(test)]
-mod seamless_tests {
-    use super::*;
-    #[test]
-    fn enrolled_client_retires_on_legacy_approval_reply() {
-        for enrolled in [false, true] {
-            let root = tempfile::tempdir().unwrap();
-            std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
-            let socket = root.path().join("editor.sock");
-            let listener = connection::bind_socket(&socket).unwrap();
-            std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600)).unwrap();
-            let locator = Locator::capture(&socket, "i".into(), "g".into()).unwrap();
-            let path = root.path().join("editor.json");
-            std::fs::write(&path, serde_json::to_vec(&locator).unwrap()).unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
-            let server = std::thread::spawn(move || {
-                let (mut stream, _) = listener.accept().unwrap();
-                let _ = tests::receive(&mut stream);
-                connection::send(
-                    &mut stream,
-                    &json!({"binding":locator.binding(),"state":"approval_required"}),
-                )
-                .unwrap();
-                let _ = tests::receive(&mut stream);
-                connection::send(&mut stream, &json!({"state":"approval_required"})).unwrap();
-            });
-            let mut client = connection::Client::open(path).unwrap();
-            if enrolled {
-                client.enroll(json!({"fixture":true}));
-            }
-            let reply = client.call("scene_inspect", &json!({}));
-            server.join().unwrap();
-            if enrolled {
-                assert_eq!(reply["error"]["code"], "trusted_connection_unavailable");
-                assert!(!reply.to_string().contains("Approve this adapter"));
-                assert!(!client.available());
-                assert_eq!(
-                    client.call("scene_inspect", &json!({}))["error"]["code"],
-                    "trusted_connection_unavailable"
-                );
-            } else {
-                assert_eq!(reply["error"]["code"], "approval_required");
-                assert!(client.available());
-            }
-        }
-    }
-    #[test]
-    fn enrolled_bind_revoked_after_early_admission_never_requests_approval() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("enrollment.json");
-        let exe = std::fs::read_link("/proc/self/exe").unwrap();
-        std::fs::write(&path, json!({"version":1,"connector_id":"fixture","executable":exe,"binary_identity":crate::project_startup::BinaryIdentity::read(&exe).unwrap(),"secret":connection::unpredictable().unwrap(),"generation":1,"projects":[{"id":"one","generation":1,"allowed":true}]}).to_string()).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
-        let grant = crate::enrollment::Grant::load(&path, "one").unwrap();
-        let mut bridge = Bridge::start_enrolled(
-            egui::Context::default(),
-            "i".into(),
-            "g".into(),
-            Some(grant.clone()),
-        )
-        .unwrap();
-        let (entered, admission) = mpsc::sync_channel(1);
-        let (resume, resumed) = mpsc::sync_channel(1);
-        bridge.authority.0.lock().unwrap().bind_gate = Some((entered, resumed));
-        let mut stream = connection::connect_socket(&bridge.socket_path()).unwrap();
-        let owner = connection::unpredictable().unwrap();
-        connection::send(&mut stream, &json!({"wire":connection::WIRE,"hello":owner,"binding":bridge.locator.as_ref().unwrap().binding(),"enrollment":grant.proof().unwrap()})).unwrap();
-        let _ = tests::receive(&mut stream);
-        connection::send(&mut stream, &json!({"wire":connection::WIRE,"bind":owner})).unwrap();
-        admission.recv_timeout(Duration::from_secs(5)).unwrap();
-        grant.revoke(false).unwrap();
-        resume.send(()).unwrap();
-        let reply = tests::receive(&mut stream);
-        assert_eq!(reply["error"]["code"], "trusted_connection_unavailable");
-        assert!(!bridge.authority.authorized());
-        bridge.disconnect();
-    }
-    #[test]
-    fn enrolled_local_transport_never_needs_native_approval_and_revokes_before_commit() {
-        use std::os::unix::fs::PermissionsExt;
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("enrollment.json");
-        let exe = std::fs::read_link("/proc/self/exe").unwrap();
-        let secret = connection::unpredictable().unwrap();
-        let value = json!({"version":1,"connector_id":"fixture","executable":exe,"binary_identity":crate::project_startup::BinaryIdentity::read(&exe).unwrap(),"secret":secret,"generation":1,"projects":[{"id":"one","generation":1,"allowed":true},{"id":"two","generation":1,"allowed":true}]});
-        std::fs::write(&path, value.to_string()).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
-        let grant = crate::enrollment::Grant::load(&path, "one").unwrap();
-        let mut bridge = Bridge::start_enrolled(
-            egui::Context::default(),
-            "incarnation".into(),
-            "generation".into(),
-            Some(grant.clone()),
-        )
-        .unwrap();
-        let proof = grant.proof().unwrap();
-        assert!(grant.authenticate(&proof, std::process::id()));
-        assert!(!grant.authenticate(&proof, u32::MAX));
-        for (key, value) in [
-            ("project", json!("two")),
-            ("generation", json!(0)),
-            ("secret", json!("0".repeat(64))),
-            ("connector", json!("claimed-chatgpt")),
-        ] {
-            let mut wrong = proof.clone();
-            wrong[key] = value;
-            assert!(!grant.authenticate(&wrong, std::process::id()));
-        }
-        let mut untrusted = connection::Client::open(bridge.locator_path()).unwrap();
-        assert_ne!(untrusted.call("scene_inspect", &json!({}))["ok"], true);
-        assert!(
-            bridge.pending_owner().is_none(),
-            "untrusted enrolled path cannot create an approval popup"
-        );
-        let mut client = connection::Client::open(bridge.locator_path()).unwrap();
-        client.enroll(proof);
-        let worker = std::thread::spawn(move || {
-            let reply = client.call("scene_inspect", &json!({}));
-            (client, reply)
-        });
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while !worker.is_finished() && Instant::now() < deadline {
-            bridge.dispatch_command(|_, _, _| json!({"ok":true,"result":{"scene_id":"one"}}));
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        let (mut client, reply) = worker.join().unwrap();
-        assert_eq!(reply["ok"], true, "{reply}");
-        assert!(bridge.approved());
-        let authority = bridge.authority();
-        let commit = authority.authorize_publication().unwrap();
-        assert!(
-            grant.revoke(false).is_err(),
-            "durable revoke cannot race an already authorized publication"
-        );
-        drop(commit);
-        let (queued, state, _) = new_pending_authorized(
-            json!({}),
-            Instant::now() + Duration::from_secs(2),
-            Some(authority.clone()),
-        );
-        assert!(state.begin_prepare());
-        grant.revoke(false).unwrap();
-        assert!(
-            queued.lease.try_commit().is_err(),
-            "durable revoke must be checked again before commit"
-        );
-        assert!(!authority.authorized());
-        assert!(authority.authorize_publication().is_none());
-        assert!(crate::enrollment::Grant::load(&path, "one").is_err());
-        assert!(crate::enrollment::Grant::load(&path, "two").is_ok());
-        assert_ne!(client.call("scene_inspect", &json!({}))["ok"], true);
-        bridge.disconnect();
-    }
-}
-
 /// Where an endpoint's `<stem>.sock` and `<stem>.json` live. A private test
 /// directory is removed with the endpoint; the shared discovery directory is not.
 struct EndpointDir {
@@ -595,6 +418,7 @@ pub struct Bridge {
 impl Bridge {
     /// Creates an unbound listener, never project authority. The Host owns the
     /// incarnation/generation; every Connect gets a new never-reused locator.
+    #[cfg(test)]
     pub fn start(ctx: egui::Context) -> std::io::Result<Self> {
         Self::start_for(
             ctx,
@@ -607,14 +431,6 @@ impl Bridge {
         incarnation: String,
         generation: String,
     ) -> std::io::Result<Self> {
-        Self::start_enrolled(ctx, incarnation, generation, None)
-    }
-    pub fn start_enrolled(
-        ctx: egui::Context,
-        incarnation: String,
-        generation: String,
-        grant: Option<crate::enrollment::Grant>,
-    ) -> std::io::Result<Self> {
         let directory = tempfile::Builder::new()
             .prefix("rot-mcp-")
             .rand_bytes(24)
@@ -622,7 +438,7 @@ impl Bridge {
         // Cleanup is identity-scoped below, never recursive deletion of a path
         // another cooperating process may have replaced.
         std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))?;
-        Self::start_at(ctx, directory.into(), incarnation, generation, grant, None)
+        Self::start_at(ctx, directory.into(), incarnation, generation, None)
     }
     /// Listen where `rot-mcp` finds running editors: `<directory>/<pid>.sock`
     /// with a `<pid>.json` record naming the project folder and scene.
@@ -630,7 +446,6 @@ impl Bridge {
         ctx: egui::Context,
         incarnation: String,
         generation: String,
-        grant: Option<crate::enrollment::Grant>,
         directory: &std::path::Path,
         scene: Option<&std::path::Path>,
         trust: Option<std::path::PathBuf>,
@@ -653,7 +468,6 @@ impl Bridge {
             endpoint,
             incarnation,
             generation,
-            grant,
             Some(Advertised {
                 project,
                 scene,
@@ -666,7 +480,6 @@ impl Bridge {
         directory: EndpointDir,
         incarnation: String,
         generation: String,
-        grant: Option<crate::enrollment::Grant>,
         discovery: Option<Advertised>,
     ) -> std::io::Result<Self> {
         let path = directory.file("sock");
@@ -696,7 +509,6 @@ impl Bridge {
         let (wake, wake_receiver) = mpsc::sync_channel(1);
         let authority = Authority::new();
         authority.0.lock().unwrap().listener_owned = true;
-        authority.0.lock().unwrap().grant = grant.clone();
         authority.0.lock().unwrap().endpoint = Some((
             locator.clone(),
             locator_path.clone(),
@@ -731,22 +543,14 @@ impl Bridge {
                         if Instant::now() >= hello_deadline { return Ok(()); }
                     };
                     if hello["wire"] != connection::WIRE || hello["binding"] != worker_locator.binding()
-                        || hello.as_object().is_none_or(|m| m.len() != 3 + usize::from(hello.get("enrollment").is_some()) + usize::from(hello.get("client").is_some()))
+                        || hello.as_object().is_none_or(|m| m.len() != 3 + usize::from(hello.get("client").is_some()))
                         || hello["hello"].as_str().is_none_or(|s| s.len() != 64)
                         || hello.get("client").is_some_and(|c| client_identity(c).is_none()) {
                         let _ = connection::send(&mut stream, &denied("wire_incompatible"));
                         continue;
                     }
                     let client = hello.get("client").and_then(client_identity);
-                    let trusted = match (&grant, hello.get("enrollment")) {
-                        (Some(g), Some(proof)) if g.authenticate(proof, pid) => true,
-                        (_, Some(_)) | (Some(_), None) => { connection::send(&mut stream, &denied("enrollment_required"))?; continue; },
-                        (None, None) => false,
-                    };
                     let owner = hello["hello"].as_str().unwrap().to_string();
-                    // Enrolled connectors keep their own path and never act as
-                    // a named app (no prompt, no save or build grant).
-                    let client = if trusted || grant.is_some() { None } else { client };
                     // An app the creator chose Allow Always for connects
                     // without a prompt. Read the store before taking the lock.
                     let mut store_seen = trust.as_deref().and_then(crate::trust::Store::modified);
@@ -756,7 +560,7 @@ impl Bridge {
                         let mut state = worker_authority.0.lock().map_err(|_| std::io::Error::other("authority poisoned"))?;
                         if !state.live || state.owner.is_some() { return Ok(()); }
                         state.owner = Some((owner.clone(), pid));
-                        state.approved = trusted || remembered;
+                        state.approved = remembered;
                         state.remembered = remembered;
                         state.client = client.clone();
                     }
@@ -768,17 +572,8 @@ impl Bridge {
                         worker_locator.validate_file(&locator_path, file_identity.0, file_identity.1)?;
                         let Some(request) = framing.poll(&mut stream)? else { continue; };
                         if request == json!({"wire":connection::WIRE,"bind":owner}) {
-                            #[cfg(test)]
-                            {
-                                let gate = worker_authority.0.lock().unwrap().bind_gate.take();
-                                if let Some((entered, resume)) = gate {
-                                    entered.send(()).unwrap();
-                                    resume.recv_timeout(Duration::from_secs(5)).unwrap();
-                                }
-                            }
                             let approved = worker_authority.authorized();
                             let reply = if approved { json!({"binding":worker_locator.binding(),"capability":capability}) }
-                                else if trusted { denied("trusted_connection_unavailable") }
                                 else { json!({"state":"approval_required"}) };
                             connection::send(&mut stream, &reply)?;
                             continue;
@@ -873,10 +668,6 @@ impl Bridge {
     }
     pub fn locator_path(&self) -> std::path::PathBuf {
         self.directory.file("json")
-    }
-    #[cfg(test)]
-    pub fn socket_path(&self) -> std::path::PathBuf {
-        self.directory.file("sock")
     }
     pub fn pending_owner(&self) -> Option<(String, u32)> {
         self.authority.0.lock().ok()?.owner.clone()
@@ -979,17 +770,7 @@ impl Bridge {
         self.cleanup_job().run();
     }
 
-    pub fn dispatch(&mut self, editor: &mut crate::model::Editor) -> bool {
-        // Legacy mode shares this gate; human replacement cannot retain opt-in.
-        if editor.connection_authority.is_none() {
-            editor.connection_authority = Some(self.authority());
-        }
-        self.dispatch_command(|nonce, operation, arguments| {
-            let token = format!("{}:{}", nonce, editor.project_generation);
-            crate::commands::dispatch(editor, &token, operation, arguments)
-        })
-    }
-
+    #[cfg(test)]
     pub fn dispatch_command(&mut self, handle: impl FnOnce(&str, &str, Value) -> Value) -> bool {
         self.dispatch_request(|nonce, operation, arguments, lease| {
             lease.run_immediate(|| handle(nonce, operation, arguments));
@@ -1211,51 +992,6 @@ pub(crate) mod tests {
             .receipts
             .iter()
             .all(|receipt| serde_json::to_vec(receipt).unwrap().len() < LIMIT as usize));
-    }
-
-    #[test]
-    fn legacy_project_intent_cannot_keep_authority_after_cancellation() {
-        for action in [
-            crate::model::Action::New("replacement".into()),
-            crate::model::Action::Open("/missing-owned-project.json".into()),
-        ] {
-            let mut bridge = Bridge::start(egui::Context::default()).unwrap();
-            let mut client = connection::Client::open(bridge.locator_path()).unwrap();
-            assert_eq!(
-                client.call("inspect", &json!({}))["error"]["code"],
-                "approval_required"
-            );
-            assert!(bridge.approve_owner(&bridge.pending_owner().unwrap()));
-            let mut editor = crate::model::Editor::new(
-                rot_core::ProjectSession::new("legacy-original", rot_core::Config::default())
-                    .unwrap(),
-            );
-            let invoke = |bridge: &mut Bridge,
-                          editor: &mut crate::model::Editor,
-                          mut client: connection::Client| {
-                let worker = std::thread::spawn(move || {
-                    let reply = client.call("inspect", &json!({}));
-                    (client, reply)
-                });
-                let deadline = Instant::now() + Duration::from_secs(4);
-                while !worker.is_finished() {
-                    bridge.dispatch(editor);
-                    assert!(Instant::now() < deadline);
-                    std::thread::sleep(Duration::from_millis(1));
-                }
-                worker.join().unwrap()
-            };
-            let (client, result) = invoke(&mut bridge, &mut editor, client);
-            assert_eq!(result["ok"], true);
-            editor.fields.transfer = "5".into();
-            editor.request(action);
-            editor.pending = None;
-            let (_, result) = invoke(&mut bridge, &mut editor, client);
-            assert_eq!(
-                result["ok"], false,
-                "a canceled legacy project intent retained its connection"
-            );
-        }
     }
 
     #[test]
@@ -1626,9 +1362,8 @@ pub(crate) mod tests {
             egui::Context::default(),
             "i".into(),
             "g".into(),
-            None,
             &directory,
-            Some(&mine.join("scene.json")),
+            Some(mine.join("scene.json").as_path()),
             None,
         )
         .unwrap();
@@ -1707,7 +1442,6 @@ pub(crate) mod tests {
                 egui::Context::default(),
                 connection::unpredictable().unwrap(),
                 "g".into(),
-                None,
                 &directory,
                 None,
                 Some(store.clone()),
@@ -1859,30 +1593,31 @@ pub(crate) mod tests {
             worker: None,
             locator: None,
         };
-        let mut editor = crate::model::Editor::new(
-            rot_core::ProjectSession::new("expiry", rot_core::Config::default()).unwrap(),
-        );
-        let request = json!({"operation":"edit","arguments":{
-            "expected_session_token":format!("test:{}",editor.project_generation),"expected_revision":"0",
-            "config":{"initial_stock":"0","production_per_tick":"3","transfer_per_tick":"4"}}});
+        let mut dispatched = false;
+        let request = json!({"operation":"edit","arguments":{"config":{"transfer_per_tick":"4"}}});
         let (pending, state, result) =
             new_pending(request.clone(), Instant::now() - Duration::from_secs(1));
         assert!(sender.send(pending).is_ok());
-        let before = editor.project.scenario().clone();
-        assert!(!bridge.dispatch(&mut editor));
-        assert_eq!(editor.project.scenario(), &before);
+        assert!(!bridge.dispatch_command(|_, _, _| {
+            dispatched = true;
+            json!({"ok":true})
+        }));
+        assert!(!dispatched);
         assert!(result.try_recv().is_err());
         assert!(state.take_reply_or_expire().is_none());
 
-        // The unchanged legacy wrapper still authorizes and returns a live
-        // immediate edit, rather than expiring it when its request is dequeued.
         let (pending, state, result) =
             new_pending(request, Instant::now() + Duration::from_secs(60));
         assert!(sender.send(pending).is_ok());
-        assert!(bridge.dispatch(&mut editor));
+        assert!(bridge.dispatch_command(|_, op, args| {
+            dispatched = true;
+            assert_eq!(op, "edit");
+            assert_eq!(args["config"]["transfer_per_tick"], "4");
+            json!({"ok":true})
+        }));
+        assert!(dispatched);
         assert!(result.try_recv().is_ok());
         assert_eq!(state.take_reply_or_expire().unwrap()["ok"], true);
-        assert_ne!(editor.project.scenario(), &before);
     }
 
     // Boundary risk: timeout and publication contend over one authority, while

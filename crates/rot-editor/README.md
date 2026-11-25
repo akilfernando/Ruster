@@ -113,23 +113,20 @@ Older checkpoints containing both an action draft and a visual draft restore thr
 
 Pending recovered work blocks conflicting edits, Save completion and MCP mutations. Enter that resumes an action cannot also Apply it. Recovered Transform Fields keep their original angle units, invalid text and subsequent edits in automatic checkpoints. Latest typing is protected after a successful checkpoint, with existing recovery timing and durability limits. [Decision0039](../../docs/decisions/0039-pending-recovery-repair.md) records ownership and compatibility. First-phase native acceptance is tracked in [current evidence](../../docs/evidence/ENGINEERING-FIRST-PHASE.md).
 
-## Legacy logistics mode
-
-The first authoring frontend supports the v1 logistics scenario. The editor uses
-`rot-core::ProjectSession` for authored operations, conflict detection and
-persistence. Runtime observation uses the same core `Simulation` as the CLI.
+## Scene editor launch
 
 From the repository root:
 
 ```sh
-cargo run --locked -p rot-editor -- --scenario examples/logistics.scenario.json
+cargo run --locked -p rot-editor
+cargo run --locked -p rot-editor -- --scene examples/arrangement.scene.json
 cargo run --locked -p rot-editor -- --help
 ```
 
 A desktop session and Vulkan adapter are required. `--help`, invalid arguments
 and invalid initial files exit before creating a window. Paths are relative to
 the launch directory. The editor uses egui/eframe and forces the wgpu Vulkan
-backend; the direct ash runtime viewer remains a separate executable. Backend warnings/errors are written to stderr so graphics diagnostics are visible when launched from a terminal.
+backend. Backend warnings/errors are written to stderr so graphics diagnostics are visible when launched from a terminal.
 The build opts into wgpu's Vulkan and WGSL features explicitly instead of
 compiling optional presentation backends that this frontend never selects.
 This narrows dependencies; no build-time or size improvement is claimed without

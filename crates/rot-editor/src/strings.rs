@@ -532,10 +532,6 @@ editor_text! {
     ScriptApplicationCommands => "Application Commands",
     AiAllowOnceFallback => "Couldn’t save access. Allowed for this connection only.",
     AiConnectionKeyChanged => "Only allow the app if you set it up again.",
-    ScenarioAiUpdated => "AI updated the scenario. Restart to see the changes.",
-    ScenarioUnapplied => "Unapplied Changes",
-    ScenarioOpenFileHint => "Choose a scenario JSON file.",
-    ScenarioSaveAsFileHint => "Choose a new file path. Existing files are protected.",
     WorkingCopyLanguageReady => "Lua editor support updated.",
     WorkingCopyLanguageFailed => "Couldn't update Lua editor support.",
     WorkingCopyLanguageSaveFailed => "Couldn't save Lua editor settings.",
@@ -920,12 +916,10 @@ editor_text! {
     CloseAiConnection => "Close AI Connection",
     DenyPendingBrowser => "Deny Pending Browser",
     Diagnostics => "Diagnostics",
-    ManagesSavedAccessOnly => "Manages saved access only.",
     NativeAddRotEngineTo => "Add Rot Engine to Claude Code, Codex or another AI app",
     NativeApprovalLetsThisBrowser => "Approval lets this browser view and edit this project for 30 minutes.",
     NativeApprovePendingBrowserFor => "Approve pending browser for this project?",
     NativeCompareThisCodeWith => "Compare this code with your browser.",
-    NativeConnectFromYourAi => "Connect from your AI app. Revoke removes saved access.",
     NativeNativeApprovalLetsThisBrowser => "Approval lets this browser view and select for 30 minutes.",
     NativePendingRequestsExpireAfter => "Pending requests expire after 2 minutes.",
     NativeWhenOffThisEditor => "When off, this editor does not listen for AI apps",
@@ -1233,56 +1227,6 @@ editor_text! {
     World => "World",
     WorldTranslationOffset => "World translation offset",
 
-    // Ui
-    ActionNeeded => "ACTION NEEDED",
-    ApplyProperties => "Apply Properties",
-    CtrlO => "Ctrl+O",
-    DiscardAndContinue => "Discard and Continue",
-    DuplicateScenario => "Duplicate Scenario…",
-    FilePath => "File path",
-    InitialStock => "Initial stock",
-    Inspector => "INSPECTOR",
-    KeepYourChanges => "Keep your changes?",
-    New => "New",
-    NewScenarioCtrlN => "New scenario · Ctrl+N",
-    Open => "Open…",
-    ProductionPerTick => "Production per tick",
-    Ready => "READY",
-    Restart => "Restart",
-    RevertFields => "Revert Fields",
-    RuntimeObservation => "RUNTIME OBSERVATION",
-    SaveAndContinue => "Save and Continue",
-    SaveApplyHint => "Apply valid fields and save · Ctrl+S",
-    SaveYourChangesBeforeContinuing => "Save your changes before continuing?",
-    Saved => "SAVED",
-    Scenario => "Scenario",
-    ScenarioEditor => "/  SCENARIO EDITOR",
-    ScenarioId => "Scenario ID",
-    Step1Tick => "Step +1 Tick",
-    ThisDestinationCollectsDeliveries => "This destination collects deliveries.",
-    ThroughputLab => "Throughput lab",
-    TransportCapacity => "Transport capacity",
-    Ui4TicksSecond => "4 ticks / second",
-    UiChooseAUniqueId => "Choose a unique ID for the new scenario.",
-    UiCreateANewFile => "Create a new file · Ctrl+Shift+S",
-    UiCreatesAFreshIdentity => "Creates a fresh identity and an unsaved project.",
-    UiItemsAtTheSource => "Items at the source before the first tick. Zero is allowed.",
-    UiMaximumWholeItemsDelivered => "Maximum whole items delivered per tick. Must be greater than zero.",
-    UiProject => "PROJECT",
-    UiRedoCtrlShiftZ => "Redo · Ctrl+Shift+Z outside text fields",
-    UiResetRestartsTheSimulation => "Reset restarts the simulation from the scene settings.",
-    UiSceneSettingsChangedRestart => "Scene settings changed. Restart to use them.",
-    UiSelectACardOr => "Select a card or use the project list. Values above are runtime observations.",
-    UiSourceTransportAndDestination => "Source, transport and destination are views of this logistics scenario.",
-    UiSupplyCapacityAndDeliveries => "Supply, capacity and deliveries from the current run.",
-    UiSupplyLimitedTransportCan => "SUPPLY LIMITED   Transport can move all new production each tick.",
-    UiTabFocusSpaceRun => "Tab: focus  ·  Space: run/pause outside fields  ·  Ctrl+S: save",
-    UiTheSimulationUsesThe => "The simulation uses the current scene settings.",
-    UiUi1128AsciiLetters => "1–128 ASCII letters, digits, hyphens, underscores or dots.",
-    UiUndoCtrlZOutside => "Undo · Ctrl+Z outside text fields",
-    UiWholeItemsProducedBefore => "Whole items produced before transport each tick. Zero is allowed.",
-    Unsaved => "UNSAVED",
-
     // Mod
     ClearSearch => "Clear Search",
     Pick => "Pick",
@@ -1347,16 +1291,6 @@ editor_text! {
     InputUiChooseASupportedKey => "Choose a supported key without Ctrl, Alt, Super or Tab.",
     InputUiThisActionAlreadyUses => "This action already uses that key; choose another key.",
 
-    // Model
-    ChooseANewFilePath => "Choose a new file path.",
-    ModelApplyOrDiscardInspector => "Apply or discard Inspector edits before using Undo or Redo.",
-    ModelEditHistoryRestoredRestart => "Edit history restored. Restart to see the changes.",
-    ModelPropertiesAppliedRestartTo => "Properties applied. Restart to use them.",
-    ProjectReady => "Project ready.",
-    RestoredThePreviousFieldValues => "Restored the previous field values.",
-    ScenarioSaved => "Scenario saved.",
-    SimulationRestarted => "Simulation restarted.",
-
     // Hierarchy
     NoObjectsMatchTheSearch => "No objects match the search.",
 
@@ -1420,8 +1354,6 @@ editor_text! {
     ConfigurationCopied => "Configuration copied.",
 
     // Native
-    NativeAccessRevokedConnectAgain => "Access revoked. Connect again to allow it.",
-    NativeCouldntRevokeAccessDisconnected => "Couldn't revoke access. Disconnected for now. Try Revoke again.",
     NativeTheRequestChangedOr => "The request changed or ended. Review it again.",
 
     // Display Ui
@@ -1507,10 +1439,6 @@ editor_text! {
     SceneEditorWaitingForAssetWork => "Waiting for asset work before the requested document action.",
     TransformApplied => "Transform applied.",
     TransformCancelled => "Transform cancelled.",
-
-    // Ui
-    EnterTheScenarioFilePath => "Enter the scenario file path.",
-    UiADuplicateMustHave => "A duplicate must have a different scenario ID.",
 
     // Workspace
     WorkspaceCouldntFindAPlace => "Couldn't find a place to save preferences.",
@@ -1644,18 +1572,10 @@ editor_text! {
     SnapOn => "Snap On",
 
     // Ui
-    NewScenario => "New scenario",
     OpenFile => "Open File",
     OpenErrorLine => "Open Error Line",
     LuaErrorSourceChanged => "Lua source changed. Run Play again for a current error location.",
     LuaErrorSourceUnavailable => "Lua source unavailable. Check Assets and run Play again.",
-    OpenScenario => "Open scenario",
-    Paused => "PAUSED",
-    Run => "Run",
-    Running => "RUNNING",
-    SaveFile => "Save File",
-    SaveScenarioAs => "Save scenario as",
-    UiDuplicateScenario => "Duplicate scenario",
 
     // Workspace
     TheRotEngineLook => "The Rot Engine look",

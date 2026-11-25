@@ -369,17 +369,6 @@ impl Host {
         }
         self.input.bridge_serviced = true;
         #[cfg(unix)]
-        if self.bridge.is_none()
-            && std::env::var_os("ROT_CONNECTOR_ENROLLMENT").is_some()
-            && std::env::var_os("ROT_PROJECT_STARTUP").is_some()
-            && !self.editor.close_in_progress()
-            && self.editor.recovery_transition.is_none()
-        {
-            // Re-arm routing only. No owner, session authority, operation replay
-            // or automatic client reconnect; a fresh explicit connect is needed.
-            let _ = self.connect_adapter(ctx);
-        }
-        #[cfg(unix)]
         if let Some(component) = &mut self.editor.component {
             #[cfg(target_os = "linux")]
             component.poll_asset_write(ctx, self.editor.ai_status.paused);

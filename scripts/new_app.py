@@ -19,7 +19,7 @@ from package_app import APPS, KIT_CRATES, ROOT, app_spec, cargo, file_manifest, 
 CRATES = KIT_CRATES
 ROOT_FILES = ("Cargo.lock", "rust-toolchain.toml", "LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.txt")
 # Compiler inputs and compatibility fixtures outside the selected crate trees.
-SHARED_INPUTS = ("crates/support/strict_json.rs", "examples/content/scene.wgsl", "examples/logistics.scenario.json")
+SHARED_INPUTS = ("examples/content/scene.wgsl",)
 VENDOR_FILES = ("Cargo.toml", "Cargo.toml.orig", "build.rs", "README.md", "LICENSE.MIT", "LICENSE.APACHE", "ROT-PATCH.md")
 PACKAGING_FILES = ("scripts/package_app.py", "scripts/dependency_notices.py")
 CREATION_PACKAGING_FILE = "scripts/package_creation.py"
@@ -57,7 +57,7 @@ def publish_tree(stage: Path, output: Path) -> None:
         raise OSError(number, os.strerror(number), str(output))
 
 
-def export(root: Path, output: Path, normalize_lock: bool = True, app: str = "yard") -> dict:
+def export(root: Path, output: Path, normalize_lock: bool = True, app: str = "motion-lab") -> dict:
     spec = app_spec(app)
     output = output.absolute()
     output = output.parent.resolve(strict=True) / output.name
@@ -140,7 +140,7 @@ def export(root: Path, output: Path, normalize_lock: bool = True, app: str = "ya
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--app", choices=APPS, default="yard", help="owned example to export (default yard)")
+    parser.add_argument("--app", choices=APPS, default="motion-lab", help="owned example to export (default motion-lab)")
     parser.add_argument("destination", type=Path, help="new directory outside the checkout")
     args = parser.parse_args()
     try:

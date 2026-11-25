@@ -6,39 +6,27 @@ use std::{
 use rot_app::creation::{CreationManifest, RuntimeScene, DESCRIPTOR_NAME};
 use rot_app::{Application, Content, HostOptions, MeshMap, ResourceRoot, Runtime, Step};
 use rot_motion_lab::generic::{self, GenericMotionLab};
-use rot_motion_lab::{read_source, MotionLab, DEFAULT_SOURCE};
 use rot_scene::input::{ActionFrame, ActionMap};
+use rot_support::strict_json;
 
-#[path = "../../../crates/support/strict_json.rs"]
-mod strict_json;
-
-const HELP: &str = "Rot Engine Motion Lab — compare authored motion or open a legacy Rhai project
+const HELP: &str = "Rot Engine Motion Lab — run authored scenes or packaged creations
 
 Usage: rot-motion-lab [OPTIONS]
-  --headless       Attach the behavior to left, Reset, run fixed ticks, print transforms
+  --headless       Run fixed ticks and print transforms
   --ticks N        Headless ticks, 0–10000 (default 10)
   --input-frames PATH Headless generic/creation JSON array, at most 1 MiB and N frames
-  --commands PATH  At most16 typed paused commands after Reset, before ordinary ticks
-  --hud-activations PATH At most32 authored button activations after sorted tick boundaries
-  --speed N        Legacy: left property; generic: runtime-only numeric speed override
-  --script PATH    Read a regular UTF-8 Rhai script, at most 16 KiB
-  --scene PATH     Read a generic Scene16 snapshot (sources, bindings and history retained)
+  --commands PATH  At most 16 typed paused commands after Reset, before ordinary ticks
+  --hud-activations PATH At most 32 authored button activations after sorted tick boundaries
+  --speed N        Generic runtime-only numeric speed override
+  --scene PATH     Read a generic scene snapshot
   --generic-demo   Use the embedded Scene5/Lua motion-comparison demo
   --creation-info Print the cumulative runtime profile, including state-driven HUD panels, and exit
   --creation PATH Read an app.json creation descriptor and its relative resources
   --play-check     Run the packaged play check in isolation; JSON result, exit 2 if unsuccessful
   --resources PATH Explicit read-only mesh resource directory for generic mode
   --mesh ID=PATH   Map a Scene mesh ID to a relative OBJ resource (repeat, at most 64)
-  --project PATH   Open an authored Motion Lab project (instead of --script)
-  --save-project PATH Save authored state before running
   --frames N       Close native window after 1–10000 frames
   -h, --help       Show help
-
-Native mode starts paused with no attachments. Select an object, Attach behavior,
-edit numeric properties, then Reset and Run or Step. Source/properties are drafts
-until Reset; invalid candidates preserve the last applied runtime. Script files
-are read only; use Reload from disk after editing externally. Projects embed source and attachments; external script files are never written.
-The default script is embedded, so the command works from any directory.
 
 Generic mode consumes Scene5/Lua through the shared behavior backend. Native mode
 loads authored data without compiling it; Reset validates at dt0, Run/Step uses
@@ -63,9 +51,6 @@ struct Options {
     play_check: bool,
     ticks: Option<u64>,
     frames: Option<u64>,
-    script: Option<PathBuf>,
-    project: Option<PathBuf>,
-    save_project: Option<PathBuf>,
     speed: Option<f64>,
     scene: Option<PathBuf>,
     generic_demo: bool,
@@ -90,9 +75,8 @@ fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Option<Options>,
             "--headless" => options.headless = true,
             "--play-check" => options.play_check = true,
             "--generic-demo" => options.generic_demo = true,
-            "--ticks" | "--frames" | "--script" | "--speed" | "--project" | "--save-project"
-            | "--scene" | "--resources" | "--mesh" | "--creation" | "--input-frames"
-            | "--commands" | "--hud-activations" => {
+            "--ticks" | "--frames" | "--speed" | "--scene" | "--resources" | "--mesh"
+            | "--creation" | "--input-frames" | "--commands" | "--hud-activations" => {
                 let value = args
                     .next()
                     .ok_or_else(|| format!("{arg} requires a value. See --help."))?;
@@ -131,9 +115,6 @@ fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Option<Options>,
                         }
                         options.meshes.push((id.into(), path.into()));
                     }
-                    "--project" => options.project = Some(value.into()),
-                    "--save-project" => options.save_project = Some(value.into()),
-                    "--script" => options.script = Some(value.into()),
                     "--speed" => {
                         let speed: f64 = value
                             .parse()
@@ -194,9 +175,6 @@ fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Option<Options>,
             "--input-frames, --commands and --hud-activations require --headless generic or creation mode".into(),
         );
     }
-    if options.project.is_some() && options.script.is_some() {
-        return Err("Use either --project or --script.".into());
-    }
     if options.creation.is_some() {
         validate_creation_options(&options)?;
     }
@@ -204,27 +182,11 @@ fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Option<Options>,
     if options.scene.is_some() && options.generic_demo {
         return Err("Use either --scene or --generic-demo".into());
     }
-    if generic
-        && (options.project.is_some() || options.script.is_some() || options.save_project.is_some())
-    {
-        return Err("Generic mode uses --scene or --generic-demo; --project, --script and --save-project belong to legacy Rhai mode".into());
-    }
     if !generic && (options.resources.is_some() || !options.meshes.is_empty()) {
         return Err("--resources and --mesh require --scene or --generic-demo".into());
     }
     if !options.meshes.is_empty() && options.resources.is_none() {
         return Err("--mesh requires an explicit --resources directory".into());
-    }
-    if (options.input_frames.is_some()
-        || options.commands.is_some()
-        || options.hud_activations.is_some())
-        && !generic
-        && (options.project.is_some() || options.script.is_some() || options.save_project.is_some())
-    {
-        return Err(
-            "--input-frames, --commands and --hud-activations are unavailable in legacy Rhai mode; use generic or creation mode"
-                .into(),
-        );
     }
     Ok(Some(options))
 }
@@ -243,82 +205,11 @@ fn execute(options: Options) -> Result<(), String> {
     if options.scene.is_some() || options.generic_demo {
         return execute_generic(options);
     }
-    if options.input_frames.is_some()
-        || options.commands.is_some()
-        || options.hud_activations.is_some()
-    {
-        return Err(
-            "--input-frames/--commands/--hud-activations require headless generic or creation mode, not legacy Rhai mode"
-                .into(),
-        );
-    }
-    let source = match &options.script {
-        Some(path) => read_source(path)?,
-        None => DEFAULT_SOURCE.into(),
-    };
-    let mut app = match &options.project {
-        Some(path) => MotionLab::open_project(path)?,
-        None => MotionLab::new(source, options.script)?,
-    };
-    if options.headless || options.speed.is_some() {
-        if (options.project.is_none() || options.speed.is_some())
-            && app.draft_properties("left").is_none()
-        {
-            app.attach("left")?;
-        }
-        if let Some(speed) = options.speed {
-            let properties = app
-                .draft_properties_mut("left")
-                .ok_or("Attach left before setting speed.")?;
-            *properties.get_mut("speed").ok_or(
-                "The script exposes no speed property; omit --speed or add speed in properties().",
-            )? = speed;
-        }
-        app.reset()?;
-    }
-    if let Some(path) = &options.save_project {
-        app.save_project(path)?;
-    }
-    let tick_duration = Duration::from_millis(100);
-    if options.headless {
-        let mut runtime = Runtime::new(app, tick_duration)?;
-        for _ in 0..options.ticks.unwrap_or(10) {
-            runtime.step()?;
-        }
-        println!("Motion Lab | tick={} dt=0.1", runtime.tick());
-        for object in &runtime.app().content().scene().objects {
-            println!(
-                "{} position={:.6?} rotation={:.6?} scale={:.6?}",
-                object.id,
-                object.transform.translation,
-                object.transform.rotation,
-                object.transform.scale
-            );
-        }
-        Ok(())
-    } else {
-        rot_app::run(
-            app,
-            HostOptions {
-                title: "Motion Lab — Behavior authoring".into(),
-                player_window: Default::default(),
-                player_window_controls: false,
-                app_id: "rot-motion-lab".into(),
-                tick_duration,
-                max_frames: options.frames,
-                start_running: false,
-                initial_camera: None,
-            },
-        )
-    }
+    Err("Use --creation app.json, --scene PATH, or --generic-demo. See --help.".into())
 }
 
 fn has_explicit_content(options: &Options) -> bool {
-    options.scene.is_some()
-        || options.generic_demo
-        || options.project.is_some()
-        || options.script.is_some()
-        || options.save_project.is_some()
+    options.scene.is_some() || options.generic_demo
 }
 
 fn validate_creation_options(options: &Options) -> Result<(), String> {
@@ -336,7 +227,7 @@ fn validate_creation_options(options: &Options) -> Result<(), String> {
         || !options.meshes.is_empty()
         || options.speed.is_some()
     {
-        return Err("Creation mode uses its app.json content and tick settings; omit --scene, --generic-demo, --project, --script, --save-project, --resources, --mesh and --speed".into());
+        return Err("Creation mode uses its app.json content and tick settings; omit --scene, --generic-demo, --resources, --mesh and --speed".into());
     }
     Ok(())
 }
@@ -1087,13 +978,6 @@ mod tests {
             vec!["--creation", "app.json", "--input-frames", "input.json"],
             vec!["--generic-demo", "--input-frames", "input.json"],
             vec![
-                "--headless",
-                "--script",
-                "legacy.rhai",
-                "--input-frames",
-                "input.json",
-            ],
-            vec![
                 "--generic-demo",
                 "--headless",
                 "--input-frames",
@@ -1107,9 +991,6 @@ mod tests {
         for flags in [
             vec!["--scene", "scene.json"],
             vec!["--generic-demo"],
-            vec!["--script", "motion.rhai"],
-            vec!["--project", "project.json"],
-            vec!["--save-project", "project.json"],
             vec!["--resources", "resources"],
             vec!["--mesh", "mesh=shape.obj"],
             vec!["--speed", "2"],
@@ -1232,13 +1113,6 @@ mod tests {
         .is_some());
         for flags in [
             vec!["--generic-demo", "--hud-activations", "activations.json"],
-            vec![
-                "--script",
-                "legacy.rhai",
-                "--headless",
-                "--hud-activations",
-                "activations.json",
-            ],
             vec![
                 "--generic-demo",
                 "--headless",

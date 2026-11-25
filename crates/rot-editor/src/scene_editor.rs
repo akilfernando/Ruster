@@ -2,8 +2,6 @@
 use crate::strings::Text;
 mod ai_indicator;
 mod ai_steps;
-#[cfg(all(test, unix))]
-mod ai_workspace_tracer;
 mod animation;
 mod asset_commands;
 mod asset_inspection;
@@ -3011,13 +3009,6 @@ impl SceneEditor {
             .as_ref()
             .map(|component| component.ai_document().0)
             .or_else(|| self.session.path())
-    }
-    #[cfg(unix)]
-    fn ai_scene_id(&self) -> &str {
-        self.component.as_deref().map_or_else(
-            || self.session.scene().id.as_str(),
-            |document| document.ai_document().1,
-        )
     }
     fn remember_camera(&mut self) {
         if let (Some(path), Some(camera)) = (self.session.path(), self.navigation.camera) {
@@ -6336,50 +6327,11 @@ fn scene_native_options() -> eframe::NativeOptions {
     }
 }
 
-#[cfg(unix)]
-fn validate_registered_scene(
-    startup: &crate::project_startup::Startup,
-    path: Option<&std::path::Path>,
-    scene_id: &str,
-) -> std::io::Result<()> {
-    if path != Some(startup.scene_path.as_path())
-        || std::env::var("ROT_PROJECT_SCENE_ID").ok().as_deref() != Some(scene_id)
-    {
-        return Err(std::io::Error::other(
-            "Registered saved project identity changed; no connection opened",
-        ));
-    }
-    Ok(())
-}
-
 fn run_session(
     session: Session,
     startup_projects: bool,
     component: Option<(PathBuf, Box<rot_scene::component_scene::ComponentSession>)>,
 ) -> Result<(), String> {
-    #[cfg(unix)]
-    let bootstrap = if std::env::var_os("ROT_PROJECT_STARTUP").is_some() {
-        let raw = std::env::var("ROT_PROJECT_BOOTSTRAP").map_err(|e| e.to_string())?;
-        let bootstrap: crate::project_startup::Bootstrap =
-            serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-        bootstrap.validate().map_err(|e| e.to_string())?;
-        Some(bootstrap)
-    } else {
-        None
-    };
-    #[cfg(unix)]
-    let _registered_owner = if let Some(raw) = std::env::var_os("ROT_PROJECT_STARTUP") {
-        let startup: crate::project_startup::Startup =
-            serde_json::from_str(&raw.to_string_lossy()).map_err(|e| e.to_string())?;
-        let (path, scene_id) = component.as_ref().map_or_else(
-            || (session.path(), session.scene().id.as_str()),
-            |(path, session)| (Some(path.as_path()), session.scene().id.as_str()),
-        );
-        validate_registered_scene(&startup, path, scene_id).map_err(|error| error.to_string())?;
-        Some(startup.lock("owner.lock").map_err(|e| e.to_string())?)
-    } else {
-        None
-    };
     let mcp_enabled = std::env::var("ROT_MCP_ENABLE").as_deref() == Ok("1");
     let legacy_destinations = mcp_enabled && component.is_none();
     let save_grant = persistence_commands::SaveGrant::from_environment(legacy_destinations)?;
@@ -6395,10 +6347,6 @@ fn run_session(
             if let Some(render) = cc.wgpu_render_state.as_ref() {
                 eprintln!("Scene editor adapter: {:?}", render.adapter.get_info());
             }
-            #[cfg(unix)]
-            if let Some(bootstrap) = &bootstrap {
-                bootstrap.validate()?;
-            }
             let mut host = Host {
                 input: Default::default(),
                 editor: {
@@ -6407,8 +6355,7 @@ fn run_session(
                     #[cfg(feature = "inspection")]
                     editor.asset_ops.probe.attach_metrics(metrics);
                     // ROT_WORKSPACE=ai: start beside an AI app, in Side by Side.
-                    let beside_ai = std::env::var_os("ROT_PROJECT_STARTUP").is_none()
-                        && std::env::var("ROT_WORKSPACE").as_deref() == Ok("ai");
+                    let beside_ai = std::env::var("ROT_WORKSPACE").as_deref() == Ok("ai");
                     if beside_ai {
                         editor.layout_override = Some(panels::LayoutKind::SideBySide);
                     }
@@ -6450,9 +6397,6 @@ fn run_session(
             // never approves an adapter or bypasses the explicit owner API.
             #[cfg(unix)]
             if mcp_enabled {
-                if let Some(bootstrap) = &bootstrap {
-                    bootstrap.validate()?;
-                }
                 host.connect_adapter(&cc.egui_ctx)
                     .map_err(std::io::Error::other)?;
             }
@@ -10149,43 +10093,37 @@ mod tests {
 
     #[test]
     fn hierarchy_guarded_session_vertical_tracer() {
-        hierarchy_creator_journey(false, false, CreatorFixture::Assembly);
+        hierarchy_creator_journey(false, CreatorFixture::Assembly);
     }
 
     #[test]
     #[ignore = "explicit ROT_TEST_MCP_BINARY; actual STDIO fixture approval, not human consent"]
     fn hierarchy_stdio_creator_save_fresh_open() {
-        hierarchy_creator_journey(true, false, CreatorFixture::Assembly);
-    }
-
-    #[test]
-    #[ignore = "explicit ROT_TEST_MCP_BINARY; registered-project STDIO fixture, not human consent"]
-    fn project_registry_stdio_creator_save_fresh_open() {
-        hierarchy_creator_journey(true, true, CreatorFixture::Assembly);
+        hierarchy_creator_journey(true, CreatorFixture::Assembly);
     }
 
     #[test]
     #[ignore = "explicit source-built adapter, matched ROT_RUNTIME_KIT and disposable ROT_MCP_EXPORT_DIR"]
     fn group_rotation_stdio_creator_save_and_export() {
-        hierarchy_creator_journey(true, false, CreatorFixture::Rotation);
+        hierarchy_creator_journey(true, CreatorFixture::Rotation);
     }
 
     #[test]
     #[ignore = "explicit source-built adapter, legacy input fixture, matched kit and disposable export directory"]
     fn player_view_stdio_creator_save_and_export() {
-        hierarchy_creator_journey(true, false, CreatorFixture::PlayerView);
+        hierarchy_creator_journey(true, CreatorFixture::PlayerView);
     }
 
     #[test]
     #[ignore = "explicit source-built adapter, real Blender fixtures, matched kit and disposable export directory"]
     fn static_glb_stdio_creator_save_and_export() {
-        hierarchy_creator_journey(true, false, CreatorFixture::StaticGlb);
+        hierarchy_creator_journey(true, CreatorFixture::StaticGlb);
     }
 
     #[test]
     #[ignore = "explicit matched MCP/runtime kit and real Scene21 play-check fixture"]
     fn saved_play_check_over_real_stdio() {
-        hierarchy_creator_journey(true, false, CreatorFixture::PlayCheck);
+        hierarchy_creator_journey(true, CreatorFixture::PlayCheck);
     }
 
     #[derive(PartialEq)]
@@ -10197,7 +10135,7 @@ mod tests {
         PlayCheck,
     }
 
-    fn hierarchy_creator_journey(stdio: bool, registered: bool, fixture: CreatorFixture) {
+    fn hierarchy_creator_journey(stdio: bool, fixture: CreatorFixture) {
         let moving = fixture == CreatorFixture::Rotation;
         let player_view = fixture == CreatorFixture::PlayerView;
         let static_glb = fixture == CreatorFixture::StaticGlb;
@@ -10309,17 +10247,7 @@ mod tests {
         let mut adapter = stdio.then(|| {
             let binary = std::env::var_os("ROT_TEST_MCP_BINARY").expect("exact source-built adapter");
             let mut command = std::process::Command::new(binary);
-            command.env_remove("ROT_MCP_LOCATOR").env_remove("ROT_MCP_PROJECT_REGISTRY");
-            if registered {
-                use std::os::unix::fs::PermissionsExt;
-                let locator: Value = serde_json::from_slice(&std::fs::read(bridge.locator_path()).unwrap()).unwrap();
-                let registry = dir.path().join("project-registry.json");
-                std::fs::write(&registry, json!({"projects":[{"id":"disposable-assembly","name":"Disposable Assembly","scene_id":editor.session.scene().id,"locator":bridge.locator_path(),"binding":{"wire":locator["wire"],"incarnation":locator["incarnation"],"generation":locator["generation"],"connection":locator["connection"]}}]}).to_string()).unwrap();
-                std::fs::set_permissions(&registry, std::fs::Permissions::from_mode(0o600)).unwrap();
-                command.env("ROT_MCP_PROJECT_REGISTRY", registry);
-            } else {
-                command.env("ROT_MCP_LOCATOR", bridge.locator_path());
-            }
+            command.env("ROT_MCP_LOCATOR", bridge.locator_path());
             let mut child = command.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::inherit()).spawn().unwrap();
             writeln!(child.stdin.as_mut().unwrap(), "{}", json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"hierarchy-actual-stdio-fixture","version":"1"}}})).unwrap();
@@ -10334,59 +10262,14 @@ mod tests {
         } else {
             Some(crate::bridge::tests::approved(&bridge))
         };
-        if registered {
-            assert_eq!(
-                transport(
-                    &mut editor,
-                    &mut bridge,
-                    &stream,
-                    &mut adapter,
-                    "scene_inspect",
-                    json!({})
-                )["error"]["code"],
-                "project_required"
-            );
-            let listed = transport(
-                &mut editor,
-                &mut bridge,
-                &stream,
-                &mut adapter,
-                "project_list",
-                json!({}),
-            );
-            assert_eq!(listed["result"]["projects"][0]["id"], "disposable-assembly");
-            assert!(
-                bridge.pending_owner().is_none(),
-                "listing grants no native owner"
-            );
-            assert_eq!(
-                transport(
-                    &mut editor,
-                    &mut bridge,
-                    &stream,
-                    &mut adapter,
-                    "project_connect",
-                    json!({"project":"Disposable"})
-                )["error"]["code"],
-                "project_not_found"
-            );
-        }
         if stdio {
             let refused = transport(
                 &mut editor,
                 &mut bridge,
                 &stream,
                 &mut adapter,
-                if registered {
-                    "project_connect"
-                } else {
-                    "scene_inspect"
-                },
-                if registered {
-                    json!({"project":"Disposable Assembly"})
-                } else {
-                    json!({})
-                },
+                "scene_inspect",
+                json!({}),
             );
             assert_eq!(refused["error"]["code"], "approval_required");
             let owner = bridge.pending_owner().unwrap();
@@ -10405,26 +10288,10 @@ mod tests {
             &mut bridge,
             &stream,
             &mut adapter,
-            if registered {
-                "project_connect"
-            } else {
-                "scene_inspect"
-            },
-            if registered {
-                json!({"project":"disposable-assembly"})
-            } else {
-                json!({})
-            },
+            "scene_inspect",
+            json!({}),
         )["result"]
             .clone();
-        if registered {
-            assert_eq!(initial["registered_project"]["id"], "disposable-assembly");
-            assert_eq!(
-                initial["workspace_handoff"]["status"],
-                "workspace_unavailable"
-            );
-            assert_eq!(initial["scene_id"], editor.session.scene().id);
-        }
         let token = initial["session_token"].as_str().unwrap().to_owned();
         let mut call = |editor: &mut SceneEditor, op: &str, mut args: Value| {
             let should_succeed = args.get("expected_revision").is_none();
@@ -10433,9 +10300,6 @@ mod tests {
                 if should_succeed {
                     args["expected_revision"] = json!(editor.session.scene().revision.to_string());
                 }
-            }
-            if registered {
-                args["connection"] = initial["connection"].clone();
             }
             let reply = transport(editor, &mut bridge, &stream, &mut adapter, op, args);
             if !should_succeed {
@@ -10719,30 +10583,6 @@ mod tests {
             eprintln!("actual STDIO committed archive {}", output.display());
         }
         drop(call);
-        if registered {
-            bridge.disconnect();
-            let refused = transport(
-                &mut editor,
-                &mut bridge,
-                &stream,
-                &mut adapter,
-                "scene_inspect",
-                json!({}),
-            );
-            assert_eq!(refused["ok"], false, "disconnect must refuse same adapter");
-            let refused = transport(
-                &mut editor,
-                &mut bridge,
-                &stream,
-                &mut adapter,
-                "project_connect",
-                json!({"project":"Disposable Assembly"}),
-            );
-            assert_eq!(
-                refused["ok"], false,
-                "connect cannot refresh revoked authority"
-            );
-        }
         let locator = bridge.locator_path();
         if let Some(mut adapter) = adapter {
             drop(adapter.0.stdin.take());

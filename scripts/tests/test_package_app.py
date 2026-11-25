@@ -30,49 +30,60 @@ class DistributionTests(unittest.TestCase):
             put(name, "fixture\n")
         for name in new_app.PACKAGING_FILES:
             put(name, "fixture package tooling\n")
-        for name in new_app.CRATES:
+        put(new_app.CREATION_PACKAGING_FILE, "fixture creator packaging helper\n")
+        for name in package_app.app_spec("motion-lab").crates:
             put(f"crates/{name}/Cargo.toml", f'[package]\nname = "{name}"\nversion.workspace = true\n')
             put(f"crates/{name}/src/lib.rs", "pub fn run() {}\n")
+        put("crates/rot-behavior/templates/follower.lua", "return {}\n")
         put("crates/rot-render/assets/rot-dark-128.png", "icon fixture\n")
         put("crates/rot-scene/tests/fixtures/legacy-v1.scene.json", "{}\n")
-        put("examples/yard-app/Cargo.toml", '[package]\nname = "rot-yard"\nversion.workspace = true\n[dependencies]\nrot-app = {path = "../../crates/rot-app"}\n')
-        put("examples/yard-app/src/main.rs", "fn main() {}\n")
-        put("crates/support/strict_json.rs", "pub fn parse() {}\n")
+        put("examples/motion-lab/Cargo.toml", '[package]\nname = "rot-motion-lab"\nversion.workspace = true\n[dependencies]\nrot-app = {path = "../../crates/rot-app"}\n')
+        put("examples/motion-lab/src/main.rs", "fn main() {}\n")
         put("examples/content/scene.wgsl", "// compatibility shader\n")
-        put("examples/logistics.scenario.json", "{}\n")
-        put("examples/yard-app/resources/truck.obj", "v 0 0 0\n")
+        put("examples/motion-lab/resources/generic.scene.json", "{}\n")
         for name in new_app.VENDOR_FILES:
             put("third_party/wgpu-hal/" + name, "fixture\n")
         put("third_party/wgpu-hal/src/lib.rs", "pub fn patched() {}\n")
         put("third_party/wgpu-hal/src/gles/shaders/clear.frag", "void main() {}\n")
         put("third_party/wgpu-hal/examples/a.rs", "fn main() {}\n")
-        put("packaging/SOURCE-README.md", "portable source\n")
-        put("packaging/BINARY-README.txt", "portable binary\n")
+        for name in new_app.MLUA_FILES:
+            if name != "Cargo.lock":
+                put("third_party/mlua/" + name, "pinned upstream fixture\n")
+        for directory in ("src", "docs", "tests", "examples", "benches"):
+            put(f"third_party/mlua/{directory}/fixture.rs", "// pinned fixture\n")
+        put("packaging/MOTION-SOURCE-README.md", "Motion source\n")
+        put("packaging/MOTION-BINARY-README.txt", "Motion binary\n")
         put("packaging/licenses/example.txt", "readable license\n")
         put("packaging/license-sources.json", json.dumps({"texts": [{"path": "licenses/example.txt", "sha256": hashlib.sha256(b"readable license\n").hexdigest(), "source": "https://example.invalid/license", "packages": []}]}))
-        self.app = {"id": "yard", "name": package_app.APP, "version": "0.1.0", "source": None}
-        self.meta = {"packages": [self.app], "resolve": {"nodes": [{"id": "yard", "deps": []}]}}
+        self.app = {"id": "motion-lab", "name": package_app.APP, "version": "0.1.0", "source": None}
+        self.meta = {"packages": [self.app], "resolve": {"nodes": [{"id": "motion-lab", "deps": []}]}}
 
     def test_source_allowlist_relocation_and_no_overwrite(self):
         """A new creator tree carries relative engine paths, never local private/cache files."""
         for relative in (".env", "crates/rot-app/src/credentials.env", "crates/rot-app/src/target/leaked.rs",
-                         "examples/yard-app/resources/private.obj", "crates/rot-editor/src/lib.rs",
-                         "crates/support/private.rs", "examples/content/private.wgsl"):
+                         "examples/motion-lab/resources/private.json", "crates/rot-editor/src/lib.rs",
+                         "crates/rot-support/private.env", "examples/content/private.wgsl"):
             package_app.put(self.root, relative, b"SECRET")
         destination = self.base / "my-app"
         manifest = new_app.export(self.root, destination, normalize_lock=False)
         moved = self.base / "relocated-app"
         destination.rename(moved)
         cargo = tomllib.loads((moved / "Cargo.toml").read_text())
-        self.assertEqual(len(cargo["workspace"]["members"]), 6)
+        self.assertEqual(len(cargo["workspace"]["members"]), 7)
+        self.assertIn("crates/rot-behavior", cargo["workspace"]["members"])
+        self.assertIn("crates/rot-support", cargo["workspace"]["members"])
+        self.assertIn("third_party/mlua", cargo["workspace"]["exclude"])
         self.assertTrue((moved / cargo["patch"]["crates-io"]["wgpu-hal"]["path"] / "src/lib.rs").is_file())
         self.assertTrue((moved / "third_party/wgpu-hal/src/gles/shaders/clear.frag").is_file())
-        sample = moved / "examples/yard-app"
+        self.assertTrue((moved / "third_party/mlua/ROT-PATCH.md").is_file())
+        self.assertFalse((moved / "third_party/mlua/Cargo.lock").exists())
+        sample = moved / "examples/motion-lab"
         path = tomllib.loads((sample / "Cargo.toml").read_text())["dependencies"]["rot-app"]["path"]
         self.assertTrue((sample / path / "src/lib.rs").is_file())
         self.assertEqual((moved / "crates/rot-render/assets/rot-dark-128.png").read_bytes(), b"icon fixture\n")
         self.assertTrue((moved / "crates/rot-scene/tests/fixtures/legacy-v1.scene.json").is_file())
-        for name in new_app.PACKAGING_FILES:
+        self.assertTrue((moved / "crates/rot-behavior/templates/follower.lua").is_file())
+        for name in new_app.PACKAGING_FILES + (new_app.CREATION_PACKAGING_FILE,):
             self.assertTrue((moved / name).is_file())
         for file in manifest["files"]:
             data = (moved / file["path"]).read_bytes()
@@ -86,29 +97,26 @@ class DistributionTests(unittest.TestCase):
             new_app.export(self.root, linked / "wrong-location", normalize_lock=False)
 
     def test_real_source_exports_preserve_shared_compiler_and_test_inputs(self):
-        """Both real application kits retain out-of-crate inputs after relocation."""
+        """Real motion-lab export retains out-of-crate inputs after relocation."""
         root = Path(__file__).resolve().parents[2]
-        required = ("crates/support/strict_json.rs", "examples/content/scene.wgsl",
-                    "examples/logistics.scenario.json",
+        required = ("crates/rot-support/src/strict_json.rs", "examples/content/scene.wgsl",
                     "crates/rot-scene/tests/fixtures/legacy-v1.scene.json",
                     "crates/rot-scene/src/assembly_prototype.rs")
-        for app in ("yard", "motion-lab"):
-            with self.subTest(app=app):
-                destination = self.base / app
-                manifest = new_app.export(root, destination, normalize_lock=False, app=app)
-                moved = self.base / (app + "-relocated")
-                destination.rename(moved)
-                files = {entry["path"]: entry for entry in manifest["files"]}
-                for name in required:
-                    original = (root / name).read_bytes()
-                    self.assertEqual((moved / name).read_bytes(), original)
-                    self.assertEqual(files[name]["sha256"], hashlib.sha256(original).hexdigest())
-                    self.assertEqual(files[name]["bytes"], len(original))
+        destination = self.base / "motion-lab"
+        manifest = new_app.export(root, destination, normalize_lock=False, app="motion-lab")
+        moved = self.base / "motion-lab-relocated"
+        destination.rename(moved)
+        files = {entry["path"]: entry for entry in manifest["files"]}
+        for name in required:
+            original = (root / name).read_bytes()
+            self.assertEqual((moved / name).read_bytes(), original)
+            self.assertEqual(files[name]["sha256"], hashlib.sha256(original).hexdigest())
+            self.assertEqual(files[name]["bytes"], len(original))
 
     def test_export_missing_file_and_symlink_fail_without_partial_destination(self):
         """Incomplete or symlinked sources cannot escape or expose a partial source project."""
         destination = self.base / "my-app"
-        resource = self.root / "examples/yard-app/resources/truck.obj"
+        resource = self.root / "examples/motion-lab/resources/generic.scene.json"
         resource.unlink()
         with self.assertRaises(OSError):
             new_app.export(self.root, destination, normalize_lock=False)
@@ -123,7 +131,7 @@ class DistributionTests(unittest.TestCase):
     def test_real_elf_archive_relocation_safe_members_and_no_overwrite(self):
         """Archive extraction preserves a real executable, safe relative names and payload checksums."""
         binary = Path(shutil.which("true")).resolve()
-        output = self.base / "yard.tar.gz"
+        output = self.base / "motion.tar.gz"
         with patch.object(package_app, "metadata", return_value=self.meta):
             manifest = package_app.package(self.root, binary, output)
         original = output.read_bytes()
@@ -133,62 +141,14 @@ class DistributionTests(unittest.TestCase):
                 self.assertFalse(Path(member.name).is_absolute())
                 self.assertNotIn("..", Path(member.name).parts)
             archive.extractall(self.base / "relocated", filter="data")
-        payload = self.base / "relocated/rot-yard"
+        payload = self.base / "relocated/rot-motion-lab"
         for file in manifest["files"]:
             self.assertEqual(hashlib.sha256((payload / file["path"]).read_bytes()).hexdigest(), file["sha256"])
-        subprocess.run([str(payload / "rot-yard")], cwd=self.base, check=True)
+        subprocess.run([str(payload / "rot-motion-lab")], cwd=self.base, check=True)
         with patch.object(package_app, "metadata", return_value=self.meta):
             with self.assertRaisesRegex(ValueError, "overwrite"):
                 package_app.package(self.root, binary, output)
         self.assertEqual(output.read_bytes(), original)
-
-    @unittest.skipUnless(sys.platform == "linux" and shutil.which("readelf"), "Linux ELF tooling required")
-    def test_motion_selection_carries_optional_backend_and_owned_resources(self):
-        """The second app exports its own closure/templates/vendor and packages its own payload."""
-        put = lambda name, text: package_app.put(self.root, name, text.encode())
-        for name in ("rot-script", "rot-behavior"):
-            put(f"crates/{name}/Cargo.toml", f'[package]\nname = "{name}"\nversion.workspace = true\n')
-            put(f"crates/{name}/src/lib.rs", "pub fn run() {}\n")
-        put("crates/rot-behavior/templates/follower.lua", "return {}\n")
-        put("examples/motion-lab/Cargo.toml", '[package]\nname = "rot-motion-lab"\nversion.workspace = true\n')
-        put("examples/motion-lab/src/main.rs", "fn main() {}\n")
-        put("examples/motion-lab/resources/motion.rhai", "fn update() {}\n")
-        put("examples/motion-lab/resources/generic.scene.json", "{}\n")
-        put("examples/motion-lab/resources/private.json", "SECRET")
-        put("packaging/MOTION-SOURCE-README.md", "Motion source\n")
-        put("packaging/MOTION-BINARY-README.txt", "Motion binary\n")
-        put(new_app.CREATION_PACKAGING_FILE, "fixture creator packaging helper\n")
-        # A source archive omits mlua's ignored development lockfile.
-        for name in new_app.MLUA_FILES:
-            if name != "Cargo.lock":
-                put("third_party/mlua/" + name, "pinned upstream fixture\n")
-        for directory in ("src", "docs", "tests", "examples", "benches"):
-            put(f"third_party/mlua/{directory}/fixture.rs", "// pinned fixture\n")
-        source = self.base / "motion-source"
-        manifest = new_app.export(self.root, source, normalize_lock=False, app="motion-lab")
-        self.assertEqual(manifest["application"], "rot-motion-lab")
-        cargo = tomllib.loads((source / "Cargo.toml").read_text())
-        self.assertIn("crates/rot-behavior", cargo["workspace"]["members"])
-        self.assertIn("third_party/mlua", cargo["workspace"]["exclude"])
-        self.assertTrue((source / "third_party/mlua/ROT-PATCH.md").is_file())
-        self.assertTrue((source / "Cargo.lock").is_file())
-        self.assertFalse((source / "third_party/mlua/Cargo.lock").exists())
-        self.assertTrue((source / new_app.CREATION_PACKAGING_FILE).is_file())
-        self.assertTrue((source / "crates/rot-behavior/templates/follower.lua").is_file())
-        self.assertFalse((source / "examples/yard-app").exists())
-        self.assertFalse((source / "examples/motion-lab/resources/private.json").exists())
-        meta = {"packages": [{"id":"motion", "name":"rot-motion-lab", "version":"0.1.0", "source":None}],
-                "resolve":{"nodes":[{"id":"motion", "deps":[]}]}}
-        output = self.base / "motion.tar.gz"
-        with patch.object(package_app, "metadata", return_value=meta):
-            binary = package_app.package(self.root, Path(shutil.which("true")).resolve(), output, app="motion-lab")
-        self.assertEqual(binary["application"], "rot-motion-lab")
-        with tarfile.open(output) as archive:
-            names = set(archive.getnames())
-            self.assertIn("rot-motion-lab/resources/generic.scene.json", names)
-            self.assertIn("rot-motion-lab/rot-motion-lab", names)
-            self.assertNotIn("rot-motion-lab/resources/truck.obj", names)
-            self.assertEqual(archive.extractfile("rot-motion-lab/README.txt").read(), b"Motion binary\n")
 
     def test_missing_notices_or_corrupted_supplements_are_blocking(self):
         """Declared SPDX metadata cannot silently replace readable redistribution notices."""
@@ -209,9 +169,9 @@ class DistributionTests(unittest.TestCase):
         def dependency(package, kind):
             return {"pkg": package, "dep_kinds": [{"kind": kind}]}
         meta = {"packages": [self.app] + [{"id": n, "name": n, "version": "1"} for n in ("normal", "build", "dev")],
-                "resolve": {"nodes": [{"id": "yard", "deps": [dependency("normal", None), dependency("build", "build"), dependency("dev", "dev")]}] +
+                "resolve": {"nodes": [{"id": "motion-lab", "deps": [dependency("normal", None), dependency("build", "build"), dependency("dev", "dev")]}] +
                             [{"id": n, "deps": []} for n in ("normal", "build", "dev")]}}
-        self.assertEqual([p["name"] for p in package_app.active_packages(meta)], ["build", "normal", "rot-yard"])
+        self.assertEqual([p["name"] for p in package_app.active_packages(meta)], ["build", "normal", "rot-motion-lab"])
 
 
 if __name__ == "__main__":

@@ -42,8 +42,7 @@ pub use animation::{
 };
 mod player_view;
 pub use player_view::{PlayerAnchor, PlayerView, ResolvedPlayerView};
-#[path = "../../support/strict_json.rs"]
-mod strict_json;
+use rot_support::strict_json;
 mod surface;
 pub use authoring::*;
 pub use collider::{Collider, ColliderRole, ColliderShape, ResolvedCollider, ResolvedShape};

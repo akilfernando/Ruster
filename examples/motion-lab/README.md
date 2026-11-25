@@ -67,50 +67,9 @@ cargo run --locked -p rot-motion-lab -- --scene my.scene.json --resources my-ass
 
 Use at most64 unique mappings. Relative mesh paths resolve beneath the explicit canonical resource root; missing mappings, escapes and invalid/oversized resources fail before running. Immutable mesh snapshots pass through the shared `Content` path. The embedded generic demo uses procedural cubes and requires no resources directory. There is no asset catalog refresh/cache ownership in this consumer.
 
-`--scene` and `--generic-demo` are mutually exclusive and cannot be combined with legacy `--script`, `--project` or `--save-project`. Omitting both preserves the existing Rhai startup. Generic mode is the shared-mechanism consumer. Its bounded modification/export/package and F1 state-specific acceptance have separate evidence in [current status](../../docs/STATUS.md).
+`--scene` and `--generic-demo` are mutually exclusive. Generic mode is the shared-mechanism consumer. Its bounded modification/export/package and F1 state-specific acceptance have separate evidence in [current status](../../docs/STATUS.md).
 
-## Legacy Rhai project1 compatibility
-
-```sh
-cargo run --locked -p rot-motion-lab
-cargo run --locked -p rot-motion-lab -- --headless --ticks 10
-cargo run --locked -p rot-motion-lab -- --headless --ticks 10 --speed 2
-cargo run --locked -p rot-motion-lab -- --script examples/motion-lab/resources/motion.rhai
-```
-
-The embedded default script requires no resource directory. Native mode starts paused with no behavior attached. Select `left` in the hierarchy or viewport, click **Attach behavior (draft)**, change `speed` or `amplitude`, then click the host's **Reset** and **Run** or **Step**. The inspector shows applied attachment state and runtime transforms. Run/Pause also uses Space when a text field does not own keyboard focus. `--speed N` preattaches `left` and applies the override in either mode; headless attaches `left` for a new project, while `--project` preserves saved attachments.
-
-The fixed tick is 0.1 seconds. With the original source, ten ticks at speed1 produce `left` position `[-2, 0.841471, 0]` and Y rotation1 radian; speed2 produces Y0.909297 and Y rotation2. Other objects stay at their authored transforms until attached. `--frames N` bounds native smoke runs; `--ticks N` bounds headless runs (maximum10000).
-
-Source and attachment/property edits are drafts until **Reset**. Reset compiles the candidate, validates every attachment's property schema and trials its first update on a disposable scene. Only success applies the whole candidate and restores all authored transforms at tick0. Attachments may share code while keeping independent values. **Detach behavior (draft)** also takes effect at Reset. There is no application of play transforms back into authored content.
-
-To edit externally, pass `--script PATH`, save the file in your editor and click **Reload from disk (draft)**, then **Reset**. Reads accept regular UTF-8 files of at most16KiB. Reload is explicit; the app never launches an editor or writes the source file. The built-in multiline source editor works without any external tool. Use **Save project** to store a runnable candidate in a separate version1 `rot-motion-project` JSON document. Enter a path first; using a new path performs Save As. The project embeds the authored scene, source snapshot and per-object attachments/properties. The external source path is an absolute informational Reload reference: reopening never reads or overwrites it, so moving or deleting the script does not change the saved behavior. Play transforms are never saved. Scene v1/v2 files remain separate and unchanged.
-
-**Undo authored edit** and **Redo authored edit** restore source/attachment/property drafts together, including Revert/defaults/reload actions; Reset applies the restored draft to play. Numeric drags and source editing are grouped until pointer release/text focus leaves the edit. History is bounded to32 edits and lasts for the current session; project files contain the current authored snapshot, not history. Dirty state compares that snapshot with the last successful save; Reset and play do not mark it saved. Save requires source/schema/first-step validation, so unfinished syntax must be repaired or undone before saving. Crash autosave and recovery journals are not implemented.
-
-**Open project** refuses unsaved edits; **Discard edits and open project** explicitly replaces them only after the new candidate validates. Failed loads, failed saves and external-file conflicts preserve current work. Closing an unsaved project pauses play and offers Save and close, Discard and close, or Cancel close. Save conflicts require reopening or saving to a new destination; existing unrelated files are never overwritten. Advisory sibling locks coordinate cooperating local writers; this trusted authoring route is not hostile-filesystem or universal power-loss isolation.
-
-```sh
-cargo run --locked -p rot-motion-lab -- --headless --speed 2 --save-project /tmp/my-motion.json
-cargo run --locked -p rot-motion-lab -- --headless --project /tmp/my-motion.json --ticks 10
-cargo run --locked -p rot-motion-lab -- --project /tmp/my-motion.json
-```
-
-Choose a fresh destination for the first command. `--project` and `--script` are mutually exclusive. Project saves are bounded to1MiB, regular files and procedural scene objects; external mesh assets are not yet part of this application format.
-
-For error recovery, first apply and run the original source. Replace the source draft with `fn properties() {` and click Reset: an error is visible and the last applied transforms/behavior remain. Click **Revert all drafts to last applied**, then Reset to recover. This discards draft source, attachment and numeric edits together; runtime transforms remain until Reset. For an external-file failure, make the same edit on disk and Reload; restore the file and Reload, then Reset. If you rename an exposed property, Reset rejects old property maps; click **Use source defaults for all draft attachments**, adjust values and Reset. This action deliberately replaces all draft attachment values.
-
-Runtime errors can still occur after the first update. The host pauses with object/source context; the entire failed frame preserves its previous transforms and tick. Correct the draft or detach the offending object, then Reset. A script that fails during headless execution prints the error and exits2. Syntax-invalid startup files also exit2 with a recovery hint; start with the embedded script to repair through the UI.
-
-The script defines `properties()` returning numeric defaults and `update(object, props, dt, time)` returning the complete transform map. Keys are `x,y,z`, `rx,ry,rz` (radians), `sx,sy,sz`; `dt` and `time` are seconds. Preserve all transform keys. The script adapter enforces bounded evaluation and validated finite transforms; this is a trusted local authoring workflow, not hostile-code isolation. See the [script crate](../../crates/rot-script/README.md) for the supported language/bounds.
-
-The focused integration checks use the real host Runtime to protect draft/application separation, invalid disk reload and schema migration, first-update candidate rejection, whole-frame atomicity across multiple objects, pause on later runtime error and Reset recovery. They supplement the script crate's language/limit tests without duplicating that matrix:
-
-```sh
-cargo test --locked -p rot-motion-lab
-```
-
-Native tests must follow the project's workspace2 isolation procedure in `AGENTS.md`. The legacy mode has no generic-editor recovery or IDE integration; use the shared generic-scene workflow above for new authoring. The bounded M8 acceptance is recorded in [behavior authoring](../../docs/BEHAVIOR-AUTHORING.md#m8-closeout--2026-11-04).
+See [behavior authoring](../../docs/BEHAVIOR-AUTHORING.md#m8-closeout--2026-11-04) for the bounded M8 acceptance record.
 
 
 ## Authored controls and supplied headless frames

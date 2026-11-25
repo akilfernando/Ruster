@@ -16,14 +16,14 @@ Updated 2026-11-25. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 ## Current phase — Phase 2: Core
 
 - **Done:** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`, `A-01`–`A-07`,
-  `P-01`–`P-02`), `C-01` design, `C-04` files-first `Assets/`, `C-07` linked
-  prefabs, `C-11` multi-scene projects & `C-11a` crash recovery, `C-12` 5k/50k
-  benchmarks, `C-05a`–`d`, `C-09a`, `C-13`–`C-61` authoring slices, and Phase 4
-  Game HUD labels.
+  `P-01`–`P-02`), `C-00a` (retired legacy logistics crates, Rhai mode, editor
+  logistics UI, and MCP enrollment/registry plumbing; promoted `rot-support`),
+  `C-01` design, `C-04` files-first `Assets/`, `C-07` linked prefabs, `C-11`
+  multi-scene projects & `C-11a` crash recovery, `C-12` 5k/50k benchmarks,
+  `C-05a`–`d`, `C-09a`, `C-13`–`C-61` authoring slices, and Phase 4 Game HUD
+  labels.
 - **Open to exit Phase 2** (new `C-62+` convenience slices are frozen per
   2026-11-25 user approval until `C-EXIT` passes):
-  - `C-00a`: delete legacy logistics prototype and superseded MCP
-    registry/enrollment plumbing.
   - `C-05` / `C-06` / `C-08`: fix live Inspector axis scrub (`C-05`), route v23
     MCP through shared commands (`C-06`), confirm non-refusal glTF import line
     and move full PBR/animated rigs to Phase 3A (`C-08`).

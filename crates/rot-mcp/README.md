@@ -30,12 +30,8 @@ project folder contains its working directory, else the only one open.
 - Turning off `allow_ai_connections` in the editor preferences stops
   listening.
 
-Two older modes still work when their variables are set:
-`ROT_MCP_PROJECT_REGISTRY` (a registry written by
-`scripts/enroll_local_connector.py`) and `ROT_MCP_LOCATOR` (one editor's
-`.json` record). In registry mode the `connection` value returned by
-`project_connect` may still be passed; when left out, calls go to the
-connected project.
+When `ROT_MCP_LOCATOR` is set to one editor's `.json` locator record,
+`rot-mcp` connects directly to that endpoint (primarily for automated tests).
 
 ## Working with the scene
 

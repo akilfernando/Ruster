@@ -307,7 +307,6 @@ mod tests {
                 egui::Context::default(),
                 host.editor.connection_incarnation.clone(),
                 host.editor.connection_generation.clone(),
-                None,
                 &root.join("run"),
                 Some(scene),
                 Some(host.editor.ai_trust.store.clone()),

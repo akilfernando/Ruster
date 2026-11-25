@@ -276,7 +276,6 @@ pub struct Client {
     owner: String,
     stream: Option<UnixStream>,
     capability: Option<String>,
-    proof: Option<Value>,
     client: Option<Value>,
     failed: bool,
 }
@@ -292,9 +291,6 @@ impl Client {
     }
     pub fn available(&self) -> bool {
         !self.failed && self.validate().is_ok()
-    }
-    pub fn enroll(&mut self, proof: Value) {
-        self.proof = Some(proof);
     }
     /// Name the AI app and present its trust token: `{"name","token"}`.
     pub fn identify(&mut self, client: Value) {
@@ -327,7 +323,6 @@ impl Client {
             owner: unpredictable()?,
             stream: None,
             capability: None,
-            proof: None,
             client: None,
             failed: false,
         })
@@ -364,9 +359,6 @@ impl Client {
             }
             let mut request =
                 json!({"wire":WIRE,"hello":self.owner,"binding":self.locator.binding()});
-            if let Some(proof) = &self.proof {
-                request["enrollment"] = proof.clone();
-            }
             if let Some(client) = &self.client {
                 request["client"] = client.clone();
             }
@@ -380,11 +372,6 @@ impl Client {
         if self.capability.is_none() {
             let reply = Self::exchange(stream, json!({"wire":WIRE,"bind":self.owner}))?;
             if reply["state"] == "approval_required" {
-                if self.proof.is_some() {
-                    return Err(io::Error::other(
-                        "enrolled bind refused; no legacy approval fallback",
-                    ));
-                }
                 return Ok(
                     json!({"ok":false,"error":{"code":"approval_required","message":"Approve this adapter owner in the selected editor before project access."}}),
                 );
@@ -406,11 +393,7 @@ impl Client {
                 self.failed = true;
                 self.stream.take();
                 self.capability.take();
-                if self.proof.is_some() {
-                    json!({"ok":false,"error":{"code":"trusted_connection_unavailable","message":"Enrolled connector refused, revoked, retired or trust-protocol upgrade required. No manual approval fallback. Outcome may be unknown; do not replay. A later explicit project_connect can establish a fresh epoch."}})
-                } else {
-                    json!({"ok":false,"error":{"code":"bridge_unavailable","message":"Selected owner transport unavailable or retired. Outcome may be unknown; do not replay. New explicit editor consent is required."}})
-                }
+                json!({"ok":false,"error":{"code":"bridge_unavailable","message":"Selected owner transport unavailable or retired. Outcome may be unknown; do not replay. New explicit editor consent is required."}})
             }
         }
     }

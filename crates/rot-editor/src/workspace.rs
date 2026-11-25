@@ -2203,7 +2203,7 @@ mod tests {
     fn scaled_settings_footer_stays_inside_small_supported_windows() {
         for physical in [egui::vec2(960.0, 640.0), egui::vec2(1400.0, 1000.0)] {
             let ctx = egui::Context::default();
-            crate::ui::configure(&ctx);
+            crate::editor_theme::configure(&ctx);
             let mut output = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, physical)),

@@ -90,15 +90,13 @@ This reports the scene identity, revision, three objects, ten preview ticks and 
 
 ### Build your own application
 
-The Yard and Motion Lab examples demonstrate application-owned behavior using the shared kit. Run the Yard delivery challenge, or export either example to a new editable workspace:
+The Motion Lab example demonstrates application-owned behavior using the shared kit. Export the example to a new editable workspace:
 
 ```sh
-cargo run --locked -p rot-yard -- --resources examples/yard-app/resources
-python3 scripts/new_app.py /tmp/my-rot-app
 python3 scripts/new_app.py --app motion-lab /tmp/my-motion-lab
 ```
 
-Use Run/Pause, Step and Reset. The default truck capacity misses the delivery target; capacity 3 completes it. Change the application rules in `examples/yard-app/src/lib.rs`, rebuild and package your result. Motion Lab is a non-game consumer of the shared Scene5 runtime. Exports require the pinned dependencies in the local Cargo cache; see the [application guide](examples/yard-app/README.md), [Motion Lab guide](examples/motion-lab/README.md), [kit API](crates/rot-app/README.md) and [distribution workflow](docs/DISTRIBUTION.md). These are Linux development artifacts, not a supported release matrix; editor/MCP services are not runtime requirements.
+Motion Lab is a non-game consumer of the shared scene runtime. Exports require the pinned dependencies in the local Cargo cache; see the [Motion Lab guide](examples/motion-lab/README.md), [kit API](crates/rot-app/README.md) and [distribution workflow](docs/DISTRIBUTION.md). These are Linux development artifacts, not a supported release matrix; editor/MCP services are not runtime requirements.
 
 ### Try behavior scripting
 

@@ -59,56 +59,12 @@ impl SceneEditor {
 // These explicit local owner APIs are CP2's integration seam, not MCP tools.
 #[allow(dead_code)]
 impl Host {
-    /// Local native administration, independent of current document work access.
-    pub(super) fn enrolled_policy(
-        &self,
-    ) -> Result<Option<(crate::enrollment::LocalPolicy, String)>, String> {
-        let Some(path) = std::env::var_os("ROT_CONNECTOR_ENROLLMENT") else {
-            return Ok(None);
-        };
-        let project = std::env::var("ROT_PROJECT_ID").map_err(|e| e.to_string())?;
-        let startup: crate::project_startup::Startup =
-            serde_json::from_str(&std::env::var("ROT_PROJECT_STARTUP").map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
-        let policy = crate::enrollment::LocalPolicy::load(std::path::Path::new(&path), &project)
-            .map_err(|e| e.to_string())?;
-        Ok(Some((
-            policy,
-            format!(
-                "Registered project: {project} · {} (may differ from the current document)",
-                startup.scene_path.display()
-            ),
-        )))
-    }
-    pub(super) fn enrolled_grant(&self) -> Result<Option<crate::enrollment::Grant>, String> {
-        let Some(path) = std::env::var_os("ROT_CONNECTOR_ENROLLMENT") else {
-            return Ok(None);
-        };
-        let startup: crate::project_startup::Startup =
-            serde_json::from_str(&std::env::var("ROT_PROJECT_STARTUP").map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
-        super::validate_registered_scene(
-            &startup,
-            self.editor.ai_scene_path(),
-            self.editor.ai_scene_id(),
-        )
-        .map_err(|_| {
-            "Registered project changed; no enrolled authority for the replacement document"
-                .to_owned()
-        })?;
-        crate::enrollment::Grant::load(
-            std::path::Path::new(&path),
-            &std::env::var("ROT_PROJECT_ID").map_err(|e| e.to_string())?,
-        )
-        .map(Some)
-        .map_err(|e| e.to_string())
-    }
     /// Keep the editor findable by `rot-mcp` while a scene is open and AI apps
     /// are allowed. Adapters still need the approval below to get access.
     pub(super) fn keep_listening(&mut self, ctx: &egui::Context) {
         use std::time::{Duration, Instant};
         let editor = &self.editor;
-        if !editor.ai_listen || std::env::var_os("ROT_PROJECT_STARTUP").is_some() {
+        if !editor.ai_listen {
             return;
         }
         if editor
@@ -168,33 +124,18 @@ impl Host {
         {
             return Err("Wait for the old connection to close.".into());
         }
-        let registered = std::env::var_os("ROT_PROJECT_STARTUP")
-            .map(|raw| {
-                let startup: crate::project_startup::Startup =
-                    serde_json::from_str(&raw.to_string_lossy()).map_err(std::io::Error::other)?;
-                super::validate_registered_scene(
-                    &startup,
-                    self.editor.ai_scene_path(),
-                    self.editor.ai_scene_id(),
-                )?;
-                Ok::<_, std::io::Error>(startup)
-            })
-            .transpose()
-            .map_err(|error| error.to_string())?;
-        let grant = self.enrolled_grant()?;
         let (incarnation, generation) = (
             self.editor.connection_incarnation.clone(),
             self.editor.connection_generation.clone(),
         );
         // Tests share one process ID, so they keep private endpoints.
         let bridge = if cfg!(test) {
-            crate::bridge::Bridge::start_enrolled(ctx.clone(), incarnation, generation, grant)
+            crate::bridge::Bridge::start_for(ctx.clone(), incarnation, generation)
         } else {
             crate::bridge::Bridge::start_discoverable(
                 ctx.clone(),
                 incarnation,
                 generation,
-                grant,
                 &crate::discovery::directory(),
                 self.editor.ai_scene_path(),
                 Some(crate::trust::path()),
@@ -217,19 +158,6 @@ impl Host {
             None
         };
         self.bridge = Some(bridge);
-        if let Some(startup) = registered {
-            let publication = (|| -> std::io::Result<()> {
-                startup.publish(
-                    &std::env::var("ROT_PROJECT_ID").map_err(std::io::Error::other)?,
-                    self.editor.ai_scene_id(),
-                    path.clone(),
-                )
-            })();
-            if let Err(error) = publication {
-                self.disconnect_adapter();
-                return Err(error.to_string());
-            }
-        }
         Ok(path)
     }
     pub(super) fn pending_adapter(&self) -> Option<(String, u32)> {
@@ -317,16 +245,6 @@ impl Host {
     }
 
     pub(super) fn connection_state(&self) -> &'static str {
-        if let Some(path) = std::env::var_os("ROT_CONNECTOR_ENROLLMENT") {
-            match crate::enrollment::Grant::access_allowed(
-                std::path::Path::new(&path),
-                &std::env::var("ROT_PROJECT_ID").unwrap_or_default(),
-            ) {
-                Ok(false) => return "access_revoked",
-                Err(_) => return "connection_error",
-                Ok(true) => (),
-            }
-        }
         match &self.bridge {
             None => "retired",
             Some(bridge) if !bridge.authority().live() => "revoked_draining",

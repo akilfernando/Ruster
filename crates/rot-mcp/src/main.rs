@@ -5,17 +5,8 @@ mod capture_tools;
 mod collider_tools;
 mod color_tools;
 mod component_tools;
-#[allow(dead_code)]
-#[path = "../../support/connection.rs"]
-mod connection;
 mod descriptions;
 mod discovered;
-#[path = "../../support/discovery.rs"]
-#[allow(dead_code)]
-mod discovery;
-#[path = "../../support/enrollment.rs"]
-#[allow(dead_code)]
-mod enrollment;
 mod export_tools;
 mod hierarchy_tools;
 mod hud_tools;
@@ -24,19 +15,10 @@ mod material_tools;
 mod persistence_tools;
 mod play_check_tools;
 mod player_view_tools;
-#[cfg(unix)]
-#[path = "../../support/project_startup.rs"]
-#[allow(dead_code)]
-mod project_startup;
-mod project_tools;
 mod runtime_tools;
-#[path = "../../support/strict_json.rs"]
-mod strict_json;
 mod tool_catalog;
-#[path = "../../support/trust.rs"]
-#[allow(dead_code)]
-mod trust;
 mod view_tools;
+use rot_support::{connection, discovery, strict_json, trust};
 use serde_json::{json, Map, Value};
 use std::io::{self, BufRead, Write};
 
@@ -1275,61 +1257,13 @@ impl Server {
     }
 }
 
-/// Adapter-local correlation only; never native identity, consent or authority.
-#[derive(serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-enum StartupResponseSource {
-    Snapshot,
-    FreshFailure,
-    CachedFailure,
-}
-struct StartupDiagnostics {
-    adapter_pid: u32,
-    process_start: Option<String>,
-    attempt_sequence: u8,
-    child_pid: Option<u32>,
-}
-impl Default for StartupDiagnostics {
-    fn default() -> Self {
-        let adapter_pid = std::process::id();
-        Self {
-            adapter_pid,
-            process_start: project_startup::process_start(adapter_pid)
-                .ok()
-                .filter(|s| {
-                    !s.is_empty() && s.len() <= 20 && s.bytes().all(|b| b.is_ascii_digit())
-                }),
-            attempt_sequence: 0,
-            child_pid: None,
-        }
-    }
-}
-impl StartupDiagnostics {
-    fn snapshot(&self, failure_cached: bool, response_source: StartupResponseSource) -> Value {
-        json!({
-            "adapter_pid": self.adapter_pid,
-            "process_start": self.process_start,
-            "prepare_attempted": self.attempt_sequence != 0,
-            "attempt_sequence": self.attempt_sequence,
-            "child_pid": self.child_pid,
-            "failure_cached": failure_cached,
-            "response_source": response_source,
-        })
-    }
-}
-
 /// Snapshot the locator exactly once per adapter process, lazily on its first
 /// project call. initialize/tools/list do not open or consume owner authority.
 #[derive(Default)]
 struct Adapter {
     attempted: bool,
     client: Option<connection::Client>,
-    registry: Option<io::Result<project_tools::Registry>>,
-    selected: Option<project_tools::Project>,
     binding: Value,
-    verified: bool,
-    startup_error: Option<String>,
-    startup_diagnostics: StartupDiagnostics,
     /// No configuration: find running editors in this directory.
     discovery: Option<std::path::PathBuf>,
     /// The editor chosen with project_connect, by process ID.
@@ -1338,27 +1272,11 @@ struct Adapter {
     client_name: Option<String>,
 }
 impl Adapter {
-    fn startup_failure(&self, source: StartupResponseSource) -> Value {
-        let mut failure = domain_error(
-            "project_startup_unavailable",
-            self.startup_error.as_deref().unwrap(),
-        );
-        failure["error"]["startup_diagnostics"] = self.startup_diagnostics.snapshot(true, source);
-        failure
-    }
     fn configured() -> Self {
-        let registry = std::env::var_os("ROT_MCP_PROJECT_REGISTRY").map(|path| {
-            if std::env::var_os("ROT_MCP_LOCATOR").is_some() {
-                return Err(io::Error::other(
-                    "registry and legacy locator are mutually exclusive",
-                ));
-            }
-            project_tools::Registry::load(std::path::Path::new(&path))
-        });
-        let discovery = (registry.is_none() && std::env::var_os("ROT_MCP_LOCATOR").is_none())
+        let discovery = std::env::var_os("ROT_MCP_LOCATOR")
+            .is_none()
             .then(discovery::directory);
         Self {
-            registry,
             discovery,
             ..Self::default()
         }
@@ -1367,135 +1285,11 @@ impl Adapter {
         if let Some(directory) = self.discovery.clone() {
             return self.call_discovered(&directory, name, arguments);
         }
-        if let Some(registry) = &self.registry {
-            let Ok(registry) = registry else {
-                return domain_error(
-                    "registry_unavailable",
-                    "Explicit private project registration is invalid; no locator fallback.",
-                );
-            };
-            if name == "project_list" {
-                let mut listed = registry.list();
-                listed["result"]["startup_diagnostics"] = self.startup_diagnostics.snapshot(
-                    self.startup_error.is_some(),
-                    StartupResponseSource::Snapshot,
-                );
-                return listed;
-            }
-            if name == "project_connect" {
-                if self
-                    .selected
-                    .as_ref()
-                    .is_some_and(|p| p.enrollment.is_some())
-                    && self.attempted
-                    && self.client.as_ref().is_none_or(|c| !c.available())
-                {
-                    self.client.take();
-                    self.selected.take();
-                    self.binding = Value::Null;
-                    self.attempted = false;
-                    self.verified = false;
-                    self.startup_error = None;
-                    self.startup_diagnostics = StartupDiagnostics::default();
-                }
-                let Ok(project) = registry.resolve(arguments["project"].as_str().unwrap_or(""))
-                else {
-                    return domain_error("project_not_found", "Name or ID must exactly match an explicitly registered project; no filesystem discovery.");
-                };
-                if let Some(selected) = &self.selected {
-                    if selected.id != project.id {
-                        return domain_error(
-                            "project_pinned",
-                            "This adapter cannot retarget; fresh owner consent is required.",
-                        );
-                    }
-                } else {
-                    self.selected = Some(project.clone());
-                    self.binding = json!({"project_id":project.id,"epoch":connection::unpredictable().expect("local randomness")});
-                }
-                if !self.attempted {
-                    self.attempted = true;
-                    self.startup_diagnostics.attempt_sequence = 1;
-                    let selected = self.selected.as_mut().unwrap();
-                    if let Err(error) = selected.prepare(&mut self.startup_diagnostics.child_pid) {
-                        self.startup_error = Some(error.to_string());
-                        return self.startup_failure(StartupResponseSource::FreshFailure);
-                    }
-                    self.client = selected.open().ok();
-                }
-            }
-            let Some(project) = &self.selected else {
-                return domain_error("project_required", "Call project_connect with an exact registered name or ID before project access.");
-            };
-            if name != "project_connect" {
-                if name != "project_disconnect" && self.startup_error.is_some() {
-                    return self.startup_failure(StartupResponseSource::CachedFailure);
-                }
-                // The connection is optional: left out, the call goes to the
-                // project chosen with project_connect.
-                let binding = arguments.get("connection").unwrap_or(&self.binding);
-                if binding != &self.binding {
-                    return domain_error("connection_changed", "Old project/epoch refused before dispatch. Explicit connect does not retarget queued calls.");
-                }
-                if name == "project_disconnect" {
-                    if let Some(client) = &mut self.client {
-                        client.disconnect();
-                    }
-                    self.client.take();
-                    self.selected.take();
-                    self.binding = Value::Null;
-                    self.attempted = false;
-                    self.verified = false;
-                    self.startup_error = None;
-                    self.startup_diagnostics = StartupDiagnostics::default();
-                    return json!({"ok":true,"result":{"disconnected":true}});
-                }
-            }
-            let Some(client) = self.client.as_mut() else {
-                if self.startup_error.is_some() {
-                    return self.startup_failure(StartupResponseSource::CachedFailure);
-                }
-                return domain_error("bridge_unavailable", "Registered incarnation unavailable; no restart, retarget or fallback. Explicit registration and fresh owner consent required.");
-            };
-            if !self.verified || name == "project_connect" {
-                let mut observed = client.call("scene_inspect", &json!({}));
-                if observed["ok"] != true {
-                    return observed;
-                }
-                if observed["result"]["scene_id"] != project.scene_id {
-                    self.client.take();
-                    return domain_error("project_identity_changed", "Registered scene identity disagrees with native owner; no authored request dispatched.");
-                }
-                self.verified = true;
-                if name == "project_connect" {
-                    observed["result"]["registered_project"] =
-                        json!({"id":project.id,"name":project.name});
-                    observed["result"]["connection"] = self.binding.clone();
-                    let descriptor = client.call("workspace_descriptor", &json!({}));
-                    observed["result"]["workspace_handoff"] = if descriptor["ok"] == true {
-                        project.workspace_handoff(
-                            &descriptor["result"],
-                            &observed["result"],
-                            client.native_pid(),
-                        )
-                    } else {
-                        json!({"status":"workspace_unavailable","message":"The exact native owner has not published a live authenticated workspace attachment. No registry URL fallback.","native_error":descriptor["error"]["code"]})
-                    };
-                    return observed;
-                }
-            }
-            let mut native_arguments = arguments.clone();
-            native_arguments
-                .as_object_mut()
-                .unwrap()
-                .remove("connection");
-            return self.client.as_mut().unwrap().call(name, &native_arguments);
-        }
         if matches!(
             name,
             "project_connect" | "project_list" | "project_disconnect"
         ) {
-            return domain_error("registry_unavailable", "Configure an explicit private project registry during installation; no discovery or implicit locator fallback.");
+            return domain_error("locator_mode", "project_list, project_connect and project_disconnect are unavailable when ROT_MCP_LOCATOR is set.");
         }
         if !self.attempted {
             self.attempted = true;
@@ -1555,69 +1349,6 @@ fn main() {
 mod tests {
     use super::*;
     use std::io::Cursor;
-
-    #[test]
-    fn explicit_disconnect_clears_attempt_cache_but_old_calls_never_retarget() {
-        let registry = project_tools::Registry::parse(&json!({"projects":[{"id":"one","name":"One","scene_id":"same","locator":"/not-opened/locator.json","binding":{"wire":connection::WIRE,"incarnation":"i","generation":"g","connection":"c"}}]}).to_string()).unwrap();
-        let mut adapter = Adapter {
-            registry: Some(Ok(registry)),
-            ..Default::default()
-        };
-        assert_eq!(
-            adapter.call("project_connect", &json!({"project":"one"}))["error"]["code"],
-            "bridge_unavailable"
-        );
-        assert_eq!(
-            adapter.call("scene_inspect", &json!({}))["error"]["code"],
-            "bridge_unavailable",
-            "a left-out connection goes to the chosen project"
-        );
-        let binding = adapter.binding.clone();
-        assert_eq!(
-            adapter.call("project_disconnect", &json!({"connection":binding}))["ok"],
-            true
-        );
-        assert!(!adapter.attempted);
-        assert!(adapter.selected.is_none());
-        assert_eq!(
-            adapter.call("scene_inspect", &json!({"connection":binding}))["error"]["code"],
-            "project_required"
-        );
-        adapter.call("project_connect", &json!({"project":"one"}));
-        assert_ne!(adapter.binding, binding);
-        assert_eq!(
-            adapter.call("scene_inspect", &json!({"connection":binding}))["error"]["code"],
-            "connection_changed"
-        );
-    }
-
-    #[test]
-    fn registry_requires_explicit_selection_and_never_falls_back() {
-        let registry = project_tools::Registry::parse(&json!({"projects":[{"id":"one","name":"One","scene_id":"scene-one","locator":"/not-opened/locator.json","binding":{"wire":connection::WIRE,"incarnation":"i","generation":"g","connection":"c"}}]}).to_string()).unwrap();
-        let mut adapter = Adapter {
-            registry: Some(Ok(registry)),
-            ..Default::default()
-        };
-        assert_eq!(
-            adapter.call("scene_inspect", &json!({}))["error"]["code"],
-            "project_required"
-        );
-        assert_eq!(
-            adapter.call("project_list", &json!({}))["result"]["projects"][0]["id"],
-            "one"
-        );
-        assert!(!adapter.attempted);
-        assert_eq!(
-            adapter.call("project_connect", &json!({"project":"On"}))["error"]["code"],
-            "project_not_found"
-        );
-        assert!(!adapter.attempted);
-        assert_eq!(
-            adapter.call("project_connect", &json!({"project":"One"}))["error"]["code"],
-            "bridge_unavailable"
-        );
-        assert!(adapter.attempted);
-    }
 
     #[test]
     fn registered_project_tools_route_without_implicit_project_access() {

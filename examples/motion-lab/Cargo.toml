@@ -20,9 +20,9 @@ inspection = ["rot-app/inspection"]
 [dependencies]
 rot-app = { path = "../../crates/rot-app", features = ["audio-output"] }
 rot-scene = { path = "../../crates/rot-scene" }
-rot-script = { path = "../../crates/rot-script" }
 rot-behavior = { path = "../../crates/rot-behavior" }
 rot-assets = { path = "../../crates/rot-assets" }
+rot-support = { path = "../../crates/rot-support" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

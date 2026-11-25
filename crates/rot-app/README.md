@@ -1,6 +1,6 @@
 # Rot Engine application kit
 
-`rot-app` turns an application-owned Rust state machine into a standalone Linux desktop application, using the existing `rot-scene`, `rot-assets` and `rot-render` facilities. It has no editor, MCP or logistics dependency. [Yard](../../examples/yard-app/README.md) is the complete code-first template and interactive example; [its package guide](../../packaging/SOURCE-README.md) describes the bounded Linux development bundle.
+`rot-app` turns an application-owned Rust state machine into a standalone Linux desktop application, using the existing `rot-scene`, `rot-assets` and `rot-render` facilities. It has no editor, MCP or logistics dependency. [Motion Lab](../../examples/motion-lab/README.md) is the compiled consumer; [its package guide](../../packaging/MOTION-SOURCE-README.md) describes the bounded Linux development bundle.
 
 ## Small application surface
 

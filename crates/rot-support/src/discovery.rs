@@ -43,7 +43,16 @@ pub fn prepare(directory: &Path) -> io::Result<()> {
 
 /// Start time of a live process, used to tell a reused process ID apart.
 pub fn process_start(pid: u32) -> Option<String> {
-    crate::project_startup::process_start(pid).ok()
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    stat.rsplit_once(") ")
+        .and_then(|(_, s)| {
+            let state = s.split_whitespace().next()?;
+            if matches!(state, "Z" | "X") {
+                return None;
+            }
+            s.split_whitespace().nth(19)
+        })
+        .map(str::to_owned)
 }
 
 /// One running editor, as read from its record.

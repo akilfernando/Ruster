@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 fs2 = "0.4"
 glam = "0.30"
+rot-support = { path = "../rot-support" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = "0.10.9"
