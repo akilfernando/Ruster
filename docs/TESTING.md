@@ -70,8 +70,9 @@ Several later subsystems do not exist yet. Add executable checks alongside the f
 Run a shared UI journey in one representative appearance. Add a focused check
 in another appearance only when a concrete palette, wording, artwork or
 control-state difference could change the result. For example, check focus
-contrast in the affected palette or wrapping in both wording variants. A shared command, saved result, Play,
-Build, audio or MCP behavior needs one functional proof.
+contrast in the affected palette or wrapping in both wording variants. A
+shared command, saved result, Play, Build, audio or MCP behavior needs one
+functional proof.
 
 Use focused tests for permutations that share a code path. Keep native
 checks for distinct ownership or integration boundaries, such as device

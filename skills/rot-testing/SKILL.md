@@ -15,5 +15,7 @@ Write the few tests that protect behavior a creator depends on, run
 
 For substantial visual verification, delegate to Terra when available.
 Provide the candidate screenshots or an isolated, app-scoped scenario and
-name the states to inspect. Follow the desktop isolation rules in
-`AGENTS.md`. The coordinator reviews the findings and owns the final gate.
+name the states to inspect. Use one representative appearance by default.
+Add a focused check in another appearance only when a concrete difference
+could affect the result. Follow the desktop isolation rules in `AGENTS.md`.
+The coordinator reviews the findings and owns the final gate.
