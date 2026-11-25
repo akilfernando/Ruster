@@ -390,6 +390,12 @@ two-bit sign assigned in the editor matched its RGB reference on reopen
 and in a relocated Vulkan build. An undefined palette index was rejected
 and the accepted texture stayed visible.
 
+**Create Box Sensor** in Add Sensor makes a stationary unit sensor and
+binds it to the named Script property in one Undo. Native and approved
+Claude tested the same operation. A saved trolley entered the sensor on
+tick 5, emitted one cue, and exited on tick 12 in the editor and a
+relocated Linux build. Vulkan showed the trolley past the checkpoint.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added

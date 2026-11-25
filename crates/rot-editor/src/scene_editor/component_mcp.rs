@@ -466,6 +466,40 @@ impl ComponentWorkspace {
 
         if op == "scene_components_edit" {
             if let Some(edits) = args["edits"].as_array() {
+                if edits
+                    .iter()
+                    .any(|edit| edit["operation"] == "create_and_bind_box_sensor")
+                {
+                    let [edit] = edits.as_slice() else {
+                        return Err((
+                            "invalid_arguments",
+                            "Create and bind a Box Sensor in its own component edit.".into(),
+                        ));
+                    };
+                    let fields = edit.as_object().ok_or_else(invalid)?;
+                    let id = |key| {
+                        edit[key]
+                            .as_str()
+                            .filter(|value| rot_scene::validate_id(value).is_ok())
+                            .ok_or_else(invalid)
+                    };
+                    let requested = fields
+                        .get("sensor_object_id")
+                        .map(|_| id("sensor_object_id"))
+                        .transpose()?;
+                    if fields.len() != 4 + usize::from(requested.is_some()) {
+                        return Err(invalid());
+                    }
+                    let (owner, component, name) =
+                        (id("object_id")?, id("component_id")?, id("property_name")?);
+                    let sensor = self
+                        .create_and_bind_box_sensor(revision, owner, component, name, requested)?;
+                    return Ok(json!({
+                        "object_id":owner,"component_id":component,"property_name":name,
+                        "sensor_object_id":sensor.object_id,"sensor_component_id":sensor.component_id,
+                        "changed":true,"dirty":self.session.is_dirty(),
+                    }));
+                }
                 use super::component_collider_fit::FitKind;
                 if let Some(kind) = edits
                     .iter()
@@ -1501,6 +1535,7 @@ impl ComponentWorkspace {
                 response["vector3_property_guidance"] = json!(
                     r#"Read three axes as properties["offset"][1], [2], [3] in Lua. Use scene_components_edit operation set_script_vec3 with exact object_id, component_id, name and value:[x,y,z]. Use value:null to remove. [0,0,0] is an explicit value."#
                 );
+                response["sensor_property_guidance"] = json!("For Kinematic Sphere only, use scene_components_edit operation create_and_bind_box_sensor with exact object_id, component_id and a free property_name. Optionally supply a fresh sensor_object_id. The new unit Box Sensor starts at the scene origin.");
                 response["movement_guidance"] = json!("An exact replace can set component.movement to kinematic_sphere or ordinary (omission keeps it). Kinematic Sphere needs a flat scene, one enabled mover, an enabled uniformly scaled Blocker Sphere, and stationary blockers. Call host.move_and_slide({dx,dy,dz}) once per Step, use suggested_translation, and return {transform=object}.");
                 response["sound_cue_guidance"] = json!(
                     r#"File-backed Object Lua calls host.play_sound("cue-name"). Use binding.properties sound_ref value {asset_id,gain}. For positional add playback:{type:"positional",range:10} and activate a Transform Game Camera. Omit playback for 2D. Find WAVs in asset_inspect and pin expected_asset_revision."#

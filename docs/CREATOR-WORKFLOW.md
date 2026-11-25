@@ -644,10 +644,18 @@ even when several components use the same file.
 ### Detect a named checkpoint
 
 On a Kinematic Sphere **Script**, open **Sensor Crossings** and choose **Add
-Sensor**. Enter a name such as `checkpoint`, choose an enabled stationary
-object with one Box Collider set to **Sensor**, and choose **Apply**. To change or remove the binding, open **Edit Sensor**.
-Bindings belong to the Script component. Two scripts using the same Lua file
-can name different sensors.
+Sensor**. Enter a name such as `checkpoint`, then choose an existing
+stationary Box Sensor or **Create Box Sensor…**. **Apply** creates a unit
+Box Sensor at the scene origin and adds the binding in one Undo step
+when you choose to create one. Move the new sensor to the checkpoint
+with the normal Transform controls. To change or remove a binding, open
+**Edit Sensor**. Each Script component owns its bindings, so two scripts
+using the same Lua file can name different sensors.
+
+Approved MCP can do both in one `scene_components_edit` with
+`operation: "create_and_bind_box_sensor"`, the Script's `object_id` and
+`component_id`, and a free `property_name`. Supply a fresh
+`sensor_object_id` when you need a specific ID.
 
 After `host.move_and_slide`, query the accepted endpoint. A sphere touching
 the box counts as inside. The starting pose is used as the first comparison

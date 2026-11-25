@@ -158,6 +158,8 @@ editor_text! {
     SensorEdit => "Edit Sensor",
     SensorRemove => "Remove Sensor",
     SensorTarget => "Sensor",
+    SensorCreateBox => "Create Box Sensor…",
+    SensorCreatePlacement => "Creates a Box Sensor at the scene origin. Move it in the Scene after applying.",
     SensorChoose => "Choose a Box Sensor",
     SensorNoTargets => "Add an enabled Box Collider Sensor to a stationary object first.",
     ScriptKinematicRequirements => "Use one uniform Blocker Sphere. Keep the scene flat and other blockers still.",
