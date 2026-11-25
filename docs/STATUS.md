@@ -327,6 +327,13 @@ in the editor and relocated Vulkan Build. The warmed release geometry scan
 for 23,552 triangles took 257–258 µs p95 for Sphere and 100–101 µs for Box,
 compared with 172–173 µs for the previous Box scan.
 
+**Reveal in Assets** opens the source of an imported Mesh Renderer geometry
+from its Inspector. In the native editor, Enter reopened a hidden browser,
+cleared a conflicting Sound search, and focused the exact OBJ among 93
+tiles despite a duplicate filename in another folder. A generated mesh
+revealed the owning Blender GLB. Pending edits, object selection, scene
+revision and file bytes were preserved.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added

@@ -348,6 +348,12 @@ impl AssetStore {
         self.registry.model_clip(id)
     }
 
+    /// The accepted model that owns an exact generated mesh resource ID.
+    pub fn model_mesh_owner(&self, id: &str) -> Option<&ModelInfo> {
+        let (model, kind) = self.registry.model_resource(id)?;
+        (kind == AssetKind::Mesh).then_some(model)
+    }
+
     pub fn model_texture(&self, id: &str) -> Option<(&ModelInfo, TextureRole)> {
         let (model, kind) = self.registry.model_resource(id)?;
         if kind != AssetKind::Texture {

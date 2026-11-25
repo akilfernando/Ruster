@@ -684,7 +684,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-42 Capture Orthographic Game Camera | Turn a composed v23 orthographic Scene view into a new active Game Camera in one Undo step. | done · 2026-11-25 · Native Isometric and approved MCP Top captured the same framing as the painted Scene view. Stale capture was refused. One Undo restored the earlier camera. Reopen and relocated Vulkan matched all three landmarks. |
 | C-43 Rename in Hierarchy | Rename a v23 object in place with F2 or its Hierarchy row menu. | done · 2026-11-25 · Focused tests covered F2 and remapping. Native editing targeted one of two same-named rows, refreshed search and kept selection. Empty, canceled and unchanged names kept history. Approved MCP and native edits shared Undo and survived reopen. |
 | C-44 Fit Sphere Collider to Mesh | Fit an existing v23 Sphere Collider around the indexed geometry of one Mesh Renderer on that object. | done · 2026-11-25 · Native picker and approved MCP fitted the same offset Blender mesh and ignored its unused vertex. Undo, stale asset refusal and reopen passed. Editor and relocated Vulkan motion agreed at the fitted boundary. |
-| C-45 Reveal Assigned Mesh in Assets | Open the exact source row for an assigned v23 Mesh Renderer geometry from the Inspector. | in progress — Codex Sol, 2026-11-25 |
+| C-45 Reveal Assigned Mesh in Assets | Open the exact source row for an assigned v23 Mesh Renderer geometry from the Inspector. | done · 2026-11-25 · Enter reopened Assets, cleared a conflicting Sound search, and focused the exact same-named OBJ among 93 tiles. A generated mesh revealed its owning GLB. Pending drafts and scene bytes stayed intact. |
 
 ### C-04 implementation brief
 

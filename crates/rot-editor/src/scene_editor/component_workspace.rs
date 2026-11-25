@@ -3744,8 +3744,9 @@ impl ComponentWorkspace {
                                 if self.draft.is_some() {
                                     let allow_new = self.material_controls();
                                     let collider_edit = self.collider_inspector_state();
-                                    let allow_spot_aim = !self.authored_edit_pending()
-                                        && !self.runtime.in_play_mode();
+                                    let allow_mesh_reveal = !self.authored_edit_pending();
+                                    let allow_spot_aim =
+                                        allow_mesh_reveal && !self.runtime.in_play_mode();
                                     let animation_preview = self.animation_preview.as_ref().map(
                                         component_animation_preview::AnimationPreview::controls,
                                     );
@@ -3763,6 +3764,7 @@ impl ComponentWorkspace {
                                             diagnostic: self.runtime.diagnostic.as_ref(),
                                             collider_edit: &collider_edit,
                                             allow_collider_fit: allow_spot_aim && !blocked,
+                                            allow_mesh_reveal: allow_mesh_reveal && !blocked,
                                             collider_fit_feedback: self
                                                 .collider_fit_feedback
                                                 .as_ref()
@@ -3780,6 +3782,10 @@ impl ComponentWorkspace {
                                         },
                                     );
                                     submit |= edits.submit;
+                                    if let Some(id) = edits.mesh_reveal {
+                                        self.reveal_mesh_in_assets(&id);
+                                        ui.ctx().request_repaint();
+                                    }
                                     if let Some(id) = edits.collider.filter(|_| !self.draft_dirty())
                                     {
                                         self.toggle_collider_mode(id);

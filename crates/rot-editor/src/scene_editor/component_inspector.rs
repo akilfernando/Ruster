@@ -208,6 +208,7 @@ pub(super) struct ComponentControls<'a> {
     pub(super) allow_sound_cues: bool,
     pub(super) diagnostic: Option<&'a rot_behavior::Diagnostic>,
     pub(super) allow_collider_fit: bool,
+    pub(super) allow_mesh_reveal: bool,
     pub(super) collider_fit_feedback: Option<(&'a str, Text)>,
     pub(super) collider_edit: &'a super::component_workspace::component_collider::InspectorState,
 }
@@ -219,6 +220,7 @@ pub(super) struct ComponentEdits {
     pub(super) animator_revision: Option<(String, u64)>,
     pub(super) collider: Option<String>,
     pub(super) collider_fit: Option<String>,
+    pub(super) mesh_reveal: Option<String>,
     pub(super) spot_aim: Option<String>,
     pub(super) script_property: Option<super::component_workspace::component_property::Request>,
     pub(super) sound_cue: Option<super::component_workspace::component_sound::Request>,
@@ -241,6 +243,7 @@ pub(super) fn components(
         diagnostic,
         collider_edit,
         allow_collider_fit,
+        allow_mesh_reveal,
         collider_fit_feedback,
         animation_preview,
         allow_animation_preview,
@@ -254,6 +257,7 @@ pub(super) fn components(
     let mut material_request = None;
     let mut collider_request = None;
     let mut fit_request = None;
+    let mut mesh_reveal = None;
     let mut spot_aim = None;
     let mut animator_revision = None;
     let mut preview_edit = None;
@@ -303,7 +307,9 @@ pub(super) fn components(
                         tint,
                         material,
                     } => {
-                        mesh_fields(ui, geometry, material, meshes, assets, materials);
+                        if let Some(id) = mesh_fields(ui, geometry, material, meshes, assets, materials, allow_mesh_reveal) {
+                            mesh_reveal = Some(id);
+                        }
                         ui.horizontal_wrapped(|ui| {
                             if ui
                                 .add_enabled(
@@ -740,6 +746,7 @@ pub(super) fn components(
         animation_preview: preview_edit,
         collider: collider_request,
         collider_fit: fit_request,
+        mesh_reveal,
         spot_aim,
         script_property,
         sound_cue,
@@ -925,7 +932,8 @@ fn mesh_fields(
     meshes: &rot_app::MeshMap,
     assets: Option<&rot_assets::AssetStore>,
     materials: &BTreeMap<String, OpaqueMaterial>,
-) {
+    allow_reveal: bool,
+) -> Option<String> {
     ui_kit::property_row(ui, Text::ComponentGeometry.plain(), |ui| {
         let field = egui::ComboBox::from_id_salt("geometry")
             .width(ui.available_width())
@@ -947,6 +955,17 @@ fn mesh_fields(
             *geometry = choice;
         }
     });
+    let reveal = if let Geometry::Imported { asset } = geometry {
+        ui.add_enabled(
+            allow_reveal,
+            egui::Button::new(Text::AssetRevealInAssets.plain()),
+        )
+        .on_disabled_hover_text(Text::AssetRevealMeshFinishEdit.plain())
+        .clicked()
+        .then(|| asset.clone())
+    } else {
+        None
+    };
     ui_kit::property_row(ui, Text::ComponentMaterial.plain(), |ui| {
         let selected = material
             .as_deref()
@@ -972,6 +991,7 @@ fn mesh_fields(
                 }
             });
     });
+    reveal
 }
 
 fn light_fields(

@@ -184,6 +184,7 @@ pub(super) struct Browser {
     pub(super) open: bool,
     pub(super) focus_search: bool,
     pub(super) selected: Option<String>,
+    reveal_focus: Option<String>,
     pub(super) issues: BTreeMap<String, ImportIssue>,
     size: f32,
     folder: PathBuf,
@@ -211,6 +212,7 @@ impl Default for Browser {
             open: true,
             focus_search: false,
             selected: None,
+            reveal_focus: None,
             issues: BTreeMap::new(),
             size: 64.0,
             folder: "Assets".into(),
@@ -779,6 +781,26 @@ impl Browser {
         }
     }
 
+    fn reveal(&mut self, id: &str) -> bool {
+        let Some(row) = self
+            .by_id
+            .get(id)
+            .map(|&index| &self.rows[index])
+            .filter(|row| row.registered)
+        else {
+            return false;
+        };
+        self.folder.clone_from(&row.folder);
+        self.query.clear();
+        self.type_filter = None;
+        self.focus_search = false;
+        self.open = true;
+        self.selected = Some(id.to_owned());
+        self.reveal_focus = Some(id.to_owned());
+        self.filter();
+        true
+    }
+
     fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -932,6 +954,10 @@ impl Browser {
         if filter_changed {
             self.filter();
         }
+        let reveal_index = self
+            .reveal_focus
+            .take()
+            .and_then(|id| self.by_id.get(&id).copied());
         if self.visible.is_empty() {
             let status = if loading {
                 Text::ImportingAssets
@@ -953,8 +979,15 @@ impl Browser {
         let columns = ((ui.available_width() + gap) / (tile_width + gap))
             .floor()
             .max(1.0) as usize;
+        let reveal_row = reveal_index
+            .and_then(|index| self.visible.binary_search(&index).ok())
+            .map(|index| index / columns);
         let mut scroll = egui::ScrollArea::vertical().id_salt("v23_asset_tiles");
-        if filter_changed {
+        if let Some(line) = reveal_row {
+            // Use the same stride as show_rows; the scroll area clamps the last row.
+            scroll = scroll
+                .vertical_scroll_offset(line as f32 * (tile_height + ui.spacing().item_spacing.y));
+        } else if filter_changed {
             scroll = scroll.vertical_scroll_offset(0.0);
         }
         scroll.show_rows(
@@ -988,6 +1021,9 @@ impl Browser {
                                     texture,
                                     self.selected.as_ref() == Some(&row.id),
                                 );
+                                if reveal_index == Some(index) {
+                                    response.request_focus();
+                                }
                                 let placeable = can_place && row.can_place(meshes);
                                 let drag = || {
                                     self.catalog.clone().map(|catalog| AssetDrag {
@@ -1338,6 +1374,36 @@ fn asset_tile(
 }
 
 impl ComponentWorkspace {
+    pub(super) fn reveal_mesh_in_assets(&mut self, mesh_id: &str) {
+        if self.authored_edit_pending() || self.ai_transition_pending() {
+            self.error = Some(Text::AssetRevealMeshFinishEdit.plain().into());
+            return;
+        }
+        let revealed = self
+            .assets
+            .as_ref()
+            .filter(|assets| {
+                self.asset_browser
+                    .catalog
+                    .as_ref()
+                    .is_some_and(|catalog| assets.matches_identity(catalog))
+            })
+            .and_then(|assets| {
+                if let Some(info) = assets
+                    .asset_info(mesh_id)
+                    .filter(|info| info.kind == AssetKind::Mesh)
+                {
+                    Some(info.id.as_str())
+                } else {
+                    assets
+                        .model_mesh_owner(mesh_id)
+                        .map(|model| model.id.as_str())
+                }
+            })
+            .is_some_and(|id| self.asset_browser.reveal(id));
+        self.error = (!revealed).then(|| Text::AssetRevealMeshUnavailable.plain().into());
+    }
+
     pub(super) fn show_assets(&mut self, ui: &mut egui::Ui, blocked: bool) {
         if !self.asset_browser.open {
             return;
@@ -1706,6 +1772,110 @@ mod tests {
         browser.filter();
         assert_eq!(visible(&browser).len(), 3);
         assert_eq!(browser.selected.as_deref(), Some("nested-script"));
+    }
+
+    #[test]
+    fn reveal_mesh_uses_exact_asset_identity_and_focused_tile() {
+        use rot_assets::fixtures::animated_glb;
+
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        for side in ["A", "B"] {
+            let folder = root.join("Assets").join(side);
+            fs::create_dir_all(&folder).unwrap();
+            fs::write(
+                folder.join("Rail.obj"),
+                "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            )
+            .unwrap();
+        }
+        let obj = "Assets/B/Rail.obj";
+        let glb = "Assets/B/Rail.glb";
+        fs::write(root.join(glb), animated_glb(Default::default())).unwrap();
+        let mut store = rot_assets::AssetStore::open(root).unwrap();
+        store.import("rail-a", "Assets/A/Rail.obj").unwrap();
+        store.import("rail-b", obj).unwrap();
+        let model = store
+            .import_glb_at(store.revision(), "rail-model", glb)
+            .unwrap();
+        let mesh = model.nodes["Rig/Arm"].mesh_id.clone().unwrap();
+        fs::write(root.join(glb), b"bad refresh").unwrap();
+        assert!(store.refresh_glb_at(store.revision(), &model.id).is_err());
+
+        let path = root.join("scene.json");
+        let scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.assets = Some(store);
+        editor
+            .asset_browser
+            .refresh(editor.assets.as_ref().unwrap(), Vec::new(), &[], &[]);
+        let selection = editor.selection.clone();
+        editor.asset_browser.selected = Some("rail-a".into());
+        editor.asset_browser.query = "other".into();
+        editor.asset_browser.type_filter = Some(Text::ComponentScript);
+        editor.asset_browser.open = false;
+
+        editor.reveal_mesh_in_assets("unknown");
+        assert_eq!(editor.asset_browser.selected.as_deref(), Some("rail-a"));
+        assert_eq!(editor.asset_browser.query, "other");
+        assert!(!editor.asset_browser.open);
+
+        editor.draft.as_mut().unwrap().name = "Pending Name".into();
+        editor.reveal_mesh_in_assets("rail-b");
+        assert_eq!(editor.draft.as_ref().unwrap().name, "Pending Name");
+        assert_eq!(editor.session.revision(), 0);
+        assert_eq!(editor.asset_browser.selected.as_deref(), Some("rail-a"));
+        editor.rebuild_draft();
+
+        editor.reveal_mesh_in_assets("rail-b");
+        assert!(editor.asset_browser.open);
+        assert_eq!(editor.asset_browser.folder, Path::new("Assets/B"));
+        assert!(
+            editor.asset_browser.query.is_empty() && editor.asset_browser.type_filter.is_none()
+        );
+        assert_eq!(editor.asset_browser.selected.as_deref(), Some("rail-b"));
+        assert_eq!(editor.asset_browser.reveal_focus.as_deref(), Some("rail-b"));
+
+        editor.reveal_mesh_in_assets(&mesh);
+        assert_eq!(editor.asset_browser.selected.as_deref(), Some("rail-model"));
+        assert_eq!(
+            editor.asset_browser.reveal_focus.as_deref(),
+            Some("rail-model")
+        );
+        assert_eq!(editor.session.scene(), &scene);
+        assert_eq!(editor.selection, selection);
+        assert_eq!(editor.session.revision(), 0);
+        assert!(!editor.session.is_dirty());
+
+        let ctx = egui::Context::default();
+        let mut focused_selection = None;
+        let mut draw = |events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    focused_selection = editor
+                        .asset_browser
+                        .show(ui, &editor.meshes, &editor.textures, false, false, false)
+                        .0;
+                },
+            );
+            output.textures_delta.clear();
+        };
+        draw(Vec::new());
+        draw(vec![egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        assert_eq!(focused_selection.as_deref(), Some("rail-model"));
     }
 
     #[test]
