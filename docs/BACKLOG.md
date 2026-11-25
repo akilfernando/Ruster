@@ -673,6 +673,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-31 Legible Scene Overlays | Keep Scene Stats and the projection caption readable over geometry and backgrounds. | done · 2026-11-25 · Opaque themed backgrounds keep Stats, Persp and Ortho readable. Plain Light checks covered dark and bright Scene backgrounds, Stats keyboard activation, projection click targets, and View Presets. |
 | C-32 Find Uses for Lua Sources | Find and reveal Script components that use a registered Lua source in the current v23 scene. | done · 2026-11-25 · Keyboard Reveal selected the exact same-named carrier under a folded parent. Approved Claude read both attachments after source rename. Detach and Undo refreshed results. Guarded pagination worked at 5,000 objects. |
 | C-33 Play Checks for v23 Hierarchies | Run saved input and local translation checks on compatible v23 assemblies and imported animation. | done · 2026-11-25 · An imported sliding gate under a translated parent reached local X=3 after a saved button sequence. Native reopen, approved Claude and ordinary Play agreed. A changed clip made the old check stale. |
+| C-34 Camera-Only GLB Rigs | Import a static camera rig and choose an imported lens to shoot an existing v23 set. | in progress — Codex Sol, 2026-11-25 |
 
 ### C-04 implementation brief
 
