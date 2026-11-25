@@ -113,6 +113,10 @@ rendered capture p50/p95 was 126.8/138.5 ms for one batch edit and
 129.0/144.8 ms and paste 127.4/141.3 ms. Each group had 12 samples.
 The native metric includes MCP and GPU readback.
 
+**Scene overlays** keep Stats and the projection caption legible as the
+background changes. Plain Light screenshots covered bright and dark
+backgrounds, and keyboard and pointer controls kept their existing behavior.
+
 **Frame from Hierarchy** selects a v23 object and frames its visible assembly
 on double-click. The folded station arch matched the context Frame camera
 in Rot and Plain Light and kept its saved bytes and scene revision.

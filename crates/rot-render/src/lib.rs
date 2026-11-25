@@ -1415,10 +1415,10 @@ pub fn allocate_viewport(
                 fitted = true;
             }
             if ui
-                .add(egui::Button::selectable(
-                    navigation.show_stats,
-                    wording.stats,
-                ))
+                .add(
+                    egui::Button::selectable(navigation.show_stats, wording.stats)
+                        .frame_when_inactive(true),
+                )
                 .on_hover_text(wording.stats_hint)
                 .clicked()
             {
@@ -1614,21 +1614,26 @@ fn paint_gizmo(
             egui::Color32::from_gray(190)
         },
     );
-    painter.text(
-        center + egui::vec2(0.0, GIZMO_RADIUS + 16.0),
-        egui::Align2::CENTER_CENTER,
-        if camera.orthographic {
-            wording.orthographic_short
-        } else {
-            wording.perspective_short
-        },
-        egui::FontId::proportional(12.0),
-        if center_hovered {
-            visuals.strong_text_color()
-        } else {
-            visuals.text_color()
-        },
+    let caption = if camera.orthographic {
+        wording.orthographic_short
+    } else {
+        wording.perspective_short
+    };
+    let text_color = if center_hovered {
+        visuals.strong_text_color()
+    } else {
+        visuals.text_color()
+    };
+    let galley =
+        painter.layout_no_wrap(caption.into(), egui::FontId::proportional(12.0), text_color);
+    let center = center + egui::vec2(0.0, GIZMO_RADIUS + 16.0);
+    let plate = egui::Rect::from_center_size(center, galley.size() + egui::vec2(8.0, 2.0));
+    painter.rect_filled(
+        plate,
+        visuals.widgets.inactive.corner_radius,
+        visuals.panel_fill,
     );
+    painter.galley(center - galley.size() * 0.5, galley, text_color);
 }
 
 /// Unity-style Stats: frame time and the FPS it allows, GPU scene time when
