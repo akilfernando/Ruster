@@ -29,13 +29,6 @@ const PROJECT_ROW: f32 = 44.0;
 const MODIFIED_COLUMN: f32 = 140.0;
 
 impl ProjectPicker {
-    pub(super) fn switch_project() -> Self {
-        Self {
-            switching: true,
-            ..Self::default()
-        }
-    }
-
     pub(super) fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -804,8 +797,6 @@ fn create_project(location: &Path, name: &str, template: Template) -> Result<Ope
 pub(super) enum BrowseKind {
     Directory,
     OpenScene,
-    SaveScene,
-    ImportAsset,
     BuildParent {
         directory: PathBuf,
     },
@@ -881,14 +872,6 @@ pub(super) fn browse(
                 .set_title(Text::ComponentOpenScene.plain())
                 .add_filter("Rot scene", &["json"])
                 .pick_file(),
-            BrowseKind::ImportAsset => dialog
-                .set_title(Text::ImportAsset.plain())
-                .add_filter("Assets", &["glb", "gltf", "obj", "png", "wav"])
-                .pick_file(),
-            BrowseKind::SaveScene => dialog
-                .set_title(Text::SaveSceneAs.plain())
-                .set_file_name("scene.json")
-                .save_file(),
             BrowseKind::BuildParent { directory } => dialog
                 .set_title(Text::BuildChooseParentFolder.plain())
                 .set_directory(directory)
@@ -943,7 +926,7 @@ mod tests {
 
     #[test]
     fn hub_opens_v23_project_without_rewriting_scene() {
-        use rot_scene::component_scene::ComponentScene;
+        use rot_scene::{component_scene::ComponentScene, Scene, Session};
 
         let folder = tempfile::tempdir().unwrap();
         let path = folder.path().join("scene.json");
@@ -962,29 +945,52 @@ mod tests {
 
     #[test]
     fn basic_3d_project_opens_with_ground_sun_cube_and_game_camera() {
+        use rot_scene::component_scene::{CameraView, Component};
+
         let parent = tempfile::tempdir().unwrap();
-        let OpenedScene::Legacy(created) =
+        let OpenedScene::Components(created_path, created) =
             create_project(parent.path(), "Game", Template::Basic3d).unwrap()
         else {
-            panic!("legacy template")
+            panic!("v23 basic 3d template")
         };
-        // The template's edits are the saved starting point, not Undo steps.
-        assert_eq!(created.undo_len(), 0);
+        assert_eq!(created_path, parent.path().join("Game").join("scene.json"));
+        assert_eq!(created.revision(), 0);
         assert!(!created.is_dirty());
-        let OpenedScene::Legacy(reopened) = open_project(&parent.path().join("Game")).unwrap()
+        let OpenedScene::Components(_, reopened) =
+            open_project(&parent.path().join("Game")).unwrap()
         else {
-            panic!("legacy template")
+            panic!("v23 basic 3d template")
         };
         let scene = reopened.scene();
-        let names: Vec<_> = scene.objects.iter().map(|o| o.display_name()).collect();
-        assert_eq!(names, ["Ground", "Cube"]);
-        let lights: Vec<_> = scene.lighting.lights().map(|(_, l)| l.clone()).collect();
+        let names: Vec<_> = scene
+            .objects
+            .iter()
+            .map(|object| object.name.as_str())
+            .collect();
+        assert!(names.contains(&"Ground") && names.contains(&"Cube"));
+        let lights: Vec<_> = scene
+            .objects
+            .iter()
+            .flat_map(|object| &object.components)
+            .filter_map(|component| match &component.kind {
+                Component::Light { kind, .. } => Some(kind),
+                _ => None,
+            })
+            .collect();
         assert_eq!(lights.len(), 1);
         assert!(matches!(
-            lights[0].kind,
+            lights[0],
             rot_scene::LightKind::Directional { .. }
         ));
-        let view = scene.resolve_player_view().unwrap().expect("game camera");
-        assert_eq!(view.anchor, [0.0, 0.5, 0.0]);
+        let (_, _, camera) = scene.designated_camera().expect("game camera");
+        match camera {
+            CameraView::Orbit(view) => assert_eq!(
+                view.anchor,
+                rot_scene::PlayerAnchor::Fixed {
+                    position: [0.0, 0.5, 0.0]
+                }
+            ),
+            other => panic!("expected orbit camera, got {other:?}"),
+        }
     }
 }

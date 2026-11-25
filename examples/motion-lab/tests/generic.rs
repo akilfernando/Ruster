@@ -6,7 +6,7 @@ use rot_motion_lab::generic::{read_session, GenericMotionLab, DEMO, FIXED_DT};
 use rot_scene::{PropertyValue, Session};
 
 fn demo() -> Session {
-    Session::from_snapshot_bytes(DEMO).unwrap()
+    Session::from_runtime_snapshot(DEMO).unwrap()
 }
 fn runtime(session: Session) -> Runtime<GenericMotionLab> {
     Runtime::new(

@@ -52,6 +52,10 @@ impl AppsDialog {
 
 impl SceneEditor {
     pub(in crate::scene_editor) fn ai_apps_ui(&mut self, ctx: &egui::Context) {
+        let project = self
+            .ai_scene_path()
+            .and_then(|p| p.parent())
+            .map(Path::to_path_buf);
         let dialog = &mut self.ai_apps;
         if !dialog.open {
             return;
@@ -75,11 +79,6 @@ impl SceneEditor {
             .clone()
             .unwrap_or_else(ai_apps::Machine::current);
         let adapter = ai_apps::adapter(&machine);
-        let project = self
-            .session
-            .path()
-            .and_then(|p| p.parent())
-            .map(Path::to_path_buf);
         let mut open = true;
         egui::Window::new(Text::AppsUiConnectAnAiApp.plain())
             .open(&mut open)

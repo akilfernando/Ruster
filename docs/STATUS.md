@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-11-25. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
+Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 [2026-11-17 archive](archive/STATUS-2026-11-17.md) for earlier entries.
 
 ## Where to work
@@ -18,7 +18,10 @@ Updated 2026-11-25. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Done:** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`, `A-01`–`A-07`,
   `P-01`–`P-02`), `C-00a` (retired legacy logistics crates, Rhai mode, editor
   logistics UI, and MCP enrollment/registry plumbing; promoted `rot-support`),
-  `C-01` design, `C-04` files-first `Assets/`, `C-07` linked prefabs, `C-11`
+  `C-01` design, `C-02` v23-only editor cutover (automatic v1–v22 → v23
+  upgrade on open, tracked `examples/` scenes migrated to v23, and legacy
+  pre-v23 editor paths removed), `C-04` files-first `Assets/`, `C-07` linked
+  prefabs, `C-11`
   multi-scene projects & `C-11a` crash recovery, `C-12` 5k/50k benchmarks,
   `C-05` Hierarchy & Inspector (live single/multi-object axis scrubbing with
   one-step Undo; live Play editing deferred to Phase 4), `C-08` General glTF
@@ -28,9 +31,7 @@ Updated 2026-11-25. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   labels.
 - **Open to exit Phase 2** (new `C-62+` convenience slices are frozen per
   2026-11-25 user approval until `C-EXIT` passes):
-  - `C-02`: automatic v1–v22 → v23 migration, convert tracked `examples/`
-    scenes, delete legacy pre-v23 scene editor.
-  - `C-06`: retire legacy MCP tools once legacy editor is removed (`C-02`),
+  - `C-06`: retire legacy MCP tools now that `C-02` removed the legacy editor,
     route v23 MCP through shared commands, keep catalog `< 15 KB`.
   - `C-03`: retire `behavior_projection()` for native flat-array component
     execution across dynamic hierarchies.
@@ -51,7 +52,7 @@ OBJ, PNG, WAV, GLB and glTF assets. Attach Lua files, set per-object
 number, Boolean and Vector3 properties, and test gameplay in Play. Build
 packages supported scenes as a runnable Linux folder or `.tar.gz` archive.
 Approved AI apps work alongside the editor through MCP and share Undo. Legacy
-scenes retain a 256-object limit and the runtime kit until `C-02` completes.
+v1–v22 scenes upgrade automatically to v23 on open.
 See the [historical inventory](PARITY-PLAN.md#2-where-we-are) and
 [backlog](BACKLOG.md).
 

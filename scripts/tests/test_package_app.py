@@ -30,7 +30,6 @@ class DistributionTests(unittest.TestCase):
             put(name, "fixture\n")
         for name in new_app.PACKAGING_FILES:
             put(name, "fixture package tooling\n")
-        put(new_app.CREATION_PACKAGING_FILE, "fixture creator packaging helper\n")
         for name in package_app.app_spec("motion-lab").crates:
             put(f"crates/{name}/Cargo.toml", f'[package]\nname = "{name}"\nversion.workspace = true\n')
             put(f"crates/{name}/src/lib.rs", "pub fn run() {}\n")
@@ -83,7 +82,7 @@ class DistributionTests(unittest.TestCase):
         self.assertEqual((moved / "crates/rot-render/assets/rot-dark-128.png").read_bytes(), b"icon fixture\n")
         self.assertTrue((moved / "crates/rot-scene/tests/fixtures/legacy-v1.scene.json").is_file())
         self.assertTrue((moved / "crates/rot-behavior/templates/follower.lua").is_file())
-        for name in new_app.PACKAGING_FILES + (new_app.CREATION_PACKAGING_FILE,):
+        for name in new_app.PACKAGING_FILES:
             self.assertTrue((moved / name).is_file())
         for file in manifest["files"]:
             data = (moved / file["path"]).read_bytes()

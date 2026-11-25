@@ -2643,6 +2643,11 @@ impl ComponentWorkspace {
         self.runtime.input_raw_focus(ctx, raw);
     }
 
+    #[cfg(unix)]
+    pub(super) fn release_input(&mut self, ctx: &egui::Context) {
+        self.runtime.release_input(ctx);
+    }
+
     pub(super) fn show(&mut self, ui: &mut egui::Ui) -> Option<OpenedScene> {
         self.show_workspace(ui, true)
     }
@@ -4494,8 +4499,9 @@ mod tests {
         assert!(editor.draft_dirty());
         assert!(matches!(
             editor.open_document(&destination, false),
-            Some(OpenedScene::Legacy(_))
+            Some(OpenedScene::Components(_, ref opened)) if opened.scene() == &ComponentScene::from_legacy(&legacy).unwrap()
         ));
+        assert!(ComponentSession::open(&destination).is_ok());
         assert_eq!(std::fs::read(&source).unwrap(), original);
 
         editor.draft.as_mut().unwrap().name = "Changed".into();
@@ -5351,11 +5357,11 @@ mod tests {
 
     #[test]
     fn v23_step_runs_the_edited_revision_without_saving_runtime_state() {
-        let legacy = Session::from_snapshot_bytes(include_bytes!(
-            "../../../../examples/motion-lab/resources/generic.scene.json"
-        ))
+        let scene = ComponentScene::read_json(
+            include_bytes!("../../../../examples/motion-lab/resources/generic.scene.json")
+                .as_slice(),
+        )
         .unwrap();
-        let scene = ComponentScene::from_legacy(&legacy).unwrap();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("scene.json");
         scene.save_new(&path).unwrap();

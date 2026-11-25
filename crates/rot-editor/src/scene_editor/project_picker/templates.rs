@@ -39,8 +39,7 @@ impl Template {
             }
             Self::Basic3d => {
                 basic_3d(&mut session)?;
-                // The starter content is the first saved state, with no Undo entries.
-                Session::new(session.scene().clone())?.save(path)
+                rot_scene::component_scene::ComponentScene::from_legacy(&session)?.save_new(path)
             }
         }
     }

@@ -1,23 +1,31 @@
 //! Bounded embedded source/property working copies. Session owns authored data.
+#[cfg(test)]
 mod command_catalog;
 mod hud_activation;
 use crate::strings::Text;
+#[cfg(test)]
 use command_catalog::{command_claim, command_clicked, command_field_focus, command_key};
 mod runtime_commands;
 mod runtime_debug;
 mod runtime_input;
 mod runtime_state;
+#[cfg(test)]
 use command_catalog::CommandDraft;
+#[cfg(test)]
 mod kinematic;
 mod spatial_feedback;
 use eframe::egui;
-use rot_scene::{
-    BehaviorBinding, BehaviorSource, BindingTarget, PropertyValue, Session, StateValue,
-};
+use rot_scene::BindingTarget;
+#[cfg(test)]
+use rot_scene::{BehaviorBinding, BehaviorSource, PropertyValue, Session, StateValue};
+#[cfg(test)]
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, ops::Range};
+use std::collections::BTreeMap;
+#[cfg(test)]
+use std::ops::Range;
 
+#[cfg(test)]
 fn fingerprint(value: &impl Serialize) -> String {
     format!(
         "{:x}",
@@ -35,6 +43,7 @@ fn play_failure(operation: Operation) -> Text {
     }
 }
 
+#[cfg(test)]
 fn annotated_template(source_id: &str, api: u32, template: &str) -> Result<String, String> {
     let hint = crate::behavior_files::annotation_hint_for_api(source_id, api)
         .map_err(|error| error.to_string())?;
@@ -65,12 +74,14 @@ fn annotated_template(source_id: &str, api: u32, template: &str) -> Result<Strin
 }
 // Reject a complete oversized insertion, restoring a selection replaced by it.
 // Backups are allocated only for an actual deletion, never an idle source frame.
+#[cfg(test)]
 struct ByteBuffer<'a> {
     text: &'a mut String,
     limit: usize,
     rejected: &'a mut bool,
     removed: Option<(egui::text::CharIndex, String)>,
 }
+#[cfg(test)]
 impl egui::TextBuffer for ByteBuffer<'_> {
     fn type_id(&self) -> std::any::TypeId {
         std::any::TypeId::of::<ByteBuffer<'static>>()
@@ -100,10 +111,12 @@ impl egui::TextBuffer for ByteBuffer<'_> {
         egui::TextBuffer::delete_char_range(self.text, range);
     }
 }
+#[cfg(test)]
 fn text(ui: &mut egui::Ui, value: &mut String, limit: usize) -> egui::Response {
     let id = ui.next_auto_id();
     text_with_id(ui, value, limit, id)
 }
+#[cfg(test)]
 pub(super) fn text_with_id(
     ui: &mut egui::Ui,
     value: &mut String,
@@ -129,6 +142,7 @@ pub(super) fn text_with_id(
     }
     response
 }
+#[cfg(test)]
 fn scroll_line(
     ui: &mut egui::Ui,
     output: &mut egui::text_edit::TextEditOutput,
@@ -154,6 +168,7 @@ fn scroll_line(
         Some(egui::Align::Center),
     );
 }
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "type",
@@ -173,6 +188,7 @@ pub(super) enum ValueDraft {
         gain: String,
     },
 }
+#[cfg(test)]
 impl From<&PropertyValue> for ValueDraft {
     fn from(value: &PropertyValue) -> Self {
         match value {
@@ -190,6 +206,7 @@ impl From<&PropertyValue> for ValueDraft {
         }
     }
 }
+#[cfg(test)]
 pub(super) fn state_property(value: &StateValue) -> PropertyValue {
     match value {
         StateValue::Number(value) => PropertyValue::Number(*value),
@@ -198,6 +215,7 @@ pub(super) fn state_property(value: &StateValue) -> PropertyValue {
         StateValue::Vec3(value) => PropertyValue::Vec3(*value),
     }
 }
+#[cfg(test)]
 impl ValueDraft {
     pub(super) fn state(&self) -> Result<StateValue, String> {
         match self.parse()? {
@@ -259,6 +277,7 @@ impl ValueDraft {
         }
     }
 }
+#[cfg(test)]
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SourceDraft {
@@ -269,6 +288,7 @@ struct SourceDraft {
     api: String,
     text: String,
 }
+#[cfg(test)]
 impl SourceDraft {
     fn parsed(&self) -> Result<BehaviorSource, String> {
         let source = BehaviorSource {
@@ -283,6 +303,7 @@ impl SourceDraft {
         Ok(source)
     }
 }
+#[cfg(test)]
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PropertyDraft {
@@ -293,6 +314,7 @@ struct PropertyDraft {
     #[serde(default)]
     state_default: bool,
 }
+#[cfg(test)]
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StateAddDraft {
@@ -303,6 +325,7 @@ struct StateAddDraft {
     name: String,
     kind: usize,
 }
+#[cfg(test)]
 impl StateAddDraft {
     fn value(&self) -> StateValue {
         match self.kind {
@@ -325,6 +348,7 @@ impl StateAddDraft {
             })
     }
 }
+#[cfg(test)]
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Drafts {
@@ -335,20 +359,8 @@ pub(super) struct Drafts {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     command: Option<CommandDraft>,
 }
-impl Drafts {
-    pub fn pending(&self) -> bool {
-        self.source.is_some()
-            || self.property.is_some()
-            || self.state_add.is_some()
-            || self.command.is_some()
-    }
-}
+#[cfg(test)]
 pub(super) enum Action {
-    External {
-        source_id: String,
-        intent: crate::behavior_external::Intent,
-    },
-    ExternalStatus,
     Create(String),
     CreateKinematic(String),
     CreateApplication,
@@ -377,12 +389,14 @@ pub(super) enum Action {
     AddProperty(String, String, PropertyValue),
     Save,
 }
+#[cfg(test)]
 #[derive(Clone)]
 pub(super) struct ObjectDrag {
     pub generation: u64,
     pub revision: u64,
     pub id: String,
 }
+#[cfg(test)]
 #[derive(Default)]
 pub(super) struct BehaviorUi {
     source: Option<SourceDraft>,
@@ -422,6 +436,8 @@ pub(super) struct BehaviorUi {
     #[cfg(test)]
     command_apply_response: Option<(egui::Id, egui::Rect)>,
 }
+#[cfg(test)]
+#[allow(dead_code)]
 struct CapturedSource {
     id: String,
     hash: String,
@@ -429,6 +445,7 @@ struct CapturedSource {
     line: Option<u32>,
     scroll: bool,
 }
+#[cfg(test)]
 impl BehaviorUi {
     pub fn active_source(&self) -> Option<&str> {
         self.source.as_ref().map(|source| source.id.as_str())
@@ -478,58 +495,8 @@ impl BehaviorUi {
         }
         Ok(())
     }
-    pub fn captured_window(&mut self, ctx: &egui::Context, editable: bool) {
-        let Some(source) = &mut self.captured_view else {
-            return;
-        };
-        let mut opened = true;
-        let mut close =
-            editable && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-        let first = source.scroll;
-        egui::Window::new(Text::CapturedDiagnosticSourceReadOnly.plain())
-            .open(&mut opened)
-            .max_width((ctx.content_rect().width() - 32.0).max(240.0))
-            .show(ctx, |ui| {
-                ui.add(
-                    egui::Label::new(format!(
-                        "{} · hash {} · line {}",
-                        source.id,
-                        source.hash,
-                        source.line.unwrap_or(1)
-                    ))
-                    .truncate(),
-                )
-                .on_hover_text(&source.hash);
-                ui.label(Text::BehaviorUiCapturedRuntimeVersionYour.plain());
-                egui::ScrollArea::vertical()
-                    .max_height((ctx.content_rect().height() - 190.0).max(48.0))
-                    .show(ui, |ui| {
-                        let mut body = source.text.as_str();
-                        let mut output = egui::TextEdit::multiline(&mut body)
-                            .code_editor()
-                            .interactive(false)
-                            .desired_width(f32::INFINITY)
-                            .show(ui);
-                        if source.scroll {
-                            scroll_line(ui, &mut output, &source.text, source.line.unwrap_or(1));
-                            source.scroll = false;
-                        }
-                    });
-                let button = ui.button(Text::CloseCapturedSource.plain());
-                if first {
-                    button.request_focus();
-                }
-                close |= button.clicked();
-            });
-        if !opened || close {
-            self.captured_view = None;
-        }
-    }
     pub fn pending(&self) -> bool {
         self.source_dirty || self.property_dirty || self.state_add_dirty || self.command.is_some()
-    }
-    pub fn state_add_pending(&self) -> bool {
-        self.state_add_dirty && !self.source_dirty && !self.property_dirty
     }
     pub fn generation(&self) -> u64 {
         self.generation
@@ -1107,11 +1074,6 @@ impl BehaviorUi {
                 self.new_property.clear();
             }
             Action::Save => self.apply_all(session)?,
-            Action::External { .. } | Action::ExternalStatus => {
-                return Err(
-                    "External editor actions are handled by the document controller.".into(),
-                );
-            }
         }
         self.changed();
         self.error.clear();
@@ -1848,53 +1810,9 @@ impl BehaviorUi {
                     if close.clicked() || hide {
                         self.source_open = false;
                     }
-                    let _external = ui.menu_button(Text::ScriptExternalEditor.plain(), |ui| {
-                        ui.add_enabled_ui(
-                            editable && !self.source_dirty && !self.property_dirty,
-                            |ui| {
-                                for (label, intent) in [
-                                    (
-                                        Text::ScriptExportWorkingCopy.plain(),
-                                        crate::behavior_external::Intent::Export,
-                                    ),
-                                    (
-                                        Text::ScriptOpenZed.plain(),
-                                        crate::behavior_external::Intent::Open {
-                                            line: 1 + source
-                                                .text
-                                                .chars()
-                                                .take(self.source_cursor)
-                                                .filter(|c| *c == '\n')
-                                                .count()
-                                                as u32,
-                                        },
-                                    ),
-                                    (
-                                        Text::ScriptRefreshWorkingCopy.plain(),
-                                        crate::behavior_external::Intent::Refresh,
-                                    ),
-                                ] {
-                                    if ui.button(label).clicked() {
-                                        action = Some(Action::External {
-                                            source_id: source.id.clone(),
-                                            intent,
-                                        });
-                                        ui.close();
-                                    }
-                                }
-                            },
-                        );
-                        if self.source_dirty || self.property_dirty {
-                            ui.label(Text::ScriptFinishBeforeExternal.plain());
-                        }
-                        if ui.button(Text::ScriptWorkingCopyDetails.plain()).clicked() {
-                            action = Some(Action::ExternalStatus);
-                            ui.close();
-                        }
-                    });
                     #[cfg(test)]
                     {
-                        self.source_footer = Some(close.rect.union(_external.response.rect));
+                        self.source_footer = Some(close.rect);
                     }
                 });
             });
@@ -1921,6 +1839,7 @@ impl BehaviorUi {
         action
     }
 }
+#[cfg(test)]
 fn property_summary(value: &PropertyValue) -> String {
     match value {
         PropertyValue::Number(n) => format!("Number: {n}"),
@@ -1937,12 +1856,14 @@ fn property_summary(value: &PropertyValue) -> String {
         ),
     }
 }
+#[cfg(test)]
 #[derive(Default)]
 pub(super) struct ValueResponse {
     pub(super) changed: bool,
     pub(super) focused: bool,
     pub(super) focus_id: Option<egui::Id>,
 }
+#[cfg(test)]
 impl ValueResponse {
     fn field(&mut self, response: egui::Response, focus: &mut bool) {
         if *focus && response.enabled() {
@@ -1957,6 +1878,7 @@ impl ValueResponse {
         }
     }
 }
+#[cfg(test)]
 pub(super) fn value_ui(
     ui: &mut egui::Ui,
     value: &mut ValueDraft,
@@ -2229,11 +2151,10 @@ pub(super) struct RuntimeUi {
     pub(super) open_project_error: Option<(String, String, Option<u32>)>,
     hud_activation: hud_activation::HudActivationControl,
     spatial_feedback_index: usize,
+    #[cfg_attr(not(test), allow(dead_code))]
     invocation: InvocationDraft,
+    #[cfg(test)]
     command_action_frame: Option<u64>,
-    state_binding: String,
-    state_offset: usize,
-    state_page_key: Option<(RunKey, u64, u64)>,
     context: Option<egui::Context>,
     awaiting: Option<(RunKey, Operation)>,
     worker: Option<VmWorker>,
@@ -2271,6 +2192,7 @@ pub enum PlayShortcut {
 }
 #[derive(Clone, Copy)]
 pub(super) enum RuntimeSource<'a> {
+    #[cfg(test)]
     Legacy(&'a Session),
     Components(
         &'a rot_scene::component_scene::ComponentSession,
@@ -2284,6 +2206,7 @@ pub(super) enum RuntimeSource<'a> {
 impl<'a> RuntimeSource<'a> {
     fn revision(self) -> u64 {
         match self {
+            #[cfg(test)]
             Self::Legacy(session) => session.scene().revision,
             Self::Components(session, _) => session.revision(),
         }
@@ -2291,14 +2214,16 @@ impl<'a> RuntimeSource<'a> {
 
     fn actions(self) -> &'a rot_scene::input::ActionMap {
         match self {
+            #[cfg(test)]
             Self::Legacy(session) => &session.authoring().actions,
             Self::Components(session, _) => &session.scene().actions,
         }
     }
 
-    fn bindings_match(self, captured: &rot_scene::Authoring) -> bool {
+    fn bindings_match(self, _captured: &rot_scene::Authoring) -> bool {
         match self {
-            Self::Legacy(session) => session.authoring().bindings == captured.bindings,
+            #[cfg(test)]
+            Self::Legacy(session) => session.authoring().bindings == _captured.bindings,
             // The component session advances its revision for every edit.
             Self::Components(..) => true,
         }
@@ -2597,49 +2522,54 @@ impl RuntimeUi {
         generation: u64,
         assets: Option<&rot_assets::AssetStore>,
     ) -> Result<RunKey, String> {
-        if let RuntimeSource::Components(session, _) = source {
-            if let Some(preview) = rot_app::creation::static_component_preview(session.scene())
-                .map_err(|error| error.to_string())?
-            {
-                let key = self.new_run(ctx, generation, source.revision())?;
-                self.captured = None;
-                self.project_sources.clear();
-                self.transition_project_sources.clear();
-                self.transition_source = None;
-                self.pending = Some(Request::ResetStatic { key, preview });
-                self.finish_reset_submission(key);
-                return Ok(key);
-            }
-        }
-        let mut project_sources = Default::default();
-        let (mut scene, authoring, hidden_mesh_renderers, projection, transform_camera) =
-            match source {
-                RuntimeSource::Legacy(session) => (
-                    session.scene().clone(),
-                    session.authoring().clone(),
-                    session.hidden_mesh_renderers().cloned(),
-                    session.runtime_projection(),
-                    session.transform_camera_binding().cloned(),
-                ),
-                RuntimeSource::Components(session, _) => {
-                    let scene = session.scene();
-                    let (resolved, sources) =
-                        crate::scene_editor::script_assets::resolved_for_play(scene, assets)?;
-                    project_sources = sources;
-                    let input = resolved
-                        .as_ref()
-                        .unwrap_or(scene)
-                        .behavior_projection()
-                        .map_err(|error| error.to_string())?;
-                    (
-                        input.scene,
-                        input.authoring,
-                        input.hidden_mesh_renderers,
-                        input.projection,
-                        input.transform_camera,
-                    )
+        let (
+            mut scene,
+            authoring,
+            hidden_mesh_renderers,
+            projection,
+            transform_camera,
+            project_sources,
+        ) = match source {
+            #[cfg(test)]
+            RuntimeSource::Legacy(session) => (
+                session.scene().clone(),
+                session.authoring().clone(),
+                session.hidden_mesh_renderers().cloned(),
+                session.runtime_projection(),
+                session.transform_camera_binding().cloned(),
+                Default::default(),
+            ),
+            RuntimeSource::Components(session, _) => {
+                if let Some(preview) = rot_app::creation::static_component_preview(session.scene())
+                    .map_err(|error| error.to_string())?
+                {
+                    let key = self.new_run(ctx, generation, source.revision())?;
+                    self.captured = None;
+                    self.project_sources.clear();
+                    self.transition_project_sources.clear();
+                    self.transition_source = None;
+                    self.pending = Some(Request::ResetStatic { key, preview });
+                    self.finish_reset_submission(key);
+                    return Ok(key);
                 }
-            };
+                let scene = session.scene();
+                let (resolved, sources) =
+                    crate::scene_editor::script_assets::resolved_for_play(scene, assets)?;
+                let input = resolved
+                    .as_ref()
+                    .unwrap_or(scene)
+                    .behavior_projection()
+                    .map_err(|error| error.to_string())?;
+                (
+                    input.scene,
+                    input.authoring,
+                    input.hidden_mesh_renderers,
+                    input.projection,
+                    input.transform_camera,
+                    sources,
+                )
+            }
+        };
         scene.revision = source.revision();
         let sounds = assets
             .map(rot_assets::AssetStore::sound_snapshots)
@@ -3019,6 +2949,7 @@ impl RuntimeUi {
         self.stale = self.frame.is_some();
         self.flush();
     }
+    #[cfg(test)]
     pub fn shutdown(&mut self) {
         self.supersede_hud_activation("Runtime shutdown superseded HUD activation");
         self.invocation = InvocationDraft::default();
@@ -3036,6 +2967,7 @@ impl RuntimeUi {
             }
         }
     }
+    #[cfg(test)]
     pub fn finished(&mut self) -> bool {
         self.worker.as_mut().is_none_or(VmWorker::finished)
     }
@@ -3050,14 +2982,7 @@ impl RuntimeUi {
     ) -> Option<RunKey> {
         self.controls_with_sounds(ui, session, generation, blocked, focus_shortcut, None)
     }
-    /// Window → Script Debugger.
-    pub fn open_debugger(&mut self) {
-        self.debug.open = true;
-    }
-    /// Help → Game Controls.
-    pub fn open_game_controls(&mut self, ctx: &egui::Context) {
-        self.open_input_help(ctx);
-    }
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub fn controls_with_sounds(
         &mut self,

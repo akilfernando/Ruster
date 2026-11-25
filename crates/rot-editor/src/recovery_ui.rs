@@ -155,6 +155,7 @@ impl RecoveryUi {
         }
         Ok(())
     }
+    #[cfg(test)]
     pub fn observe(
         &mut self,
         revision: u64,
@@ -221,11 +222,6 @@ impl RecoveryUi {
     pub fn reschedule(&mut self) {
         self.observed = None;
     }
-    pub fn checkpoint_now(&mut self) {
-        self.wanted = true;
-        self.deadline
-            .changed(Instant::now() - std::time::Duration::from_secs(2));
-    }
     pub fn schedule(&self, ctx: &egui::Context, now: Instant) {
         if !self.busy && self.boundary.is_none() && !self.shutdown && !self.broken {
             if let Some(delay) = self.deadline.remaining(now) {
@@ -266,9 +262,6 @@ impl RecoveryUi {
     }
     pub fn retire(&mut self) -> u64 {
         self.boundary(None, true)
-    }
-    pub fn adopt(&mut self, journal: Journal) -> u64 {
-        self.boundary(Some(journal), true)
     }
     pub fn fence(&mut self) -> u64 {
         self.boundary(None, false)
@@ -413,22 +406,6 @@ impl RecoveryUi {
     }
     pub fn take_ack(&mut self) -> Option<(u64, Result<(), String>)> {
         self.ack.take()
-    }
-    pub fn shutdown(&mut self) {
-        if self.shutdown {
-            return;
-        }
-        self.shutdown = true;
-        self.cancel_schedule();
-        if self.worker.is_some() {
-            self.pending_control = Some(Command::Shutdown);
-            self.flush_control();
-        } else {
-            self.shutdown_ack = true;
-        }
-    }
-    pub fn shutdown_finished(&mut self) -> bool {
-        self.shutdown_ack && self.worker.as_mut().is_none_or(Worker::finished)
     }
     #[cfg(test)]
     pub fn checkpoint(&mut self, snapshot: Result<crate::recovery::Snapshot, String>) {
@@ -583,29 +560,6 @@ impl RecoveryUi {
             });
         });
         intent
-    }
-    pub fn warning_ui(&mut self, ui: &mut egui::Ui) {
-        if !self.warning.is_empty() {
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(self.warning.lines().next().unwrap_or_default())
-                        .color(ui.visuals().warn_fg_color),
-                )
-                .wrap(),
-            )
-            .on_hover_text(&self.warning);
-            if ui.button(Text::RetryRecoveryCheckpoint.plain()).clicked() {
-                if self.store.is_none() {
-                    match Self::directory().and_then(Store::open) {
-                        Ok(store) => self.store = Some(store),
-                        Err(error) => self.set_warning(error),
-                    }
-                }
-                self.wanted = true;
-                self.deadline
-                    .changed(Instant::now() - std::time::Duration::from_secs(2));
-            }
-        }
     }
 }
 

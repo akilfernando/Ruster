@@ -5,6 +5,7 @@ use rot_scene::{CommandDefinition, StateFields};
 
 // Semantic form actions require a fresh key press. A held key must not submit
 // again after a previous worker receipt or a new egui layout pass.
+#[cfg(test)]
 pub(super) fn command_key(ui: &egui::Ui, key: egui::Key) -> bool {
     if !ui.is_enabled() || !ui.input(|input| input.focused) || egui::Popup::is_any_open(ui.ctx()) {
         return false;
@@ -19,6 +20,7 @@ pub(super) fn command_key(ui: &egui::Ui, key: egui::Key) -> bool {
     })
 }
 
+#[cfg(test)]
 pub(super) fn command_clicked(response: &egui::Response) -> bool {
     if !response.enabled()
         || !response.ctx.input(|input| input.focused)
@@ -44,6 +46,7 @@ pub(super) fn command_clicked(response: &egui::Response) -> bool {
         })
 }
 
+#[cfg(test)]
 pub(super) fn command_claim(ctx: &egui::Context, claimed: &mut Option<u64>) -> bool {
     let frame = ctx.cumulative_frame_nr();
     if *claimed == Some(frame) {
@@ -56,6 +59,7 @@ pub(super) fn command_claim(ctx: &egui::Context, claimed: &mut Option<u64>) -> b
 // Single-line TextEdit relinquishes focus even for a held Enter. Keep its real
 // response as the owner until this form accepts/removes it or the user traverses
 // elsewhere. This also leaves invalid submissions ready for repair/Escape.
+#[cfg(test)]
 pub(super) fn command_field_focus(ui: &egui::Ui, id: Option<egui::Id>) -> bool {
     let Some(id) = id else {
         return false;
@@ -88,6 +92,7 @@ pub(super) fn command_field_focus(ui: &egui::Ui, id: Option<egui::Id>) -> bool {
     owned
 }
 
+#[cfg(test)]
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CommandDraft {
@@ -101,6 +106,7 @@ pub(super) struct CommandDraft {
     pub(super) new_name: String,
     pub(super) new_kind: usize,
 }
+#[cfg(test)]
 impl CommandDraft {
     pub(super) fn new(
         session: &Session,
@@ -174,6 +180,7 @@ impl CommandDraft {
         Ok(definition)
     }
 }
+#[cfg(test)]
 impl BehaviorUi {
     pub(super) fn apply_command(&mut self, session: &mut Session) -> Result<(), String> {
         let draft = self.command.as_ref().ok_or("No command draft")?;

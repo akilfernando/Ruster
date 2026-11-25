@@ -149,7 +149,7 @@ impl Picker {
             return;
         };
         let Ok(project) = &self.project else { return };
-        let pin = project.pin_scene(row);
+        let mut pin = project.pin_scene(row);
         let destination = self.purpose == Purpose::Destination;
         self.error = None;
         match Job::start(ctx, move |_| {

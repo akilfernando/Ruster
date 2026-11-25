@@ -30,6 +30,7 @@ pub struct BrowserPairing {
     denied: bool,
 }
 impl BrowserPairing {
+    #[cfg(test)]
     pub(crate) fn new(request: BrowserRequest) -> Self {
         Self {
             request,

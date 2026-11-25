@@ -1,10 +1,10 @@
 //! Exact-owner native binding UI; client registration remains separately fail-closed.
-use crate::strings::Text;
 #[cfg(unix)]
 mod native;
 #[cfg(unix)]
 mod prompt;
 use super::*;
+use crate::strings::Text;
 #[cfg(unix)]
 pub(super) use prompt::TrustUi;
 #[cfg(unix)]
@@ -29,7 +29,6 @@ mod tests;
 
 impl SceneEditor {
     pub(super) fn revoke_connection(&mut self) {
-        self.captures.invalidate();
         #[cfg(unix)]
         if let Some(component) = &mut self.component {
             component.clear_ai_capture();
@@ -39,8 +38,8 @@ impl SceneEditor {
             authority.revoke();
         }
         self.save_grant = None;
-        self.creation_export.revoke_agent_destination();
     }
+
     pub(super) fn connection_draining(&self) -> bool {
         #[cfg(unix)]
         {
@@ -74,10 +73,10 @@ impl Host {
         {
             return;
         }
-        let allowed = editor.component.as_ref().map_or_else(
-            || editor.workspace.prefs.allow_ai_connections && editor.project_picker.is_none(),
-            |component| component.ai_listening_allowed(),
-        );
+        let allowed = editor
+            .component
+            .as_ref()
+            .is_some_and(|component| component.ai_listening_allowed());
         if let Some(bridge) = &mut self.bridge {
             // Refresh the record after Save As or when AI apps are turned off,
             // but never while an adapter holds the connection.
@@ -93,27 +92,25 @@ impl Host {
         }
         if !allowed
             || editor.ai_listen_retry.is_some_and(|at| Instant::now() < at)
-            || editor.asset_ops.busy()
-            || editor.creation_export.busy()
             || editor.recovery_transition.is_some()
             || editor.close_in_progress()
         {
             return;
         }
-        if let Err(error) = self.open_endpoint(ctx, false) {
+        if let Err(error) = self.open_endpoint(ctx) {
             log::warn!("AI apps cannot find this editor yet: {error}");
             self.editor.ai_listen_retry = Some(Instant::now() + Duration::from_secs(2));
             ctx.request_repaint_after(Duration::from_secs(2));
         }
     }
+
     pub(super) fn connect_adapter(&mut self, ctx: &egui::Context) -> Result<PathBuf, String> {
-        self.open_endpoint(ctx, self.workspace_enabled)
+        self.open_endpoint(ctx)
     }
-    fn open_endpoint(&mut self, ctx: &egui::Context, workspace: bool) -> Result<PathBuf, String> {
+
+    fn open_endpoint(&mut self, ctx: &egui::Context) -> Result<PathBuf, String> {
         self.poll_connection(ctx);
         if self.bridge.is_some()
-            || self.editor.asset_ops.busy()
-            || self.editor.creation_export.busy()
             || self.editor.recovery_transition.is_some()
             || self.editor.close_in_progress()
             || self
@@ -146,41 +143,34 @@ impl Host {
         self.editor.ai_listen_scene = self.editor.ai_scene_path().map(Into::into);
         let path = bridge.locator_path();
         self.editor.connection_authority = Some(bridge.authority());
-        self.workspace = if workspace && self.editor.component.is_none() {
-            match workspace_attachment::WorkspaceAttachment::start(&self.editor, &bridge, ctx) {
-                Ok(workspace) => workspace,
-                Err(error) => {
-                    log::warn!("Optional Rot browser preview unavailable: {error}");
-                    None
-                }
-            }
-        } else {
-            None
-        };
         self.bridge = Some(bridge);
         Ok(path)
     }
+
     pub(super) fn pending_adapter(&self) -> Option<(String, u32)> {
         self.bridge.as_ref()?.pending_owner()
     }
+
     pub(super) fn approve_adapter(&mut self, owner: &(String, u32)) -> bool {
         self.bridge
             .as_ref()
             .is_some_and(|bridge| bridge.approve_owner(owner))
     }
+
     pub(super) fn disconnect_adapter(&mut self) {
-        self.stop_workspace();
         self.editor.revoke_connection();
         if let Some(bridge) = &mut self.bridge {
             bridge.disconnect();
         }
     }
+
     /// Local human-owner receipt access; no unauthenticated MCP exception.
+    #[allow(dead_code)]
     pub(super) fn terminal_connection_receipts(&self) -> &std::collections::VecDeque<Value> {
         &self.editor.retired_connection_receipts
     }
-    /// Read-only CP2 presentation seam. Registration/reload receipts must be
-    /// supplied by the later consent controller, never inferred from a listener.
+
+    /// Read-only CP2 presentation seam.
     pub(super) fn connection_status_ui(&self, ui: &mut egui::Ui) {
         let state = self.connection_state();
         let (status, description) = match state {
@@ -205,14 +195,7 @@ impl Host {
                 "An AI app is asking to connect",
                 "Allow it to let it read and change this project.",
             ),
-            "bound" => (
-                "AI app connected",
-                if self.editor.component.is_some() {
-                    "Scene edits share Undo."
-                } else {
-                    "Imported assets are saved to the project at once, before Save."
-                },
-            ),
+            "bound" => ("AI app connected", "Scene edits share Undo."),
             _ => ("Connection state unavailable", ""),
         };
         let palette = crate::editor_theme::colors(ui);
@@ -253,19 +236,14 @@ impl Host {
             Some(_) => "bound",
         }
     }
+
     pub(super) fn poll_connection(&mut self, ctx: &egui::Context) {
-        if self.bridge.as_ref().is_none_or(|b| !b.authority().live()) {
-            self.stop_workspace();
-        }
         if let Some(bridge) = &mut self.bridge {
             if !bridge.authority().live() {
                 self.editor.revoke_connection();
                 bridge.disconnect();
             }
-            if bridge.poll_retired()
-                && !self.editor.asset_ops.busy()
-                && !self.editor.creation_export.busy()
-            {
+            if bridge.poll_retired() {
                 for receipt in bridge.take_terminal_receipts() {
                     self.editor.retired_connection_receipts.push_back(receipt);
                     if self.editor.retired_connection_receipts.len() > 8 {

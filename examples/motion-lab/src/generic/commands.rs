@@ -465,7 +465,7 @@ mod tests {
     // preserve invalid raw arguments and respect the host's actual playback bit.
     #[test]
     fn command_form_keyboard_ownership_preserves_raw_input_and_one_commit() {
-        let mut session = Session::from_snapshot_bytes(DEMO).unwrap();
+        let mut session = Session::from_runtime_snapshot(DEMO).unwrap();
         let revision = session.scene().revision;
         session.create_behavior(revision, "app-source", rot_scene::BehaviorSource {
             label: None, language_id: "lua54".into(), host_api_version: 5,

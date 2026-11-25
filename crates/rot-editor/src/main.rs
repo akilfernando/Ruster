@@ -1,9 +1,6 @@
 //! Native authoring frontend. egui paints through wgpu's Vulkan backend only.
 #[cfg(unix)]
 mod ai_apps;
-mod asset_save;
-mod asset_worker;
-mod behavior_external;
 mod behavior_files;
 mod behavior_ui;
 mod behavior_worker;
@@ -11,14 +8,13 @@ mod branding;
 #[cfg(unix)]
 mod bridge;
 // Shared wire primitives; each binary uses only its own side.
-use rot_support::strict_json;
 #[cfg(unix)]
 #[allow(unused_imports)]
 use rot_support::{connection, discovery, trust};
 mod console;
-mod creation_export;
 mod directory_grant;
 mod editor_theme;
+#[cfg(test)]
 mod focus;
 mod input_ui;
 mod manipulation;

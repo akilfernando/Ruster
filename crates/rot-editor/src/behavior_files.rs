@@ -1,27 +1,36 @@
 //! Explicit project-local working-copy jobs. Embedded text stays authoritative.
 //! Call synchronously off the UI thread; this module owns no queue, watcher or process.
 //! Locks/hash guards coordinate trusted local writers, not hostile path replacement.
+#[cfg(test)]
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     io::{Read, Write},
+};
+use std::{
     path::{Path, PathBuf},
     process::Command,
 };
 
+#[cfg(test)]
 use rot_scene::{
     Authoring, BehaviorSource, PropertyValue, MAX_BINDINGS, MAX_SOURCES, MAX_SOURCE_BYTES,
 };
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use sha2::{Digest, Sha256};
 
+#[cfg(test)]
 const MAX_CONFIG_BYTES: usize = 64 * 1024;
+#[cfg(test)]
 const MAX_MANIFEST_BYTES: usize = 256 * 1024;
+#[cfg(test)]
 const MANIFEST_FILE: &str = "manifest.json";
 const MAX_LAUNCH_ARGS: usize = 32;
 const MAX_LAUNCH_BYTES: usize = 16 * 1024;
 const MAX_ARGUMENT_BYTES: usize = 4096;
 
+#[cfg(test)]
 fn known_lua_api(language: &str, api: u32) -> bool {
     language == rot_behavior::LANGUAGE_ID
         && matches!(
@@ -38,16 +47,22 @@ fn known_lua_api(language: &str, api: u32) -> bool {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ErrorKind {
+    #[cfg_attr(not(test), allow(dead_code))]
     Unsaved,
     Invalid,
+    #[cfg_attr(not(test), allow(dead_code))]
     Busy,
+    #[cfg_attr(not(test), allow(dead_code))]
     Conflict,
+    #[cfg_attr(not(test), allow(dead_code))]
     Missing,
     TooLarge,
+    #[cfg_attr(not(test), allow(dead_code))]
     Io,
 }
 #[derive(Debug)]
 pub(super) struct FilesError {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub kind: ErrorKind,
     pub message: String,
 }
@@ -62,18 +77,22 @@ fn error(kind: ErrorKind, message: impl Into<String>) -> FilesError {
         message: message.into(),
     }
 }
+#[cfg(test)]
 fn io(error: std::io::Error) -> FilesError {
     self::error(ErrorKind::Io, error.to_string())
 }
+#[cfg(test)]
 fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
+#[cfg(test)]
 fn valid_hash(value: &str) -> bool {
     value.len() == 64
         && value
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
+#[cfg(test)]
 fn valid_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
@@ -81,6 +100,7 @@ fn valid_id(value: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
 }
+#[cfg(test)]
 fn id(value: &str) -> Result<(), FilesError> {
     if valid_id(value) {
         Ok(())
@@ -91,6 +111,7 @@ fn id(value: &str) -> Result<(), FilesError> {
         ))
     }
 }
+#[cfg(test)]
 fn regular(path: &Path) -> Result<(), FilesError> {
     match path.symlink_metadata() {
         Ok(meta) if meta.is_file() => Ok(()),
@@ -105,6 +126,7 @@ fn regular(path: &Path) -> Result<(), FilesError> {
         Err(e) => Err(io(e)),
     }
 }
+#[cfg(test)]
 fn real_dir(path: &Path, create: bool) -> Result<bool, FilesError> {
     match path.symlink_metadata() {
         Ok(meta) if meta.is_dir() => Ok(true),
@@ -123,6 +145,7 @@ fn real_dir(path: &Path, create: bool) -> Result<bool, FilesError> {
         Err(e) => Err(io(e)),
     }
 }
+#[cfg(test)]
 fn existing_directory_chain(path: &Path) -> Result<(), FilesError> {
     let mut current = PathBuf::new();
     for component in path.components() {
@@ -134,6 +157,7 @@ fn existing_directory_chain(path: &Path) -> Result<(), FilesError> {
     Ok(())
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug)]
 pub(super) struct Context {
     scene: PathBuf,
@@ -141,6 +165,7 @@ pub(super) struct Context {
     root: PathBuf,
     identity: String,
 }
+#[cfg(test)]
 impl Context {
     /// Only an explicit existing saved scene establishes project context. Save As
     /// derives a new identity/root; old working copies are never relocated/deleted.
@@ -216,6 +241,7 @@ impl Context {
         Ok(self.root.join("src").join(format!("{source_id}.{ext}")))
     }
 }
+#[cfg(test)]
 fn guard_legacy_lua_copy(source: &BehaviorSource, path: &Path) -> Result<(), FilesError> {
     if known_lua_api(&source.language_id, source.host_api_version)
         && source.host_api_version != rot_behavior::HOST_API_VERSION
@@ -230,7 +256,9 @@ fn guard_legacy_lua_copy(source: &BehaviorSource, path: &Path) -> Result<(), Fil
     }
     Ok(())
 }
+#[cfg(test)]
 struct Lease(File);
+#[cfg(test)]
 impl Lease {
     fn acquire(context: &Context) -> Result<Self, FilesError> {
         let path = context.root.join(".lock");
@@ -252,11 +280,13 @@ impl Lease {
         }
     }
 }
+#[cfg(test)]
 impl Drop for Lease {
     fn drop(&mut self) {
         let _ = self.0.unlock();
     }
 }
+#[cfg(test)]
 fn read(path: &Path, limit: usize) -> Result<Option<Vec<u8>>, FilesError> {
     regular(path)?;
     let file = match File::open(path) {
@@ -284,6 +314,7 @@ fn read(path: &Path, limit: usize) -> Result<Option<Vec<u8>>, FilesError> {
 }
 /// Recheck the expected complete bytes under the context lock. First writes are
 /// no-clobber. An external noncooperating edit during replacement is out of scope.
+#[cfg(test)]
 fn write(
     path: &Path,
     bytes: &[u8],
@@ -331,6 +362,7 @@ fn write(
 
 // Decode maps directly from original JSON bytes: normal Value decoding would
 // erase duplicate keys before a typed manifest could reject them.
+#[cfg(test)]
 fn unique_map<'de, D, T>(deserializer: D) -> Result<BTreeMap<String, T>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -359,6 +391,7 @@ where
     }
     deserializer.deserialize_map(Unique(std::marker::PhantomData))
 }
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ManifestSource {
@@ -367,6 +400,7 @@ struct ManifestSource {
     embedded_sha256: String,
     file_sha256: String,
 }
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Manifest {
@@ -378,6 +412,7 @@ struct Manifest {
     #[serde(deserialize_with = "unique_map")]
     tooling: BTreeMap<String, String>,
 }
+#[cfg(test)]
 impl Manifest {
     fn empty(context: &Context) -> Self {
         Self {
@@ -422,11 +457,13 @@ impl Manifest {
 }
 /// Durable baselines are not live synchronization observations. The expected full
 /// bytes hash is private and checked by every metadata update under the lease.
+#[cfg(test)]
 #[derive(Clone, Debug)]
 pub(super) struct ManifestSnapshot {
     data: Manifest,
     expected_sha256: Option<String>,
 }
+#[cfg(test)]
 impl ManifestSnapshot {
     #[cfg(test)]
     pub fn exists(&self) -> bool {
@@ -454,6 +491,7 @@ impl ManifestSnapshot {
         })
     }
 }
+#[cfg(test)]
 pub(super) fn load_manifest(context: &Context) -> Result<ManifestSnapshot, FilesError> {
     if !context.prepare(false)? {
         return Ok(ManifestSnapshot {
@@ -464,6 +502,7 @@ pub(super) fn load_manifest(context: &Context) -> Result<ManifestSnapshot, Files
     let _lease = Lease::acquire(context)?;
     load_manifest_locked(context)
 }
+#[cfg(test)]
 fn load_manifest_locked(context: &Context) -> Result<ManifestSnapshot, FilesError> {
     let bytes = read(&context.root.join(MANIFEST_FILE), MAX_MANIFEST_BYTES)?;
     let Some(bytes) = bytes else {
@@ -484,6 +523,7 @@ fn load_manifest_locked(context: &Context) -> Result<ManifestSnapshot, FilesErro
         expected_sha256: Some(hash(&bytes)),
     })
 }
+#[cfg(test)]
 fn check_manifest_locked(
     context: &Context,
     expected: &ManifestSnapshot,
@@ -498,6 +538,7 @@ fn check_manifest_locked(
     }
     Ok(current)
 }
+#[cfg(test)]
 fn commit_manifest_locked(
     context: &Context,
     expected: &ManifestSnapshot,
@@ -530,6 +571,7 @@ fn commit_manifest_locked(
 }
 /// Derived-file ownership may persist for unsaved inputs. Source baselines do not
 /// change here: only independent saved-scene verification may promote them.
+#[cfg(test)]
 pub(super) fn persist_tooling(
     context: &Context,
     expected: &ManifestSnapshot,
@@ -543,6 +585,7 @@ pub(super) fn persist_tooling(
     data.tooling = tooling.files.clone();
     commit_manifest_locked(context, expected, data)
 }
+#[cfg(test)]
 #[derive(Debug)]
 pub(super) struct Promotion {
     pub promoted: Vec<String>,
@@ -554,6 +597,7 @@ pub(super) struct Promotion {
 /// guard. Only matching saved ID/language/API/text hashes may replace durable bases.
 /// A failed/interrupted check preserves the old manifest. Scene and manifest writes
 /// are separate transactions; no cross-file or hostile-filesystem atomicity is claimed.
+#[cfg(test)]
 pub(super) fn promote_saved_bases(
     context: &Context,
     expected: &ManifestSnapshot,
@@ -622,6 +666,7 @@ pub(super) fn promote_saved_bases(
     })
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct SyncBase {
@@ -632,6 +677,7 @@ pub(super) struct SyncBase {
     pub embedded_sha256: String,
     pub file_sha256: String,
 }
+#[cfg(test)]
 impl SyncBase {
     fn validate(&self, context: &Context, source_id: &str) -> Result<(), FilesError> {
         id(&self.source_id)?;
@@ -651,6 +697,7 @@ impl SyncBase {
         Ok(())
     }
 }
+#[cfg(test)]
 #[derive(Debug)]
 pub(super) enum SyncOutcome {
     Unchanged {
@@ -681,6 +728,7 @@ pub(super) enum SyncOutcome {
         current_path: PathBuf,
     },
 }
+#[cfg(test)]
 fn base(
     context: &Context,
     source_id: &str,
@@ -696,6 +744,7 @@ fn base(
         file_sha256: file_hash,
     }
 }
+#[cfg(test)]
 pub(super) fn export(
     context: &Context,
     source_id: &str,
@@ -704,6 +753,7 @@ pub(super) fn export(
 ) -> Result<SyncOutcome, FilesError> {
     sync(context, source_id, source, previous, true)
 }
+#[cfg(test)]
 pub(super) fn refresh(
     context: &Context,
     source_id: &str,
@@ -712,6 +762,7 @@ pub(super) fn refresh(
 ) -> Result<SyncOutcome, FilesError> {
     sync(context, source_id, source, previous, false)
 }
+#[cfg(test)]
 fn sync(
     context: &Context,
     source_id: &str,
@@ -815,6 +866,7 @@ fn sync(
     }
 }
 
+#[cfg(test)]
 fn observed_source(
     context: &Context,
     source_id: &str,
@@ -855,6 +907,7 @@ fn observed_source(
 }
 /// Explicit user choice of the observed file version. Only returns a candidate;
 /// caller still performs guarded source history mutation and live-base adoption.
+#[cfg(test)]
 pub(super) fn import_observed(
     context: &Context,
     source_id: &str,
@@ -883,6 +936,7 @@ pub(super) fn import_observed(
 }
 /// Explicit user choice of embedded text. Never follows a persisted path or writes
 /// over a different observed version; this does not promote a durable source base.
+#[cfg(test)]
 pub(super) fn overwrite_observed(
     context: &Context,
     source_id: &str,
@@ -909,12 +963,14 @@ pub(super) fn overwrite_observed(
     })
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ToolingBase {
     pub context_sha256: String,
     pub files: BTreeMap<String, String>,
 }
+#[cfg(test)]
 impl ToolingBase {
     fn validate(&self, context: &Context) -> Result<(), FilesError> {
         if self.context_sha256 != context.identity
@@ -944,6 +1000,7 @@ impl ToolingBase {
         Ok(())
     }
 }
+#[cfg(test)]
 fn tooling_name(name: &str) -> Result<(), FilesError> {
     if name == ".luarc.json" || name == "types/host.lua" {
         return Ok(());
@@ -959,6 +1016,7 @@ fn tooling_name(name: &str) -> Result<(), FilesError> {
         })?;
     id(source)
 }
+#[cfg(test)]
 fn tooling_limit(name: &str) -> usize {
     if name == ".luarc.json" {
         MAX_CONFIG_BYTES
@@ -966,16 +1024,19 @@ fn tooling_limit(name: &str) -> usize {
         MAX_SOURCE_BYTES
     }
 }
+#[cfg(test)]
 #[derive(Debug)]
 pub(super) struct ToolingOutput {
     pub config: PathBuf,
     pub base: ToolingBase,
     pub annotation_hints: BTreeMap<String, String>,
 }
+#[cfg(test)]
 pub(super) fn source_class_name(source_id: &str) -> Result<String, FilesError> {
     id(source_id)?;
     Ok(format!("RotProps_{}", hash(source_id.as_bytes())))
 }
+#[cfg(test)]
 pub(super) fn annotation_hint_for_api(source_id: &str, api: u32) -> Result<String, FilesError> {
     id(source_id)?;
     if api == rot_behavior::GROUP_ROTATION_HOST_API_VERSION {
@@ -1008,6 +1069,7 @@ pub(super) fn annotation_hint_for_api(source_id: &str, api: u32) -> Result<Strin
         source_class_name(source_id)?
     ))
 }
+#[cfg(test)]
 fn property_type(value: &PropertyValue) -> (&'static str, bool) {
     match value {
         PropertyValue::Number(_) => ("number", false),
@@ -1020,6 +1082,7 @@ fn property_type(value: &PropertyValue) -> (&'static str, bool) {
         PropertyValue::SoundRef(_) => ("RotSoundRef", false),
     }
 }
+#[cfg(test)]
 fn source_types(source_id: &str, authoring: &Authoring) -> Result<String, FilesError> {
     let bindings: Vec<_> = authoring
         .bindings
@@ -1061,11 +1124,14 @@ fn source_types(source_id: &str, authoring: &Authoring) -> Result<String, FilesE
     }
     Ok(output)
 }
+#[cfg(test)]
 const HOST_TYPES: &str = "---@meta\n---@alias RotObjectId string\n---@alias RotAssetId string\n---@class RotVec3\n---@field [1] number\n---@field [2] number\n---@field [3] number\n---@class RotTransform\n---@field translation RotVec3\n---@field rotation RotVec3\n---@field scale RotVec3\n---@class RotHost\n---@field resolve fun(id:RotObjectId?):RotTransform?\n---@class RotMath\n---@field min fun(x:number,...:number):number\n---@field max fun(x:number,...:number):number\n---@field abs fun(x:number):number\n---@field sqrt fun(x:number):number\n---@field sin fun(x:number):number\n---@field cos fun(x:number):number\n---@field floor fun(x:number):number\n---@field ceil fun(x:number):number\nmath={} --[[@as RotMath]]\n";
+#[cfg(test)]
 struct GeneratedTooling {
     files: BTreeMap<String, Vec<u8>>,
     annotation_hints: BTreeMap<String, String>,
 }
+#[cfg(test)]
 const VERSIONED_HOST_TYPES: &str = r#"
 ---@class RotButton
 ---@field held boolean
@@ -1125,6 +1191,7 @@ const VERSIONED_HOST_TYPES: &str = r#"
 ---@field binding_state fun(binding_id:string,name:string):RotStateValue Copied tick-start peer field, missing owners/fields fail.
 ---@field play_sound fun(property_name:string) Commit a one-shot cue from an own Sound property; no arbitrary asset IDs or paths.
 "#;
+#[cfg(test)]
 fn tooling_files(authoring: &Authoring) -> Result<GeneratedTooling, FilesError> {
     if authoring.sources.len() > MAX_SOURCES || authoring.bindings.len() > MAX_BINDINGS {
         return Err(error(
@@ -1214,6 +1281,7 @@ fn tooling_files(authoring: &Authoring) -> Result<GeneratedTooling, FilesError> 
 /// Generate derived files only. Preflight all ownership/hash/type bounds before
 /// writes; each replacement is atomic, not a multi-file filesystem transaction.
 /// Retrying after partial I/O failure can adopt byte-identical completed outputs.
+#[cfg(test)]
 pub(super) fn tooling(
     context: &Context,
     authoring: &Authoring,
@@ -1304,6 +1372,7 @@ pub(super) struct LaunchSpec {
 }
 impl LaunchSpec {
     /// Build argv only. The explicit launch UI chooses whether/when to spawn it.
+    #[cfg(test)]
     pub fn command(
         &self,
         context: &Context,

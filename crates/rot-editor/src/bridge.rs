@@ -96,6 +96,7 @@ impl Authority {
     }
     /// Async operations acknowledge preparation separately. Their final
     /// publication still races revocation through the same lease gate.
+    #[cfg(test)]
     pub fn authorize_publication(&self) -> Option<CommitLease> {
         let (pending, state, _) = new_pending_authorized(
             json!({}),
@@ -698,6 +699,7 @@ impl Bridge {
         true
     }
     /// Bounded pending slot; neither selection nor transport can grant authority.
+    #[cfg(test)]
     pub(crate) fn request_browser(&mut self, request: browser::BrowserRequest) -> &'static str {
         if !self.authority.live()
             || request.id.len() != 64
@@ -725,6 +727,7 @@ impl Bridge {
             pairing.deny();
         }
     }
+    #[cfg(test)]
     pub(crate) fn browser_authorized(&self, request: &browser::BrowserRequest) -> bool {
         self.approved()
             && self
@@ -1540,7 +1543,7 @@ pub(crate) mod tests {
             let (mut stream, handshake) = approved(&bridge);
             let mut request = frame(&handshake, "behavior_property_set", json!({})).to_string();
             request = request.replacen("\"arguments\":{}", &format!("\"arguments\":{raw}"), 1);
-            let valid = crate::strict_json::parse(request.as_bytes()).is_ok();
+            let valid = rot_support::strict_json::parse(request.as_bytes()).is_ok();
             let worker = std::thread::spawn(move || {
                 writeln!(stream, "{request}").unwrap();
                 let mut line = String::new();

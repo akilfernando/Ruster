@@ -15,31 +15,6 @@ struct Run {
     finished: bool,
 }
 impl Probe {
-    pub fn begin(ids: [u64; 4]) -> Self {
-        #[cfg(feature = "inspection")]
-        {
-            use std::sync::{
-                atomic::{AtomicUsize, Ordering},
-                OnceLock,
-            };
-            static ENABLED: OnceLock<bool> = OnceLock::new();
-            static COUNT: AtomicUsize = AtomicUsize::new(0);
-            let enabled = *ENABLED
-                .get_or_init(|| std::env::var_os("ROT_CAPTURE_TIMING").is_some_and(|v| v == "1"));
-            let admitted = enabled
-                && COUNT
-                    .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
-                        (n < 64).then_some(n + 1)
-                    })
-                    .is_ok();
-            Self::begin_with(admitted, ids, std::time::Instant::now)
-        }
-        #[cfg(not(feature = "inspection"))]
-        {
-            let _ = ids;
-            Self::default()
-        }
-    }
     #[cfg(any(feature = "inspection", test))]
     pub(super) fn begin_with(
         enabled: bool,

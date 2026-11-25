@@ -207,35 +207,6 @@ impl Draft {
         Ok(())
     }
 
-    pub(super) fn revision(&self) -> u64 {
-        self.revision
-    }
-
-    pub(super) fn recovered_values_ui(&self, ui: &mut egui::Ui) {
-        ui.label(match (self.intent, self.edited_id.is_some()) {
-            (Intent::Remove, _) => Text::InputUiRecoveredRequestToDelete.plain(),
-            (Intent::Set, true) => Text::InputUiRecoveredChangesToAn.plain(),
-            (Intent::Set, false) => Text::RecoveredNewAction.plain(),
-        });
-        ui.strong(Text::ActionId.plain());
-        ui.add(egui::Label::new(egui::RichText::new(&self.id).monospace()).wrap());
-        if let Some(original) = self
-            .edited_id
-            .as_ref()
-            .filter(|original| *original != &self.id)
-        {
-            ui.add(egui::Label::new(format!("Originally editing {original}")).wrap());
-        }
-        ui.strong(Text::Label.plain());
-        if self.label.is_empty() {
-            ui.label(Text::NoLabelEntered.plain());
-        } else {
-            ui.add(egui::Label::new(&self.label).wrap());
-        }
-        ui.strong(Text::Controls.plain());
-        ui.add(egui::Label::new(hint(&self.kind)).wrap());
-    }
-
     pub(super) fn review_recovery(&self, session: &impl ActionDocument) -> Result<(), String> {
         self.validate_recovery_storage(session)?;
         if self.base_hash
@@ -248,13 +219,6 @@ impl Draft {
             return Err(Text::InputRecoveredActionChanged.plain().into());
         }
         Ok(())
-    }
-
-    pub(super) fn resume_recovery(&self, session: &impl ActionDocument) -> Result<Self, String> {
-        self.review_recovery(session)?;
-        let mut resumed = self.clone();
-        resumed.revision = session.action_revision();
-        Ok(resumed)
     }
 
     pub(super) fn validate_snapshot(&self, session: &impl ActionDocument) -> Result<(), String> {
@@ -358,6 +322,7 @@ impl InputUi {
         self.interaction_frame = Some(frame);
         true
     }
+    #[cfg(test)]
     pub(super) fn generation(&self) -> u64 {
         self.generation
     }
@@ -379,6 +344,7 @@ impl InputUi {
     pub(super) fn capturing(&self) -> bool {
         self.capture.is_some()
     }
+    #[cfg(test)]
     pub(super) fn drafts(&self) -> Option<Draft> {
         self.draft.clone()
     }
@@ -391,6 +357,7 @@ impl InputUi {
         self.validation_focus = None;
         self.message.clear();
     }
+    #[cfg(test)]
     pub(super) fn restore_drafts(
         &mut self,
         draft: Option<Draft>,
@@ -404,23 +371,6 @@ impl InputUi {
         self.focus_first = self.pending();
         self.validation_focus = None;
         self.message.clear();
-        Ok(())
-    }
-
-    pub(super) fn resume_recovered(
-        &mut self,
-        draft: Draft,
-        session: &impl ActionDocument,
-        ctx: &egui::Context,
-    ) -> Result<(), String> {
-        if self.pending() {
-            return Err(
-                "Resolve the current input action draft before resuming recovered work.".into(),
-            );
-        }
-        self.restore_drafts(Some(draft), session)?;
-        // Resume owns this entire frame, including further layout passes.
-        self.claim_frame(ctx);
         Ok(())
     }
 

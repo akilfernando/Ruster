@@ -1,8 +1,8 @@
 //! Edit → Project Settings…: settings that belong to the project rather than
-//! to this computer (Project, Input Actions, Build), in the same page layout
-//! as Preferences.
-use super::*;
+//! to this computer (Project, Input Actions, Player, Build), in the same page
+//! layout as Preferences.
 use crate::strings::Text;
+use eframe::egui;
 use std::path::Path;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -23,94 +23,6 @@ impl ProjectPage {
             Self::Build => "Build",
         }
     }
-}
-
-impl SceneEditor {
-    pub(super) fn open_project_settings(&mut self, page: ProjectPage) {
-        self.project_settings = Some(page);
-        self.input_actions_open = page == ProjectPage::InputActions;
-    }
-
-    fn build_page(&mut self, ui: &mut egui::Ui) {
-        crate::ui_kit::property_row(ui, Text::Target.plain(), |ui| {
-            ui.label(Text::LinuxX8664.plain());
-        });
-        let kit = self.creation_export.runtime_kit().map(Path::to_path_buf);
-        crate::ui_kit::property_row(ui, Text::RuntimeKit.plain(), |ui| match &kit {
-            Some(kit) => {
-                let text = kit.display().to_string();
-                ui.add(egui::Label::new(&text).truncate())
-                    .on_hover_text(text);
-            }
-            None => {
-                ui.weak(Text::NotSet.plain())
-                    .on_hover_text(Text::BuildKitHint.plain());
-            }
-        });
-        ui.add_space(crate::ui_kit::tokens::SPACE_S);
-        if crate::editor_theme::primary_button(ui, Action::Export.label()).clicked() {
-            self.queued_action = Some(Action::Export);
-        }
-    }
-
-    /// The Project Settings window. Returns an Input Actions edit to apply.
-    pub(super) fn project_settings_ui(
-        &mut self,
-        ctx: &egui::Context,
-    ) -> Option<crate::input_ui::Edit> {
-        if self.input_actions_open && self.project_settings.is_none() {
-            self.project_settings = Some(ProjectPage::InputActions);
-        }
-        let mut page = self.project_settings?;
-        if !self.input_actions.capturing()
-            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
-        {
-            self.project_settings = None;
-            self.input_actions_open = false;
-            return None;
-        }
-        let mut open = true;
-        let mut edit = None;
-        settings_window(
-            ctx,
-            &mut page,
-            &mut open,
-            false,
-            false,
-            |ui, page| match page {
-                ProjectPage::Project => project_page(ui, self.session.path()),
-                ProjectPage::InputActions => {
-                    let editable = self.input_action_editable();
-                    edit = self.input_actions.show(ui, &self.session, editable);
-                }
-                ProjectPage::Player => {}
-                ProjectPage::Build => self.build_page(ui),
-            },
-        );
-        if open {
-            self.project_settings = Some(page);
-            self.input_actions_open = page == ProjectPage::InputActions;
-            if self.input_actions_open {
-                self.runtime.release_input(ctx);
-            }
-        } else {
-            self.project_settings = None;
-            self.input_actions_open = false;
-        }
-        edit
-    }
-}
-
-pub(super) fn project_page(ui: &mut egui::Ui, path: Option<&Path>) {
-    project_identity(ui, path);
-    let startup = path.and_then(Path::file_name).map_or_else(
-        || "Not saved yet".into(),
-        |name| name.to_string_lossy().into_owned(),
-    );
-    crate::ui_kit::property_row(ui, Text::StartupScene.plain(), |ui| {
-        ui.label(startup)
-            .on_hover_text(Text::StartupSceneHint.plain());
-    });
 }
 
 pub(super) fn project_identity(ui: &mut egui::Ui, path: Option<&Path>) {

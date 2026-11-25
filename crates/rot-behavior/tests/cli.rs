@@ -74,12 +74,50 @@ fn migrated_motion_lab_keeps_the_runtime_observation() {
     use std::{fs, process::Command};
 
     let temp = tempfile::tempdir().unwrap();
+    let example_path = temp.path().join("example.json");
+    let example_bytes = include_bytes!("../../../examples/motion-lab/resources/generic.scene.json");
+    fs::write(&example_path, example_bytes).unwrap();
+
     let legacy_path = temp.path().join("legacy.json");
     let component_path = temp.path().join("components.json");
-    let legacy = include_bytes!("../../../examples/motion-lab/resources/generic.scene.json");
-    fs::write(&legacy_path, legacy).unwrap();
-    let session = rot_scene::Session::from_snapshot_bytes(legacy).unwrap();
-    ComponentScene::from_legacy(&session)
+    let mut legacy_scene = Scene::demo();
+    for object in &mut legacy_scene.objects {
+        object.name = Some(object.id.clone());
+    }
+    legacy_scene.objects[0].name = Some("Slow sample".into());
+    let mut legacy_session = Session::new(legacy_scene).unwrap();
+    legacy_session
+        .create_behavior(
+            0,
+            "mover",
+            BehaviorSource {
+                label: None,
+                language_id: LANGUAGE_ID.into(),
+                host_api_version: HOST_API_VERSION,
+                text: "return { update = function(t, p, dt) t.translation[1] = t.translation[1] + p.speed * dt; return t end }".into(),
+            },
+            "motion-left",
+            BehaviorBinding {
+                target: rot_scene::BindingTarget::Object("left".into()),
+                source_id: "mover".into(),
+                enabled: true,
+                properties: std::collections::BTreeMap::from([(
+                    "speed".into(),
+                    PropertyValue::Number(1.5),
+                )]),
+                state_defaults: Default::default(),
+                commands: Default::default(),
+            },
+        )
+        .unwrap();
+    let mut legacy_doc: serde_json::Value =
+        serde_json::from_slice(&legacy_session.snapshot_bytes().unwrap()).unwrap();
+    legacy_doc["scene"]["revision"] = serde_json::json!(0);
+    legacy_doc["undo"] = serde_json::json!([]);
+    let legacy_bytes = serde_json::to_vec_pretty(&legacy_doc).unwrap();
+    fs::write(&legacy_path, &legacy_bytes).unwrap();
+    let legacy_session = rot_scene::Session::from_snapshot_bytes(&legacy_bytes).unwrap();
+    ComponentScene::from_legacy(&legacy_session)
         .unwrap()
         .save_new(&component_path)
         .unwrap();
@@ -98,6 +136,10 @@ fn migrated_motion_lab_keeps_the_runtime_observation() {
         );
         serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap()
     };
+    let example_run = run(&example_path);
+    assert_eq!(example_run["tick"], "16");
+    assert_eq!(fs::read(&example_path).unwrap(), example_bytes);
+
     let expected = run(&legacy_path);
     let actual = run(&component_path);
     assert_eq!(actual["scene"], expected["scene"]);

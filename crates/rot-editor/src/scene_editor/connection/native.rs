@@ -36,18 +36,10 @@ impl Host {
     /// Supported local observation, including when no listener/adapter exists.
     /// Does not dispatch a tool, start a listener, approve or claim an owner.
     pub(super) fn native_scene_observation(&self) -> SceneObservation {
-        let (scene_id, revision) = self.editor.component.as_ref().map_or_else(
-            || {
-                (
-                    self.editor.session.scene().id.as_str(),
-                    self.editor.session.scene().revision,
-                )
-            },
-            |component| {
-                let (_, id, revision) = component.ai_document();
-                (id, revision)
-            },
-        );
+        let (scene_id, revision) = self.editor.component.as_ref().map_or(("", 0), |component| {
+            let (_, id, revision) = component.ai_document();
+            (id, revision)
+        });
         SceneObservation {
             session_token: self
                 .editor
@@ -120,7 +112,9 @@ impl Host {
             .unwrap_or_default();
         if std::mem::take(&mut self.editor.ai_connection_requested) {
             state.open = !state.open;
-            self.editor.runtime.release_input(&ctx);
+            if let Some(component) = &mut self.editor.component {
+                component.release_input(&ctx);
+            }
         }
         if state.open {
             let available = ui.available_size();
@@ -386,11 +380,16 @@ mod tests {
         );
     }
 
+    fn disk_bytes(host: &Host) -> Vec<u8> {
+        let path = host.editor.component.as_ref().unwrap().ai_document().0;
+        std::fs::read(path).unwrap()
+    }
+
     #[test]
     fn real_widget_consent_cancels_then_approves_exact_socket_owner_and_disconnects() {
         let ctx = egui::Context::default();
         let mut host = super::super::tests::host("native-consent");
-        let before = host.editor.session.snapshot_bytes().unwrap();
+        let before = disk_bytes(&host);
         let mut state = NativeUi::default();
         click(&mut host, &ctx, &mut state, "Start Listening");
         assert!(state.preview.is_some());
@@ -471,20 +470,25 @@ mod tests {
         drop(stream);
         super::super::tests::retire(&mut host, &ctx);
         assert!(!locator_path.exists());
-        assert_eq!(before, host.editor.session.snapshot_bytes().unwrap());
+        assert_eq!(before, disk_bytes(&host));
     }
 
     #[test]
     fn prelaunch_scene_observation_matches_tool_guards_and_paints_without_authority() {
         let ctx = egui::Context::default();
         let mut host = super::super::tests::host("scene-observation");
-        let before = host.editor.session.snapshot_bytes().unwrap();
+        let before = disk_bytes(&host);
         let observation = host.native_scene_observation();
         assert!(observation.owner.is_none());
         assert_eq!(observation.connection_state, "retired");
         assert_ne!(observation.session_token, observation.incarnation);
-        let nonce = host.editor.connection_incarnation.clone();
-        let inspected = host.editor.command(&nonce, "scene_inspect", json!({}));
+        let token = observation.session_token.clone();
+        let inspected =
+            host.editor
+                .component
+                .as_mut()
+                .unwrap()
+                .ai_command(&token, "scene_inspect", &json!({}));
         assert_eq!(
             inspected["result"]["session_token"],
             observation.session_token
@@ -505,7 +509,7 @@ mod tests {
             .any(|(text, _)| text == &format!("Scene version: {}", observation.revision)));
         assert!(host.bridge.is_none());
         assert!(host.editor.connection_authority.is_none());
-        assert_eq!(before, host.editor.session.snapshot_bytes().unwrap());
+        assert_eq!(before, disk_bytes(&host));
     }
 
     #[test]
@@ -520,14 +524,15 @@ mod tests {
         );
         assert!(!host.confirm_binding(preview, &ctx));
         let preview = host.binding_preview();
-        let nonce = host.editor.connection_incarnation.clone();
-        let result = host.editor.command(
-            &nonce,
+        let token = preview.observation.session_token.clone();
+        let result = host.editor.component.as_mut().unwrap().ai_command(
+            &token,
             "scene_create",
-            json!({
-                "expected_session_token":preview.observation.session_token,
-                "expected_revision":preview.observation.revision,
-                "object_id":"observation-probe","name":"Probe"
+            &json!({
+                "expected_session_token": preview.observation.session_token,
+                "expected_revision": preview.observation.revision,
+                "object_id": "observation-probe",
+                "name": "Probe"
             }),
         );
         assert_eq!(result["ok"], true, "{result}");

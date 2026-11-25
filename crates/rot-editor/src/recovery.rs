@@ -1,7 +1,9 @@
 //! Bounded per-machine checkpoints. Restoring never grants project-save authority.
 use crate::strings::Text;
 use serde::{Deserialize, Serialize};
-use serde_json::{value::RawValue, Value};
+use serde_json::value::RawValue;
+#[cfg(test)]
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
@@ -111,6 +113,7 @@ fn present_component<'de, D: serde::Deserializer<'de>>(
 }
 
 impl Snapshot {
+    #[cfg(test)]
     pub fn capture(
         session: &rot_scene::Session,
         asset_origin: Option<PathBuf>,
@@ -230,6 +233,7 @@ impl Snapshot {
         rot_scene::Session::from_snapshot_bytes(self.document.get().as_bytes())
             .map_err(|e| e.to_string())
     }
+    #[cfg(test)]
     pub fn drafts(&self) -> Result<Value, String> {
         serde_json::from_str(self.drafts.get()).map_err(|e| e.to_string())
     }

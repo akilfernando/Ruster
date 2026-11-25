@@ -20,6 +20,7 @@ pub(super) enum Command {
         adopt: Option<Journal>,
         retire: bool,
     },
+    #[cfg_attr(not(test), allow(dead_code))]
     Shutdown,
 }
 pub(super) enum Reply {
@@ -32,12 +33,14 @@ pub(super) enum Reply {
         epoch: u64,
         result: Result<(), String>,
     },
+    #[cfg_attr(not(test), allow(dead_code))]
     Shutdown,
 }
 pub(super) struct Worker {
     sender: Option<SyncSender<Command>>,
     receiver: Receiver<Reply>,
     epoch: Arc<AtomicU64>,
+    #[cfg_attr(not(test), allow(dead_code))]
     thread: Option<JoinHandle<()>>,
 }
 impl Worker {
@@ -133,6 +136,7 @@ impl Worker {
             thread.join().unwrap();
         }
     }
+    #[cfg(test)]
     pub fn finished(&mut self) -> bool {
         if self
             .thread

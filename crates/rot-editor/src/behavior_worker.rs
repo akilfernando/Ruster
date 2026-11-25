@@ -470,6 +470,7 @@ pub(super) struct Worker {
     shared: Arc<Shared>,
     current: RunKey,
     boundary_sent: Cell<bool>,
+    #[cfg_attr(not(test), allow(dead_code))]
     thread: Option<JoinHandle<()>>,
 }
 impl Worker {
@@ -999,6 +1000,7 @@ impl Worker {
         self.try_request(Command::Stop { key })?;
         Ok(key)
     }
+    #[cfg(test)]
     pub fn request_shutdown(&mut self) -> Result<RunKey, RequestError> {
         let advanced = self.advance(self.current.generation, self.current.authored_revision);
         self.shared.shutdown.store(true, Ordering::SeqCst);
@@ -1041,6 +1043,7 @@ impl Worker {
     pub fn last_good_frame(&self) -> Option<Frame> {
         self.shared.latest.try_lock().ok()?.clone()
     }
+    #[cfg(test)]
     pub fn finished(&mut self) -> bool {
         if self.thread.as_ref().is_some_and(JoinHandle::is_finished) {
             if let Some(thread) = self.thread.take() {

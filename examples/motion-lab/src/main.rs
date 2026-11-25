@@ -726,7 +726,7 @@ fn execute_generic(options: Options) -> Result<(), String> {
     let session = match &options.scene {
         Some(path) => generic::read_session(path)?,
         None => {
-            rot_scene::Session::from_snapshot_bytes(generic::DEMO).map_err(|e| e.to_string())?
+            rot_scene::Session::from_runtime_snapshot(generic::DEMO).map_err(|e| e.to_string())?
         }
     };
     let tick_duration = generic::session_tick_duration(&session);

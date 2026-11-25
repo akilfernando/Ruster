@@ -13,14 +13,10 @@ use std::collections::VecDeque;
 pub(super) struct DebugUi {
     pub points: Vec<Breakpoint>,
     pub open: bool,
-    source: String,
-    line: String,
     next_operation: u64,
     active: Option<Receipt>,
     recent: VecDeque<Receipt>,
     last_stop: Option<rot_behavior::debug::StopId>,
-    hash_revision: Option<u64>,
-    source_hashes: BTreeMap<String, String>,
 }
 struct Receipt {
     id: u64,
@@ -88,6 +84,7 @@ fn input_receipt_wire(receipt: InputReceipt) -> Value {
         "tick":receipt.tick.to_string(),"input_epoch":receipt.input_epoch.to_string(),"origin":receipt.origin})
 }
 impl RuntimeUi {
+    #[cfg(test)]
     pub(super) fn last_command_receipt(&self) -> Option<&rot_behavior::CommandReceipt> {
         let key = self.frame.as_ref()?.key;
         self.debug
@@ -360,6 +357,7 @@ impl RuntimeUi {
         self.flush();
         Ok((key, expected_tick, receipt))
     }
+    #[cfg(test)]
     pub(crate) fn breakpoint(
         &mut self,
         session: &Session,
@@ -403,212 +401,7 @@ impl RuntimeUi {
         self.debug.points = points;
         Ok(())
     }
-    pub(crate) fn debug_window(
-        &mut self,
-        ctx: &egui::Context,
-        session: &Session,
-        blocked: bool,
-    ) -> Option<rot_behavior::Diagnostic> {
-        if !self.debug.open {
-            return None;
-        }
-        if self.debug.hash_revision != Some(session.scene().revision) {
-            self.debug.source_hashes = session
-                .authoring()
-                .sources
-                .iter()
-                .map(|(id, source)| (id.clone(), rot_behavior::source_hash(&source.text)))
-                .collect();
-            self.debug.hash_revision = Some(session.scene().revision);
-        }
-        let stop = self.debug_snapshot();
-        let mut opened = true;
-        let mut navigate = false;
-        let mut point = None;
-        let mut remove = None;
-        let mut resume = None;
-        egui::Window::new(Text::ScriptDebugger.plain())
-            .open(&mut opened)
-            .default_width(600.0)
-            .max_width((ctx.content_rect().width() - 48.0).max(240.0))
-            .show(ctx, |ui| {
-                ui.small(Text::RuntimeDebugBreakpointsTakeEffectThe.plain());
-                ui.add_enabled_ui(!blocked, |ui| {
-                    egui::ComboBox::from_label(Text::BreakpointScript.plain())
-                        .selected_text(if self.debug.source.is_empty() {
-                            Text::ChooseScript.plain()
-                        } else {
-                            &self.debug.source
-                        })
-                        .show_ui(ui, |ui| {
-                            for id in session.authoring().sources.keys() {
-                                ui.selectable_value(&mut self.debug.source, id.clone(), id);
-                            }
-                        });
-                    ui.horizontal(|ui| {
-                        ui.label(Text::Line.plain());
-                        let field = ui.add(
-                            egui::TextEdit::singleline(&mut self.debug.line)
-                                .char_limit(5)
-                                .desired_width(70.0),
-                        );
-                        let owns = field.has_focus() || field.lost_focus();
-                        let enter = owns
-                            && ui.input_mut(|input| {
-                                input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
-                            });
-                        let escape = owns
-                            && ui.input_mut(|input| {
-                                input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
-                            });
-                        if enter {
-                            field.request_focus();
-                        }
-                        if escape {
-                            self.debug.open = false;
-                            field.surrender_focus();
-                        }
-                        if ui.button(Text::AddBreakpoint.plain()).clicked() || enter {
-                            if let (Some(source), Ok(line)) = (
-                                session.source(&self.debug.source),
-                                self.debug.line.parse::<u32>(),
-                            ) {
-                                point = Some(Breakpoint {
-                                    source_id: self.debug.source.clone(),
-                                    source_hash: rot_behavior::source_hash(&source.text),
-                                    line,
-                                    binding_id: None,
-                                });
-                            } else {
-                                self.status = Text::RuntimeDebugChooseAScriptAnd.plain().into();
-                            }
-                        }
-                    });
-                });
-                egui::ScrollArea::vertical()
-                    .id_salt("breakpoint_list")
-                    .max_height(110.0)
-                    .show(ui, |ui| {
-                        for (index, point) in self.debug.points.iter().enumerate() {
-                            ui.horizontal(|ui| {
-                                let stale = self.debug.source_hashes.get(&point.source_id)
-                                    != Some(&point.source_hash);
-                                ui.label(format!(
-                                    "{}:{} · {}{}",
-                                    point.source_id,
-                                    point.line,
-                                    &point.source_hash[..12],
-                                    if stale { " (stale)" } else { "" }
-                                ));
-                                if ui
-                                    .add_enabled(!blocked, egui::Button::new(Text::Remove.plain()))
-                                    .clicked()
-                                {
-                                    remove = Some(index);
-                                }
-                            });
-                        }
-                    });
-                if let Some(stop) = &stop {
-                    ui.separator();
-                    ui.label(format!(
-                        "Stopped {}:{} · {:?} · stop {}",
-                        stop.source_id,
-                        stop.line.unwrap_or(0),
-                        stop.reason,
-                        stop.stop.get()
-                    ));
-                    ui.label(format!(
-                        "Committed tick {} · pending tick {} remains private",
-                        stop.committed_tick, stop.attempted_tick
-                    ));
-                    ui.horizontal(|ui| {
-                        if ui
-                            .add_enabled(!blocked, egui::Button::new(Text::StepOver.plain()))
-                            .clicked()
-                        {
-                            resume = Some(Resume::Next);
-                        }
-                        if ui
-                            .add_enabled(!blocked, egui::Button::new(Text::Continue.plain()))
-                            .clicked()
-                        {
-                            resume = Some(Resume::Continue);
-                        }
-                        if ui.button(Text::ShowPausedScript.plain()).clicked() {
-                            navigate = true;
-                        }
-                    });
-                    egui::ScrollArea::vertical()
-                        .id_salt("debug_locals")
-                        .max_height(300.0)
-                        .show(ui, |ui| {
-                            for (index, frame) in stop.frames.iter().enumerate() {
-                                ui.collapsing(
-                                    format!(
-                                        "Frame {index}: {} · line {}",
-                                        frame.name.as_deref().unwrap_or("<anonymous>"),
-                                        frame.line.unwrap_or(0)
-                                    ),
-                                    |ui| {
-                                        for local in &frame.locals {
-                                            ui.label(format!(
-                                                "{} #{} = {}",
-                                                local.name,
-                                                local.ordinal,
-                                                node_summary(stop, local.node, 0)
-                                            ));
-                                        }
-                                    },
-                                );
-                            }
-                            if stop.truncated {
-                                ui.small(Text::RuntimeDebugSomeValuesAreToo.plain());
-                            }
-                        });
-                } else {
-                    ui.label(Text::RuntimeDebugStartPlayOrStep.plain());
-                }
-            });
-        self.debug.open &= opened;
-        if let Some(point) = point {
-            if let Err(error) = self.breakpoint(session, point, true) {
-                self.status = error;
-            }
-        }
-        if let Some(index) = remove {
-            let point = self.debug.points[index].clone();
-            // Removing stale points is always allowed; it grants no VM/source authority.
-            self.debug.points.remove(index);
-            if let Some(worker) = &self.worker {
-                if let Err(error) =
-                    worker.set_breakpoints(worker.current_key(), self.debug.points.clone())
-                {
-                    self.debug.points.insert(index, point);
-                    self.status = error.to_string();
-                }
-            }
-        }
-        if let (Some(stop), Some(action), Some(worker)) = (&stop, resume, &self.worker) {
-            if let Err(error) = worker.debug_resume(worker.current_key(), stop.stop, action) {
-                self.status = error.to_string();
-            }
-        }
-        if navigate {
-            let stop = stop?;
-            return Some(rot_behavior::Diagnostic {
-                code: rot_behavior::DiagnosticCode::Runtime,
-                source_id: Some(stop.source_id.clone().into()),
-                source_hash: Some(stop.source_hash.clone().into()),
-                binding_id: Some(stop.binding_id.clone().into()),
-                object_id: stop.object_id.clone().map(Into::into),
-                phase: stop.phase,
-                message: "Debugger source stop".into(),
-                line: stop.line,
-            });
-        }
-        None
-    }
+    #[cfg(test)]
     pub(crate) fn runtime_api(
         &mut self,
         op: &str,
@@ -619,6 +412,7 @@ impl RuntimeUi {
         self.runtime_api_with_sounds(op, args, session, generation, None)
     }
 
+    #[cfg(test)]
     pub(crate) fn runtime_api_with_sounds(
         &mut self,
         op: &str,
@@ -824,29 +618,8 @@ impl RuntimeUi {
             );
         }
         if op == "behavior_breakpoint_set" {
-            let RuntimeSource::Legacy(session) = source else {
-                return Err("Unsupported runtime operation".into());
-            };
-            self.breakpoint(
-                session,
-                Breakpoint {
-                    source_id: args["source_id"]
-                        .as_str()
-                        .ok_or("Missing source ID")?
-                        .into(),
-                    source_hash: args["source_hash"]
-                        .as_str()
-                        .ok_or("Missing source hash")?
-                        .into(),
-                    line: args["line"]
-                        .as_str()
-                        .and_then(|s| s.parse().ok())
-                        .ok_or("Invalid line")?,
-                    binding_id: args["binding_id"].as_str().map(str::to_owned),
-                },
-                args["enabled"].as_bool().ok_or("Invalid enabled flag")?,
-            )?;
-            return Ok(json!({"configured":true,"status":self.status}));
+            let _ = args;
+            return Err("Unsupported runtime operation".into());
         }
         if op != "behavior_runtime_reset"
             && args["expected_run_id"].as_str()
@@ -971,36 +744,6 @@ fn node_wire(node: &ValueNode) -> Value {
         _ => serde_json::to_value(node).expect("owned finite debugger values"),
     }
 }
-fn node_summary(stop: &StopSnapshot, index: u32, depth: usize) -> String {
-    let Some(node) = stop.nodes.get(index as usize) else {
-        return "<unavailable>".into();
-    };
-    match node {
-        ValueNode::Nil => "nil".into(),
-        ValueNode::Boolean(value) => value.to_string(),
-        ValueNode::Integer(value) => value.to_string(),
-        ValueNode::Number(value) => value.to_string(),
-        ValueNode::Text(value) => format!("{value:?}"),
-        ValueNode::Cycle => "<cycle>".into(),
-        ValueNode::Opaque(value) => format!("<{value}>"),
-        ValueNode::Truncated => "<truncated>".into(),
-        ValueNode::Table(entries) if depth < 2 => format!(
-            "{{{}}}",
-            entries
-                .iter()
-                .take(4)
-                .map(|entry| format!(
-                    "{}: {}",
-                    node_summary(stop, entry.key, depth + 1),
-                    node_summary(stop, entry.value, depth + 1)
-                ))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        ValueNode::Table(_) => "<table>".into(),
-    }
-}
-
 fn frame_wire(frame: &rot_behavior::debug::Frame) -> Value {
     let clip = |text: &str| text.chars().take(48).collect::<String>();
     json!({"name":frame.name.as_deref().map(clip),"source":frame.source.as_deref().map(clip),"line":frame.line.map(|line|line.to_string()),"locals":frame.locals.iter().map(|local|json!({"name":clip(&local.name),"ordinal":local.ordinal.to_string(),"node":local.node.to_string()})).collect::<Vec<_>>()})

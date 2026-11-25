@@ -19,7 +19,7 @@ pub(in crate::scene_editor) struct TrustUi {
     denied: Vec<String>,
     /// The connection the prompt is showing for, and since when.
     shown: Option<((String, u32), Instant)>,
-    /// The connection that already received its save and build grants.
+    /// The connection that already received its save grant.
     granted: Option<(String, u32)>,
     /// One line for the Rot connection panel, such as a failed write.
     pub(in crate::scene_editor) notice: String,
@@ -111,13 +111,8 @@ impl Host {
                     ui.label(Text::AiConnectionKeyChanged.plain());
                 } else {
                     ui.strong(format!("Allow {app} to edit this project?"));
-                    let suffix = if self.editor.component.is_some() {
-                        ""
-                    } else {
-                        " and save it"
-                    };
                     ui.label(format!(
-                        "{app} can read and change {}{suffix}.",
+                        "{app} can read and change {}.",
                         self.editor.document_label()
                     ));
                 }
@@ -182,9 +177,8 @@ impl Host {
         }
     }
 
-    /// An app the creator allowed may save the open scene inside its folder
-    /// and, in a Rot project folder, build into `<project>/Builds`. Done once
-    /// per approved connection.
+    /// An app the creator allowed may save the open scene inside its folder.
+    /// Done once per approved connection.
     pub(in crate::scene_editor) fn grant_trusted_app(&mut self) {
         let Some(owner) = self
             .bridge
@@ -198,12 +192,15 @@ impl Host {
             return;
         }
         self.editor.ai_trust.granted = Some(owner);
-        let component = self.editor.component.as_ref();
-        let path = match component {
-            Some(component) => component.saved_association(),
-            None => self.editor.session.path(),
+        let Some(path) = self
+            .editor
+            .component
+            .as_ref()
+            .and_then(|component| component.saved_association())
+        else {
+            return;
         };
-        let Some(project) = path.and_then(Path::parent).map(Path::to_path_buf) else {
+        let Some(project) = path.parent().map(Path::to_path_buf) else {
             return;
         };
         if self.editor.save_grant.is_none() {
@@ -212,23 +209,6 @@ impl Host {
                 Err(error) => {
                     self.editor.ai_trust.notice = format!("AI saving is unavailable: {error}")
                 }
-            }
-        }
-        if component.is_some() {
-            return;
-        }
-        // Only a Rot project gets a Builds folder, never a loose scene's
-        // folder such as Downloads.
-        let rot_project = ["scene.json", ".rot-assets.json"]
-            .iter()
-            .any(|marker| project.join(marker).is_file());
-        if rot_project && !self.editor.creation_export.has_agent_destination() {
-            if let Err(error) = self
-                .editor
-                .creation_export
-                .grant_agent_destination(&project)
-            {
-                self.editor.ai_trust.notice = format!("AI builds are unavailable: {error}");
             }
         }
     }
@@ -298,9 +278,8 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     /// A host listening like the running editor, with a private trust store.
-    fn listening(root: &Path, scene: &Path) -> Host {
-        let mut host = super::super::tests::host("trust");
-        host.editor.session.save(scene).unwrap();
+    fn listening(root: &Path, scene: &Path) -> super::super::tests::TestHost {
+        let mut host = super::super::tests::host_at(scene);
         host.editor.ai_trust.store = root.join("config/rot/ai-apps.json");
         host.bridge = Some(
             crate::bridge::Bridge::start_discoverable(
@@ -367,15 +346,17 @@ mod tests {
             host.editor.save_grant.is_some(),
             "save with no ROT_MCP_SAVE_DIR"
         );
-        assert!(scene.parent().unwrap().join("Builds").is_dir());
-        let state = host.editor.persistence_command(
-            &host
-                .editor
-                .scene_guard_token(&host.editor.connection_incarnation),
-            "scene_persistence_inspect",
-            &json!({}),
-        );
-        assert!(state.is_ok(), "{state:?}");
+        let guard = host
+            .editor
+            .scene_guard_token(&host.editor.connection_incarnation);
+        let grant = host.editor.save_grant.as_ref();
+        let state =
+            host.editor
+                .component
+                .as_ref()
+                .unwrap()
+                .inspect_persistence(&guard, &json!({}), grant);
+        assert_eq!(state["ok"], true, "{state}");
     }
 
     #[test]
@@ -394,10 +375,6 @@ mod tests {
         );
         host.grant_trusted_app();
         assert!(host.editor.save_grant.is_some());
-        assert!(
-            !scene.parent().unwrap().join("Builds").exists(),
-            "a loose scene's folder gets no Builds folder"
-        );
 
         host.disconnect_adapter();
         host.answer_ai_prompt(Answer::Deny); // nothing waiting: no effect
@@ -480,24 +457,5 @@ mod tests {
         let (_, reply) = serve(&mut host, client);
         assert_ne!(reply["ok"], true);
         assert!(!authority.live());
-    }
-
-    #[test]
-    fn builds_link_leading_out_of_the_project_is_refused() {
-        let root = tempfile::tempdir().unwrap();
-        let project = root.path().join("Project");
-        let outside = root.path().join("outside");
-        std::fs::create_dir_all(&project).unwrap();
-        std::fs::create_dir_all(&outside).unwrap();
-        std::os::unix::fs::symlink("../outside", project.join("Builds")).unwrap();
-        let mut export = crate::creation_export::Controller::disabled();
-        assert!(export.grant_agent_destination(&project).is_err());
-        assert!(!export.has_agent_destination());
-        std::fs::remove_file(project.join("Builds")).unwrap();
-        assert!(export.grant_agent_destination(&project).is_ok());
-        assert_eq!(
-            export.output_directory(),
-            Some(project.canonicalize().unwrap().join("Builds").as_path())
-        );
     }
 }

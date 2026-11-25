@@ -1,6 +1,5 @@
 //! Read-only pages of the committed worker snapshot, without VM access.
 use super::*;
-use crate::strings::Text;
 use serde_json::{json, Value};
 
 impl RuntimeUi {
@@ -69,116 +68,6 @@ impl RuntimeUi {
                 "historical_committed"
             }
         })
-    }
-
-    pub fn state_inspector(&mut self, ui: &mut egui::Ui) {
-        egui::CollapsingHeader::new(Text::CommittedRuntimeState.plain()).show(ui, |ui| {
-            let Some(frame) = self.frame.as_ref() else {
-                ui.label(Text::RuntimeStateResetThePreviewTo.plain());
-                return;
-            };
-            let key = (frame.key, frame.tick, frame.commit_revision);
-            if self.state_page_key != Some(key) {
-                self.state_page_key = Some(key);
-                self.state_offset = 0;
-            }
-            ui.label(format!(
-                "Run {}:{}:{} · tick {}",
-                frame.key.generation,
-                frame.key.reset_epoch,
-                frame.key.authored_revision,
-                frame.tick
-            ));
-            ui.label(format!(
-                "Run version {} · last Step {:?}",
-                frame.commit_revision, frame.last_step_commit_revision
-            ));
-            if self.stale || !self.ready || Some(frame.key) != self.current_run() {
-                ui.colored_label(
-                    ui.visuals().warn_fg_color,
-                    Text::RuntimeStateStartPlayAgainTo.plain(),
-                );
-            }
-            if frame.state.binding(&self.state_binding).is_none() {
-                self.state_binding = frame.state.binding_ids().next().unwrap_or("").into();
-                self.state_offset = 0;
-            }
-            if self.state_binding.is_empty() {
-                ui.label(Text::RuntimeStateNoScriptsStoreValues.plain());
-                return;
-            }
-            let previous = self.state_binding.clone();
-            egui::ComboBox::from_label(Text::ComponentScript.plain())
-                .selected_text(&self.state_binding)
-                .show_ui(ui, |ui| {
-                    for id in frame.state.binding_ids() {
-                        ui.selectable_value(&mut self.state_binding, id.into(), id);
-                    }
-                });
-            if previous != self.state_binding {
-                self.state_offset = 0;
-            }
-            let fields = frame
-                .state
-                .binding(&self.state_binding)
-                .expect("selected snapshot owner");
-            ui.label(format!(
-                "{} fields · {} encoded bytes across the snapshot",
-                fields.len(),
-                frame.state.encoded_bytes()
-            ));
-            if self.playing && fields.len() > 16 {
-                ui.label(Text::RuntimeStatePausePreviewToBrowse.plain());
-            }
-            for (name, value) in fields.iter().skip(self.state_offset).take(16) {
-                ui.horizontal_wrapped(|ui| {
-                    ui.strong(name);
-                    if let StateValue::Text(value) = value {
-                        ui.small(Text::RuntimeStateTextLabel.plain());
-                        ui.label(value);
-                    } else {
-                        ui.label(property_summary(&state_property(value)));
-                    }
-                });
-            }
-            ui.horizontal_wrapped(|ui| {
-                if ui
-                    .add_enabled(
-                        !self.playing && self.state_offset > 0,
-                        egui::Button::new(Text::PreviousStateFields.plain()),
-                    )
-                    .clicked()
-                {
-                    self.state_offset = self.state_offset.saturating_sub(16);
-                }
-                if ui
-                    .add_enabled(
-                        !self.playing && self.state_offset.saturating_add(16) < fields.len(),
-                        egui::Button::new(Text::NextStateFields.plain()),
-                    )
-                    .clicked()
-                {
-                    self.state_offset = self.state_offset.saturating_add(16);
-                }
-            });
-            ui.collapsing(Text::StateSnapshotIdentity.plain(), |ui| {
-                ui.label(format!(
-                    "Source {}",
-                    frame
-                        .state
-                        .source_hash(&self.state_binding)
-                        .unwrap_or("unavailable")
-                ));
-                ui.label(format!(
-                    "Schema {}",
-                    frame
-                        .state
-                        .schema_hash(&self.state_binding)
-                        .unwrap_or("unavailable")
-                ));
-            });
-            ui.label(Text::RuntimeStateLiveValuesResetTo.plain());
-        });
     }
 }
 

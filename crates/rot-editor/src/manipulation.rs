@@ -1,14 +1,20 @@
 //! Transient translation gestures and the window-owned geometry/light clipboard.
 //! Authored transactions stay in Session; no pointer frame enters undo history.
+#[cfg(test)]
 use crate::strings::Text;
 use eframe::egui;
-use rot_scene::{Ambient, Light, Lighting, Object, OpaqueMaterial, Scene, Session, Transform};
+use rot_scene::Transform;
+#[cfg(test)]
+use rot_scene::{Ambient, Light, Lighting, Object, OpaqueMaterial, Scene, Session};
+#[cfg(test)]
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
 };
+#[cfg(test)]
+use transform_gizmo_egui::math::{DMat4, DVec3, Transform as GizmoTransform};
 use transform_gizmo_egui::{
-    math::{DMat3, DMat4, DQuat, DVec3, Transform as GizmoTransform},
+    math::{DMat3, DQuat},
     prelude::*,
 };
 
@@ -72,6 +78,7 @@ pub(super) fn nearby_euler(q: DQuat, original: [f32; 3]) -> [f64; 3] {
 }
 // Resolve the whole bounded selection before any transform/draft mutation.
 // An absent or repeated target must never become a partial mixed transaction.
+#[cfg(test)]
 fn selected_transforms<'a>(scene: &'a Scene, ids: &[String]) -> Result<Vec<&'a Transform>, String> {
     if ids.len() > rot_scene::MAX_OBJECTS {
         return Err("Selection exceeds256 authoring targets.".into());
@@ -91,6 +98,7 @@ fn selected_transforms<'a>(scene: &'a Scene, ids: &[String]) -> Result<Vec<&'a T
         })
         .collect()
 }
+#[cfg(test)]
 fn reject_light_scale(scene: &Scene, ids: &[String]) -> Result<(), String> {
     if let Some(id) = ids.iter().find(|id| scene.lighting.light(id).is_some()) {
         let name = scene.target_display_name(id).unwrap_or(id);
@@ -101,6 +109,7 @@ fn reject_light_scale(scene: &Scene, ids: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(test)]
 fn proxy_for(
     session: &Session,
     ids: &[String],
@@ -139,6 +148,7 @@ fn proxy_for(
         position,
     ))
 }
+#[cfg(test)]
 #[derive(Clone)]
 pub(super) struct Gesture {
     revision: u64,
@@ -150,6 +160,7 @@ pub(super) struct Gesture {
     proxy: GizmoTransform,
     current_proxy: GizmoTransform,
 }
+#[cfg(test)]
 impl Gesture {
     #[cfg(test)]
     fn begin(session: &Session, ids: &[String]) -> Result<Self, String> {
@@ -287,6 +298,7 @@ impl Gesture {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, serde::Serialize)]
 struct Clipboard {
     version: u32,
@@ -301,6 +313,7 @@ struct Clipboard {
     target_order: Vec<String>,
 }
 
+#[cfg(test)]
 impl Clipboard {
     fn validate(&self) -> Result<(), String> {
         let count = self.objects.len() + self.lights.len();
@@ -381,6 +394,7 @@ impl Clipboard {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum AngleUnit {
@@ -388,6 +402,7 @@ pub(super) enum AngleUnit {
     Radians,
     Degrees,
 }
+#[cfg(test)]
 impl AngleUnit {
     pub fn display(self, radians: f32) -> f32 {
         match self {
@@ -408,21 +423,13 @@ impl AngleUnit {
         }
     }
 }
-// Reserve room for a signed f32 value instead of squeezing three clipped
-// fields into every panel. Wrap complete axis/field groups at narrow widths.
-pub(super) fn component_group_width(ui: &egui::Ui) -> f32 {
-    let available = ui.available_width().max(1.0);
-    let spacing = ui.spacing().item_spacing.x;
-    let columns = ((available + spacing) / (90.0 + spacing))
-        .floor()
-        .clamp(1.0, 3.0);
-    ((available - (columns - 1.0) * spacing) / columns).max(1.0)
-}
 /// A scrubbed component, rounded to a thousandth so drags do not leave float noise.
+#[cfg(test)]
 fn format_component(value: f64) -> String {
     (((value * 1000.0).round() / 1000.0) as f32).to_string()
 }
 // Format only canonical syncs or an active preview, never all scene objects per idle frame.
+#[cfg(test)]
 fn precision_components<'a>(
     transforms: impl Iterator<Item = &'a Transform>,
     unit: AngleUnit,
@@ -458,6 +465,7 @@ fn precision_components<'a>(
     });
     (text, mixed)
 }
+#[cfg(test)]
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct DraftSnapshot {
@@ -469,6 +477,7 @@ pub(super) struct DraftSnapshot {
     #[serde(default)]
     rotation_unit: AngleUnit,
 }
+#[cfg(test)]
 pub(super) struct Manipulation {
     pub ids: Vec<String>,
     pub local: bool,
@@ -492,6 +501,7 @@ pub(super) struct Manipulation {
     suppress_pointer: bool,
     draft_generation: u64,
 }
+#[cfg(test)]
 impl Default for Manipulation {
     fn default() -> Self {
         Self {
@@ -519,15 +529,13 @@ impl Default for Manipulation {
         }
     }
 }
+#[cfg(test)]
 impl Manipulation {
     pub fn draft_generation(&self) -> u64 {
         self.draft_generation
     }
     pub fn draft_changed(&mut self) {
         self.draft_generation = self.draft_generation.wrapping_add(1);
-    }
-    pub fn offset_pending(&self) -> bool {
-        self.delta.iter().any(|text| text != "0")
     }
     pub fn snapshot_drafts(&self) -> DraftSnapshot {
         DraftSnapshot {
@@ -837,9 +845,6 @@ impl Manipulation {
         self.suppress_pointer |= self.gesture.is_some();
         self.gesture = None;
         self.gizmo = Gizmo::default();
-    }
-    pub fn clipboard_from(&mut self, other: &mut Self) {
-        self.clipboard = other.clipboard.take();
     }
     pub fn reconcile(&mut self, scene: &Scene) {
         self.ids.retain(|id| scene.target_transform(id).is_some());

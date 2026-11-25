@@ -258,17 +258,6 @@ pub fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
     egui::Frame::popup(&ctx.style_of(ctx.theme())).inner_margin(egui::Margin::same(16))
 }
 
-pub fn dialog_header(ui: &mut egui::Ui, title: &str, description: &str) {
-    ui.heading(title);
-    ui.add(egui::Label::new(egui::RichText::new(description).weak()).wrap());
-    ui.separator();
-}
-
-pub fn dialog_section(ui: &mut egui::Ui, label: &str) -> egui::Response {
-    ui.add_space(4.0);
-    ui.strong(label)
-}
-
 /// A local primary action with explicit hover, pressed and keyboard-focus states.
 pub fn primary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
     let p = colors(ui);

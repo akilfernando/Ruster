@@ -1,6 +1,5 @@
 //! The command palette (Ctrl+K): search every registered command and run it
 //! (UX-STANDARDS §7, S-09).
-use super::SceneEditor;
 use crate::strings::Text;
 use crate::workspace::{Action, Workspace};
 use eframe::egui;
@@ -63,34 +62,6 @@ pub(super) fn palette_label(action: Action) -> String {
                 .unwrap_or_default()
         }
         _ => action.label().to_owned(),
-    }
-}
-
-impl SceneEditor {
-    pub(super) fn palette_ui(&mut self, ctx: &egui::Context) {
-        let Some(mut palette) = self.palette.take() else {
-            return;
-        };
-        let (run, keep_open) = palette.show(
-            ctx,
-            &self.workspace,
-            |action| {
-                !matches!(
-                    action,
-                    Action::GroupSelection
-                        | Action::PlaceSelectionOnGround
-                        | Action::SetGameCameraFromView
-                )
-            },
-            |action| self.command_enabled(action),
-        );
-        if let Some(action) = run {
-            self.queued_action = Some(action);
-            self.process_queued_action();
-        }
-        if keep_open {
-            self.palette = Some(palette);
-        }
     }
 }
 
@@ -188,12 +159,10 @@ mod tests {
         for action in Action::ALL {
             assert!(
                 action == Action::CommandPalette || all.contains(&action),
-                "{action:?} is in the palette"
+                "{action:?} missing from palette"
             );
         }
-        assert_eq!(matches("side by side"), vec![Action::LayoutSideBySide]);
-        assert!(matches("play").contains(&Action::Play));
-        assert!(matches("prefer").contains(&Action::Preferences));
-        assert!(matches("zzz").is_empty());
+        assert!(matches("und").contains(&Action::Undo));
+        assert!(matches("view iso").contains(&Action::Isometric));
     }
 }

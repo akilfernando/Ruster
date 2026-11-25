@@ -1166,34 +1166,70 @@ mod tests {
     }
 
     #[test]
-    fn tracked_examples_migrate_without_losing_objects_or_scripts() {
+    fn tracked_examples_read_canonically_and_legacy_scenes_migrate() {
         for bytes in [
             include_bytes!("../../../examples/arrangement.scene.json").as_slice(),
             include_bytes!("../../../examples/content/scene.json").as_slice(),
             include_bytes!("../../../examples/motion-lab/resources/generic.scene.json").as_slice(),
         ] {
-            let legacy = Session::from_snapshot_bytes(bytes).unwrap();
-            let migrated = ComponentScene::from_legacy(&legacy).unwrap();
-            assert_eq!(migrated.sources, legacy.authoring().sources);
-            assert_eq!(migrated.objects.len(), legacy.scene().objects.len());
-            for (old, new) in legacy.scene().objects.iter().zip(&migrated.objects) {
-                assert_eq!(old.id, new.id);
-                assert_eq!(old.transform, new.transform);
-                assert!(
-                    matches!(&new.components[0].kind, Component::MeshRenderer { tint, .. } if *tint == old.color)
-                );
-            }
-            for (id, old) in &legacy.authoring().bindings {
-                assert!(migrated.objects.iter().flat_map(|object| &object.components).any(|component|
-                    component.id == *id && matches!(&component.kind, Component::Script { binding, .. } if binding == old)));
-            }
-            let mut json = Vec::new();
-            migrated.write_json(&mut json).unwrap();
-            assert_eq!(
-                ComponentScene::read_json(json.as_slice()).unwrap(),
-                migrated
+            let scene = ComponentScene::read_json(bytes).unwrap();
+            scene.validate().unwrap();
+            let mut canonical = Vec::new();
+            scene.write_json(&mut canonical).unwrap();
+            assert_eq!(canonical.as_slice(), bytes);
+        }
+
+        let mut scripted = crate::Scene::demo();
+        scripted.objects[0].mesh = Some("pyramid".into());
+        let mut legacy = Session::new(scripted).unwrap();
+        legacy
+            .create_behavior(
+                0,
+                "follower",
+                crate::BehaviorSource {
+                    label: Some("Follower".into()),
+                    language_id: "lua54".into(),
+                    host_api_version: 1,
+                    text: "return { update = function(t) return t end }".into(),
+                },
+                "motion",
+                crate::BehaviorBinding {
+                    target: crate::BindingTarget::Object("left".into()),
+                    source_id: "follower".into(),
+                    enabled: true,
+                    properties: Default::default(),
+                    state_defaults: Default::default(),
+                    commands: Default::default(),
+                },
+            )
+            .unwrap();
+        let legacy = Session::from_snapshot_bytes(&legacy.snapshot_bytes().unwrap()).unwrap();
+        let migrated = ComponentScene::from_legacy(&legacy).unwrap();
+        assert_eq!(migrated.sources, legacy.authoring().sources);
+        assert_eq!(migrated.objects.len(), legacy.scene().objects.len());
+        for (old, new) in legacy.scene().objects.iter().zip(&migrated.objects) {
+            assert_eq!(old.id, new.id);
+            assert_eq!(old.transform, new.transform);
+            assert!(
+                matches!(&new.components[0].kind, Component::MeshRenderer { tint, .. } if *tint == old.color)
             );
         }
+        for (id, old) in &legacy.authoring().bindings {
+            assert!(migrated
+                .objects
+                .iter()
+                .flat_map(|object| &object.components)
+                .any(|component| {
+                    component.id == *id
+                        && matches!(&component.kind, Component::Script { binding, .. } if binding == old)
+                }));
+        }
+        let mut json = Vec::new();
+        migrated.write_json(&mut json).unwrap();
+        assert_eq!(
+            ComponentScene::read_json(json.as_slice()).unwrap(),
+            migrated
+        );
     }
 
     #[test]

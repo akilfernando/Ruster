@@ -1,6 +1,7 @@
 //! Explicit opt-in template for the bounded API7 sphere mover.
 use super::*;
 
+#[cfg(test)]
 const TEMPLATE: &str = r#"return {
     update = function(transform, props, dt, host)
         -- Reset keeps the authored pose. Use saved Axis action IDs below.
@@ -18,6 +19,7 @@ const TEMPLATE: &str = r#"return {
 }
 "#;
 
+#[cfg(test)]
 impl BehaviorUi {
     pub(super) fn create_kinematic(
         &mut self,

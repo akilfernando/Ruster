@@ -150,7 +150,7 @@ impl ScenePin {
         Ok(observed.root.join(&self.filename))
     }
 
-    pub fn load(&self, destination: bool) -> Result<super::OpenedScene, String> {
+    pub fn load(&mut self, destination: bool) -> Result<super::OpenedScene, String> {
         let observed = Observation::rooted(&self.project.root, Some(&self.project.identity))?;
         let path = self.verify_in(&observed)?;
         let file = observed.open_regular(&self.filename).map_err(error)?;
@@ -163,14 +163,9 @@ impl ScenePin {
                 if !destination
                     && version < u64::from(rot_scene::component_scene::FORMAT_VERSION) =>
             {
-                let file = observed.open_regular(&self.filename).map_err(error)?;
-                if stamp(&file)? != self.stamp {
-                    return Err(CHANGED.into());
-                }
-                rot_scene::Session::from_open_file(&path, file)
-                    .map(Box::new)
-                    .map(super::OpenedScene::Legacy)
-                    .map_err(error)?
+                let session = ComponentSession::upgrade_legacy(&path).map_err(error)?;
+                self.stamp = observed.child_stamp(&self.filename)?;
+                super::OpenedScene::Components(path.clone(), Box::new(session))
             }
             Err(failure) => return Err(format!("Couldn't open {}. {failure}", self.filename)),
         };
@@ -1462,13 +1457,15 @@ mod tests {
             ]
         );
         assert!(project.pin_scene(&rows[0]).load(false).is_err());
-        let legacy = project.pin_scene(&rows[2]);
+        let mut legacy = project.pin_scene(&rows[2]);
+        assert!(legacy.load(true).is_err());
         assert!(matches!(
             legacy.load(false),
-            Ok(super::super::OpenedScene::Legacy(session)) if session.scene().id == "legacy"
+            Ok(super::super::OpenedScene::Components(_, session)) if session.scene().id == "legacy"
         ));
-        assert!(legacy.load(true).is_err());
-        let pin = project.pin_scene(&rows[3]);
+        assert!(legacy.verify().is_ok());
+        assert!(ComponentSession::open(root.join("Legacy.scene.json")).is_ok());
+        let mut pin = project.pin_scene(&rows[3]);
         assert!(matches!(
             pin.load(false),
             Ok(super::super::OpenedScene::Components(..))

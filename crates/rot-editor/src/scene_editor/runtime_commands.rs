@@ -1,10 +1,12 @@
-//! Guarded asynchronous VM/debug controls. This path never evaluates Lua.
-use super::SceneEditor;
-use serde_json::{json, Value};
+//! Guarded asynchronous VM/debug argument validation and failure classification.
+use serde_json::Value;
+
 type Result<T> = std::result::Result<T, (String, String)>;
+
 fn fail(code: &str) -> (String, String) {
     (code.into(), code.into())
 }
+
 fn number(value: &Value) -> Option<u64> {
     let text = value.as_str()?;
     if text.is_empty()
@@ -15,25 +17,7 @@ fn number(value: &Value) -> Option<u64> {
     }
     text.parse().ok()
 }
-pub(super) fn supported(op: &str) -> bool {
-    matches!(
-        op,
-        "hud_activate"
-            | "behavior_runtime_command"
-            | "behavior_runtime_inspect"
-            | "behavior_runtime_state"
-            | "behavior_runtime_reset"
-            | "behavior_runtime_play"
-            | "behavior_runtime_pause"
-            | "behavior_runtime_step"
-            | "behavior_runtime_stop"
-            | "behavior_breakpoints"
-            | "behavior_breakpoint_set"
-            | "behavior_debug_inspect"
-            | "behavior_debug_next"
-            | "behavior_debug_continue"
-    )
-}
+
 fn runtime_inspect(op: &str) -> bool {
     matches!(op, "behavior_runtime_inspect" | "behavior_breakpoints")
 }
@@ -196,69 +180,4 @@ pub(super) fn runtime_failure(message: String) -> (String, String) {
         },
         message,
     )
-}
-
-impl SceneEditor {
-    pub(super) fn runtime_command(&mut self, token: &str, op: &str, args: &Value) -> Result<Value> {
-        validate_runtime_args(op, args)?;
-        let inspect = runtime_inspect(op);
-        let revision = self.session.scene().revision;
-        if !inspect {
-            if args["expected_session_token"].as_str() != Some(token) {
-                return Err(fail("stale_session"));
-            }
-            if number(&args["expected_revision"]) != Some(revision) {
-                return Err(fail("stale_revision"));
-            }
-            if !matches!(
-                op,
-                "behavior_debug_inspect" | "behavior_runtime_state" | "behavior_runtime_stop"
-            ) {
-                if op == "behavior_runtime_reset" && self.asset_busy() {
-                    return Err((
-                        "asset_busy".into(),
-                        "Assets are still saving. Wait a moment.".into(),
-                    ));
-                }
-                self.guard().map_err(|message| {
-                    (
-                        if message == "asset_busy" {
-                            "asset_busy"
-                        } else {
-                            "drafts_pending"
-                        }
-                        .into(),
-                        message,
-                    )
-                })?;
-                if self.manipulation.offset_pending() {
-                    return Err(fail("drafts_pending"));
-                }
-            }
-        }
-        self.observe_runtime();
-        let mut value = self
-            .runtime
-            .runtime_api_with_sounds(
-                op,
-                args,
-                &self.session,
-                self.generation,
-                self.assets.as_ref(),
-            )
-            .map_err(runtime_failure)?;
-        if op == "behavior_runtime_reset" {
-            if let Some(key) = self.runtime.current_run() {
-                self.capture_reset_assets(key);
-            }
-        }
-        let object = value.as_object_mut().ok_or_else(|| fail("runtime_error"))?;
-        object.insert("session_token".into(), json!(token));
-        object.insert("revision".into(), json!(revision.to_string()));
-        // This is the editor bridge's encoded payload budget, before MCP envelopes.
-        if serde_json::to_vec(&value).map_or(true, |bytes| bytes.len() > 60000) {
-            return Err(fail("output_limit"));
-        }
-        Ok(value)
-    }
 }

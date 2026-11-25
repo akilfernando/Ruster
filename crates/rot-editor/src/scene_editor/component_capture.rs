@@ -178,14 +178,8 @@ impl ComponentWorkspace {
                     let painted = painted.expect("capture requires a visible viewport");
                     let frame = ReadbackFrame::default();
                     let cancel = CancelOnDrop(Arc::new(AtomicBool::new(false)));
-                    let receiver = permit.request(
-                        ctx,
-                        painted.view.rect,
-                        frame.clone(),
-                        false,
-                        &cancel,
-                        Default::default(),
-                    );
+                    let receiver =
+                        permit.request(ctx, painted.view.rect, frame.clone(), false, &cancel);
                     ctx.request_repaint_after(Duration::from_millis(50));
                     State::Reading {
                         receiver,

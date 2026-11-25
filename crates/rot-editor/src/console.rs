@@ -4,24 +4,27 @@
 //! diagnostics (with file and line), import and build results, and engine
 //! warnings from the `log` crate. The status bar shows the latest one; the
 //! Console lists them all; toasts confirm what the creator just did.
+#[cfg(test)]
 use crate::strings::Text;
+#[cfg(test)]
+use crate::ui_kit::tokens::*;
+#[cfg(test)]
 use eframe::egui::{self, RichText};
+#[cfg(test)]
 use std::collections::VecDeque;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
-
-use crate::ui_kit::tokens::*;
 
 const CAPACITY: usize = 2000;
-const TOAST_TIME: Duration = Duration::from_secs(4);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Level {
+    #[cfg_attr(not(test), allow(dead_code))]
     Info,
     Warning,
     Error,
 }
 
+#[cfg(test)]
 impl Level {
     fn index(self) -> usize {
         self as usize
@@ -43,6 +46,7 @@ impl Level {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
     pub level: Level,
@@ -55,6 +59,7 @@ pub struct Entry {
     pub repeats: u32,
 }
 
+#[cfg(test)]
 impl Entry {
     pub fn summary(&self) -> &str {
         self.text
@@ -63,11 +68,6 @@ impl Entry {
             .unwrap_or("")
             .trim()
     }
-}
-
-struct Toast {
-    text: String,
-    shown: Instant,
 }
 
 /// Engine log records waiting for the Console (filled by the `log` backend).
@@ -87,6 +87,7 @@ pub fn engine_log(level: log::Level, text: String) {
     }
 }
 
+#[cfg(test)]
 #[derive(Default)]
 pub struct Console {
     entries: VecDeque<Entry>,
@@ -97,17 +98,16 @@ pub struct Console {
     selected: Option<usize>,
     collapse: bool,
     hide: [bool; 3],
-    toasts: Vec<Toast>,
-    /// The Console tab is showing instead of Assets.
-    pub open: bool,
 }
 
 /// What the creator asked for from the Console this frame.
+#[cfg(test)]
 pub enum Request {
     /// Open a script in the configured code editor at this line.
     OpenSource(String, u32),
 }
 
+#[cfg(test)]
 impl Console {
     pub fn push(&mut self, level: Level, source: &'static str, text: impl Into<String>) {
         self.push_entry(Entry {
@@ -177,18 +177,6 @@ impl Console {
         }
     }
 
-    /// Swap the newest entry for a richer one describing the same message.
-    pub fn replace_latest(&mut self, entry: Entry) {
-        if let Some(last) = self.entries.back_mut() {
-            if last.text == entry.text && last.level == entry.level {
-                last.location = entry.location;
-                last.source = entry.source;
-                return;
-            }
-        }
-        self.push_entry(entry);
-    }
-
     pub fn latest(&self) -> Option<&Entry> {
         self.entries.back()
     }
@@ -197,7 +185,6 @@ impl Console {
         self.counts[level.index()]
     }
 
-    #[cfg(test)]
     pub fn entries(&self) -> impl Iterator<Item = &Entry> {
         self.entries.iter()
     }
@@ -206,53 +193,6 @@ impl Console {
         self.entries.clear();
         self.counts = [0; 3];
         self.selected = None;
-    }
-
-    /// A short confirmation of something the creator just did.
-    pub fn toast(&mut self, text: impl Into<String>) {
-        let text = text.into();
-        let first = text
-            .split(". ")
-            .next()
-            .unwrap_or(&text)
-            .trim_end_matches('.');
-        if first.is_empty() {
-            return;
-        }
-        self.toasts.retain(|toast| toast.text != first);
-        self.toasts.push(Toast {
-            text: first.to_owned(),
-            shown: Instant::now(),
-        });
-        if self.toasts.len() > 3 {
-            self.toasts.remove(0);
-        }
-    }
-
-    /// Bottom-right toasts. Repaints only while one is showing.
-    pub fn toasts_ui(&mut self, ctx: &egui::Context, bottom_right: egui::Pos2) {
-        self.toasts
-            .retain(|toast| toast.shown.elapsed() < TOAST_TIME);
-        let Some(oldest) = self.toasts.first() else {
-            return;
-        };
-        ctx.request_repaint_after(TOAST_TIME.saturating_sub(oldest.shown.elapsed()));
-        egui::Area::new(egui::Id::unique("rot_toasts"))
-            .order(egui::Order::Foreground)
-            .pivot(egui::Align2::RIGHT_BOTTOM)
-            .fixed_pos(bottom_right - egui::vec2(SPACE_L, SPACE_L))
-            .interactable(false)
-            .show(ctx, |ui| {
-                for toast in &self.toasts {
-                    egui::Frame::popup(ui.style())
-                        .inner_margin(egui::Margin::symmetric(SPACE_M as i8, SPACE_S as i8))
-                        .show(ui, |ui| {
-                            ui.set_max_width(360.0);
-                            ui.add(egui::Label::new(&toast.text).truncate());
-                        });
-                    ui.add_space(SPACE_XS);
-                }
-            });
     }
 
     /// The Console panel: toolbar, message list and the selected message.
@@ -396,10 +336,7 @@ mod tests {
     /// Double-clicking a script error asks to open its file at its line.
     #[test]
     fn double_clicking_a_script_error_opens_its_location() {
-        let mut console = Console {
-            open: true,
-            ..Default::default()
-        };
+        let mut console = Console::default();
         console.push_entry(Entry {
             level: Level::Error,
             source: "Script",

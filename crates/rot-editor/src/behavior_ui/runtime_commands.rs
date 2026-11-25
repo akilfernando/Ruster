@@ -1,14 +1,23 @@
 //! Paused Application transactions on the existing worker and captured catalog.
 use super::*;
+#[cfg(test)]
 use crate::strings::Text;
-use serde_json::{json, Value};
+#[cfg(test)]
+use serde_json::json;
+use serde_json::Value;
 
+#[cfg(test)]
 #[derive(Default)]
 pub(super) struct InvocationDraft {
     key: Option<(RunKey, u64)>,
     binding: String,
     command: String,
     arguments: BTreeMap<String, ValueDraft>,
+    dirty: bool,
+}
+#[cfg(not(test))]
+#[derive(Default)]
+pub(super) struct InvocationDraft {
     dirty: bool,
 }
 impl RuntimeUi {
@@ -72,6 +81,7 @@ impl RuntimeUi {
         Ok(key)
     }
     /// Drafts are local to an exact committed run. They never enter recovery or Scene.
+    #[cfg(test)]
     pub fn command_controls(&mut self, ui: &mut egui::Ui, session: &Session, editable: bool) {
         let Some(frame) = self.frame.as_ref() else {
             return;

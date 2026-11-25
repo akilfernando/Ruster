@@ -1,5 +1,5 @@
 //! One isolated play-check job shared by the ordinary editor and native bridge.
-use super::{component_workspace::ComponentWorkspace, SceneEditor};
+use super::component_workspace::ComponentWorkspace;
 use crate::strings::Text;
 use eframe::egui;
 use rot_app::creation::RuntimeScene;
@@ -9,7 +9,7 @@ use rot_behavior::play_check::{
 use rot_scene::{
     component_scene::{Component, SavedComponentPin},
     input::{ActionFrame, ActionValue, ButtonState},
-    Session, StateValue,
+    StateValue,
 };
 use serde_json::{json, Value};
 use std::{
@@ -100,36 +100,10 @@ enum Work {
     Save(Box<PlayCheck>, Option<Vec<u8>>),
     Run,
 }
-enum SavedScene {
-    Legacy(Box<Session>),
-    Components(SavedComponentPin),
-}
-
 struct Snapshot {
-    saved: SavedScene,
+    saved: SavedComponentPin,
     path: PathBuf,
     assets: Result<Option<rot_assets::ExportSnapshot>, String>,
-}
-
-impl SavedScene {
-    fn verify<T>(&self, path: &std::path::Path, run: impl FnOnce() -> T) -> Result<T, String> {
-        match self {
-            Self::Components(pin) => pin
-                .with_verified_saved(run)
-                .map_err(|error| error.to_string()),
-            Self::Legacy(session) => {
-                let disk = Session::open(path).map_err(|error| error.to_string())?;
-                if disk.snapshot_bytes().map_err(|error| error.to_string())?
-                    != session
-                        .snapshot_bytes()
-                        .map_err(|error| error.to_string())?
-                {
-                    return Err("scene contents differ".into());
-                }
-                Ok(run())
-            }
-        }
-    }
 }
 
 fn component_check_assets(
@@ -215,18 +189,6 @@ impl Drop for Host {
     }
 }
 impl Host {
-    pub(super) fn scene_replaced(&mut self) {
-        if let Some(job) = &self.active {
-            job.cancel.store(true, Ordering::Release);
-        }
-        self.open = false;
-        self.latest_run = None;
-        self.edit_message.clear();
-        self.repaint = None;
-        self.draft = None;
-        self.baseline = None;
-        self.draft_path = None;
-    }
     fn start(
         &mut self,
         snapshot: Snapshot,
@@ -405,7 +367,7 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
         let case = PlayCheck::decode(&bytes)?;
         return Ok(Completion::Loaded(case, bytes));
     }
-    if snapshot.saved.verify(&snapshot.path, || ()).is_err() {
+    if snapshot.saved.with_verified_saved(|| ()).is_err() {
         return Ok(Completion::Refused {
             status: "stale",
             diagnostic: "The saved scene changed outside the editor. Reopen it.".into(),
@@ -429,9 +391,7 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
             });
     let resources = match resources {
         Ok(resources) => resources,
-        Err(error)
-            if matches!(snapshot.saved, SavedScene::Components(_)) && matches!(work, Work::Run) =>
-        {
+        Err(error) if matches!(work, Work::Run) => {
             return Ok(Completion::Refused {
                 status: "stale",
                 diagnostic: format!("Check resources changed or are unavailable. {error}"),
@@ -440,12 +400,12 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
         Err(error) => return Err(error),
     };
     let tick = rot_behavior::DEFAULT_FIXED_TICK.as_nanos() as u64;
-    let identity = match &snapshot.saved {
-        SavedScene::Legacy(session) => CheckIdentity::capture(session, resources, tick)?,
-        SavedScene::Components(pin) => {
-            CheckIdentity::for_saved_scene(pin.sha256(), &pin.scene().actions, resources, tick)?
-        }
-    };
+    let identity = CheckIdentity::for_saved_scene(
+        snapshot.saved.sha256(),
+        &snapshot.saved.scene().actions,
+        resources,
+        tick,
+    )?;
     if cancel.load(Ordering::Acquire) {
         return Ok(Completion::Refused {
             status: "cancelled",
@@ -465,20 +425,14 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
                     });
                 }
             };
-            let projected = matches!(&snapshot.saved, SavedScene::Components(_));
-            let runtime = match snapshot.saved {
-                SavedScene::Legacy(session) => RuntimeScene::Behavior(session),
-                SavedScene::Components(pin) => {
-                    let stale = case.identity.stale_fields(&identity);
-                    if !stale.is_empty() {
-                        return Ok(Completion::Refused {
-                            status: "stale",
-                            diagnostic: format!("Changed {}; re-pin the case explicitly without replacing its expectations.", stale.join(", ")),
-                        });
-                    }
-                    component_check_runtime(pin, script_sources)?
-                }
-            };
+            let stale = case.identity.stale_fields(&identity);
+            if !stale.is_empty() {
+                return Ok(Completion::Refused {
+                    status: "stale",
+                    diagnostic: format!("Changed {}; re-pin the case explicitly without replacing its expectations.", stale.join(", ")),
+                });
+            }
+            let runtime = component_check_runtime(snapshot.saved, script_sources)?;
             let report = match runtime {
                 RuntimeScene::StaticHierarchy { preview, .. } => {
                     check::run_static(preview.scene(), &case, identity, cancel)
@@ -488,11 +442,7 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
                         Some(assets) => rot_behavior::decode_clips(assets.clips())?,
                         None => Default::default(),
                     };
-                    if projected {
-                        check::run_projected(&session, &case, identity, &clips, cancel)
-                    } else {
-                        check::run_with_identity(&session, &case, Ok(identity), &clips, cancel)
-                    }
+                    check::run_projected(&session, &case, identity, &clips, cancel)
                 }
             };
             Ok(Completion::Ran(report))
@@ -535,7 +485,7 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
             }
             snapshot
                 .saved
-                .verify(&snapshot.path, || {
+                .with_verified_saved(|| {
                     if cancel.load(Ordering::Acquire) {
                         return Err("Check save cancelled.".into());
                     }
@@ -548,10 +498,7 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
                     }
                     Ok::<_, String>(())
                 })
-                .map_err(|_| {
-                    "Saved scene changed during check preparation; reopen before saving this check."
-                        .to_owned()
-                })??;
+                .map_err(|error| error.to_string())??;
             Ok(Completion::Saved(*case, bytes))
         }
         Work::Load => unreachable!(),
@@ -567,126 +514,6 @@ fn component_check_runtime(
         .bake_script_assets(scripts)
         .map_err(|error| error.to_string())?;
     RuntimeScene::from_components(Box::new(scene))
-}
-
-impl SceneEditor {
-    fn check_snapshot(&self) -> Result<Snapshot, String> {
-        if self.asset_ops.busy()
-            || self.recovery_transition.is_some()
-            || self.close_pending
-            || self.close_approved
-        {
-            return Err("Wait for content/save/open/close operations before a play check.".into());
-        }
-        if self.session.loaded_format_version() < 11 {
-            return Err("Couldn't run the check. Save this scene again first.".into());
-        }
-        if self.session.is_dirty() {
-            return Err("Save the scene before using its play check.".into());
-        }
-        let path = self
-            .session
-            .path()
-            .ok_or("Save the scene before creating a play check")?
-            .to_owned();
-        let (mesh, texture) = crate::creation_export::scene_dependencies(self.session.scene())?;
-        let sound = self.session.sound_asset_references().assets;
-        let clip: std::collections::BTreeSet<String> = self
-            .session
-            .scene()
-            .animations
-            .values()
-            .map(|binding| binding.clip.clone())
-            .collect();
-        let ids = mesh
-            .iter()
-            .chain(&texture)
-            .chain(&sound)
-            .chain(&clip)
-            .cloned()
-            .collect();
-        if !sound.is_disjoint(&mesh) || !sound.is_disjoint(&texture) {
-            return Err("WAV assets must use distinct IDs from meshes and textures.".into());
-        }
-        if let Some(store) = &self.assets {
-            for id in &sound {
-                if store.sound(id).is_none() {
-                    return Err(format!("Sound {id} has no usable audio."));
-                }
-            }
-        }
-        let assets = match &self.assets {
-            Some(store) => Some(store.export_snapshot(&ids).map_err(|e| e.to_string())?),
-            None if mesh.is_empty()
-                && texture.is_empty()
-                && sound.is_empty()
-                && clip.is_empty() =>
-            {
-                None
-            }
-            None => {
-                return Err("Project assets unavailable; reopen or repair content first.".into());
-            }
-        };
-        Ok(Snapshot {
-            saved: SavedScene::Legacy(Box::new(self.session.clone())),
-            path,
-            assets: Ok(assets),
-        })
-    }
-    pub(super) fn play_check_write_busy(&self) -> bool {
-        self.play_checks
-            .active
-            .as_ref()
-            .is_some_and(|job| job.kind == "save")
-    }
-    pub(super) fn play_check_command(
-        &mut self,
-        token: &str,
-        op: &str,
-        args: &Value,
-    ) -> CommandResult {
-        let mut host = std::mem::take(&mut self.play_checks);
-        let result = host.command(
-            token,
-            op,
-            args,
-            (
-                self.session.scene().revision,
-                asset_revision(self.assets.as_ref()),
-            ),
-            || self.check_snapshot(),
-            self.export_context.clone(),
-        );
-        self.play_checks = host;
-        result
-    }
-    pub(super) fn poll_play_checks(&mut self) {
-        self.play_checks.poll();
-    }
-    pub(super) fn open_play_checks(&mut self) {
-        self.play_checks
-            .open(self.session.path().map(std::path::Path::to_owned));
-    }
-
-    pub(super) fn play_checks_ui(&mut self, ctx: &egui::Context) {
-        if !self.play_checks.open {
-            return;
-        }
-        let mut host = std::mem::take(&mut self.play_checks);
-        host.show(
-            ctx,
-            self.session.path(),
-            &self.session.authoring().actions,
-            |saving| {
-                if saving && self.creation_export.busy() {
-                    return Err("Wait for the active export before saving a play check.".into());
-                }
-                self.check_snapshot()
-            },
-        );
-        self.play_checks = host;
-    }
 }
 
 impl Host {
@@ -823,7 +650,7 @@ impl ComponentWorkspace {
             .ok_or("Save the scene before creating a play check.")?;
         let assets = component_check_assets(pin.scene(), store);
         Ok(Snapshot {
-            saved: SavedScene::Components(pin),
+            saved: pin,
             path: path.to_owned(),
             assets,
         })
@@ -1558,23 +1385,8 @@ fn show_assertion(ui: &mut egui::Ui, row: &Value, passed: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rot_scene::Session;
     use std::time::{Duration, Instant};
-    fn wait(editor: &mut SceneEditor, id: &Value) -> Value {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            let result = editor.command(
-                "test",
-                "play_check_inspect",
-                json!({"operation_id":id,"details":true}),
-            );
-            assert_eq!(result["ok"], true, "{result}");
-            if result["result"]["state"] != "running" {
-                return result["result"].clone();
-            }
-            assert!(Instant::now() < deadline);
-            thread::sleep(Duration::from_millis(2));
-        }
-    }
     #[test]
     fn result_header_and_committed_dropdowns_stay_visible() {
         fn frame(
@@ -1668,9 +1480,8 @@ mod tests {
             }
         ));
         let ctx = egui::Context::default();
-        let mut editor = SceneEditor::new(Session::new(rot_scene::Scene::demo()).unwrap());
-        let host = &mut editor.play_checks;
-        host.new_play_check(editor.session.path());
+        let mut host = Host::default();
+        host.new_play_check(None);
         host.draft.as_mut().unwrap().frames = vec![ActionFrame::default(); 120];
         host.open(None);
         host.latest_run = Some(Ok(1));
@@ -1688,12 +1499,21 @@ mod tests {
                 {"index":0,"passed":true,"expectation":assertion,"actual":StateValue::Vec3([3.0,0.0,0.0])},
                 {"index":1,"passed":false,"expectation":assertion,"actual":StateValue::Vec3([2.0,0.0,0.0])}
             ]}}));
-        let paint_host =
-            |editor: &mut SceneEditor, events| frame(&ctx, events, |_| editor.play_checks_ui(&ctx));
+        let actions = rot_scene::input::ActionMap::default();
+        let paint_host = |host: &mut Host, events| {
+            frame(&ctx, events, |_| {
+                host.show(
+                    &ctx,
+                    None,
+                    &actions,
+                    |_| Err("Save the scene first.".into()),
+                )
+            })
+        };
         for _ in 0..3 {
-            paint_host(&mut editor, vec![]);
+            paint_host(&mut host, vec![]);
         }
-        let shapes = paint_host(&mut editor, vec![]);
+        let shapes = paint_host(&mut host, vec![]);
         text_rect(&shapes, "Gate travel · Assertion failed · Completed Tick 2");
         let failed = text_rect(&shapes, "Assertion 2 · Object Local Translation · Fail");
         let passed = text_rect(&shapes, "Assertion 1 · Object Local Translation · Pass");
@@ -1710,11 +1530,11 @@ mod tests {
 
         let edit = text_rect(&shapes, "Edit Check").center();
         paint_host(
-            &mut editor,
+            &mut host,
             vec![egui::Event::PointerMoved(edit), click(edit, true)],
         );
-        paint_host(&mut editor, vec![click(edit, false)]);
-        let shapes = paint_host(&mut editor, vec![]);
+        paint_host(&mut host, vec![click(edit, false)]);
+        let shapes = paint_host(&mut host, vec![]);
         text_rect(&shapes, "Check Name");
         text_rect(&shapes, "Input Frames (120)");
         text_rect(&shapes, "Assertions");
@@ -1724,7 +1544,7 @@ mod tests {
         assert!(!has_text(&shapes, "Gate travel · Assertion failed"));
 
         paint_host(
-            &mut editor,
+            &mut host,
             vec![egui::Event::Key {
                 key: egui::Key::Escape,
                 physical_key: None,
@@ -1733,13 +1553,12 @@ mod tests {
                 modifiers: egui::Modifiers::NONE,
             }],
         );
-        assert!(!editor.play_checks.open);
-        assert_eq!(editor.play_checks.draft.as_ref().unwrap().frames.len(), 120);
-        editor.play_checks.open(None);
-        assert!(editor.play_checks.page == Page::Results);
-        assert_eq!(editor.play_checks.draft.as_ref().unwrap().frames.len(), 120);
+        assert!(!host.open);
+        assert_eq!(host.draft.as_ref().unwrap().frames.len(), 120);
+        host.open(None);
+        assert!(host.page == Page::Results);
+        assert_eq!(host.draft.as_ref().unwrap().frames.len(), 120);
 
-        let host = &mut editor.play_checks;
         let (sender, receiver) = mpsc::sync_channel(1);
         host.latest_run = Some(Ok(2));
         host.active = Some(Job {
@@ -1749,7 +1568,7 @@ mod tests {
             cancel: Arc::new(AtomicBool::new(false)),
             receiver,
         });
-        let pending = paint_host(&mut editor, vec![]);
+        let pending = paint_host(&mut host, vec![]);
         text_rect(&pending, "Running Saved Check");
         text_rect(&pending, "Cancel Operation");
         assert!(!has_text(&pending, "Gate travel"));
@@ -1759,16 +1578,14 @@ mod tests {
                 diagnostic: "Capture a new identity to run this check.".into(),
             }))
             .unwrap();
-        editor.play_checks.poll();
-        let stale = paint_host(&mut editor, vec![]);
+        host.poll();
+        let stale = paint_host(&mut host, vec![]);
         text_rect(&stale, "Saved Check · Out of date");
         assert!(!has_text(&stale, "Gate travel"));
-        editor
-            .play_checks
-            .dialog_action(&ctx, None, DialogAction::Run, |_| {
-                Err("Save the scene first.".into())
-            });
-        let failed = paint_host(&mut editor, vec![]);
+        host.dialog_action(&ctx, None, DialogAction::Run, |_| {
+            Err("Save the scene first.".into())
+        });
+        let failed = paint_host(&mut host, vec![]);
         text_rect(&failed, "Couldn’t Run the Saved Check");
         text_rect(&failed, "Save the scene first.");
         assert!(!has_text(&failed, "Gate travel"));
@@ -1799,7 +1616,7 @@ mod tests {
         let run = |work| {
             execute(
                 Snapshot {
-                    saved: SavedScene::Components(session.saved_pin().unwrap()),
+                    saved: session.saved_pin().unwrap(),
                     path: path.clone(),
                     assets: Ok(None),
                 },
@@ -2011,7 +1828,7 @@ mod tests {
         scene.save_new(&path).unwrap();
         let mut session = ComponentSession::open(&path).unwrap();
         let snapshot = |session: &ComponentSession, store: &rot_assets::AssetStore| Snapshot {
-            saved: SavedScene::Components(session.saved_pin().unwrap()),
+            saved: session.saved_pin().unwrap(),
             path: path.clone(),
             assets: component_check_assets(session.scene(), Some(store)),
         };
@@ -2103,126 +1920,12 @@ mod tests {
         assert!(session.saved_pin().is_none());
         session.save(&path).unwrap();
         assert!(matches!(
-            run(&session, &store, Work::Run),
-            Completion::Refused {
-                status: "stale",
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn saved_check_host_preserves_drafts_preview_and_receipts() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("scene.json");
-        Session::new(rot_scene::Scene::demo())
-            .unwrap()
-            .save(&path)
-            .unwrap();
-        let mut editor = SceneEditor::test_loaded(Session::open(&path).unwrap());
-        editor.play_checks.new_play_check(editor.session.path());
-        let Completion::Captured(identity) = execute(
-            editor.check_snapshot().unwrap(),
-            Work::Capture,
-            Arc::new(AtomicBool::new(false)),
-        )
-        .unwrap() else {
-            panic!("identity")
-        };
-        editor.play_checks.draft.as_mut().unwrap().identity = identity;
-        let case = editor.play_checks.draft.clone().unwrap();
-        let Completion::Saved(_, bytes) = execute(
-            editor.check_snapshot().unwrap(),
-            Work::Save(Box::new(case.clone()), None),
-            Arc::new(AtomicBool::new(false)),
-        )
-        .unwrap() else {
-            panic!("save")
-        };
-        let Completion::Loaded(loaded, _) = execute(
-            editor.check_snapshot().unwrap(),
-            Work::Load,
-            Arc::new(AtomicBool::new(false)),
-        )
-        .unwrap() else {
-            panic!("load")
-        };
-        assert_eq!(loaded.encode().unwrap(), bytes);
-        editor.play_checks = Host::default();
-        let token =
-            editor.command("test", "scene_inspect", json!({}))["result"]["session_token"].clone();
-        let args = json!({"expected_session_token":token,"expected_revision":"0","expected_asset_revision":"0"});
-        editor.draft.as_mut().unwrap().translation[0] = "unfinished human draft".into();
-        editor.preview.tick = 9;
-        let before = editor.session.snapshot_bytes().unwrap();
-        let draft = editor.draft.clone();
-        let preview = editor.preview.scene.fingerprint();
-        for (field, value, code) in [
-            ("expected_session_token", "stale", "stale_session"),
-            ("expected_revision", "9", "stale_revision"),
-            ("expected_asset_revision", "1", "stale_asset_revision"),
-        ] {
-            let mut stale = args.clone();
-            stale[field] = json!(value);
-            assert_eq!(
-                editor.command("test", "play_check_start", stale)["error"]["code"],
-                code
-            );
-        }
-        let started = editor.command("test", "play_check_start", args.clone());
-        assert_eq!(started["ok"], true, "{started}");
-        let id = &started["result"]["operation_id"];
-        let receipt = wait(&mut editor, id);
-        assert_eq!(receipt["report"]["status"], "passed", "{receipt}");
-        assert_eq!(receipt["report"]["completed_tick"], 2);
-        assert!(!editor.play_checks.open);
-        assert!(editor.play_checks.draft_path.is_none());
-        editor.play_checks.open(Some(path.clone()));
-        assert!(editor.play_checks.page == Page::Results);
-        assert_eq!(
-            editor.play_checks.latest_run,
-            Some(Ok(decimal(id).unwrap()))
-        );
-        assert_eq!(editor.session.snapshot_bytes().unwrap(), before);
-        assert!(editor.draft == draft);
-        assert_eq!(editor.preview.tick, 9);
-        assert_eq!(editor.preview.scene.fingerprint(), preview);
-        assert_eq!(wait(&mut editor, id), receipt); // terminal result retained across re-observation
-        let summary = editor.command("test", "play_check_inspect", json!({"details":true}));
-        assert!(summary["result"]["receipts"][0]["report"]
-            .get("results")
-            .is_none());
-        assert!(serde_json::to_vec(&summary).unwrap().len() < 8192);
-        assert_eq!(
-            editor.command("test", "play_check_inspect", json!({"operation_id":"0"}))["error"]
-                ["code"],
-            "unknown_operation"
-        );
-        let sidecar = check::sidecar_path(&path);
-        std::fs::write(&sidecar, b"broken case").unwrap();
-        editor.play_checks.page = Page::Edit;
-        let started = editor.command("test", "play_check_start", args);
-        assert!(editor.play_checks.page == Page::Edit);
-        assert_eq!(
-            wait(&mut editor, &started["result"]["operation_id"])["report"]["status"],
-            "invalid_case"
-        );
-        assert!(editor.play_checks.page == Page::Edit);
-        editor.play_checks.scene_replaced();
-        editor
-            .play_checks
-            .open(Some(root.path().join("another-scene.json")));
-        assert!(editor.play_checks.latest_run.is_none());
-        assert!(execute(
-            editor.check_snapshot().unwrap(),
-            Work::Save(Box::new(case), Some(bytes)),
-            Arc::new(AtomicBool::new(false))
-        )
-        .is_err());
-        assert_eq!(std::fs::read(&sidecar).unwrap(), b"broken case");
-        assert!(matches!(
             execute(
-                editor.check_snapshot().unwrap(),
+                Snapshot {
+                    saved: session.saved_pin().unwrap(),
+                    path: path.clone(),
+                    assets: component_check_assets(session.scene(), Some(&store)),
+                },
                 Work::Run,
                 Arc::new(AtomicBool::new(true))
             )

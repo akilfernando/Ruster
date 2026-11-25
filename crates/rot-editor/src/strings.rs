@@ -9,6 +9,7 @@ use eframe::egui;
 // Keep each key and its Plain wording together. Tests use the same list.
 macro_rules! editor_text {
     ($($key:ident => $plain:literal,)+) => {
+        #[cfg_attr(not(test), allow(dead_code))]
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         pub enum Text {
             $($key,)+

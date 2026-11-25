@@ -1,13 +1,16 @@
 //! Shared application mark and About dialog.
+#[cfg(test)]
 use crate::strings::Text;
 use std::sync::{Arc, OnceLock};
 
 use eframe::egui::{self, ColorImage, IconData, TextureHandle, TextureOptions};
 
+#[cfg(test)]
 use crate::editor_theme;
 
 const ICON: &[u8] = include_bytes!("../assets/org.rot.editor.png");
 const MUSHROOM: &[u8] = include_bytes!("../assets/rot-mushroom.png");
+#[cfg(test)]
 const ABOUT: &str = "rot_engine_about";
 
 /// The dark app tile, also installed as the Linux launcher icon.
@@ -59,7 +62,7 @@ fn padded_mark(ui: &mut egui::Ui, size: f32, padding: egui::Margin) {
 
 /// The mushroom, tinted, as a clickable control. `label` names it for
 /// screen readers and the tooltip.
-#[cfg(unix)]
+#[cfg(all(unix, test))]
 pub fn connection_indicator(ui: &mut egui::Ui, tint: egui::Color32, label: &str) -> egui::Response {
     let texture = texture(ui.ctx(), true);
     let source = texture.size_vec2();
@@ -73,7 +76,7 @@ pub fn connection_indicator(ui: &mut egui::Ui, tint: egui::Color32, label: &str)
 }
 
 /// The indicator's idle grey for the current theme.
-#[cfg(unix)]
+#[cfg(all(unix, test))]
 pub fn idle_tint(ui: &egui::Ui) -> egui::Color32 {
     if ui.visuals().dark_mode {
         egui::Color32::from_gray(151)
@@ -82,11 +85,13 @@ pub fn idle_tint(ui: &egui::Ui) -> egui::Color32 {
     }
 }
 
+#[cfg(test)]
 pub fn is_about_open(ctx: &egui::Context) -> bool {
     ctx.data(|data| data.get_temp::<bool>(egui::Id::unique(ABOUT)))
         .unwrap_or(false)
 }
 
+#[cfg(test)]
 pub fn open_about(ctx: &egui::Context) {
     ctx.data_mut(|data| data.insert_temp(egui::Id::unique(ABOUT), true));
     ctx.memory_mut(|memory| {
@@ -96,6 +101,7 @@ pub fn open_about(ctx: &egui::Context) {
     });
 }
 
+#[cfg(test)]
 pub fn show_about(ctx: &egui::Context) {
     if !is_about_open(ctx) {
         return;

@@ -1,15 +1,10 @@
-//! The AI indicator at the right of the toolbar, its popover (who is
-//! connected, Pause AI Edits, recent AI changes with Undo, Connect an AI
-//! App…, Disconnect) and the connect/disconnect toast.
+//! The AI indicator state refreshed by the host and read-only MCP gating.
 use super::*;
-use crate::strings::Text;
 use std::time::{Duration, Instant};
 
 const TOAST: Duration = Duration::from_secs(4);
-/// How long after a request the indicator keeps pulsing.
-const ACTIVE: Duration = Duration::from_millis(800);
 
-/// What the indicator shows, refreshed by the host every frame.
+/// What the AI status indicator shows, refreshed by the host every frame.
 #[derive(Default)]
 pub(super) struct AiStatus {
     /// The connected app's name, when an app is connected and allowed.
@@ -36,9 +31,6 @@ impl AiStatus {
             self.toast = Some((text, Instant::now()));
             self.connected = connected;
         }
-    }
-    fn active(&self) -> bool {
-        self.last_request.is_some_and(|at| at.elapsed() < ACTIVE)
     }
 }
 
@@ -68,105 +60,6 @@ pub(super) fn toast_id() -> egui::Id {
 }
 
 impl SceneEditor {
-    /// The indicator and its popover. The single call site places it.
-    pub(super) fn ai_indicator_ui(&mut self, ui: &mut egui::Ui) {
-        let status = &self.ai_status;
-        let (label, mut tint) = match (&status.connected, &status.asking) {
-            (Some(app), _) if status.paused => (
-                format!("AI: {app} connected, edits paused"),
-                crate::editor_theme::ROT_RED,
-            ),
-            (Some(app), _) => (format!("AI: {app} connected"), crate::editor_theme::ROT_RED),
-            (None, Some(app)) => (
-                format!("AI: {app} is asking to connect"),
-                crate::branding::idle_tint(ui),
-            ),
-            (None, None) => (
-                "AI: no app connected".to_string(),
-                crate::branding::idle_tint(ui),
-            ),
-        };
-        if status.active()
-            && crate::editor_theme::style(ui.ctx()) == crate::editor_theme::Style::Rot
-        {
-            // A slow pulse while requests are arriving.
-            let phase = ui.input(|i| i.time) as f32 * std::f32::consts::TAU / 1.6;
-            tint = tint.gamma_multiply(0.6 + 0.4 * phase.cos().abs());
-            ui.ctx().request_repaint_after(Duration::from_millis(50));
-        }
-        let response = crate::branding::connection_indicator(ui, tint, &label);
-        egui::Popup::from_toggle_button_response(&response)
-            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-            .align(egui::RectAlign::BOTTOM_END)
-            .width(280.0)
-            .show(|ui| self.ai_popover_ui(ui));
-    }
-
-    fn ai_popover_ui(&mut self, ui: &mut egui::Ui) {
-        ui.strong(Text::LabelAi.plain());
-        match (&self.ai_status.connected, &self.ai_status.asking) {
-            (Some(app), _) => ui.label(format!("{app} is connected.")),
-            (None, Some(app)) => ui.label(format!("{app} is asking to connect.")),
-            (None, None) => ui.weak(Text::NoAiAppIsConnected.plain()),
-        };
-        ui.checkbox(&mut self.ai_status.paused, Text::PauseAiEdits.plain())
-            .on_hover_text(Text::AiIndicatorAiChangesWaitUntil.plain());
-        let revision = self.session.scene().revision;
-        let recent: Vec<(String, bool)> = self
-            .ai_steps
-            .recent()
-            .take(5)
-            .map(|step| {
-                (
-                    step.label.trim_start_matches("AI: ").to_owned(),
-                    step.revision == revision,
-                )
-            })
-            .collect();
-        if !recent.is_empty() {
-            ui.separator();
-            ui.weak(Text::RecentAiChanges.plain());
-            for (index, (label, latest)) in recent.into_iter().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.label(label);
-                    if index == 0 && latest {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .button(Text::LabelUndo.plain())
-                                .on_hover_text(self.workspace.shortcut_text(Action::Undo))
-                                .clicked()
-                            {
-                                self.history(false);
-                            }
-                        });
-                    }
-                });
-            }
-        }
-        ui.separator();
-        ui.horizontal(|ui| {
-            if ui.button(Text::ConnectAnAiApp.plain()).clicked() {
-                #[cfg(unix)]
-                self.ai_apps.show();
-                ui.close();
-            }
-            if ui
-                .add_enabled(
-                    self.ai_status.connected.is_some(),
-                    egui::Button::new(Text::Disconnect.plain()),
-                )
-                .clicked()
-            {
-                self.ai_status.disconnect = true;
-                ui.close();
-            }
-        });
-        if ui.link("AI connection settings").clicked() {
-            self.ai_connection_requested = true;
-            ui.close();
-        }
-    }
-
     /// One line at the bottom right for four seconds.
     pub(super) fn ai_toast_ui(&mut self, ctx: &egui::Context) {
         let Some((text, since)) = &self.ai_status.toast else {

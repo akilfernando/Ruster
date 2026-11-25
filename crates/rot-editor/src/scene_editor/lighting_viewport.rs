@@ -4,13 +4,16 @@
 //! calls only outside runtime view, and gives transform handles pick precedence.
 //! Guides deliberately overlay geometry: clip depth is camera visibility, not
 //! occlusion testing. Point framing uses its anchor, never its influence range.
+#[cfg(test)]
 use std::{collections::BTreeMap, sync::Arc};
 
 use eframe::egui;
-use rot_scene::{Light, LightKind, Scene, Transform};
+#[cfg(test)]
+use rot_scene::Scene;
+use rot_scene::{Light, LightKind, Transform};
 use transform_gizmo_egui::math::{DMat4, DQuat, DVec3, DVec4};
 
-const ICON_RADIUS: f32 = 8.0;
+#[cfg(test)]
 const HIT_RADIUS: f32 = 12.0;
 const RANGE_SEGMENTS: usize = 48;
 const CLIP_EPSILON: f64 = 1.0e-8;
@@ -39,6 +42,7 @@ fn screen(rect: egui::Rect, clip: DVec4) -> egui::Pos2 {
 
 /// Camera clipping uses the shared wgpu0..1 projection. Never project an anchor
 /// behind the camera or allow an offscreen icon's hit radius to leak inward.
+#[cfg(test)]
 pub(super) fn project(rect: egui::Rect, vp: DMat4, point: DVec3) -> Option<(egui::Pos2, f32)> {
     if !rect.is_positive() {
         return None;
@@ -144,13 +148,14 @@ pub(super) fn spot_guide(ui: &egui::Ui, viewport: &rot_render::ViewportInteracti
     }
 }
 
+#[cfg(test)]
 struct Marker<'a> {
     id: &'a str,
-    light: &'a Light,
     center: egui::Pos2,
     depth: f32,
 }
 
+#[cfg(test)]
 fn marker_hit<'a>(markers: &[Marker<'a>], pointer: egui::Pos2) -> Option<&'a str> {
     markers
         .iter()
@@ -167,245 +172,10 @@ fn marker_hit<'a>(markers: &[Marker<'a>], pointer: egui::Pos2) -> Option<&'a str
         .map(|(_, marker)| marker.id)
 }
 
-/// Same passive native icon hit rule, without synthesizing a viewport click.
-pub(super) fn pick_at(
-    scene: &Scene,
-    rect: egui::Rect,
-    view: [[f32; 4]; 4],
-    projection: [[f32; 4]; 4],
-    pointer: egui::Pos2,
-) -> Option<String> {
-    let poses = scene.resolve_poses().ok()?;
-    let mut lighting = scene.lighting.clone();
-    if let rot_scene::Lighting::Authored { lights, .. } = &mut lighting {
-        for (id, light) in lights {
-            light.transform = poses.transforms[id].clone();
-        }
-    }
-    let vp = DMat4::from_cols_array_2d(&projection.map(|c| c.map(f64::from)))
-        * DMat4::from_cols_array_2d(&view.map(|c| c.map(f64::from)));
-    let markers: Vec<_> = lighting
-        .lights()
-        .filter_map(|(id, light)| {
-            project(rect, vp, position(light)).map(|(center, depth)| Marker {
-                id,
-                light,
-                center,
-                depth,
-            })
-        })
-        .collect();
-    marker_hit(&markers, pointer).map(str::to_owned)
-}
-
-fn range_guide(painter: &egui::Painter, rect: egui::Rect, vp: DMat4, light: &Light) {
-    let LightKind::Point { range } = light.kind else {
-        return;
-    };
-    let center = position(light);
-    let stroke = egui::Stroke::new(
-        1.0,
-        egui::Color32::from_rgba_unmultiplied(130, 185, 230, 120),
-    );
-    // Reuse one bounded unit ring for all three planes rather than recomputing
-    // identical trigonometry for both endpoints of every segment.
-    let unit: [[f64; 2]; RANGE_SEGMENTS + 1] = std::array::from_fn(|step| {
-        let angle = std::f64::consts::TAU * step as f64 / RANGE_SEGMENTS as f64;
-        let (sin, cos) = angle.sin_cos();
-        [cos, sin]
-    });
-    for (u, v) in [
-        (DVec3::X, DVec3::Y),
-        (DVec3::X, DVec3::Z),
-        (DVec3::Y, DVec3::Z),
-    ] {
-        let at = |step: usize| center + f64::from(range) * (u * unit[step][0] + v * unit[step][1]);
-        for step in 0..RANGE_SEGMENTS {
-            if let Some(points) = segment(rect, vp, at(step), at(step + 1)) {
-                painter.line_segment(points, stroke);
-            }
-        }
-    }
-}
-
-fn direction_guide(
-    painter: &egui::Painter,
-    rect: egui::Rect,
-    vp: DMat4,
-    view: DMat4,
-    marker: &Marker<'_>,
-    color: egui::Color32,
-    font: egui::FontId,
-) {
-    let emitted = rotation(&marker.light.transform) * DVec3::NEG_Z;
-    let center = position(marker.light);
-    // Direction has no magnitude. Keep the arrow readable at every camera
-    // distance; derive only its screen orientation from the actual world ray.
-    let clip = vp * (center + emitted).extend(1.0);
-    let delta = if clip.is_finite() && clip.w > CLIP_EPSILON {
-        screen(rect, clip) - marker.center
-    } else {
-        // If a forward sample crosses the camera, the backward sample still
-        // provides the same direction after sign reversal.
-        let back = vp * (center - emitted).extend(1.0);
-        if back.is_finite() && back.w > CLIP_EPSILON {
-            marker.center - screen(rect, back)
-        } else {
-            egui::Vec2::ZERO
-        }
-    };
-    if delta.length_sq() > 0.01 {
-        let direction = delta.normalized();
-        let start = marker.center + direction * (ICON_RADIUS + 5.0);
-        painter.arrow(start, direction * 34.0, egui::Stroke::new(2.0, color));
-    } else {
-        // An along-view ray has no 2D heading. Dot means toward the viewer,
-        // cross away; no arbitrary horizontal arrow is substituted.
-        let toward = view.transform_vector3(emitted).z > 0.0;
-        painter.text(
-            marker.center + egui::vec2(0.0, 22.0),
-            egui::Align2::CENTER_CENTER,
-            if toward {
-                "⊙ toward view"
-            } else {
-                "⊗ away from view"
-            },
-            font,
-            color,
-        );
-    }
-}
-
-/// Paint passive xray guides and return only a viewport-owned light click.
-/// Caller must skip this function in runtime view. It must run before gizmo
-/// painting and use `gizmo_owns` to suppress this candidate before selection.
-/// No guide line/label extends the icon's fixed12point pick radius.
-pub(super) fn paint_and_pick(
-    ui: &egui::Ui,
-    viewport: &rot_render::ViewportInteraction,
-    authored_scene: &Scene,
-    selected: &[String],
-    pointer_allowed: bool,
-) -> Option<String> {
-    let poses = authored_scene.resolve_poses().ok()?;
-    let mut resolved_lighting = authored_scene.lighting.clone();
-    if let rot_scene::Lighting::Authored { lights, .. } = &mut resolved_lighting {
-        for (id, light) in lights {
-            light.transform = poses.transforms[id].clone();
-        }
-    }
-    let vp = view_projection(viewport);
-    let view = DMat4::from_cols_array_2d(&viewport.view.map(|column| column.map(f64::from)));
-    let markers: Vec<_> = resolved_lighting
-        .lights()
-        .filter_map(|(id, light)| {
-            project(viewport.rect, vp, position(light)).map(|(center, depth)| Marker {
-                id,
-                light,
-                center,
-                depth,
-            })
-        })
-        .collect();
-    let painter = ui.painter().with_clip_rect(viewport.rect);
-    for (id, light) in resolved_lighting.lights() {
-        if selected.iter().any(|selected| selected == id) {
-            range_guide(&painter, viewport.rect, vp, light);
-        }
-    }
-    for marker in &markers {
-        let chosen = selected.iter().any(|id| id == marker.id);
-        let color = if marker.light.enabled {
-            egui::Color32::from(egui::Rgba::from_rgb(
-                marker.light.color[0],
-                marker.light.color[1],
-                marker.light.color[2],
-            ))
-        } else {
-            egui::Color32::from_gray(125)
-        };
-        // The 3D viewport is not themed; overlays keep the dark-chrome ink.
-        let ink = if marker.light.enabled {
-            crate::editor_theme::DARK.text
-        } else {
-            egui::Color32::from_gray(125)
-        };
-        let center = marker.center;
-        painter.circle_filled(
-            center,
-            ICON_RADIUS + 2.0,
-            egui::Color32::from_black_alpha(200),
-        );
-        // Black-emitting lights remain readable editor controls; a center chip
-        // shows the color without hiding the glyph's outline.
-        let stroke = egui::Stroke::new(1.75, ink);
-        let label = match marker.light.kind {
-            LightKind::Directional { .. } => {
-                painter.circle_stroke(center, 4.0, stroke);
-                painter.circle_filled(center, 2.5, color);
-                for ray in 0..8 {
-                    let direction = egui::Vec2::angled(std::f32::consts::TAU * ray as f32 / 8.0);
-                    painter
-                        .line_segment([center + direction * 6.0, center + direction * 9.0], stroke);
-                }
-                if chosen {
-                    direction_guide(
-                        &painter,
-                        viewport.rect,
-                        vp,
-                        view,
-                        marker,
-                        ink,
-                        egui::TextStyle::Body.resolve(ui.style()),
-                    );
-                }
-                "Sun"
-            }
-            LightKind::Point { .. } | LightKind::Spot { .. } => {
-                painter.circle_stroke(center, 6.0, stroke);
-                painter.circle_filled(center, 2.0, color);
-                "Point"
-            }
-        };
-        if chosen {
-            painter.circle_stroke(
-                center,
-                HIT_RADIUS,
-                egui::Stroke::new(1.5, crate::editor_theme::DARK.accent),
-            );
-        }
-        let name: String = marker
-            .light
-            .display_name(marker.id)
-            .chars()
-            .take(22)
-            .collect();
-        painter.text(
-            center + egui::vec2(HIT_RADIUS + 3.0, 0.0),
-            egui::Align2::LEFT_CENTER,
-            format!(
-                "{label}: {name}{}",
-                if marker.light.enabled { "" } else { " (off)" }
-            ),
-            egui::TextStyle::Body.resolve(ui.style()),
-            crate::editor_theme::DARK.text,
-        );
-    }
-    if !pointer_allowed || !viewport.response.clicked() {
-        return None;
-    }
-    let pointer = viewport.response.interact_pointer_pos()?;
-    viewport
-        .rect
-        .contains(pointer)
-        .then(|| marker_hit(&markers, pointer))
-        .flatten()
-        .map(str::to_owned)
-}
-
 /// Runtime surface hits must still identify authored geometry. A stale runtime
 /// object ID may have been reused for a light after its history reservation was
 /// evicted; that invisible authored light is not a runtime pick target.
+#[cfg(test)]
 pub(super) fn selectable_target(scene: &Scene, id: &str, authored_view: bool) -> bool {
     if authored_view {
         scene.target_transform(id).is_some()
@@ -419,6 +189,7 @@ pub(super) fn selectable_target(scene: &Scene, id: &str, authored_view: bool) ->
 /// current authored/transient scene and accepted mesh map, never runtime data.
 /// Pass pre-toolbar available width/height aspect (a conservative portrait fit),
 /// then install the returned camera before the viewport is rendered this frame.
+#[cfg(test)]
 pub(super) fn frame_selection(
     scene: &Scene,
     ids: &[String],
@@ -521,7 +292,6 @@ mod tests {
 
     #[test]
     fn glyph_camera_clipping_fixed_hit_size_and_overlap_order_match_both_projections() {
-        let light = Light::point(None);
         for vp in [
             DMat4::perspective_rh(45_f64.to_radians(), 1.6, 0.1, 100.0),
             DMat4::orthographic_rh(-8.0, 8.0, -5.0, 5.0, 0.1, 100.0),
@@ -531,7 +301,6 @@ mod tests {
                 assert_eq!(center, rect().center());
                 let markers = [Marker {
                     id: "point",
-                    light: &light,
                     center,
                     depth,
                 }];
@@ -556,19 +325,16 @@ mod tests {
         let markers = [
             Marker {
                 id: "far",
-                light: &light,
                 center: rect().center(),
                 depth: 0.8,
             },
             Marker {
                 id: "b",
-                light: &light,
                 center: rect().center(),
                 depth: 0.2,
             },
             Marker {
                 id: "a",
-                light: &light,
                 center: rect().center(),
                 depth: 0.2,
             },

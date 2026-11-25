@@ -917,7 +917,6 @@ pub(super) struct Workspace {
     pub prefs: Preferences,
     pub error: String,
     pub settings_open: bool,
-    pub welcome: bool,
     /// No preferences file existed: offer the style chooser once.
     pub first_launch: bool,
     pub layout_generation: u64,
@@ -994,7 +993,6 @@ impl Workspace {
             prefs: Preferences::default(),
             error: String::new(),
             settings_open: false,
-            welcome: true,
             first_launch: false,
             layout_generation: 0,
             capture: None,
@@ -1158,9 +1156,6 @@ impl Workspace {
     /// The style the first-launch chooser is previewing, if any.
     pub fn previewed_style(&self) -> Option<crate::editor_theme::Style> {
         self.style_preview.filter(|_| self.prefs.style.is_none())
-    }
-    pub fn state_path(&self) -> Option<&Path> {
-        self.storage.path.as_deref()
     }
     fn reset_editor_draft(&mut self) {
         self.editor_executable = self
@@ -1370,14 +1365,7 @@ impl Workspace {
         *state = updated;
         Ok(())
     }
-    /// Fly speed changed from the viewport (wheel while flying); saved on the
-    /// next flush.
-    pub fn set_movement_speed(&mut self, speed: f32) {
-        if speed.is_finite() && speed != self.prefs.movement_speed {
-            self.prefs.movement_speed = speed.clamp(0.05, 1000.0);
-            self.dirty = true;
-        }
-    }
+    #[cfg(test)]
     pub fn camera_for(&self, path: &Path) -> Option<rot_render::CameraState> {
         self.prefs
             .cameras
@@ -1385,6 +1373,7 @@ impl Workspace {
             .find(|(old, _)| old == path)
             .map(|(_, camera)| *camera)
     }
+    #[cfg(test)]
     pub fn remember_camera(&mut self, path: &Path, camera: rot_render::CameraState) {
         if !camera.is_valid()
             || !self.prefs.recent.iter().any(|p| p == path)
@@ -1403,6 +1392,7 @@ impl Workspace {
         }
     }
     /// Save adoption publishes recent-file and camera preferences together.
+    #[cfg(test)]
     pub fn remember_saved(&mut self, path: &Path, camera: Option<rot_render::CameraState>) {
         self.stage_recent(path);
         if let Some(camera) = camera {
@@ -1453,6 +1443,7 @@ impl Workspace {
             .map(|b| b.text())
             .unwrap_or_default()
     }
+    #[cfg(test)]
     pub fn shortcuts(&mut self, ctx: &egui::Context, blocked: bool) -> Option<Action> {
         self.workspace_shortcuts(ctx, blocked, false)
     }
@@ -1789,9 +1780,6 @@ impl Workspace {
         )
         .on_hover_text(Text::NativeWhenOffThisEditor.plain());
         ui.weak(Text::WorkspaceTrustedAppsAndDiagnostics.plain());
-    }
-    pub fn settings_ui(&mut self, ctx: &egui::Context) {
-        let _ = self.settings_ui_with_footer(ctx, false);
     }
     pub fn shortcuts_ui(&mut self, ctx: &egui::Context) {
         let _ = self.settings_ui_with_footer(ctx, true);

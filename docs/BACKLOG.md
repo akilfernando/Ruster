@@ -40,8 +40,7 @@ cuts below in order.
 
 | Package | Outcome | Status & remaining gap |
 | --- | --- | --- |
-| `C-02` Scene crate & v23 cutover | `rot-scene` and `rot-editor` run exclusively on v23 with automatic upgrade on open. | `in progress` · Enable automatic v1–v22 → v23 migration (`ComponentScene::from_legacy`), convert `examples/` tracked scenes to v23, and delete legacy v1–v22 editor paths, `creation_export.rs`, and `scripts/package_creation.py`. See [C-01 brief](plans/C-01-OBJECT-COMPONENT-MODEL.md). |
-| `C-06` General MCP tools | Small general tool set (< 15 KB) using the shared command layer (`A4`). | `in progress — closing` · Retire legacy MCP tools once the legacy editor is deleted (`C-02`), route v23 MCP commands through the shared command/transaction layer, keep catalog `< 15 KB`, close `C-06`. |
+| `C-06` General MCP tools | Small general tool set (< 15 KB) using the shared command layer (`A4`). | `in progress` · Retire legacy MCP tools now that `C-02` removed the legacy editor, route v23 MCP commands through the shared command/transaction layer, keep catalog `< 15 KB`, close `C-06`. |
 | `C-03` Native component runtime | Runtime, renderer and scripts execute `ComponentScene` flat arrays directly. | `in progress` · Retire `component_behavior.rs` (`behavior_projection()`) and `RuntimeScene::Behavior(Session)` so dynamic hierarchies, renderable parents, multiple components, and >256 objects run natively. |
 | `C-09` Build and Run | Editor ships a dedicated player binary and packages runnable Linux folders/archives. | `in progress` · Extract a lean `rot-player` binary crate out of `examples/motion-lab` (without `rot-script` or runtime kit); record Build and empty-player budgets. |
 | `C-10` Unified file-backed Lua API | One persistent-VM Lua component API (`A8`) with live reload on save. | `in progress` · Replace `host API1`–`7` and per-tick scene cloning with one growing component API (`on_start`, `on_update`, `find`, `spawn`, `destroy`, component access) and live reload on save. |
@@ -87,7 +86,10 @@ completed packages:
 - **Phase 2 — Core completed packages:** `C-00a` (retired legacy logistics
   crates, Rhai mode, editor logistics UI, and superseded MCP
   enrollment/registry plumbing; promoted `crates/rot-support`), `C-01` (v23
-  design), `C-04` (files-first `Assets/`), `C-05` (Hierarchy & Inspector with
+  design), `C-02` (v23-only editor cutover, automatic v1–v22 → v23 upgrade on
+  open, tracked `examples/` scenes migrated to v23, and deletion of pre-v23
+  editor UI paths, `creation_export.rs`, and `scripts/package_creation.py`),
+  `C-04` (files-first `Assets/`), `C-05` (Hierarchy & Inspector with
   live single/multi-object axis scrubbing, parented descendants & lights preview,
   Escape cancel, and one-step Undo; live editing during Play deferred to
   Phase 4), `C-07` (linked prefabs), `C-08` (non-refusal `.glb`/`.gltf`
