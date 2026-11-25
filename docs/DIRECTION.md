@@ -26,6 +26,28 @@ The user also wants to minimize the cost of maintaining Rot and Plain.
 They share the editor's functional paths. Verification covers shared
 behavior once and checks presentation differences where affected.
 
+## Roadmap realignment and legacy retirement — 2026-11-25
+
+Confirmed by the user on 2026-11-25 following an architecture and roadmap review:
+
+- **Retire the legacy logistics prototype:** Delete `rot-core`, `rot-cli`,
+  `rot-viewer`, `rot-script`, `examples/yard-app`, and the legacy editor
+  `ui.rs`/`model.rs`/`commands.rs` paths; retire the legacy pre-v23 scene
+  editor once automatic v1–v22 to v23 migration lands.
+- **Retire superseded MCP registry/enrollment modes:** Delete
+  `crates/support/enrollment.rs`, `crates/support/project_startup.rs`, and
+  `scripts/enroll_local_connector.py` (superseded by zero-setup discovery and
+  trust-once tokens).
+- **Realign Phases 2–5:** Freeze new `C-62+` convenience slices until Phase 2's
+  exit test passes; split Phase 3 into 3A (PBR & Scene Scale, starting with
+  `.material.json` asset files) and 3B (Lighting & Post); split Phase 5 into
+  5A (Ship & Scale) and 5B (Production World Tools); isolate platform seams
+  (`A11`) and add a Windows `cargo check` CI job right after Phase 2 exit.
+- **Confirm the mushroom brand mark:** [crates/rot-editor/assets/rot-mushroom.png](../crates/rot-editor/assets/rot-mushroom.png)
+  and the dark app tile [crates/rot-editor/assets/org.rot.editor.png](../crates/rot-editor/assets/org.rot.editor.png)
+  are the active Rot Engine mark; [the brand note](branding/rot/README.md)
+  tracks that confirmation.
+
 ## Creator-owned application logic clarification — 2026-11-09
 
 The user explicitly confirms that Rot Engine is the foundation through which creators implement their own scoring systems, menus and other application rules. Reusable state, scripting, UI and lifecycle facilities must support creator-defined designs through code, direct editing and native MCP. Example challenges supply acceptance exercises for those capabilities. Their particular scoring/objective/menu rules are application content. The next-work recommendation remains a proposal. Engine architecture and the acceptance exercise require their own bounded selection.

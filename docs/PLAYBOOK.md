@@ -62,9 +62,14 @@ limit permits new work.
 
 1. **Astra defines the goal.** Check the backlog and current code. Pick one
    bounded creator workflow, with a clear starting point, a usable outcome,
-   an acceptance scenario, and a stopping point. Rotate to another
-   underdeveloped area once the current area can serve the chosen workflow.
-   Connect related slices through the parity plan's reference projects.
+   an acceptance scenario, and a stopping point. **Phase-Exit Priority Rule:**
+   while any core package or exit criterion for the active phase is open,
+   every selected slice must close a named gap in an open core package or
+   exit criterion — do not invent new convenience slices. Exercise the phase's
+   tracked reference project in `examples/` where applicable instead of
+   one-off throwaway fixtures. Rotate to another underdeveloped area once the
+   current area can serve the chosen workflow. Connect related slices through
+   the parity plan's reference projects.
 2. **Sol implements the slice.** Give Sol the base commit, scope, acceptance
    scenario, relevant risks, and stopping point. Agree on the question and
    measurement boundary before building a performance check. Share fixtures
@@ -194,11 +199,11 @@ their open windows.
 
 | File | What you write | Limit |
 | --- | --- | --- |
-| [BACKLOG](BACKLOG.md) | Status line of your package; new findings as one-line items under **Inbox** | One line each |
-| [STATUS](STATUS.md) | What works now, what is in progress, known problems | The whole file stays under 100 lines; move old entries out |
+| [BACKLOG](BACKLOG.md) | Status line of your package; new findings as one-line items under **Inbox** | One line each; enforced `< 300` lines by `scripts/check.py` |
+| [STATUS](STATUS.md) | What works now, what is in progress, known problems | Enforced `< 120` lines (target `< 100`) by `scripts/check.py`; archive old entries out |
 | User guides (`docs/CREATOR-WORKFLOW.md`, crate READMEs) | How a creator uses the feature | Only when behavior changed |
 | `docs/decisions/` | A decision that changes architecture, a file format or the AI trust model | Under 40 lines: context, decision, why, what it costs |
-| Commit message | What changed, how you verified it | A few lines |
+| Commit message | What changed, how you verified it, and any benchmark timings | A few lines; never put benchmark paragraphs in `STATUS.md` |
 
 Nothing else is required. No per-package plan documents, evidence documents,
 delegation logs or model-routing records. Write dates as `2026-11-17`. Mark
@@ -245,7 +250,9 @@ their branch instead; the coordinating session merges it.
 - One trunk, named in STATUS. Branch `work/<package-id>-<short-name>` from
   it, merge back into it locally when the package is done, delete the
   branch. Merging into the trunk needs no permission; pushing follows the
-  policy in STATUS.
+  policy in STATUS. Standalone 1-line `Claim` commits on trunk are only
+  needed when multiple concurrent agents share the backlog; single-agent
+  sessions may skip them.
 - Commit as you go. One package may be several commits.
 - Do not rewrite history on the trunk. Do not leave work only in a stash or a
   worktree.

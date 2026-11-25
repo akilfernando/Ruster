@@ -172,6 +172,10 @@ def choose_plan(root, paths, full_reason=None, workspace=None):
 # Inline and reference-style Markdown links. This intentionally does not fetch URLs
 # or validate headings; link targets with spaces should use Markdown's <...> form.
 LINK = re.compile(r"!?\[[^\]\n]*\]\(\s*(<[^>]+>|[^\s)]+)(?:\s+[^)]*)?\)|^\s*\[[^\]\n]+\]:\s*(<[^>]+>|\S+)", re.MULTILINE)
+DOC_LINE_LIMITS = {
+    "docs/STATUS.md": 120,
+    "docs/BACKLOG.md": 300,
+}
 
 
 def validate_markdown(root, paths):
@@ -181,11 +185,18 @@ def validate_markdown(root, paths):
         if not docs_path(relative) or not path.is_file():
             continue
         content = path.read_text(encoding="utf-8")
-        for number, line in enumerate(content.splitlines(), 1):
+        lines = content.splitlines()
+        for number, line in enumerate(lines, 1):
             if line.rstrip() != line:
                 errors.append(f"{relative}:{number}: trailing whitespace")
         if content and not content.endswith("\n"):
             errors.append(f"{relative}: missing final newline")
+        if relative in DOC_LINE_LIMITS:
+            limit = DOC_LINE_LIMITS[relative]
+            if len(lines) > limit:
+                errors.append(
+                    f"{relative}: {len(lines)} lines exceeds limit of {limit} (archive older entries)"
+                )
         # Fenced examples are not actual document links.
         prose = re.sub(r"(?ms)^\s*(`{3,}|~{3,})[^\n]*\n.*?^\s*\1\s*$", "", content)
         for match in LINK.finditer(prose):

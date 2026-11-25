@@ -75,30 +75,52 @@ while the user moves things by hand. Every core surface passes the
 no caps, clean text scene files, assets as files with automatic import and
 thumbnails, general glTF import, prefabs, scripts as files, a rebuilt
 Hierarchy and Inspector, general MCP tools, and one-click Build.
+Convenience slices (`C-62+`) are frozen (user-approved 2026-11-25) until the
+remaining structural packages (`C-00a`, `C-02`, `C-03`, `C-05`, `C-06`,
+`C-08`, `C-09`, `C-10`) and a tracked Phase 2 reference project in `examples/`
+pass the exit gate.
 *Exit:* import a public CC0 asset pack and a Blender scene without a
 refusal, lay out a 5,000-object level using prefabs at 60 fps, save, reopen,
 Build and Run.
 
-**Phase 3 — Look: scenes look right.** Full metallic-roughness PBR with
-normal, emissive and occlusion maps, transparency, many lights with spot
-lights and shadows, sky and image-based lighting, a post-processing stack,
-culling and instancing.
-*Exit:* the Khronos glTF sample models and a lit interior render
-recognizably the same as in a reference viewer, at the frame budgets below.
+**Phase 3A — Look: PBR & Scene Scale.** `.material.json` asset files in
+`Assets/` (`L-01`, first), `rot-render` refactor (GPU storage-buffer
+instances, vertex tangents, decoupled selection outline pass, lifted prototype
+asset/GPU caps per A12), full metallic-roughness PBR with normal, emissive and
+occlusion maps, sky and image-based lighting, alpha transparency, frustum
+culling and dirty-range instancing.
+*Exit:* the Khronos glTF sample models render recognizably the same as in a
+reference viewer, within the frame budgets below.
 
-**Phase 4 — Play: real games.** A general scripting API with events, rigid
-body physics and a character controller, skeletal animation with a state
-machine, spatial audio and music, a runtime UI system, mouse and gamepad
-input, multiple cameras, scene loading, particles and save data.
+**Phase 3B — Look: Lighting & Post.** Clustered forward many-lights (after
+verifying `wgpu-hal` SPIR-V/compute readiness), cascaded directional plus spot
+and point shadow atlas, fog, a post-processing stack (bloom, color grading,
+ambient occlusion, anti-aliasing options), shading and debug view modes.
+*Exit:* a lit multi-light interior renders recognizably within the frame
+budgets below.
+
+**Phase 4 — Play: real games.** Delivered in strict internal order:
+(1) persistent-VM unified Lua component API (`on_start`, `on_update`, `find`,
+`spawn`, `destroy`, component access, events, coroutines) and native component
+runtime if not already closed in Phase 2; (2) Rapier3D rigid bodies, colliders,
+triggers, raycasts, joints and a character controller (retiring `parry3d` in
+one cut; no further `parry3d` kinematic additions); (3) skeletal skinning and
+animation state machine; (4) spatial audio and mixer, runtime UI layout,
+mouse and gamepad input, multiple cameras, scene loading, particles and save
+data.
 *Exit:* a third-person platformer sample (animated character, enemies,
 pickups, menus, sound, gamepad) built in the editor and shipped.
-Phases 3 and 4 touch different crates and can run in parallel.
+Phases 3 and 4 touch different crates and can run in parallel only after
+`C-03` (native component runtime) and `C-10` (unified Lua API) land.
 
-**Phase 5 — Ship and scale.** Windows editor and builds, profiler and
-debugging tools, LOD and occlusion, terrain, navigation, timeline, light
-baking or probes, editor extensions, localization.
+**Phase 5A — Ship and scale.** Windows editor and builds, profiler and
+script debugger polish, cooked binary runtime/cache assets for large scenes,
+LOD and occlusion culling, and 50,000-object scenes at 60 fps.
 *Exit:* the platformer ships on Windows and Linux; a 50,000-object scene
 holds 60 fps; a creator can find a slow script with the profiler.
+
+**Phase 5B — Production world tools.** Terrain, navigation, timeline, light
+probes or baking, editor extensions, localization.
 
 **Phase 6 — High end.** Ray tracing, virtualized geometry, large streamed
 worlds, networking, further platforms. Scoped when Phase 5 is in sight.
@@ -178,8 +200,12 @@ threat model is unchanged (other processes of the same user are trusted),
 and the AI is limited to the open project's folder.
 
 **A11. Platform seams.** New code that touches sockets, processes, file
-dialogs or audio devices goes behind a small per-OS module from now on, so
-Windows support in Phase 5 is porting, not rewriting.
+dialogs, file watching, OS directories or audio devices goes behind a small
+per-OS module from now on, so Windows support in Phase 5 is porting, not
+rewriting. Immediately after Phase 2 exit (`P-03`), existing OS-specific
+code (`rustix`, sockets, `inotify` watcher, `rfd` features, `xdg-open`, dirs)
+is extracted into platform modules and guarded by a `windows-latest`
+`cargo check --workspace` CI job.
 
 **A12. Limits.** No fixed caps on objects, assets, lights or file sizes
 beyond generous safety limits on untrusted input. Scale is governed by the

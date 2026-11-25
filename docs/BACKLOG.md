@@ -1,828 +1,93 @@
 # Backlog
 
 The ordered work for the [parity plan](PARITY-PLAN.md). Take the first open
-package in your lane under **Now**. How to work is in the
-[PLAYBOOK](PLAYBOOK.md); UI rules are in [UX-STANDARDS](UX-STANDARDS.md).
+package in your lane under **Now**. How to work is in [PLAYBOOK](PLAYBOOK.md);
+UI rules are in [UX-STANDARDS](UX-STANDARDS.md). Completed Phase 1 (`S-01`–`P-02`)
+and Phase 2 slices (`C-05a`–`d`, `C-09a`, `C-11a`, `C-13`–`C-61`) are archived in
+[BACKLOG-2026-11-25](archive/BACKLOG-2026-11-25.md).
 
 - **Size.** S is half a session, M is one session, L must be split into M
   packages before starting.
 - **Brief.** *ready* means implement as written. *brief needed* means the
   strongest available model writes the Do and Done-when lists first.
 - **Status.** `open`, `in progress — who, date`, or `done — date, commit`.
-- File references were checked on 2026-11-17 and drift; search if a line
-  number is off.
 
 ## Needs the user
 
-- **Vetoes.** The [architecture decisions](PARITY-PLAN.md#4-architecture-decisions)
-  and the [vocabulary](UX-STANDARDS.md#2-vocabulary) are agent-selected.
-- **Outside the repository.** The installed editor is still the pre-rename
-  build. Two MCP entries in `~/.codex/config.toml` point at old names. Projects in
-  `~/Projects/Ruster-Creations` use pre-rename file names.
-- **For the user (2026-11-17).** A-04's real-config test left
-  `~/.claude.json.rot-backup` and `~/.codex/config.toml.rot-backup` (safe to
-  delete) and an empty `"mcpServers": {}` in `~/.claude.json`; no `rot`
-  entry remains in either config. The current build is installed
-  (607b908); to connect an AI app, use Window ▸ AI Connection… ▸ Connect an
-  AI App… from the installed editor.
-- **Answered 2026-11-17 (user).** A-04 may add the `rot` entry to the user's
-  real Claude Code and Codex configs (backup, that entry only, Undo). P-02 may
-  replace the installed pre-rename build (old one kept for `--rollback`).
-  Phase 1 runs as three parallel lanes.
+- **External pre-rename leftovers.** Two MCP entries in `~/.codex/config.toml`
+  and projects in `~/Projects/Ruster-Creations` still use pre-rename names.
 
 ## Inbox
 
 One line each. Anyone may add; the user or a planning pass orders them.
 
-- CI efficiency (2026-11-24 retrospective): Documentation-only changes under `docs/` now skip Rust setup and caching. C-26 through C-28 spent about 22 of 29 hosted job minutes outside the change-aware gate. For code changes, compare total job times for the full `target` cache and a smaller cache, including rebuild and save costs.
-- Grouping is blocked scene-wide by input actions, a HUD, ordinary script
-  sources, or object/application script attachments. C-02/C-03 must preserve
-  these features alongside hierarchy during migration. Until then, explain
-  the specific blocker in the editor.
-- Human walkthrough: ChatGPT requested several write approvals after
-  connecting. Consider batched undoable edits in C-06 to reduce tool calls.
-- MCP village test (2026-11-19): “the roofs on the houses look a bit broken.” Open gables were confirmed. Whether rotation order contributed is unproven because geometry and rotations changed together. Prioritize documenting Euler order, local and world axes, handedness, and units with a rotated-and-tilted example, making parent-local assembly straightforward, and framing a selected object from the front, side, and above (C-05/C-06). Triangular Prism gives the editor and MCP a closed roof shape (C-05). For prefabs (C-07), try reusable cottages with per-instance position and heading and fixes that propagate to instances. Verify one complete cottage up close from multiple angles before duplicating it.
-- AI-assisted authoring (C-06): The user wants to “minimize the amount of guessing” and “proactively advise on certain best practices if we know any.” Give the AI project and scene context from the editor, clear tool semantics, and ways to check its work. When an established practice applies, surface it at the relevant step as brief, optional guidance. For repeated structures, suggest building and inspecting one complete instance before duplicating it. Repeat the village task with a real MCP client and check whether it closes the gables and verifies one cottage before copying it.
-- `ui_drive.py` screenshots do not change after key-only input (Tab): the hub and the editor gave byte-identical PNGs across Tab presses while the accessibility focus moved, so focus rings cannot be checked from screenshots on the hidden workspace (S-13, 2026-11-17).
-- `third_party/egui_tiles` is egui_tiles 0.18.0 with three Sense lines patched so dock dividers and tab-bar backgrounds are not Tab stops; drop it when upstream allows that (S-07a).
-- An open scene repaints about 3 frames per 10 s while idle; the hub draws
-  none (P-01, 2026-11-17).
-- Scrubbing an Inspector axis letter commits on release; the viewport does not follow live during the drag (S-02).
-- `conflict_never_reads_back_and_mismatched_readback_fails_closed` (connection/worker.rs) failed once in about 105 full-suite runs under parallel load: the conflict case reported "failed or indeterminate". Not reproduced; a spawn `ETXTBSY` on the freshly written script is the likely cause (2026-11-17).
-- `enrolled_local_transport_never_needs_native_approval_and_revokes_before_commit` (bridge.rs:534) failed once in 24 full-suite runs under parallel load: `grant.revoke(false)` returned `WouldBlock`. Decide whether a contended durable revoke may fail or must wait (2026-11-17).
-- The legacy logistics prototype (`rot-core`, `rot-cli`, `rot-viewer`,
-  `rot-script`, `examples/yard-app`, editor `ui.rs` and `model.rs`, five
-  legacy MCP tools) is unused by the scene editor. Proposal: delete it.
-  Needs the user's yes.
-- The registry and enrollment connection modes (`ROT_MCP_PROJECT_REGISTRY`,
-  `ROT_CONNECTOR_ENROLLMENT`, `scripts/enroll_local_connector.py`,
-  `support/enrollment.rs`, `support/project_startup.rs`) are superseded by
-  A-01/A-02 and still pin binaries. Proposal: delete them (agent, 2026-11-17).
-- `docs/branding/rot/README.md` describes a monogram; the app uses the
-  mushroom. Refresh the brand note once the user confirms the mark.
-- In the Rot dark palette the error color is close to the accent color.
-- Decision 0050 says save and build destinations are granted in the app;
-  the code only reads environment variables. A-02 resolves this.
+- CI efficiency (2026-11-24): Benchmark `Swatinem/rust-cache` or slimmer target
+  caching once legacy crates are removed (`C-00a`).
+- AI-assisted authoring: Surface project/scene context, generic component
+  schemas, and brief optional best-practice hints so MCP clients guess less;
+  repeat the village workflow with a real client.
+- Flaky test under parallel load: `conflict_never_reads_back_and_mismatched_readback_fails_closed`
+  (`connection/worker.rs`) failed once (likely `ETXTBSY` on a freshly written script).
+- Rot dark palette: error color is close to accent color (verify during UI checklist).
+- Idle repaints: an open scene repaints ~3 frames per 10 s (0.2% CPU); track under
+  Phase 3A/5A polish.
 
-## Now — Phase 1: Shell
+## Now — Phase 2: Core (Structural Closure)
 
-Three lanes that can run at the same time: **UX** (S and T packages), **AI**
-(A packages), **Tools** (P packages). With no lane given, take the UX lane;
-it is the user's stated weak point. The lanes mostly touch different files.
-The exception is `crates/rot-editor/src/scene_editor.rs`, which several
-packages edit: keep changes there small and merge to the trunk often.
+**Freeze rule (user-approved 2026-11-25):** Do not start new `C-62+` convenience
+slices until `C-EXIT` passes. Focus strictly on closing the structural Phase 2
+cuts below in order.
 
----
-
-### UX lane
-
-#### S-01 · Tab reaches every panel — S — ready
-Status: done — 2026-11-17, 9fc6522
-**Outcome.** Tab and Shift+Tab move through every control in the Hierarchy
-and Inspector panels.
-**Facts.** Today focus goes menu → Assets controls → toolbar → "Fit", then
-drops to the window and wraps to File; the side panels are never entered.
-The 2026-11-16 build behaves the same. Known invisible focus stops: the
-viewport surface (`crates/rot-render/src/lib.rs:1031`,
-`Sense::click_and_drag()`), each panel backdrop
-(`crates/rot-editor/src/scene_editor/sidebars.rs:104`), each resize handle
-(`sidebars.rs:136`), and the gizmo's 1×1 widget
-(`third_party/transform-gizmo-egui/src/lib.rs:87`). Why focus never reaches
-the panel contents was not found.
-**Do.** Reproduce with
-`python3 scripts/ui_drive.py --scene examples/arrangement.scene.json "click:left" tabwalk:60`
-(clicking an object row fills the Inspector). If the cause is not obvious,
-log `ctx.memory(|m| m.focused())` per frame. Make surfaces that are not
-controls non-focusable. Fix whatever blocks the panels. This package is
-only the focus fix; do not restyle anything.
-**Done when.** `tabwalk` visits the Hierarchy search field, the object rows
-and the Inspector fields, each panel's controls together and top to bottom,
-then returns to File; no stop is an unlabeled surface; Shift+Tab reverses;
-a `shot:` after a few Tab presses shows the focus ring on a Hierarchy
-control and on an Inspector field; the order is pasted in the commit
-message.
-
-#### S-02 · UI kit, tokens and fonts — M — ready
-Status: done — 2026-11-17, see git log
-**Outcome.** One module supplies every control, size and color, and the
-editor becomes denser and consistent.
-**Facts.** `crates/rot-editor/src/editor_theme.rs` has a 17-role `Palette`
-(`:51`) and sizes set inline in `apply()` (`:156-193`): 30–32 px controls,
-14 px default egui font. Helpers exist for dialogs and a primary button
-only. Panels call `ui.button` about 150 times and `ui.label` about 320.
-**Do.** Create `crates/rot-editor/src/ui_kit/` with tokens
-([sizes](UX-STANDARDS.md#4-sizes-and-spacing)), the palette roles
-([colors](UX-STANDARDS.md#color)), and the
-[components](UX-STANDARDS.md#5-components): button, icon button, property
-row, vector row, number field with drag-to-scrub, section header, reference
-field, search field, empty state. Bundle Inter and a monospace font and add
-their license notices the way other third-party notices are recorded.
-Apply the new sizes globally. Convert the Inspector's Transform block to
-three vector rows as the first real use.
-**Done when.** Screenshots at 1280×800 show 24 px controls, Inter at 13 px
-and Transform as three rows; nothing clips at 960×600 or UI scale 1.5;
-the gate passes.
-**Not now.** Converting every panel. Panels move to the kit as each is
-rebuilt in later packages.
-
-#### S-03 · Menu bar and names — S — ready
-Status: done — 2026-11-17, see git log
-**Outcome.** Menus are where a Unity or Unreal user looks, with standard
-names.
-**Facts.** Menus are built in `scene_menu_contents`
-(`crates/rot-editor/src/scene_editor.rs:5304-5605`). Today: File, Create,
-Edit, View, Content, Help, mixed capitalization, preferences under File.
-**Do.** Build these menus, Title Case, each item showing its shortcut:
-- **File:** New Scene, Open Scene…, Open Recent ▸, Save, Save As…, —,
-  New Project…, Open Project…, —, Build…, Build and Run, —, Exit.
-- **Edit:** Undo, Redo, —, Copy, Paste, Duplicate, Rename, Delete, —,
-  Select All, Frame Selected, —, Play, Pause, Step, —, Project Settings…,
-  Preferences….
-- **Assets:** Import…, Create ▸, Refresh.
-- **Object:** Create Empty, 3D Object ▸ (Cube, Sphere, Capsule), Light ▸
-  (Directional Light, Point Light), Camera…, Game UI….
-- **Window:** one checkable item per panel, AI Connection, Play Checks,
-  Script Debugger, Recovery Checkpoints, —, Layouts ▸.
-- **Help:** Documentation, Keyboard Shortcuts…, About Rot Engine.
-Rename panel titles to Hierarchy, Assets, Scene and Game.
-**Done when.** The menus match this list in screenshots; every old command
-is still reachable; compact-width collapsing still works.
-**Not now.** A Component menu (arrives with components in Phase 2).
-**Left for later (agent, 2026-11-17).** Build and Run (C-09), Assets → Refresh
-(C-04), Play/Pause/Step in Edit (S-05), Script Debugger in Window (no
-standalone window yet), real Project Settings… and Preferences… windows (S-10;
-today Project Settings ▸ Input Actions… and Preferences… open the old modal).
-
-#### S-04 · One toolbar; view options move into the viewport — M — ready
-Status: done — 2026-11-17, see git log
-**Outcome.** One toolbar row and a much larger viewport.
-**Facts.** Toolbar rows are laid out in `scene_editor.rs:5799-5842`; a third
-row ("Perspective", "View presets", "Fit") is drawn inside
-`rot_render::allocate_viewport` (`crates/rot-render/src/lib.rs:983-1029`).
-At 1280×800 the viewport is about 745×425.
-**Do.** Follow the [window anatomy](UX-STANDARDS.md#3-window-anatomy). Left:
-Select, Move, Rotate, Scale, then Pivot, Local/World and Snap as compact
-dropdowns. Center: Play, Pause, Step. Right: Layout and the AI indicator.
-Scene and Game become a tab strip above the viewport. Projection, view
-presets and Frame become small overlaid controls in the viewport's top-left
-corner. Move the "Runtime" menu's items to Window and Help. Overflow into a
-`»` menu when narrow.
-**Done when.** Exactly one toolbar row at every width from 960 px up; the
-viewport at 1280×800 is at least 520 px tall; `tabwalk` still reaches
-everything.
-
-#### S-05 · Play, Pause, Step, Stop — M — ready
-Status: done — 2026-11-17, see git log
-**Outcome.** Pressing Play runs the current scene. There is no Reset.
-**Facts.** The runtime toolbar is in
-`crates/rot-editor/src/behavior_ui.rs:2386-2511`. Play is enabled only after
-Reset (`ready`, `:2422`, set in `complete_reset` `:2134`); any edit clears
-it (`:2010-2017`). "Control runtime" hands the keyboard to the game
-(`behavior_ui/runtime_input.rs:124`).
-**Do.** Play resets from the current scene and starts in one action. Stop
-returns to the editing view. Step from stopped starts paused on the first
-tick. An edit made during Play applies to the scene and restarts Play.
-Clicking the Game view while playing gives it the keyboard; Escape gives it
-back. Shortcuts Ctrl+P, Ctrl+Shift+P, Ctrl+Alt+P. A thin accent border marks
-the views while playing. The MCP play tool gets the same one-step behavior.
-**Done when.** New scene, add a script, press Play: it runs. No "Reset",
-"Runtime" or "Control runtime" label remains. Stop restores the edit view.
-**Not now.** Editing the running game's live values (Phase 2).
-**Notes (agent, 2026-11-17).** No MCP tool starts Play today (play checks run
-headless), so there was nothing to change on the MCP side. About 30 status
-messages still mention Reset; S-08 rewrites them. Focus Game Controls moved
-from Ctrl+Shift+P to Ctrl+Shift+G so Pause can use Unity's key.
-
-#### S-06 · Console, status bar and toasts — M — ready
-Status: done — 2026-11-17, see git log
-**Outcome.** Messages have a home. The status bar is one quiet line.
-**Facts.** There is no Console; logs go to stderr
-(`crates/rot-editor/src/main.rs:47-62`). The status bar is `asset_status_ui`
-(`scene_editor/asset_commands.rs:2343`). Panels set long `self.notice` and
-`self.error` strings directly.
-**Do.** Add one message log (level, source, text, detail) kept in memory.
-Build the [Console](UX-STANDARDS.md#6-panels) as a tab beside Assets. Send
-script output and errors (with file and line), import warnings and build
-output to it. Status bar: latest message on one line, progress with Cancel,
-warning and error counts that open the Console. Add toasts for results of
-the creator's own actions. Convert the twenty most frequent notices.
-**Done when.** A script error shows in the Console with its file and line;
-double-clicking opens the configured code editor; the status bar never
-wraps at 960 px.
-
-#### T-01 · Rot and Plain styles — M — ready
-Status: done — 2026-11-17, see git log
-**Outcome.** A creator picks Rot or Plain, dark or light, and can switch at
-any time.
-**Facts.** `ThemeChoice` has System, Dark, Light and OLED black
-(`editor_theme.rs:13-46`). The user decided on 2026-11-13 to keep OLED as an
-option. About 33 hard-coded `Color32` values remain (for example
-`crates/rot-render/src/lib.rs:1067`).
-**Do.** Add Style (Rot, Plain) beside Mode (System, Dark, Light, OLED black).
-Add the Plain palettes and missing roles from the
-[color table](UX-STANDARDS.md#color). Add a first-launch chooser showing both
-styles. Add the Themed Wording checkbox (it takes effect in S-08). Replace
-hard-coded colors in the files you touch.
-**Done when.** Switching is instant; screenshots of all four palettes pass
-the checklist; layout is pixel-identical between styles.
-
-#### S-07a · Dock shell: every panel in a tab — M — ready
-Status: done — 2026-11-17, see git log
-**Outcome.** Hierarchy, Inspector, Scene, Game, Assets and Console are tabs
-in one dock. Tabs drag between docks; nothing is painted over the viewport.
-**Facts.** Agent decision 2026-11-17: `egui_tiles = "0.18.0"` (needs `egui
-^0.37.0`, as the repo has; `egui_dock` 0.21.1 stops at 0.36). Sidebars
-overlay the viewport (`scene_editor/sidebars.rs`); Assets is `Panel::bottom`
-and the viewport is the `CentralPanel` closure, both in `workspace_ui`.
-`rot_render::allocate_viewport` fills the `Ui` it is given and
-`render_viewport_with_materials` adds an `egui_wgpu` paint callback for that
-rect, so the Vulkan view works in a tile unchanged. There is one render
-surface. egui_tiles calls `pane_ui` only for a container's active tab.
-**Do.** Add the crate; rerun `scripts/dependency_notices.py`. Create
-`crates/rot-editor/src/panels/mod.rs`, declared in `scene_editor.rs` with
-`#[path = "panels/mod.rs"]` so it reaches `SceneEditor`'s private fields:
-`enum Pane` (six variants, serde); `default_tree()` = Vertical[ Horizontal[
-Hierarchy 0.14, Tabs[Scene, Game] 0.59, Inspector 0.27 ] 0.75, Tabs[Assets,
-Console] 0.25 ]; a `Behavior<Pane>` over `&mut SceneEditor` (hold the tree
-in an `Option` and `take()` it per frame), `all_panes_must_have_tabs: true`,
-tab colors from the theme. Move the `CentralPanel` closure body to
-`viewport_pane_ui`, used by Scene and Game: their active tab drives
-`set_player_preview` (replacing S-04's strip) and neither is draggable
-(`is_tile_draggable`), so one surface is enough. Delete `SceneSidebars`,
-`sidebar_budget`, the `content_browser` panels and the `sidebar_pointer`
-terms. Block viewport input while `tree.dragged_id` is some. In
-`ai_workspace` mode show `viewport_pane_ui` without the tree until S-07c.
-**Done when.** Screenshots at 1280×800 and 1920×1080 match the
-[window anatomy](UX-STANDARDS.md#3-window-anatomy); clicks near each edge of
-the Scene tab pick correctly; the camera survives a divider drag; in-process
-tests show the wheel over Hierarchy does not zoom and a pointer drag moves
-Console into the Inspector dock (`ui_drive.py` cannot drag; say so);
-`tabwalk` reaches every panel.
-**Not now.** Close buttons, saving and layouts (S-07b, S-07c).
-
-#### S-07b · Close, reopen, saved layout and F6 — M — ready
-Status: done — 2026-11-17, see git log
-**Outcome.** Panels close and reopen from Window, the layout survives a
-restart, and F6 moves the keyboard between panels.
-**Facts.** egui_tiles: `Tree::set_visible` hides a tile in place,
-`on_tab_close` returning false keeps it, `make_active` selects a tab,
-`on_edit` fires on each user change, `Tree<Pane>` is serde. Preferences are
-`~/.config/rot/editor.json` (`Workspace::load`, `workspace.rs`;
-`ROT_EDITOR_STATE` overrides). `Preferences::parse` rejects unknown keys and
-P-02 keeps the old build for rollback, so the layout cannot go in that file.
-**Do.**
-- Save `layout.json` beside `editor.json` (`state_path().parent()`):
-  `{"format":"rot-editor-layout","version":1,"layouts":{"default":<Tree>}}`.
-  Mark dirty in `on_edit`; write by temp file and rename where
-  `workspace.flush()` is called and on exit. A missing or bad file, or a
-  tree without each `Pane` exactly once, loads `default_tree()` with one
-  Console warning.
-- Hierarchy, Inspector, Assets and Console get a close button
-  (`set_visible(false)`). Scene and Game do not close.
-- Window's panel items show `tree.is_visible`; checking one shows, activates
-  and focuses the tab. `Action::FindObjects` and `FindContent` do the same.
-  Add Window ▸ Layouts ▸ Reset Layout.
-- Keep the seven sidebar keys in `editor.json` read and written but unused;
-  remove their settings controls.
-- Add `Action::NextPanel` (F6) and `PreviousPanel` (Shift+F6): the next
-  visible dock in reading order (`tiles.rect`), focusing the first control
-  of its active tab (pattern: `hierarchy_focus`).
-**Done when.** Closing Hierarchy unchecks it in Window and checking it
-restores it to the same dock; a test saves a changed tree through a
-temporary state path and a new editor loads it; a corrupt file opens the
-default; F6 visits each dock once and wraps, and is remappable.
-
-#### S-07c · Default and Side by Side layouts; no AI workspace — M — ready
-Status: done — 2026-11-17, see git log
-**Outcome.** Two layouts, picked from the toolbar or by window width. The
-editor beside an AI app is the same editor.
-**Facts.** The AI workspace is the `ai_workspace` flag with `ai_header`,
-`ai_tools` and `ai_drawer_ui` (`scene_editor/ai_workspace.rs`), entered from
-File ▸ Advanced or `ROT_WORKSPACE=ai` (host setup in `scene_editor.rs`,
-which also skips the project picker). About a dozen `self.ai_workspace`
-branches hide menus, toolbar and status bar. It has a test in
-`ai_workspace_tracer.rs` and a section in `crates/rot-editor/README.md`.
-**Do.**
-- `layout.json` gains `"active"` and a `side_by_side` tree: Horizontal[
-  Vertical[ Tabs[Scene, Game] 0.62, Tabs[Assets, Console] 0.38 ] 0.64,
-  Tabs[Inspector, Hierarchy] 0.36 ]. Each layout keeps its own arrangement.
-- S-04's Layout picker and Window ▸ Layouts list Default and Side by Side
-  as radio items, then Reset Layout for the active one.
-- Agent decision: crossing 1100 px of window width switches to Side by Side
-  below and Default above. A manual choice holds until the next crossing.
-- Delete `Drawer`, `ai_drawer_ui`, `ai_header`, `ai_tools`,
-  `set_ai_workspace`, their fields, the menu item and every branch.
-  `ROT_WORKSPACE=ai` only starts in Side by Side and skips the picker.
-  Update the tracer test and the README.
-**Done when.** Screenshots at 960×1080, 960×600, 1280×800 and 1920×1080 clip
-nothing; at 960×1080 the viewport is at least 560×560 px; `resize:` from
-1280 to 960 and back switches layouts and restores each arrangement; both
-survive a restart; no `ai_workspace` identifier remains in the editor crate.
-**Not now.** User-named layouts, floating OS windows, multiple viewports.
-
-#### S-07d · Panel code in `panels/<name>.rs` — M — ready
-Status: done — 2026-11-17, see git log. Hierarchy, Inspector and viewport moved; Assets and Console already had files.
-**Outcome.** Each panel's code is one file and `scene_editor.rs` is about
-1,500 lines shorter. No behavior changes.
-**Facts.** Panel bodies are `SceneEditor` methods in `scene_editor.rs`:
-`hierarchy_contents`, `inspector_scroll_ui` and `inspector_contents`,
-`browser_contents`, and `viewport_pane_ui` from S-07a. Several open packages
-edit the same file.
-**Do.** Move them, with their private helpers and tests, as `impl
-SceneEditor` blocks into `panels/hierarchy.rs`, `inspector.rs`, `assets.rs`,
-`console.rs` and `scene_view.rs` (Scene and Game). Delete `sidebars.rs` and
-`ai_workspace.rs` if S-07a and S-07c left anything in them. Code motion only:
-no renames, no logic edits. Start from a fresh trunk, finish in one sitting
-and merge at once. Suits a cheaper model.
-**Done when.** `git diff --color-moved` shows moves only; `scene_editor.rs`
-holds no panel body; one `ui_drive.py` screenshot is unchanged; the gate
-passes.
-
-#### S-08 · String table and wording pass — M — ready
-Status: done — 2026-11-22. Legacy and v23 editor controls and messages use
-shared Plain and Rot wording. Build, Assets, prefab, recovery and script
-failures keep technical diagnostics available under Details or in the Console.
-Verified the wording and length audit and the Themed Wording toggle in the
-native editor. Reviewed Rot and Plain at 1280×800 and 1920×1080.
-**Outcome.** All text follows the [writing rules](UX-STANDARDS.md#8-writing)
-and comes from one table with Plain and Rot wording.
-**Facts.** Strings are inline. About 337 literals are longer than 80
-characters, many of them contract explanations.
-**Do.** Add a string table keyed by an enum, with a Plain column and an
-optional Rot column. Move user-facing text into it surface by surface:
-menus, toolbar, Hierarchy, Inspector, Assets, dialogs, messages. Delete
-helper prose, shorten messages, apply the vocabulary and Title Case, move
-real detail into tooltips. Update tests that assert old strings. This is
-mechanical and suits a cheaper model once the first surface sets the
-pattern.
-**Done when.** Fewer than twenty UI string literals over 80 characters
-remain outside tests, all of them tooltips; none of the banned internal
-words appear; the Themed Wording checkbox changes the lines that have a Rot
-variant.
-
-#### S-09 · Command layer and palette — M — ready
-Status: done — 2026-11-17, see git log
-**Outcome.** Every action is one registered command used by menus, context
-menus, shortcuts and a command palette.
-**Facts.** Shortcuts use an `Action` enum
-(`crates/rot-editor/src/workspace.rs:14-49`, defaults `:190-221`) dispatched
-in `process_queued_action` (`scene_editor.rs:5017`). Context menus call
-`object_action("duplicate")` directly with their own labels. MCP has a third
-path (`execute`, around `scene_editor.rs:3237`).
-**Do.** Add a command registry: id, label key, default shortcut, enabled
-test, run function, Undo label. Move every `Action` and every menu-only
-action into it. Menus, context menus and toolbar buttons call commands by
-id. Add the palette on Ctrl+K.
-**Done when.** No menu item or context-menu entry has its own handler or
-label; the palette can run every command.
-**Not now.** Routing MCP through commands (C-06).
-
-#### S-10 · Preferences, Project Settings and Shortcuts — M — ready
-Status: done — 2026-11-18, see git log
-**Outcome.** Standard settings windows under Edit.
-**Facts.** Settings are the "Workspace and shortcuts" modal
-(`workspace.rs:1027`, about 670 lines) with explicit Save and Close buttons.
-**Do.** Preferences: a category list (General, Appearance, Viewport,
-Shortcuts, External Tools, AI) and a page per category; changes apply at
-once; Reset to Defaults per page; Shortcuts has search and conflict
-warnings and lists every command. Project Settings: project name, startup
-scene, Input Actions (moved from Edit), Build.
-**Done when.** No Save button; everything from the old modal is present;
-Ctrl+, opens Preferences.
-
-#### S-11 · Viewport navigation and selection — M — ready
-Status: done — Claude Opus 5.5 (UX helper), 2026-11-17
-**Outcome.** The viewport handles like Unity's Scene view.
-**Facts.** Navigation is in `crates/rot-render/src/lib.rs:1192-1235`:
-right-drag orbits, middle-drag pans, wheel zooms, right button plus WASD
-flies. There is no box select and no stats display. Renderer timings exist
-in a `Metrics` struct (`rot-render/src/lib.rs:137`).
-**Do.** Implement the scheme in [Scene and Game](UX-STANDARDS.md#6-panels).
-Add box select, double-click to frame, an orientation gizmo in the top-right
-corner, scroll-to-change-speed while flying, and a Stats overlay (frame
-time, fps, draw calls, triangles) toggled from the viewport.
-**Done when.** A Unity user's navigation habits work without reading
-anything; Stats shows live numbers.
-
-#### S-12 · Assets browser — M — ready
-Status: done — Claude Opus 5.5 (AI lane helper), 2026-11-17
-**Outcome.** Assets are a grid of thumbnails you drag from, not a list of
-rows with buttons.
-**Facts.** The panel is `browser_contents` (`scene_editor.rs:4248`). Import
-is a form asking for an asset ID (`:4657`). File choosing shells out to
-`zenity` (`scene_editor/project_picker.rs:429`).
-**Do.** Grid and list views with thumbnails (texture previews first; a type
-icon for the rest), search and a size slider. Selecting an asset shows it in
-the Inspector. Replace per-row buttons with drag and drop (texture onto a
-material slot, mesh onto an object, model into the scene) and a context
-menu. Dropping files from the OS file manager copies them into the project
-and imports them with an ID taken from the file name. Use the `rfd` crate
-for native file dialogs everywhere.
-**Done when.** Drop a `.glb` from the file manager onto the panel, then drag
-it into the scene, with no form.
-**Not now.** Folder tree, automatic reimport and sidecar files (C-04).
-
-**Find Uses in Scene — done, 2026-11-23.** The v23 Assets Inspector and
-approved MCP report exact material slots and renderers, including disabled
-and linked prefab users, unassigned materials and missing sources. Rot and
-Plain keyboard navigation revealed the exact renderer without editing.
-Approved Claude reassignment and native Undo updated the results. Pages
-pin the scene and asset revisions. At 5,000 objects, cold and warm pages
-took 0.154 and 0.036 ms p95.
-
-#### S-13 · Project hub and templates — S — ready
-Status: done — 2026-11-17, Claude Opus 5.5 (UX helper). The list shows Unity Hub's "Modified" (scene file time), not a stored last-opened time (agent choice).
-**Outcome.** A first launch that looks finished.
-**Facts.** `scene_editor/project_picker.rs:30-135`; New Project creates one
-empty scene; no templates.
-**Do.** Hub with recent projects (name, path, last opened), New Project and
-Open Project. New Project offers Empty and Basic 3D (ground, light, cube,
-camera). First launch shows the style chooser from T-01 and an optional
-"Connect an AI App" step from A-04.
-**Done when.** Screenshots pass the checklist in both styles.
-
-#### T-02 · Rot motif and themed wording — S — ready
-Status: done — 2026-11-18, see git log; screenshots sent to the user for review
-**Outcome.** The Rot style has its character, lightly.
-**Do.** Follow [the motif](UX-STANDARDS.md#the-motif): empty-state line art,
-the three-spore loading indicator, the AI mushroom pulse, hub and About
-backgrounds, and the Rot column of the wording table. Depends on T-01 and
-S-08.
-**Done when.** At most one themed line per screen; Plain shows none of it;
-the user has seen screenshots.
-
----
-
-### AI lane
-
-Target experience: the creator opens the editor, clicks Connect once for
-their AI app, and from then on the AI can see and edit the open project
-whenever both are running, with no prompts, tokens or environment
-variables. See [A10](PARITY-PLAN.md#4-architecture-decisions).
-
-#### A-01 · The editor is always reachable — M — ready
-Status: done — 2026-11-17, 2c5811d
-**Outcome.** `rot-mcp` started with no configuration finds the running
-editor.
-**Facts.** The editor listens only after Connect AI or with
-`ROT_MCP_ENABLE=1` (`scene_editor.rs:6486`, `:6566-6575`). Each Connect
-creates a new random directory under `$TMPDIR`
-(`crates/rot-editor/src/bridge.rs:579-598`). The adapter needs
-`ROT_MCP_PROJECT_REGISTRY` or `ROT_MCP_LOCATOR`
-(`crates/rot-mcp/src/main.rs:861-868`). An editor the user opened by hand is
-invisible to the adapter, which then starts a second editor on the same
-file (`crates/rot-mcp/src/project_tools.rs:177-264`).
-**Do.** While a scene is open the editor listens on
-`$XDG_RUNTIME_DIR/rot/<pid>.sock` and writes `<pid>.json` beside it (pid,
-project folder, scene, start time), removing it on exit. `rot-mcp` lists
-those files, drops dead ones, and picks the editor whose project folder
-contains its working directory, else the only one running. With several to
-choose from, the existing `project_list` and `project_connect` tools list
-and select running editors; with none running, tools answer "Rot Engine is
-not running" and `project_connect` with a project path starts it. Do not
-add new tool names. Put socket and process code in a small per-OS module.
-Store an "allow AI apps to connect" setting in the preferences file,
-default on; its checkbox arrives with S-10. **Keep the existing approval
-step exactly as it is.** This package changes how the editor is found, not
-who is trusted; trust changes in A-02.
-**Done when.** Start the editor normally, run `rot-mcp` in a terminal, and
-`initialize`, `tools/list` and a read tool work with no environment
-variables; a headless test covers discovery with two editors and a dead
-entry.
-
-#### A-02 · Trust once — M — ready
-Status: done — 2026-11-17, c9c6013 (reviewed; trust trade accepted by the user)
-**Outcome.** An AI app is approved once and never again, across restarts and
-rebuilds.
-**Facts.** Unenrolled adapters need approval after every restart
-(`crates/support/connection.rs:354`). Enrollment pins the inode and
-modification time of both binaries, so any rebuild breaks it
-(`crates/support/project_startup.rs:11-37`,
-`crates/support/enrollment.rs:140-152`), and is created only by two
-scripts. `scene_save` needs `ROT_MCP_SAVE_DIR`
-(`scene_editor/persistence_commands.rs:22-29`).
-**Do.** Keep a per-user store of trusted AI apps (name, random token,
-allowed flag) in the config directory with owner-only permissions.
-`rot-mcp --client <name>` presents the token. A known token connects
-silently. An unknown client produces one non-blocking prompt: Allow Always,
-Allow Once, Deny. Remove binary pinning. A trusted app may save the open
-scene and write inside the project folder; builds go to `<project>/Builds`.
-Revoke lives in Preferences → AI (until S-10, in the existing connection
-panel). Write a short decision note: this replaces the session-bound
-approvals of decision 0050. Because this changes the AI trust boundary, have
-the strongest available model review the diff before merging.
-**Done when.** Approve once; restart the editor, rebuild both binaries,
-reconnect: no prompt. Revoke blocks the next call. Save works for a trusted
-app with no environment variable.
-
-#### A-03 · Smooth shared editing — M — ready
-Status: done — Claude Opus 5.5 (AI lane helper), 2026-11-17
-**Outcome.** The AI and the creator edit the same scene without tripping
-over each other.
-**Facts.** Every edit needs `expected_session_token` and
-`expected_revision`; any human edit in between fails the AI's call with
-`stale_revision` (`scene_editor.rs:3107`). A pending human draft or drag
-rejects AI edits (`:1993-2018`). Any transport error retires the client for
-good (`crates/support/connection.rs:368-380`). The queue holds one request
-(`bridge.rs:690`). Integers must be decimal strings.
-**Do.** Make the revision arguments optional: enforced when sent, otherwise
-the edit applies to the current scene. Commit a valid pending draft before
-applying an AI edit; during a drag, wait up to a second. Queue up to 32
-requests and serve several per frame within a small time budget. Reconnect
-on the next call after an error. Accept JSON numbers. Label AI steps in the
-Undo history ("AI: Move Cube").
-**Done when.** A scripted run where the human edits between the AI's read
-and write succeeds; fifty edits in a row finish in under two seconds; after
-killing and restarting the adapter the next call works.
-
-#### A-04 · Connect an AI App — M — ready
-Status: done — Claude Opus 5.5 (AI lane helper), 2026-11-17
-**Outcome.** One click registers Rot Engine with the creator's AI app.
-**Facts.** Nothing in the repository writes any AI app's configuration. The
-panel says "Automatic Hermes registration is unavailable"
-(`scene_editor/connection/native.rs:246`).
-**Do.** A dialog listing AI apps found on the machine with a Connect button
-each. First read each app's current official documentation for registering
-a local MCP server; do not rely on memory. Start with Claude Code, Claude
-Desktop, Codex, ChatGPT desktop, Cursor and VS Code, plus Copy Configuration
-for anything else. Writing a config file means: read it, add or replace only
-the `rot` entry, write atomically, keep a backup. Offer Undo. Also offer
-"Add AI configuration to this project" for apps that read project-level
-files.
-Develop and test against copies of the config files. Ask the user before
-the first write to their real configuration.
-**Done when.** On this machine, with the user's go-ahead, Claude Code and
-Codex connect through the button and run a tool with no manual editing;
-other entries in their config files are unchanged; Undo removes the entry.
-**Not now.** Provenance checks, custom transactions or hardening beyond an
-atomic merge. An earlier attempt at this spent days there and shipped
-nothing.
-
-#### A-05 · AI indicator and activity — M — ready
-Status: done — Claude Opus 5.5 (AI lane helper), 2026-11-17
-**Outcome.** The creator can see what the AI is doing and stop it.
-**Facts.** The mushroom badge only has a hover label
-(`crates/rot-editor/src/branding.rs:60-77`); the panel is under File →
-Advanced and shows internal terms.
-**Do.** Clicking the indicator opens a popover: connected apps, a Pause AI
-Edits switch, the recent AI actions with Undo on the latest, Connect an AI
-App…, Disconnect. Grey when idle, Rot red when connected, slow pulse while a
-request is running. Toast on connect and disconnect. Move diagnostics to
-Preferences → AI and remove internal wording.
-**Done when.** Screenshots pass the checklist; pausing makes AI edits wait
-and resume.
-
-#### A-06 · Slim the tool list — M — ready
-Status: done — Claude Opus 5.5 (AI lane helper), 2026-11-17
-**Outcome.** The tool list costs an AI client a fraction of today's context.
-**Facts.** 98 tools, roughly 90–120 KB. Every tool repeats a `connection`
-parameter and a long suffix (`crates/rot-mcp/src/main.rs:623-635`). The
-server instructions are about 1.9 KB (`:704`). Five legacy logistics tools
-are always listed. Screenshots need start-then-poll. The README and the
-`scripts/mcp_*demo.py` files describe variables the code no longer reads.
-**Do.** Drop the `connection` parameter and suffix (A-01 makes the target
-implicit). Remove the legacy tools from the scene editor. Rewrite each
-description in one or two plain sentences using the
-[vocabulary](UX-STANDARDS.md#2-vocabulary). Cut the instructions to a short
-paragraph. Add a single-call `viewport_screenshot`. Add a test that fails
-if `tools/list` exceeds 40 KB. Fix the README; delete the stale demos.
-**Done when.** `tools/list` is under 40 KB and a real client still completes
-the A-07 journey.
-**Not now.** The general object and component tools (C-06).
-
-#### A-07 · Real-client check — S — ready
-Status: done — Claude Opus 5.5 (AI lane helper), 2026-11-17
-**Outcome.** One command proves the AI route works end to end.
-**Do.** `scripts/mcp_smoke.py`, standard library only: start the editor with
-`ui_drive.Editor`, start `rot-mcp` over stdio, then initialize, list tools
-(print the size), read the scene, create and move an object, take a
-screenshot, undo. Then, in a throwaway project with a project-level MCP
-config, ask Claude Code or Codex to "add three cubes in a row and color them
-differently", and note the result in STATUS.
-**Done when.** The script passes and is listed in the PLAYBOOK's
-verification table.
-
----
-
-### Tools lane
-
-#### P-01 · Baseline performance numbers — S — ready
-Status: done — 2026-11-17, f8d6de6
-**Outcome.** Known starting numbers for the
-[budgets](PARITY-PLAN.md#5-performance-budgets).
-**Facts.** `rot-render` has a benchmark binary (`--objects 3|256 --frames
-N`). The scene cap is 256 objects until C-02.
-**Do.** Measure in release: cold start to the hub, opening a small project,
-editor memory, idle repaint count, renderer frame time at 256 objects, and
-an MCP edit round trip. Write the numbers beside the budgets. Add larger
-benchmark scenes after C-02.
-**Done when.** Each Phase 1 budget has a measured value or a note on why it
-could not be measured.
-
-#### P-02 · One-command local install — S — ready
-Status: done — 2026-11-17, e6a1ee8
-**Outcome.** The user can try each finished package.
-**Do.** `scripts/install_local.py`: build release `rot-editor` and
-`rot-mcp`, install them with the desktop entry and icon under `~/.local`,
-keep the previous version for `--rollback`. Ask the user before the first
-run, because it replaces the installed pre-rename build.
-**Done when.** Install, launch from the desktop launcher, roll back.
-
-## Next — Phase 2: Core
-
-The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1 checks. The human walkthrough and shared editing exercise ran on 2026-11-19. The full UI checklist remains open. C-01 comes first and gates the rest.
-
-| Package | Outcome | Brief |
+| Package | Outcome | Status & remaining gap |
 | --- | --- | --- |
-| C-01 Object and component model | A written design for [A1 and A2](PARITY-PLAN.md#4-architecture-decisions): types, file format, Undo outside files, upgrade of the repository's example scenes, and the order of the port. | design drafted 2026-11-19 · [C-01 brief](plans/C-01-OBJECT-COMPONENT-MODEL.md) |
-| C-02 Scene crate on the new model | `rot-scene` implements it. No object, depth or file-size caps. | in progress · the hub's Empty template creates a v23 project. The hub, File → Open and native `--scene` open v23 for basic Inspector edits, object creation, parenting, deletion, Undo/Redo and Save. Scene switching protects v23 drafts. Automatic upgrade and tracked example conversion are open |
-| C-03 Renderer, runtime and scripts on the new model | Everything that reads a scene uses objects and components. | shipped for supported scenes · Authored v23 Transform Game Cameras support Perspective and Orthographic projection, full vertical size in world units, finite clipping and optional fixed aspect. Native Inspector and approved MCP share guarded edits and Undo. Equal-sized rulers, letterboxing, clipping, depth and view-dependent shading were checked through native Game view, approved capture and a relocated Vulkan player. The committed camera pose still supplies the positional audio listener. In flat scenes and supported groups, a scripted Mesh Renderer leaf can carry a Point or Spot Light with its own Enabled setting. Draw and beam use the same committed pose. Approved MCP reports world light transforms by owner. On the Blender night trolley, guarded Steps and native controls moved or aimed the lamp through Play and a relocated Linux startup build. A rejected Step kept the preceding pixels. In a matched motion test, Step plus CPU viewport preparation took 0.097 ms p95 for an attached lamp and 1.847 ms for the equivalent motion driven by a Group with a separate lamp. Grouped runtime drawing reuses immutable committed world poses and lights. Changed leaves update their indexed draws, and Group/animation changes share the staged pose resolve. Depth-eight release CPU p95 fell from 0.762 to 0.012 ms for a paused viewport and 0.915 to 0.067 ms for combined Step and extraction with one moving leaf at 256 targets. Supported v23 Object Lua API1/2 drives a child in parent-local coordinates under transform-only, positive-uniform groups. A/D and guarded Steps drove a trolley on a rotated and scaled rail through editor Play and a relocated Linux player. World-pose and camera validation preserve the previous committed frame on rejection. The compact MCP catalog shows tagged axis and button examples. v23 Transform Perspective Game Cameras use the committed simulation pose for editor Game view, approved MCP captures and packaged playback. Blender clips drive an owner or its parent, and a detached camera works alongside flat Lua scenes. A rejected Step retains the preceding camera and scene. v23 scripted Play and Build hide disabled mesh renderers and shadows while retaining Lua, collider and object identity. Renderable parents in dynamic hierarchies remain open. default Cube samples shared Base Color and roughness using its existing face UVs. Play and Build share world matrices, lighting, and effective enable state for supported static v23 scenes. Native and MCP share Play/Pause/Step/Stop and runtime captures. Editor Play, standalone viewer, headless behavior and packaged Motion Lab support v23 through previews and runtime projections. Native editor and viewer use world matrices for draw, fit and hit testing. General component execution remains open; v23 can build a Linux player folder |
-| C-04 Assets as files | `Assets/` folder, sidecar ids and import settings, rebuildable cache, file watcher, automatic import and reimport, folder tree in the browser. | done · 2026-11-23 · Native Move to Folder preserves the source and sidecar of registered OBJ, Lua and WAV files and follows the same ID after catalog publication. Approved Claude verified moved paths and used the original assets after reopen. A relocated Linux build retained the vehicle mesh, file-backed drive and horn. Previously delivered Linux live import, browser and file actions, stable sidecars, approved MCP import and refresh, and independent player build (2026-11-19). Standalone Build verified with 80 meshes · [C-04 implementation brief](#c-04-implementation-brief) |
-| C-05 Hierarchy and Inspector | Rebuilt on components: Add Component, drag to reparent, multi-edit, enable toggles, visibility and lock, live values during Play. | in progress · Delivered v23 Hierarchy search with keyboard navigation, exact reveal, and parent paths for duplicate names. Approved MCP searches the same scene with guarded pages. Native Rot and Plain and approved Claude verified duplicate names, hidden and disabled objects, draft preservation, and stale continuation. Delivered exact v23 Animator clip preview through the Inspector and approved MCP. The preview samples through the final pose with Loop enabled, clears when its scene or asset context changes, and leaves saved authoring and Undo intact. Native Rot and Plain, approved Claude, and a relocated Linux Build verified the workflow. Previously delivered: Duplicate copies selected ordinary subtrees through Ctrl+D, the Hierarchy menu, palette or guarded MCP. The copy keeps sibling order and shares materials and assets. Internal references follow the copy. Rot and Plain verified immediate Move, independent edits and stable IDs after Redo. Approved Claude duplicated overlapping selections in one edit. Both market stalls survived reopen and relocated Vulkan. At 5,000 objects, release duplication p95 was 4.71 ms for a leaf and 5.41 ms for a 100-object subtree. Linked prefab parts direct creators to Place Prefab. Aim at Object in the Spot Light Inspector and guarded MCP turns the owner toward a target pivot with one Undo. The Scene view guide shows the forward ray and finite inner/outer rings, including during Rotate drags. Exact MCP detail reports authored world origin and direction. A parented Blender stage under nonuniform scale matched editor Play and relocated Vulkan. At 5,000 objects, selected CPU through tessellation p95 was 0.702 ms with the guide and 0.685 ms before it. GPU scene p95 held near 0.284 ms. Edit Collider fits a v23 Box Collider in the Scene view. Face drags preserve the opposing face and commit Center and Size as one shared Undo. Exact approved MCP inspection reports world corners or explains unavailable geometry. The Blender loading bay preserved its authored collider through reopen and Linux Build. Flat v23 Play, guarded Step and a relocated player verified the corresponding sphere contact change. Release editor CPU through tessellation at 5,000 objects was 0.705 ms p95 before and 0.712 ms with handles off, 0.720 ms visible, or 0.758 ms dragging. Make Unique creates and assigns a scene-owned material copy to one v23 Mesh Renderer with shared Undo. The visible renderer scope and guarded MCP target distinguish multiple renderers on one object. Blender panels preserved both textures while the separate finishes survived reopen and relocated Vulkan playback. v23 Animator selects same-model clips and Loop through the Inspector and guarded MCP, with shared Undo. Two Blender drawbridges held and repeated their selected clip through Play, source refresh, reopen and a relocated Vulkan build. Transform Perspective Game Cameras preserve parented pose and roll through static Play and Linux Build, including 5,000 objects. Native and MCP activation and lenses share Undo. Numeric Tab navigation preserves authored values. Fixed Game Camera capture from the perspective Scene view, active Camera controls, shared MCP history and static Play/Build at 5,000 objects. Follow continues to use its existing runtime. Triangular Prism creates a textured closed pitched solid in native and MCP workflows. Three linked cottage roofs retained independent placements and accepted a shared width edit through a relocated Vulkan build. Assets imports linear Roughness PNGs alongside existing sRGB interpretations. Shared material editing selects, replaces and clears Roughness maps. Edit → Scene Display sets Surface HDR and exposure with shared Undo, and Legacy SDR stays the default. v23 Mesh Renderer creates and assigns scene materials and edits shared definitions with one Undo. Two assigned Khronos surfaces retained the new Base Color and original roughness map through Play and a relocated Vulkan build. v23 Move, Rotate, and Scale support World and Local axes, pivot modes, snapping, live geometry and lights, and one shared Undo. Save, Play, and a relocated Vulkan build preserved the edits. v23 point and directional light creation, attachment, and Inspector editing work in the editor and MCP with shared history. Shadow settings survive unrelated edits. Excess active lights are kept with a preview warning. Group Selection completed 2026-11-21 in the editor and MCP with shared Undo/Redo. Component authoring, multi-edit, local viewport controls and live Transform and script state work in v23. Native edit and save worked at 5,000 objects. Desktop frame-rate checks remain open |
-| C-05a Textured Cylinder | Build predictable world blockouts with one textured Y-up Cylinder. | done · A centered 32-sided Cylinder has a full side texture wrap, planar caps and shared immutable geometry. Native Create, Create Child and geometry assignment, guarded Claude placement, Undo/Redo, cap picking, save/reopen and a relocated Vulkan build were verified. The package used one texture and no external meshes. |
-| C-05b Animator button trigger | Start one placed imported clip from the input action map. | done · Native and approved MCP bind an existing Button action with shared Undo. Two Blender drawbridges verified independent press, hold, restart, final pose, loop and rejected-Step rollback after reopen and in a relocated Linux build. Missing or retyped actions report what to repair. |
-| C-05c Texture tiling and offset | Share v23 UV controls and import compatible GLB texture transforms. | done · Edit Material and guarded MCP set Tiling and Offset for Base Color and Roughness. Repeat and Clamp matched independent baked UV references. Blender import, approved Claude, native Undo, old catalog reopen and Reimport, and relocated Linux Vulkan playback passed. |
-| C-05d Hierarchy disclosure | Fold and reveal v23 object branches with keyboard navigation. | done · Visible rows support arrows and Shift selection. Search and Find Uses reveal only needed ancestors. The native station verified local folds and draft retention. Approved Claude inspected and copied a complete folded wing, and native Undo restored it. Rot and Plain share the same focus control. |
-| C-06 General MCP tools | A small set of object, component, asset, play and screenshot tools that call the command layer. Tool list under 15 KB. | in progress · 2026-11-23 · assisted construction verified with Claude Code. First-page context, shared batch hierarchy placement, native Undo and guarded in-place Save preserved three linked cottages through reopen and a relocated Linux build. Material tools now inspect scope and texture roles, create and assign to exact Mesh Renderers, and edit shared v23 definitions with scene and catalog guards. v23 discovery and registered native connections, parent-local creation and transform conventions, object and component batches, shared history, Play, front/side/top hierarchy framing and capture, geometry picking, asset inspection, import, refresh and OBJ mesh assignment |
-| C-07 Prefabs | Prefab assets, instances, per-property overrides, apply and revert. | done · 2026-11-20 · Native controls and approved Claude Code assembled and reused a cottage. Three placements retained independent transforms and an override through a shared roof fix, save, reopen and relocated Linux Build. Linked prefab source updates checked at 5,000 objects. Material overrides (2026-11-23) give one linked Mesh Renderer a local finish. Native and approved MCP Apply changes the matching source renderer, and Revert restores the current inherited material. Three linked Blender displays preserved sibling and local finishes through Undo, refresh and relocated Vulkan Build · [implementation brief](#c-07-implementation-brief) |
-| C-08 General glTF import | Multi-primitive meshes, full PBR material mapping, cameras and lights; warnings instead of refusals. | in progress · Double Sided opaque materials are available in the shared Inspector, approved MCP, and new placements from accepted GLB imports and reimports. A single-sheet Blender banner verified color, back-face lighting, depth, picking and sun shadows. Existing single-sided views matched pixel-for-pixel. Shared v23 materials support Emission Color with a black default. GLB factor-only emission survives placement, and Reimport can adopt it for new placements from the same bytes. Emissive textures report an omission and stay dark. An approved Claude edit and native Undo preserved both shared users. The Blender signal lens matched native and relocated Vulkan in SDR and two HDR exposures. Native Create and Add Component, Inspector, and guarded MCP author editable v23 Spot Lights. Static GLB spots retain their source node, degrees and world-unit range. The renderer uses local −Z and shares four enabled point/spot slots. Native Reimport upgrades older accepted catalogs from the same bytes while keeping existing placements and retaining the last good model after invalid refresh. Rot and Plain authoring plus approved Claude use shared Undo. The Blender test matched all five lighting witnesses in editor Play and relocated Vulkan in SDR and HDR. The 5,000-mesh release benchmark measured four Spot Lights at 0.372 ms CPU preparation and 0.378 ms GPU scene time p95. Packed glTF metallic–roughness PNGs supply a linear Roughness map from green and retain the authored multiplier. Native placement and approved MCP keep the derived texture role through source refresh, shared Undo, and relocated Vulkan Build. Existing catalogs reopen with their accepted appearance and can adopt the map through Refresh. Unsupported UV mappings and conflicts with the Base Color sampler leave the supported appearance in place and report the omission. Static GLB perspective cameras place as editable source-node components and preserve authored aspect and clipping, including infinite far projection, in editor and relocated Vulkan playback. Native and approved MCP placement keep the existing Game Camera. Skipped lenses are reported, and invalid camera refreshes retain the last accepted model. Static GLB point and directional lights place as editable v23 components, including shared definitions and source nodes with several mesh surfaces. Assets and MCP report approximate brightness, substituted range and clamps. unmodified Khronos Box and BoxTextured GLBs place through Assets and MCP, preserve orientation and texture through reimport and Play, and run in relocated builds. Sampler approximations appear in import warnings. Base-color textures accept 8-bit indexed PNG. v23 places GLB hierarchies with per-surface materials, transform clips, shared Undo, and MCP. All 15 GLBs in the Kenney Starter Kit 3D Platformer import with their relative PNG textures. Import warns about common material fallbacks and skipped degenerate triangles. Static orthographic lenses place on their source nodes with fixed aspect and clip planes. Broader material mapping, animated lens values, and animated light playback remain open |
-| C-09 Build and Run | The editor ships a player binary; Build writes a runnable folder; no Python. | in progress · 2026-11-23 · Project Settings gives the Linux player an exact title and initial logical window size. Build and approved MCP show the effective values and their source. Player-only settings survive startup and route edits. Rot and Plain, stale second-editor refusal, a relocated 1280 × 720 window, keyboard Start and manual resize were verified. Existing packages keep their default window. a relocated Vulkan player loaded a 1.44 MB v23 scene with 5,000 objects and an imported textured mesh. Static hierarchies with renderable parents and transform-only groups build to a relocated Linux player with world transforms preserved. Static builds preserve attached and parented lighting, disabled content, and assets referenced only by disabled geometry. Legacy Build still uses the runtime kit |
-| C-09a Linux archive | Share a verified Linux build as one portable .tar.gz. | done · Build offers Folder and Linux archive. The verified worker streams and publishes one portable .tar.gz with cancellation and no overwrite. Approved MCP reports the format and archive bytes. Independent extraction matched the folder files and modes. The relocated Vulkan game verified Start, Lua motion and its WAV cue. |
-| C-10 Scripts as files | Lua files in `Assets/`, one growing API (lifecycle, find, spawn, destroy, components, input, time), reload on save, open in the creator's code editor. | in progress · On Linux, Assets → Create → Lua Script creates and selects a starter Object Lua file in the chosen folder. Open in Code Editor uses the saved editor configuration on the registered source. Native and approved MCP attachment share Undo. Play keeps its starting code through external saves, and the next Play and relocated build use the revised source. Existing files and orphan sidecars are preserved on refusal. Kinematic Sphere scripts can bind named stationary Box Sensors and detect entry, dwell and exit from the accepted endpoint. Collider-only checkpoints are invisible in Play and Build. Native and approved Claude verified inclusive contact and rollback, and the relocated Linux player played exactly two entry chimes. Camera-relative positional WAV cues are available in the native Inspector and approved MCP. One WAV can serve independent emitters with linear range and pan sampled from the same committed Game Camera and emitter poses. Native authoring, approved Claude, editor stereo PCM and relocated Linux builds verified the workflow. File-backed Object Lua can opt into Kinematic Sphere on one flat-scene mover. Native Rot and Plain plus approved Claude verified free travel, wall stop, diagonal slide, and corner stop with shared Undo. Two bindings sharing one file retained separate movement modes. A relocated Linux player matched the editor's committed poses and contacts. At 128 blockers, release Step p95 was 29 µs ordinary, 299 µs in free travel and 273 µs in sustained contact. File-backed Object Lua binds named one-shot WAV cues per Script with native and guarded MCP edits and shared Undo. A private capture verified separate WAVs on two trolleys sharing Lua, one sound per press in Rot and Plain, and silence after a rejected Step. A relocated Vulkan build opened the WAV at startup and reused one audio stream. Warm API2 Step p95 was 30.6 µs unbound, 32.6 µs bound and idle, and 33.3 µs emitting one cue. v23 Project Settings and approved MCP author Button and 1D Axis keyboard actions with shared Undo. Watched Lua Object scripts use the captured action map in Play and relocated Linux Build. Native hold, release, one-shot press and focus loss, plus guarded MCP Step, were verified on a controllable cube. Watched Lua files attach through Inspector and approved MCP, share Undo, keep their ID through rename and prefab reuse, update on the next Play and build into a relocatable Linux player. External editor launching, live source replacement and broader lifecycle, component and spawning APIs remain open. |
-| C-11 Scenes and projects | Several scenes per project, a project settings file, a startup scene. | done — 2026-11-23, 12ad501 · A native Project Scenes picker filters and opens exact saved siblings and selects the Start destination. Rot and Plain keyboard control, dirty Cancel and Discard, active approved connection safety, and same-name replacement were verified. Approved Claude read the configured route and entered Rail Yard with one guarded Step. A picker-configured, relocated Vulkan build played both scenes. The stress folder with 480 extra scenes returned initial results in 43.3 ms p95. The 5,000-object destination validated in 61.6 ms p95. Start Transition connects a saved startup Button action to one saved project sibling. Native Play and guarded MCP activate the destination at tick zero and keep the authored scene and Undo. Linux Build packages both verified asset closures. A relocated Vulkan game opened Title and entered Rail Yard on Enter, kept the trolley at its initial pose through held Enter, then drove on D. Failed destination activation leaves Title visible. The 5,000-object release stress test reduced the worst standalone Start update from 35.819 to 0.108 ms by preparing the destination on a worker. File → New Scene, Ctrl+N and the command palette create a saved v23 sibling with a fresh scene identity. Save, Discard and Cancel keep the project catalog and startup settings. A competing file keeps its content and the original editor keeps its draft and history. Approved Claude edited two separate sessions and reused the original Blender trolley from the shared catalog. A relocated Vulkan build opened the new Title scene while Rail Yard was active with an unsaved edit. In release tests, Create reached the first catalog-ready tessellated frame in 0.867 ms p95. Equivalent same-project Open dropped from 5.711 to 0.811 ms p95 by reusing the active catalog. Project Settings selects a saved v23 sibling as startup or resets to default. Hub opens the configured startup and Linux Build captures its own saved assets. Explicit Open and Play use the chosen or active document. Approved MCP reports the three routes. A relocated Title build shipped its texture while the unsaved Rail Yard stayed open. General runtime scene loading remains in Phase 4. |
-| C-11a v23 crash recovery | Recover a completed dirty scene checkpoint as an exclusive new sibling after an unexpected exit. | done · A completed v23 checkpoint keeps native and approved MCP edits. Recover as New Scene opens an exclusive sibling with a fresh scene ID and intact object, component and asset references. The original and startup choice stay intact. Native recovery verified a filename collision and 5,000 objects. Save fencing, discard, corrupt record preservation and version 1 checkpoint compatibility passed. |
-| C-12 Benchmark scenes | 5,000- and 50,000-object scenes and a one-command frame-time report. | done · 2026-11-19 · deterministic v23 scene export and [release timings](../crates/rot-render/README.md#large-scene-benchmark) |
-| C-13 v23 Play Checks | Save and rerun a fixed input and assertion sequence in a flat scene. | done · Native and approved MCP reproduced the same 30-tick conveyor check. Saved scene and Lua changes separately invalidated its pin. Recapture kept the original expectation and produced the same failure as guarded Steps. A 640-object static check ran 120 ticks and verified the last object. |
-| C-14 Scene Background | Author a solid per-scene background with the existing display controls. | done · Native picker and sRGB hex, guarded MCP, shared Undo and saved linear color work in v23. SDR and HDR pixels matched, including after a relocated Vulkan title-to-yard Start. Default images, grid coverage, geometry lighting, HUD and letterbox witnesses were verified. |
-| C-15 Primary Mouse Button | Bind Primary Mouse with keys to the same v23 Button action. | done · Native Project Settings and guarded MCP preserve Space. Editor Play and a relocated Vulkan build verified ownership, combined edges, HUD and letterbox exclusion, release outside and focus cancellation. |
-| C-16 Unpack Prefab Instance | Turn one linked v23 instance into ordinary scene objects. | done · The native confirmation and guarded MCP detach the exact root with shared Undo. The accepted hierarchy, roof and finish overrides, and asset references stay intact, including when the source is missing. Two neighboring links kept receiving source edits. Save, reopen and relocated Vulkan verified the independent cottage. |
-| C-17 Save Scene As | Copy the live v23 scene into an independent project sibling. | done · The File menu, shortcut and palette share a filename dialog. Market Night kept committed edits, the valid Inspector draft, linked stalls, camera and textured sign. Cancel, invalid name, filename collision and failed publication kept the original edit context. Approved Claude reconnected to the copy, and the variant launched from a relocated Vulkan build. |
-| C-18 Lua error navigation | Open a failed v23 file-backed Lua source from Game Error Details. | done · Neovim opened the exact Step and startup syntax lines, including after a same-byte rename. Changed and missing files withheld the jump. Approved Claude read the asset, path and binding from runtime inspection. A fresh run advanced after repair. |
-| C-19 Sphere Collider radius fitting | Fit a v23 Sphere Collider from its Scene view outline. | done · A viewport drag edits radius with one Undo and Escape cancellation. Perspective and orthographic produced the same fitted radius and preserved the center. Approved Claude set the flat robot radius, and deterministic editor and relocated Vulkan runs stopped 0.5 units farther from the wall. |
-| C-20 Restore Missing Source | Restore an accepted missing v23 project Lua or WAV source from its exact cached bytes. | done · Assets restores the original path under its existing ID and sidecar. A corrupt cache, changed sidecar, unsafe folder or competing destination is refused. Approved Claude inspected both candidates and ran the restored signal, which moved and rang in the relocated Linux player. |
-| C-21 Orthographic GLB cameras | Place static orthographic lenses as editable v23 Cameras on their source nodes. | done · Explicit Reimport upgrades older catalog acceptances from the same bytes. Two Blender nodes sharing a lens kept independent components under their original rig. Approved Claude inspected and activated the exact Game Camera. Save, reopen and the relocated Vulkan player matched the Blender framing. Unsupported lenses leave their nodes with a warning. Invalid refresh retains the last accepted model. |
-| C-22 Game HUD Action Button | Trigger an existing v23 Button action from the Game HUD. | done · Window → Game HUD offers a caption and a Button picker with shared Undo. A click or keyboard activation supplies one tap. A held gameplay key survives the click and the Primary Mouse binding stays quiet. Approved Claude authored a separate button and verified its guarded Step. The Blender bridge matched the keyboard-input pose at tick 13 and ran from a relocated Vulkan build. |
-| C-23 Fit Box Collider to Mesh | Fit an existing v23 Box Collider to one same-owner Mesh Renderer. | done · Indexed local geometry sets Center and Size in one Undo. With multiple renderers the Inspector asks which one to fit. Thin axes use the minimum size. Approved Claude fit the Blender barrier through the guarded command. Reimport invalidated the old asset guard, and the saved fit stopped the robot at the expected contact point in editor and relocated Vulkan Play. |
-| C-24 Place Selection on Ground | Place a v23 assembly at world Y=0 using its indexed mesh geometry. | done · Hierarchy, the command palette and guarded MCP move selected roots together in one Undo. The Blender workshop kept world spacing under a rotated, scaled parent and touched the floor in editor Play and a relocated Vulkan build. A stale import, missing mesh and empty assembly were refused. A grounded assembly added no history. |
-| C-25 WAV Audition | Hear an accepted v23 WAV once from the Assets Inspector. | done · Preview and Stop use the accepted decoded clip. The Inspector and approved MCP show duration and sample rate. Selection stays silent, and switching asset, project or entering Play stops audition. Private stereo capture verified the WAV selected by Claude played the matching tone in the relocated Linux build. |
-| C-26 Borderless Fullscreen | Choose and toggle window mode for the Linux player. | done · Project Settings chooses the Linux startup mode. In relocated Vulkan Play, F11 restored the last windowed size and stayed out of game input. The HUD Start transition preserved fullscreen and fixed camera framing. Older packages opened windowed. Approved MCP reported the mode and its source. |
-| C-27 Number Properties for Object Lua | Tune a shared file-backed Lua script independently on each v23 object. | done · Two carriers shared one Lua file and used separate speeds. The Inspector supported keyboard entry, removal and shared Undo. Approved Claude changed one number and preserved the existing sound cue. After save and reopen, both editor Play and the relocated Linux build moved the carriers according to their independent values. |
-| C-28 Copy and Paste Local Transform | Reuse selected parent-local Transform channels on one or more v23 objects. | done · Inspector Copy snapshots an authored Transform. Paste Position, Rotation, Scale and All share one Undo across targets. Approved Claude copied the current source rotation by exact IDs. Three parented lamps kept distinct world beam directions in editor and relocated Vulkan, and the prefab lamp kept its prior Scale override. |
-| C-29 Boolean Properties for Object Lua | Toggle behavior per v23 object using one shared file-backed Lua script. | done · 2026-11-25 · Tab and Space set the Boolean in the Inspector. Approved Claude set an explicit false through MCP. Shared Undo, reopen, and a relocated Vulkan build preserved distinct carrier behavior alongside existing speed and sound properties. |
-| C-30 Frame from Hierarchy | Double-click a v23 Hierarchy object to select and frame its assembly in the Scene view. | done · 2026-11-25 · A folded station arch framed its posts, crossbar and imported lamp with the existing Frame camera. Single click and Ctrl-selection left the camera fixed. Rot and Plain Light confirmed the full assembly and checked that scene bytes and revision stayed the same. |
-| C-31 Legible Scene Overlays | Keep Scene Stats and the projection caption readable over geometry and backgrounds. | done · 2026-11-25 · Opaque themed backgrounds keep Stats, Persp and Ortho readable. Plain Light checks covered dark and bright Scene backgrounds, Stats keyboard activation, projection click targets, and View Presets. |
-| C-32 Find Uses for Lua Sources | Find and reveal Script components that use a registered Lua source in the current v23 scene. | done · 2026-11-25 · Keyboard Reveal selected the exact same-named carrier under a folded parent. Approved Claude read both attachments after source rename. Detach and Undo refreshed results. Guarded pagination worked at 5,000 objects. |
-| C-33 Play Checks for v23 Hierarchies | Run saved input and local translation checks on compatible v23 assemblies and imported animation. | done · 2026-11-25 · An imported sliding gate under a translated parent reached local X=3 after a saved button sequence. Native reopen, approved Claude and ordinary Play agreed. A changed clip made the old check stale. |
-| C-34 Camera-Only GLB Rigs | Import a static camera rig and choose an imported lens to shoot an existing v23 set. | done · 2026-11-25 · Native and approved MCP placed both lenses from a JSON-only Blender rig. Camera activation, Undo and a malformed reimport kept the expected camera. Save, reopen and relocated Vulkan matched the orthographic framing. |
-| C-35 Organize Play Checks | Open on clear results and keep check editing in its own view with stable controls. | done · 2026-11-25 · Results shows one summary and expected/actual values for failures. Edit Check retains drafts and keeps the footer visible at frame 120. Native keyboard checks and Terra review covered the dialog down to 960 × 640. |
-| C-36 Open Build Folder | Open the actual published Linux folder from the editor's build status. | done · 2026-11-25 · Native Tab and Enter sent the exact custom output path to a scoped file-manager opener. Folder, launch-failed and archive flows passed. A relocated build ran headlessly and a redirected path was refused. |
-| C-37 Meshless GLB Lighting Rigs | Place reusable static Blender lights into an existing v23 set. | done · 2026-11-25 · Native and approved MCP placed a meshless spot-and-fill Blender rig. Native Aim moved the spot to the opposite panel. Undo, malformed refresh, reopen and relocated Vulkan passed. |
-| C-38 Reset Local Transform | Restore selected v23 objects to identity relative to their own parents in one Undo step. | done · 2026-11-25 · Keyboard Reset restored two housings to different parent origins in one Undo. The copy stayed available, a no-op kept history, and approved MCP, reopen and relocated Vulkan matched. |
-| C-39 Animator Playback Speed | Reuse one imported clip on v23 objects with independent playback multipliers. | done · 2026-11-25 · Native and approved MCP configured 0.5× and 2× for one shared clip. Exact poses matched in Play, a saved Play Check, and relocated fixed-tick playback. Default-rate poses matched the release baseline. |
-| C-40 Filter Assets by Type | Combine exact asset categories with the existing folder and project text search. | done · 2026-11-25 · Sound plus a name query isolated a WAV from similarly named meshes and Lua. Folder navigation, watcher updates, compact layout, keyboard selection and private audio audition passed. |
-| C-41 Centered Game HUD Edge Anchors | Anchor HUD labels and actions at the top or bottom center of the Game view. | done · 2026-11-25 · Native Bottom Center and approved MCP Top Center share Undo. The saved button reopened in place and activated the intended bridge in relocated Vulkan at 16:9 and 4:3. |
-| C-42 Capture Orthographic Game Camera | Turn a composed v23 orthographic Scene view into a new active Game Camera in one Undo step. | done · 2026-11-25 · Native Isometric and approved MCP Top captured the same framing as the painted Scene view. Stale capture was refused. One Undo restored the earlier camera. Reopen and relocated Vulkan matched all three landmarks. |
-| C-43 Rename in Hierarchy | Rename a v23 object in place with F2 or its Hierarchy row menu. | done · 2026-11-25 · Focused tests covered F2 and remapping. Native editing targeted one of two same-named rows, refreshed search and kept selection. Empty, canceled and unchanged names kept history. Approved MCP and native edits shared Undo and survived reopen. |
-| C-44 Fit Sphere Collider to Mesh | Fit an existing v23 Sphere Collider around the indexed geometry of one Mesh Renderer on that object. | done · 2026-11-25 · Native picker and approved MCP fitted the same offset Blender mesh and ignored its unused vertex. Undo, stale asset refusal and reopen passed. Editor and relocated Vulkan motion agreed at the fitted boundary. |
-| C-45 Reveal Assigned Mesh in Assets | Open the exact source row for an assigned v23 Mesh Renderer geometry from the Inspector. | done · 2026-11-25 · Enter reopened Assets, cleared a conflicting Sound search, and focused the exact same-named OBJ among 93 tiles. A generated mesh revealed its owning GLB. Pending drafts and scene bytes stayed intact. |
-| C-46 Aim Directional Light at Object | Aim a v23 Directional Light along the line from its owner pivot to a selected scene object. | done · 2026-11-25 · Native and approved Claude aimed a sun under a rotated, nonuniform rig. Shadows changed sides. No-op, stale target guard, shared Undo, reopen and relocated Vulkan passed. |
-| C-47 Vector3 Properties for Object Lua | Set three-axis values per v23 file-backed Object Lua binding. | done · 2026-11-25 · Native keyboard and approved Claude configured two carriers on one Lua source. Zero and unset behaved distinctly. Shared Undo, reopen and relocated Vulkan matched the signed three-axis positions. |
-| C-48 Import GLB Triangle Strips and Fans | Import GLB surfaces with strip or fan topology into the existing mesh format. | done · 2026-11-25 · Textured strip and fan renders matched explicit triangles in front and back views. Native and approved Claude placement, last-good refresh, and relocated Vulkan preserved winding and UVs. |
-| C-49 Preview Sound Cue at Draft Gain | Audition a ready WAV inside the v23 Sound Cue editor using its draft gain. | done · 2026-11-25 · Keyboard preview produced quarter amplitude at 0.25 and silence at zero. Escape stopped playback and preserved both cue assignments. Assets stayed full gain, and relocated runtime PCM matched the applied gain. |
-| C-50 Built-in Plane | Create or assign an engine-owned horizontal Plane for floors and blockout. | done · 2026-11-25 · Native Create Child and approved Claude placed explicit Planes under different parents. Undo, Redo, save and reopen kept the same geometry. An asymmetric overhead texture kept its size and orientation in relocated Vulkan. |
-| C-51 F11 Binding Conflict | Explain the Linux player fullscreen shortcut and repair existing F11 Input Actions. | done · 2026-11-25 · Existing Button and Axis bindings remained readable and editable. Native and approved MCP repaired them. Undo, Redo and reopen passed. In a relocated Linux player, F11 toggled fullscreen and the replacement H moved the Lua witness once. |
-| C-52 Select Prefab Root | Reveal the exact owning prefab instance from a linked child in the Inspector. | done · 2026-11-25 · Keyboard activation selected the correct same-named cottage under its folded lot and kept the other lot folded. Pending edits were preserved. The action worked without a source file and left the camera and scene history intact. |
-| C-53 Compact Indexed PNG | Use opaque 1-, 2- and 4-bit indexed PNGs as base-color textures. | done · 2026-11-25 · Odd-width rows matched RGB at every mip. An indexed sign was assigned in the editor and inspected by approved Claude. A malformed refresh kept the accepted texture. Reopen and relocated Vulkan matched the RGB reference. |
-| C-54 Create and Bind Box Sensor | Create a stationary Box Sensor for a Kinematic Sphere Script from its named binding dialog. | done · 2026-11-25 · Native and approved Claude created and bound a unit sensor in one Undo. Cancel and Redo preserved exact identities. In editor and relocated playback, the trolley entered at tick 5, emitted one cue, and exited at tick 12. |
-| C-55 Inspector Validation Feedback | Dismiss draft errors when their Inspector edit is restored or canceled. | done · 2026-11-25 · A rejected blank name kept the committed name. Retyping the saved name or pressing Escape cleared the warning without another Apply or Undo entry. Separate scene errors stayed visible. |
-| C-56 Frame Lighting Rigs | Frame visible lights and meshless v23 rigs from the Hierarchy or approved MCP. | done · 2026-11-25 · Native Frame Selected fit a folded Blender rig and a single light at their exact pivots. Approved Claude framed the same rig from Top. Hiding a light narrowed the fit and changing range left it unchanged. |
-| C-57 Browse for Build Destination | Choose a Linux build folder parent or archive filename from the Build dialog. | done · 2026-11-25 · Native keyboard Browse kept the folder name and seeded the archive chooser. An isolated portal tested cancellation, late replies, and exact paths with spaces. Folder and archive builds passed and a protected output stayed intact. |
-| C-58 Step Through Animator Keys | Navigate earlier and later authored key times in Animator Preview. | done · 2026-11-25 · Keyboard and approved Claude visited the distinct translation and rotation keys in order. Rendered poses matched the source times. Endpoints, stale refresh, clear and the unchanged scene revision passed. |
-| C-59 Escape Ownership During Hierarchy Search | Preserve the hierarchy filter when Escape cancels an Inspector draft. | done · 2026-11-25 · Native Escape canceled a crate rename and kept both search results. Search-focused Escape restored the full tree. The scene and selection stayed unchanged, and a focused test preserved popup priority. |
-| C-60 Clear Assets Search | Clear the query with a dedicated keyboard-accessible control and keep the folder and type filter. | done · 2026-11-25 · Click and Tab/Enter returned a project-wide Sound search to its original folder. Focus returned to Search, and the selected sound stayed open in the Inspector even when it lived in another folder. |
-| C-61 Escape Clears Project Scenes Search | Recover from an empty result list before closing the picker. | done · 2026-11-25 · Native Escape restored both saved scene rows and kept Search focused. A second Escape closed the picker with the current scene unchanged. The restored list still opened the other scene. |
-
-### C-04 implementation brief
-
-- **File-first OBJ.** Discover OBJ files under the project's `Assets/` folder.
-  Give each source a stable ID and import settings in an adjacent sidecar.
-  Reuse OBJ preparation and accepted asset publication. Done when a dropped
-  OBJ appears without a typed ID, survives assignment and reopen, rebuilds
-  with the same ID from source and sidecar, and displays in a built player.
-- **Existing projects and formats.** Bring PNG, WAV and supported GLB onto
-  the same path. Preserve accepted asset IDs, import settings, GLB subresource
-  IDs and clips. Preserve multiple catalog interpretations of one source.
-  Done when migration can resume safely and moving a source with its sidecar
-  keeps references. Report duplicate or invalid sidecars.
-- **Live reimport and browser.** Use a project-scoped worker for initial scan
-  and coalesced file changes. Show folders, search, import settings, and
-  missing or invalid files. Keep accepted content when reimport fails and
-  discard stale work on scene switch. Done when an external edit becomes
-  visible within one second on a measured fixture, repair recovers, and a
-  project with more than 64 assets remains usable.
-- **MCP and Build.** Use the same asset publication for native and approved
-  client writes. Check project, document, asset revision and the existing
-  lease at publication. Keep mesh assignment in shared scene Undo. Build
-  from the accepted dependency closure. Done when an approved client can
-  import and assign, stale or revoked writes leave the project intact, and
-  the built player loads independently of the source project and cache.
-
-### C-05 implementation brief
-
-- **Inspector.** Keep Transform first and use stable component IDs for sections.
-  Add a searchable component picker and edit each component through the same
-  scene transaction as its enabled state. Done when Add, edit, remove and
-  enable preserve unrelated fields, undo cleanly, reopen correctly and support
-  keyboard entry. Start with Mesh Renderer and Collider, then cover remaining
-  component types as their runtime and reference pickers become available.
-- **Hierarchy.** Add drag-to-reparent and sibling ordering, contiguous and
-  additive selection, and editor-only visibility and locking. Done when cycles
-  leave the scene intact, grouped moves undo together, and picking and
-  keyboard alternatives respect visibility and locking.
-- **Multi-edit and Play.** Edit shared fields in one transaction and show
-  mixed values where selections differ. Show live values while playing.
-  Done when Stop restores authored values, 5,000-object interactions are
-  measured, and C-06 can drive the same editor commands and Undo history.
-
-### C-06 implementation brief
-
-- Reuse native discovery, consent, pause, revocation and request leases. Use
-  active document identity and preferences. Route unsupported v23 operations
-  away from the legacy session. Validate v23 registered startup separately.
-- Expose paginated stable IDs and guarded local transforms through
-  `ComponentSession`. Done when an approved STDIO client can edit a 5,000-object
-  scene, native and MCP Undo share history, and stale or pending edits leave it intact.
-- Group object, component, asset, Play and capture operations around existing
-  transactions. Retain callable legacy names. Done when the full serialized
-  tool list is under 15 KB and the legacy and v23 client checks both pass.
-  v23 import and refresh use the live asset owner in C-04.
-
-### C-07 implementation brief
-
-- Save a v23 subtree as a readable prefab in `Assets/` with stable source
-  object and component IDs and sidecar asset identity. Include referenced
-  materials and script sources. Report cross-boundary references that cannot
-  be preserved before writing. Keep the selected subtree as the first instance.
-- Store optional instance links, stable ID mappings and per-property overrides
-  beside the scene's materialized objects. Reconcile on accepted source changes
-  and open. Preserve each instance's root placement and overrides. Retain the
-  last usable objects when the source is invalid or missing, and recover when
-  the same source identity returns.
-- Editor and MCP share placement, child Transform and Mesh Renderer Tint
-  overrides, Apply, Revert and Undo. Apply changes only the chosen source
-  property. Check the source bytes before replacing them or undoing a source
-  edit. Validate scene changes before publishing. Build ships the materialized
-  scene and runtime resources.
-- Verify three linked cottages, a propagated roof fix, preserved overrides and
-  placement, paired native and real MCP Undo, source moves and recovery,
-  save and reopen, and a relocated player. Nested prefabs, variants and
-  structural overrides are separate work.
-- The Linux watcher retains the last usable instances while a source is
-  unavailable and reconnects them when the same sidecar identity returns.
-  An accepted external change resets history. Applying a property through
-  the editor or MCP remains undoable with a source-byte check.
-- Release check applied a source change across 5,000 linked objects in
-  13.88 ms before disk I/O, then saved and reopened the scene. This is an
-  in-process measurement of a single update, separate from desktop frame
-  timing.
-
-## Phase 4 — Play slices
-
-- **Game HUD labels.** done — 2026-11-23, 607fc96. Native v23 anchors,
-  visibility and static text share Undo with guarded MCP. Approved Claude
-  edited one label by stable ID. A grouped horn trolley kept its input
-  while showing the label. Scripted and 5,000-object static Linux builds
-  showed the same anchor at 16:9 and 4:3. Release CPU layout and
-  tessellation p95 was 0.215 ms with HUD off, 0.214 ms with one label
-  and 0.240 ms with 32.
+| `C-00a` Legacy retirement | Remove unused legacy logistics crates and superseded MCP enrollment plumbing. | `open` (user-approved 2026-11-25) · Delete `rot-core`, `rot-cli`, `rot-viewer`, `rot-script`, `examples/yard-app`, legacy editor `ui.rs`/`model.rs`/`commands.rs`, `crates/support/{enrollment,project_startup}.rs`, and `scripts/enroll_local_connector.py`; promote `crates/support` to a workspace crate. |
+| `C-05` Hierarchy and Inspector | Rebuilt on components with immediate scrub feedback and standard hierarchy/inspector parity. | `in progress — closing` · Fix live Inspector axis scrubbing (`PARITY-PLAN` §5); explicitly defer live editing during Play to Phase 4; close `C-05`. |
+| `C-06` General MCP tools | Small general tool set (< 15 KB) using the shared command layer (`A4`). | `in progress — closing` · Retire legacy MCP tools once the legacy editor is deleted (`C-02`), route v23 MCP commands through the shared command/transaction layer, keep catalog `< 15 KB`, close `C-06`. |
+| `C-08` General glTF import | Non-refusal `.glb`/`.gltf` import with warnings instead of refusals. | `in progress — closing` · Confirm `.glb`/`.gltf` non-refusal import with warnings on the Phase 2 CC0 + Blender content; move full PBR maps, animated lenses, and animated lights to Phase 3A/3B; close `C-08`. |
+| `C-02` Scene crate & v23 cutover | `rot-scene` and `rot-editor` run exclusively on v23 with automatic upgrade on open. | `in progress` · Enable automatic v1–v22 → v23 migration (`ComponentScene::from_legacy`), convert `examples/` tracked scenes to v23, and delete legacy v1–v22 editor paths, `creation_export.rs`, and `scripts/package_creation.py`. See [C-01 brief](plans/C-01-OBJECT-COMPONENT-MODEL.md). |
+| `C-03` Native component runtime | Runtime, renderer and scripts execute `ComponentScene` flat arrays directly. | `in progress` · Retire `component_behavior.rs` (`behavior_projection()`) and `RuntimeScene::Behavior(Session)` so dynamic hierarchies, renderable parents, multiple components, and >256 objects run natively. |
+| `C-09` Build and Run | Editor ships a dedicated player binary and packages runnable Linux folders/archives. | `in progress` · Extract a lean `rot-player` binary crate out of `examples/motion-lab` (without `rot-script` or runtime kit); record Build and empty-player budgets. |
+| `C-10` Unified file-backed Lua API | One persistent-VM Lua component API (`A8`) with live reload on save. | `in progress` · Replace `host API1`–`7` and per-tick scene cloning with one growing component API (`on_start`, `on_update`, `find`, `spawn`, `destroy`, component access) and live reload on save. |
+| `C-EXIT` Phase 2 reference project & gate | Prove Phase 2 end-to-end on a tracked reference level within budgets. | `open` · Commit one v23 reference project in `examples/` (CC0 pack + Blender scene + 5,000-object prefab level); lift prototype caps (`16 MiB` GLB, `32k` tris, `2048` px edge) per `A12`; measure blank Phase 2 budgets, run desktop 60 fps and full UI checklist, and update the local install. |
+| `P-03` Platform seams & Windows CI | Protect `A11` immediately after Phase 2 exit before Phase 3/4 work begins. | `open` · Extract `rustix`, Unix sockets, `inotify` watcher, `rfd` target features, `xdg-open`, and OS dirs into platform modules; add a `windows-latest` `cargo check --workspace` CI job. |
 
 ## Later
 
-One line each until their phase is next. See the
-[phases](PARITY-PLAN.md#3-phases).
+One line each until their phase is active. See [phases](PARITY-PLAN.md#3-phases).
 
-- **Phase 3 — Look.** PBR material with normal, metallic, emissive and
-  occlusion maps; material assets with a preview; transparency and
-  double-sided; spot lights and many lights; cascaded, spot and point
-  shadows; sky, image-based lighting and fog; bloom, color grading, ambient
-  occlusion, anti-aliasing options; culling and instancing; shading and
-  debug view modes.
-- **Phase 4 — Play.** Events and coroutines in scripts; Rapier rigid bodies,
-  colliders, layers, raycasts, triggers, joints and a character controller;
-  skinned meshes, animation state machine and blending; looping, streamed
-  and spatial audio with a mixer; expanded runtime UI with images, buttons
-  and layout; mouse and gamepad input with rebinding; several
-  cameras and follow rigs; scene loading; particles; save data.
-- **Phase 5 — Ship and scale.** Windows editor and builds; profiler; script
-  debugger polish; LOD and occlusion culling; terrain; navigation;
-  timeline; light probes or baking; editor extensions; localization.
-- **Phase 6 — High end.** Ray tracing; virtualized geometry; streamed
-  worlds; networking; more platforms.
+- **Phase 3A — Look: PBR & Scene Scale.** Start with `L-01` (`.material.json`
+  asset files in `Assets/`); refactor `rot-render` (GPU storage-buffer instances,
+  vertex tangents, decoupled selection outline pass, lifted caps); full
+  metallic-roughness PBR with normal, emissive and occlusion maps; sky and IBL;
+  alpha transparency; frustum culling and dirty-range instancing.
+- **Phase 3B — Look: Lighting & Post.** Verify `wgpu-hal` SPIR-V/compute readiness
+  and implement clustered forward many-lights; cascaded directional plus spot
+  and point shadow atlas; fog; bloom, color grading, ambient occlusion and AA
+  options; shading and debug view modes.
+- **Phase 4 — Play.** Strict order: (1) unified persistent-VM Lua API with
+  events/coroutines + native component runtime (if not already closed in Phase 2);
+  (2) Rapier3D rigid bodies, colliders, triggers, raycasts, joints and character
+  controller (retiring `parry3d` in one cut; no further `parry3d` kinematic additions);
+  (3) skeletal skinning and animation state machine; (4) spatial/streamed audio
+  and mixer, expanded runtime UI, mouse and gamepad rebinding, multiple cameras,
+  scene loading, particles and save data.
+- **Phase 5A — Ship and scale.** Windows editor and builds, profiler and script
+  debugger polish, cooked binary runtime/cache assets for large scenes, LOD and
+  occlusion culling, and 50,000-object scenes at 60 fps.
+- **Phase 5B — Production world tools.** Terrain, navigation, timeline, light
+  probes or baking, editor extensions, localization.
+- **Phase 6 — High end.** Ray tracing, virtualized geometry, streamed worlds,
+  networking, further platforms.
 
 ## Done
 
-- 2026-11-17 · Imported GLB transform animation (import, Place, Play,
-  Refresh, Build). `5e24664`…`298428b`.
-- 2026-11-17 · Renamed remaining Ruster identifiers to Rot. `9a4ed8f`.
-- 2026-11-17 · `scripts/ui_drive.py`: drive and screenshot the editor on a
-  hidden workspace.
+See [BACKLOG-2026-11-25](archive/BACKLOG-2026-11-25.md) for full details on
+completed packages:
+
+- **Phase 1 — Shell (done 2026-11-17–19):** `S-01`–`S-13`, `T-01`–`T-02`,
+  `A-01`–`A-07`, `P-01`–`P-02`.
+- **Phase 2 — Core completed packages:** `C-01` (v23 design), `C-04` (files-first
+  `Assets/`), `C-07` (linked prefabs), `C-11` & `C-11a` (multi-scene projects &
+  crash recovery), `C-12` (5k/50k benchmark scenes), `C-05a`–`d`, `C-09a`, and
+  slices `C-13`–`C-61`.
+- **Phase 4 — Early slice:** Game HUD labels (`2026-11-23`, `607fc96`).

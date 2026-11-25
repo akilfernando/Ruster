@@ -211,6 +211,15 @@ class RunnerTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     check.validate_markdown(self.root, {"docs/broken.md"})
 
+    def test_markdown_doc_line_limits(self):
+        for rel, limit in check.DOC_LINE_LIMITS.items():
+            with self.subTest(path=rel):
+                self.write(rel, "".join(f"line {i}\n" for i in range(limit)))
+                check.validate_markdown(self.root, {rel})
+                self.write(rel, "".join(f"line {i}\n" for i in range(limit + 1)))
+                with self.assertRaisesRegex(RuntimeError, f"exceeds limit of {limit}"):
+                    check.validate_markdown(self.root, {rel})
+
     def test_commands_include_doc_tests_and_fail_fast(self):
         plan = check.Plan("packages", "fixture", ("rot-cli",))
         commands = check.commands(plan)
