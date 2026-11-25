@@ -152,7 +152,7 @@ fn preflight(bytes: &[u8], role: TextureRole, packed_green: bool) -> Result<(), 
     let mut data_ended = false;
     let mut ended = false;
     let mut ihdr = false;
-    let mut indexed = false;
+    let mut max_palette_bytes = None;
     let mut palette_entries = None;
     while offset < bytes.len() {
         let header_end = offset
@@ -186,8 +186,9 @@ fn preflight(bytes: &[u8], role: TextureRole, packed_green: bool) -> Result<(), 
                 ihdr = true;
                 let (width, height) = (number(&data[..4]), number(&data[4..8]));
                 chain_bytes(width, height, role)?;
-                indexed = (role == TextureRole::BaseColor || packed_green) && data[9] == 3;
-                if data[8] != 8
+                let indexed = (role == TextureRole::BaseColor || packed_green) && data[9] == 3;
+                let depth = data[8];
+                if !(depth == 8 || indexed && matches!(depth, 1 | 2 | 4))
                     || !(matches!(data[9], 2 | 6)
                         || indexed
                         || (role == TextureRole::Roughness && data[9] == 0))
@@ -197,30 +198,33 @@ fn preflight(bytes: &[u8], role: TextureRole, packed_green: bool) -> Result<(), 
                 {
                     return Err(error(
                         match role {
-                            TextureRole::BaseColor => "supported PNG is noninterlaced 8-bit RGB/RGBA/indexed with standard compression/filtering",
+                            TextureRole::BaseColor => "supported PNG is noninterlaced 8-bit RGB/RGBA or 1/2/4/8-bit indexed with standard compression/filtering",
                             TextureRole::Roughness => "supported roughness PNG is noninterlaced 8-bit grayscale/RGB/RGBA with standard compression/filtering",
                         },
                     ));
                 }
+                if indexed {
+                    max_palette_bytes = Some(3usize << depth);
+                }
             }
-            b"PLTE" if indexed => {
+            b"PLTE" if max_palette_bytes.is_some() => {
                 if image_data
                     || palette_entries.is_some()
-                    || !(3..=768).contains(&length)
+                    || !max_palette_bytes.is_some_and(|max| (3..=max).contains(&length))
                     || !length.is_multiple_of(3)
                 {
                     return Err(error("indexed PNG requires one valid palette before IDAT"));
                 }
                 palette_entries = Some(length / 3);
             }
-            b"tRNS" if indexed => {
+            b"tRNS" if max_palette_bytes.is_some() => {
                 if image_data || palette_entries.is_none_or(|count| !(1..=count).contains(&length))
                 {
                     return Err(error("invalid indexed PNG transparency"));
                 }
             }
             b"IDAT" => {
-                if indexed && palette_entries.is_none() {
+                if max_palette_bytes.is_some() && palette_entries.is_none() {
                     return Err(error("indexed PNG is missing its palette"));
                 }
                 if data_ended {
@@ -327,6 +331,7 @@ fn decode_png_channel(
         .read_info()
         .map_err(|e| error(format!("PNG decode: {e}")))?;
     let (width, height) = (reader.info().width, reader.info().height);
+    let header_depth = reader.info().bit_depth;
     // A roughness RGB/RGBA decoder buffer can still use four bytes per pixel;
     // it is a temporary owner, separate from the accepted R8 chain accounting.
     let raw_limit = image_bytes(width, height, TextureRole::BaseColor)?;
@@ -349,10 +354,13 @@ fn decode_png_channel(
         png::ColorType::Rgba => 4,
         _ => return Err(error("unexpected PNG output type")),
     };
-    if info.bit_depth != png::BitDepth::Eight
+    let depth = info.bit_depth as usize;
+    let row_bytes = (width as usize * channels * depth).div_ceil(8);
+    if info.bit_depth != header_depth
         || info.width != width
         || info.height != height
-        || info.buffer_size() != raw_limit / 4 * channels
+        || info.line_size != row_bytes
+        || info.buffer_size() != raw.len()
     {
         return Err(error("PNG output does not match checked header"));
     }
@@ -365,15 +373,19 @@ fn decode_png_channel(
             .as_deref()
             .ok_or_else(|| error("indexed PNG is missing its palette"))?;
         let (colors, _) = palette.as_chunks::<3>();
-        for &index in decoded {
-            let rgb = colors
-                .get(usize::from(index))
-                .ok_or_else(|| error("PNG pixel references an undefined palette entry"))?;
-            if packed_green {
-                pixels.push(rgb[1]);
-            } else {
-                pixels.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
-            }
+        if depth == 8 {
+            append_indexed_pixels(decoded.iter().copied(), colors, packed_green, &mut pixels)?;
+        } else {
+            let mask = (1u8 << depth) - 1;
+            // Each scanline starts on a byte boundary, with the first index
+            // in the high bits. The last byte can contain arbitrary padding.
+            let indices = decoded.chunks_exact(row_bytes).flat_map(|row| {
+                (0..width as usize).map(move |x| {
+                    let bit = x * depth;
+                    (row[bit / 8] >> (8 - depth - bit % 8)) & mask
+                })
+            });
+            append_indexed_pixels(indices, colors, packed_green, &mut pixels)?;
         }
     } else {
         for pixel in decoded.chunks_exact(channels) {
@@ -412,6 +424,26 @@ fn decode_png_channel(
     validate_texture(&texture)?;
     Ok(texture)
 }
+
+fn append_indexed_pixels(
+    indices: impl Iterator<Item = u8>,
+    colors: &[[u8; 3]],
+    packed_green: bool,
+    pixels: &mut Vec<u8>,
+) -> Result<(), AssetError> {
+    for index in indices {
+        let rgb = colors
+            .get(usize::from(index))
+            .ok_or_else(|| error("PNG pixel references an undefined palette entry"))?;
+        if packed_green {
+            pixels.push(rgb[1]);
+        } else {
+            pixels.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+        }
+    }
+    Ok(())
+}
+
 /// Package an already admitted linear level zero as ordinary grayscale PNG.
 pub(crate) fn encode_roughness_source(texture: &Texture) -> Result<Vec<u8>, AssetError> {
     let mut bytes = Vec::new();
@@ -673,6 +705,93 @@ pub(crate) mod tests {
         assert!(decode_png(&duplicate).is_err());
         let invalid_size = insert_chunk(&encoded, b"PLTE", &[1, 2, 3, 4], 33);
         assert!(decode_png(&invalid_size).is_err());
+    }
+
+    fn compact_indexed_png(depth: png::BitDepth, palette: &[[u8; 3]], rows: &[u8]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let mut encoder = png::Encoder::new(&mut bytes, 3, 3);
+        encoder.set_color(png::ColorType::Indexed);
+        encoder.set_depth(depth);
+        encoder.set_palette(palette.as_flattened());
+        encoder.set_trns(vec![0; palette.len()]);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(rows)
+            .unwrap();
+        bytes
+    }
+
+    #[test]
+    fn compact_indexed_png_rows_and_mips_match_rgb() {
+        use png::{BitDepth, ColorType};
+        let palette = [[12, 34, 56], [70, 80, 90], [180, 200, 220]];
+        for (depth, colors, packed, indices) in [
+            (
+                BitDepth::One,
+                &palette[..2],
+                &[0x5f, 0xbf, 0xdf][..],
+                [0, 1, 0, 1, 0, 1, 1, 1, 0],
+            ),
+            (
+                BitDepth::Two,
+                &palette[..],
+                &[0x1b, 0x87, 0x63][..],
+                [0, 1, 2, 2, 0, 1, 1, 2, 0],
+            ),
+            (
+                BitDepth::Four,
+                &palette[..],
+                &[0x01, 0x2f, 0x20, 0x1f, 0x12, 0x0f][..],
+                [0, 1, 2, 2, 0, 1, 1, 2, 0],
+            ),
+        ] {
+            let rgb = indices.map(|index| colors[index]);
+            let reference = png(3, 3, ColorType::Rgb, BitDepth::Eight, rgb.as_flattened());
+            let indexed = compact_indexed_png(depth, colors, packed);
+            assert_eq!(
+                decode_png(&indexed).unwrap(),
+                decode_png(&reference).unwrap(),
+                "{depth:?}"
+            );
+            assert_eq!(
+                decode_glb_roughness(&indexed).unwrap(),
+                decode_glb_roughness(&reference).unwrap(),
+                "{depth:?}"
+            );
+            assert!(decode_png_with_role(&indexed, TextureRole::Roughness).is_err());
+        }
+        let padded = compact_indexed_png(BitDepth::One, &palette[..1], &[0x1f; 3]);
+        assert_eq!(
+            decode_png(&padded).unwrap().mips[0].bytes,
+            [12, 34, 56, 255].repeat(9)
+        );
+    }
+
+    #[test]
+    fn compact_indexed_png_rejects_oversized_palette_indices_and_short_rows() {
+        use png::BitDepth;
+        let oversized = compact_indexed_png(BitDepth::One, &[[0; 3]; 3], &[0; 3]);
+        assert!(decode_png(&oversized)
+            .unwrap_err()
+            .to_string()
+            .contains("valid palette"));
+        let undefined =
+            compact_indexed_png(BitDepth::Four, &[[0; 3]; 2], &[0x01, 0x20, 0, 0, 0, 0]);
+        assert!(decode_png(&undefined)
+            .unwrap_err()
+            .to_string()
+            .contains("undefined palette entry"));
+
+        // Declare a fourth row without adding it to the compressed image.
+        let mut truncated = compact_indexed_png(BitDepth::Two, &[[0; 3]; 2], &[0; 3]);
+        truncated[20..24].copy_from_slice(&4_u32.to_be_bytes());
+        let checksum = crc32(&truncated[12..29]).to_be_bytes();
+        truncated[29..33].copy_from_slice(&checksum);
+        assert!(decode_png(&truncated)
+            .unwrap_err()
+            .to_string()
+            .contains("PNG pixels"));
     }
 
     // One boundary case owns PNG policy, opaque color normalization, linear-light

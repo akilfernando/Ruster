@@ -301,9 +301,9 @@ requires a supported model with geometry.
 
 Keep any PNG files a GLB references beside the model or in their original
 subfolder. Rot imports them with the model and refreshes the model when a
-referenced PNG in `Assets/` changes. Base-color textures support 8-bit
-noninterlaced indexed PNG alongside RGB and RGBA. Rot uses mipmaps and
-chooses the filter that matches the most explicitly requested sampling
+referenced PNG in `Assets/` changes. Base-color textures support
+noninterlaced 1-, 2-, 4-, or 8-bit indexed PNG and 8-bit RGB or RGBA. Rot
+uses mipmaps and chooses the filter that matches the most explicitly requested sampling
 stages. Select a GLB and look under **Import Warnings** in the Inspector for
 sampler approximations, other material fallbacks, or skipped faces.
 You can still place the model. `asset_inspect` reports

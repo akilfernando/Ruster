@@ -384,6 +384,12 @@ selected root carried only its own roof. One Undo restored its position.
 The action also worked without the source file and blocked navigation
 while Inspector edits were pending.
 
+**Compact indexed PNGs** now import at 1, 2 and 4 bits per pixel. Exact mip
+tests checked odd-width rows, including nonzero padding bits. A 13 × 7
+two-bit sign assigned in the editor matched its RGB reference on reopen
+and in a relocated Vulkan build. An undefined palette index was rejected
+and the accepted texture stayed visible.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added
