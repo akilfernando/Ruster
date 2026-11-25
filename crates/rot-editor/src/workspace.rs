@@ -359,6 +359,33 @@ pub(super) struct Binding {
     pub alt: bool,
 }
 impl Binding {
+    fn consume_press(&self, ctx: &egui::Context) -> bool {
+        let Some(key) = self.key else {
+            return false;
+        };
+        ctx.input_mut(|i| {
+            let mut consumed = false;
+            i.events.retain(|event| {
+                let matches = matches!(
+                    event,
+                    egui::Event::Key {
+                        key: pressed_key,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } if *pressed_key == key
+                        && modifiers.ctrl == self.ctrl
+                        && modifiers.shift == self.shift
+                        && modifiers.alt == self.alt
+                        && modifiers.matches_logically(self.modifiers())
+                );
+                consumed |= matches;
+                !matches
+            });
+            consumed
+        })
+    }
+
     pub fn text(self) -> String {
         let Some(key) = self.key else {
             return "Unbound".into();
@@ -1429,6 +1456,25 @@ impl Workspace {
         self.workspace_shortcuts(ctx, blocked, true)
     }
 
+    pub fn consume_hierarchy_rename(&self, ctx: &egui::Context) -> bool {
+        self.capture.is_none()
+            && !self.settings_open
+            && ctx.input(|input| {
+                input.focused
+                    && input
+                        .events
+                        .iter()
+                        .any(|event| matches!(event, egui::Event::Key { pressed: true, .. }))
+            })
+            && !ctx.text_edit_focused()
+            && self
+                .prefs
+                .bindings
+                .iter()
+                .find(|binding| binding.action == Action::Rename)
+                .is_some_and(|binding| binding.consume_press(ctx))
+    }
+
     fn workspace_shortcuts(
         &mut self,
         ctx: &egui::Context,
@@ -1532,27 +1578,7 @@ impl Workspace {
                 return None;
             }
             let key = binding.key?;
-            let action = ctx.input_mut(|i| {
-                let mut consumed = false;
-                i.events.retain(|event| {
-                    let matches = matches!(
-                        event,
-                        egui::Event::Key {
-                            key: pressed_key,
-                            pressed: true,
-                            modifiers,
-                            ..
-                        } if *pressed_key == key
-                            && modifiers.ctrl == binding.ctrl
-                            && modifiers.shift == binding.shift
-                            && modifiers.alt == binding.alt
-                            && modifiers.matches_logically(binding.modifiers())
-                    );
-                    consumed |= matches;
-                    !matches
-                });
-                consumed.then_some(binding.action)
-            });
+            let action = binding.consume_press(ctx).then_some(binding.action);
             if action == Some(Action::FocusRuntime) {
                 // A separate navigation event wins over a focus jump in the
                 // same batch, including when it follows the default shortcut.

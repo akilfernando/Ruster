@@ -312,6 +312,13 @@ Isometric and approved MCP Top shots matched their Scene views within
 one Undo restored the original camera, and reopened and relocated Vulkan
 views matched the overhead landmarks.
 
+**Inline Hierarchy rename** edits the exact v23 row through F2 or its
+context menu. Enter updates the name, Inspector and search while keeping
+the object ID and selection. Escape cancels, blank names stay editable,
+and unchanged names add no history. Focused tests covered remapping and
+temporary window focus loss. Native editing at 960 × 640 and approved
+STDIO MCP shared Undo and survived Save and reopen.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added

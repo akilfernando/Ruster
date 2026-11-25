@@ -125,6 +125,73 @@ struct ViewFlags {
     locked: bool,
 }
 
+struct HierarchyRename {
+    index: usize,
+    id: String,
+    revision: u64,
+    name: String,
+    focus: bool,
+    field_id: Option<egui::Id>,
+    error: Option<String>,
+}
+
+enum RenameStep {
+    Keep,
+    Commit,
+    FocusLost,
+}
+
+impl HierarchyRename {
+    fn show(&mut self, ui: &mut egui::Ui) -> RenameStep {
+        let id = ui.make_persistent_id("hierarchy_rename");
+        self.field_id = Some(id);
+        let focused = ui.memory(|memory| memory.has_focus(id));
+        let enter = focused
+            && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+        let response = ui.add_sized(
+            [ui.available_width(), ROW_HEIGHT],
+            egui::TextEdit::singleline(&mut self.name)
+                .id(id)
+                .hint_text(Text::ComponentName.plain())
+                .char_limit(1024),
+        );
+        if !ui.is_rect_visible(response.rect) {
+            return RenameStep::FocusLost;
+        }
+        let first = std::mem::take(&mut self.focus);
+        if first {
+            response.request_focus();
+            if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) {
+                use egui::text::{CCursor, CCursorRange};
+                state.cursor.set_char_range(Some(CCursorRange::two(
+                    CCursor::new(0),
+                    CCursor::new(self.name.chars().count()),
+                )));
+                state.store(ui.ctx(), id);
+            }
+        }
+        if response.changed() {
+            self.error = None;
+        }
+        if let Some(error) = &self.error {
+            ui.painter().rect_stroke(
+                response.rect,
+                ui.visuals().widgets.active.corner_radius,
+                egui::Stroke::new(1.0, editor_theme::colors(ui).error),
+                egui::StrokeKind::Inside,
+            );
+            response.on_hover_text(error);
+        }
+        if enter {
+            RenameStep::Commit
+        } else if !first && !ui.memory(|memory| memory.has_focus(id)) {
+            RenameStep::FocusLost
+        } else {
+            RenameStep::Keep
+        }
+    }
+}
+
 enum HierarchyDestination {
     Parent(Option<String>),
     Sibling { id: String, before: bool },
@@ -301,6 +368,7 @@ pub(super) struct ComponentWorkspace {
     collapsed_objects: HashSet<String>,
     visible_rows: Option<Vec<usize>>,
     hierarchy_focus: Option<(usize, bool)>,
+    hierarchy_rename: Option<HierarchyRename>,
     hierarchy_name_click: Option<egui::Id>,
     hierarchy_search: component_hierarchy_search::Search,
     hierarchy_search_index: component_hierarchy_search::SearchIndex,
@@ -429,6 +497,7 @@ impl ComponentWorkspace {
             collapsed_objects: HashSet::new(),
             visible_rows: None,
             hierarchy_focus: None,
+            hierarchy_rename: None,
             hierarchy_name_click: None,
             hierarchy_search: Default::default(),
             hierarchy_search_index: Default::default(),
@@ -937,6 +1006,55 @@ impl ComponentWorkspace {
         }
     }
 
+    fn hierarchy_rename_available(&self) -> bool {
+        !self.runtime.in_play_mode()
+            && !self.authored_edit_pending()
+            && !self.ai_transition_pending()
+    }
+
+    fn begin_hierarchy_rename(&mut self, index: usize, scroll: bool) {
+        if !self.hierarchy_rename_available() {
+            return;
+        }
+        let object = &self.session.scene().objects[index];
+        self.hierarchy_rename = Some(HierarchyRename {
+            index,
+            id: object.id.clone(),
+            revision: self.session.revision(),
+            name: object.name.clone(),
+            focus: true,
+            field_id: None,
+            error: None,
+        });
+        if scroll {
+            self.hierarchy_focus = Some((index, true));
+        }
+        self.hierarchy_name_click = None;
+    }
+
+    fn commit_hierarchy_rename(&mut self, draft: &HierarchyRename) -> Result<(), SceneError> {
+        if !self.hierarchy_rename_available() || self.session.revision() != draft.revision {
+            return Err(SceneError::Invalid(
+                Text::HierarchyRenameStale.plain().into(),
+            ));
+        }
+        let object = self
+            .session
+            .scene()
+            .objects
+            .get(draft.index)
+            .filter(|object| object.id == draft.id)
+            .ok_or_else(|| SceneError::Invalid(Text::HierarchyRenameStale.plain().into()))?;
+        if object.name == draft.name {
+            return Ok(());
+        }
+        let mut renamed = object.clone();
+        renamed.name.clone_from(&draft.name);
+        self.session.put_object(draft.revision, renamed)?;
+        self.refresh();
+        Ok(())
+    }
+
     fn target_ids(&self, hit: Option<&str>) -> Vec<String> {
         if let Some(id) = hit.filter(|id| !self.selection.contains(*id)) {
             return vec![id.to_owned()];
@@ -1003,6 +1121,7 @@ impl ComponentWorkspace {
         self.rebuild_draft();
         (self.rows, self.parents) = hierarchy_rows(&self.session.scene().objects);
         self.hierarchy_focus = None;
+        self.hierarchy_rename = None;
         self.refresh_disclosure();
         self.refresh_view();
     }
@@ -1806,6 +1925,15 @@ impl ComponentWorkspace {
             }
             Action::SetGameCameraFromView => {
                 self.begin_camera_capture();
+                return;
+            }
+            Action::Rename => {
+                if let Some(index) = self
+                    .selected_index
+                    .filter(|&index| self.visible_row_of(index).is_some())
+                {
+                    self.begin_hierarchy_rename(index, true);
+                }
                 return;
             }
             Action::Frame => {
@@ -2693,6 +2821,19 @@ impl ComponentWorkspace {
 
     fn show_workspace(&mut self, ui: &mut egui::Ui, draw_viewport: bool) -> Option<OpenedScene> {
         let ctx = ui.ctx().clone();
+        if self.hierarchy_rename.as_ref().is_some_and(|draft| {
+            draft.focus
+                || draft.field_id.is_some_and(|id| {
+                    ctx.memory(|memory| memory.has_focus(id) || memory.had_focus_last_frame(id))
+                })
+        }) && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            let draft = self
+                .hierarchy_rename
+                .take()
+                .expect("active Hierarchy rename");
+            self.hierarchy_focus = Some((draft.index, false));
+        }
         #[cfg(target_os = "linux")]
         let build_open = self.build.is_open();
         #[cfg(not(target_os = "linux"))]
@@ -2972,7 +3113,12 @@ impl ComponentWorkspace {
         let build_status = self.build.status();
         #[cfg(not(target_os = "linux"))]
         let build_status = None::<Text>;
-        let scene_error = self.error.as_ref().or(self.asset_error.as_ref());
+        let scene_error = self
+            .hierarchy_rename
+            .as_ref()
+            .and_then(|draft| draft.error.as_ref())
+            .or(self.error.as_ref())
+            .or(self.asset_error.as_ref());
         #[cfg(target_os = "linux")]
         let scene_error = self.asset_import_error.as_ref().or(scene_error);
         #[cfg(target_os = "linux")]
@@ -3058,6 +3204,7 @@ impl ComponentWorkspace {
                             | Action::GroupSelection
                             | Action::PlaceSelectionOnGround
                             | Action::Duplicate
+                            | Action::Rename
                             | Action::Delete
                             | Action::Frame
                             | Action::SetGameCameraFromView
@@ -3076,6 +3223,7 @@ impl ComponentWorkspace {
                 },
                 |action| {
                     !blocked
+                        && (action != Action::Rename || self.selected_index.is_some())
                         && (!matches!(
                             action,
                             Action::GroupSelection
@@ -3115,8 +3263,17 @@ impl ComponentWorkspace {
                     .then(|| self.hierarchy_name_click.take())
                     .flatten();
                 if self.show_hierarchy_search(ui, blocked || transform_active) {
+                    self.hierarchy_rename = None;
                     return;
                 }
+                let can_rename = !blocked && !transform_active && !self.runtime.in_play_mode();
+                let mut rename_draft = self.hierarchy_rename.take().filter(|draft| {
+                    can_rename
+                        && self.hierarchy_rename_available()
+                        && draft.revision == self.session.revision()
+                });
+                let mut rename_step = RenameStep::FocusLost;
+                let mut rename = None;
                 let root = ui
                     .selectable_label(self.selection.is_empty(), Text::ComponentSceneRoot.plain());
                 if self.rows.is_empty() {
@@ -3202,6 +3359,13 @@ impl ComponentWorkspace {
                                     ui.add_space(crate::ui_kit::tokens::CONTROL_HEIGHT);
                                     None
                                 };
+                                if let Some(draft) = rename_draft
+                                    .as_mut()
+                                    .filter(|draft| draft.index == index && draft.id == object.id)
+                                {
+                                    rename_step = draft.show(ui);
+                                    return;
+                                }
                                 let active = self.selection.contains(&object.id);
                                 let response = ui
                                     .add(
@@ -3218,6 +3382,13 @@ impl ComponentWorkspace {
                                 } else {
                                     disclosure_focused
                                 };
+                                if focused.is_some()
+                                    && can_rename
+                                    && !egui::Popup::is_any_open(ui.ctx())
+                                    && self.workspace.consume_hierarchy_rename(ui.ctx())
+                                {
+                                    rename = Some(index);
+                                }
                                 let tree_key = focused
                                     .filter(|_| {
                                         focus.is_none_or(|(target, _)| index == target)
@@ -3302,6 +3473,14 @@ impl ComponentWorkspace {
                                     selected = Some(Some((row, modifiers)));
                                 }
                                 response.context_menu(|ui| {
+                                    if action_menu_item(
+                                        ui,
+                                        &self.workspace,
+                                        Action::Rename,
+                                        can_rename && self.hierarchy_rename_available(),
+                                    ) {
+                                        rename = Some(index);
+                                    }
                                     if ui
                                         .add_enabled(
                                             !blocked && !self.runtime.in_play_mode(),
@@ -3397,7 +3576,32 @@ impl ComponentWorkspace {
                 if name_click.is_some() {
                     self.hierarchy_name_click = name_click;
                 }
-                if let Some(index) = toggle {
+                if let Some(mut draft) = rename_draft {
+                    match rename_step {
+                        RenameStep::Keep => self.hierarchy_rename = Some(draft),
+                        RenameStep::Commit => {
+                            match self.commit_hierarchy_rename(&draft) {
+                                Ok(()) => {
+                                    self.hierarchy_focus = Some((draft.index, false));
+                                }
+                                Err(error) => {
+                                    draft.error = Some(if draft.name.trim().is_empty() {
+                                        Text::HierarchyRenameNameRequired.plain().into()
+                                    } else {
+                                        error.to_string()
+                                    });
+                                    self.hierarchy_rename = Some(draft);
+                                }
+                            }
+                            ui.ctx().request_repaint();
+                        }
+                        RenameStep::FocusLost => {}
+                    }
+                }
+                if let Some(index) = rename {
+                    self.begin_hierarchy_rename(index, false);
+                    ui.ctx().request_repaint();
+                } else if let Some(index) = toggle {
                     self.toggle_disclosure(index);
                     ui.ctx().request_repaint();
                 } else if let Some((asset, parent)) = placed.filter(|_| !blocked) {
@@ -4224,6 +4428,111 @@ mod tests {
         assert!(editor.meshes.contains_key(&asset.id));
         assert!(dir.path().join("Assets/Triangle.obj.rotmeta").is_file());
         assert!(!editor.session.is_dirty());
+    }
+
+    #[test]
+    fn hierarchy_rename_uses_focused_row_and_keeps_selection_and_history() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.objects[0].name = "Twin".into();
+        scene.objects[1].name = "Twin".into();
+        scene.objects[1].parent = Some(scene.objects[2].id.clone());
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.adopt_workspace(Workspace::at_for_test(directory.path().join("editor.json")));
+        editor.select(Some(scene.objects[0].id.clone()));
+        editor.hierarchy_focus = Some((1, false));
+
+        let ctx = egui::Context::default();
+        let draw = |editor: &mut ComponentWorkspace, focused, events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 800.0),
+                    )),
+                    focused,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    editor.show_workspace(ui, false);
+                },
+            );
+            output.textures_delta.clear();
+        };
+        let frame = |editor: &mut ComponentWorkspace, events| draw(editor, true, events);
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(&mut editor, vec![]);
+        frame(&mut editor, vec![key(egui::Key::F2)]);
+        assert_eq!(
+            editor.hierarchy_rename.as_ref().unwrap().id,
+            scene.objects[1].id
+        );
+        frame(&mut editor, vec![]);
+        draw(&mut editor, false, vec![egui::Event::WindowFocused(false)]);
+        assert!(editor.hierarchy_rename.is_some());
+        draw(&mut editor, false, vec![]);
+        assert!(editor.hierarchy_rename.is_some());
+        frame(&mut editor, vec![egui::Event::WindowFocused(true)]);
+        frame(&mut editor, vec![egui::Event::Text("   ".into())]);
+        assert_eq!(editor.hierarchy_rename.as_ref().unwrap().name, "   ");
+        frame(&mut editor, vec![key(egui::Key::Enter)]);
+        assert!(editor.hierarchy_rename.as_ref().unwrap().error.is_some());
+        assert_eq!(editor.session.revision(), 0);
+        frame(&mut editor, vec![key(egui::Key::Escape)]);
+        assert!(editor.hierarchy_rename.is_none());
+        assert_eq!(editor.target_ids(None), [scene.objects[0].id.clone()]);
+
+        let binding = editor
+            .workspace
+            .prefs
+            .bindings
+            .iter_mut()
+            .find(|binding| binding.action == Action::Rename)
+            .unwrap();
+        binding.key = Some(egui::Key::F4);
+        frame(&mut editor, vec![key(egui::Key::F2)]);
+        assert!(editor.hierarchy_rename.is_none());
+        frame(&mut editor, vec![key(egui::Key::F4)]);
+        frame(&mut editor, vec![]);
+        frame(&mut editor, vec![egui::Event::Text("Not Committed".into())]);
+        frame(&mut editor, vec![key(egui::Key::Tab)]);
+        frame(&mut editor, vec![]);
+        assert!(editor.hierarchy_rename.is_none());
+        assert_eq!(editor.session.scene(), &scene);
+
+        editor.hierarchy_focus = Some((1, false));
+        frame(&mut editor, vec![]);
+        frame(&mut editor, vec![key(egui::Key::F4)]);
+        frame(&mut editor, vec![]);
+        frame(&mut editor, vec![egui::Event::Text("Renamed Child".into())]);
+        frame(&mut editor, vec![key(egui::Key::Enter)]);
+        let updated = editor.session.scene().clone();
+        assert_eq!(updated.objects[0], scene.objects[0]);
+        assert_eq!(updated.objects[1].id, scene.objects[1].id);
+        assert_eq!(updated.objects[1].parent, scene.objects[1].parent);
+        assert_eq!(updated.objects[1].name, "Renamed Child");
+        assert_eq!(editor.target_ids(None), [scene.objects[0].id.clone()]);
+        assert_eq!(editor.session.revision(), 1);
+
+        frame(&mut editor, vec![]);
+        frame(&mut editor, vec![key(egui::Key::F4)]);
+        frame(&mut editor, vec![]);
+        frame(&mut editor, vec![key(egui::Key::Enter)]);
+        assert_eq!(editor.session.revision(), 1);
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene(), &scene);
+        editor.command(Action::Redo);
+        assert_eq!(editor.session.scene(), &updated);
     }
 
     #[test]

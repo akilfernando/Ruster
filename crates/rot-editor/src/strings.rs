@@ -38,6 +38,8 @@ editor_text! {
     PrimitiveCapsule => "Procedural Capsule",
     Welcome => "Welcome to Rot Engine",
     NoRecentProjects => "No recent projects",
+    HierarchyRenameStale => "The Hierarchy row changed. Start Rename again.",
+    HierarchyRenameNameRequired => "Enter an object name.",
     HierarchySearchEmpty => "No matching objects.",
     HierarchyExpand => "Expand {name}",
     HierarchyCollapse => "Collapse {name}",
