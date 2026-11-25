@@ -85,6 +85,14 @@ impl Search {
 }
 
 impl ComponentWorkspace {
+    pub(super) fn select_and_reveal_hierarchy(&mut self, id: String, ctx: &egui::Context) {
+        self.hierarchy_search.clear();
+        self.hierarchy_search.focus_requested = false;
+        self.hierarchy_search_reveal = Some(id.clone());
+        self.select(Some(id));
+        ctx.request_repaint();
+    }
+
     /// A nonempty search replaces the visible tree without changing its state.
     pub(super) fn show_hierarchy_search(&mut self, ui: &mut egui::Ui, blocked: bool) -> bool {
         let input_id = ui.make_persistent_id("hierarchy_search_input");
@@ -294,11 +302,8 @@ impl ComponentWorkspace {
         if let Some(index) = reveal {
             let id = objects[index].id.clone();
             if self.apply() {
-                self.hierarchy_search.clear();
-                self.hierarchy_search_reveal = Some(id.clone());
-                self.select(Some(id));
+                self.select_and_reveal_hierarchy(id, ui.ctx());
                 ui.memory_mut(|memory| memory.surrender_focus(input_id));
-                ui.ctx().request_repaint();
             }
         }
         true

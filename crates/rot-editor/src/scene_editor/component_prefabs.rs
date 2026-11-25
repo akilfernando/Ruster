@@ -423,22 +423,28 @@ impl ComponentWorkspace {
         self.unpack_prefab_draft = Some(draft);
     }
 
-    pub(super) fn prefab_inspector(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn prefab_inspector(&mut self, ui: &mut egui::Ui, blocked: bool) {
         let Some(object) = self.draft.as_ref() else {
             return;
         };
-        let Some((link, part)) = self.session.scene().prefabs.values().find_map(|link| {
-            link.parts
-                .values()
-                .find(|part| part.object == object.id)
-                .map(|part| (link, part))
-        }) else {
+        let Some((root, link, part)) =
+            self.session
+                .scene()
+                .prefabs
+                .iter()
+                .find_map(|(root, link)| {
+                    link.parts
+                        .values()
+                        .find(|part| part.object == object.id)
+                        .map(|part| (root, link, part))
+                })
+        else {
             return;
         };
         let file = self.prefab_files.get(&link.asset);
         ui.separator();
         ui.strong(Text::Prefab.plain());
-        if self.session.scene().prefabs.contains_key(&object.id)
+        if root == &object.id
             && ui
                 .add_enabled(
                     !self.authored_edit_pending() && !self.runtime.in_play_mode(),
@@ -456,6 +462,23 @@ impl ComponentWorkspace {
                 focus_cancel: true,
                 error: None,
             });
+        }
+        if root != &object.id
+            && ui
+                .add_enabled(
+                    !blocked
+                        && !self.runtime.in_play_mode()
+                        && !self.authored_edit_pending()
+                        && !self.ai_transition_pending()
+                        && self.hierarchy_rename.is_none()
+                        && self.current_animation_preview().is_none(),
+                    egui::Button::new(Text::PrefabSelectRoot.plain()),
+                )
+                .on_disabled_hover_text(Text::PrefabSelectRootBlocked.plain())
+                .clicked()
+        {
+            self.select_and_reveal_hierarchy(root.clone(), ui.ctx());
+            return;
         }
         if let Some(file) = file {
             ui.label(
@@ -567,6 +590,160 @@ mod tests {
     use super::*;
     use rot_scene::component_scene::{ComponentScene, ComponentSession};
     use rot_scene::{Scene, Session};
+
+    #[test]
+    fn select_prefab_root_reveals_exact_link_and_preserves_pending_edits() {
+        use rot_scene::component_scene::ObjectNode;
+
+        let project = tempfile::tempdir().unwrap();
+        let path = project.path().join("scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let root = scene.objects[0].id.clone();
+        scene.objects[0].name = "Identical Root".into();
+        scene.objects[0].parent = Some("bay-a".into());
+        scene.objects[1].name = "Linked Child".into();
+        scene.objects[1].parent = Some(root.clone());
+        for id in ["bay-a", "bay-b"] {
+            scene.objects.push(ObjectNode {
+                id: id.into(),
+                name: "Bay".into(),
+                parent: None,
+                enabled: true,
+                transform: Transform::default(),
+                components: Vec::new(),
+            });
+        }
+        let source = PrefabSource::from_selection(&scene, &root).unwrap();
+        let mut session = ComponentSession::new(scene).unwrap();
+        session
+            .link_prefab(
+                0,
+                "source".into(),
+                "Assets/Missing.prefab".into(),
+                &source,
+                |_| Ok(()),
+            )
+            .unwrap();
+        session
+            .place_prefab(
+                1,
+                "source".into(),
+                source.content_hash().unwrap(),
+                &source,
+                "second-root",
+                Transform::default(),
+                Some("bay-b".into()),
+            )
+            .unwrap();
+        session.save(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let before = editor.session.scene().clone();
+        assert_eq!(
+            before
+                .objects
+                .iter()
+                .filter(|obj| obj.name == "Identical Root")
+                .count(),
+            2
+        );
+        let child = before.prefabs["second-root"]
+            .parts
+            .values()
+            .find(|part| part.object != "second-root")
+            .unwrap()
+            .object
+            .clone();
+        editor.select(Some(child.clone()));
+        editor
+            .collapsed_objects
+            .extend(["bay-a".into(), "bay-b".into(), "second-root".into()]);
+        editor.refresh_disclosure();
+
+        let ctx = egui::Context::default();
+        ctx.all_styles_mut(|style| style.animation_time = 0.);
+        let frame = |editor: &mut ComponentWorkspace, events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280., 960.),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    editor.show_workspace(ui, false);
+                },
+            );
+            output.textures_delta.clear();
+            output.shapes
+        };
+        let button = |shapes: Vec<egui::epaint::ClippedShape>| {
+            shapes
+                .into_iter()
+                .find_map(|shape| match shape.shape {
+                    egui::epaint::Shape::Text(text)
+                        if text.galley.text() == Text::PrefabSelectRoot.plain() =>
+                    {
+                        Some(text.pos + text.galley.size() * 0.5)
+                    }
+                    _ => None,
+                })
+                .expect("missing-source child still shows Select Prefab Root")
+        };
+        let click = |editor: &mut ComponentWorkspace, pos| {
+            frame(editor, vec![egui::Event::PointerMoved(pos)]);
+            for pressed in [true, false] {
+                frame(
+                    editor,
+                    vec![egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                );
+            }
+        };
+        editor.hierarchy_search.focus_requested = true;
+        frame(&mut editor, vec![]);
+        frame(&mut editor, vec![egui::Event::Text("Linked Child".into())]);
+        assert!(editor.hierarchy_search.is_active());
+
+        editor.draft.as_mut().unwrap().transform.translation[0] = 3.;
+        let pos = button(frame(&mut editor, vec![]));
+        click(&mut editor, pos);
+        assert_eq!(editor.selection_anchor.as_deref(), Some(child.as_str()));
+        assert_eq!(editor.draft.as_ref().unwrap().transform.translation[0], 3.);
+        assert!(editor.hierarchy_search.is_active());
+
+        editor.rebuild_draft();
+        let pos = button(frame(&mut editor, vec![]));
+        click(&mut editor, pos);
+        assert_eq!(editor.selection_anchor.as_deref(), Some("second-root"));
+        assert!(!editor.hierarchy_search.is_active());
+        assert_eq!(
+            editor.hierarchy_search_reveal.as_deref(),
+            Some("second-root")
+        );
+        frame(&mut editor, vec![]);
+        assert!(editor.hierarchy_search_reveal.is_none());
+        assert_eq!(
+            editor.collapsed_objects,
+            ["bay-a".into(), "second-root".into()].into()
+        );
+        let row_focus = ctx
+            .memory(|memory| memory.focused())
+            .and_then(|id| ctx.read_response(id))
+            .unwrap();
+        assert!(row_focus.has_focus() && row_focus.rect.center().x < 330.);
+        assert_eq!(editor.session.scene(), &before);
+        assert_eq!(editor.session.revision(), 0);
+        assert!(!editor.session.is_dirty());
+        assert!(matches!(editor.session.undo(0), Err(SceneError::NoUndo)));
+    }
 
     #[cfg(unix)]
     #[test]

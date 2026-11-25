@@ -377,6 +377,13 @@ bindings keep their saved values until edited. The picker and Capture
 guide the creator to a replacement. In the relocated Linux player, F11
 toggled fullscreen and the replacement H moved the Lua witness once.
 
+**Select Prefab Root** reveals the owning instance from a linked child
+in the Inspector. Keyboard activation focused the correct same-named
+cottage, expanded its lot, and kept the other lot folded. Moving the
+selected root carried only its own roof. One Undo restored its position.
+The action also worked without the source file and blocked navigation
+while Inspector edits were pending.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added

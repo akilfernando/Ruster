@@ -3746,7 +3746,7 @@ impl ComponentWorkspace {
                             if self.selected_index.is_some() {
                                 self.local_transform_menu(ui);
                                 self.parent_ui(ui);
-                                self.prefab_inspector(ui);
+                                self.prefab_inspector(ui, blocked);
                                 ui.separator();
                                 if self.draft.is_some() {
                                     let allow_new = self.material_controls();

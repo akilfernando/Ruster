@@ -324,6 +324,8 @@ editor_text! {
     PrefabRevert => "Couldn't revert the prefab override.",
     PrefabRefresh => "Couldn't update linked prefabs.",
     PrefabUnavailable => "Prefab source unavailable",
+    PrefabSelectRoot => "Select Prefab Root",
+    PrefabSelectRootBlocked => "Finish the current edit or transition before selecting the prefab root.",
     PrefabUnpackAction => "Unpack Prefab Instance…",
     PrefabUnpackTitle => "Unpack Prefab Instance",
     PrefabUnpackConfirm => "Unpack",

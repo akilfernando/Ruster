@@ -780,6 +780,11 @@ their own local finish keep it. **Revert Material** restores the current
 inherited finish on the selected renderer. Both actions share Undo with
 the editor and MCP.
 
+On a linked child, choose **Select Prefab Root** in the Inspector's
+**Prefab** section to select its instance and reveal it in the Hierarchy.
+Finish any pending edits first. You can select the root even when the
+prefab source is missing.
+
 To keep an instance as ordinary scene objects, select its root and choose
 **Unpack Prefab Instance…** in the Inspector. Review the root and object
 count, then choose **Unpack**. The assembly keeps its objects, components,
