@@ -698,6 +698,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-56 Frame Lighting Rigs | Frame visible lights and meshless v23 rigs from the Hierarchy or approved MCP. | done · 2026-11-25 · Native Frame Selected fit a folded Blender rig and a single light at their exact pivots. Approved Claude framed the same rig from Top. Hiding a light narrowed the fit and changing range left it unchanged. |
 | C-57 Browse for Build Destination | Choose a Linux build folder parent or archive filename from the Build dialog. | done · 2026-11-25 · Native keyboard Browse kept the folder name and seeded the archive chooser. An isolated portal tested cancellation, late replies, and exact paths with spaces. Folder and archive builds passed and a protected output stayed intact. |
 | C-58 Step Through Animator Keys | Navigate earlier and later authored key times in Animator Preview. | done · 2026-11-25 · Keyboard and approved Claude visited the distinct translation and rotation keys in order. Rendered poses matched the source times. Endpoints, stale refresh, clear and the unchanged scene revision passed. |
+| C-59 Escape Ownership During Hierarchy Search | Preserve the hierarchy filter when Escape cancels an Inspector draft. | in progress — Codex Sol, 2026-11-25 |
 
 ### C-04 implementation brief
 
