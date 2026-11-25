@@ -69,6 +69,7 @@ pub(super) struct Search {
     revision: Option<u64>,
     results: Vec<usize>,
     active: usize,
+    focused_control: Option<egui::Id>,
     pub(super) focus_requested: bool,
 }
 
@@ -81,6 +82,7 @@ impl Search {
         self.query.clear();
         self.results.clear();
         self.active = 0;
+        self.focused_control = None;
     }
 }
 
@@ -94,11 +96,30 @@ impl ComponentWorkspace {
     }
 
     /// A nonempty search replaces the visible tree without changing its state.
-    pub(super) fn show_hierarchy_search(&mut self, ui: &mut egui::Ui, blocked: bool) -> bool {
+    pub(super) fn show_hierarchy_search(
+        &mut self,
+        ui: &mut egui::Ui,
+        blocked: bool,
+        popup_was_open: bool,
+    ) -> bool {
         let input_id = ui.make_persistent_id("hierarchy_search_input");
-        let focused_before = ui.memory(|memory| memory.has_focus(input_id));
+        let previously_rendered_focus = self.hierarchy_search.focused_control.take();
+        let (focused_before, owns_escape) = ui.memory(|memory| {
+            let focused = memory.focused();
+            let owns_escape = match focused {
+                Some(id) => id == input_id || previously_rendered_focus == Some(id),
+                None => {
+                    memory.had_focus_last_frame(input_id)
+                        || previously_rendered_focus
+                            .is_some_and(|id| memory.had_focus_last_frame(id))
+                }
+            };
+            (focused == Some(input_id), owns_escape)
+        });
         let escape = !blocked
             && self.hierarchy_search.is_active()
+            && owns_escape
+            && !popup_was_open
             && !egui::Popup::is_any_open(ui.ctx())
             && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
         let (up, down, enter) = if !blocked && focused_before && self.hierarchy_search.is_active() {
@@ -114,7 +135,12 @@ impl ComponentWorkspace {
         };
         if escape {
             self.hierarchy_search.clear();
-            ui.memory_mut(|memory| memory.surrender_focus(input_id));
+            ui.memory_mut(|memory| {
+                memory.surrender_focus(input_id);
+                if let Some(id) = previously_rendered_focus {
+                    memory.surrender_focus(id);
+                }
+            });
         }
         let edit = ui
             .add_enabled_ui(!blocked, |ui| {
@@ -150,12 +176,15 @@ impl ComponentWorkspace {
                             Text::LabelFindObjects.plain(),
                         )
                     });
-                    if !self.hierarchy_search.query.is_empty()
-                        && ui_kit::icon_button(ui, "×", Text::ClearSearch.plain(), None, false)
-                            .clicked()
-                    {
-                        self.hierarchy_search.clear();
-                        edit.request_focus();
+                    if !self.hierarchy_search.query.is_empty() {
+                        let clear =
+                            ui_kit::icon_button(ui, "×", Text::ClearSearch.plain(), None, false);
+                        if clear.clicked() {
+                            self.hierarchy_search.clear();
+                            edit.request_focus();
+                        } else if !blocked && ui.memory(|memory| memory.has_focus(clear.id)) {
+                            self.hierarchy_search.focused_control = Some(clear.id);
+                        }
                     }
                     if !blocked && std::mem::take(&mut self.hierarchy_search.focus_requested) {
                         edit.request_focus();
@@ -207,6 +236,7 @@ impl ComponentWorkspace {
             list = list.vertical_scroll_offset(offset as f32 * extent);
         }
         let mut reveal = enter.then_some(search.results[search.active]);
+        let window_focused = ui.input(|input| input.focused);
         list.show_rows(ui, result_height, search.results.len(), |ui, range| {
             for row in range {
                 let index = search.results[row];
@@ -228,6 +258,11 @@ impl ComponentWorkspace {
                         )
                     })
                     .inner;
+                let focused = ui.memory(|memory| memory.has_focus(response.id));
+                if !blocked && focused {
+                    search.focused_control = Some(response.id);
+                }
+                let show_focus = window_focused && focused;
                 let selected = row == search.active;
                 let label = format!("{} · {}", object.name, object.id);
                 response.widget_info(|| {
@@ -240,13 +275,13 @@ impl ComponentWorkspace {
                 });
                 let visuals = ui.visuals();
                 let widget = ui.style().interact(&response);
-                if selected || response.hovered() || response.has_focus() {
+                if selected || response.hovered() || show_focus {
                     let fill = if selected {
                         visuals.selection.bg_fill
                     } else {
                         widget.weak_bg_fill
                     };
-                    let stroke = if response.has_focus() {
+                    let stroke = if show_focus {
                         widget.fg_stroke
                     } else {
                         egui::Stroke::NONE
@@ -405,6 +440,105 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn hierarchy_search_escape_respects_an_inspector_draft_and_popup() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.objects[0].name = "Inspection Target".into();
+        let mut editor =
+            ComponentWorkspace::new(path, ComponentSession::new(scene.clone()).unwrap());
+        editor.select(Some(scene.objects[0].id.clone()));
+
+        let ctx = egui::Context::default();
+        let draw = |editor: &mut ComponentWorkspace, events, popup| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280., 800.),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    if popup {
+                        egui::Popup::open_id(ui.ctx(), egui::Id::unique("escape-owner-fixture"));
+                    }
+                    editor.show_workspace(ui, false);
+                    if popup {
+                        assert!(ui.input(|input| input.key_pressed(egui::Key::Escape)));
+                        egui::Popup::close_all(ui.ctx());
+                    }
+                },
+            );
+            output.textures_delta.clear();
+            output.shapes
+        };
+        let key = |key| {
+            [true, false]
+                .into_iter()
+                .map(|pressed| egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .collect()
+        };
+        editor.hierarchy_search.focus_requested = true;
+        draw(&mut editor, vec![], false);
+        let shapes = draw(
+            &mut editor,
+            vec![egui::Event::Text("Inspection".into())],
+            false,
+        );
+        assert_eq!(editor.hierarchy_search.query, "Inspection");
+        let name = shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text)
+                    if text.pos.x > 800. && text.galley.text() == "Inspection Target" =>
+                {
+                    Some(text.pos + text.galley.size() * 0.5)
+                }
+                _ => None,
+            })
+            .expect("visible Inspector name field");
+        draw(&mut editor, vec![egui::Event::PointerMoved(name)], false);
+        for pressed in [true, false] {
+            draw(
+                &mut editor,
+                vec![egui::Event::PointerButton {
+                    pos: name,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                false,
+            );
+        }
+        draw(&mut editor, vec![egui::Event::Text(" draft".into())], false);
+        assert_ne!(editor.draft.as_ref().unwrap().name, scene.objects[0].name);
+        draw(&mut editor, key(egui::Key::Escape), true);
+        assert!(editor.draft_dirty());
+        assert_eq!(editor.hierarchy_search.query, "Inspection");
+
+        draw(&mut editor, key(egui::Key::Escape), false);
+        assert_eq!(editor.hierarchy_search.query, "Inspection");
+        assert_eq!(editor.draft.as_ref().unwrap().name, scene.objects[0].name);
+        assert!(!editor.draft_dirty());
+        assert_eq!(editor.session.revision(), 0);
+
+        editor.hierarchy_search.focus_requested = true;
+        draw(&mut editor, vec![], false);
+        draw(&mut editor, key(egui::Key::Escape), false);
+        assert!(!editor.hierarchy_search.is_active());
+        assert_eq!(editor.session.scene(), &scene);
+    }
+
+    #[test]
     fn hierarchy_search_keeps_the_draft_and_paginates_exact_hierarchy_order() {
         let folder = tempfile::tempdir().unwrap();
         let path = folder.path().join("scene.json");
@@ -448,7 +582,8 @@ mod tests {
                     if let Some(action) = editor.workspace.component_shortcuts(ui.ctx(), false) {
                         editor.command(action);
                     }
-                    editor.show_hierarchy_search(ui, false);
+                    let popup = egui::Popup::is_any_open(ui.ctx());
+                    editor.show_hierarchy_search(ui, false, popup);
                 },
             );
             output.textures_delta.clear();

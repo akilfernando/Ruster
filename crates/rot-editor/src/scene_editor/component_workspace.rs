@@ -2843,6 +2843,7 @@ impl ComponentWorkspace {
 
     fn show_workspace(&mut self, ui: &mut egui::Ui, draw_viewport: bool) -> Option<OpenedScene> {
         let ctx = ui.ctx().clone();
+        let popup_was_open = egui::Popup::is_any_open(&ctx);
         if self.hierarchy_rename.as_ref().is_some_and(|draft| {
             draft.focus
                 || draft.field_id.is_some_and(|id| {
@@ -3289,7 +3290,7 @@ impl ComponentWorkspace {
                     .input(|input| input.pointer.any_released())
                     .then(|| self.hierarchy_name_click.take())
                     .flatten();
-                if self.show_hierarchy_search(ui, blocked || transform_active) {
+                if self.show_hierarchy_search(ui, blocked || transform_active, popup_was_open) {
                     self.hierarchy_rename = None;
                     return;
                 }
@@ -3876,6 +3877,7 @@ impl ComponentWorkspace {
                     && self.project_settings.is_none()
                     && (self.collider_tool.mode().is_none()
                         || escape_pressed && !self.collider_tool.active() && self.draft_dirty())
+                    && !popup_was_open
                     && !egui::Popup::is_any_open(&ctx)
                     && ui.input_mut(|input| {
                         input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)

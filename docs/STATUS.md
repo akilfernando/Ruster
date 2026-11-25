@@ -420,6 +420,11 @@ Refresh refused the stale request, and Exit restored the authored pose.
 An isolated release lookup measured 8.0 µs p95 for 1,024 tracks with
 32 keys each. The controls read cached adjacent times between seeks.
 
+**Escape during Hierarchy search** follows the focused control. Native
+Escape discarded an Inspector rename while retaining the filter. With
+search focused, Escape restored the full tree. Both kept the authored
+scene and selection intact, and popup Escape kept first priority.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added
