@@ -680,6 +680,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-38 Reset Local Transform | Restore selected v23 objects to identity relative to their own parents in one Undo step. | done · 2026-11-25 · Keyboard Reset restored two housings to different parent origins in one Undo. The copy stayed available, a no-op kept history, and approved MCP, reopen and relocated Vulkan matched. |
 | C-39 Animator Playback Speed | Reuse one imported clip on v23 objects with independent playback multipliers. | done · 2026-11-25 · Native and approved MCP configured 0.5× and 2× for one shared clip. Exact poses matched in Play, a saved Play Check, and relocated fixed-tick playback. Default-rate poses matched the release baseline. |
 | C-40 Filter Assets by Type | Combine exact asset categories with the existing folder and project text search. | done · 2026-11-25 · Sound plus a name query isolated a WAV from similarly named meshes and Lua. Folder navigation, watcher updates, compact layout, keyboard selection and private audio audition passed. |
+| C-41 Centered Game HUD Edge Anchors | Anchor HUD labels and actions at the top or bottom center of the Game view. | in progress — Codex Sol, 2026-11-25 |
 
 ### C-04 implementation brief
 
