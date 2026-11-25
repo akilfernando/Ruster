@@ -32,7 +32,6 @@ pub(super) fn advertised(name: &str) -> bool {
             | "asset_inspect"
             | "asset_import"
             | "asset_refresh"
-            | "asset_rename"
             | "scene_model_place"
             | "scene_prefab"
             | "scene_mesh"
@@ -142,20 +141,17 @@ mod tests {
             &mut local,
         );
         let names = list["result"]["tools"].as_array().unwrap();
-        assert!(names.iter().any(|tool| tool["name"] == "scene_color"));
+        assert!(names.iter().any(|tool| tool["name"] == "scene_display_set"));
         assert!(names
             .iter()
             .all(|tool| !advertised(tool["name"].as_str().unwrap())));
         let description = invoke(
             &mut server,
             "rot_tools",
-            json!({"action":"describe","name":"scene_color"}),
+            json!({"action":"describe","name":"scene_display_set"}),
             &mut local,
         );
-        assert_eq!(
-            description["result"]["inputSchema"]["required"],
-            json!(["object_id", "color"])
-        );
+        assert_eq!(description["result"]["inputSchema"]["required"], json!([]));
         let primitive = invoke(
             &mut server,
             "rot_tools",
@@ -168,33 +164,33 @@ mod tests {
             .contains("radius 0.5 and height 2 along +Y"));
         let mut args = json!({
             "expected_session_token":"owner","expected_revision":2,
-            "object_id":"cube","color":[0,0.5,1,1]
+            "display":{"type":"legacy_sdr"}
         });
         let response = json!({"ok":false,"error":{"code":"approval_required"}});
         let mut bridge = |name: &str, forwarded: &Value| {
-            assert_eq!(name, "scene_color");
+            assert_eq!(name, "scene_display_set");
             assert_eq!(forwarded["expected_revision"], "2");
-            assert_eq!(forwarded["color"], json!([0, 0.5, 1, 1]));
+            assert_eq!(forwarded["display"], json!({"type":"legacy_sdr"}));
             response.clone()
         };
         assert_eq!(
-            invoke(&mut server, "scene_color", args.clone(), &mut bridge),
+            invoke(&mut server, "scene_display_set", args.clone(), &mut bridge),
             response
         );
         assert_eq!(
             invoke(
                 &mut server,
                 "rot_tools",
-                json!({"action":"call","name":"scene_color","arguments":args}),
+                json!({"action":"call","name":"scene_display_set","arguments":args}),
                 &mut bridge,
             ),
             response
         );
-        args["color"] = json!([0, 1, 10, 1]);
+        args["display"] = json!({"type":"surface_hdr","exposure_stops":99});
         let refusal = invoke(
             &mut server,
             "rot_tools",
-            json!({"action":"call","name":"scene_color","arguments":args}),
+            json!({"action":"call","name":"scene_display_set","arguments":args}),
             &mut local,
         );
         assert_eq!(refusal["error"]["code"], "invalid_arguments");

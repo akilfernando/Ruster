@@ -1305,13 +1305,9 @@ pub(crate) mod tests {
         let (owner_b, handshake_b) = approved(&b);
         assert_ne!(handshake_a["binding"], handshake_b["binding"]);
         // Use the owning capability inventory, not a second hand-maintained
-        // matrix. All scene and legacy operations cross the same gate.
-        let operations: Vec<_> = crate::scene_editor::SCENE_CAPABILITIES
-            .iter()
-            .copied()
-            .chain(["inspect", "edit", "undo", "redo", "replay"])
-            .collect();
-        assert_eq!(operations.len(), 99);
+        // matrix. All v23 operations cross the same gate.
+        let operations: Vec<_> = crate::scene_editor::SCENE_CAPABILITIES.to_vec();
+        assert_eq!(operations.len(), 59);
         assert!(operations.contains(&"scene_copy_local_transform"));
         assert!(operations.contains(&"scene_place_on_ground"));
         for op in operations {
@@ -1541,7 +1537,7 @@ pub(crate) mod tests {
         ] {
             let mut bridge = Bridge::start(egui::Context::default()).unwrap();
             let (mut stream, handshake) = approved(&bridge);
-            let mut request = frame(&handshake, "behavior_property_set", json!({})).to_string();
+            let mut request = frame(&handshake, "scene_components_edit", json!({})).to_string();
             request = request.replacen("\"arguments\":{}", &format!("\"arguments\":{raw}"), 1);
             let valid = rot_support::strict_json::parse(request.as_bytes()).is_ok();
             let worker = std::thread::spawn(move || {

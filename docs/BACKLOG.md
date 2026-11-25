@@ -40,7 +40,6 @@ cuts below in order.
 
 | Package | Outcome | Status & remaining gap |
 | --- | --- | --- |
-| `C-06` General MCP tools | Small general tool set (< 15 KB) using the shared command layer (`A4`). | `in progress` · Retire legacy MCP tools now that `C-02` removed the legacy editor, route v23 MCP commands through the shared command/transaction layer, keep catalog `< 15 KB`, close `C-06`. |
 | `C-03` Native component runtime | Runtime, renderer and scripts execute `ComponentScene` flat arrays directly. | `in progress` · Retire `component_behavior.rs` (`behavior_projection()`) and `RuntimeScene::Behavior(Session)` so dynamic hierarchies, renderable parents, multiple components, and >256 objects run natively. |
 | `C-09` Build and Run | Editor ships a dedicated player binary and packages runnable Linux folders/archives. | `in progress` · Extract a lean `rot-player` binary crate out of `examples/motion-lab` (without `rot-script` or runtime kit); record Build and empty-player budgets. |
 | `C-10` Unified file-backed Lua API | One persistent-VM Lua component API (`A8`) with live reload on save. | `in progress` · Replace `host API1`–`7` and per-tick scene cloning with one growing component API (`on_start`, `on_update`, `find`, `spawn`, `destroy`, component access) and live reload on save. |
@@ -92,7 +91,11 @@ completed packages:
   `C-04` (files-first `Assets/`), `C-05` (Hierarchy & Inspector with
   live single/multi-object axis scrubbing, parented descendants & lights preview,
   Escape cancel, and one-step Undo; live editing during Play deferred to
-  Phase 4), `C-07` (linked prefabs), `C-08` (non-refusal `.glb`/`.gltf`
+  Phase 4), `C-06` (retired 35 legacy/logistics MCP tools, orphaned
+  `workspace_server.py`, and `Save As`/`filename` wire fallbacks; shared
+  v23 `ComponentWorkspace` rename/delete/history helpers; enforced `tools/list`
+  at `14,352` bytes < 15 KB with 66 live tools), `C-07` (linked prefabs),
+  `C-08` (non-refusal `.glb`/`.gltf`
   import with external `.bin`/image & `data:` URI packing, JPEG textures, and
   warnings on real-world CC0/Blender fallbacks; full PBR maps, animated
   lenses, and animated lights tracked in Phase 3A/3B), `C-11` &

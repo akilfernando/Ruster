@@ -31,7 +31,7 @@ pub(super) fn asset_arguments<'a>(
     let map = args
         .as_object()
         .ok_or_else(|| error("invalid_arguments", "Expected object arguments"))?;
-    if !matches!(op, "asset_import" | "asset_refresh" | "asset_rename")
+    if !matches!(op, "asset_import" | "asset_refresh")
         || fields.iter().any(|key| !map.contains_key(*key))
         || map.keys().any(|key| {
             !fields.contains(&key.as_str())
@@ -128,13 +128,12 @@ pub(super) fn asset_mutation(
                 }
             }
         }
-        _ => AssetMutation::Rename {
-            id,
-            source: args["source"]
-                .as_str()
-                .ok_or_else(|| error("invalid_arguments", "source required"))?
-                .into(),
-        },
+        _ => {
+            return Err(error(
+                "unsupported_operation",
+                format!("Unsupported asset operation: {op}"),
+            ))
+        }
     })
 }
 

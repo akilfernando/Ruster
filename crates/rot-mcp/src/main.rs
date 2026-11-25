@@ -2,8 +2,6 @@
 mod animation_tools;
 mod behavior_tools;
 mod capture_tools;
-mod collider_tools;
-mod color_tools;
 mod component_tools;
 mod descriptions;
 mod discovered;
@@ -24,7 +22,7 @@ use std::io::{self, BufRead, Write};
 
 const PROTOCOL: &str = "2025-06-18";
 /// The server instructions every client reads once. Keep them short.
-const INSTRUCTIONS: &str = "Rot Engine edits the scene open in the editor; the creator sees every change and shares Undo. Use scene_inspect to find object IDs. Pass expected_session_token and expected_revision from an inspect to pin edits to that scene state. viewport_screenshot shows the result. Use scene_persistence_inspect for scene_save guards. v23 saves the active scene in place. Only legacy Save As takes a filename. If the save outcome is unknown, inspect the receipt before taking further action. Use rot_tools for additional editor commands. If several editors are open, call project_list and project_connect first.";
+const INSTRUCTIONS: &str = "Rot Engine edits the scene open in the editor; the creator sees every change and shares Undo. Use scene_inspect to find object IDs. Pass expected_session_token and expected_revision from an inspect to pin edits to that scene state. viewport_screenshot shows the result. Use scene_persistence_inspect for scene_save guards. v23 saves the active scene in place. If the save outcome is unknown, inspect the receipt before taking further action. Use rot_tools for additional editor commands. If several editors are open, call project_list and project_connect first.";
 const MAX_FRAME: usize = 64 * 1024;
 const MAX_OUTPUT: usize = 256 * 1024;
 
@@ -217,14 +215,8 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
     if material_tools::supported(name) {
         return material_tools::valid(name, arguments);
     }
-    if collider_tools::supported(name) {
-        return collider_tools::valid(name, arguments);
-    }
     if hierarchy_tools::supported(name) {
         return hierarchy_tools::valid(name, arguments);
-    }
-    if color_tools::supported(name) {
-        return color_tools::valid(name, arguments);
     }
     if view_tools::supported(name) {
         return view_tools::valid(name, arguments);
@@ -250,14 +242,11 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
     let Some(args) = arguments.as_object() else {
         return false;
     };
-    if matches!(
-        name,
-        "scene_transform_many" | "scene_duplicate_many" | "scene_delete_many"
-    ) {
-        let field = match name {
-            "scene_transform_many" => "transforms",
-            "scene_duplicate_many" => "objects",
-            _ => "object_ids",
+    if matches!(name, "scene_transform_many" | "scene_delete_many") {
+        let field = if name == "scene_transform_many" {
+            "transforms"
+        } else {
+            "object_ids"
         };
         if !exact_keys(
             args,
@@ -279,11 +268,6 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
         let id = |v: &Value| v.as_str().is_some_and(|s| !s.is_empty() && s.len() <= 128);
         return items.iter().all(|item| match name {
             "scene_delete_many" => id(item),
-            "scene_duplicate_many" => item.as_object().is_some_and(|o| {
-                exact_keys(o, &["object_id", "new_object_id"], &[])
-                    && id(&item["object_id"])
-                    && id(&item["new_object_id"])
-            }),
             _ => item.as_object().is_some_and(|o| {
                 exact_keys(o, &["object_id", "transform"], &[])
                     && id(&item["object_id"])
@@ -297,7 +281,7 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
             }),
         });
     }
-    if name == "scene_duplicate" && args.contains_key("object_ids") {
+    if name == "scene_duplicate" {
         return exact_keys(
             args,
             &["expected_session_token", "expected_revision", "object_ids"],
@@ -316,16 +300,10 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
                     })
             });
     }
-    if matches!(
-        name,
-        "scene_create" | "scene_rename" | "scene_duplicate" | "scene_delete"
-    ) {
+    if matches!(name, "scene_create" | "scene_rename" | "scene_delete") {
         let mut keys = vec!["expected_session_token", "expected_revision", "object_id"];
         if name != "scene_delete" {
             keys.push("name");
-        }
-        if name == "scene_duplicate" {
-            keys.push("new_object_id");
         }
         return exact_keys(
             args,
@@ -484,21 +462,12 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
     }
     if matches!(
         name,
-        "asset_import"
-            | "asset_refresh"
-            | "asset_rename"
-            | "scene_mesh"
-            | "scene_model_place"
-            | "shader_refresh"
+        "asset_import" | "asset_refresh" | "scene_mesh" | "scene_model_place"
     ) {
-        let revision = if name == "shader_refresh" {
-            "expected_shader_revision"
-        } else {
-            "expected_asset_revision"
-        };
+        let revision = "expected_asset_revision";
         let mut keys = vec!["expected_session_token", "expected_revision", revision];
         match name {
-            "asset_import" | "asset_rename" => keys.extend(["asset_id", "source"]),
+            "asset_import" => keys.extend(["asset_id", "source"]),
             "asset_refresh" | "scene_model_place" => keys.push("asset_id"),
             "scene_mesh" => keys.extend(["object_id", "asset_id"]),
             _ => {}
@@ -511,9 +480,7 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
         if !exact_keys(
             args,
             &keys,
-            if name == "shader_refresh" {
-                &["builtin"]
-            } else if name == "scene_model_place" {
+            if name == "scene_model_place" {
                 &["name"]
             } else if name == "asset_import" {
                 &["normal_policy", "texture_role"]
@@ -527,7 +494,6 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
             return false;
         }
         match name {
-            "shader_refresh" => args.get("builtin").is_none_or(Value::is_boolean),
             "scene_model_place" => {
                 bounded_string(&args["asset_id"], 128)
                     && args
@@ -540,8 +506,7 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
             }
             _ => {
                 bounded_string(&args["asset_id"], 128)
-                    && (!matches!(name, "asset_import" | "asset_rename")
-                        || bounded_string(&args["source"], 256))
+                    && (name != "asset_import" || bounded_string(&args["source"], 256))
                     && args.get("normal_policy").is_none_or(|value| {
                         value.as_str().is_some_and(|policy| {
                             matches!(policy, "flat" | "authored_when_complete")
@@ -560,9 +525,6 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
             }
         }
     } else {
-        if name == "inspect" {
-            return args.is_empty();
-        }
         if name == "scene_inspect" {
             if args.contains_key("search") {
                 let offset = args.get("offset");
@@ -591,10 +553,8 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
                 && args.get("offset").is_none_or(canonical_u64);
         }
         let extra = match name {
-            "edit" => "config",
-            "replay" | "scene_replay" => "ticks",
             "scene_transform" => "object_id",
-            "undo" | "redo" | "scene_undo" | "scene_redo" => "",
+            "scene_undo" | "scene_redo" => "",
             _ => return false,
         };
         let mut keys = vec!["expected_session_token", "expected_revision"];
@@ -613,14 +573,6 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
             return false;
         }
         match name {
-            "edit" => args["config"].as_object().is_some_and(|config| {
-                exact_keys(
-                    config,
-                    &["initial_stock", "production_per_tick", "transfer_per_tick"],
-                    &[],
-                ) && config.values().all(canonical_u64)
-            }),
-            "replay" | "scene_replay" => canonical_u64(&args["ticks"]),
             "scene_transform" => {
                 args["object_id"].is_string()
                     && args["transform"].as_object().is_some_and(|transform| {
@@ -652,35 +604,27 @@ fn tools() -> Value {
         ("asset_inspect", "Inspect pages of project assets and GLB models. Follow next_offset and model_next_offset. v23 also lists prefabs and import issues by path, including files with no ID. Follow prefab_next_offset and issue_next_offset using the matching offsets. Issues can change without a catalog revision."),
         ("asset_import", "Import one bounded project-relative OBJ mesh, bounded PCM16 WAV sound, supported PNG texture, bounded UTF-8 Lua script or self-contained static GLB model into the immediately persisted typed catalog. GLB rejects normal_policy/texture_role; supports bounded hierarchies with optional names, representable node matrices, Point, Spot and Directional lights, perspective and orthographic cameras, and opaque dielectric materials with Base Color PNG and green-channel packed Roughness. Unsupported semantics reject; place separately with scene_model_place. Optional normal_policy selects a distinct OBJ interpretation: flat or authored_when_complete; omitted preserves flat. PNG-only texture_role selects base_color_srgb or roughness_linear; omission preserves base color. The two options cannot be combined. Another interpretation needs a distinct asset ID; Refresh preserves the accepted interpretation. Requires scene/session/catalog revisions. Does not assign it or save the scene."),
         ("asset_refresh", "Reimport one registered mesh, texture or static GLB model, retaining last-good accepted content on failure. Model refresh accepts geometry/normal/UV/image changes only with the same named structure, transforms and material settings; it updates resources without rewriting placed scene copies. Catalog persists independently of scene history."),
-        ("asset_rename", "Rename one registered OBJ or PNG source within the project without overwrite or changing its extension/kind, preserving stable asset ID; catalog update is independent of scene undo."),
         ("scene_model_place", "Place a registered static GLB model as ordinary editable scene hierarchy/material copies under a creator-owned root. Requires inspected session, scene and asset revisions plus clean human drafts. Optional name labels the root. One atomic unsaved Undo entry; does not reimport or save. Reimport updates shared resources, not local scene values."),
         ("scene_prefab", "Save, place, apply, revert or unpack a v23 prefab."),
         ("scene_mesh", "Assign a registered mesh ID or null for procedural cube to one scene object; revisioned shared authored undo. A changed mesh beneath a textured material requires complete UVs; clear the material first to repair. Preview snapshot unchanged."),
-        ("shader_refresh", "Refresh the fixed project-local scene.wgsl trusted shader, validating a candidate pipeline and keeping the last good pipeline on error."),
         ("scene_inspect", "Inspect one page of at most 16 authored scene objects, session/revision and mutation guards. Start without offset; use next_offset for subsequent pages."),
         ("scene_create", "Create one procedural cube (default/null primitive), sphere, capsule, triangular prism, cylinder or plane with a new immutable object ID and display name. Revisioned, unsaved and shares human undo; preview unchanged."),
         ("scene_primitive", "Set one object's built-in shape: sphere, capsule, triangular_prism, cylinder, plane or null for cube. Clears a mesh asset in the same Undo entry. Session/revision and pending-human-draft guards apply; preview unchanged."),
         ("scene_rename", "Change an object's display name without changing its stable ID. Shares authored undo; preview unchanged."),
-        ("scene_duplicate", "Duplicate one object with a fresh stable ID and display name. Preserves its transform and mesh; shares authored undo."),
+        ("scene_duplicate", "Duplicate selected subtrees as siblings in one Undo entry. Assigns fresh IDs and returns mappings."),
         ("scene_delete", "Delete one object, retaining its data and position in bounded authored undo. Preview unchanged."),
-        ("scene_transform_many", "Atomically replace transforms for up to256 objects with one revision and Undo entry. Bounded diff page; inspect after truncated responses."),
-        ("scene_duplicate_many", "Atomically duplicate up to256 objects with supplied new immutable IDs, preserving names and properties; one Undo entry."),
-        ("scene_delete_many", "Atomically delete up to256 objects and preserve them in one Undo entry. Bounded diff page; inspect after truncated responses."),
+        ("scene_transform_many", "Atomically replace transforms for up to 256 objects with one revision and Undo entry. Bounded diff page; inspect after truncated responses."),
+        ("scene_delete_many", "Atomically delete up to 256 objects and preserve them in one Undo entry. Bounded diff page; inspect after truncated responses."),
         ("scene_transform", "Replace one object's authored translation, Euler rotation in radians and scale. Requires the inspected identity/revision and clean human drafts. Unsaved; shares human undo; leaves preview unchanged."),
         ("scene_undo", "Undo one authored scene change in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
         ("scene_redo", "Redo one authored scene change in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
-        ("scene_replay", "Replay the inspected static scene snapshot in isolation for at most 10000 lifecycle ticks; return its fingerprint and object count. No gameplay or editor playback changes."),
     ] {
         let mut properties = Map::new();
         let mut required = Vec::new();
-        if name != "inspect" && name != "scene_inspect" && name != "asset_inspect" {
+        if name != "scene_inspect" && name != "asset_inspect" {
             properties.insert("expected_session_token".into(), json!({"type":"string","minLength":1,"maxLength":256}));
             properties.insert("expected_revision".into(), decimal.clone());
             required.extend(["expected_session_token", "expected_revision"]);
-        }
-        if name == "edit" {
-            properties.insert("config".into(), object_schema(json!({"initial_stock":decimal, "production_per_tick":decimal, "transfer_per_tick":decimal}), vec!["initial_stock", "production_per_tick", "transfer_per_tick"]));
-            required.push("config");
         }
         if name == "scene_inspect" || name == "asset_inspect" {
             properties.insert("offset".into(), decimal.clone());
@@ -690,10 +634,10 @@ fn tools() -> Value {
             properties.insert("expected_session_token".into(), json!({"type":"string"}));
             properties.insert("expected_revision".into(), decimal.clone());
         }
-        if matches!(name,"asset_import"|"asset_refresh"|"asset_rename"|"scene_mesh"|"scene_model_place") {
+        if matches!(name,"asset_import"|"asset_refresh"|"scene_mesh"|"scene_model_place") {
             properties.insert("expected_asset_revision".into(),decimal.clone());required.push("expected_asset_revision");
             properties.insert("asset_id".into(),if name=="scene_mesh" {json!({"type":["string","null"],"minLength":1,"maxLength":128})}else{json!({"type":"string","minLength":1,"maxLength":128})});required.push("asset_id");
-            if matches!(name,"asset_import"|"asset_rename") {properties.insert("source".into(),json!({"type":"string","minLength":1,"maxLength":256,"description":"Relative project path; no traversal, absolute paths or escaping symlinks."}));required.push("source");}
+            if name=="asset_import" {properties.insert("source".into(),json!({"type":"string","minLength":1,"maxLength":256,"description":"Relative project path; no traversal, absolute paths or escaping symlinks."}));required.push("source");}
             if name=="scene_mesh" {properties.insert("object_id".into(),json!({"type":"string","minLength":1,"maxLength":128}));required.push("object_id");}
         }
         if name == "asset_inspect" {
@@ -720,19 +664,17 @@ fn tools() -> Value {
         }
         if name=="asset_import" {properties.insert("normal_policy".into(),json!({"type":"string","enum":["flat","authored_when_complete"],"description":"OBJ mesh import interpretation: flat geometric normals, or complete valid authored corner normals with flat fallback when incomplete. Omitted uses the existing flat route; PNG and GLB imports reject this field. Import another asset identity to change an accepted interpretation."}));}
         if name=="asset_import" {properties.insert("texture_role".into(),json!({"type":"string","enum":["base_color_srgb","roughness_linear"],"description":"PNG-only immutable interpretation. Base color decodes sRGB; roughness reads grayscale/red as linear byte/255 and builds arithmetic perceptual-roughness mips. Omission uses base_color_srgb. Cannot combine with normal_policy; use a distinct asset ID for another interpretation of the same source."}));}
-        if name=="shader_refresh" {properties.insert("expected_shader_revision".into(),decimal.clone());properties.insert("builtin".into(),json!({"type":"boolean","description":"Explicitly select built-in appearance instead of reading scene.wgsl; preserves the source file."}));required.push("expected_shader_revision");}
-        if matches!(name, "scene_create" | "scene_rename" | "scene_duplicate" | "scene_delete") {
+        if matches!(name, "scene_create" | "scene_rename" | "scene_delete") {
             properties.insert("object_id".into(), json!({"type":"string","minLength":1,"maxLength":128,"description":"Immutable object identity, distinct from its display name."}));
             required.push("object_id");
             if name != "scene_delete" {
                 properties.insert("name".into(), json!({"type":"string","minLength":1,"maxLength":128}));
                 required.push("name");
             }
-            if name == "scene_duplicate" {
-                properties.insert("new_object_id".into(), json!({"type":"string","minLength":1,"maxLength":128}));
-                properties.insert("object_ids".into(), json!({"type":"array","items":{"type":"string","minLength":1,"maxLength":128},"minItems":1,"maxItems":256,"uniqueItems":true,"description":"v23 only. Selected object IDs. Copies their topmost subtrees and assigns fresh IDs."}));
-                required.retain(|key| !matches!(*key, "object_id" | "name"));
-            }
+        }
+        if name == "scene_duplicate" {
+            properties.insert("object_ids".into(), json!({"type":"array","items":{"type":"string","minLength":1,"maxLength":128},"minItems":1,"maxItems":256,"uniqueItems":true,"description":"Selected object IDs. Copies their topmost subtrees and assigns fresh IDs."}));
+            required.push("object_ids");
         }
         if matches!(name, "scene_create" | "scene_primitive") {
             properties.insert("primitive".into(), json!({"enum":["sphere","capsule","triangular_prism","cylinder","plane",null],"description":"Built-in geometry, not a collider or asset. Null means cube."}));
@@ -744,16 +686,14 @@ fn tools() -> Value {
         if name == "scene_create" {
             hierarchy_tools::creation_properties(&mut properties);
         }
-        if matches!(name, "scene_transform_many" | "scene_duplicate_many" | "scene_delete_many") {
+        if matches!(name, "scene_transform_many" | "scene_delete_many") {
             let id = json!({"type":"string","minLength":1,"maxLength":128});
-            let (field, item) = match name {
-                "scene_duplicate_many" => ("objects", object_schema(json!({"object_id":id,"new_object_id":id}), vec!["object_id","new_object_id"])),
-                "scene_delete_many" => ("object_ids", id),
-                _ => {
-                    let vector = json!({"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3});
-                    let transform = object_schema(json!({"translation":vector,"rotation":vector,"scale":vector}),vec!["translation","rotation","scale"]);
-                    ("transforms", object_schema(json!({"object_id":id,"transform":transform}),vec!["object_id","transform"]))
-                }
+            let (field, item) = if name == "scene_delete_many" {
+                ("object_ids", id)
+            } else {
+                let vector = json!({"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3});
+                let transform = object_schema(json!({"translation":vector,"rotation":vector,"scale":vector}),vec!["translation","rotation","scale"]);
+                ("transforms", object_schema(json!({"object_id":id,"transform":transform}),vec!["object_id","transform"]))
             };
             properties.insert(field.into(),json!({"type":"array","items":item,"minItems":1,"maxItems":256}));
             required.push(field);
@@ -764,17 +704,7 @@ fn tools() -> Value {
             properties.insert("transform".into(), object_schema(json!({"translation":vector, "rotation":vector, "scale":vector}), vec!["translation", "rotation", "scale"]));
             required.extend(["object_id", "transform"]);
         }
-        if name == "replay" || name == "scene_replay" {
-            properties.insert("ticks".into(), decimal.clone());
-            required.push("ticks");
-        }
         let mut input_schema = object_schema(Value::Object(properties),required);
-        if name == "scene_duplicate" {
-            input_schema["oneOf"] = json!([
-                {"required":["object_ids"],"not":{"anyOf":[{"required":["object_id"]},{"required":["new_object_id"]},{"required":["name"]}]}},
-                {"required":["object_id","new_object_id","name"],"not":{"required":["object_ids"]}}
-            ]);
-        }
         if name == "asset_import" {
             input_schema["allOf"] = json!([
                 {"not":{"required":["normal_policy","texture_role"]}},
@@ -784,11 +714,9 @@ fn tools() -> Value {
         }
         tools.push(json!({"name":name,"description":description,
             "inputSchema":input_schema,
-            "annotations":{"readOnlyHint":matches!(name, "inspect" | "replay" | "scene_inspect" | "scene_replay" | "asset_inspect"), "openWorldHint":false}}));
+            "annotations":{"readOnlyHint":matches!(name, "scene_inspect" | "asset_inspect"), "openWorldHint":false}}));
     }
-    tools.extend(collider_tools::list());
     tools.extend(component_tools::list());
-    tools.extend(color_tools::list());
     tools.extend(hierarchy_tools::list());
     tools.extend(material_tools::list());
     tools.extend(lighting_tools::list());
@@ -1457,12 +1385,12 @@ mod tests {
             "duplicate keys must reject before normalization/dispatch"
         );
         let opaque = "return {update=function(o) return o end} -- {\"key\":1,\"key\":2}";
-        let arguments = json!({"expected_session_token":"session","expected_revision":"0","binding_id":"binding","name":"script","value":{"type":"text","value":opaque}});
-        let request = json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"behavior_property_set","arguments":arguments}});
+        let arguments = json!({"expected_session_token":"session","expected_revision":"0","object_id":"object","name":opaque});
+        let request = json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"scene_rename","arguments":arguments}});
         let response = server
             .handle(&serde_json::to_vec(&request).unwrap(), |name, actual| {
                 dispatches += 1;
-                assert_eq!(name, "behavior_property_set");
+                assert_eq!(name, "scene_rename");
                 assert_eq!(
                     actual, &arguments,
                     "Lua-looking string contents stay opaque"
@@ -1574,7 +1502,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_accepts_exact_v23_selection_and_preserves_legacy_wire() {
+    fn duplicate_accepts_exact_v23_selection_only() {
         let args = json!({"expected_session_token":"s","expected_revision":"0","object_ids":["rig","camera"]});
         assert!(valid_arguments("scene_duplicate", &args));
         assert!(!tool_catalog::advertised("scene_duplicate"));
@@ -1589,7 +1517,7 @@ mod tests {
         let mut invalid = args;
         invalid["object_id"] = json!("rig");
         assert!(!valid_arguments("scene_duplicate", &invalid));
-        assert!(valid_arguments(
+        assert!(!valid_arguments(
             "scene_duplicate",
             &json!({"expected_session_token":"s","expected_revision":"0",
             "object_id":"rig","new_object_id":"copy","name":"Copy"})
@@ -1664,8 +1592,27 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let bytes = listed.to_string().len();
+        eprintln!("tools/list bytes={bytes}");
         assert!(bytes < 15_000, "tools/list is {bytes} bytes");
         let tools = listed["result"]["tools"].as_array().unwrap();
+        let all = tool_definitions();
+        assert_eq!(all.len(), descriptions::DESCRIPTIONS.len());
+        for &(name, summary) in descriptions::DESCRIPTIONS {
+            assert!(!summary.is_empty(), "empty description for {name}");
+            assert!(
+                all.iter().any(|tool| tool["name"] == name),
+                "stale description entry {name}"
+            );
+        }
+        for tool in all {
+            let name = tool["name"].as_str().unwrap();
+            assert!(
+                descriptions::DESCRIPTIONS
+                    .iter()
+                    .any(|(described, _)| *described == name),
+                "missing description entry {name}"
+            );
+        }
         for tool in tools {
             let description = tool["description"].as_str().unwrap();
             assert!(
@@ -1722,7 +1669,7 @@ mod tests {
                 "string"
             );
         }
-        assert_eq!(schema["properties"]["filename"]["type"], "string");
+        assert!(schema["properties"].get("filename").is_none());
 
         let component_edit = tools
             .iter()
@@ -1940,11 +1887,9 @@ mod tests {
                 "asset_inspect",
                 "asset_import",
                 "asset_refresh",
-                "asset_rename",
                 "scene_model_place",
                 "scene_prefab",
                 "scene_mesh",
-                "shader_refresh",
                 "scene_inspect",
                 "scene_create",
                 "scene_primitive",
@@ -1952,16 +1897,12 @@ mod tests {
                 "scene_duplicate",
                 "scene_delete",
                 "scene_transform_many",
-                "scene_duplicate_many",
                 "scene_delete_many",
                 "scene_transform",
                 "scene_undo",
                 "scene_redo",
-                "scene_replay",
-                "scene_collider_set",
                 "scene_components_inspect",
                 "scene_components_edit",
-                "scene_color",
                 "scene_copy_local_transform",
                 "scene_place_on_ground",
                 "scene_group_create",
@@ -1970,46 +1911,22 @@ mod tests {
                 "scene_material_set",
                 "scene_material_assign",
                 "scene_material_copy",
-                "scene_material_remove",
-                "lighting_inspect",
-                "scene_light_create",
-                "scene_light_set",
-                "scene_ambient_set",
                 "scene_display_set",
                 "viewport_inspect",
                 "viewport_frame",
-                "viewport_camera",
-                "viewport_player_view",
-                "scene_select",
                 "viewport_capture_pick",
                 "viewport_capture_start",
                 "viewport_capture_inspect",
                 "creation_export_inspect",
-                "creation_export_start",
-                "creation_export_cancel",
                 "play_check_inspect",
                 "play_check_start",
                 "play_check_cancel",
                 "scene_persistence_inspect",
                 "scene_save",
                 "behavior_inspect",
-                "behavior_source",
-                "behavior_source_set",
-                "behavior_source_remove",
-                "behavior_create",
-                "behavior_binding",
-                "behavior_binding_set",
-                "behavior_binding_remove",
-                "behavior_property",
-                "behavior_property_set",
-                "behavior_state_default",
-                "behavior_state_default_set",
-                "behavior_command",
-                "behavior_command_set",
                 "behavior_action",
                 "behavior_action_set",
                 "behavior_action_remove",
-                "behavior_runtime_command",
                 "behavior_runtime_state",
                 "behavior_runtime_inspect",
                 "behavior_runtime_reset",
@@ -2017,11 +1934,6 @@ mod tests {
                 "behavior_runtime_pause",
                 "behavior_runtime_step",
                 "behavior_runtime_stop",
-                "behavior_breakpoints",
-                "behavior_breakpoint_set",
-                "behavior_debug_inspect",
-                "behavior_debug_next",
-                "behavior_debug_continue",
                 "hud_inspect",
                 "hud_settings_set",
                 "hud_label_set",
@@ -2053,18 +1965,61 @@ mod tests {
             )["error"]["code"],
             -32602
         );
+        for retired in [
+            "inspect",
+            "edit",
+            "undo",
+            "redo",
+            "replay",
+            "asset_rename",
+            "shader_refresh",
+            "scene_duplicate_many",
+            "scene_replay",
+            "scene_collider_set",
+            "scene_color",
+            "scene_material_remove",
+            "lighting_inspect",
+            "scene_light_create",
+            "scene_light_set",
+            "scene_ambient_set",
+            "viewport_camera",
+            "viewport_player_view",
+            "scene_select",
+            "creation_export_start",
+            "creation_export_cancel",
+            "behavior_source",
+            "behavior_source_set",
+            "behavior_source_remove",
+            "behavior_create",
+            "behavior_binding",
+            "behavior_binding_set",
+            "behavior_binding_remove",
+            "behavior_property",
+            "behavior_property_set",
+            "behavior_state_default",
+            "behavior_state_default_set",
+            "behavior_command",
+            "behavior_command_set",
+            "behavior_runtime_command",
+            "behavior_breakpoints",
+            "behavior_breakpoint_set",
+            "behavior_debug_inspect",
+            "behavior_debug_next",
+            "behavior_debug_continue",
+        ] {
+            assert!(!valid_arguments(retired, &json!({})), "{retired}");
+            assert!(
+                request(
+                    &mut server,
+                    "tools/call",
+                    json!({"name":retired,"arguments":{}})
+                )["error"]["code"]
+                    == -32602,
+                "retired {retired} must reject"
+            );
+        }
         let base =
             json!({"expected_session_token":"session","expected_revision":"18446744073709551615"});
-        assert!(valid_arguments("undo", &base));
-        let mut debug = base.clone();
-        debug["expected_run_id"] = json!("1:2:3");
-        debug["expected_stop_id"] = json!("18446744073709551615");
-        assert!(valid_arguments("behavior_debug_next", &debug));
-        debug["expected_stop_id"] = json!("01");
-        assert!(!valid_arguments("behavior_debug_next", &debug));
-        debug["expected_stop_id"] = json!("1");
-        debug["expression"] = json!("do_not_evaluate()");
-        assert!(!valid_arguments("behavior_debug_next", &debug));
         assert!(valid_arguments(
             "behavior_runtime_inspect",
             &json!({"operation_id":"2","offset":"0"})
@@ -2107,18 +2062,6 @@ mod tests {
                 "invalid_arguments"
             );
         }
-        assert!(!valid_arguments("inspect", &json!({"path":"secret"})));
-        let mut args = base.clone();
-        args["config"] =
-            json!({"initial_stock":"1","production_per_tick":"2","transfer_per_tick":"3"});
-        assert!(valid_arguments("edit", &args));
-        args["config"]["extra"] = json!(0);
-        assert!(!valid_arguments("edit", &args));
-        let mut args = base;
-        args["ticks"] = json!("10001");
-        // Domain work limit belongs to the editor; do not silently clamp it here.
-        assert!(valid_arguments("replay", &args));
-        assert!(valid_arguments("scene_replay", &args));
         assert!(valid_arguments("scene_inspect", &json!({})));
         assert!(valid_arguments("scene_inspect", &json!({"offset":"16"})));
         assert!(!valid_arguments("scene_inspect", &json!({"offset":16})));
@@ -2136,53 +2079,11 @@ mod tests {
             json!({"ok":true,"result":{}})
         }).unwrap();
         assert_eq!(response["result"]["isError"], false);
-        // Collider wire admission protects strict variants and original f64
-        // bounds. Scale compatibility remains with the owning Scene transaction.
-        let base = json!({"expected_session_token":"s","expected_revision":"9007199254740993","object_id":"probe"});
-        for collider in [
-            Value::Null,
-            json!({"enabled":true,"role":"blocker","offset":[0,0,0],"shape":{"type":"sphere","radius":0.5}}),
-            json!({"enabled":false,"role":"sensor","offset":[-10000,0,10000],"shape":{"type":"box","half_extents":[0.001,1,1000]}}),
-        ] {
-            let mut args = base.clone();
-            args["collider"] = collider;
-            assert!(valid_arguments("scene_collider_set", &args));
-            let mut server = ready();
-            let response = server.handle(
-                &serde_json::to_vec(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"scene_collider_set","arguments":args}})).unwrap(),
-                |name, actual| {
-                    assert_eq!(name, "scene_collider_set");
-                    assert_eq!(actual, &args);
-                    json!({"ok":true,"result":{}})
-                },
-            ).unwrap();
-            assert_eq!(response["result"]["isError"], false);
-        }
-        assert!(!valid_arguments("scene_collider_set", &base));
-        for collider in [
-            json!({}),
-            json!({"enabled":false,"role":"sensor","offset":[0,0,0],"shape":{"type":"sphere","radius":0.00099999999}}),
-            json!({"enabled":true,"role":"blocker","offset":[0,0,10000.00001],"shape":{"type":"sphere","radius":0.5}}),
-            json!({"enabled":true,"role":"blocker","offset":[0,0,0],"shape":{"type":"box","half_extents":[1,1,1000.00001]}}),
-            json!({"enabled":true,"role":"blocker","offset":[0,0,0],"shape":{"type":"box","half_extents":[1,1]}}),
-            json!({"enabled":true,"role":"blocker","offset":[0,0,0],"shape":{"type":"sphere","radius":0.5,"half_extents":[1,1,1]}}),
-            json!({"enabled":true,"role":"trigger","offset":[0,0,0],"shape":{"type":"sphere","radius":0.5}}),
-            json!({"enabled":true,"role":"blocker","offset":[0,0,0],"shape":{"type":"sphere","radius":0.5},"extra":null}),
-        ] {
-            let mut args = base.clone();
-            args["collider"] = collider;
-            assert!(!valid_arguments("scene_collider_set", &args), "{args}");
-        }
         for (name, field, item) in [
             (
                 "scene_transform_many",
                 "transforms",
                 json!({"object_id":"a","transform":{"translation":[0,0,0],"rotation":[0,0,0],"scale":[1,1,1]}}),
-            ),
-            (
-                "scene_duplicate_many",
-                "objects",
-                json!({"object_id":"a","new_object_id":"b"}),
             ),
             ("scene_delete_many", "object_ids", json!("a")),
         ] {
@@ -2194,39 +2095,10 @@ mod tests {
             args[field] = json!(vec![item; 257]);
             assert!(!valid_arguments(name, &args));
         }
-        let builtin = json!({"expected_session_token":"s","expected_revision":"0","expected_shader_revision":"0","builtin":true});
-        assert!(valid_arguments("shader_refresh", &builtin));
-        let mut invalid = builtin;
-        invalid["builtin"] = json!("true");
-        assert!(!valid_arguments("shader_refresh", &invalid));
-        let export = json!({"expected_session_token":"s","expected_revision":"7","expected_persistence_token":"p","expected_asset_revision":"0","expected_shader_revision":"0","expected_export_token":"0","title":"Creator app","filename":"creator.tar.gz"});
-        assert!(valid_arguments("creation_export_start", &export));
-        for field in export.as_object().unwrap().keys() {
-            let mut missing = export.clone();
-            missing.as_object_mut().unwrap().remove(field);
-            assert!(!valid_arguments("creation_export_start", &missing));
-        }
-        for field in [
-            "expected_revision",
-            "expected_asset_revision",
-            "expected_shader_revision",
-            "expected_export_token",
-        ] {
-            let mut rounded = export.clone();
-            rounded[field] = json!(7);
-            assert!(!valid_arguments("creation_export_start", &rounded));
-        }
-        assert!(valid_arguments(
-            "creation_export_inspect",
-            &json!({"operation_id":"18446744073709551615"})
-        ));
+        assert!(valid_arguments("creation_export_inspect", &json!({})));
         assert!(!valid_arguments(
             "creation_export_inspect",
-            &json!({"operation_id":"0"})
-        ));
-        assert!(!valid_arguments(
-            "creation_export_start",
-            &json!({"command":"shell"})
+            &json!({"operation_id":"1"})
         ));
         // Persistence adds an independent save-association precondition, without
         // letting the adapter infer paths or apply pending editor drafts.
@@ -2239,11 +2111,7 @@ mod tests {
         assert!(valid_arguments("scene_save", &save));
         let mut fresh = save.clone();
         fresh["filename"] = json!("creation.json");
-        assert!(valid_arguments("scene_save", &fresh));
-        for invalid in [json!(null), json!(1), json!(""), json!("x".repeat(129))] {
-            fresh["filename"] = invalid;
-            assert!(!valid_arguments("scene_save", &fresh));
-        }
+        assert!(!valid_arguments("scene_save", &fresh));
         for field in [
             "expected_session_token",
             "expected_revision",
@@ -2276,7 +2144,7 @@ mod tests {
             ),
             (
                 "scene_duplicate",
-                json!({"expected_session_token":"s","expected_revision":"7","object_id":"cube","new_object_id":"copy","name":"Copy"}),
+                json!({"expected_session_token":"s","expected_revision":"7","object_ids":["cube"]}),
             ),
             (
                 "scene_delete",
@@ -2287,7 +2155,11 @@ mod tests {
             args["extra"] = json!(true);
             assert!(!valid_arguments(name, &args));
             args.as_object_mut().unwrap().remove("extra");
-            args["object_id"] = json!("x".repeat(129));
+            if args.get("object_id").is_some() {
+                args["object_id"] = json!("x".repeat(129));
+            } else {
+                args["object_ids"] = json!(["x".repeat(129)]);
+            }
             assert!(!valid_arguments(name, &args));
         }
         let mut server = ready();
@@ -2319,10 +2191,6 @@ mod tests {
                 json!({"expected_session_token":"s","expected_revision":"7","transforms":[{"object_id":"a","transform":{"translation":[0,0,0],"rotation":[0,0,0],"scale":[1,1,1]}}]}),
             ),
             (
-                "scene_duplicate_many",
-                json!({"expected_session_token":"s","expected_revision":"7","objects":[{"object_id":"a","new_object_id":"b"}]}),
-            ),
-            (
                 "scene_delete_many",
                 json!({"expected_session_token":"s","expected_revision":"7","object_ids":["a","b"]}),
             ),
@@ -2336,51 +2204,22 @@ mod tests {
             ),
             (
                 "scene_duplicate",
-                json!({"expected_session_token":"s","expected_revision":"7","object_id":"cube-1","new_object_id":"cube-2","name":"Copy"}),
+                json!({"expected_session_token":"s","expected_revision":"7","object_ids":["cube-1"]}),
             ),
             (
                 "scene_delete",
                 json!({"expected_session_token":"s","expected_revision":"7","object_id":"cube-1"}),
             ),
             ("scene_inspect", json!({"offset":"16"})),
-            ("lighting_inspect", json!({})),
             (
                 "scene_display_set",
                 json!({"expected_session_token":"s","expected_revision":"7","display":{"type":"surface_hdr","exposure_stops":0}}),
             ),
-            (
-                "scene_light_create",
-                json!({"expected_session_token":"s","expected_revision":"7","light_id":"sun",
-                    "light":{"transform":{"translation":[0,2,0],"rotation":[0,0,0],"scale":[1,1,1]},
-                        "enabled":true,"color":[1,1,1],"intensity":0.72,"kind":{"type":"directional"}}}),
-            ),
-            (
-                "scene_light_set",
-                json!({"expected_session_token":"s","expected_revision":"7","light_id":"point",
-                    "light":{"transform":{"translation":[0,2,0],"rotation":[0,0,0],"scale":[1,1,1]},
-                        "enabled":false,"color":[1,0.5,0],"intensity":1,"kind":{"type":"point","range":5}}}),
-            ),
-            (
-                "scene_ambient_set",
-                json!({"expected_session_token":"s","expected_revision":"7","ambient":{"color":[1,1,1],"intensity":0.28}}),
-            ),
-            ("creation_export_inspect", json!({"operation_id":"1"})),
-            (
-                "creation_export_start",
-                json!({"expected_session_token":"s","expected_revision":"7","expected_persistence_token":"p","expected_asset_revision":null,"expected_shader_revision":"0","expected_export_token":"0","title":"Creator app","filename":"creator.tar.gz"}),
-            ),
-            (
-                "creation_export_cancel",
-                json!({"expected_session_token":"s","operation_id":"1"}),
-            ),
+            ("creation_export_inspect", json!({})),
             ("scene_persistence_inspect", json!({})),
             (
                 "scene_save",
                 json!({"expected_session_token":"s","expected_revision":"7","expected_persistence_token":"p"}),
-            ),
-            (
-                "scene_save",
-                json!({"expected_session_token":"s","expected_revision":"7","expected_persistence_token":"p","filename":"creation.json","connection":{"project_id":"project","epoch":"ab".repeat(32)}}),
             ),
             (
                 "scene_undo",
@@ -2389,10 +2228,6 @@ mod tests {
             (
                 "scene_redo",
                 json!({"expected_session_token":"scene-session","expected_revision":"7"}),
-            ),
-            (
-                "scene_replay",
-                json!({"expected_session_token":"scene-session","expected_revision":"7","ticks":"10001"}),
             ),
         ] {
             let response = server.handle(json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":args}}).to_string().as_bytes(), |forwarded_name, forwarded_args| {
@@ -2442,8 +2277,6 @@ mod tests {
         let mut mesh = refresh.clone();
         mesh["object_id"] = json!("left");
         mesh["asset_id"] = Value::Null;
-        let mut shader = common;
-        shader["expected_shader_revision"] = json!("9");
         for (name, args) in [
             ("asset_inspect", json!({"offset":"16", "model_offset":"32"})),
             ("asset_import", model_import.clone()),
@@ -2455,10 +2288,8 @@ mod tests {
             ("asset_import", authored_import),
             ("asset_import", color_import.clone()),
             ("asset_import", roughness_import.clone()),
-            ("asset_rename", import.clone()),
             ("asset_refresh", refresh.clone()),
             ("scene_mesh", mesh.clone()),
-            ("shader_refresh", shader.clone()),
         ] {
             assert!(valid_arguments(name, &args), "{name}: {args}");
             let response = server.handle(
@@ -2474,11 +2305,14 @@ mod tests {
                 "asset_error"
             );
         }
+        assert!(!valid_arguments("asset_rename", &import));
+        let mut shader = common;
+        shader["expected_shader_revision"] = json!("9");
+        assert!(!valid_arguments("shader_refresh", &shader));
         for (name, valid, revision) in [
             ("asset_import", &import, "expected_asset_revision"),
             ("scene_model_place", &placement, "expected_asset_revision"),
             ("scene_model_place", &placement, "expected_revision"),
-            ("shader_refresh", &shader, "expected_shader_revision"),
         ] {
             for value in [
                 json!(1),
@@ -2494,18 +2328,13 @@ mod tests {
             missing.as_object_mut().unwrap().remove(revision);
             assert!(!valid_arguments(name, &missing));
             let mut extra = valid.clone();
-            extra[if matches!(revision, "expected_asset_revision" | "expected_revision") {
-                "expected_shader_revision"
-            } else {
-                "expected_asset_revision"
-            }] = json!("0");
+            extra["expected_shader_revision"] = json!("0");
             assert!(!valid_arguments(name, &extra));
         }
         for value in [Value::Null, json!(4), json!(""), json!("x".repeat(257))] {
             let mut invalid = import.clone();
             invalid["source"] = value;
             assert!(!valid_arguments("asset_import", &invalid));
-            assert!(!valid_arguments("asset_rename", &invalid));
         }
         for value in [
             Value::Null,
@@ -2517,15 +2346,11 @@ mod tests {
             invalid["normal_policy"] = value;
             assert!(!valid_arguments("asset_import", &invalid));
         }
-        for name in ["asset_rename", "asset_refresh"] {
-            let mut invalid = if name == "asset_rename" {
-                import.clone()
-            } else {
-                refresh.clone()
-            };
+        {
+            let mut invalid = refresh.clone();
             invalid["normal_policy"] = json!("flat");
             assert!(
-                !valid_arguments(name, &invalid),
+                !valid_arguments("asset_refresh", &invalid),
                 "Normal policy is an import-only argument"
             );
         }
@@ -2630,9 +2455,6 @@ mod tests {
             schema("scene_mesh")["properties"]["asset_id"]["minLength"],
             1
         );
-        assert!(schema("shader_refresh")["properties"]
-            .get("expected_asset_revision")
-            .is_none());
         assert!(schema("asset_import")["properties"]
             .get("expected_shader_revision")
             .is_none());

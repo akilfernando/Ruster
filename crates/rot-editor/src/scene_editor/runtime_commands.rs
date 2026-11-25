@@ -19,23 +19,12 @@ fn number(value: &Value) -> Option<u64> {
 }
 
 fn runtime_inspect(op: &str) -> bool {
-    matches!(op, "behavior_runtime_inspect" | "behavior_breakpoints")
+    op == "behavior_runtime_inspect"
 }
 
 pub(super) fn validate_runtime_args(op: &str, args: &Value) -> Result<()> {
     let (fields, optional): (&[&str], &[&str]) = match op {
         "hud_activate" => (&["expected_run_id", "button_id"], &[]),
-        "behavior_runtime_command" => (
-            &[
-                "expected_run_id",
-                "expected_commit_revision",
-                "binding_id",
-                "command_id",
-                "schema_hash",
-                "arguments",
-            ],
-            &[],
-        ),
         "behavior_runtime_inspect" => (&[], &["offset", "operation_id"]),
         "behavior_runtime_state" => (
             &[
@@ -47,7 +36,6 @@ pub(super) fn validate_runtime_args(op: &str, args: &Value) -> Result<()> {
             ],
             &["offset", "expected_commit_revision"],
         ),
-        "behavior_breakpoints" => (&[], &["offset"]),
         "behavior_runtime_reset" => (&[], &[]),
         "behavior_runtime_play" | "behavior_runtime_pause" | "behavior_runtime_stop" => {
             (&["expected_run_id"], &[])
@@ -61,17 +49,6 @@ pub(super) fn validate_runtime_args(op: &str, args: &Value) -> Result<()> {
                 "expected_input_epoch",
             ],
         ),
-        "behavior_breakpoint_set" => (
-            &["source_id", "source_hash", "line", "binding_id", "enabled"],
-            &[],
-        ),
-        "behavior_debug_inspect" => (
-            &["expected_run_id", "expected_stop_id"],
-            &["offset", "limit"],
-        ),
-        "behavior_debug_next" | "behavior_debug_continue" => {
-            (&["expected_run_id", "expected_stop_id"], &[])
-        }
         _ => return Err(fail("unsupported_operation")),
     };
     let inspect = runtime_inspect(op);
@@ -118,21 +95,10 @@ pub(super) fn validate_runtime_args(op: &str, args: &Value) -> Result<()> {
                             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
                 })
             }
-            "arguments" => serde_json::from_value::<rot_scene::StateFields>(value.clone())
-                .is_ok_and(|fields| rot_scene::command_argument_payload_bytes(&fields).is_ok()),
             "input_frame" => {
                 serde_json::from_value::<rot_scene::input::ActionFrame>(value.clone()).is_ok()
             }
-            "expected_stop_id" => number(value).is_some_and(|n| n > 0),
-            "line" => number(value).is_some_and(|n| (1..=16385).contains(&n)),
-            "limit" => number(value).is_some_and(|n| (1..=16).contains(&n)),
-            "binding_id"
-                if value.is_null()
-                    && !matches!(op, "behavior_runtime_state" | "behavior_runtime_command") =>
-            {
-                true
-            }
-            "enabled" => value.is_boolean(),
+            "binding_id" if value.is_null() && op != "behavior_runtime_state" => true,
             _ => value.as_str().is_some_and(|text| {
                 !text.is_empty()
                     && text.len()
@@ -169,7 +135,6 @@ pub(super) fn runtime_failure(message: String) -> (String, String) {
                 | "input_owned"
                 | "runtime_playing"
                 | "runtime_busy"
-                | "debug_stopped"
                 | "input_busy"
                 | "input_unavailable"
                 | "tick_exhausted"

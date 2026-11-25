@@ -430,12 +430,6 @@ impl ComponentWorkspace {
             ));
         }
 
-        if matches!(op, "scene_undo" | "scene_redo")
-            && self.runtime.in_play_mode()
-            && self.session.action_history_pending(op == "scene_undo")
-        {
-            return Err(("play_active", Text::InputActionsStopPlay.plain().into()));
-        }
         if matches!(op, "behavior_action_set" | "behavior_action_remove") {
             if !self.input_action_editable() {
                 return Err(("play_active", Text::InputActionsStopPlay.plain().into()));
@@ -977,16 +971,7 @@ impl ComponentWorkspace {
             "scene_rename" => {
                 let id = args["object_id"].as_str().ok_or_else(invalid)?;
                 let name = args["name"].as_str().ok_or_else(invalid)?;
-                let mut object = self
-                    .session
-                    .scene()
-                    .objects
-                    .iter()
-                    .find(|object| object.id == id)
-                    .cloned()
-                    .ok_or_else(object_not_found)?;
-                object.name = name.to_owned();
-                self.session.put_object(revision, object)
+                self.rename_object(revision, id, name.to_owned())
             }
             "scene_reparent" => {
                 let ids = match (args.get("object_id"), args.get("object_ids")) {
@@ -1025,7 +1010,7 @@ impl ComponentWorkspace {
             }
             "scene_delete" => {
                 let id = args["object_id"].as_str().ok_or_else(invalid)?;
-                self.session.remove_subtree(revision, id)
+                self.delete_subtrees(revision, &[id])
             }
             "scene_delete_many" => {
                 let ids = batch(&args["object_ids"])
@@ -1033,7 +1018,7 @@ impl ComponentWorkspace {
                     .iter()
                     .map(|value| value.as_str().ok_or_else(invalid))
                     .collect::<Result<Vec<_>, _>>()?;
-                self.session.remove_subtrees(revision, &ids)
+                self.delete_subtrees(revision, &ids)
             }
             "scene_components_edit" => {
                 let asset_revision = map
@@ -1043,8 +1028,13 @@ impl ComponentWorkspace {
                 let edits = self.component_edits(&args["edits"], asset_revision)?;
                 self.session.put_objects(revision, edits)
             }
-            "scene_undo" => self.prefab_history(revision, true),
-            "scene_redo" => self.prefab_history(revision, false),
+            "scene_undo" | "scene_redo" => match self.history_step(revision, op == "scene_undo") {
+                Ok(next) => Ok(next),
+                Err(super::HistoryStepError::PlayActive) => {
+                    return Err(("play_active", Text::InputActionsStopPlay.plain().into()));
+                }
+                Err(super::HistoryStepError::Scene(error)) => Err(error),
+            },
             _ => unreachable!("checked command"),
         };
         let next = result.map_err(|error| {

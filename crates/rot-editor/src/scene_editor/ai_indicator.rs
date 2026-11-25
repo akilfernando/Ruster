@@ -39,17 +39,10 @@ pub(super) fn read_only(op: &str) -> bool {
     op.ends_with("_inspect")
         || matches!(
             op,
-            "behavior_source"
-                | "behavior_runtime_state"
-                | "behavior_binding"
-                | "behavior_property"
-                | "behavior_state_default"
-                | "behavior_command"
+            "behavior_runtime_state"
                 | "behavior_action"
-                | "behavior_breakpoints"
                 | "viewport_capture_start"
                 | "viewport_capture_pick"
-                | "scene_replay"
                 | "workspace_descriptor"
         )
 }

@@ -425,6 +425,11 @@ pub(super) fn project_directory(scene_path: &std::path::Path) -> &std::path::Pat
         .unwrap_or_else(|| std::path::Path::new("."))
 }
 
+pub(super) enum HistoryStepError {
+    PlayActive,
+    Scene(SceneError),
+}
+
 impl ComponentWorkspace {
     pub(super) fn new(path: PathBuf, session: ComponentSession) -> Self {
         Self::open_in_project(path, session, None)
@@ -1040,6 +1045,44 @@ impl ComponentWorkspace {
         self.hierarchy_name_click = None;
     }
 
+    pub(super) fn rename_object(
+        &mut self,
+        revision: u64,
+        id: &str,
+        name: String,
+    ) -> Result<u64, SceneError> {
+        let mut renamed = self
+            .session
+            .scene()
+            .objects
+            .iter()
+            .find(|object| object.id == id)
+            .cloned()
+            .ok_or_else(|| SceneError::ObjectNotFound(id.to_owned()))?;
+        renamed.name = name;
+        self.session.put_object(revision, renamed)
+    }
+
+    pub(super) fn delete_subtrees(
+        &mut self,
+        revision: u64,
+        ids: &[&str],
+    ) -> Result<u64, SceneError> {
+        self.session.remove_subtrees(revision, ids)
+    }
+
+    pub(super) fn history_step(
+        &mut self,
+        revision: u64,
+        undo: bool,
+    ) -> Result<u64, HistoryStepError> {
+        if self.runtime.in_play_mode() && self.session.action_history_pending(undo) {
+            return Err(HistoryStepError::PlayActive);
+        }
+        self.prefab_history(revision, undo)
+            .map_err(HistoryStepError::Scene)
+    }
+
     fn commit_hierarchy_rename(&mut self, draft: &HierarchyRename) -> Result<(), SceneError> {
         if !self.hierarchy_rename_available() || self.session.revision() != draft.revision {
             return Err(SceneError::Invalid(
@@ -1056,9 +1099,7 @@ impl ComponentWorkspace {
         if object.name == draft.name {
             return Ok(());
         }
-        let mut renamed = object.clone();
-        renamed.name.clone_from(&draft.name);
-        self.session.put_object(draft.revision, renamed)?;
+        self.rename_object(draft.revision, &draft.id, draft.name.clone())?;
         self.refresh();
         Ok(())
     }
@@ -1637,7 +1678,7 @@ impl ComponentWorkspace {
             return;
         }
         let ids: Vec<_> = ids.iter().map(String::as_str).collect();
-        match self.session.remove_subtrees(self.session.revision(), &ids) {
+        match self.delete_subtrees(self.session.revision(), &ids) {
             Ok(_) => {
                 self.error = None;
                 self.refresh();
@@ -2074,15 +2115,16 @@ impl ComponentWorkspace {
                 return;
             }
             Action::Redo if self.draft_dirty() => return,
-            Action::Undo | Action::Redo
-                if self.runtime.in_play_mode()
-                    && self.session.action_history_pending(action == Action::Undo) =>
-            {
-                self.error = Some(Text::InputActionsStopPlay.plain().into());
-                return;
+            Action::Undo | Action::Redo => {
+                match self.history_step(revision, action == Action::Undo) {
+                    Ok(next) => Ok(next),
+                    Err(HistoryStepError::PlayActive) => {
+                        self.error = Some(Text::InputActionsStopPlay.plain().into());
+                        return;
+                    }
+                    Err(HistoryStepError::Scene(error)) => Err(error),
+                }
             }
-            Action::Undo => self.prefab_history(revision, true),
-            Action::Redo => self.prefab_history(revision, false),
             _ => return,
         };
         match result {

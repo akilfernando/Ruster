@@ -19,13 +19,8 @@ const TOOLS: &[(&str, &str, &[&str])] = &[
     ),
     (
         "scene_material_copy",
-        "Copy one material into a fresh scene-owned ID. In v23, assign_object_id and component_id are both required and the exact Mesh Renderer must use source_id. Copies and assigns in one Undo. Legacy copies without assigning. Requires current scene and asset guards.",
+        "Copy one material into a fresh scene-owned ID. In v23, assign_object_id and component_id are both required and the exact Mesh Renderer must use source_id. Copies and assigns in one Undo. Requires current scene and asset guards.",
         &["source_id", "new_material_id"],
-    ),
-    (
-        "scene_material_remove",
-        "Remove an unreferenced scene-owned material; rejects materials still assigned to objects. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry. Source imports/refresh remain outside scene Undo.",
-        &["material_id"],
     ),
 ];
 
@@ -299,8 +294,6 @@ mod tests {
             "exact renderer required"
         );
         unique["component_id"] = json!("renderer.2");
-        let mut remove = guards;
-        remove["material_id"] = json!("surface_2");
 
         let advertised = list();
         let accepted = [
@@ -313,9 +306,8 @@ mod tests {
             ("scene_material_assign", assign.clone()),
             ("scene_material_copy", copy),
             ("scene_material_copy", unique),
-            ("scene_material_remove", remove),
         ];
-        assert_eq!(advertised.len(), 5);
+        assert_eq!(advertised.len(), 4);
         for (name, args) in accepted {
             assert!(supported(name));
             assert!(valid(name, &args), "accepted {name}: {args}");

@@ -15,14 +15,13 @@ pub fn list() -> Vec<Value> {
         }),
         json!({
             "name":"scene_save",
-            "description":"Save the active v23 scene in place. Legacy scenes save within an explicitly editor-granted directory, with a fresh leaf filename for Save As. Requires all three guards from scene_persistence_inspect. If the outcome is unknown, inspect the last receipt before taking further action.",
+            "description":"Save the active v23 scene in place using all three guards from scene_persistence_inspect. If the outcome is unknown, inspect the last receipt before taking further action.",
             "inputSchema":{
                 "type":"object",
                 "properties":{
                     "expected_session_token":{"type":"string","minLength":1,"maxLength":256},
                     "expected_revision":{"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20},
-                    "expected_persistence_token":{"type":"string","minLength":1,"maxLength":256},
-                    "filename":{"type":"string","minLength":1,"maxLength":128,"description":"Legacy Save As only. Fresh ordinary scene filename directly inside the granted directory, never a path. Existing destinations, including the current association, are rejected for Save As."}
+                    "expected_persistence_token":{"type":"string","minLength":1,"maxLength":256}
                 },
                 "required":["expected_session_token","expected_revision","expected_persistence_token"],
                 "additionalProperties":false
@@ -47,7 +46,7 @@ pub fn valid(name: &str, arguments: &Value) -> bool {
                 "expected_revision",
                 "expected_persistence_token",
             ],
-            &["filename"],
+            &[],
         )
         || !super::canonical_u64(&args["expected_revision"])
     {
@@ -59,10 +58,5 @@ pub fn valid(name: &str, arguments: &Value) -> bool {
             args[*field]
                 .as_str()
                 .is_some_and(|value| !value.is_empty() && value.len() <= 256)
-        })
-        && args.get("filename").is_none_or(|value| {
-            value
-                .as_str()
-                .is_some_and(|name| !name.is_empty() && name.len() <= 128)
         })
 }

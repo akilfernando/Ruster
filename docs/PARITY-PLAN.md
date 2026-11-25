@@ -244,7 +244,7 @@ See [benchmark commands](../crates/rot-render/README.md#large-scene-benchmark).
 | Enter Play mode, small scene | 300 ms | 1 | 70 ms for Reset then Play (Reset 35 ms) |
 | AI edit of one object, round trip | 30 ms at the 95th percentile | 1 | `scene_transform` 3.8 ms p50, 6.6 ms p95 over 200 calls (adapter stdio to editor and back) |
 | AI screenshot | 250 ms | 1 | 58 ms median, 70 ms worst of 10 (`viewport_capture_start` until `viewport_capture_inspect` is ready) |
-| MCP tool list | 40 KB in Phase 1, 15 KB after Phase 2 | 1 | 11,668 bytes over STDIO, 33 advertised tools (C-06, 2026-11-19). Earlier commands remain callable and discoverable through `rot_tools`. Phase 1 measured 39 KB. |
+| MCP tool list | 40 KB in Phase 1, 15 KB after Phase 2 | 1 | 14,352 bytes over STDIO, 34 advertised tools / 66 live v23 tools (C-06, 2026-11-26). Additional v23 commands remain callable and discoverable through `rot_tools`. Phase 1 measured 39 KB. |
 | Editor memory, empty project | 300 MB | 1 | Hub 284 MB RSS (207 MB PSS); 3-object scene 293 MB RSS (214 MB PSS) |
 | Editor UI frame, 5,000 objects, excluding 3D | 4 ms at the 95th percentile | 2 | Panels p95 0.43–0.45 ms with one selected object, 1.21–1.32 ms including a 5,000-object range selection. C-05 active Rotate and Scale were 0.76–0.85 ms p95 on CPU with 4,990 affected descendants, including UI preparation and tessellation. |
 | Scene view, 5,000 objects, about 1 M triangles, 1080p | 60 fps | 2 | Offscreen p95 0.97–1.20 ms through GPU completion, including CPU preparation and composite. |

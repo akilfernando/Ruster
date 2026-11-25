@@ -24,11 +24,34 @@ fn text_schema() -> Value {
         "description":"At most1024 UTF-8 bytes per label, including combined prefix and suffix for state labels. Document validation owns the byte limit."})
 }
 
+fn state_arguments_schema() -> Value {
+    let alternatives: Vec<Value> = [
+        ("number", json!({"type":"number"})),
+        ("bool", json!({"type":"boolean"})),
+        ("text", json!({"type":"string","maxLength":1024})),
+        (
+            "vec3",
+            json!({"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3}),
+        ),
+    ]
+    .into_iter()
+    .map(|(tag, value)| {
+        super::object_schema(
+            json!({"type":{"const":tag},"value":value}),
+            vec!["type", "value"],
+        )
+    })
+    .collect();
+    json!({"type":"object","maxProperties":16,
+        "propertyNames":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9_.-]+$"},
+        "additionalProperties":json!({"oneOf":alternatives})})
+}
+
 fn source_schema() -> Value {
     json!({"oneOf":[
         super::object_schema(json!({"kind":{"const":"button"},"caption":text_schema(),
             "command":super::object_schema(json!({"binding_id":identifier_schema(),
-                "command_id":identifier_schema(),"arguments":super::behavior_tools::state_arguments_schema()}),
+                "command_id":identifier_schema(),"arguments":state_arguments_schema()}),
                 vec!["binding_id","command_id","arguments"])}),vec!["kind","caption","command"]),
         super::object_schema(json!({"kind":{"const":"action_button"},"caption":text_schema(),
             "action_id":identifier_schema()}),vec!["kind","caption","action_id"]),

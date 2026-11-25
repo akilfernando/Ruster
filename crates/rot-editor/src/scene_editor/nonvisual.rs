@@ -233,9 +233,9 @@ mod tests {
             .editor
             .scene_guard_token(&host.editor.connection_incarnation);
         let (bridge, mut write) = crate::bridge::queued_test_bridge(
-            json!({"operation":"scene_ambient_set","arguments":{
+            json!({"operation":"scene_display_set","arguments":{
                 "expected_session_token":token,"expected_revision":"0",
-                "ambient":{"color":[1,1,1],"intensity":0.1}}}),
+                "display":{"type":"legacy_sdr"}}}),
             Instant::now() + Duration::from_secs(10),
         );
         host.bridge = Some(bridge);
@@ -252,9 +252,9 @@ mod tests {
             .editor
             .scene_guard_token(&host.editor.connection_incarnation);
         let (bridge, mut observe) = crate::bridge::queued_test_bridge(
-            json!({"operation":"scene_ambient_set","arguments":{
+            json!({"operation":"scene_display_set","arguments":{
                 "expected_session_token":token,"expected_revision":"0",
-                "ambient":{"color":[1,1,1],"intensity":0.1}}}),
+                "display":{"type":"legacy_sdr"}}}),
             Instant::now() + Duration::from_secs(10),
         );
         host.bridge = Some(bridge);

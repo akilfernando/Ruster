@@ -1,22 +1,9 @@
 //! Bounded data authoring only; execution remains an editor-owned asynchronous workflow.
 use serde_json::{json, Map, Value};
-const TOOLS: &[(&str,&str,&[&str])] = &[
-    ("behavior_inspect","Page through source/binding summaries, full action definitions with binding warnings, or missing-reference diagnostics, at most16 rows; no source/property bodies.",&["kind"]),
-    ("behavior_source","Read one embedded source as base64 UTF-8 with SHA256; no filesystem access.",&["source_id"]),
-    ("behavior_source_set","Upsert embedded source data, including unfinished code. host_api_version is a positive u32; Lua API7 opts into owned-sphere move-and-slide. Shared Undo; no compilation or execution; runtime validates supported versions and owner constraints.",&["source_id","label","language_id","host_api_version","text_base64"]),
-    ("behavior_source_remove","Remove embedded source; dependent bindings remain repairable. Shared Undo.",&["source_id"]),
-    ("behavior_create","Atomically create a fresh source and enabled binding in one Undo entry. Use exactly one object_id or a tagged target: application, or group with group_id for Lua API6 local radians. Lua API7 uses object_id for one flat enabled blocker sphere; runtime enforces constrained movement.",&["source_id","binding_id","label","language_id","host_api_version","text_base64"]),
-    ("behavior_binding","Read owner/source metadata,16 property names/types and16 authored state defaults. The same offset selects each page; next_offset and next_state_offset are separate.",&["binding_id"]),
-    ("behavior_binding_set","Attach/change source, owner or enabled flag, retaining properties and state defaults. Use exactly one object_id or a tagged target: application, or group with group_id for Lua API6 local radians. Lua API7 uses object_id for one flat enabled blocker sphere; runtime enforces constrained movement. Shared Undo.",&["binding_id","source_id","enabled"]),
-    ("behavior_binding_remove","Detach one behavior binding. Shared Undo; source stays available.",&["binding_id"]),
-    ("behavior_property","Read one typed property or null for absent; no complete property-map response.",&["binding_id","name"]),
-    ("behavior_property_set","Set one typed property or use null to remove. Sound uses sound_ref value {asset_id,gain}; gain 0..1, nullable stable WAV asset ID. Lua4/5/7 host.play_sound accepts the property name, not an arbitrary path. Known wrong-kind catalog IDs reject; missing IDs stay repairable. Shared Undo, no execution.",&["binding_id","name","value"]),
-    ("behavior_state_default","Read one authored typed state default or null for absent. Runtime values belong to the committed run.",&["binding_id","name"]),
-    ("behavior_state_default_set","Set/remove one authored state field through shared Undo. Number, Bool, Text and Vec3 only,64fields/16KiB per owner and1MiB total. Null removes. Requires clean drafts. Current runtime stays unchanged until Reset.",&["binding_id","name","value"]),
-    ("behavior_command","Read one complete authored command definition or null for absent; binding summaries expose IDs and argument counts only.",&["binding_id","command_id"]),
-    ("behavior_command_set","Set/remove one Application command definition through shared Undo. Up to16 commands,16 typed arguments and16KiB normalized argument payload per command. Null removes. Clean drafts required.",&["binding_id","command_id","definition"]),
+const TOOLS: &[(&str, &str, &[&str])] = &[
+    ("behavior_inspect","Page through full action definitions with binding warnings, at most 16 rows.",&["kind"]),
     ("behavior_action","Read one complete authored action definition under current scene session/revision authority, with any Linux player F11 conflict.",&["action_id"]),
-    ("behavior_action_set","Replace/upsert a complete authored action definition. At most32 actions including unbound definitions; at most4 total logical keys per action. Cross-action key sharing is allowed; v23 Buttons may also bind primary_mouse (boolean); repeated/opposite keys and reserved Escape/Tab reject. F11 is preserved with a warning because the Linux player consumes it for fullscreen. Shared Undo, clean human drafts required; live runtime map stays immutable until Reset.",&["action_id","definition"]),
+    ("behavior_action_set","Replace/upsert a complete authored action definition. At most 32 actions including unbound definitions; at most 4 total logical keys per action. Cross-action key sharing is allowed; v23 Buttons may also bind primary_mouse (boolean); repeated/opposite keys and reserved Escape/Tab reject. F11 is preserved with a warning because the Linux player consumes it for fullscreen. Shared Undo, clean human drafts required; live runtime map stays immutable until Reset.",&["action_id","definition"]),
     ("behavior_action_remove","Remove one authored action definition through shared Undo. Reversible action IDs remain reserved; Undo restores them. Existing script references remain available for repair; no live runtime map mutation.",&["action_id"]),
 ];
 pub fn supported(name: &str) -> bool {
@@ -31,8 +18,7 @@ fn fields(name: &str) -> Option<Vec<&'static str>> {
 }
 fn optional(name: &str) -> &'static [&'static str] {
     match name {
-        "behavior_create" | "behavior_binding_set" => &["object_id", "target"],
-        "behavior_inspect" | "behavior_binding" => &["offset"],
+        "behavior_inspect" => &["offset"],
         _ => &[],
     }
 }
@@ -100,129 +86,26 @@ fn valid_action_definition(value: &Value) -> bool {
 }
 fn shape(field: &str) -> Value {
     match field {
-        "target" => json!({"oneOf":[
-            super::object_schema(json!({"type":{"const":"application"}}), vec!["type"]),
-            super::object_schema(json!({
-                "type":{"const":"group"},
-                "group_id":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9_.-]+$"}
-            }), vec!["type","group_id"])
-        ]}),
         "expected_revision" | "offset" => {
             json!({"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20})
         }
         "expected_session_token" => json!({"type":"string","minLength":1,"maxLength":256}),
-        "kind" => json!({"enum":["sources","bindings","actions","diagnostics"]}),
+        "kind" => json!({"const":"actions"}),
         "action_id" => {
             json!({"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9_.-]+$",
             "description":"Stable action ID; current and reversible history reservations cannot be silently reused."})
         }
         "definition" => action_definition_schema(),
-        "label" => json!({"type":["string","null"],"maxLength":128}),
-        "host_api_version" => json!({"type":"integer","minimum":1,"maximum":4294967295u64}),
-        "text_base64" => {
-            json!({"type":"string","maxLength":21848,"description":"Canonical padded base64 of at most16384 UTF-8 bytes; empty text is allowed."})
-        }
-        "enabled" => json!({"type":"boolean"}),
-        "value" => {
-            let mut alternatives = vec![json!({"type":"null"})];
-            for (tag, value) in [
-                ("number", json!({"type":"number"})),
-                ("bool", json!({"type":"boolean"})),
-                ("text", json!({"type":"string","maxLength":1024})),
-                (
-                    "vec3",
-                    json!({"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3}),
-                ),
-                (
-                    "object_ref",
-                    json!({"type":["string","null"],"minLength":1,"maxLength":128}),
-                ),
-                (
-                    "asset_ref",
-                    json!({"type":["string","null"],"minLength":1,"maxLength":128}),
-                ),
-                (
-                    "sound_ref",
-                    super::object_schema(
-                        json!({
-                            "asset_id":{"type":["string","null"],"minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9_.-]+$"},
-                            "gain":{"type":"number","minimum":0,"maximum":1}
-                        }),
-                        vec!["asset_id", "gain"],
-                    ),
-                ),
-            ] {
-                alternatives.push(super::object_schema(
-                    json!({"type":{"const":tag},"value":value}),
-                    vec!["type", "value"],
-                ));
-            }
-            json!({"oneOf":alternatives,"description":"Top-level null removes property. Text limits are UTF-8 bytes; references inside tagged values may be null. sound_ref contains an optional registered WAV asset_id and gain in 0..1; host.play_sound uses the binding property name on Lua4/5/7."})
-        }
-        _ => json!({"type":"string","minLength":1,"maxLength":128}),
+        _ => unreachable!("unexpected field {field}"),
     }
-}
-pub(super) fn state_arguments_schema() -> Value {
-    let mut value = shape("value");
-    value["oneOf"]
-        .as_array_mut()
-        .unwrap()
-        .retain(|alternative| {
-            alternative["type"] != "null"
-                && !matches!(
-                    alternative["properties"]["type"]["const"].as_str(),
-                    Some("object_ref" | "asset_ref" | "sound_ref")
-                )
-        });
-    json!({"type":"object","maxProperties":16,
-        "propertyNames":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9_.-]+$"},
-        "additionalProperties":value})
-}
-pub(super) fn valid_state_arguments(value: &Value) -> bool {
-    value.as_object().is_some_and(|fields| {
-        fields.len() <= 16
-            && fields.iter().all(|(name, value)| {
-                !name.is_empty()
-                    && name.len() <= 128
-                    && name
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
-                    && value.as_object().is_some_and(|value| {
-                        super::exact_keys(value, &["type", "value"], &[])
-                            && match value["type"].as_str() {
-                                Some("number") => value["value"].is_number(),
-                                Some("bool") => value["value"].is_boolean(),
-                                Some("text") => value["value"]
-                                    .as_str()
-                                    .is_some_and(|text| text.len() <= 1024),
-                                Some("vec3") => value["value"].as_array().is_some_and(|values| {
-                                    values.len() == 3 && values.iter().all(Value::is_number)
-                                }),
-                                _ => false,
-                            }
-                    })
-            })
-            && serde_json::to_vec(value).is_ok_and(|bytes| bytes.len() <= 16384)
-    })
 }
 pub fn list() -> Vec<Value> {
     TOOLS.iter().map(|(name,description,_)|{
         let required=fields(name).unwrap();
         let mut properties:Map<String,Value>=required.iter().map(|f|(f.to_string(),shape(f))).collect();
         for field in optional(name) {properties.insert((*field).into(),shape(field));}
-        if *name == "behavior_state_default_set" {
-            properties.get_mut("value").unwrap()["oneOf"].as_array_mut().unwrap().retain(|value| {
-                !matches!(value["properties"]["type"]["const"].as_str(), Some("object_ref"|"asset_ref"|"sound_ref"))
-            });
-        }
-        if *name == "behavior_command_set" {
-            properties.insert("definition".into(),json!({"oneOf":[{"type":"null"},super::object_schema(json!({"arguments":state_arguments_schema()}),vec!["arguments"])]}));
-        }
-        let mut schema=super::object_schema(Value::Object(properties),required);
-        if matches!(*name,"behavior_create"|"behavior_binding_set") {
-            schema["oneOf"]=json!([{"required":["object_id"],"not":{"required":["target"]}},{"required":["target"],"not":{"required":["object_id"]}}]);
-        }
-        json!({"name":name,"description":description,"inputSchema":schema,"annotations":{"readOnlyHint":matches!(*name,"behavior_inspect"|"behavior_source"|"behavior_binding"|"behavior_property"|"behavior_action"|"behavior_state_default"|"behavior_command"),"openWorldHint":false}})
+        let schema=super::object_schema(Value::Object(properties),required);
+        json!({"name":name,"description":description,"inputSchema":schema,"annotations":{"readOnlyHint":matches!(*name,"behavior_inspect"|"behavior_action"),"openWorldHint":false}})
     }).collect()
 }
 fn valid_stable_id(value: &Value) -> bool {
@@ -244,87 +127,19 @@ pub fn valid(name: &str, args: &Value) -> bool {
     if !required.iter().all(|k| args.contains_key(*k)) {
         return false;
     }
-    if matches!(name, "behavior_create" | "behavior_binding_set")
-        && args.contains_key("object_id") == args.contains_key("target")
-    {
-        return false;
-    }
     args.iter().all(|(field, value)| {
         if !required.contains(&field.as_str()) && !optional(name).contains(&field.as_str()) {
             return false;
         }
         match field.as_str() {
-            "target" => {
-                value == &json!({"type":"application"})
-                    || value.as_object().is_some_and(|target| {
-                        super::exact_keys(target, &["type", "group_id"], &[])
-                            && target["type"] == "group"
-                            && valid_stable_id(&target["group_id"])
-                    })
-            }
             "expected_revision" | "offset" => super::canonical_u64(value),
-            "host_api_version" => value
-                .as_u64()
-                .is_some_and(|n| n > 0 && n <= u32::MAX as u64),
-            "enabled" => value.is_boolean(),
-            "definition" if name == "behavior_command_set" => {
-                value.is_null()
-                    || value.as_object().is_some_and(|definition| {
-                        super::exact_keys(definition, &["arguments"], &[])
-                            && valid_state_arguments(&definition["arguments"])
-                    })
-            }
             "definition" => valid_action_definition(value),
             "action_id" => valid_stable_id(value),
-            "kind" => value
+            "kind" => value == "actions",
+            "expected_session_token" => value
                 .as_str()
-                .is_some_and(|v| ["sources", "bindings", "actions", "diagnostics"].contains(&v)),
-            "label" => value.is_null() || value.as_str().is_some_and(|v| v.len() <= 128),
-            "text_base64" => value.as_str().is_some_and(|v| v.len() <= 21848),
-            "value" => {
-                value.is_null()
-                    || value.as_object().is_some_and(|o| {
-                        if !super::exact_keys(o, &["type", "value"], &[]) {
-                            return false;
-                        }
-                        match o["type"].as_str() {
-                            Some("number") => o["value"].is_number(),
-                            Some("bool") => o["value"].is_boolean(),
-                            Some("text") => o["value"].as_str().is_some_and(|s| s.len() <= 1024),
-                            Some("vec3") => o["value"]
-                                .as_array()
-                                .is_some_and(|v| v.len() == 3 && v.iter().all(Value::is_number)),
-                            Some("sound_ref") => {
-                                name == "behavior_property_set"
-                                    && o["value"].as_object().is_some_and(|sound| {
-                                        super::exact_keys(sound, &["asset_id", "gain"], &[])
-                                            && (sound["asset_id"].is_null()
-                                                || valid_stable_id(&sound["asset_id"]))
-                                            && sound["gain"]
-                                                .as_f64()
-                                                .is_some_and(|gain| (0.0..=1.0).contains(&gain))
-                                    })
-                            }
-                            Some("object_ref" | "asset_ref") => {
-                                name != "behavior_state_default_set"
-                                    && (o["value"].is_null()
-                                        || o["value"]
-                                            .as_str()
-                                            .is_some_and(|s| !s.is_empty() && s.len() <= 128))
-                            }
-                            _ => false,
-                        }
-                    })
-            }
-            _ => value.as_str().is_some_and(|v| {
-                !v.is_empty()
-                    && v.len()
-                        <= if field == "expected_session_token" {
-                            256
-                        } else {
-                            128
-                        }
-            }),
+                .is_some_and(|v| !v.is_empty() && v.len() <= 256),
+            _ => false,
         }
     })
 }
@@ -332,83 +147,36 @@ pub fn valid(name: &str, args: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // One wire dispatch case protects tool discovery, strict shapes and exact
-    // forwarding; semantic source validation belongs to the editor owner.
+
     #[test]
-    fn behavior_tools_forward_encoded_data_and_preserve_preconditions() {
-        let args = json!({"expected_session_token":"session","expected_revision":"9007199254740993","source_id":"source","label":null,"language_id":"lua54","host_api_version":1,"text_base64":"AA=="});
-        assert!(valid("behavior_source_set", &args));
-        let mut sound = json!({"expected_session_token":"session","expected_revision":"3","binding_id":"application","name":"chime","value":{"type":"sound_ref","value":{"asset_id":"chime","gain":0.5}}});
-        assert!(valid("behavior_property_set", &sound));
-        assert!(!valid("behavior_state_default_set", &sound));
-        for gain in [json!(-0.1), json!(1.1), json!("0.5"), Value::Null] {
-            sound["value"]["value"]["gain"] = gain;
-            assert!(!valid("behavior_property_set", &sound));
-        }
-        sound["value"]["value"]["gain"] = json!(0.5);
-        sound["value"]["value"]["path"] = json!("arbitrary.wav");
-        assert!(!valid("behavior_property_set", &sound));
-        sound["value"]["value"]
-            .as_object_mut()
-            .unwrap()
-            .remove("path");
-        sound["value"]["value"]["asset_id"] = Value::Null;
-        assert!(valid("behavior_property_set", &sound));
-        let mut command = json!({"expected_session_token":"session","expected_revision":"3","binding_id":"application","command_id":"reset","definition":{"arguments":{"amount":{"type":"number","value":2.5}}}});
-        assert!(valid("behavior_command_set", &command));
-        command["definition"]["arguments"]["amount"] = json!({"type":"object_ref","value":null});
-        assert!(!valid("behavior_command_set", &command));
-        command["definition"] = Value::Null;
-        assert!(valid("behavior_command_set", &command));
-        let mut extra = args.clone();
-        extra["path"] = "/unavailable".into();
-        assert!(!valid("behavior_source_set", &extra));
-        let mut rounded = args.clone();
-        rounded["expected_revision"] = 9007199254740993u64.into();
-        assert!(!valid("behavior_source_set", &rounded));
-        let mut server = super::super::tests::ready();
-        let request = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"behavior_source_set","arguments":args}});
-        let response = server
-            .handle(&serde_json::to_vec(&request).unwrap(), |name, forwarded| {
-                assert_eq!(name, "behavior_source_set");
-                assert_eq!(forwarded, &args);
-                json!({"ok":false,"error":{"code":"drafts_pending","message":"Apply source draft"}})
-            })
-            .unwrap();
-        assert_eq!(response["result"]["isError"], true);
-        assert_eq!(
-            response["result"]["structuredContent"]["error"]["code"],
-            "drafts_pending"
-        );
-        // Version selection is forwarded as authored data, including API7;
-        // runtime ownership semantics remain with the editor/VM, not the adapter.
-        let mut kinematic = args.clone();
-        kinematic["host_api_version"] = json!(7);
-        let mut create = kinematic.clone();
-        create["binding_id"] = json!("mover");
-        create["object_id"] = json!("sphere");
-        for (name, arguments) in [
-            ("behavior_source_set", kinematic),
-            ("behavior_create", create),
+    fn behavior_action_tools_validate_shapes_and_reject_retired_names() {
+        for retired in [
+            "behavior_source",
+            "behavior_source_set",
+            "behavior_source_remove",
+            "behavior_create",
+            "behavior_binding",
+            "behavior_binding_set",
+            "behavior_binding_remove",
+            "behavior_property",
+            "behavior_property_set",
+            "behavior_state_default",
+            "behavior_state_default_set",
+            "behavior_command",
+            "behavior_command_set",
         ] {
-            assert!(valid(name, &arguments));
-            let response = server.handle(
-                &serde_json::to_vec(&json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":name,"arguments":arguments}})).unwrap(),
-                |forwarded_name, forwarded| {
-                    assert_eq!(forwarded_name, name);
-                    assert_eq!(forwarded, &arguments);
-                    json!({"ok":false,"error":{"code":"stale_revision","message":"Inspect current revision"}})
-                },
-            ).unwrap();
-            assert_eq!(
-                response["result"]["structuredContent"]["error"]["code"],
-                "stale_revision"
-            );
+            assert!(!supported(retired), "{retired} must be retired");
+            assert!(!valid(retired, &json!({})), "{retired} must reject");
         }
+        assert!(!valid("behavior_inspect", &json!({"kind":"sources"})));
+        assert!(!valid("behavior_inspect", &json!({"kind":"bindings"})));
+        assert!(!valid("behavior_inspect", &json!({"kind":"diagnostics"})));
+        let mut server = super::super::tests::ready();
         let action = json!({"expected_session_token":"session","expected_revision":"9007199254740993","action_id":"move"});
         let mut set = action.clone();
         set["definition"] = json!({"label":"Traverse","kind":{"type":"axis1d","negative":["a","arrow_left"],"positive":["d","arrow_right"]}});
         let tools = list();
+        assert_eq!(tools.len(), 4);
         for (index, (name, args, readonly)) in [
             ("behavior_action", action.clone(), true),
             ("behavior_action_set", set.clone(), false),
@@ -474,29 +242,6 @@ mod tests {
         let mut unbound = set;
         unbound["definition"] = json!({"kind":{"type":"button","keys":[]}});
         assert!(valid("behavior_action_set", &unbound));
-        let mut application = json!({"expected_session_token":"session","expected_revision":"0",
-            "binding_id":"application","source_id":"source","enabled":true,
-            "target":{"type":"application"}});
-        assert!(valid("behavior_binding_set", &application));
-        application["object_id"] = json!("cube");
-        assert!(!valid("behavior_binding_set", &application));
-        application.as_object_mut().unwrap().remove("target");
-        assert!(valid("behavior_binding_set", &application));
-        application.as_object_mut().unwrap().remove("object_id");
-        assert!(!valid("behavior_binding_set", &application));
-        application["target"] = json!({"type":"group","group_id":"hinge"});
-        assert!(valid("behavior_binding_set", &application));
-        application["target"]["group_id"] = "not an ID".into();
-        assert!(!valid("behavior_binding_set", &application));
-        application["target"] = json!({"type":"group","group_id":"hinge","extra":false});
-        assert!(!valid("behavior_binding_set", &application));
-        let mut state = json!({"expected_session_token":"session","expected_revision":"0",
-            "binding_id":"application","name":"elapsed","value":{"type":"number","value":0.0}});
-        assert!(valid("behavior_state_default_set", &state));
-        state["value"] = json!({"type":"object_ref","value":null});
-        assert!(!valid("behavior_state_default_set", &state));
-        state["value"] = Value::Null;
-        assert!(valid("behavior_state_default_set", &state));
         // Finite-key membership/reservations remain the editor's owning check,
         // rather than a second independently maintained key table in this crate.
         unbound["definition"]["kind"]["keys"] = json!(["future_key"]);
