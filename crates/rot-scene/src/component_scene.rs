@@ -434,7 +434,7 @@ impl ComponentScene {
                                 || binding.properties.values().any(|property| {
                                     !matches!(
                                         property,
-                                        crate::PropertyValue::Number(_) | crate::PropertyValue::Bool(_)
+                                        crate::PropertyValue::Number(_) | crate::PropertyValue::Bool(_) | crate::PropertyValue::Vec3(_)
                                     )
                                         && !matches!(property, crate::PropertyValue::SoundRef(sound) if sound.asset_id.is_some())
                                         && !matches!(property, crate::PropertyValue::SensorRef(_) if *movement == ScriptMovement::KinematicSphere)
@@ -443,7 +443,7 @@ impl ComponentScene {
                                 || !binding.commands.is_empty())
                         {
                             return Err(SceneError::Invalid(format!(
-                                "file-backed script {} supports number and Boolean properties, assigned sound cues and Kinematic Sphere sensor bindings",
+                                "file-backed script {} supports number, Boolean, and Vector3 properties, assigned sound cues and Kinematic Sphere sensor bindings",
                                 component.id
                             )));
                         }

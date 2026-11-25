@@ -8,6 +8,7 @@ use rot_scene::PropertyValue;
 pub(in crate::scene_editor) enum Kind {
     Number,
     Bool,
+    Vec3,
 }
 
 impl Kind {
@@ -15,6 +16,7 @@ impl Kind {
         match self {
             Self::Number => Text::ScriptNumberProperties,
             Self::Bool => Text::ScriptBooleanProperties,
+            Self::Vec3 => Text::ScriptVectorProperties,
         }
     }
 
@@ -24,13 +26,17 @@ impl Kind {
             (Self::Number, true) => Text::ScriptNumberEdit,
             (Self::Bool, false) => Text::ScriptBooleanAdd,
             (Self::Bool, true) => Text::ScriptBooleanEdit,
+            (Self::Vec3, false) => Text::ScriptVectorAdd,
+            (Self::Vec3, true) => Text::ScriptVectorEdit,
         }
     }
 
     pub(in crate::scene_editor) fn matches(self, value: &PropertyValue) -> bool {
         matches!(
             (self, value),
-            (Self::Number, PropertyValue::Number(_)) | (Self::Bool, PropertyValue::Bool(_))
+            (Self::Number, PropertyValue::Number(_))
+                | (Self::Bool, PropertyValue::Bool(_))
+                | (Self::Vec3, PropertyValue::Vec3(_))
         )
     }
 }
@@ -55,6 +61,7 @@ pub(super) struct Draft {
 enum DraftValue {
     Number(String),
     Bool(bool),
+    Vec3([String; 3]),
 }
 
 impl DraftValue {
@@ -62,6 +69,7 @@ impl DraftValue {
         match self {
             Self::Number(_) => Kind::Number,
             Self::Bool(_) => Kind::Bool,
+            Self::Vec3(_) => Kind::Vec3,
         }
     }
 }
@@ -136,6 +144,12 @@ impl ComponentWorkspace {
                 DraftValue::Number(value.to_string())
             }
             (Kind::Bool, Some(PropertyValue::Bool(value))) => DraftValue::Bool(*value),
+            (Kind::Vec3, Some(PropertyValue::Vec3(value))) => {
+                DraftValue::Vec3(value.map(|axis| axis.to_string()))
+            }
+            (Kind::Vec3, None) if request.name.is_none() => {
+                DraftValue::Vec3(std::array::from_fn(|_| "0".into()))
+            }
             (Kind::Number, None) if request.name.is_none() => DraftValue::Number("0".into()),
             (Kind::Bool, None) if request.name.is_none() => DraftValue::Bool(false),
             _ => return,
@@ -191,6 +205,17 @@ impl ComponentWorkspace {
                             ui_kit::number_field(ui, value, false, ui.available_width(), true)
                                 .labelled_by(label.id);
                         response.has_focus() || response.lost_focus()
+                    }
+                    DraftValue::Vec3(values) => {
+                        let mut focused = false;
+                        ui_kit::vector_row(ui, Text::Value.plain(), |ui, axis, width| {
+                            let label = ui.label(["X", "Y", "Z"][axis]);
+                            let response =
+                                ui_kit::number_field(ui, &mut values[axis], false, width, true)
+                                    .labelled_by(label.id);
+                            focused |= response.has_focus() || response.lost_focus();
+                        });
+                        focused
                     }
                     DraftValue::Bool(value) => {
                         let checkbox = ui.next_auto_id();
@@ -263,14 +288,11 @@ impl ComponentWorkspace {
                 .plain()
                 .replace("{name}", &format!("{name:?}")));
         }
-        let current = match draft
+        let current = draft
             .original
             .as_ref()
             .and_then(|name| properties.get(name))
-        {
-            Some(PropertyValue::Number(value)) => Some(*value),
-            _ => None,
-        };
+            .cloned();
         let kind = draft.value.kind();
         if let Some(original) = &draft.original {
             if remove || original != name {
@@ -279,15 +301,27 @@ impl ComponentWorkspace {
         }
         if !remove {
             let value = match &draft.value {
-                DraftValue::Number(input) => PropertyValue::Number(
-                    input
-                        .trim()
-                        .parse::<f64>()
-                        .ok()
-                        .filter(|value| value.is_finite())
-                        .or_else(|| ui_kit::eval_number(input, current))
-                        .ok_or(Text::ScriptNumberInvalid.plain())?,
-                ),
+                DraftValue::Number(input) => {
+                    let prior = match current {
+                        Some(PropertyValue::Number(value)) => Some(value),
+                        _ => None,
+                    };
+                    PropertyValue::Number(
+                        parse_number(input, prior).ok_or(Text::ScriptNumberInvalid.plain())?,
+                    )
+                }
+                DraftValue::Vec3(values) => {
+                    let prior = match current {
+                        Some(PropertyValue::Vec3(value)) => value.map(Some),
+                        _ => [None; 3],
+                    };
+                    let [Some(x), Some(y), Some(z)] =
+                        std::array::from_fn(|axis| parse_number(&values[axis], prior[axis]))
+                    else {
+                        return Err(Text::ScriptVectorInvalid.plain().into());
+                    };
+                    PropertyValue::Vec3([x, y, z])
+                }
                 DraftValue::Bool(value) => PropertyValue::Bool(*value),
             };
             edit(&mut object, &draft.component, name, kind, Some(value))?;
@@ -300,5 +334,176 @@ impl ComponentWorkspace {
             self.refresh();
         }
         Ok(())
+    }
+}
+
+fn parse_number(input: &str, current: Option<f64>) -> Option<f64> {
+    input
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
+        .or_else(|| ui_kit::eval_number(input, current))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rot_scene::component_scene::{ComponentScene, ComponentSession};
+    use rot_scene::{Scene, Session};
+    use serde_json::json;
+
+    #[test]
+    fn script_vec3_draft_keyboard_shares_guarded_binding_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        for (index, object) in scene.objects.iter_mut().take(2).enumerate() {
+            object.components.push(
+                serde_json::from_value(json!({
+                    "id":format!("drive-{index}"),"enabled":true,"type":"script","source_kind":"asset",
+                    "binding":{"object_id":object.id,"enabled":true,"source_id":"shared-drive",
+                        "properties":{"flag":{"type":"bool","value":false}}}
+                }))
+                .unwrap(),
+            );
+        }
+        scene.save_new(&path).unwrap();
+        let owner = scene.objects[0].id.clone();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.select(Some(owner.clone()));
+
+        let ctx = egui::Context::default();
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let frame = |editor: &mut ComponentWorkspace, events| {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960., 640.),
+                    )),
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    editor.show_script_property(ui.ctx());
+                },
+            )
+            .textures_delta
+            .clear();
+        };
+        let key_with = |key, modifiers| {
+            [true, false].map(|pressed| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers,
+            })
+        };
+        let key = |key| key_with(key, egui::Modifiers::NONE).into();
+        let type_text = |text: &str| vec![egui::Event::Text(text.into())];
+        let begin = |editor: &mut ComponentWorkspace, name: Option<&str>| {
+            editor.begin_script_property(Request {
+                component: "drive-0".into(),
+                name: name.map(str::to_owned),
+                kind: Kind::Vec3,
+            })
+        };
+        let vector = |editor: &ComponentWorkspace| {
+            super::super::component_sound::sound_script(
+                editor.session.scene().objects[0].components.last().unwrap(),
+            )
+            .unwrap()
+            .get("offset")
+            .cloned()
+        };
+
+        begin(&mut editor, None);
+        frame(&mut editor, vec![]);
+        frame(&mut editor, type_text("offset"));
+        for input in ["-1.5", "2", "3.25"] {
+            frame(&mut editor, key(egui::Key::Tab));
+            frame(
+                &mut editor,
+                key_with(egui::Key::A, egui::Modifiers::COMMAND).into(),
+            );
+            frame(&mut editor, type_text(input));
+        }
+        frame(&mut editor, key(egui::Key::Enter));
+        assert!(
+            editor.script_property.is_none(),
+            "{:?}",
+            editor
+                .script_property
+                .as_ref()
+                .and_then(|draft| draft.error.as_deref())
+        );
+        assert_eq!(vector(&editor), Some(PropertyValue::Vec3([-1.5, 2., 3.25])));
+        assert_eq!(editor.session.revision(), 1);
+
+        begin(&mut editor, Some("offset"));
+        frame(&mut editor, vec![]);
+        frame(&mut editor, key(egui::Key::Tab));
+        frame(
+            &mut editor,
+            key_with(egui::Key::A, egui::Modifiers::COMMAND).into(),
+        );
+        frame(&mut editor, type_text("1e9999"));
+        frame(&mut editor, key(egui::Key::Enter));
+        assert!(editor.script_property.as_ref().unwrap().error.is_some());
+        assert_eq!(editor.session.revision(), 1);
+        frame(&mut editor, key(egui::Key::Escape));
+        assert!(editor.script_property.is_none());
+
+        let request = |revision: u64, name: &str, value| {
+            json!({
+                "expected_session_token":"session","expected_revision":revision.to_string(),"edits":[
+                    {"operation":"set_script_vec3","object_id":owner,"component_id":"drive-0","name":name,"value":value}
+                ]
+            })
+        };
+        for (revision, name, value, code) in [
+            (0, "offset", json!([0, 0, 0]), "stale_revision"),
+            (1, "flag", json!(null), "invalid_arguments"),
+            (1, "offset", json!([1, 2]), "invalid_arguments"),
+            (1, "offset", json!([1, 2, true]), "invalid_arguments"),
+        ] {
+            let reply = editor.ai_command(
+                "session",
+                "scene_components_edit",
+                &request(revision, name, value),
+            );
+            assert_eq!(reply["error"]["code"], code, "{reply}");
+        }
+        let reply = editor.ai_command(
+            "session",
+            "scene_components_edit",
+            &request(1, "offset", json!([0, 0, 0])),
+        );
+        assert_eq!(reply["result"]["revision"], "2", "{reply}");
+        assert_eq!(vector(&editor), Some(PropertyValue::Vec3([0.; 3])));
+        let no_op = editor.ai_command(
+            "session",
+            "scene_components_edit",
+            &request(2, "offset", json!([0, 0, 0])),
+        );
+        assert_eq!(no_op["result"]["changed"], false, "{no_op}");
+        let removed = editor.ai_command(
+            "session",
+            "scene_components_edit",
+            &request(2, "offset", json!(null)),
+        );
+        assert_eq!(removed["result"]["revision"], "3", "{removed}");
+        assert_eq!(vector(&editor), None);
+        editor.command(crate::workspace::Action::Undo);
+        assert_eq!(vector(&editor), Some(PropertyValue::Vec3([0.; 3])));
+        assert!(editor.save());
+        let reopened =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        assert_eq!(vector(&reopened), Some(PropertyValue::Vec3([0.; 3])));
+        assert_eq!(reopened.session.scene().objects[1], scene.objects[1]);
     }
 }

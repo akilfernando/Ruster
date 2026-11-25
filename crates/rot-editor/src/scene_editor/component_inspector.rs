@@ -622,7 +622,7 @@ pub(super) fn components(
                                 }
                             }
                             use super::component_workspace::component_property::{Kind, Request};
-                            for kind in [Kind::Number, Kind::Bool] {
+                            for kind in [Kind::Number, Kind::Bool, Kind::Vec3] {
                                 ui.strong(kind.label().plain());
                                 for (name, value) in &binding.properties {
                                     if !kind.matches(value) {
@@ -633,6 +633,9 @@ pub(super) fn components(
                                             value.to_string()
                                         }
                                         rot_scene::PropertyValue::Bool(value) => value.to_string(),
+                                        rot_scene::PropertyValue::Vec3([x, y, z]) => {
+                                            format!("[{x}, {y}, {z}]")
+                                        }
                                         _ => unreachable!(),
                                     };
                                     ui.horizontal_wrapped(|ui| {

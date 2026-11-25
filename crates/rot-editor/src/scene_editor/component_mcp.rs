@@ -1489,6 +1489,9 @@ impl ComponentWorkspace {
                 response["boolean_property_guidance"] = json!(
                     r#"Read properties["auto_start"] in Lua. Use scene_components_edit operation set_script_bool with exact object_id, component_id, name and Boolean value. Use value:null to remove. False is an explicit value."#
                 );
+                response["vector3_property_guidance"] = json!(
+                    r#"Read three axes as properties["offset"][1], [2], [3] in Lua. Use scene_components_edit operation set_script_vec3 with exact object_id, component_id, name and value:[x,y,z]. Use value:null to remove. [0,0,0] is an explicit value."#
+                );
                 response["movement_guidance"] = json!("An exact replace can set component.movement to kinematic_sphere or ordinary (omission keeps it). Kinematic Sphere needs a flat scene, one enabled mover, an enabled uniformly scaled Blocker Sphere, and stationary blockers. Call host.move_and_slide({dx,dy,dz}) once per Step, use suggested_translation, and return {transform=object}.");
                 response["sound_cue_guidance"] = json!(
                     r#"File-backed Object Lua calls host.play_sound("cue-name"). Use binding.properties sound_ref value {asset_id,gain}. For positional add playback:{type:"positional",range:10} and activate a Transform Game Camera. Omit playback for 2D. Find WAVs in asset_inspect and pin expected_asset_revision."#
@@ -1886,6 +1889,12 @@ enum ComponentEdit {
         name: String,
         value: Value,
     },
+    SetScriptVec3 {
+        object_id: String,
+        component_id: String,
+        name: String,
+        value: Value,
+    },
     SetEnabled {
         object_id: String,
         component_id: String,
@@ -1909,6 +1918,7 @@ impl ComponentEdit {
             | Self::Replace { object_id, .. }
             | Self::SetScriptNumber { object_id, .. }
             | Self::SetScriptBool { object_id, .. }
+            | Self::SetScriptVec3 { object_id, .. }
             | Self::SetEnabled { object_id, .. }
             | Self::Remove { object_id, .. } => object_id,
         };
@@ -2011,6 +2021,29 @@ impl ComponentEdit {
                     &name,
                     super::component_property::Kind::Bool,
                     value,
+                )
+                .map_err(|message| ("invalid_arguments", message))?;
+            }
+            Self::SetScriptVec3 {
+                component_id,
+                name,
+                value,
+                ..
+            } => {
+                let value = if value.is_null() {
+                    None
+                } else {
+                    Some(
+                        serde_json::from_value::<[f64; 3]>(value)
+                            .map_err(|_| invalid_component_arguments())?,
+                    )
+                };
+                super::component_property::edit(
+                    object,
+                    &component_id,
+                    &name,
+                    super::component_property::Kind::Vec3,
+                    value.map(rot_scene::PropertyValue::Vec3),
                 )
                 .map_err(|message| ("invalid_arguments", message))?;
             }

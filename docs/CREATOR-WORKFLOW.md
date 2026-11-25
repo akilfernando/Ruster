@@ -1217,6 +1217,13 @@ local auto_start = properties["auto_start"]
 if auto_start == nil then auto_start = true end
 ```
 
+For a three-axis value, choose **Add Vector3 Property** under **Vector3
+Properties**. Give it a name such as `velocity`, then enter finite **X**,
+**Y**, and **Z** values. Lua reads them at indices 1, 2, and 3. A zero
+vector is an explicit value. Removing the property makes it `nil`.
+Approved MCP clients can use the guarded `set_script_vec3` edit with an
+array of three numbers, or with `null` to remove the property.
+
 ### Copy a local Transform
 
 Select one object and open **Local Transform** in its Inspector. Choose

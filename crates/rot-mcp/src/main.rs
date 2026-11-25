@@ -906,7 +906,10 @@ fn listed() -> Value {
                 );
             }
             properties.insert("operation".into(), json!({"enum":operations}));
-            properties.insert("value".into(), json!({"type":["number","boolean","null"]}));
+            properties.insert(
+                "value".into(),
+                json!({"type":["number","boolean","array","null"],"items":{"type":"number"}}),
+            );
             *edits = object_schema(json!(properties), vec!["operation", "object_id"]);
         }
         compact(schema);
@@ -2004,9 +2007,13 @@ mod tests {
             .as_array()
             .unwrap()
             .contains(&json!("set_script_bool")));
+        assert!(edit_fields["operation"]["enum"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("set_script_vec3")));
         assert_eq!(
             edit_fields["value"]["type"],
-            json!(["number", "boolean", "null"])
+            json!(["number", "boolean", "array", "null"])
         );
         for operation in ["aim_spot_at_object", "aim_directional_at_object"] {
             assert!(edit_fields["operation"]["enum"]

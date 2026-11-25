@@ -38,6 +38,7 @@ pub(super) fn list() -> [Value; 2] {
         object_schema(json!({"operation":{"const":"fit_sphere_to_mesh"},"object_id":id,"component_id":id,"renderer_component_id":id}),vec!["operation","object_id","component_id"]),
         object_schema(json!({"operation":{"const":"set_script_number"},"object_id":id,"component_id":id,"name":id,"value":{"type":["number","null"]}}),vec!["operation","object_id","component_id","name","value"]),
         object_schema(json!({"operation":{"const":"set_script_bool"},"object_id":id,"component_id":id,"name":id,"value":{"type":["boolean","null"]}}),vec!["operation","object_id","component_id","name","value"]),
+        object_schema(json!({"operation":{"const":"set_script_vec3"},"object_id":id,"component_id":id,"name":id,"value":{"type":["array","null"],"items":{"type":"number"},"minItems":3,"maxItems":3}}),vec!["operation","object_id","component_id","name","value"]),
         object_schema(json!({"operation":{"const":"set_enabled"},"object_id":id,"component_id":id,"enabled":{"type":"boolean"}}),vec!["operation","object_id","component_id","enabled"])
     ]});
     [
@@ -125,7 +126,10 @@ pub(super) fn valid(name: &str, args: &Value) -> bool {
                                         && id(&edit["component_id"])
                                         && edit.get("renderer_component_id").is_none_or(id)
                                 }
-                                Some(operation @ ("set_script_number" | "set_script_bool")) => {
+                                Some(
+                                    operation @ ("set_script_number" | "set_script_bool"
+                                    | "set_script_vec3"),
+                                ) => {
                                     exact_keys(
                                         op,
                                         &[
@@ -139,10 +143,20 @@ pub(super) fn valid(name: &str, args: &Value) -> bool {
                                     ) && id(&edit["component_id"])
                                         && id(&edit["name"])
                                         && (edit["value"].is_null()
-                                            || if operation == "set_script_bool" {
-                                                edit["value"].is_boolean()
-                                            } else {
-                                                edit["value"].as_f64().is_some_and(f64::is_finite)
+                                            || match operation {
+                                                "set_script_bool" => edit["value"].is_boolean(),
+                                                "set_script_vec3" => {
+                                                    edit["value"].as_array().is_some_and(|axes| {
+                                                        axes.len() == 3
+                                                            && axes.iter().all(|axis| {
+                                                                axis.as_f64()
+                                                                    .is_some_and(f64::is_finite)
+                                                            })
+                                                    })
+                                                }
+                                                _ => edit["value"]
+                                                    .as_f64()
+                                                    .is_some_and(f64::is_finite),
                                             })
                                 }
                                 Some("set_enabled") => {
@@ -157,4 +171,34 @@ pub(super) fn valid(name: &str, args: &Value) -> bool {
                             })
                 })
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn script_vec3_wire_requires_three_numbers_or_explicit_null() {
+        let mut request = json!({
+            "expected_session_token":"s:1", "expected_revision":"7",
+            "edits":[{"operation":"set_script_vec3","object_id":"object","component_id":"script",
+                "name":"offset","value":[1,-2,3.5]}]
+        });
+        let check = |args: &Value| valid("scene_components_edit", args);
+        assert!(check(&request));
+        request["edits"][0]["value"] = Value::Null;
+        assert!(check(&request));
+        for invalid in [
+            json!([1, 2]),
+            json!([1, 2, 3, 4]),
+            json!([1, 2, false]),
+            json!(0),
+            json!({"x":1,"y":2,"z":3}),
+        ] {
+            request["edits"][0]["value"] = invalid;
+            assert!(!check(&request));
+        }
+        request["edits"][0].as_object_mut().unwrap().remove("value");
+        assert!(!check(&request));
+    }
 }

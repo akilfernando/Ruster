@@ -342,6 +342,14 @@ the relocated Vulkan build matched the saved east shadow. The extracted
 release direction conversion reported identical outputs and about 68 ns
 median per call before and after.
 
+**Vector3 properties on Object Lua** let bindings that share a file supply
+their own finite XYZ values. Native keyboard and approved Claude authored
+distinct carrier paths. An explicit zero held the carrier still while an
+absent value used the script fallback. Save, reopen and relocated Vulkan
+matched signed poses at 12 ticks. With 16 active bindings and identical
+movement, warmed release Step p95 was 189–191 µs for fallback values and
+207 µs for supplied vectors.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added
