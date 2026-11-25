@@ -49,6 +49,7 @@ fn baseline_fingerprint(hud: &Hud) -> Result<String, String> {
                     && panel.name == "HUD"
                     && panel.visible_when.is_none()
                     && panel.anchor != HudAnchor::Center
+                    && !panel.anchor.requires_v23()
                     && panel.elements.iter().all(|row| row.enabled_when.is_none()) =>
             {
                 panel

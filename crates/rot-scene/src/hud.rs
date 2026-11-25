@@ -34,6 +34,23 @@ pub enum HudAnchor {
     BottomLeft,
     BottomRight,
     Center,
+    TopCenter,
+    BottomCenter,
+}
+
+impl HudAnchor {
+    pub fn requires_v23(self) -> bool {
+        matches!(self, Self::TopCenter | Self::BottomCenter)
+    }
+
+    pub(crate) fn validate_legacy(self) -> Result<(), SceneError> {
+        if self.requires_v23() {
+            return Err(SceneError::Invalid(
+                "Top Center and Bottom Center HUD anchors require a v23 scene.".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -454,6 +471,17 @@ impl Hud {
         self == &Self::default()
     }
 
+    pub fn has_v23_anchors(&self) -> bool {
+        self.panels.iter().any(|panel| panel.anchor.requires_v23())
+    }
+
+    pub(crate) fn validate_legacy_anchors(&self) -> Result<(), SceneError> {
+        for panel in &self.panels {
+            panel.anchor.validate_legacy()?;
+        }
+        Ok(())
+    }
+
     /// Static presentation needs only authored labels and the global visibility flag.
     pub fn is_static(&self) -> bool {
         self.panels.iter().all(|panel| {
@@ -608,6 +636,7 @@ fn decode_legacy_hud(value: serde_json::Value) -> Result<(bool, HudPanel), Scene
         }
     }
     let legacy: LegacyHud = serde_json::from_value(value)?;
+    legacy.anchor.validate_legacy()?;
     let panel = HudPanel {
         anchor: legacy.anchor,
         width: legacy.width,

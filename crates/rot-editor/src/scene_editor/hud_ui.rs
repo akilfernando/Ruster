@@ -94,6 +94,7 @@ impl HudDraft {
                 .original_sha256
                 .bytes()
                 .all(|byte| byte.is_ascii_hexdigit())
+            || self.hud.has_v23_anchors()
             || self.hud.panels.len() > MAX_HUD_PANELS
             || self.hud.elements().count() > MAX_HUD_LABELS
             || self.panel_styles.len() != self.hud.panels.len()

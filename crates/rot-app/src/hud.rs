@@ -239,9 +239,15 @@ fn prepare_panel(
         .as_ref()
         .map_or(0.0, |galley| galley.size().y + spacing);
     let right = matches!(hud.anchor, HudAnchor::TopRight | HudAnchor::BottomRight);
-    let bottom = matches!(hud.anchor, HudAnchor::BottomLeft | HudAnchor::BottomRight);
+    let bottom = matches!(
+        hud.anchor,
+        HudAnchor::BottomLeft | HudAnchor::BottomCenter | HudAnchor::BottomRight
+    );
     let centered = hud.anchor == HudAnchor::Center;
-    let x = if centered {
+    let x = if matches!(
+        hud.anchor,
+        HudAnchor::TopCenter | HudAnchor::Center | HudAnchor::BottomCenter
+    ) {
         available.center().x - width * 0.5
     } else if right {
         available.right() - width
@@ -1286,6 +1292,69 @@ mod tests {
     }
 
     #[test]
+    fn center_edge_panels_fit_and_activate_in_wide_and_standard_content() {
+        for size in [Vec2::new(640.0, 360.0), Vec2::new(480.0, 360.0)] {
+            for anchor in [HudAnchor::TopCenter, HudAnchor::BottomCenter] {
+                let mut harness = InteractionHarness::new();
+                harness.viewport = Rect::from_min_size(egui::pos2(30.0, 40.0), size);
+                let panel = &mut harness.hud.panels[0];
+                panel.anchor = anchor;
+                panel.width = 160.0;
+                panel.elements[0].source = HudSource::ActionButton {
+                    caption: "Raise Gate".into(),
+                    action_id: "raise".into(),
+                };
+                let text = "A wrapped status line for the sliding gate";
+                panel.elements.insert(
+                    0,
+                    rot_scene::hud::HudLabel {
+                        id: "status".into(),
+                        source: HudSource::Static { text: text.into() },
+                        enabled_when: None,
+                    },
+                );
+                let labels = &mut harness.resolved.panels[0].labels;
+                labels[0].text = "Raise Gate".into();
+                labels.insert(
+                    0,
+                    ResolvedHudLabel {
+                        id: "status".into(),
+                        text: text.into(),
+                        diagnostic: None,
+                        available: true,
+                    },
+                );
+                harness.frame(Vec::new());
+                let panel = harness.report.panels[0].rect;
+                assert_eq!(panel.center().x, harness.viewport.center().x);
+                match anchor {
+                    HudAnchor::TopCenter => assert_eq!(panel.top(), harness.viewport.top() + 12.0),
+                    HudAnchor::BottomCenter => {
+                        assert_eq!(panel.bottom(), harness.viewport.bottom() - 12.0)
+                    }
+                    _ => unreachable!(),
+                }
+                assert!(harness.viewport.contains_rect(panel));
+                assert!(!harness.report.clipped);
+                let label = harness.report.label_rects[0];
+                let button = harness.report.label_rects[1];
+                assert!(label.height() > 24.0);
+                assert!(label.bottom() < button.top());
+                assert!(panel.contains_rect(button));
+                let inside = button.center();
+                let pressed = harness.pointer(inside, egui::PointerButton::Primary, true);
+                assert!(pressed.pointer_owned && pressed.activated.is_none());
+                let released = harness.pointer(inside, egui::PointerButton::Primary, false);
+                assert_eq!(released.activated.as_deref(), Some("submit"));
+                assert_eq!(
+                    harness.key(egui::Key::Enter, false)[0].activated.as_deref(),
+                    Some("submit")
+                );
+            }
+        }
+    }
+
+    #[test]
     fn panel_reports_skip_hidden_and_empty_geometry_but_keep_global_indices_and_center() {
         let mut harness = InteractionHarness::new();
         harness.resolved.panels[0].visible = false;
@@ -1529,8 +1598,14 @@ mod tests {
         let clipped = natural_height > available.height();
         let height = natural_height.min(available.height());
         let right = matches!(hud.anchor, HudAnchor::TopRight | HudAnchor::BottomRight);
-        let bottom = matches!(hud.anchor, HudAnchor::BottomLeft | HudAnchor::BottomRight);
-        let x = if hud.anchor == HudAnchor::Center {
+        let bottom = matches!(
+            hud.anchor,
+            HudAnchor::BottomLeft | HudAnchor::BottomCenter | HudAnchor::BottomRight
+        );
+        let x = if matches!(
+            hud.anchor,
+            HudAnchor::TopCenter | HudAnchor::Center | HudAnchor::BottomCenter
+        ) {
             available.center().x - width * 0.5
         } else if right {
             available.right() - width
@@ -1601,8 +1676,10 @@ mod tests {
                         Rect::from_min_size(egui::pos2(30.0, 40.0), Vec2::new(300.0, height));
                     for anchor in [
                         HudAnchor::TopLeft,
+                        HudAnchor::TopCenter,
                         HudAnchor::TopRight,
                         HudAnchor::BottomLeft,
+                        HudAnchor::BottomCenter,
                         HudAnchor::BottomRight,
                         HudAnchor::Center,
                     ] {
@@ -1660,8 +1737,12 @@ mod tests {
                             }
                             if clipped {
                                 assert!(report.label_rects.len() < count);
-                                if matches!(anchor, HudAnchor::BottomLeft | HudAnchor::BottomRight)
-                                {
+                                if matches!(
+                                    anchor,
+                                    HudAnchor::BottomLeft
+                                        | HudAnchor::BottomCenter
+                                        | HudAnchor::BottomRight
+                                ) {
                                     assert_eq!(report.label_indices.last(), Some(&(count - 1)));
                                 } else {
                                     assert_eq!(report.label_indices.first(), Some(&0));

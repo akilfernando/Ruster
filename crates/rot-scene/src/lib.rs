@@ -1583,6 +1583,15 @@ impl Document {
                 "Primary Mouse actions require a v23 scene.".into(),
             ));
         }
+        self.authoring.hud.validate_legacy_anchors()?;
+        for hud in self
+            .undo
+            .iter()
+            .chain(&self.redo)
+            .flat_map(Change::hud_values)
+        {
+            hud.validate_legacy_anchors()?;
+        }
         self.validate_for_runtime(&Default::default())
     }
     fn validate_for_runtime(
@@ -2511,6 +2520,7 @@ impl Session {
     /// or an enabled API5 Application command with complete typed arguments.
     pub fn set_hud(&mut self, expected_revision: u64, hud: hud::Hud) -> Result<u64, SceneError> {
         self.check_revision(expected_revision)?;
+        hud.validate_legacy_anchors()?;
         hud.validate()?;
         if hud
             .elements()
@@ -4776,6 +4786,36 @@ mod tests {
         let reopened = Session::from_snapshot_bytes(&restored.snapshot_bytes().unwrap()).unwrap();
         assert_eq!(reopened.hud(), &repair);
         assert!(reopened.contains_source_id("source"));
+    }
+
+    #[test]
+    fn center_edge_hud_anchors_reject_legacy_edits_migration_and_history() {
+        use hud::{Hud, HudAnchor, HudPanel};
+        let mut session = Session::new(Scene::empty("legacy-hud")).unwrap();
+        let mut legacy = Hud {
+            enabled: true,
+            panels: vec![HudPanel {
+                anchor: HudAnchor::Center,
+                ..HudPanel::default()
+            }],
+        };
+        session.set_hud(0, legacy.clone()).unwrap();
+        let mut wire = serde_json::to_value(&session.document).unwrap();
+        for (anchor, name) in [
+            (HudAnchor::TopCenter, "top_center"),
+            (HudAnchor::BottomCenter, "bottom_center"),
+        ] {
+            legacy.panels[0].anchor = anchor;
+            assert!(session.set_hud(1, legacy.clone()).is_err());
+            assert!(hud::migrate_legacy_hud(serde_json::json!({"anchor":name})).is_err());
+            assert!(hud::migrate_legacy_hud_draft(serde_json::json!({"anchor":name})).is_err());
+
+            wire["format_version"] = serde_json::json!(22);
+            wire["undo"][0]["hud"]["after"]["panels"][0]["anchor"] = serde_json::json!(name);
+            assert!(Document::decode(&serde_json::to_vec(&wire).unwrap()).is_err());
+        }
+        assert_eq!(session.scene().revision, 1);
+        assert_eq!(session.hud().panels[0].anchor, HudAnchor::Center);
     }
 
     // Future HUD owner fields must fail closed for every prior format, even

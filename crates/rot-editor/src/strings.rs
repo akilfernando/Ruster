@@ -446,6 +446,8 @@ editor_text! {
     AssetAllTypes => "All Types",
     AssetTypeTexture => "Texture",
     AssetTypeSound => "Sound",
+    HudTopCenter => "Top Center",
+    HudBottomCenter => "Bottom Center",
     AssetSearch => "Search Assets",
     AssetNewFolderCommand => "New Folder…",
     AssetShowInFileManager => "Show in File Manager",

@@ -1,5 +1,5 @@
 use super::ComponentWorkspace;
-use crate::editor_theme;
+use crate::{editor_theme, strings::Text};
 use eframe::egui;
 use rot_scene::hud::{Hud, HudAnchor, HudLabel, HudPanel, HudSource, MAX_HUD_LABELS};
 use rot_scene::input::ActionKind;
@@ -19,10 +19,12 @@ pub(super) struct Draft {
     error: Option<String>,
 }
 
-const ANCHORS: [(HudAnchor, &str); 5] = [
+const ANCHORS: [(HudAnchor, &str); 7] = [
     (HudAnchor::TopLeft, "Top Left"),
+    (HudAnchor::TopCenter, Text::HudTopCenter.plain()),
     (HudAnchor::TopRight, "Top Right"),
     (HudAnchor::BottomLeft, "Bottom Left"),
+    (HudAnchor::BottomCenter, Text::HudBottomCenter.plain()),
     (HudAnchor::BottomRight, "Bottom Right"),
     (HudAnchor::Center, "Center"),
 ];
@@ -676,7 +678,24 @@ mod tests {
         assert_eq!(workspace.session.scene().hud, before);
         workspace.session.redo(2).unwrap();
         assert_eq!(workspace.session.scene().hud, after);
+        let anchor_edit = workspace
+            .game_hud_command(
+                "test",
+                "hud_panel_set",
+                &json!({
+                    "expected_session_token":"test","expected_revision":"3",
+                    "panel_id":before.panels[0].id,"settings":{"anchor":"bottom_center"}
+                }),
+            )
+            .unwrap();
+        assert_eq!(anchor_edit["revision"], "4");
+        let placed = workspace.session.scene().hud.clone();
+        assert_eq!(placed.panels[0].anchor, HudAnchor::BottomCenter);
+        assert_eq!(placed.panels[0].elements, after.panels[0].elements);
+        workspace.session.undo(4).unwrap();
+        assert_eq!(workspace.session.scene().hud, after);
+        workspace.session.redo(5).unwrap();
         workspace.session.save(&path).unwrap();
-        assert_eq!(ComponentSession::open(&path).unwrap().scene().hud, after);
+        assert_eq!(ComponentSession::open(&path).unwrap().scene().hud, placed);
     }
 }

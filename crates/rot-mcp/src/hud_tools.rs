@@ -48,7 +48,7 @@ fn settings_schema() -> Value {
     super::object_schema(
         json!({
             "enabled":{"type":"boolean"},
-            "anchor":{"type":"string","enum":["top_left","top_right","bottom_left","bottom_right","center"]},
+            "anchor":{"type":"string","enum":["top_left","top_center","top_right","bottom_left","bottom_center","bottom_right","center"]},
             "width":{"type":"number","minimum":64,"maximum":1024},
             "margin":{"type":"number","minimum":0,"maximum":256},
             "spacing":{"type":"number","minimum":0,"maximum":64},
@@ -243,7 +243,15 @@ fn valid_settings(value: &Value) -> bool {
             "enabled" => value.is_boolean(),
             "anchor" => matches!(
                 value.as_str(),
-                Some("top_left" | "top_right" | "bottom_left" | "bottom_right" | "center")
+                Some(
+                    "top_left"
+                        | "top_center"
+                        | "top_right"
+                        | "bottom_left"
+                        | "bottom_center"
+                        | "bottom_right"
+                        | "center"
+                )
             ),
             "width" => bounded_number(value, 64.0, 1024.0),
             "margin" => bounded_number(value, 0.0, 256.0),
@@ -391,6 +399,12 @@ mod tests {
             tools[1]["inputSchema"]["properties"]["settings"]["additionalProperties"],
             false
         );
+        for anchor in ["top_center", "bottom_center"] {
+            let edit = json!({"expected_session_token":"session","expected_revision":"7",
+                "panel_id":"panel","settings":{"anchor":anchor}});
+            assert!(valid("hud_panel_set", &edit));
+            assert!(valid("hud_settings_set", &edit));
+        }
         let variants = &tools[2]["inputSchema"]["properties"]["source"]["oneOf"][1]["oneOf"];
         assert!(variants
             .as_array()
