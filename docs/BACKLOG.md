@@ -692,6 +692,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-50 Built-in Plane | Create or assign an engine-owned horizontal Plane for floors and blockout. | done · 2026-11-25 · Native Create Child and approved Claude placed explicit Planes under different parents. Undo, Redo, save and reopen kept the same geometry. An asymmetric overhead texture kept its size and orientation in relocated Vulkan. |
 | C-51 F11 Binding Conflict | Explain the Linux player fullscreen shortcut and repair existing F11 Input Actions. | done · 2026-11-25 · Existing Button and Axis bindings remained readable and editable. Native and approved MCP repaired them. Undo, Redo and reopen passed. In a relocated Linux player, F11 toggled fullscreen and the replacement H moved the Lua witness once. |
 | C-52 Select Prefab Root | Reveal the exact owning prefab instance from a linked child in the Inspector. | done · 2026-11-25 · Keyboard activation selected the correct same-named cottage under its folded lot and kept the other lot folded. Pending edits were preserved. The action worked without a source file and left the camera and scene history intact. |
+| C-53 Compact Indexed PNG | Use opaque 1-, 2- and 4-bit indexed PNGs as base-color textures. | in progress — Codex Sol, 2026-11-25 |
 
 ### C-04 implementation brief
 
