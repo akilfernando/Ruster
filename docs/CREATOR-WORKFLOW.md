@@ -1185,3 +1185,8 @@ The values are relative to each object's own parent. Two objects with the
 same local values can have different world poses when their parents differ.
 The copied values stay available in the open scene as you change selection
 or edit the source. A paste that changes values is one Undo step.
+
+Choose **Reset Local Transform** from the same menu to set Position and
+Rotation to zero and Scale to one for the current selection. Each object
+resets relative to its own parent. A reset that changes values is one Undo
+step across the selection, and your copied values stay available for Paste.

@@ -1,5 +1,6 @@
-//! One editor-local authored snapshot and a shared guarded paste transaction.
+//! Editor-local transform snapshots and guarded batch edits.
 use super::ComponentWorkspace;
+use crate::strings::Text;
 use eframe::egui;
 use rot_scene::{
     component_scene::{CameraView, Component},
@@ -44,6 +45,30 @@ impl Channels {
         }
         if self.0 & Self::SCALE.0 != 0 {
             target.scale = source.scale;
+        }
+    }
+}
+
+enum Edit<'a> {
+    Paste {
+        source: &'a Transform,
+        channels: Channels,
+    },
+    Reset,
+}
+
+impl Edit<'_> {
+    fn activity(&self) -> &'static str {
+        match self {
+            Self::Paste { .. } => Text::LocalTransformPasting.plain(),
+            Self::Reset => Text::LocalTransformResetting.plain(),
+        }
+    }
+
+    fn apply(&self, transform: &mut Transform) {
+        match self {
+            Self::Paste { source, channels } => channels.merge(transform, source),
+            Self::Reset => *transform = Transform::default(),
         }
     }
 }
@@ -94,6 +119,20 @@ impl ComponentWorkspace {
                     ui.close();
                 }
             }
+            ui.separator();
+            if ui
+                .add_enabled(
+                    editable && !self.selection.is_empty(),
+                    egui::Button::new(Text::ResetLocalTransform.plain()),
+                )
+                .clicked()
+            {
+                self.error = self
+                    .reset_selected_local_transforms()
+                    .err()
+                    .map(|(_, message)| message);
+                ui.close();
+            }
         });
     }
 
@@ -104,25 +143,50 @@ impl ComponentWorkspace {
         ids: &[&str],
         channels: Channels,
     ) -> Result<usize, PasteError> {
+        self.edit_local_transforms(revision, ids, Edit::Paste { source, channels })
+    }
+
+    fn reset_selected_local_transforms(&mut self) -> Result<usize, PasteError> {
+        let ids = self.target_ids(None);
+        let ids = ids.iter().map(String::as_str).collect::<Vec<_>>();
+        self.edit_local_transforms(self.session.revision(), &ids, Edit::Reset)
+    }
+
+    fn edit_local_transforms(
+        &mut self,
+        revision: u64,
+        ids: &[&str],
+        edit: Edit<'_>,
+    ) -> Result<usize, PasteError> {
+        let activity = edit.activity();
         if revision != self.session.revision() {
             return Err(("stale_revision", "Inspect the current scene again.".into()));
         }
         if self.runtime.in_play_mode() {
             return Err((
                 "play_active",
-                "Stop Play before pasting a local Transform.".into(),
+                Text::LocalTransformStopPlay
+                    .plain()
+                    .replace("{activity}", activity),
             ));
         }
         if self.authored_edit_pending() || self.ai_transition_pending() {
             return Err((
                 "drafts_pending",
-                "Apply or cancel the pending edit before pasting.".into(),
+                Text::LocalTransformFinishEdit
+                    .plain()
+                    .replace("{activity}", activity),
             ));
         }
         if ids.is_empty() {
             return Err((
                 "invalid_arguments",
-                "Select objects to receive the local Transform.".into(),
+                match edit {
+                    Edit::Paste { .. } => Text::LocalTransformSelectPaste,
+                    Edit::Reset => Text::LocalTransformSelectReset,
+                }
+                .plain()
+                .into(),
             ));
         }
         let objects = &self.session.scene().objects;
@@ -144,12 +208,15 @@ impl ComponentWorkspace {
             if self.view_flags.get(index).is_some_and(|flags| flags.locked) {
                 return Err((
                     "objects_locked",
-                    format!("Unlock {} before pasting.", objects[index].name),
+                    Text::LocalTransformUnlock
+                        .plain()
+                        .replace("{activity}", activity)
+                        .replace("{name}", &objects[index].name),
                 ));
             }
             let object = &objects[index];
             let mut transform = object.transform.clone();
-            channels.merge(&mut transform, source);
+            edit.apply(&mut transform);
             if transform != object.transform {
                 let mut next = object.clone();
                 next.transform = transform;
@@ -160,7 +227,7 @@ impl ComponentWorkspace {
         if edits.is_empty() {
             return Ok(0);
         }
-        self.validate_local_transform_paste(&changes)?;
+        self.validate_local_transform_edit(&changes, activity)?;
         let count = edits.len();
         self.session
             .put_objects(revision, edits)
@@ -169,9 +236,10 @@ impl ComponentWorkspace {
         Ok(count)
     }
 
-    fn validate_local_transform_paste(
+    fn validate_local_transform_edit(
         &self,
         changes: &HashMap<usize, glam::DMat4>,
+        activity: &str,
     ) -> Result<(), PasteError> {
         let scene = self.session.scene();
         let preview = self
@@ -194,10 +262,9 @@ impl ComponentWorkspace {
             let unrepresentable = || {
                 (
                     "world_transform_unrepresentable",
-                    format!(
-                        "Pasting would put {} beyond the world transform limits.",
-                        object.name
-                    ),
+                    Text::LocalTransformWorldLimit
+                        .plain()
+                        .replace("{name}", &object.name),
                 )
             };
             if !world.is_finite() {
@@ -206,10 +273,10 @@ impl ComponentWorkspace {
             if self.view_flags.get(index).is_some_and(|flags| flags.locked) {
                 return Err((
                     "objects_locked",
-                    format!(
-                        "Unlock {} before pasting its ancestor's local Transform.",
-                        object.name
-                    ),
+                    Text::LocalTransformUnlockDescendant
+                        .plain()
+                        .replace("{activity}", activity)
+                        .replace("{name}", &object.name),
                 ));
             }
             staged.insert(index, world);
@@ -255,5 +322,60 @@ impl ComponentWorkspace {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rot_scene::{
+        component_scene::{ComponentScene, ComponentSession},
+        Scene, Session,
+    };
+
+    #[test]
+    fn reset_local_transform_shares_guarded_undo_and_keeps_the_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("reset.scene");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let parent = scene.objects[2].id.clone();
+        let children = [scene.objects[0].id.clone(), scene.objects[1].id.clone()];
+        for (index, object) in scene.objects[..2].iter_mut().enumerate() {
+            object.parent = Some(parent.clone());
+            object.transform.translation[0] = index as f32 + 1.0;
+            object.transform.rotation[1] = 0.25;
+            object.transform.scale = [2.0; 3];
+        }
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let copied = scene.objects[0].transform.clone();
+        editor.local_transform_copy = Some(copied.clone());
+        editor.select(Some(children[0].clone()));
+        editor.draft.as_mut().unwrap().name = "Pending Name".into();
+        assert_eq!(
+            editor.reset_selected_local_transforms().unwrap_err().0,
+            "drafts_pending"
+        );
+        assert_eq!(editor.session.revision(), 0);
+        assert_eq!(editor.draft.as_ref().unwrap().name, "Pending Name");
+
+        editor.selection = children.into_iter().collect();
+        editor.rebuild_draft();
+        assert_eq!(editor.reset_selected_local_transforms(), Ok(2));
+        assert_eq!(editor.session.revision(), 1);
+        let reset = editor.session.scene().clone();
+        assert_eq!(reset.objects[2], scene.objects[2]);
+        for object in &reset.objects[..2] {
+            assert_eq!(object.parent.as_deref(), Some(parent.as_str()));
+            assert_eq!(object.transform, Transform::default());
+        }
+        assert_eq!(editor.local_transform_copy.as_ref(), Some(&copied));
+        assert_eq!(editor.reset_selected_local_transforms(), Ok(0));
+        assert_eq!(editor.session.revision(), 1);
+        editor.command(super::super::Action::Undo);
+        assert_eq!(editor.session.scene(), &scene);
+        editor.command(super::super::Action::Redo);
+        assert_eq!(editor.session.scene(), &reset);
     }
 }
