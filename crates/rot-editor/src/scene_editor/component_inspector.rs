@@ -204,7 +204,7 @@ pub(super) struct ComponentControls<'a> {
     pub(super) animation_preview: Option<(&'a str, f32, f32)>,
     pub(super) allow_animation_preview: bool,
     pub(super) allow_new_material: bool,
-    pub(super) allow_spot_aim: bool,
+    pub(super) allow_light_aim: bool,
     pub(super) allow_sound_cues: bool,
     pub(super) diagnostic: Option<&'a rot_behavior::Diagnostic>,
     pub(super) allow_collider_fit: bool,
@@ -221,7 +221,7 @@ pub(super) struct ComponentEdits {
     pub(super) collider: Option<String>,
     pub(super) collider_fit: Option<String>,
     pub(super) mesh_reveal: Option<String>,
-    pub(super) spot_aim: Option<String>,
+    pub(super) light_aim: Option<String>,
     pub(super) script_property: Option<super::component_workspace::component_property::Request>,
     pub(super) sound_cue: Option<super::component_workspace::component_sound::Request>,
     pub(super) sensor_binding: Option<super::component_workspace::component_sensor::Request>,
@@ -238,7 +238,7 @@ pub(super) fn components(
     let ComponentControls {
         actions,
         allow_new_material,
-        allow_spot_aim,
+        allow_light_aim,
         allow_sound_cues,
         diagnostic,
         collider_edit,
@@ -258,7 +258,7 @@ pub(super) fn components(
     let mut collider_request = None;
     let mut fit_request = None;
     let mut mesh_reveal = None;
-    let mut spot_aim = None;
+    let mut light_aim = None;
     let mut animator_revision = None;
     let mut preview_edit = None;
     let mut submit = false;
@@ -424,16 +424,16 @@ pub(super) fn components(
                         kind,
                     } => {
                         submit |= light_fields(ui, color, intensity, kind);
-                        if matches!(kind, LightKind::Spot { .. })
+                        if matches!(kind, LightKind::Spot { .. } | LightKind::Directional { .. })
                             && ui
                                 .add_enabled(
-                                    allow_spot_aim,
+                                    allow_light_aim,
                                     egui::Button::new(Text::SpotAim.plain()),
                                 )
                                 .on_hover_text(Text::SpotAimOwnerEffect.plain())
                                 .clicked()
                         {
-                            spot_aim = Some(component.id.clone());
+                            light_aim = Some(component.id.clone());
                         }
                     }
                     Component::Camera { view } => {
@@ -747,7 +747,7 @@ pub(super) fn components(
         collider: collider_request,
         collider_fit: fit_request,
         mesh_reveal,
-        spot_aim,
+        light_aim,
         script_property,
         sound_cue,
         sensor_binding,

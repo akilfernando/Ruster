@@ -95,7 +95,7 @@ impl LightingPacket {
     }
 }
 
-fn incoming_direction([x, y, z]: [f32; 3]) -> Vec3 {
+pub(crate) fn incoming_direction([x, y, z]: [f32; 3]) -> Vec3 {
     // Transform's fixed-axis XYZ is Rz*Ry*Rx. Local -Z is the emitted ray.
     (Quat::from_euler(EulerRot::ZYX, z, y, x) * Vec3::Z).normalize()
 }

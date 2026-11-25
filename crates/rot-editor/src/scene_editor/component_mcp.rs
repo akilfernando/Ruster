@@ -502,14 +502,13 @@ impl ComponentWorkspace {
                     )?;
                     return Ok(fit.response(object, component, self.session.is_dirty()));
                 }
-                if edits
-                    .iter()
-                    .any(|edit| edit["operation"] == "aim_spot_at_object")
-                {
+                if let Some(kind) = edits.iter().find_map(|edit| {
+                    super::component_spot::AimKind::from_operation(&edit["operation"])
+                }) {
                     let [edit] = edits.as_slice() else {
                         return Err((
                             "invalid_arguments",
-                            "Aim a Spot Light in its own component edit.".into(),
+                            format!("Aim a {} in its own component edit.", kind.name()),
                         ));
                     };
                     if edit.as_object().is_none_or(|entry| entry.len() != 4) {
@@ -524,7 +523,7 @@ impl ComponentWorkspace {
                     let object = id("object_id")?;
                     let component = id("component_id")?;
                     let target = id("target_object_id")?;
-                    let changed = self.aim_spot(revision, object, component, target)?;
+                    let changed = self.aim_light(kind, revision, object, component, target)?;
                     return Ok(
                         json!({"object_id":object,"component_id":component,"target_object_id":target,
                         "changed":changed,"dirty":self.session.is_dirty()}),
@@ -1515,6 +1514,26 @@ impl ComponentWorkspace {
                             "pose_source":"authored_world_pivot_and_rotation_chain"})
                     }
                 );
+            }
+            if matches!(
+                component.kind,
+                Component::Light {
+                    kind: rot_scene::LightKind::Directional { .. },
+                    ..
+                }
+            ) {
+                response["directional_world"] = self
+                    .preview_world
+                    .get(row)
+                    .and_then(|&world| {
+                        let forward =
+                            rot_render::component_preview::directional_light_forward(world)?;
+                        Some(json!({
+                            "status":"resolved","origin":world.w_axis.truncate().to_array(),
+                            "forward":forward.to_array(),"pose_source":"authored_world_affine",
+                        }))
+                    })
+                    .unwrap_or_else(|| json!({"status":"unavailable"}));
             }
             if let Some(collider) = super::component_collider::collider_component(component) {
                 use super::component_collider::WorldCollider;

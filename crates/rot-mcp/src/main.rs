@@ -2008,6 +2008,13 @@ mod tests {
             edit_fields["value"]["type"],
             json!(["number", "boolean", "null"])
         );
+        for operation in ["aim_spot_at_object", "aim_directional_at_object"] {
+            assert!(edit_fields["operation"]["enum"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(operation)));
+        }
+        assert_eq!(edit_fields["target_object_id"]["type"], "string");
         assert_eq!(edit_fields["renderer_component_id"]["type"], "string");
         let required = schema["required"].as_array().unwrap();
         for (guard, _) in SCENE_GUARDS {

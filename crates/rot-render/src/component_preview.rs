@@ -286,19 +286,31 @@ fn light_transform(
         let (z, y, x) = rotation.normalize().to_euler(EulerRot::ZYX);
         transform.rotation = [x as f32, y as f32, z as f32];
     } else if matches!(kind, LightKind::Directional { .. }) {
-        let direction = world.z_axis.truncate();
-        let magnitude = direction.abs().max_element();
-        if !magnitude.is_finite() || magnitude == 0.0 {
-            return Err(SceneError::Invalid(format!(
+        transform.rotation = directional_light_rotation(world).ok_or_else(|| {
+            SceneError::Invalid(format!(
                 "world direction on {id} exceeds renderer precision"
-            )));
-        }
-        let axis = (direction / magnitude).normalize().as_vec3();
-        let (z, y, x) = Quat::from_rotation_arc(Vec3::Z, axis).to_euler(EulerRot::ZYX);
-        transform.rotation = [x, y, z];
+            ))
+        })?;
     }
     transform.validate()?;
     Ok(transform)
+}
+
+fn directional_light_rotation(world: DMat4) -> Option<[f32; 3]> {
+    let direction = world.z_axis.truncate();
+    let magnitude = direction.abs().max_element();
+    if !magnitude.is_finite() || magnitude == 0.0 {
+        return None;
+    }
+    let axis = (direction / magnitude).normalize().as_vec3();
+    let (z, y, x) = Quat::from_rotation_arc(Vec3::Z, axis).to_euler(EulerRot::ZYX);
+    Some([x, y, z])
+}
+
+/// The emitted ray, after the same conversion used for Directional rendering.
+pub fn directional_light_forward(world: DMat4) -> Option<Vec3> {
+    directional_light_rotation(world)
+        .map(|rotation| -crate::lighting_gpu::incoming_direction(rotation))
 }
 
 pub enum LoadedPreview {

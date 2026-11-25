@@ -389,7 +389,7 @@ pub(super) struct ComponentWorkspace {
     sensor_binding: Option<component_sensor::Draft>,
     display_draft: Option<component_display::Draft>,
     camera_authoring: component_camera::Authoring,
-    spot_aim: Option<component_spot::AimPicker>,
+    light_aim: Option<component_spot::AimPicker>,
     material_usage: component_material::Usage,
     asset_uses: Option<std::sync::Arc<component_asset_uses::AssetUses>>,
     asset_uses_dialog: Option<component_asset_uses::Dialog>,
@@ -577,7 +577,7 @@ impl ComponentWorkspace {
             sound_audition: Default::default(),
             sensor_binding: None,
             display_draft: None,
-            spot_aim: None,
+            light_aim: None,
             camera_authoring: Default::default(),
             material_usage: component_material::Usage::default(),
             asset_uses: None,
@@ -1087,7 +1087,7 @@ impl ComponentWorkspace {
             || self.input_actions.pending()
             || self.player_pending()
             || self.camera_authoring.pending()
-            || self.spot_aim.is_some()
+            || self.light_aim.is_some()
             || self.collider_fit.is_some()
             || self.unpack_prefab_draft.is_some()
     }
@@ -3745,7 +3745,7 @@ impl ComponentWorkspace {
                                     let allow_new = self.material_controls();
                                     let collider_edit = self.collider_inspector_state();
                                     let allow_mesh_reveal = !self.authored_edit_pending();
-                                    let allow_spot_aim =
+                                    let allow_inspector_actions =
                                         allow_mesh_reveal && !self.runtime.in_play_mode();
                                     let animation_preview = self.animation_preview.as_ref().map(
                                         component_animation_preview::AnimationPreview::controls,
@@ -3759,11 +3759,11 @@ impl ComponentWorkspace {
                                         component_inspector::ComponentControls {
                                             actions: &self.session.scene().actions,
                                             allow_new_material: allow_new,
-                                            allow_spot_aim,
-                                            allow_sound_cues: allow_spot_aim,
+                                            allow_light_aim: allow_inspector_actions,
+                                            allow_sound_cues: allow_inspector_actions,
                                             diagnostic: self.runtime.diagnostic.as_ref(),
                                             collider_edit: &collider_edit,
-                                            allow_collider_fit: allow_spot_aim && !blocked,
+                                            allow_collider_fit: allow_inspector_actions && !blocked,
                                             allow_mesh_reveal: allow_mesh_reveal && !blocked,
                                             collider_fit_feedback: self
                                                 .collider_fit_feedback
@@ -3773,7 +3773,8 @@ impl ComponentWorkspace {
                                                 })
                                                 .map(|(_, id, hint)| (id.as_str(), *hint)),
                                             animation_preview,
-                                            allow_animation_preview: allow_spot_aim && !blocked,
+                                            allow_animation_preview: allow_inspector_actions
+                                                && !blocked,
 
                                             reveal: self
                                                 .asset_use_reveal
@@ -3801,8 +3802,8 @@ impl ComponentWorkspace {
                                     if let Some(id) = edits.collider_fit {
                                         self.begin_collider_fit(id);
                                     }
-                                    if let Some(id) = edits.spot_aim {
-                                        self.begin_spot_aim(id);
+                                    if let Some(id) = edits.light_aim {
+                                        self.begin_light_aim(id);
                                     }
                                     self.camera_controls(ui);
                                     if let Some(request) = edits.sensor_binding {
@@ -3885,7 +3886,7 @@ impl ComponentWorkspace {
         self.show_game_hud(&ctx);
         self.show_display_draft(&ctx);
         self.show_camera_draft(&ctx);
-        self.show_spot_aim(&ctx);
+        self.show_light_aim(&ctx);
         self.show_collider_fit(&ctx);
         self.show_unpack_prefab(&ctx);
         self.asset_use_reveal = None;

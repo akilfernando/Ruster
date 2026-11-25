@@ -913,6 +913,12 @@ Turning shadows off keeps those settings. Approved AI clients can inspect
 and edit a light with `scene_components_inspect` and the guarded
 `scene_components_edit`.
 
+On a Directional Light, **Aim at Object…** points its rays along the line
+from the light owner's pivot to the target's current pivot. It rotates the
+owner and its children in one Undo step. Shadow settings stay in place.
+Approved MCP clients can inspect the world direction and use the guarded
+`aim_directional_at_object` edit.
+
 The renderer uses the first four enabled point or spot lights and the first
 enabled directional light in scene order. The editor keeps extra lights and
 shows a warning. Approved clients see the warning in the first page of

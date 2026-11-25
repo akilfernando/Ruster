@@ -334,6 +334,14 @@ tiles despite a duplicate filename in another folder. A generated mesh
 revealed the owning Blender GLB. Pending edits, object selection, scene
 revision and file bytes were preserved.
 
+**Directional Light Aim at Object** aims the rendered ray through the target
+pivot, including under rotated, nonuniformly scaled parents. Native and
+approved Claude aimed west and east with unchanged shadow settings. The mast
+shadow crossed the yard, Undo restored the original light rotation, and
+the relocated Vulkan build matched the saved east shadow. The extracted
+release direction conversion reported identical outputs and about 68 ns
+median per call before and after.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added

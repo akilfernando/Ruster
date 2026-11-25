@@ -1,13 +1,51 @@
-//! One-shot authored Spot aiming, shared by the Inspector and guarded tools.
+//! One-shot authored light aiming, shared by the Inspector and guarded tools.
 use super::{viewport_transform::authored_rotation, ComponentWorkspace};
 use crate::{editor_theme, strings::Text};
 use eframe::egui;
-use glam::{DQuat, DVec3};
+use glam::{DMat3, DMat4, DQuat, DVec3};
 use rot_scene::{component_scene::Component, LightKind, SceneError, Transform};
 
 type AimError = (&'static str, String);
 
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum AimKind {
+    Spot,
+    Directional,
+}
+
+impl AimKind {
+    pub(super) fn from_operation(operation: &serde_json::Value) -> Option<Self> {
+        match operation.as_str()? {
+            "aim_spot_at_object" => Some(Self::Spot),
+            "aim_directional_at_object" => Some(Self::Directional),
+            _ => None,
+        }
+    }
+
+    fn from_component(component: &Component) -> Option<Self> {
+        match component {
+            Component::Light {
+                kind: LightKind::Spot { .. },
+                ..
+            } => Some(Self::Spot),
+            Component::Light {
+                kind: LightKind::Directional { .. },
+                ..
+            } => Some(Self::Directional),
+            _ => None,
+        }
+    }
+
+    pub(super) fn name(self) -> &'static str {
+        match self {
+            Self::Spot => "Spot Light",
+            Self::Directional => "Directional Light",
+        }
+    }
+}
+
 pub(super) struct AimPicker {
+    kind: AimKind,
     revision: u64,
     owner: String,
     component: String,
@@ -31,7 +69,7 @@ impl ComponentWorkspace {
         false
     }
 
-    pub(super) fn begin_spot_aim(&mut self, component: String) {
+    pub(super) fn begin_light_aim(&mut self, component: String) {
         if self.runtime.in_play_mode()
             || self.authored_edit_pending()
             || self.ai_transition_pending()
@@ -42,6 +80,14 @@ impl ComponentWorkspace {
             return;
         };
         let scene = self.session.scene();
+        let Some(kind) = scene.objects[owner]
+            .components
+            .iter()
+            .find(|entry| entry.id == component)
+            .and_then(|entry| AimKind::from_component(&entry.kind))
+        else {
+            return;
+        };
         let Some(start) = self.rows.iter().position(|&(row, _)| row == owner) else {
             return;
         };
@@ -55,7 +101,8 @@ impl ComponentWorkspace {
             .chain(&self.rows[end..])
             .map(|&(row, _)| row)
             .collect();
-        self.spot_aim = Some(AimPicker {
+        self.light_aim = Some(AimPicker {
+            kind,
             revision: self.session.revision(),
             owner: scene.objects[owner].id.clone(),
             component,
@@ -70,8 +117,8 @@ impl ComponentWorkspace {
         self.invalidate_display_capture();
     }
 
-    pub(super) fn show_spot_aim(&mut self, ctx: &egui::Context) {
-        let Some(mut picker) = self.spot_aim.take() else {
+    pub(super) fn show_light_aim(&mut self, ctx: &egui::Context) {
+        let Some(mut picker) = self.light_aim.take() else {
             return;
         };
         if picker.revision != self.session.revision() || self.ai_transition_pending() {
@@ -175,16 +222,23 @@ impl ComponentWorkspace {
         }
         if response.inner.1 {
             let target = objects[picker.filtered[picker.selected]].id.clone();
-            match self.aim_spot(picker.revision, &picker.owner, &picker.component, &target) {
+            match self.aim_light(
+                picker.kind,
+                picker.revision,
+                &picker.owner,
+                &picker.component,
+                &target,
+            ) {
                 Ok(_) => return,
                 Err((_, error)) => picker.error = Some(error),
             }
         }
-        self.spot_aim = Some(picker);
+        self.light_aim = Some(picker);
     }
 
-    pub(super) fn aim_spot(
+    pub(super) fn aim_light(
         &mut self,
+        kind: AimKind,
         revision: u64,
         owner_id: &str,
         component_id: &str,
@@ -193,24 +247,24 @@ impl ComponentWorkspace {
         if self.session.revision() != revision {
             return Err(("stale_revision", Text::SpotAimChanged.plain().into()));
         }
+        let light = kind.name();
         if self.runtime.in_play_mode() {
-            return Err((
-                "play_active",
-                "Stop Play before aiming a Spot Light.".into(),
-            ));
+            return Err(("play_active", format!("Stop Play before aiming a {light}.")));
         }
         if self.authored_edit_pending() || self.ai_transition_pending() {
             return Err((
                 "drafts_pending",
-                "Finish the pending editor change before aiming a Spot Light.".into(),
+                format!("Finish the pending editor change before aiming a {light}."),
             ));
         }
         let scene = self.session.scene();
         let row = |id: &str| scene.objects.iter().position(|node| node.id == id);
-        let owner_index = row(owner_id).ok_or((
-            "object_not_found",
-            "The Spot Light owner no longer exists.".into(),
-        ))?;
+        let owner_index = row(owner_id).ok_or_else(|| {
+            (
+                "object_not_found",
+                format!("The {light} owner no longer exists."),
+            )
+        })?;
         let target = row(target_id).ok_or((
             "object_not_found",
             "The aim target no longer exists.".into(),
@@ -220,40 +274,47 @@ impl ComponentWorkspace {
             .components
             .iter()
             .find(|component| component.id == component_id)
-            .ok_or((
-                "component_not_found",
-                "The Spot Light component no longer exists on this object.".into(),
-            ))?;
-        if !matches!(
-            component.kind,
-            Component::Light {
-                kind: LightKind::Spot { .. },
-                ..
-            }
-        ) {
+            .ok_or_else(|| {
+                (
+                    "component_not_found",
+                    format!("The {light} component no longer exists on this object."),
+                )
+            })?;
+        if AimKind::from_component(&component.kind) != Some(kind) {
             return Err((
                 "invalid_arguments",
-                "Choose a Spot Light component on its owner.".into(),
+                format!("Choose a {light} component on its owner."),
             ));
         }
         if self.aimed_at_descendant(owner_index, target) {
             return Err((
                 "invalid_arguments",
-                "Choose a target outside the Spot Light owner's hierarchy.".into(),
+                format!("Choose a target outside the {light} owner's hierarchy."),
             ));
         }
         let unavailable = || {
             (
                 "invalid_arguments",
-                "Couldn't resolve the Spot Light and target world pivots.".into(),
+                format!("Couldn't resolve the {light} and target world pivots."),
             )
         };
         let origin = self.spot_origin(owner_index).ok_or_else(unavailable)?;
         let target = self.spot_origin(target).ok_or_else(unavailable)?;
-        let parent = self.parents[owner_index].map_or(DQuat::IDENTITY, |index| {
-            scene.world_rotation(index, &self.parents)
-        });
-        let next = aimed_rotation(&owner.transform, parent, target - origin)?;
+        let next = match kind {
+            AimKind::Spot => {
+                let parent = self.parents[owner_index].map_or(DQuat::IDENTITY, |index| {
+                    scene.world_rotation(index, &self.parents)
+                });
+                aimed_rotation(&owner.transform, parent, target - origin)?
+            }
+            AimKind::Directional => {
+                let parent = match self.parents[owner_index] {
+                    Some(index) => *self.preview_world.get(index).ok_or_else(unavailable)?,
+                    None => DMat4::IDENTITY,
+                };
+                aimed_directional_rotation(&owner.transform, parent, target - origin)?
+            }
+        };
         let Some(rotation) = next else {
             return Ok(false);
         };
@@ -322,6 +383,63 @@ fn aimed_rotation(
         return Err(invalid());
     }
     Ok(Some(stored))
+}
+
+fn aimed_directional_rotation(
+    original: &Transform,
+    parent: DMat4,
+    offset: DVec3,
+) -> Result<Option<[f32; 3]>, AimError> {
+    let target = offset.try_normalize().ok_or_else(|| {
+        (
+            "invalid_arguments",
+            "The Directional Light and target share a world pivot. Move one first.".into(),
+        )
+    })?;
+    let invalid = || {
+        (
+            "invalid_arguments",
+            "The Directional Light aim cannot be represented. Check the hierarchy scales or try a different target.".into(),
+        )
+    };
+    let linear = DMat3::from_mat4(parent);
+    let determinant = linear.determinant();
+    let z_scale = f64::from(original.scale[2]);
+    if !determinant.is_finite() || determinant == 0. || !z_scale.is_finite() || z_scale == 0. {
+        return Err(invalid());
+    }
+    let aligns = |transform: &Transform| {
+        rot_render::component_preview::directional_light_forward(parent * transform.affine_matrix())
+            .is_some_and(|forward| forward.as_dvec3().abs_diff_eq(target, 2e-6))
+    };
+    if aligns(original) {
+        return Ok(None);
+    }
+
+    // Invert the parent's full linear transform before solving the local swing.
+    let desired_local = (linear.inverse() * target)
+        .try_normalize()
+        .ok_or_else(invalid)?;
+    let local = local_rotation(original.rotation);
+    let current_local = local * (DVec3::NEG_Z * z_scale.signum());
+    let cross = current_local.cross(desired_local);
+    let sine = cross.length();
+    let cosine = current_local.dot(desired_local);
+    let delta = if sine > 1e-12 {
+        DQuat::from_axis_angle(cross / sine, sine.atan2(cosine))
+    } else if cosine < 0. {
+        DQuat::from_axis_angle(local * DVec3::Y, std::f64::consts::PI)
+    } else {
+        DQuat::IDENTITY
+    };
+    let rotation = authored_rotation((delta * local).normalize(), original).ok_or_else(invalid)?;
+    if !aligns(&Transform {
+        rotation,
+        ..original.clone()
+    }) {
+        return Err(invalid());
+    }
+    Ok(Some(rotation))
 }
 
 fn local_rotation(rotation: [f32; 3]) -> DQuat {
@@ -506,6 +624,117 @@ mod tests {
     }
 
     #[test]
+    fn directional_aim_mcp_preserves_settings_and_uses_world_affine() {
+        use serde_json::json;
+
+        let folder = tempfile::tempdir().unwrap();
+        let mut editor = workspace(folder.path());
+        let mut lamp = editor.session.scene().objects[1].clone();
+        lamp.components[0].kind = Component::Light {
+            color: [0.5, 0.7, 1.],
+            intensity: 2.,
+            kind: LightKind::Directional {
+                shadow: Default::default(),
+            },
+        };
+        let revision = editor.session.put_object(0, lamp.clone()).unwrap();
+        editor.refresh();
+        let before = editor.session.scene().clone();
+        let edit = |revision: u64, operation: &str, target: &str| {
+            json!({
+                "expected_session_token":"session", "expected_revision":revision.to_string(),
+                "edits":[{"operation":operation, "object_id":"lamp", "component_id":"spot", "target_object_id":target}]
+            })
+        };
+        for (rev, op, target, error) in [
+            (0, "aim_directional_at_object", "target", "stale_revision"),
+            (
+                revision,
+                "aim_directional_at_object",
+                "child",
+                "invalid_arguments",
+            ),
+            (
+                revision,
+                "aim_directional_at_object",
+                "lamp",
+                "invalid_arguments",
+            ),
+            (
+                revision,
+                "aim_spot_at_object",
+                "target",
+                "invalid_arguments",
+            ),
+        ] {
+            let reply =
+                editor.ai_command("session", "scene_components_edit", &edit(rev, op, target));
+            assert_eq!(reply["error"]["code"], error, "{reply}");
+        }
+        assert_eq!(editor.session.scene(), &before);
+        editor.select(Some("lamp".into()));
+        editor.begin_light_aim("spot".into());
+        assert!(matches!(
+            editor.light_aim.take().unwrap().kind,
+            AimKind::Directional
+        ));
+
+        let request = |revision| edit(revision, "aim_directional_at_object", "target");
+        let reply = editor.ai_command("session", "scene_components_edit", &request(revision));
+        assert_eq!(reply["result"]["changed"], true, "{reply}");
+        let after = &editor.session.scene().objects[1];
+        assert_eq!(after.components, lamp.components);
+        assert_eq!(after.transform.translation, lamp.transform.translation);
+        assert_eq!(after.transform.scale, lamp.transform.scale);
+
+        let observation = editor.ai_command(
+            "session",
+            "scene_components_inspect",
+            &json!({"object_id":"lamp", "component_id":"spot"}),
+        );
+        let world = &observation["result"]["directional_world"];
+        assert_eq!(world["status"], "resolved", "{observation}");
+        let forward: [f64; 3] = serde_json::from_value(world["forward"].clone()).unwrap();
+        let origin: [f64; 3] = serde_json::from_value(world["origin"].clone()).unwrap();
+        let expected = before.objects[0]
+            .transform
+            .affine_matrix()
+            .transform_point3(DVec3::from(lamp.transform.translation.map(f64::from)));
+        assert!(DVec3::from(origin).abs_diff_eq(expected, 1e-9));
+        assert!(DVec3::from(forward)
+            .abs_diff_eq((DVec3::new(5., 4., -6.) - expected).normalize(), 2e-6));
+        let next = editor.session.revision();
+        let no_op = editor.ai_command("session", "scene_components_edit", &request(next));
+        assert_eq!(no_op["result"]["changed"], false, "{no_op}");
+        assert_eq!(editor.session.revision(), next);
+        editor.session.undo(next).unwrap();
+        assert_eq!(editor.session.scene(), &before);
+    }
+
+    #[test]
+    fn directional_aim_accounts_for_signed_z_and_rejects_degenerate_inputs() {
+        let before = Transform {
+            scale: [1., 1., -2.],
+            ..Transform::default()
+        };
+        let target = DVec3::new(1., -2., 3.).normalize();
+        let rotation = aimed_directional_rotation(&before, DMat4::IDENTITY, target)
+            .unwrap()
+            .unwrap();
+        let aimed = Transform {
+            rotation,
+            ..before.clone()
+        };
+        let forward =
+            rot_render::component_preview::directional_light_forward(aimed.affine_matrix())
+                .unwrap();
+        assert!(forward.as_dvec3().abs_diff_eq(target, 2e-6));
+        assert!(aimed_directional_rotation(&before, DMat4::IDENTITY, DVec3::ZERO).is_err());
+        let singular = DMat4::from_scale(DVec3::new(1., 0., 1.));
+        assert!(aimed_directional_rotation(&before, singular, target).is_err());
+    }
+
+    #[test]
     fn spot_aim_picker_accepts_search_enter_and_cancels_escape() {
         let folder = tempfile::tempdir().unwrap();
         let mut editor = workspace(&folder.path().join("scene.json"));
@@ -519,7 +748,7 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    editor.show_spot_aim(ui.ctx());
+                    editor.show_light_aim(ui.ctx());
                 },
             )
             .textures_delta
@@ -532,19 +761,19 @@ mod tests {
             repeat: false,
             modifiers: egui::Modifiers::NONE,
         };
-        editor.begin_spot_aim("spot".into());
+        editor.begin_light_aim("spot".into());
         frame(&mut editor, vec![]);
         frame(&mut editor, vec![key(egui::Key::Escape)]);
-        assert!(editor.spot_aim.is_none());
+        assert!(editor.light_aim.is_none());
         assert_eq!(editor.session.revision(), 0);
 
-        editor.begin_spot_aim("spot".into());
+        editor.begin_light_aim("spot".into());
         frame(&mut editor, vec![]);
         frame(&mut editor, vec![egui::Event::Text("Yellow Plate".into())]);
-        assert_eq!(editor.spot_aim.as_ref().unwrap().filtered, [3]);
+        assert_eq!(editor.light_aim.as_ref().unwrap().filtered, [3]);
         frame(&mut editor, vec![key(egui::Key::Enter)]);
         assert!(
-            editor.spot_aim.is_none(),
+            editor.light_aim.is_none(),
             "Enter commits the selected pivot"
         );
         assert_eq!(editor.session.revision(), 1);

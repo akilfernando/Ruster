@@ -33,6 +33,7 @@ pub(super) fn list() -> [Value; 2] {
         object_schema(json!({"operation":{"enum":["add","replace"]},"object_id":id,"component":component}),vec!["operation","object_id","component"]),
         object_schema(json!({"operation":{"const":"remove"},"object_id":id,"component_id":id}),vec!["operation","object_id","component_id"]),
         object_schema(json!({"operation":{"const":"aim_spot_at_object"},"object_id":id,"component_id":id,"target_object_id":id}),vec!["operation","object_id","component_id","target_object_id"]),
+        object_schema(json!({"operation":{"const":"aim_directional_at_object"},"object_id":id,"component_id":id,"target_object_id":id}),vec!["operation","object_id","component_id","target_object_id"]),
         object_schema(json!({"operation":{"const":"fit_box_to_mesh"},"object_id":id,"component_id":id,"renderer_component_id":id}),vec!["operation","object_id","component_id"]),
         object_schema(json!({"operation":{"const":"fit_sphere_to_mesh"},"object_id":id,"component_id":id,"renderer_component_id":id}),vec!["operation","object_id","component_id"]),
         object_schema(json!({"operation":{"const":"set_script_number"},"object_id":id,"component_id":id,"name":id,"value":{"type":["number","null"]}}),vec!["operation","object_id","component_id","name","value"]),
@@ -99,7 +100,7 @@ pub(super) fn valid(name: &str, args: &Value) -> bool {
                                     exact_keys(op, &["operation", "object_id", "component_id"], &[])
                                         && id(&edit["component_id"])
                                 }
-                                Some("aim_spot_at_object") => {
+                                Some("aim_spot_at_object" | "aim_directional_at_object") => {
                                     edits.len() == 1
                                         && exact_keys(
                                             op,
