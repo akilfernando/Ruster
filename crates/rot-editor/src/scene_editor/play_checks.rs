@@ -435,6 +435,7 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
                     });
                 }
             };
+            let projected = matches!(&snapshot.saved, SavedScene::Components(_));
             let runtime = match snapshot.saved {
                 SavedScene::Legacy(session) => RuntimeScene::Behavior(session),
                 SavedScene::Components(pin) => {
@@ -457,7 +458,11 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
                         Some(assets) => rot_behavior::decode_clips(assets.clips())?,
                         None => Default::default(),
                     };
-                    check::run_with_identity(&session, &case, Ok(identity), &clips, cancel)
+                    if projected {
+                        check::run_projected(&session, &case, identity, &clips, cancel)
+                    } else {
+                        check::run_with_identity(&session, &case, Ok(identity), &clips, cancel)
+                    }
                 }
             };
             Ok(Completion::Ran(report))
@@ -778,14 +783,6 @@ impl ComponentWorkspace {
         let pin = session
             .saved_pin()
             .ok_or("Save the scene before using its play check.")?;
-        if pin
-            .scene()
-            .objects
-            .iter()
-            .any(|object| object.parent.is_some())
-        {
-            return Err("Play checks currently require a flat scene.".into());
-        }
         let path = session
             .path()
             .ok_or("Save the scene before creating a play check.")?;
@@ -1141,7 +1138,7 @@ fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
                 egui::ComboBox::from_id_salt("selection")
                     .selected_text(match expectation.select {
                         Selection::Tick => Text::CompletedTick.plain(),
-                        Selection::Translation { .. } => Text::ObjectTranslation.plain(),
+                        Selection::Translation { .. } => Text::ObjectLocalTranslation.plain(),
                         Selection::State { .. } => Text::CreatorState.plain(),
                     })
                     .show_ui(ui, |ui| {
@@ -1164,7 +1161,7 @@ fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
                         if ui
                             .selectable_label(
                                 matches!(expectation.select, Selection::Translation { .. }),
-                                Text::ObjectTranslation.plain(),
+                                Text::ObjectLocalTranslation.plain(),
                             )
                             .clicked()
                         {
@@ -1377,7 +1374,9 @@ fn assertion_display(row: &Value) -> (String, Option<(String, String)>) {
     };
     let selection = match expectation.select {
         Selection::Tick => Text::CompletedTick.plain().into(),
-        Selection::Translation { object_id } => format!("{object_id} translation"),
+        Selection::Translation { object_id } => {
+            format!("{object_id} · {}", Text::ObjectLocalTranslation.plain())
+        }
         Selection::State { binding_id, field } => format!("{binding_id}.{field}"),
     };
     let expected = match expectation.comparison {
@@ -1614,6 +1613,133 @@ mod tests {
         };
         assert_eq!(report.status, check::Status::Passed);
         assert_eq!(report.completed_tick, 120);
+    }
+
+    #[test]
+    fn saved_hierarchy_check_observes_button_animation_in_parent_local_space() {
+        use rot_assets::fixtures::{animated_glb, AnimatedFixture};
+        use rot_scene::component_scene::{AnimatorStart, ComponentScene, ComponentSession};
+
+        let root = tempfile::tempdir().unwrap();
+        let assets = root.path().join("Assets");
+        std::fs::create_dir(&assets).unwrap();
+        std::fs::write(
+            assets.join("Gate.glb"),
+            animated_glb(AnimatedFixture {
+                mid_angle: 0.0,
+                clip_name: "Slide",
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        let (store, _) = rot_assets::AssetStore::open_project(root.path()).unwrap();
+        let model = store.models().next().unwrap();
+        let mut legacy = rot_scene::Scene::empty("gate");
+        let mut leaf = rot_scene::Object::cube("gate-leaf", Some("Gate Leaf".into()));
+        leaf.mesh = model.nodes["Rig/Arm"].mesh_id.clone();
+        assert!(leaf.mesh.is_some());
+        legacy.objects.push(leaf);
+        legacy.hierarchy.groups.insert(
+            "gate-root".into(),
+            rot_scene::Group {
+                name: Some("Gate".into()),
+                transform: rot_scene::Transform {
+                    translation: [10.0, 0.0, 0.0],
+                    ..Default::default()
+                },
+            },
+        );
+        legacy
+            .hierarchy
+            .parents
+            .insert("gate-leaf".into(), "gate-root".into());
+        legacy.animations.insert(
+            "gate-root".into(),
+            rot_scene::AnimationBinding {
+                clip: model.clips["Slide"].id.clone(),
+                looping: false,
+                targets: BTreeMap::from([("Rig/Arm".into(), "gate-leaf".into())]),
+            },
+        );
+        let mut scene = ComponentScene::from_legacy(&Session::new(legacy).unwrap()).unwrap();
+        scene.actions = serde_json::from_value(json!({
+            "open-gate":{"kind":{"type":"button","keys":["f"]}}
+        }))
+        .unwrap();
+        let assembly = scene
+            .objects
+            .iter_mut()
+            .find(|object| object.id == "gate-root")
+            .unwrap();
+        let Component::Animator { start_playback, .. } = &mut assembly.components[0].kind else {
+            panic!("gate assembly has an Animator")
+        };
+        *start_playback = AnimatorStart::OnButtonPress {
+            action_id: "open-gate".into(),
+        };
+        let path = root.path().join("gate.scene.json");
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let ctx = egui::Context::default();
+        while editor.play_check_workspace().1.is_none() {
+            assert!(Instant::now() < deadline, "project assets did not load");
+            editor.poll_runtime(&ctx);
+            thread::sleep(Duration::from_millis(2));
+        }
+        let run = |work| {
+            execute(
+                editor.check_snapshot().unwrap(),
+                work,
+                Arc::new(AtomicBool::new(false)),
+            )
+            .unwrap()
+        };
+        let Completion::Captured(identity) = run(Work::Capture) else {
+            panic!("expected a captured identity")
+        };
+        let mut frames = vec![ActionFrame::default(); 61];
+        let mut baseline = None;
+        for (label, expected) in [("Idle", 0.0), ("Opened", 1.0)] {
+            let case = PlayCheck {
+                format: check::FORMAT.into(),
+                version: check::VERSION,
+                name: label.into(),
+                identity: identity.clone(),
+                frames: frames.clone(),
+                expectations: vec![Expectation {
+                    select: Selection::Translation {
+                        object_id: "gate-leaf".into(),
+                    },
+                    comparison: Comparison::Equals {
+                        expected: StateValue::Vec3([expected, 0.0, 0.0]),
+                        tolerance: Some(1.0e-5),
+                    },
+                }],
+            };
+            let Completion::Saved(_, bytes) = run(Work::Save(Box::new(case), baseline)) else {
+                panic!("expected a saved check")
+            };
+            baseline = Some(bytes);
+            let Completion::Ran(report) = run(Work::Run) else {
+                panic!("expected a report")
+            };
+            assert_eq!(report.status, check::Status::Passed, "{report:?}");
+            assert_eq!(report.completed_tick, 61);
+            frames[0] = ActionFrame(BTreeMap::from([(
+                "open-gate".into(),
+                ActionValue::Button(ButtonState {
+                    pressed: true,
+                    held: true,
+                    released: false,
+                }),
+            )]));
+        }
+        let (session, _) = editor.play_check_workspace();
+        assert_eq!(session.scene(), &scene);
+        assert!(!session.is_dirty());
     }
 
     #[test]

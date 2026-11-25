@@ -382,6 +382,23 @@ pub fn run_with_identity(
     )
 }
 
+/// Check a behavior session projected from an authored v23 scene, including
+/// any hierarchy admitted by the same runtime projection as ordinary Play.
+pub fn run_projected(
+    session: &Session,
+    case: &PlayCheck,
+    identity: CheckIdentity,
+    clips: &crate::Clips,
+    cancel: Arc<AtomicBool>,
+) -> Report {
+    run_with_source(
+        CheckSource::Projected(session, clips),
+        case,
+        Ok(identity),
+        cancel,
+    )
+}
+
 /// Check the immutable scene used by ordinary v23 static Play. Static Steps
 /// advance only the tick and do not initialize or run a Lua VM.
 pub fn run_static(
@@ -395,6 +412,7 @@ pub fn run_static(
 
 enum CheckSource<'a> {
     Behavior(&'a Session, &'a crate::Clips),
+    Projected(&'a Session, &'a crate::Clips),
     Static(&'a rot_scene::Scene),
 }
 
@@ -447,7 +465,9 @@ fn run_with_source(
     }
     let empty_actions = rot_scene::input::ActionMap::new();
     let actions = match &source {
-        CheckSource::Behavior(session, _) => &session.authoring().actions,
+        CheckSource::Behavior(session, _) | CheckSource::Projected(session, _) => {
+            &session.authoring().actions
+        }
         CheckSource::Static(_) => &empty_actions,
     };
     for (index, frame) in case.frames.iter().enumerate() {
@@ -478,7 +498,7 @@ fn run_with_source(
             report.completed_tick = case.frames.len() as u64;
             (scene, None)
         }
-        CheckSource::Behavior(session, clips) => {
+        CheckSource::Behavior(session, clips) | CheckSource::Projected(session, clips) => {
             let limits = Limits {
                 fixed_dt: Duration::from_nanos(current.tick_nanos).as_secs_f64(),
                 ..Limits::default()

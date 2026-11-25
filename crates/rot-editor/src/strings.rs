@@ -1020,7 +1020,7 @@ editor_text! {
     NoSavedInputActions => "No saved Input Actions",
     NumericRange => "Numeric Range",
     ObjectId => "Object ID",
-    ObjectTranslation => "Object Translation",
+    ObjectLocalTranslation => "Object Local Translation",
     OrderedInputFrames => "Ordered input frames",
     PlayChecks => "Play checks",
     PlayChecksCreateACheckOr => "Create a check or reopen this scene's .play-check.json file.",

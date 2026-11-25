@@ -1049,14 +1049,15 @@ for the guarded equivalent.
 
 ## Save and rerun a play check
 
-Open **Window → Play Checks…** in a saved scene. In v23, use a flat scene
-that works in ordinary Play. Scripted Play supports up to 256 geometry and
-light targets. Static checks support larger scenes and advance one tick per
-frame. Checks run the fixed input frames against the saved scene, including
-verified Lua files from Assets. They leave
-your live Play session and scene Undo alone.
+Open **Window → Play Checks…** in a saved scene. In v23, checks support
+hierarchies that work in ordinary Play, including imported animation.
+Scripted Play supports up to 256 geometry and light targets. Static checks
+support larger scenes and advance one tick per frame. Checks run the fixed
+input frames against the saved scene, including verified Lua files from
+Assets. Your live Play session and scene Undo stay available.
 Create a check, add ordered named-action frames and choose the final tick,
-translation or typed state values to verify. **Capture Current Identity**
+**Object Local Translation** or typed state values to verify. A translation
+assertion on a modeled child reads its position relative to the parent. **Capture Current Identity**
 pins the current saved scene and its resources. **Save Check** writes the
 sibling `<scene-stem>.play-check.json`. Use **Reopen Check** to continue
 editing the saved case later.

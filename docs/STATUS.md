@@ -113,6 +113,11 @@ rendered capture p50/p95 was 126.8/138.5 ms for one batch edit and
 129.0/144.8 ms and paste 127.4/141.3 ms. Each group had 12 samples.
 The native metric includes MCP and GPU readback.
 
+**Play Checks for v23 hierarchies** use the same runtime projection as
+ordinary Play. The Blender gate under a translated parent reached local
+X=3 at tick 32 after a Button press. Native reopen, approved Claude and
+ordinary Play agreed, and reimporting a changed clip made the check stale.
+
 **Find Uses for Lua sources** lists exact Script attachments by stable ID,
 including missing registered sources. Keyboard Reveal opened the selected
 carrier under its folded parent. Approved Claude found both attachments
@@ -684,8 +689,6 @@ The previous build is in `~/.local/share/rot-engine/previous` for `--rollback`.
   actions, HUD settings or scripts prevent empty group creation. Approved MCP
   clients see the same reasons in `scene_inspect`. Phase 2 tracks lifting the
   legacy restrictions on creating groups and reparenting.
-- Play checks refuse scenes that use groups, so they cannot cover an animated
-  model.
 - Outside the repository, still using old names: two MCP entries in `~/.codex/config.toml`,
   and the projects in `~/Projects/Ruster-Creations`, which will not load in a
   build from this branch until their files are renamed.
