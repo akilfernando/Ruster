@@ -425,6 +425,11 @@ Escape discarded an Inspector rename while retaining the filter. With
 search focused, Escape restored the full tree. Both kept the authored
 scene and selection intact, and popup Escape kept first priority.
 
+**Clear Search in Assets** returns to the existing folder and preserves
+its Type filter. Native pointer and keyboard checks kept the selected
+sound in the Inspector, including when it came from another folder.
+Focus returned to the search field and the scene stayed unchanged.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added

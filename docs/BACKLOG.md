@@ -699,7 +699,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-57 Browse for Build Destination | Choose a Linux build folder parent or archive filename from the Build dialog. | done · 2026-11-25 · Native keyboard Browse kept the folder name and seeded the archive chooser. An isolated portal tested cancellation, late replies, and exact paths with spaces. Folder and archive builds passed and a protected output stayed intact. |
 | C-58 Step Through Animator Keys | Navigate earlier and later authored key times in Animator Preview. | done · 2026-11-25 · Keyboard and approved Claude visited the distinct translation and rotation keys in order. Rendered poses matched the source times. Endpoints, stale refresh, clear and the unchanged scene revision passed. |
 | C-59 Escape Ownership During Hierarchy Search | Preserve the hierarchy filter when Escape cancels an Inspector draft. | done · 2026-11-25 · Native Escape canceled a crate rename and kept both search results. Search-focused Escape restored the full tree. The scene and selection stayed unchanged, and a focused test preserved popup priority. |
-| C-60 Clear Assets Search | Clear the query with a dedicated keyboard-accessible control and keep the folder and type filter. | in progress — Codex Sol, 2026-11-25 |
+| C-60 Clear Assets Search | Clear the query with a dedicated keyboard-accessible control and keep the folder and type filter. | done · 2026-11-25 · Click and Tab/Enter returned a project-wide Sound search to its original folder. Focus returned to Search, and the selected sound stayed open in the Inspector even when it lived in another folder. |
 
 ### C-04 implementation brief
 

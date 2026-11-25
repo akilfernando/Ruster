@@ -501,11 +501,15 @@ impl Browser {
         issues: &[ProjectFileIssue],
         prefabs: &[PrefabFile],
     ) {
-        let selected_source = self
+        let selected_index = self
             .selected
             .as_ref()
             .and_then(|id| self.by_id.get(id))
-            .map(|&index| &self.rows[index])
+            .copied();
+        let preserve_selection =
+            selected_index.is_some_and(|index| self.visible.binary_search(&index).is_err());
+        let selected_source = selected_index
+            .map(|index| &self.rows[index])
             .filter(|row| !row.registered)
             .map(|row| (row.source.clone(), row.kind));
         let project_prefix = format!("{}{}", assets.root().display(), std::path::MAIN_SEPARATOR);
@@ -753,10 +757,14 @@ impl Browser {
                 (replacements.next().is_none()).then(|| candidate.id.clone())
             });
         }
-        self.filter();
+        self.filter_with_selection(preserve_selection);
     }
 
     fn filter(&mut self) {
+        self.filter_with_selection(false);
+    }
+
+    fn filter_with_selection(&mut self, preserve_selection: bool) {
         let query = self.query.trim().to_lowercase();
         self.visible = self
             .rows
@@ -773,9 +781,9 @@ impl Browser {
             .map(|(index, _)| index)
             .collect();
         if self.selected.as_ref().is_some_and(|id| {
-            self.by_id
-                .get(id)
-                .is_none_or(|index| self.visible.binary_search(index).is_err())
+            self.by_id.get(id).is_none_or(|index| {
+                !preserve_selection && self.visible.binary_search(index).is_err()
+            })
         }) {
             self.selected = None;
         }
@@ -812,6 +820,7 @@ impl Browser {
     ) -> (Option<String>, Option<AssetDrag>) {
         let mut opened_folder = None;
         let mut filter_changed = false;
+        let mut preserve_selection = false;
         ui.horizontal_wrapped(|ui| {
             ui.strong(Text::ComponentAssets.plain());
             ui.separator();
@@ -830,22 +839,32 @@ impl Browser {
                 }
             }
             ui.separator();
-            let search = ui.add(
-                egui::TextEdit::singleline(&mut self.query)
-                    .id_salt(SEARCH)
-                    .hint_text(Text::AssetSearch.plain())
-                    .desired_width(150.0),
-            );
-            if std::mem::take(&mut self.focus_search) {
-                search.request_focus();
-            }
-            let clear = search.has_focus()
-                && ui
-                    .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-            if clear {
-                self.query.clear();
-            }
-            filter_changed = search.changed() || clear;
+            ui.horizontal(|ui| {
+                let search = ui.add(
+                    egui::TextEdit::singleline(&mut self.query)
+                        .id_salt(SEARCH)
+                        .hint_text(Text::AssetSearch.plain())
+                        .desired_width(150.0),
+                );
+                if std::mem::take(&mut self.focus_search) {
+                    search.request_focus();
+                }
+                let escape = search.has_focus()
+                    && ui.input_mut(|input| {
+                        input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                    });
+                let clear = !self.query.is_empty()
+                    && crate::ui_kit::icon_button(ui, "×", Text::ClearSearch.plain(), None, false)
+                        .clicked();
+                if escape || clear {
+                    self.query.clear();
+                }
+                if clear {
+                    search.request_focus();
+                    preserve_selection = true;
+                }
+                filter_changed = search.changed() || escape || clear;
+            });
             ui.horizontal(|ui| {
                 let label = ui.label(Text::AssetType.plain());
                 let focus =
@@ -875,7 +894,10 @@ impl Browser {
                     });
                 focus.restore(ui, &combo.response, selected);
                 combo.response.labelled_by(label.id).on_hover_text(current);
-                filter_changed |= prior != self.type_filter;
+                if prior != self.type_filter {
+                    filter_changed = true;
+                    preserve_selection = false;
+                }
             });
             ui.add(
                 egui::Slider::new(&mut self.size, 40.0..=112.0)
@@ -950,9 +972,10 @@ impl Browser {
             self.folder = folder;
             self.query.clear();
             filter_changed = true;
+            preserve_selection = false;
         }
         if filter_changed {
-            self.filter();
+            self.filter_with_selection(preserve_selection);
         }
         let reveal_index = self
             .reveal_focus
@@ -1755,6 +1778,48 @@ mod tests {
         browser.filter();
         assert_eq!(visible(&browser), ["nested-script"]);
         browser.selected = Some("nested-script".into());
+
+        let ctx = egui::Context::default();
+        let frame = |browser: &mut Browser, events| {
+            ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    browser.show(ui, &BTreeMap::new(), &BTreeMap::new(), false, false, false);
+                },
+            )
+            .textures_delta
+            .clear();
+        };
+        let key = |key| {
+            [true, false]
+                .into_iter()
+                .map(|pressed| egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .collect()
+        };
+        browser.focus_search = true;
+        frame(&mut browser, vec![]);
+        let search_focus = ctx.memory(|memory| memory.focused()).unwrap();
+        frame(&mut browser, key(egui::Key::Tab));
+        assert_ne!(ctx.memory(|memory| memory.focused()), Some(search_focus));
+        frame(&mut browser, key(egui::Key::Enter));
+        assert!(browser.query.is_empty());
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(search_focus));
+        assert_eq!(browser.folder, Path::new("Assets"));
+        assert_eq!(browser.type_filter, Some(Text::ComponentScript));
+        assert!(visible(&browser).is_empty());
+        assert_eq!(browser.selected.as_deref(), Some("nested-script"));
+        browser.refresh(&store, Vec::new(), &[], &[]);
+        assert_eq!(browser.selected.as_deref(), Some("nested-script"));
 
         browser.folder = "Assets/Depot".into();
         browser.query.clear();
