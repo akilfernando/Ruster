@@ -672,6 +672,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-30 Frame from Hierarchy | Double-click a v23 Hierarchy object to select and frame its assembly in the Scene view. | done · 2026-11-25 · A folded station arch framed its posts, crossbar and imported lamp with the existing Frame camera. Single click and Ctrl-selection left the camera fixed. Rot and Plain Light confirmed the full assembly and checked that scene bytes and revision stayed the same. |
 | C-31 Legible Scene Overlays | Keep Scene Stats and the projection caption readable over geometry and backgrounds. | done · 2026-11-25 · Opaque themed backgrounds keep Stats, Persp and Ortho readable. Plain Light checks covered dark and bright Scene backgrounds, Stats keyboard activation, projection click targets, and View Presets. |
 | C-32 Find Uses for Lua Sources | Find and reveal Script components that use a registered Lua source in the current v23 scene. | done · 2026-11-25 · Keyboard Reveal selected the exact same-named carrier under a folded parent. Approved Claude read both attachments after source rename. Detach and Undo refreshed results. Guarded pagination worked at 5,000 objects. |
+| C-33 Play Checks for v23 Hierarchies | Run saved input and local translation checks on compatible v23 assemblies and imported animation. | in progress — Codex Sol, 2026-11-25 |
 
 ### C-04 implementation brief
 
