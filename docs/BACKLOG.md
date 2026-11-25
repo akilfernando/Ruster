@@ -687,6 +687,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-45 Reveal Assigned Mesh in Assets | Open the exact source row for an assigned v23 Mesh Renderer geometry from the Inspector. | done · 2026-11-25 · Enter reopened Assets, cleared a conflicting Sound search, and focused the exact same-named OBJ among 93 tiles. A generated mesh revealed its owning GLB. Pending drafts and scene bytes stayed intact. |
 | C-46 Aim Directional Light at Object | Aim a v23 Directional Light along the line from its owner pivot to a selected scene object. | done · 2026-11-25 · Native and approved Claude aimed a sun under a rotated, nonuniform rig. Shadows changed sides. No-op, stale target guard, shared Undo, reopen and relocated Vulkan passed. |
 | C-47 Vector3 Properties for Object Lua | Set three-axis values per v23 file-backed Object Lua binding. | done · 2026-11-25 · Native keyboard and approved Claude configured two carriers on one Lua source. Zero and unset behaved distinctly. Shared Undo, reopen and relocated Vulkan matched the signed three-axis positions. |
+| C-48 Import GLB Triangle Strips and Fans | Import GLB surfaces with strip or fan topology into the existing mesh format. | in progress — Codex Sol, 2026-11-25 |
 
 ### C-04 implementation brief
 
