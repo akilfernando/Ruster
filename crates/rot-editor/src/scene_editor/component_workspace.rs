@@ -396,6 +396,7 @@ pub(super) struct ComponentWorkspace {
     asset_use_reveal: Option<(usize, String)>,
     edit_scene_during_play: bool,
     component_picker: component_inspector::ComponentPicker,
+    inspector_error: Option<String>,
     error: Option<String>,
     open_path: Option<String>,
     new_scene: Option<component_new_scene::NewScene>,
@@ -585,6 +586,7 @@ impl ComponentWorkspace {
             asset_use_reveal: None,
             edit_scene_during_play: false,
             component_picker: Default::default(),
+            inspector_error: None,
             error: None,
             open_path: None,
             new_scene: None,
@@ -884,6 +886,7 @@ impl ComponentWorkspace {
     }
 
     fn rebuild_draft(&mut self) {
+        self.inspector_error = None;
         self.clear_animation_preview();
         self.transform_tool.invalidate_target();
         #[cfg(unix)]
@@ -1077,6 +1080,14 @@ impl ComponentWorkspace {
             || self.multi_draft.as_ref().is_some_and(MultiInspector::dirty)
     }
 
+    fn inspector_apply_enabled(&mut self, ctx: &egui::Context) -> bool {
+        let dirty = self.draft_dirty();
+        if !dirty && self.inspector_error.take().is_some() {
+            ctx.request_repaint();
+        }
+        dirty
+    }
+
     pub(super) fn surface_edit_pending(&self) -> bool {
         self.material_draft.is_some()
             || self.game_hud.is_some()
@@ -1219,6 +1230,7 @@ impl ComponentWorkspace {
             return false;
         }
         if !self.draft_dirty() {
+            self.inspector_error = None;
             return true;
         }
         let result = self
@@ -1226,12 +1238,11 @@ impl ComponentWorkspace {
             .and_then(|objects| Self::put_draft(&mut self.session, objects));
         match result {
             Ok(_) => {
-                self.error = None;
                 self.refresh();
                 true
             }
             Err(error) => {
-                self.error = Some(error.to_string());
+                self.inspector_error = Some(error.to_string());
                 false
             }
         }
@@ -1967,7 +1978,6 @@ impl ComponentWorkspace {
             }
             Action::Undo if self.draft_dirty() => {
                 self.rebuild_draft();
-                self.error = None;
                 return;
             }
             Action::Redo if self.draft_dirty() => return,
@@ -3137,12 +3147,16 @@ impl ComponentWorkspace {
         #[cfg(target_os = "linux")]
         let mut reveal_error = None;
         if scene_error.is_some()
+            || self.inspector_error.is_some()
             || build_status.is_some()
             || self.prefab_feedback.is_some()
             || has_import_issues
             || light_budget_exceeded
         {
             egui::Panel::bottom("component_status").show(ui, |ui| {
+                if let Some(error) = &self.inspector_error {
+                    ui.colored_label(editor_theme::colors(ui).error, error);
+                }
                 if let Some(error) = scene_error {
                     ui.colored_label(editor_theme::colors(ui).error, error);
                 } else if let Some(status) = build_status {
@@ -3718,7 +3732,7 @@ impl ComponentWorkspace {
                         .show(ui, |ui| self.multi_inspector(ui));
                     if ui
                         .add_enabled(
-                            self.draft_dirty(),
+                            self.inspector_apply_enabled(ui.ctx()),
                             egui::Button::new(Text::ComponentApply.plain()),
                         )
                         .clicked()
@@ -3828,7 +3842,7 @@ impl ComponentWorkspace {
                                 }
                                 if ui
                                     .add_enabled(
-                                        self.draft_dirty(),
+                                        self.inspector_apply_enabled(ui.ctx()),
                                         egui::Button::new(Text::ComponentApply.plain()),
                                     )
                                     .clicked()
@@ -5109,6 +5123,76 @@ mod tests {
         assert!(!object.components[1].enabled);
         let (play_scene, _) = reopened.scene().behavior_input().unwrap();
         assert!(!play_scene.objects[0].collider.unwrap().enabled);
+    }
+
+    #[test]
+    fn inspector_validation_feedback_follows_draft_without_clearing_scene_errors() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        let scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path, ComponentSession::new(scene.clone()).unwrap());
+        editor.select(Some(scene.objects[0].id.clone()));
+        editor.error = Some("An unrelated scene error".into());
+        let reject_blank = |editor: &mut ComponentWorkspace| {
+            editor.draft.as_mut().unwrap().name.clear();
+            assert!(!editor.apply());
+            assert_eq!(editor.inspector_error.as_deref(),
+                Some("invalid scene: display name requires 1..128 UTF-8 bytes without surrounding whitespace or control characters"));
+        };
+        let ctx = egui::Context::default();
+        let frame = |editor: &mut ComponentWorkspace, events| {
+            ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    editor.show_workspace(ui, false);
+                },
+            )
+            .textures_delta
+            .clear();
+        };
+
+        reject_blank(&mut editor);
+        frame(&mut editor, vec![]);
+        assert!(editor.inspector_error.is_some());
+        editor
+            .draft
+            .as_mut()
+            .unwrap()
+            .name
+            .clone_from(&scene.objects[0].name);
+        frame(&mut editor, vec![]);
+        assert!(editor.inspector_error.is_none());
+        assert_eq!(editor.session.scene(), &scene);
+        assert_eq!(editor.session.revision(), 0);
+
+        reject_blank(&mut editor);
+        frame(
+            &mut editor,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(!editor.draft_dirty());
+        assert!(editor.inspector_error.is_none());
+        assert_eq!(editor.session.revision(), 0);
+        assert!(matches!(editor.session.undo(0), Err(SceneError::NoUndo)));
+        assert_eq!(editor.error.as_deref(), Some("An unrelated scene error"));
+
+        reject_blank(&mut editor);
+        editor.draft.as_mut().unwrap().name = "Corrected Name".into();
+        assert!(editor.apply());
+        assert!(editor.inspector_error.is_none());
+        assert_eq!(editor.error.as_deref(), Some("An unrelated scene error"));
+        assert_eq!(editor.session.revision(), 1);
     }
 
     #[cfg(unix)]

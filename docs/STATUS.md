@@ -396,6 +396,11 @@ Claude tested the same operation. A saved trolley entered the sensor on
 tick 5, emitted one cue, and exited on tick 12 in the editor and a
 relocated Linux build. Vulkan showed the trolley past the checkpoint.
 
+**Inspector validation feedback** clears when a rejected draft matches the
+saved values again or is canceled. Native editing verified that restoring
+a blank name left the revision unchanged. A valid later rename applied
+once and shared Undo. Separate scene errors keep their own status.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added
