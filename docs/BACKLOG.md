@@ -683,6 +683,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-41 Centered Game HUD Edge Anchors | Anchor HUD labels and actions at the top or bottom center of the Game view. | done · 2026-11-25 · Native Bottom Center and approved MCP Top Center share Undo. The saved button reopened in place and activated the intended bridge in relocated Vulkan at 16:9 and 4:3. |
 | C-42 Capture Orthographic Game Camera | Turn a composed v23 orthographic Scene view into a new active Game Camera in one Undo step. | done · 2026-11-25 · Native Isometric and approved MCP Top captured the same framing as the painted Scene view. Stale capture was refused. One Undo restored the earlier camera. Reopen and relocated Vulkan matched all three landmarks. |
 | C-43 Rename in Hierarchy | Rename a v23 object in place with F2 or its Hierarchy row menu. | done · 2026-11-25 · Focused tests covered F2 and remapping. Native editing targeted one of two same-named rows, refreshed search and kept selection. Empty, canceled and unchanged names kept history. Approved MCP and native edits shared Undo and survived reopen. |
+| C-44 Fit Sphere Collider to Mesh | Fit an existing v23 Sphere Collider around the indexed geometry of one Mesh Renderer on that object. | in progress — Codex Sol, 2026-11-25 |
 
 ### C-04 implementation brief
 
