@@ -316,6 +316,120 @@ fn transform_camera_pose_commits_with_animated_parent_owner_and_rejected_step() 
 }
 
 #[test]
+fn button_animators_use_independent_playback_speeds_and_source_clip_endpoints() {
+    use rot_scene::{
+        component_scene::{AnimatorStart, Component, ComponentScene},
+        input::{ActionDefinition, ActionKind, ButtonState, InputKey},
+        Session,
+    };
+    let (mut scene, mut engine) = fixture(false);
+    let mut fast = scene.objects[0].clone();
+    fast.id = "fast-arm".into();
+    scene.objects.push(fast);
+    scene.hierarchy.groups.insert(
+        "fast-root".into(),
+        Group {
+            name: None,
+            transform: Transform::default(),
+        },
+    );
+    scene
+        .hierarchy
+        .parents
+        .insert("fast-arm".into(), "fast-root".into());
+    let mut binding = scene.animations["root"].clone();
+    binding.looping = true;
+    binding.targets.insert("Rig/Arm".into(), "fast-arm".into());
+    scene.animations.insert("fast-root".into(), binding);
+    let mut authored = ComponentScene::from_legacy(&Session::new(scene).unwrap()).unwrap();
+    authored.actions.insert(
+        "start".into(),
+        ActionDefinition {
+            label: None,
+            kind: ActionKind::Button {
+                keys: vec![InputKey::F],
+                primary_mouse: false,
+            },
+        },
+    );
+    for object in &mut authored.objects {
+        for component in &mut object.components {
+            if let Component::Animator {
+                start_playback,
+                playback_speed,
+                ..
+            } = &mut component.kind
+            {
+                *start_playback = AnimatorStart::OnButtonPress {
+                    action_id: "start".into(),
+                };
+                *playback_speed = if object.id == "root" { 0.5 } else { 2.0 };
+            }
+        }
+    }
+    let input = authored.behavior_projection().unwrap();
+    let mut runtime = engine
+        .reset_projected(
+            &input.scene,
+            &input.authoring,
+            input.transform_camera,
+            input.projection,
+        )
+        .unwrap();
+    let values = |runtime: &Runtime| {
+        let x = |id| {
+            runtime
+                .scene()
+                .objects
+                .iter()
+                .find(|object| object.id == id)
+                .unwrap()
+                .transform
+                .translation[0]
+        };
+        [x("arm"), x("fast-arm")]
+    };
+    engine.step(&mut runtime).unwrap();
+    assert_eq!(
+        values(&runtime),
+        [1.0, 1.0],
+        "neutral input keeps the reset sample"
+    );
+    let pressed = ActionFrame(BTreeMap::from([(
+        "start".into(),
+        ActionValue::Button(ButtonState {
+            pressed: true,
+            held: true,
+            released: false,
+        }),
+    )]));
+    engine.step_with_input(&mut runtime, &pressed).unwrap();
+    assert_eq!(values(&runtime), [1.0, 1.0]);
+    engine.step(&mut runtime).unwrap();
+    assert_eq!(values(&runtime), [1.75, 4.0]);
+    engine.step(&mut runtime).unwrap();
+    assert_eq!(
+        values(&runtime),
+        [2.5, 1.0],
+        "2× wraps at the source endpoint"
+    );
+    for _ in 0..6 {
+        engine.step(&mut runtime).unwrap();
+    }
+    assert_eq!(
+        values(&runtime),
+        [7.0, 1.0],
+        "0.5× reaches the endpoint after eight ticks"
+    );
+    engine.step(&mut runtime).unwrap();
+    assert_eq!(
+        values(&runtime),
+        [7.0, 4.0],
+        "nonlooping holds its last sample"
+    );
+}
+
+#[test]
 fn button_animators_wait_restart_per_placement_and_keep_the_clock_on_rejection() {
     use rot_scene::{
         component_scene::{AnimatorStart, Component, ComponentScene},

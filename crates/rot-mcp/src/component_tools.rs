@@ -24,7 +24,7 @@ pub(super) fn list() -> [Value; 2] {
             "shape":{"type":"object","properties":{
                 "type":{"enum":["box","sphere"]},"radius":{"type":"number"},
                 "half_extents":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3}}},
-            "view":{"type":"object","description":"Camera view: orbit, {type:transform_perspective,vertical_fov_degrees:45}, or {type:transform_orthographic,vertical_size:8,clip:{near:0.1,far:1000}}. Optional aspect_ratio."},"binding":{"type":"object"},"source_kind":{"enum":["asset"]},
+            "view":{"type":"object","description":"Camera view: orbit, {type:transform_perspective,vertical_fov_degrees:45}, or {type:transform_orthographic,vertical_size:8,clip:{near:0.1,far:1000}}. Optional aspect_ratio."},"binding":{"type":"object"},"playback_speed":{"type":"number","exclusiveMinimum":0},"source_kind":{"enum":["asset"]},
             "color":{"type":"array","items":{"type":"number"}},"intensity":{"type":"number"},
             "kind":{"type":"object"}
         }

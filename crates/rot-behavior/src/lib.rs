@@ -371,6 +371,7 @@ struct ResolvedAnimation {
     binding: AnimationBinding,
     clip: Arc<Clip>,
     button: Option<String>,
+    speed: f64,
 }
 
 impl Engine {
@@ -410,6 +411,7 @@ impl Engine {
                 binding: binding.clone(),
                 clip: clip.clone(),
                 button: projection.animator_button(owner).map(str::to_owned),
+                speed: f64::from(projection.animator_speed(owner)),
             });
         }
         // Only targets a clip actually animates have a second transform writer.
@@ -1018,7 +1020,7 @@ impl Engine {
             let scene = staged.get_or_insert_with(|| (*snapshot).clone());
             Self::apply_animation(
                 animation,
-                ticks as f64 * self.limits.fixed_dt,
+                ticks as f64 * self.limits.fixed_dt * animation.speed,
                 scene,
                 Phase::Commit,
             )?;

@@ -471,11 +471,34 @@ pub(super) fn components(
                     Component::Animator {
                         binding,
                         start_playback,
+                        playback_speed,
                     } => {
                         animator_start_fields(ui, start_playback, actions);
                         if let Some(revision) = animator_fields(ui, binding, assets) {
                             animator_revision = Some((component.id.clone(), revision));
                         }
+                        ui_kit::property_row_with_label(
+                            ui,
+                            Text::AnimatorPlaybackSpeed.plain(),
+                            |ui, label| {
+                                let current = f64::from(*playback_speed);
+                                ui.add(
+                                    egui::DragValue::new(playback_speed)
+                                        .range(f32::from_bits(1)..=f32::MAX)
+                                        .speed(0.01)
+                                        .suffix("×")
+                                        .custom_parser(move |input| {
+                                            input.trim().parse::<f64>().ok()
+                                                .or_else(|| ui_kit::eval_number(input, Some(current)))
+                                                .filter(|&speed| {
+                                                    rot_scene::component_scene::valid_animator_playback_speed(speed as f32)
+                                                })
+                                        }),
+                                )
+                                .labelled_by(label)
+                                .on_hover_text(Text::AnimatorPlaybackSpeedHint.plain());
+                            },
+                        );
                         if let Some(edit) = component_animation_preview::controls(
                             ui,
                             &component.id,

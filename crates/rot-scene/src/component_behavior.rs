@@ -145,6 +145,7 @@ pub struct RuntimeProjection {
     named_sensors: bool,
     attached_lights: Option<Arc<AttachedLights>>,
     animator_buttons: BTreeMap<String, String>,
+    animator_speeds: BTreeMap<String, f32>,
 }
 
 /// A projected mesh leaf owns a distinct, non-targetable local light.
@@ -176,6 +177,10 @@ impl RuntimeProjection {
         self.animator_buttons.get(owner).map(String::as_str)
     }
 
+    pub fn animator_speed(&self, owner: &str) -> f32 {
+        self.animator_speeds.get(owner).copied().unwrap_or(1.0)
+    }
+
     pub(crate) fn allows_named_sensors(&self) -> bool {
         self.named_sensors
     }
@@ -196,6 +201,11 @@ impl RuntimeProjection {
         if !self.animator_buttons.is_empty() {
             return Err(SceneError::Invalid(
                 "Save the component scene to keep Animator button triggers.".into(),
+            ));
+        }
+        if !self.animator_speeds.is_empty() {
+            return Err(SceneError::Invalid(
+                "Save the component scene to keep Animator playback speeds.".into(),
             ));
         }
         if self.named_sensors {
@@ -440,6 +450,7 @@ impl ComponentScene {
         let mut lights = BTreeMap::new();
         let mut attached = Vec::new();
         let mut animator_buttons = BTreeMap::new();
+        let mut animator_speeds = BTreeMap::new();
         let parents: HashSet<_> = self
             .objects
             .iter()
@@ -555,6 +566,7 @@ impl ComponentScene {
                     Component::Animator {
                         binding,
                         start_playback,
+                        playback_speed,
                     } => {
                         detached_only = false;
                         if !component.enabled {
@@ -565,6 +577,9 @@ impl ComponentScene {
                         start_playback.validate_action(&self.actions, &object.id)?;
                         if let AnimatorStart::OnButtonPress { action_id } = start_playback {
                             animator_buttons.insert(object.id.clone(), action_id.clone());
+                        }
+                        if *playback_speed != 1.0 {
+                            animator_speeds.insert(object.id.clone(), *playback_speed);
                         }
                         if scene
                             .animations
@@ -680,6 +695,7 @@ impl ComponentScene {
         scene.validate()?;
         let projection = RuntimeProjection {
             animator_buttons,
+            animator_speeds,
             positional_audio,
             named_sensors,
             local_leaf_scripts: !scene.hierarchy.is_empty()

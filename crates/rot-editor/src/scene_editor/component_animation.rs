@@ -93,6 +93,7 @@ pub(super) fn observe(
     store: Option<&AssetStore>,
     binding: &AnimationBinding,
     start: &rot_scene::component_scene::AnimatorStart,
+    playback_speed: f32,
     actions: &rot_scene::input::ActionMap,
     owner: &str,
 ) -> Value {
@@ -100,6 +101,6 @@ pub(super) fn observe(
         json!({"model_id":model.id, "clip_name":name, "duration":model.clips[name].duration})
     });
     json!({"clip_id":binding.clip,"looping":binding.looping,
-        "target_count":binding.targets.len(),"source":source,"start_playback":start,
+        "target_count":binding.targets.len(),"source":source,"start_playback":start,"playback_speed":playback_speed,
         "start_error":start.validate_action(actions,owner).err().map(|error| error.to_string())})
 }

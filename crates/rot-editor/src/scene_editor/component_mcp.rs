@@ -372,6 +372,7 @@ impl ComponentWorkspace {
                     "component_id",
                     "preview_seconds",
                     "start_playback",
+                    "playback_speed",
                 ]
                 .iter()
                 .filter(|key| map.contains_key(**key))
@@ -1051,7 +1052,7 @@ impl ComponentWorkspace {
         let invalid = || {
             (
                 "invalid_arguments",
-                "Pass owner_id and clip_id, looping, start_playback, or remove:true.".into(),
+                "Pass owner_id and clip_id, looping, start_playback, playback_speed, or remove:true.".into(),
             )
         };
         let clip = args
@@ -1069,6 +1070,18 @@ impl ComponentWorkspace {
                     .map_err(|_| invalid())
             })
             .transpose()?;
+        let speed = args
+            .get("playback_speed")
+            .map(|value| {
+                value
+                    .as_f64()
+                    .map(|speed| speed as f32)
+                    .filter(|&speed| {
+                        rot_scene::component_scene::valid_animator_playback_speed(speed)
+                    })
+                    .ok_or_else(invalid)
+            })
+            .transpose()?;
         let remove = args.get("remove");
         let asset_revision = args
             .get("expected_asset_revision")
@@ -1078,8 +1091,13 @@ impl ComponentWorkspace {
             && (remove != Some(&Value::Bool(true))
                 || clip.is_some()
                 || looping.is_some()
-                || start.is_some()))
-            || (remove.is_none() && clip.is_none() && looping.is_none() && start.is_none())
+                || start.is_some()
+                || speed.is_some()))
+            || (remove.is_none()
+                && clip.is_none()
+                && looping.is_none()
+                && start.is_none()
+                && speed.is_none())
         {
             return Err(invalid());
         }
@@ -1118,6 +1136,7 @@ impl ComponentWorkspace {
             let Component::Animator {
                 binding,
                 start_playback,
+                playback_speed,
             } = &mut object.components[index].kind
             else {
                 unreachable!()
@@ -1138,10 +1157,14 @@ impl ComponentWorkspace {
                     .map_err(|error| ("invalid_animation", error.to_string()))?;
                 *start_playback = start;
             }
+            if let Some(speed) = speed {
+                *playback_speed = speed;
+            }
             animation = observe(
                 self.assets.as_ref(),
                 binding,
                 start_playback,
+                *playback_speed,
                 actions,
                 owner,
             );
@@ -1515,12 +1538,14 @@ impl ComponentWorkspace {
             if let Component::Animator {
                 binding,
                 start_playback,
+                playback_speed,
             } = &component.kind
             {
                 response["animation"] = component_animation::observe(
                     self.assets.as_ref(),
                     binding,
                     start_playback,
+                    *playback_speed,
                     &self.session.scene().actions,
                     id,
                 );
@@ -1629,8 +1654,12 @@ impl ComponentWorkspace {
                     *entry.insert(index)
                 }
             };
-            let movement_explicit = edit["component"].get("movement").is_some();
-            action.apply(&mut changed[index], movement_explicit)?;
+            let fields = &edit["component"];
+            action.apply(
+                &mut changed[index],
+                fields.get("movement").is_some(),
+                fields.get("playback_speed").is_some(),
+            )?;
         }
         let parents = std::cell::LazyCell::new(|| {
             super::component_sensor::parent_ids(&self.session.scene().objects)
@@ -1829,7 +1858,12 @@ enum ComponentEdit {
 }
 
 impl ComponentEdit {
-    fn apply(self, object: &mut ObjectNode, movement_explicit: bool) -> Result<(), CommandError> {
+    fn apply(
+        self,
+        object: &mut ObjectNode,
+        movement_explicit: bool,
+        speed_explicit: bool,
+    ) -> Result<(), CommandError> {
         let object_id = match &self {
             Self::Add { object_id, .. }
             | Self::Replace { object_id, .. }
@@ -1882,6 +1916,18 @@ impl ComponentEdit {
                     ) = (&object.components[index].kind, &mut component.kind)
                     {
                         *movement = *old;
+                    }
+                }
+                if !speed_explicit {
+                    if let (
+                        Component::Animator {
+                            playback_speed: prior,
+                            ..
+                        },
+                        Component::Animator { playback_speed, .. },
+                    ) = (&object.components[index].kind, &mut component.kind)
+                    {
+                        *playback_speed = *prior;
                     }
                 }
                 object.components[index] = component;
@@ -2038,7 +2084,7 @@ mod tests {
                 object_id: object.id.clone(),
                 component: component.clone(),
             }
-            .apply(&mut object, explicit)
+            .apply(&mut object, explicit, false)
             .unwrap();
             assert!(
                 matches!(object.components.last().unwrap().kind, Component::Script {movement,..}

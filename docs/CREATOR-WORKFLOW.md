@@ -1035,6 +1035,12 @@ whether playback repeats or holds the final pose. Choose **On Play** to
 start automatically. Repair a missing Button by selecting another Button
 or switching to **On Play**.
 
+Set **Playback Speed** on each v23 Animator to play the shared clip at
+different rates. Use `0.5` for half speed, `2` for double, and `1` for
+the original rate. Choose **Apply** to save the edit to Undo history.
+The rate applies in Play, saved Play Checks, and Linux builds.
+Preview Time still reads seconds from the source clip.
+
 Choose **Preview** in the v23 Animator to scrub its transform clip in the
 Scene view. Use **Preview Time** or enter an exact **Time (seconds)**. The
 end of the slider shows the final pose even when **Loop** is on.

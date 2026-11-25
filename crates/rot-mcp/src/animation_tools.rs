@@ -20,6 +20,7 @@ pub fn list() -> Vec<Value> {
                 "expected_asset_revision":{"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20},
                 "clip_id":{"type":"string","minLength":1,"maxLength":256},
                 "looping":{"type":"boolean"},
+                "playback_speed":{"type":"number","exclusiveMinimum":0,"description":"Positive finite v23 Animator speed relative to the source clip. 1 is normal speed."},
                 "start_playback":{"oneOf":[
                     {"type":"object","additionalProperties":false,"required":["type"],"properties":{"type":{"const":"on_play"}}},
                     {"type":"object","additionalProperties":false,"required":["type","action_id"],"properties":{"type":{"const":"on_button_press"},"action_id":id}}
@@ -70,6 +71,7 @@ pub fn valid(name: &str, args: &Value) -> bool {
                 "remove",
                 "expected_asset_revision",
                 "start_playback",
+                "playback_speed",
             ],
         )
     {
@@ -97,6 +99,11 @@ pub fn valid(name: &str, args: &Value) -> bool {
                 Err(_) => false,
             }
         })
+        && map.get("playback_speed").is_none_or(|value| {
+            value.as_f64().is_some_and(|value| {
+                rot_scene::component_scene::valid_animator_playback_speed(value as f32)
+            })
+        })
         && match (clip, remove) {
             (Some(clip), None) => {
                 clip.as_str()
@@ -107,10 +114,12 @@ pub fn valid(name: &str, args: &Value) -> bool {
                 *remove == json!(true)
                     && !map.contains_key("looping")
                     && !map.contains_key("start_playback")
+                    && !map.contains_key("playback_speed")
             }
-            (None, None) => map
-                .get("looping")
-                .map_or_else(|| map.contains_key("start_playback"), Value::is_boolean),
+            (None, None) => map.get("looping").map_or_else(
+                || map.contains_key("start_playback") || map.contains_key("playback_speed"),
+                Value::is_boolean,
+            ),
             _ => false,
         }
 }

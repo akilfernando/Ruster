@@ -102,6 +102,7 @@ impl ComponentWorkspace {
                     enabled: true,
                     kind: Component::Animator {
                         start_playback: Default::default(),
+                        playback_speed: 1.0,
                         binding: AnimationBinding {
                             clip: clip.id.clone(),
                             looping: true,
@@ -544,6 +545,54 @@ mod tests {
         assert_eq!(reply["result"]["animation"]["looping"], false, "{reply}");
         workspace.session.undo(3).unwrap();
         workspace.session.undo(4).unwrap();
+        workspace.refresh();
+        assert_eq!(workspace.session.scene(), &placed);
+
+        for (value, expected) in [
+            (json!(0), "invalid_arguments"),
+            (json!(1e70), "invalid_arguments"),
+        ] {
+            let bad = workspace.ai_command(
+                "session",
+                "scene_animation_set",
+                &json!({
+                    "expected_session_token":"session","expected_revision":"5","owner_id":owner,
+                    "playback_speed":value
+                }),
+            );
+            assert_eq!(bad["error"]["code"], expected, "{bad}");
+        }
+        assert_eq!(workspace.session.scene(), &placed);
+        let speed = workspace.ai_command(
+            "session",
+            "scene_animation_set",
+            &json!({
+                "expected_session_token":"session","expected_revision":"5","owner_id":owner,
+                "playback_speed":2.0
+            }),
+        );
+        assert_eq!(
+            speed["result"]["animation"]["playback_speed"], 2.0,
+            "{speed}"
+        );
+        let after = workspace.session.scene().objects[0].components[0].clone();
+        let mut expected = component.clone();
+        let Component::Animator { playback_speed, .. } = &mut expected.kind else {
+            unreachable!()
+        };
+        *playback_speed = 2.0;
+        assert_eq!(after, expected);
+        let omitted = workspace.ai_command(
+            "session",
+            "scene_components_edit",
+            &json!({
+                "expected_session_token":"session","expected_revision":"6",
+                "edits":[{"operation":"replace","object_id":owner,"component":component}]
+            }),
+        );
+        assert_eq!(omitted["ok"], true, "{omitted}");
+        assert_eq!(workspace.session.revision(), 6);
+        workspace.session.undo(6).unwrap();
         assert_eq!(workspace.session.scene(), &placed);
     }
 

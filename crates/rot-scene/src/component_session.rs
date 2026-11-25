@@ -2094,6 +2094,7 @@ mod tests {
                 "rig-animator",
                 Component::Animator {
                     start_playback: Default::default(),
+                    playback_speed: 1.0,
                     binding: AnimationBinding {
                         clip: "bridge-lift".into(),
                         looping: true,

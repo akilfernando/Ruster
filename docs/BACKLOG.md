@@ -678,7 +678,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-36 Open Build Folder | Open the actual published Linux folder from the editor's build status. | done · 2026-11-25 · Native Tab and Enter sent the exact custom output path to a scoped file-manager opener. Folder, launch-failed and archive flows passed. A relocated build ran headlessly and a redirected path was refused. |
 | C-37 Meshless GLB Lighting Rigs | Place reusable static Blender lights into an existing v23 set. | done · 2026-11-25 · Native and approved MCP placed a meshless spot-and-fill Blender rig. Native Aim moved the spot to the opposite panel. Undo, malformed refresh, reopen and relocated Vulkan passed. |
 | C-38 Reset Local Transform | Restore selected v23 objects to identity relative to their own parents in one Undo step. | done · 2026-11-25 · Keyboard Reset restored two housings to different parent origins in one Undo. The copy stayed available, a no-op kept history, and approved MCP, reopen and relocated Vulkan matched. |
-| C-39 Animator Playback Speed | Reuse one imported clip on v23 objects with independent playback multipliers. | in progress — Codex Sol, 2026-11-25 |
+| C-39 Animator Playback Speed | Reuse one imported clip on v23 objects with independent playback multipliers. | done · 2026-11-25 · Native and approved MCP configured 0.5× and 2× for one shared clip. Exact poses matched in Play, a saved Play Check, and relocated fixed-tick playback. Default-rate poses matched the release baseline. |
 
 ### C-04 implementation brief
 

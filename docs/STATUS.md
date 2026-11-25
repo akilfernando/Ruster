@@ -113,6 +113,12 @@ rendered capture p50/p95 was 126.8/138.5 ms for one batch edit and
 129.0/144.8 ms and paste 127.4/141.3 ms. Each group had 12 samples.
 The native metric includes MCP and GPU readback.
 
+**Animator Playback Speed** gives each v23 Animator its own rate. Two lifts
+used the same Blender clip at 0.5× and 2×. Their local X values at tick 16
+were 1.4333 and 2.9333 in Play, saved Play Checks, and a relocated player.
+Across five paired release runs with 16 active Animators, Step p50 was
+191.9–193.4 μs before and 192.0–192.9 μs after at 1×. Poses matched.
+
 **Reset Local Transform** restores selected v23 objects to identity relative
 to each parent in one Undo. The two station housings kept their parent
 poses and a prior copy stayed ready for Paste. Approved MCP, reopening

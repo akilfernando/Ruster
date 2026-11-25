@@ -488,7 +488,14 @@ impl ComponentScene {
                     Component::Animator {
                         binding,
                         start_playback,
+                        playback_speed,
                     } => {
+                        if !valid_animator_playback_speed(*playback_speed) {
+                            return Err(SceneError::Invalid(format!(
+                                "Animator {} Playback Speed must be positive and finite.",
+                                component.id
+                            )));
+                        }
                         if let AnimatorStart::OnButtonPress { action_id } = start_playback {
                             validate_id(action_id)?;
                         }
@@ -689,6 +696,7 @@ impl ComponentScene {
                 id: component_id(owner, "animator"),
                 enabled: true,
                 kind: Component::Animator {
+                    playback_speed: 1.0,
                     start_playback: Default::default(),
                     binding: binding.clone(),
                 },
@@ -868,6 +876,18 @@ impl AnimatorStart {
     }
 }
 
+pub fn valid_animator_playback_speed(speed: f32) -> bool {
+    speed.is_finite() && speed > 0.0
+}
+
+fn default_animator_playback_speed() -> f32 {
+    1.0
+}
+
+fn is_default_animator_playback_speed(speed: &f32) -> bool {
+    *speed == default_animator_playback_speed()
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ComponentInstance {
     pub id: String,
@@ -886,6 +906,11 @@ pub enum Component {
         binding: AnimationBinding,
         #[serde(default, skip_serializing_if = "AnimatorStart::is_on_play")]
         start_playback: AnimatorStart,
+        #[serde(
+            default = "default_animator_playback_speed",
+            skip_serializing_if = "is_default_animator_playback_speed"
+        )]
+        playback_speed: f32,
     },
     Script {
         binding: BehaviorBinding,
@@ -1210,7 +1235,8 @@ mod tests {
             rig.components[0].kind,
             Component::Animator {
                 binding: animation,
-                start_playback: AnimatorStart::OnPlay {}
+                start_playback: AnimatorStart::OnPlay {},
+                playback_speed: 1.0,
             }
         );
         let camera = &migrated.objects.last().unwrap().components[0];
@@ -1222,6 +1248,39 @@ mod tests {
             ComponentScene::read_json(json.as_slice()).unwrap(),
             migrated
         );
+
+        assert!(!std::str::from_utf8(&json)
+            .unwrap()
+            .contains("playback_speed"));
+        let mut changed = migrated.clone();
+        let animator = changed
+            .objects
+            .iter_mut()
+            .find(|object| object.id == "rig")
+            .unwrap();
+        let Component::Animator { playback_speed, .. } = &mut animator.components[0].kind else {
+            unreachable!();
+        };
+        *playback_speed = 0.5;
+        let mut bytes = Vec::new();
+        changed.write_json(&mut bytes).unwrap();
+        assert_eq!(
+            ComponentScene::read_json(bytes.as_slice()).unwrap(),
+            changed
+        );
+        for speed in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            let animator = changed
+                .objects
+                .iter_mut()
+                .find(|object| object.id == "rig")
+                .unwrap();
+            let Component::Animator { playback_speed, .. } = &mut animator.components[0].kind
+            else {
+                unreachable!();
+            };
+            *playback_speed = speed;
+            assert!(changed.validate().is_err());
+        }
 
         let mut invalid = migrated;
         invalid.objects.retain(|object| object.id != "left");

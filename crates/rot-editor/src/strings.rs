@@ -121,6 +121,8 @@ editor_text! {
     AnimationPreviewTime => "Preview Time",
     AnimationPreviewSeconds => "Time (seconds)",
     AnimationPreviewExit => "Exit Preview",
+    AnimatorPlaybackSpeed => "Playback Speed",
+    AnimatorPlaybackSpeedHint => "Play speed relative to the source clip. Preview uses source seconds.",
     AnimatorClipUnavailable => "Clip unavailable. Refresh the source model.",
     AnimatorMissingTargets => "This clip needs additional nodes. Place the model again.",
     ComponentAnimator => "Animator",
