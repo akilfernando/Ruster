@@ -358,6 +358,13 @@ Vulkan build preserved the expected winding and UVs. Warm release decode
 p95 for a 24,000-triangle surface was 9.05–9.31 ms for the old list path,
 8.80–9.01 ms for the new list path, and 8.77–8.92 ms for the strip.
 
+**Sound Cue Preview at Gain** auditions a ready WAV as centered 2D audio
+inside the draft. Native keyboard preview measured 14,594 PCM peak at
+full gain and 3,649 at quarter gain. Zero stayed silent. Escape stopped a
+long clip and kept both assignments. Assets preview stayed at full gain,
+and ordinary playback in a relocated build matched the applied quarter
+gain. Approved Claude inspected both saved assignments.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added

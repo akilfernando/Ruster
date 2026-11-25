@@ -667,6 +667,10 @@ and choose **Apply**. Use the `host.play_sound("cue-name")` call shown in the
 Inspector from the fourth `update` argument. For example, call the cue when
 `host.button("fire").pressed` is true to play it once per press.
 
+Use **Preview at Gain** to hear the selected WAV at its draft gain before
+applying the cue. The preview is centered 2D audio for either playback mode.
+Changing the WAV or gain, closing the dialog, or starting Play stops it.
+
 In the Sound Cue dialog, **Playback** defaults to **2D**. Choose
 **Positional** and set a positive **Range** in scene units to hear it
 from the script owner's position relative to the active **Transform** Game

@@ -159,12 +159,24 @@ impl Audition {
         clip: Arc<AudioClip>,
         wake: impl FnOnce() + Send + 'static,
     ) -> Result<(), String> {
+        self.play_at_gain(clip, 1.0, wake)
+    }
+
+    pub fn play_at_gain(
+        &mut self,
+        clip: Arc<AudioClip>,
+        gain: f64,
+        wake: impl FnOnce() + Send + 'static,
+    ) -> Result<(), String> {
+        if !(0.0..=1.0).contains(&gain) {
+            return Err("Preview gain must be a finite value from 0 to 1.".into());
+        }
         #[cfg(target_os = "linux")]
         {
             if self.task.is_some() {
                 return Err("The previous preview is still closing. Try again.".into());
             }
-            self.task = Some(audition::Task::start(clip, wake)?);
+            self.task = Some(audition::Task::start(clip, gain, wake)?);
             Ok(())
         }
         #[cfg(not(target_os = "linux"))]
@@ -216,6 +228,7 @@ mod audition {
     impl Task {
         pub(super) fn start(
             clip: Arc<AudioClip>,
+            gain: f64,
             wake: impl FnOnce() + Send + 'static,
         ) -> Result<Self, String> {
             let live = Arc::new(AtomicBool::new(true));
@@ -224,7 +237,7 @@ mod audition {
             let worker = thread::Builder::new()
                 .name("rot-wav-preview".into())
                 .spawn(move || {
-                    let mut result = audition(&worker_live, &clip);
+                    let mut result = audition(&worker_live, &clip, gain);
                     if !worker_live.load(Ordering::Acquire) {
                         result = Ok(());
                     }
@@ -266,7 +279,7 @@ mod audition {
         }
     }
 
-    fn audition(live: &Arc<AtomicBool>, clip: &AudioClip) -> Result<(), String> {
+    fn audition(live: &Arc<AtomicBool>, clip: &AudioClip, gain: f64) -> Result<(), String> {
         if !live.load(Ordering::Acquire) {
             return Ok(());
         }
@@ -276,7 +289,7 @@ mod audition {
         if !live.load(Ordering::Acquire) {
             return Ok(());
         }
-        if device.play("preview", clip, 1.0, None) != OutputStatus::Ready {
+        if device.play("preview", clip, gain, None) != OutputStatus::Ready {
             return Err("The audio output could not start the preview.".into());
         }
         while live.load(Ordering::Acquire) {

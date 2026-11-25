@@ -1,5 +1,5 @@
-use super::ComponentWorkspace;
-use crate::editor_theme;
+use super::{component_sound_audition::Preview, ComponentWorkspace};
+use crate::{editor_theme, strings::Text};
 use eframe::egui;
 use rot_assets::{AssetInfo, AssetKind, AssetStatus, AssetStore};
 use rot_scene::component_scene::{Component, ComponentInstance, ObjectNode, ScriptSourceKind};
@@ -90,6 +90,12 @@ pub(super) struct Draft {
     error: Option<String>,
 }
 
+impl Draft {
+    pub(super) fn audition_selection(&self) -> (f64, Option<&str>) {
+        (self.gain, self.asset.as_deref())
+    }
+}
+
 impl ComponentWorkspace {
     pub(super) fn begin_sound_cue(&mut self, request: Request) {
         if self.authored_edit_pending()
@@ -133,6 +139,7 @@ impl ComponentWorkspace {
                 })
                 .collect()
         });
+        self.sound_audition.stop();
         self.sound_cue = Some(Draft {
             object: object.id.clone(),
             component: request.component,
@@ -154,6 +161,13 @@ impl ComponentWorkspace {
         let Some(mut draft) = self.sound_cue.take() else {
             return;
         };
+        let preview_blocked = self.runtime.in_play_mode()
+            || self.ai_transition_pending()
+            || draft.revision != self.session.revision()
+            || ctx.input(|input| input.viewport().close_requested());
+        if preview_blocked {
+            self.sound_audition.stop();
+        }
         let popup_before = egui::Popup::is_any_open(ctx);
         let mut cancel = false;
         let mut apply = false;
@@ -272,6 +286,19 @@ impl ComponentWorkspace {
                             input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
                         });
                 }
+                let (gain, asset) = draft.audition_selection();
+                self.sound_audition
+                    .poll_cue(gain, asset, self.assets.as_ref());
+                ui.horizontal_wrapped(|ui| {
+                    self.sound_audition.controls(
+                        ui,
+                        Preview::Cue(gain),
+                        asset,
+                        self.assets.as_ref(),
+                        preview_blocked,
+                    );
+                    ui.weak(Text::SoundPreviewCentered.plain());
+                });
                 if rot_scene::validate_id(draft.name.trim()).is_ok() {
                     ui.monospace(format!("host.play_sound({:?})", draft.name.trim()));
                 }
@@ -294,6 +321,9 @@ impl ComponentWorkspace {
                         input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
                     });
             });
+        if cancel || apply || remove {
+            self.sound_audition.stop();
+        }
         if cancel {
             return;
         }

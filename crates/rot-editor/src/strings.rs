@@ -1520,6 +1520,8 @@ editor_text! {
     SoundDuration => "Duration",
     SoundSampleRate => "Sample Rate",
     SoundPreview => "Preview Sound",
+    SoundPreviewAtGain => "Preview at Gain",
+    SoundPreviewCentered => "Preview is centered 2D.",
     SoundStopPreview => "Stop Preview",
     SoundPreviewStopPlay => "Stop Play before previewing sound.",
     SoundPreviewLinux => "Sound preview is available on Linux.",
