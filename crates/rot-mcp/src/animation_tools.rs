@@ -11,11 +11,18 @@ pub fn list() -> Vec<Value> {
         "description":"Change or remove animation on an imported model root as one Undo. Pick a same-model clip_id from asset_inspect; v23 requires expected_asset_revision for clip selection and allows looping alone. Restart Play to use changes.",
         "inputSchema":{"type":"object","additionalProperties":false,
             "required":["expected_session_token","expected_revision","owner_id"],
+            "if":{"anyOf":[{"required":["preview_seconds"]},{"required":["preview_key"]}]},
+            "then":{
+                "required":["component_id","expected_asset_revision"],
+                "oneOf":[{"required":["preview_seconds"]},{"required":["preview_key"]}],
+                "not":{"anyOf":[{"required":["clip_id"]},{"required":["looping"]},{"required":["remove"]},{"required":["start_playback"]},{"required":["playback_speed"]}]}
+            },
             "properties":{
                 "expected_session_token":{"type":"string","minLength":1,"maxLength":256},
                 "expected_revision":{"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20},
                 "owner_id":id,
                 "component_id":id,
+                "preview_key":{"enum":["previous","next"],"description":"v23 exact active Animator preview. Step to the nearest earlier or later source key across tracks. At an endpoint returns changed:false."},
                 "preview_seconds":{"type":["number","null"],"description":"v23 exact Animator preview. Absolute clip seconds, including the endpoint. Null exits preview. Requires component_id and expected_asset_revision."},
                 "expected_asset_revision":{"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20},
                 "clip_id":{"type":"string","minLength":1,"maxLength":256},
@@ -34,7 +41,14 @@ pub fn valid(name: &str, args: &Value) -> bool {
     let Some(map) = args.as_object() else {
         return false;
     };
-    if name == "scene_animation_set" && map.contains_key("preview_seconds") {
+    if name == "scene_animation_set"
+        && (map.contains_key("preview_seconds") || map.contains_key("preview_key"))
+    {
+        let mode = if map.contains_key("preview_key") {
+            "preview_key"
+        } else {
+            "preview_seconds"
+        };
         return super::exact_keys(
             map,
             &[
@@ -43,7 +57,7 @@ pub fn valid(name: &str, args: &Value) -> bool {
                 "expected_asset_revision",
                 "owner_id",
                 "component_id",
-                "preview_seconds",
+                mode,
             ],
             &[],
         ) && args["expected_session_token"]
@@ -56,10 +70,14 @@ pub fn valid(name: &str, args: &Value) -> bool {
                     .as_str()
                     .is_some_and(|id| rot_scene::validate_id(id).is_ok())
             })
-            && (args["preview_seconds"].is_null()
-                || args["preview_seconds"]
-                    .as_f64()
-                    .is_some_and(|value| (0.0..=600.0).contains(&value)));
+            && if mode == "preview_key" {
+                matches!(args[mode].as_str(), Some("previous" | "next"))
+            } else {
+                args[mode].is_null()
+                    || args[mode]
+                        .as_f64()
+                        .is_some_and(|value| (0.0..=600.0).contains(&value))
+            };
     }
     if name != "scene_animation_set"
         || !super::exact_keys(
@@ -168,6 +186,25 @@ mod tests {
             args[key] = bad;
             assert!(!valid("scene_animation_set", &args), "{args}");
         }
+        let mut step = first.clone();
+        step.as_object_mut().unwrap().remove("preview_seconds");
+        step["preview_key"] = json!("previous");
+        assert!(valid("scene_animation_set", &step));
+        step["preview_key"] = json!("next");
+        assert!(valid("scene_animation_set", &step));
+        for (field, value) in [
+            ("preview_seconds", Value::Null),
+            ("looping", json!(true)),
+            ("preview_key", json!("first")),
+        ] {
+            let mut invalid = step.clone();
+            invalid[field] = value;
+            assert!(!valid("scene_animation_set", &invalid), "{invalid}");
+        }
+        step.as_object_mut()
+            .unwrap()
+            .remove("expected_asset_revision");
+        assert!(!valid("scene_animation_set", &step));
         let mut missing = first;
         missing.as_object_mut().unwrap().remove("component_id");
         assert!(!valid("scene_animation_set", &missing));

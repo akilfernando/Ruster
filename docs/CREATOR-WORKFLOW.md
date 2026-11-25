@@ -1111,12 +1111,18 @@ The rate applies in Play, saved Play Checks, and Linux builds.
 Preview Time still reads seconds from the source clip.
 
 Choose **Preview** in the v23 Animator to scrub its transform clip in the
-Scene view. Use **Preview Time** or enter an exact **Time (seconds)**. The
-end of the slider shows the final pose even when **Loop** is on.
+Scene view. Use **Preview Time** or enter an exact **Time (seconds)**.
+**Previous Key** and **Next Key** move between distinct source key times
+across all tracks. At either end, the unavailable direction is disabled.
+The end of the slider shows the final pose even when **Loop** is on.
 **Exit Preview** or Escape restores the authored pose. Selecting another
 object, changing the scene, starting Play, or accepting refreshed assets
 clears preview. The scene camera, saved scene, Undo history and other
 placements are retained.
+
+Approved MCP can step an active preview with `scene_animation_set` and
+`preview_key` set to `previous` or `next`, using the same owner,
+component and revision guards as an exact preview seek.
 
 After changing keys in Blender, overwrite the source and use **Refresh**.
 The placement keeps its binding. Renaming a clip, or animating a

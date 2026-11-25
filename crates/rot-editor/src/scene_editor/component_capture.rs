@@ -631,6 +631,13 @@ mod tests {
         let mut request = json!({"expected_session_token":"scene", "expected_revision":"2",
             "expected_asset_revision":"1", "owner_id":first, "component_id":component,
             "preview_seconds":2.0});
+        let mut step = request.clone();
+        step.as_object_mut().unwrap().remove("preview_seconds");
+        step["preview_key"] = json!("next");
+        assert_eq!(
+            editor.ai_command("scene", "scene_animation_set", &step)["error"]["code"],
+            "stale_preview"
+        );
         let reply = editor.ai_command("scene", "scene_animation_set", &request);
         assert_eq!(reply["ok"], true, "{reply}");
         assert_eq!(reply["result"]["revision"], "2");
@@ -697,6 +704,39 @@ mod tests {
             false
         );
         assert_eq!(editor.capture.epoch, epoch);
+        let endpoint = editor.ai_command("scene", "scene_animation_set", &step);
+        assert_eq!(endpoint["result"]["changed"], false);
+        assert_eq!(
+            endpoint["result"]["animation_preview"]["next_key_seconds"],
+            Value::Null
+        );
+        assert_eq!(editor.capture.epoch, epoch);
+
+        step["preview_key"] = json!("previous");
+        let previous = editor.ai_command("scene", "scene_animation_set", &step);
+        assert_eq!(previous["result"]["animation_preview"]["seconds"], 1.0);
+        assert_eq!(
+            previous["result"]["animation_preview"]["previous_key_seconds"],
+            0.0
+        );
+        assert_eq!(previous["result"]["changed"], true);
+        assert_eq!(previous["result"]["revision"], "2");
+        step["preview_key"] = json!("next");
+        assert_eq!(
+            editor.ai_command("scene", "scene_animation_set", &step)["result"]["animation_preview"]
+                ["seconds"],
+            2.0
+        );
+        assert_eq!(editor.session.scene(), &original);
+
+        editor.capture.view = Some(View {
+            epoch: editor.capture.epoch,
+            ..painted
+        });
+        assert_eq!(
+            viewport(&mut editor)["result"]["display_mode"],
+            "animation_preview"
+        );
 
         std::fs::write(
             &model_path,
@@ -712,6 +752,15 @@ mod tests {
         assert_eq!(
             editor.ai_command("scene", "scene_animation_set", &request)["error"]["code"],
             "stale_asset_revision"
+        );
+        assert_eq!(
+            editor.ai_command("scene", "scene_animation_set", &step)["error"]["code"],
+            "stale_asset_revision"
+        );
+        step["expected_revision"] = json!("1");
+        assert_eq!(
+            editor.ai_command("scene", "scene_animation_set", &step)["error"]["code"],
+            "stale_revision"
         );
         editor.validate_animation_preview();
         request["expected_asset_revision"] = json!("2");

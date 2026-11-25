@@ -196,12 +196,12 @@ pub(super) fn mesh_renderer_heading(ordinal: Option<usize>) -> std::borrow::Cow<
     ordinal.map_or_else(|| label.into(), |index| format!("{label} {index}").into())
 }
 
-use super::component_workspace::component_animation_preview::{self, PreviewEdit};
+use super::component_workspace::component_animation_preview::{self, PreviewControls, PreviewEdit};
 
 pub(super) struct ComponentControls<'a> {
     pub actions: &'a rot_scene::input::ActionMap,
     pub reveal: Option<&'a str>,
-    pub(super) animation_preview: Option<(&'a str, f32, f32)>,
+    pub(super) animation_preview: Option<PreviewControls<'a>>,
     pub(super) allow_animation_preview: bool,
     pub(super) allow_new_material: bool,
     pub(super) allow_light_aim: bool,
@@ -515,8 +515,7 @@ pub(super) fn components(
                                 && component.enabled
                                 && assets.is_some_and(|store| store.clip(&binding.clip).is_some()),
                             animation_preview
-                                .filter(|(id, _, _)| *id == component.id)
-                                .map(|(_, time, duration)| (time, duration)),
+                                .filter(|preview| preview.component_id == component.id),
                         ) {
                             preview_edit = Some(edit);
                         }

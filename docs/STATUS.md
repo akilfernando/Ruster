@@ -413,6 +413,13 @@ Native editor tests with an isolated portal verified focus return,
 cancellation and ignoring stale replies. They published a folder and an
 archive under a path with spaces and preserved an occupied destination.
 
+**Animator key stepping** moves between distinct source times across
+translation, rotation and scale tracks. Native keyboard stepping and
+approved Claude matched the expected poses at 0, 0.37, 0.60 and 1.00 s.
+Refresh refused the stale request, and Exit restored the authored pose.
+An isolated release lookup measured 8.0 µs p95 for 1,024 tracks with
+32 keys each. The controls read cached adjacent times between seeks.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added

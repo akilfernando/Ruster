@@ -125,6 +125,8 @@ editor_text! {
     AnimationPreview => "Preview",
     AnimationPreviewTime => "Preview Time",
     AnimationPreviewSeconds => "Time (seconds)",
+    AnimationPreviewPreviousKey => "Previous Key",
+    AnimationPreviewNextKey => "Next Key",
     AnimationPreviewExit => "Exit Preview",
     AnimatorPlaybackSpeed => "Playback Speed",
     AnimatorPlaybackSpeedHint => "Play speed relative to the source clip. Preview uses source seconds.",

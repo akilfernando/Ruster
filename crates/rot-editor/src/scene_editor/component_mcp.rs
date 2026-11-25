@@ -377,6 +377,7 @@ impl ComponentWorkspace {
                     "remove",
                     "component_id",
                     "preview_seconds",
+                    "preview_key",
                     "start_playback",
                     "playback_speed",
                 ]
@@ -576,7 +577,7 @@ impl ComponentWorkspace {
         }
 
         if op == "scene_animation_set" {
-            if map.contains_key("preview_seconds") {
+            if map.contains_key("preview_seconds") || map.contains_key("preview_key") {
                 return self.animation_preview_command(args);
             }
             if map.contains_key("component_id") {
@@ -1065,21 +1066,29 @@ impl ComponentWorkspace {
     }
 
     fn animation_preview_command(&mut self, args: &Value) -> Result<Value, CommandError> {
+        use super::component_animation_preview::PreviewKey;
+
         let invalid = || {
-            ("invalid_arguments", "Pass owner_id, component_id and preview_seconds (number or null), with asset and scene guards.".into())
+            ("invalid_arguments", "Pass owner_id, component_id and either preview_seconds (number or null) or preview_key (previous or next), with asset and scene guards.".into())
         };
         let map = args.as_object().ok_or_else(invalid)?;
         if map.len() != 6
-            || ["clip_id", "looping", "remove"]
-                .iter()
-                .any(|key| map.contains_key(*key))
+            || map.contains_key("preview_seconds") == map.contains_key("preview_key")
+            || !map.contains_key("expected_asset_revision")
         {
             return Err(invalid());
         }
         let owner = hierarchy_id(&args["owner_id"]).ok_or_else(invalid)?;
         let component = hierarchy_id(&args["component_id"]).ok_or_else(invalid)?;
         self.require_component_asset_revision(decimal(&args["expected_asset_revision"]))?;
-        let changed = if args["preview_seconds"].is_null() {
+        let changed = if let Some(value) = map.get("preview_key") {
+            let key = match value.as_str() {
+                Some("previous") => PreviewKey::Previous,
+                Some("next") => PreviewKey::Next,
+                _ => return Err(invalid()),
+            };
+            self.step_animation_preview_key(owner, component, key)?
+        } else if args["preview_seconds"].is_null() {
             if self.runtime.in_play_mode() {
                 return Err((
                     "play_active",

@@ -5,9 +5,63 @@ use eframe::egui;
 use glam::{DMat4, DQuat, EulerRot};
 use rot_render::component_preview::ComponentPreview;
 use rot_scene::{component_scene::Component, Clip, LightKind, Transform};
-use std::collections::{HashMap, HashSet};
+use std::{
+    cell::Cell,
+    collections::{HashMap, HashSet},
+};
 
 type Error = (&'static str, String);
+
+#[derive(Clone, Copy)]
+pub(in crate::scene_editor) enum PreviewKey {
+    Previous,
+    Next,
+}
+
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+struct AdjacentKeys {
+    previous: Option<f32>,
+    next: Option<f32>,
+}
+
+impl AdjacentKeys {
+    fn at(clip: &Clip, seconds: f32) -> Self {
+        let mut adjacent = Self::default();
+        for track in clip.tracks() {
+            let times = &track.times;
+            let index = times.partition_point(|&time| time < seconds);
+            if let Some(previous) = index.checked_sub(1).map(|index| times[index]) {
+                adjacent.previous = Some(
+                    adjacent
+                        .previous
+                        .map_or(previous, |best| best.max(previous)),
+                );
+            }
+            // The clip validates strictly increasing times within each track.
+            let after = index + usize::from(times.get(index) == Some(&seconds));
+            if let Some(&next) = times.get(after) {
+                adjacent.next = Some(adjacent.next.map_or(next, |best| best.min(next)));
+            }
+        }
+        adjacent
+    }
+
+    fn get(self, key: PreviewKey) -> Option<f32> {
+        match key {
+            PreviewKey::Previous => self.previous,
+            PreviewKey::Next => self.next,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::scene_editor) struct PreviewControls<'a> {
+    pub(in crate::scene_editor) component_id: &'a str,
+    seconds: f32,
+    duration: f32,
+    adjacent: AdjacentKeys,
+    reveal_controls: &'a Cell<bool>,
+}
 
 pub(super) struct AnimationPreview {
     revision: u64,
@@ -23,6 +77,8 @@ pub(super) struct AnimationPreview {
     nodes: Vec<Node>,
     pub(super) projection: ComponentPreview,
     pub(super) seconds: f32,
+    adjacent: AdjacentKeys,
+    reveal_controls: Cell<bool>,
 }
 
 struct Node {
@@ -202,6 +258,8 @@ impl AnimationPreview {
             nodes,
             projection: base.clone(),
             seconds: f32::NAN,
+            adjacent: AdjacentKeys::default(),
+            reveal_controls: Cell::new(false),
         })
     }
 
@@ -269,15 +327,18 @@ impl AnimationPreview {
             .set_sampled_rows(draws, lights)
             .map_err(|error| ("preview_unavailable", error.to_string()))?;
         self.seconds = seconds;
+        self.adjacent = AdjacentKeys::at(&self.clip, seconds);
         Ok(true)
     }
 
-    pub(super) fn controls(&self) -> (&str, f32, f32) {
-        (
-            self.component_id.as_str(),
-            self.seconds,
-            self.clip.duration(),
-        )
+    pub(super) fn controls(&self) -> PreviewControls<'_> {
+        PreviewControls {
+            component_id: &self.component_id,
+            seconds: self.seconds,
+            duration: self.clip.duration(),
+            adjacent: self.adjacent,
+            reveal_controls: &self.reveal_controls,
+        }
     }
 
     #[cfg(unix)]
@@ -287,6 +348,7 @@ impl AnimationPreview {
             "clip_id":self.clip_id, "model_hash":self.model_hash,
             "asset_revision":self.asset_revision.to_string(),
             "seconds":self.seconds, "duration":self.clip.duration(),
+            "previous_key_seconds":self.adjacent.previous, "next_key_seconds":self.adjacent.next,
         })
     }
 }
@@ -294,6 +356,7 @@ impl AnimationPreview {
 pub(in crate::scene_editor) enum PreviewEdit {
     Start(String),
     Seek(String, f64),
+    Step(String, PreviewKey),
     Clear,
 }
 
@@ -302,16 +365,17 @@ pub(in crate::scene_editor) fn controls(
     ui: &mut egui::Ui,
     component_id: &str,
     enabled: bool,
-    active: Option<(f32, f32)>,
+    active: Option<PreviewControls<'_>>,
 ) -> Option<PreviewEdit> {
-    let Some((current, duration)) = active else {
+    let Some(active) = active else {
         return ui
             .add_enabled(enabled, egui::Button::new(Text::AnimationPreview.plain()))
             .clicked()
             .then(|| PreviewEdit::Start(component_id.into()));
     };
-    let mut seconds = f64::from(current);
-    let range = 0.0..=f64::from(duration);
+    let reveal_controls = active.reveal_controls.replace(false);
+    let mut seconds = f64::from(active.seconds);
+    let range = 0.0..=f64::from(active.duration);
     let sliding =
         ui_kit::property_row_with_label(ui, Text::AnimationPreviewTime.plain(), |ui, label| {
             ui.spacing_mut().slider_width = ui.available_width().max(28.0);
@@ -322,7 +386,6 @@ pub(in crate::scene_editor) fn controls(
                     .show_value(false),
             )
             .labelled_by(label)
-            .changed()
         });
     let typing =
         ui_kit::property_row_with_label(ui, Text::AnimationPreviewSeconds.plain(), |ui, label| {
@@ -334,11 +397,41 @@ pub(in crate::scene_editor) fn controls(
                     .max_decimals(6),
             )
             .labelled_by(label)
-            .changed()
         });
-    if ui.button(Text::AnimationPreviewExit.plain()).clicked() {
+    let key_row = ui.horizontal_wrapped(|ui| {
+        let previous = ui.add_enabled(
+            enabled && active.adjacent.previous.is_some(),
+            egui::Button::new(Text::AnimationPreviewPreviousKey.plain()),
+        );
+        let next = ui.add_enabled(
+            enabled && active.adjacent.next.is_some(),
+            egui::Button::new(Text::AnimationPreviewNextKey.plain()),
+        );
+        let exit = ui.button(Text::AnimationPreviewExit.plain());
+        for response in [&previous, &next, &exit] {
+            if response.gained_focus() {
+                response.scroll_to_me(None);
+            }
+        }
+        (previous.clicked(), next.clicked(), exit.clicked())
+    });
+    if reveal_controls {
+        ui.scroll_to_rect(
+            sliding.rect.union(typing.rect).union(key_row.response.rect),
+            None,
+        );
+    }
+    let keys = key_row.inner;
+    if keys.2 {
         Some(PreviewEdit::Clear)
-    } else if sliding || typing {
+    } else if keys.0 || keys.1 {
+        let key = if keys.0 {
+            PreviewKey::Previous
+        } else {
+            PreviewKey::Next
+        };
+        Some(PreviewEdit::Step(component_id.into(), key))
+    } else if sliding.changed() || typing.changed() {
         Some(PreviewEdit::Seek(component_id.into(), seconds))
     } else {
         None
@@ -367,12 +460,7 @@ impl ComponentWorkspace {
         }
     }
 
-    pub(super) fn seek_animation_preview(
-        &mut self,
-        owner: &str,
-        component: &str,
-        seconds: f64,
-    ) -> Result<bool, Error> {
+    fn animation_preview_available(&self) -> Result<(), Error> {
         if self.runtime.in_play_mode() {
             return Err((
                 "play_active",
@@ -385,6 +473,45 @@ impl ComponentWorkspace {
                 "Finish the pending edit before previewing an Animator.".into(),
             ));
         }
+        Ok(())
+    }
+
+    pub(super) fn step_animation_preview_key(
+        &mut self,
+        owner: &str,
+        component: &str,
+        key: PreviewKey,
+    ) -> Result<bool, Error> {
+        self.animation_preview_available()?;
+        let preview = self
+            .current_animation_preview()
+            .filter(|preview| preview.owner_id == owner && preview.component_id == component)
+            .ok_or((
+                "stale_preview",
+                "Open the exact Animator preview before stepping keys.".into(),
+            ))?;
+        let Some(seconds) = preview.adjacent.get(key) else {
+            return Ok(false);
+        };
+        self.seek_animation_preview_ready(owner, component, f64::from(seconds))
+    }
+
+    pub(super) fn seek_animation_preview(
+        &mut self,
+        owner: &str,
+        component: &str,
+        seconds: f64,
+    ) -> Result<bool, Error> {
+        self.animation_preview_available()?;
+        self.seek_animation_preview_ready(owner, component, seconds)
+    }
+
+    fn seek_animation_preview_ready(
+        &mut self,
+        owner: &str,
+        component: &str,
+        seconds: f64,
+    ) -> Result<bool, Error> {
         let changed = if self
             .current_animation_preview()
             .is_some_and(|preview| preview.owner_id == owner && preview.component_id == component)
@@ -408,17 +535,62 @@ impl ComponentWorkspace {
     }
 
     pub(super) fn apply_animation_preview_ui(&mut self, owner: &str, edit: PreviewEdit) {
-        let (component, seconds) = match edit {
-            PreviewEdit::Start(component) => (component, 0.0),
-            PreviewEdit::Seek(component, seconds) => (component, seconds),
+        let result = match edit {
+            PreviewEdit::Start(component) => {
+                let result = self.seek_animation_preview(owner, &component, 0.0);
+                if let Some(preview) = self.animation_preview.as_ref().filter(|_| result.is_ok()) {
+                    preview.reveal_controls.set(true);
+                }
+                result
+            }
+            PreviewEdit::Seek(component, seconds) => {
+                self.seek_animation_preview(owner, &component, seconds)
+            }
+            PreviewEdit::Step(component, key) => {
+                self.step_animation_preview_key(owner, &component, key)
+            }
             PreviewEdit::Clear => {
                 self.clear_animation_preview();
                 return;
             }
         };
-        self.error = self
-            .seek_animation_preview(owner, &component, seconds)
-            .err()
-            .map(|(_, error)| error);
+        self.error = result.err().map(|(_, error)| error);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn adjacent_source_keys_are_strict_across_uneven_tracks() {
+        let clip = Clip::decode(
+            &serde_json::to_vec(&json!({
+                "format":"rot-clip","version":1,"duration":8,
+                "tracks":[
+                    {"node":"Arm","property":"translation","interpolation":"linear",
+                        "times":[1,3,7],"values":[[0,0,0],[1,0,0],[2,0,0]]},
+                    {"node":"Arm","property":"rotation","interpolation":"step",
+                        "times":[2,3,4,6],"values":[[0,0,0,1],[0,0,1,0],[0,0,0,1],[0,0,1,0]]}
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        for (seconds, previous, next) in [
+            (0., None, Some(1.)),
+            (1., None, Some(2.)),
+            (2.5, Some(2.), Some(3.)),
+            (3., Some(2.), Some(4.)),
+            (5., Some(4.), Some(6.)),
+            (7., Some(6.), None),
+            (8., Some(7.), None),
+        ] {
+            assert_eq!(
+                AdjacentKeys::at(&clip, seconds),
+                AdjacentKeys { previous, next }
+            );
+        }
     }
 }
