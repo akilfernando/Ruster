@@ -83,39 +83,54 @@ impl AddComponent {
     }
 }
 
-pub(super) fn transform(ui: &mut egui::Ui, draft: &mut ObjectNode) -> bool {
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct TransformEdit {
+    pub submit: bool,
+    pub dragging: bool,
+    pub released: bool,
+}
+
+impl TransformEdit {
+    pub(super) fn merge(&mut self, other: Self) {
+        self.submit |= other.submit;
+        self.dragging |= other.dragging;
+        self.released |= other.released;
+    }
+}
+
+pub(super) fn transform(ui: &mut egui::Ui, draft: &mut ObjectNode) -> TransformEdit {
     ui.heading(Text::ComponentTransform.plain());
     let transform = &mut draft.transform;
-    let mut submit = vector(
+    let mut edit = vector(
         ui,
         Text::ComponentPosition,
         &mut transform.translation,
-        0.1,
+        0.01,
         -10_000.0..=10_000.0,
     );
     let mut degrees = transform.rotation.map(f32::to_degrees);
     let before = degrees;
     let max_rotation = 10_000.0_f32.to_degrees();
-    submit |= vector(
+    edit.merge(vector(
         ui,
         Text::ComponentRotation,
         &mut degrees,
         1.0,
         -max_rotation..=max_rotation,
-    );
+    ));
     for (index, value) in degrees.into_iter().enumerate() {
         if value != before[index] {
             transform.rotation[index] = value.to_radians().clamp(-10_000.0, 10_000.0);
         }
     }
-    submit |= vector(
+    edit.merge(vector(
         ui,
         Text::ComponentScale,
         &mut transform.scale,
         0.01,
         0.001..=1_000.0,
-    );
-    submit
+    ));
+    edit
 }
 
 fn enter_commits(ui: &egui::Ui, response: &egui::Response) -> bool {
@@ -142,9 +157,33 @@ fn vector(
     values: &mut [f32; 3],
     step: f64,
     range: std::ops::RangeInclusive<f32>,
-) -> bool {
-    let mut submit = false;
+) -> TransformEdit {
+    let mut edit = TransformEdit::default();
     ui_kit::vector_row(ui, label.plain(), |ui, axis, width| {
+        let axis_label = [
+            Text::ComponentAxisX,
+            Text::ComponentAxisY,
+            Text::ComponentAxisZ,
+        ][axis]
+            .plain();
+        let scrub = ui_kit::scrub_label(ui, axis_label, ui_kit::colors(ui).axis[axis], step);
+        if scrub.delta != 0.0 {
+            let next = (f64::from(values[axis]) + scrub.delta)
+                .clamp(f64::from(*range.start()), f64::from(*range.end()));
+            if next.is_finite() {
+                values[axis] = next as f32;
+            }
+        }
+        let speed_mult = ui.input(|input| {
+            if input.modifiers.shift {
+                10.0
+            } else if input.modifiers.alt {
+                0.1
+            } else {
+                1.0
+            }
+        });
+        let current = f64::from(values[axis]);
         let layout = egui::Layout::centered_and_justified(ui.layout().main_dir());
         let response = ui
             .allocate_ui_with_layout(
@@ -152,24 +191,25 @@ fn vector(
                 layout,
                 |ui| {
                     let field = exact_drag_value(ui, &mut values[axis])
-                        .prefix(
-                            [
-                                Text::ComponentAxisX,
-                                Text::ComponentAxisY,
-                                Text::ComponentAxisZ,
-                            ][axis]
-                                .plain(),
-                        )
-                        .speed(step)
+                        .speed(step * speed_mult)
                         .range(range.clone())
-                        .clamp_existing_to_range(false);
+                        .clamp_existing_to_range(false)
+                        .custom_parser(move |input| {
+                            input
+                                .trim()
+                                .parse::<f64>()
+                                .ok()
+                                .or_else(|| ui_kit::eval_number(input, Some(current)))
+                        });
                     ui.add(field)
                 },
             )
             .inner;
-        submit |= enter_commits(ui, &response);
+        edit.submit |= enter_commits(ui, &response);
+        edit.dragging |= scrub.dragging || response.dragged();
+        edit.released |= scrub.released || response.drag_stopped();
     });
-    submit
+    edit
 }
 
 pub(super) fn component_label(component: &Component) -> Text {
@@ -1328,7 +1368,7 @@ fn collider_fields(
                 }
             });
     });
-    let mut submit = vector(ui, Text::ComponentCenter, offset, 0.1, -10_000.0..=10_000.0);
+    let mut submit = vector(ui, Text::ComponentCenter, offset, 0.1, -10_000.0..=10_000.0).submit;
     match shape {
         ColliderShape::Sphere { radius } => {
             let response = ui_kit::property_row(ui, Text::ComponentRadius.plain(), |ui| {
@@ -1342,7 +1382,7 @@ fn collider_fields(
         }
         ColliderShape::Box { half_extents } => {
             let mut size = half_extents.map(|extent| extent * 2.0);
-            submit |= vector(ui, Text::ComponentSize, &mut size, 0.01, 0.002..=2_000.0);
+            submit |= vector(ui, Text::ComponentSize, &mut size, 0.01, 0.002..=2_000.0).submit;
             *half_extents = size.map(|size| size * 0.5);
         }
     }
@@ -1515,7 +1555,7 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    assert!(!transform(ui, &mut draft));
+                    assert_eq!(transform(ui, &mut draft), TransformEdit::default());
                     assert!(!number_field(
                         ui,
                         Text::CameraVerticalFov,

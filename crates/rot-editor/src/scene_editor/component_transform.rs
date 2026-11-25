@@ -169,6 +169,217 @@ impl TransformTool {
     }
 }
 
+pub(super) struct InspectorScrub {
+    revision: u64,
+    originals: Vec<(usize, Transform)>,
+    last_applied: Vec<Transform>,
+    roots: Vec<ScrubRoot>,
+    preview: ComponentPreview,
+}
+
+struct ScrubRoot {
+    parent_world: Option<DMat4>,
+    parent_rotation: Option<DQuat>,
+    nodes: Vec<ScrubNode>,
+}
+
+struct ScrubNode {
+    parent: Option<usize>,
+    selected_slot: Option<usize>,
+    authored_local: DMat4,
+    authored_rotation: [f32; 3],
+    world: DMat4,
+    draws: Vec<usize>,
+    lights: Vec<(String, bool)>,
+}
+
+impl InspectorScrub {
+    pub(super) fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub(super) fn originals(&self) -> &[(usize, Transform)] {
+        &self.originals
+    }
+
+    pub(super) fn preview(&self) -> &ComponentPreview {
+        &self.preview
+    }
+
+    pub(super) fn stage(&mut self, candidates: &[Transform]) -> bool {
+        if candidates.len() != self.originals.len() {
+            return false;
+        }
+        if candidates == self.last_applied.as_slice() {
+            return true;
+        }
+        if candidates
+            .iter()
+            .any(|candidate| candidate.validate().is_err())
+        {
+            return false;
+        }
+        for root in &mut self.roots {
+            for index in 0..root.nodes.len() {
+                let node = &root.nodes[index];
+                let local = node
+                    .selected_slot
+                    .map_or(node.authored_local, |slot| candidates[slot].affine_matrix());
+                let world = node.parent.map_or_else(
+                    || root.parent_world.map_or(local, |parent| parent * local),
+                    |parent| root.nodes[parent].world * local,
+                );
+                if !world.is_finite() {
+                    return false;
+                }
+                root.nodes[index].world = world;
+            }
+        }
+        let draws = self.roots.iter().flat_map(|root| {
+            root.nodes
+                .iter()
+                .flat_map(|node| node.draws.iter().map(|&row| (row, node.world)))
+        });
+        let lights = self.roots.iter().flat_map(|root| {
+            let nodes = &root.nodes;
+            let parent_rotation = root.parent_rotation;
+            nodes.iter().enumerate().flat_map(move |(index, node)| {
+                node.lights.iter().map(move |(id, spot)| {
+                    let rotation = spot.then(|| {
+                        let mut local = DQuat::IDENTITY;
+                        let mut current = index;
+                        loop {
+                            let current_node = &nodes[current];
+                            let rot = current_node
+                                .selected_slot
+                                .map_or(current_node.authored_rotation, |slot| {
+                                    candidates[slot].rotation
+                                });
+                            local = euler_rotation(rot) * local;
+                            let Some(parent) = current_node.parent else {
+                                break;
+                            };
+                            current = parent;
+                        }
+                        parent_rotation.expect("spot root orientation") * local
+                    });
+                    (id.as_str(), node.world, rotation)
+                })
+            })
+        });
+        if self.preview.set_sampled_rows(draws, lights).is_err() {
+            return false;
+        }
+        self.last_applied.clone_from_slice(candidates);
+        true
+    }
+}
+
+impl ComponentWorkspace {
+    pub(super) fn begin_inspector_scrub(
+        &self,
+        selected_indices: Vec<usize>,
+    ) -> Option<InspectorScrub> {
+        if selected_indices.is_empty() {
+            return None;
+        }
+        let objects = &self.session.scene().objects;
+        let preview = self.preview.as_ref().ok()?;
+        let mut slot_by_object = HashMap::with_capacity(selected_indices.len());
+        let mut originals = Vec::with_capacity(selected_indices.len());
+        let mut last_applied = Vec::with_capacity(selected_indices.len());
+        for index in selected_indices {
+            if slot_by_object.contains_key(&index) {
+                continue;
+            }
+            let transform = objects.get(index)?.transform.clone();
+            let slot = originals.len();
+            slot_by_object.insert(index, slot);
+            last_applied.push(transform.clone());
+            originals.push((index, transform));
+        }
+
+        let mut roots = Vec::new();
+        let mut moved = HashMap::new();
+        let mut positions = vec![0; objects.len()];
+        let mut subtree: Option<(usize, usize)> = None;
+        for &(index, depth) in &self.rows {
+            if subtree.is_some_and(|(start, _)| depth <= start) {
+                subtree = None;
+            }
+            if subtree.is_none() && slot_by_object.contains_key(&index) {
+                let root_slot = roots.len();
+                roots.push(ScrubRoot {
+                    parent_world: self.parents[index].map(|parent| self.preview_world[parent]),
+                    parent_rotation: None,
+                    nodes: Vec::new(),
+                });
+                subtree = Some((depth, root_slot));
+            }
+            if let Some((_, root_slot)) = subtree {
+                let owner = &objects[index];
+                let world = self.preview_world[index];
+                let lights: Vec<_> = owner
+                    .components
+                    .iter()
+                    .filter_map(|component| {
+                        preview.scene().lighting.light(&component.id).map(|light| {
+                            (
+                                component.id.clone(),
+                                matches!(light.kind, rot_scene::LightKind::Spot { .. }),
+                            )
+                        })
+                    })
+                    .collect();
+                let root = &mut roots[root_slot];
+                let position = root.nodes.len();
+                let parent = if position == 0 {
+                    None
+                } else {
+                    self.parents[index].map(|parent| positions[parent])
+                };
+                positions[index] = position;
+                if root.parent_rotation.is_none() && lights.iter().any(|(_, spot)| *spot) {
+                    let mut root_index = index;
+                    while let Some(p) = self.parents[root_index] {
+                        if moved.contains_key(objects[p].id.as_str()) {
+                            root_index = p;
+                        } else {
+                            break;
+                        }
+                    }
+                    root.parent_rotation =
+                        Some(self.parents[root_index].map_or(DQuat::IDENTITY, |parent| {
+                            self.session.scene().world_rotation(parent, &self.parents)
+                        }));
+                }
+                moved.insert(owner.id.as_str(), (root_slot, position));
+                root.nodes.push(ScrubNode {
+                    parent,
+                    selected_slot: slot_by_object.get(&index).copied(),
+                    authored_local: owner.transform.affine_matrix(),
+                    authored_rotation: owner.transform.rotation,
+                    world,
+                    draws: Vec::new(),
+                    lights,
+                });
+            }
+        }
+        for (row, object) in preview.scene().objects.iter().enumerate() {
+            if let Some(&(root_slot, node)) = moved.get(object.id.as_str()) {
+                roots[root_slot].nodes[node].draws.push(row);
+            }
+        }
+        Some(InspectorScrub {
+            revision: self.session.revision(),
+            originals,
+            last_applied,
+            roots,
+            preview: preview.clone(),
+        })
+    }
+}
+
 impl ComponentWorkspace {
     fn transform_target(&self) -> Result<Option<Target>, Text> {
         if self.selection.is_empty() {

@@ -1,10 +1,10 @@
 //! Mixed values are a view of the selection. Only explicit edits are applied.
-use super::component_inspector::{component_label, geometry_choices, geometry_name};
+use super::component_inspector::{component_label, geometry_choices, geometry_name, TransformEdit};
 use crate::{strings::Text, ui_kit};
 use eframe::egui;
 use rot_scene::component_scene::{Component, ComponentInstance, Geometry, ObjectNode};
-use rot_scene::{ColliderRole, ColliderShape, OpaqueMaterial, SceneError};
-use std::{collections::BTreeMap, convert::identity};
+use rot_scene::{ColliderRole, ColliderShape, OpaqueMaterial, SceneError, Transform};
+use std::{collections::BTreeMap, convert::identity, ops::RangeInclusive};
 
 struct Field<T> {
     common: Option<T>,
@@ -103,6 +103,24 @@ struct Number {
     common: Option<f32>,
     baseline: String,
     text: String,
+    scrub_value: Option<f64>,
+}
+
+fn format_scrub(value: f64) -> String {
+    let rounded = (value * 10_000.0).round() / 10_000.0;
+    let normalized = if rounded == 0.0 { 0.0 } else { rounded };
+    (normalized as f32).to_string()
+}
+
+fn parse_relative_scrub(text: &str) -> Option<f64> {
+    let trimmed = text.trim();
+    if let Some(rest) = trimmed.strip_prefix("+=") {
+        ui_kit::eval_number(rest, None)
+    } else if let Some(rest) = trimmed.strip_prefix("-=") {
+        ui_kit::eval_number(rest, None).map(|value| -value)
+    } else {
+        None
+    }
 }
 
 impl Number {
@@ -112,6 +130,7 @@ impl Number {
             common: Some(value),
             baseline: text.clone(),
             text,
+            scrub_value: None,
         }
     }
 
@@ -120,6 +139,7 @@ impl Number {
             self.common = None;
             self.baseline.clear();
             self.text.clear();
+            self.scrub_value = None;
         }
     }
 
@@ -127,8 +147,47 @@ impl Number {
         self.text != self.baseline
     }
 
+    fn scrub(&mut self, delta: f64, range: Option<&RangeInclusive<f64>>) {
+        if delta == 0.0 {
+            return;
+        }
+        let trimmed = self.text.trim();
+        let relative = self.common.is_none()
+            && (trimmed.is_empty() || trimmed.starts_with("+=") || trimmed.starts_with("-="));
+        if relative {
+            let base = self
+                .scrub_value
+                .unwrap_or_else(|| parse_relative_scrub(trimmed).unwrap_or(0.0));
+            let next = base + delta;
+            self.scrub_value = Some(next);
+            self.text = if next.abs() < 1e-6 {
+                String::new()
+            } else if next > 0.0 {
+                format!("+={}", format_scrub(next))
+            } else {
+                format!("-={}", format_scrub(-next))
+            };
+        } else if let Some(base) = self
+            .scrub_value
+            .or_else(|| ui_kit::eval_number(&self.text, self.common.map(f64::from)))
+            .or_else(|| self.common.map(f64::from))
+        {
+            let mut next = base + delta;
+            if let Some(range) = range {
+                next = next.clamp(*range.start(), *range.end());
+            }
+            if next.is_finite() {
+                self.scrub_value = Some(next);
+                self.text = format_scrub(next);
+            }
+        }
+    }
+
     fn show(&mut self, ui: &mut egui::Ui, label: &str, width: f32) -> bool {
         let response = ui_kit::number_field(ui, &mut self.text, self.common.is_none(), width, true);
+        if response.changed() {
+            self.scrub_value = None;
+        }
         response.widget_info(|| {
             let mut info = egui::WidgetInfo::text_edit(true, &self.baseline, &self.text, "");
             info.label = Some(label.to_owned());
@@ -167,14 +226,23 @@ impl Vector {
         self.0.iter().any(Number::dirty)
     }
 
-    fn show(&mut self, ui: &mut egui::Ui, label: Text) -> bool {
-        let mut submit = false;
+    fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        label: Text,
+        step: f64,
+        range: Option<RangeInclusive<f64>>,
+    ) -> TransformEdit {
+        let mut edit = TransformEdit::default();
         ui_kit::vector_row(ui, label.plain(), |ui, axis, width| {
             let name = ["X", "Y", "Z"][axis];
-            ui.label(egui::RichText::new(name).color(ui_kit::colors(ui).axis[axis]));
-            submit |= self.0[axis].show(ui, &format!("{} {name}", label.plain()), width);
+            let scrub = ui_kit::scrub_label(ui, name, ui_kit::colors(ui).axis[axis], step);
+            self.0[axis].scrub(scrub.delta, range.as_ref());
+            edit.dragging |= scrub.dragging;
+            edit.released |= scrub.released;
+            edit.submit |= self.0[axis].show(ui, &format!("{} {name}", label.plain()), width);
         });
-        submit
+        edit
     }
 
     fn write(
@@ -397,7 +465,10 @@ impl SharedComponent {
                             },
                             [false, true],
                         );
-                        submit |= fields.offset.show(ui, Text::ComponentCenter);
+                        submit |= fields
+                            .offset
+                            .show(ui, Text::ComponentCenter, 0.1, Some(-10_000.0..=10_000.0))
+                            .submit;
                         match fields.sphere.current() {
                             Some(true) => {
                                 submit |=
@@ -409,7 +480,12 @@ impl SharedComponent {
                                         )
                                     });
                             }
-                            Some(false) => submit |= fields.size.show(ui, Text::ComponentSize),
+                            Some(false) => {
+                                submit |= fields
+                                    .size
+                                    .show(ui, Text::ComponentSize, 0.01, Some(0.002..=2_000.0))
+                                    .submit;
+                            }
                             None => {}
                         }
                     }
@@ -530,13 +606,71 @@ impl MultiInspector {
         Some(result)
     }
 
-    pub(super) fn header(&mut self, ui: &mut egui::Ui) -> bool {
+    pub(super) fn header(&mut self, ui: &mut egui::Ui) -> TransformEdit {
         self.enabled.checkbox(ui, Text::ComponentEnabled.plain());
         ui.separator();
         ui.heading(Text::ComponentTransform.plain());
-        self.position.show(ui, Text::ComponentPosition)
-            | self.rotation.show(ui, Text::ComponentRotation)
-            | self.scale.show(ui, Text::ComponentScale)
+        let max_rotation = f64::from(10_000.0_f32.to_degrees());
+        let mut edit = self.position.show(
+            ui,
+            Text::ComponentPosition,
+            0.01,
+            Some(-10_000.0..=10_000.0),
+        );
+        edit.merge(self.rotation.show(
+            ui,
+            Text::ComponentRotation,
+            1.0,
+            Some(-max_rotation..=max_rotation),
+        ));
+        edit.merge(
+            self.scale
+                .show(ui, Text::ComponentScale, 0.01, Some(0.001..=1_000.0)),
+        );
+        edit
+    }
+
+    pub(super) fn preview_transform(&self, object: &ObjectNode) -> Result<Transform, SceneError> {
+        let mut transform = object.transform.clone();
+        self.position.write(
+            &mut transform.translation,
+            Text::ComponentPosition,
+            identity,
+            identity,
+        )?;
+        self.rotation.write(
+            &mut transform.rotation,
+            Text::ComponentRotation,
+            f32::to_degrees,
+            f32::to_radians,
+        )?;
+        self.scale.write(
+            &mut transform.scale,
+            Text::ComponentScale,
+            identity,
+            identity,
+        )?;
+        Ok(transform)
+    }
+
+    pub(super) fn reset_transforms<'a>(
+        &mut self,
+        mut selected: impl Iterator<Item = &'a ObjectNode>,
+    ) {
+        let Some(first) = selected.next() else {
+            return;
+        };
+        let mut position = Vector::new(first.transform.translation);
+        let mut rotation = Vector::new(first.transform.rotation.map(f32::to_degrees));
+        let mut scale = Vector::new(first.transform.scale);
+        for object in selected {
+            position.observe(object.transform.translation);
+            rotation.observe(object.transform.rotation.map(f32::to_degrees));
+            scale.observe(object.transform.scale);
+        }
+        self.position = position;
+        self.rotation = rotation;
+        self.scale = scale;
     }
 
     pub(super) fn components(

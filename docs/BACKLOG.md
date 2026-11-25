@@ -40,10 +40,9 @@ cuts below in order.
 
 | Package | Outcome | Status & remaining gap |
 | --- | --- | --- |
-| `C-05` Hierarchy and Inspector | Rebuilt on components with immediate scrub feedback and standard hierarchy/inspector parity. | `in progress — closing` · Fix live Inspector axis scrubbing (`PARITY-PLAN` §5); explicitly defer live editing during Play to Phase 4; close `C-05`. |
-| `C-06` General MCP tools | Small general tool set (< 15 KB) using the shared command layer (`A4`). | `in progress — closing` · Retire legacy MCP tools once the legacy editor is deleted (`C-02`), route v23 MCP commands through the shared command/transaction layer, keep catalog `< 15 KB`, close `C-06`. |
 | `C-08` General glTF import | Non-refusal `.glb`/`.gltf` import with warnings instead of refusals. | `in progress — closing` · Confirm `.glb`/`.gltf` non-refusal import with warnings on the Phase 2 CC0 + Blender content; move full PBR maps, animated lenses, and animated lights to Phase 3A/3B; close `C-08`. |
 | `C-02` Scene crate & v23 cutover | `rot-scene` and `rot-editor` run exclusively on v23 with automatic upgrade on open. | `in progress` · Enable automatic v1–v22 → v23 migration (`ComponentScene::from_legacy`), convert `examples/` tracked scenes to v23, and delete legacy v1–v22 editor paths, `creation_export.rs`, and `scripts/package_creation.py`. See [C-01 brief](plans/C-01-OBJECT-COMPONENT-MODEL.md). |
+| `C-06` General MCP tools | Small general tool set (< 15 KB) using the shared command layer (`A4`). | `in progress — closing` · Retire legacy MCP tools once the legacy editor is deleted (`C-02`), route v23 MCP commands through the shared command/transaction layer, keep catalog `< 15 KB`, close `C-06`. |
 | `C-03` Native component runtime | Runtime, renderer and scripts execute `ComponentScene` flat arrays directly. | `in progress` · Retire `component_behavior.rs` (`behavior_projection()`) and `RuntimeScene::Behavior(Session)` so dynamic hierarchies, renderable parents, multiple components, and >256 objects run natively. |
 | `C-09` Build and Run | Editor ships a dedicated player binary and packages runnable Linux folders/archives. | `in progress` · Extract a lean `rot-player` binary crate out of `examples/motion-lab` (without `rot-script` or runtime kit); record Build and empty-player budgets. |
 | `C-10` Unified file-backed Lua API | One persistent-VM Lua component API (`A8`) with live reload on save. | `in progress` · Replace `host API1`–`7` and per-tick scene cloning with one growing component API (`on_start`, `on_update`, `find`, `spawn`, `destroy`, component access) and live reload on save. |
@@ -64,7 +63,8 @@ One line each until their phase is active. See [phases](PARITY-PLAN.md#3-phases)
   and point shadow atlas; fog; bloom, color grading, ambient occlusion and AA
   options; shading and debug view modes.
 - **Phase 4 — Play.** Strict order: (1) unified persistent-VM Lua API with
-  events/coroutines + native component runtime (if not already closed in Phase 2);
+  events/coroutines + native component runtime (if not already closed in Phase 2)
+  + live editing during Play (deferred from `C-05`);
   (2) Rapier3D rigid bodies, colliders, triggers, raycasts, joints and character
   controller (retiring `parry3d` in one cut; no further `parry3d` kinematic additions);
   (3) skeletal skinning and animation state machine; (4) spatial/streamed audio
@@ -86,9 +86,12 @@ completed packages:
 - **Phase 1 — Shell (done 2026-11-17–19):** `S-01`–`S-13`, `T-01`–`T-02`,
   `A-01`–`A-07`, `P-01`–`P-02`.
 - **Phase 2 — Core completed packages:** `C-00a` (retired legacy logistics
-  crates, Rhai mode, legacy editor logistics UI, and superseded MCP
+  crates, Rhai mode, editor logistics UI, and superseded MCP
   enrollment/registry plumbing; promoted `crates/rot-support`), `C-01` (v23
-  design), `C-04` (files-first `Assets/`), `C-07` (linked prefabs), `C-11` &
+  design), `C-04` (files-first `Assets/`), `C-05` (Hierarchy & Inspector with
+  live single/multi-object axis scrubbing, parented descendants & lights preview,
+  Escape cancel, and one-step Undo; live editing during Play deferred to
+  Phase 4), `C-07` (linked prefabs), `C-11` &
   `C-11a` (multi-scene projects & crash recovery), `C-12` (5k/50k benchmark
   scenes), `C-05a`–`d`, `C-09a`, and slices `C-13`–`C-61`.
 - **Phase 4 — Early slice:** Game HUD labels (`2026-11-23`, `607fc96`).

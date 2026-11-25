@@ -20,15 +20,17 @@ Updated 2026-11-25. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   logistics UI, and MCP enrollment/registry plumbing; promoted `rot-support`),
   `C-01` design, `C-04` files-first `Assets/`, `C-07` linked prefabs, `C-11`
   multi-scene projects & `C-11a` crash recovery, `C-12` 5k/50k benchmarks,
-  `C-05a`–`d`, `C-09a`, `C-13`–`C-61` authoring slices, and Phase 4 Game HUD
-  labels.
+  `C-05` Hierarchy & Inspector (live single/multi-object axis scrubbing with
+  one-step Undo; live Play editing deferred to Phase 4), `C-05a`–`d`, `C-09a`,
+  `C-13`–`C-61` authoring slices, and Phase 4 Game HUD labels.
 - **Open to exit Phase 2** (new `C-62+` convenience slices are frozen per
   2026-11-25 user approval until `C-EXIT` passes):
-  - `C-05` / `C-06` / `C-08`: fix live Inspector axis scrub (`C-05`), route v23
-    MCP through shared commands (`C-06`), confirm non-refusal glTF import line
-    and move full PBR/animated rigs to Phase 3A (`C-08`).
+  - `C-08`: confirm non-refusal `.glb`/`.gltf` import with warnings and move
+    full PBR/animated rigs to Phase 3A/3B.
   - `C-02`: automatic v1–v22 → v23 migration, convert tracked `examples/`
     scenes, delete legacy pre-v23 scene editor.
+  - `C-06`: retire legacy MCP tools once legacy editor is removed (`C-02`),
+    route v23 MCP through shared commands, keep catalog `< 15 KB`.
   - `C-03`: retire `behavior_projection()` for native flat-array component
     execution across dynamic hierarchies.
   - `C-09`: extract a dedicated `rot-player` binary crate out of
@@ -64,6 +66,6 @@ previous build is in `~/.local/share/rot-engine/previous` for `--rollback`.
 - External leftovers outside this repo still use pre-rename names: two MCP
   entries in `~/.codex/config.toml` and `~/Projects/Ruster-Creations`.
 - Unverified gates: full Phase 1 [UI checklist](UX-STANDARDS.md#10-ui-review-checklist),
-  live Inspector axis-scrub preview, physical pointer/gizmo display latency,
-  desktop interactive 60 fps at 5,000 objects, and three blank Phase 2 budgets
-  (50 MB model import, formalized small-project Build, empty built-game RSS).
+  physical pointer/gizmo display latency, desktop interactive 60 fps at 5,000
+  objects, and three blank Phase 2 budgets (50 MB model import, formalized
+  small-project Build, empty built-game RSS).

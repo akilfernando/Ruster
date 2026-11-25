@@ -240,7 +240,7 @@ See [benchmark commands](../crates/rot-render/README.md#large-scene-benchmark).
 | Editor idle with nothing changing | No frames drawn, under 1% of one core | 1 | Hub: 0 frames, 0.0% over 10 s. Open scene: 3 frames, 0.2% over 10 s (small periodic repaint) |
 | Cold start to the project hub | 1.5 s | 1 | 306 ms median, 584 ms worst of 5 (exec to hub drawn) |
 | Open a small project | 2 s | 1 | 319 ms median, 354 ms worst of 5, launched with `--scene`; the hub's Open Project… uses a native file dialog that the harness cannot drive |
-| Gizmo drag or field scrub | Visible on the next frame | 1 | App-scoped tests in an isolated compositor captured live v23 Move, Rotate, and Scale before release. Physical input-to-display latency remains unmeasured. |
+| Gizmo drag or field scrub | Visible on the next frame | 1 | App-scoped tests in an isolated compositor captured live v23 Move, Rotate, and Scale before release, and in-process egui tests verified live v23 single/multi-object Inspector axis scrubbing (parented descendants & lights, Shift/Alt speeds, Escape cancel, one-step Undo). Physical input-to-display latency remains unmeasured. |
 | Enter Play mode, small scene | 300 ms | 1 | 70 ms for Reset then Play (Reset 35 ms) |
 | AI edit of one object, round trip | 30 ms at the 95th percentile | 1 | `scene_transform` 3.8 ms p50, 6.6 ms p95 over 200 calls (adapter stdio to editor and back) |
 | AI screenshot | 250 ms | 1 | 58 ms median, 70 ms worst of 10 (`viewport_capture_start` until `viewport_capture_inspect` is ready) |

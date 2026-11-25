@@ -361,6 +361,8 @@ pub(super) struct ComponentWorkspace {
     local_transform_copy: Option<Transform>,
     animation_preview: Option<component_animation_preview::AnimationPreview>,
     transform_tool: TransformTool,
+    inspector_scrub: Option<viewport_transform::InspectorScrub>,
+    inspector_scrub_release: viewport_transform::PointerRelease,
     collider_tool: component_collider::ColliderTool,
     collider_fit: Option<component_collider_fit::Picker>,
     collider_fit_feedback: Option<(u64, String, Text)>,
@@ -491,6 +493,8 @@ impl ComponentWorkspace {
             local_transform_copy: None,
             animation_preview: None,
             transform_tool: TransformTool::default(),
+            inspector_scrub: None,
+            inspector_scrub_release: viewport_transform::PointerRelease::Idle,
             collider_tool: Default::default(),
             collider_fit: None,
             collider_fit_feedback: None,
@@ -888,6 +892,7 @@ impl ComponentWorkspace {
     fn rebuild_draft(&mut self) {
         self.inspector_error = None;
         self.clear_animation_preview();
+        self.inspector_scrub = None;
         self.transform_tool.invalidate_target();
         #[cfg(unix)]
         {
@@ -1108,7 +1113,10 @@ impl ComponentWorkspace {
     }
 
     fn authored_edit_pending(&self) -> bool {
-        self.viewport_edit_active() || self.surface_edit_pending() || self.draft_dirty()
+        self.viewport_edit_active()
+            || self.inspector_scrub.is_some()
+            || self.surface_edit_pending()
+            || self.draft_dirty()
     }
 
     fn refresh(&mut self) {
@@ -1139,6 +1147,7 @@ impl ComponentWorkspace {
 
     fn refresh_view(&mut self) {
         self.clear_animation_preview();
+        self.inspector_scrub = None;
         self.transform_tool.cancel();
         self.collider_tool.cancel();
         self.transform_tool.invalidate_target();
@@ -1724,16 +1733,99 @@ impl ComponentWorkspace {
         }
     }
 
-    fn multi_inspector(&mut self, ui: &mut egui::Ui) {
+    #[cfg(test)]
+    fn active_preview(&self) -> Option<&rot_render::component_preview::ComponentPreview> {
+        self.transform_tool
+            .preview()
+            .or_else(|| self.inspector_scrub.as_ref().map(|scrub| scrub.preview()))
+            .or_else(|| {
+                self.animation_preview
+                    .as_ref()
+                    .map(|preview| &preview.projection)
+            })
+            .or(self.preview.as_ref().ok())
+    }
+
+    fn multi_inspector(
+        &mut self,
+        ui: &mut egui::Ui,
+        blocked: bool,
+        scrub_suppressed: bool,
+        focused: bool,
+        escape_pressed: bool,
+    ) {
         ui.label(format!(
             "{} {}",
             self.selection.len(),
             Text::ComponentObjectsSelected.plain()
         ));
-        let mut submit = self
+        let edit = self
             .multi_draft
             .as_mut()
-            .is_some_and(|draft| draft.header(ui));
+            .map(|draft| draft.header(ui))
+            .unwrap_or_default();
+        let mut submit = edit.submit;
+        let selected_indices: Vec<_> = self
+            .rows
+            .iter()
+            .map(|&(index, _)| index)
+            .filter(|&index| {
+                self.selection
+                    .contains(&self.session.scene().objects[index].id)
+            })
+            .collect();
+        if scrub_suppressed {
+            if edit.dragging || edit.released {
+                if let Some(draft) = &mut self.multi_draft {
+                    let objects = &self.session.scene().objects;
+                    draft.reset_transforms(selected_indices.iter().map(|&index| &objects[index]));
+                }
+            }
+        } else if self.inspector_scrub.is_some()
+            && (escape_pressed
+                || !focused
+                || blocked
+                || self
+                    .inspector_scrub
+                    .as_ref()
+                    .is_some_and(|scrub| scrub.revision() != self.session.revision()))
+        {
+            self.inspector_scrub = None;
+            self.inspector_scrub_release = viewport_transform::PointerRelease::Pending;
+            if let Some(draft) = &mut self.multi_draft {
+                let objects = &self.session.scene().objects;
+                draft.reset_transforms(selected_indices.iter().map(|&index| &objects[index]));
+            }
+            if escape_pressed {
+                ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+            }
+            ui.ctx().request_repaint();
+        } else if edit.dragging {
+            if self.inspector_scrub.is_none() {
+                self.inspector_scrub = self.begin_inspector_scrub(selected_indices);
+            }
+            if let (Some(scrub), Some(draft)) = (&mut self.inspector_scrub, &self.multi_draft) {
+                let objects = &self.session.scene().objects;
+                if let Ok(candidates) = scrub
+                    .originals()
+                    .iter()
+                    .map(|&(index, _)| draft.preview_transform(&objects[index]))
+                    .collect::<Result<Vec<_>, _>>()
+                {
+                    scrub.stage(&candidates);
+                }
+                ui.ctx().request_repaint();
+            }
+        } else if edit.released {
+            self.inspector_scrub = None;
+            if self.draft_dirty() {
+                submit = true;
+            }
+            ui.ctx().request_repaint();
+        } else if self.inspector_scrub.is_some() {
+            self.inspector_scrub = None;
+            ui.ctx().request_repaint();
+        }
         self.local_transform_menu(ui);
         self.parent_ui(ui);
         ui.separator();
@@ -1746,6 +1838,7 @@ impl ComponentWorkspace {
             );
         }
         if submit {
+            self.inspector_scrub = None;
             self.apply();
         }
     }
@@ -2267,6 +2360,7 @@ impl ComponentWorkspace {
             None => self
                 .transform_tool
                 .preview()
+                .or_else(|| self.inspector_scrub.as_ref().map(|scrub| scrub.preview()))
                 .or_else(|| {
                     self.animation_preview
                         .as_ref()
@@ -2936,6 +3030,9 @@ impl ComponentWorkspace {
         let escape_pressed = ctx.input(|input| input.key_pressed(egui::Key::Escape));
         if interrupted || self.runtime.in_play_mode() || escape_pressed {
             self.transform_tool.cancel();
+        }
+        if interrupted || (self.runtime.in_play_mode() && !self.edit_scene_during_play) {
+            self.inspector_scrub = None;
         }
         if self.runtime.in_play_mode() {
             self.collider_tool.exit();
@@ -3731,13 +3828,37 @@ impl ComponentWorkspace {
                     self.edit_scene_during_play = false;
                 }
                 if self.multi_draft.is_some() {
+                    let (focused, down, pressed, released) = ui.input(|input| {
+                        (
+                            input.focused,
+                            input.pointer.button_down(egui::PointerButton::Primary),
+                            input.pointer.button_pressed(egui::PointerButton::Primary),
+                            input.pointer.button_released(egui::PointerButton::Primary),
+                        )
+                    });
+                    let scrub_suppressed = self.inspector_scrub_release
+                        != viewport_transform::PointerRelease::Idle
+                        && self.inspector_scrub_release.suppress(
+                            ui.ctx().cumulative_frame_nr(),
+                            down,
+                            pressed,
+                            released,
+                        );
                     let body_height = ui.available_height()
                         - crate::ui_kit::tokens::CONTROL_HEIGHT
                         - ui.spacing().item_spacing.y;
                     egui::ScrollArea::both()
                         .max_height(body_height.max(0.0))
                         .auto_shrink([false, false])
-                        .show(ui, |ui| self.multi_inspector(ui));
+                        .show(ui, |ui| {
+                            self.multi_inspector(
+                                ui,
+                                blocked,
+                                scrub_suppressed,
+                                focused,
+                                escape_pressed,
+                            )
+                        });
                     if ui
                         .add_enabled(
                             self.inspector_apply_enabled(ui.ctx()),
@@ -3745,14 +3866,33 @@ impl ComponentWorkspace {
                         )
                         .clicked()
                     {
+                        self.inspector_scrub = None;
                         self.apply();
                     }
                 } else {
+                    let (focused, down, pressed, released) = ui.input(|input| {
+                        (
+                            input.focused,
+                            input.pointer.button_down(egui::PointerButton::Primary),
+                            input.pointer.button_pressed(egui::PointerButton::Primary),
+                            input.pointer.button_released(egui::PointerButton::Primary),
+                        )
+                    });
+                    let scrub_suppressed = self.inspector_scrub_release
+                        != viewport_transform::PointerRelease::Idle
+                        && self.inspector_scrub_release.suppress(
+                            ui.ctx().cumulative_frame_nr(),
+                            down,
+                            pressed,
+                            released,
+                        );
                     // Wide fields scroll within the Inspector.
                     egui::ScrollArea::both()
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
                             let mut submit = false;
+                            let mut transform_edit = component_inspector::TransformEdit::default();
+                            let mut transform_before = None;
                             if let Some(draft) = &mut self.draft {
                                 ui.label(Text::ComponentName.plain());
                                 let response = ui.add(
@@ -3763,7 +3903,61 @@ impl ComponentWorkspace {
                                     && ui.input(|input| input.key_pressed(egui::Key::Enter));
                                 ui.checkbox(&mut draft.enabled, Text::ComponentEnabled.plain());
                                 ui.separator();
-                                submit |= component_inspector::transform(ui, draft);
+                                transform_before = Some(draft.transform.clone());
+                                transform_edit = component_inspector::transform(ui, draft);
+                                submit |= transform_edit.submit;
+                            }
+                            if scrub_suppressed {
+                                if let (Some(draft), Some(before)) =
+                                    (&mut self.draft, transform_before)
+                                {
+                                    draft.transform = before;
+                                }
+                            } else if self.inspector_scrub.is_some()
+                                && (escape_pressed
+                                    || !focused
+                                    || blocked
+                                    || self.inspector_scrub.as_ref().is_some_and(|scrub| {
+                                        scrub.revision() != self.session.revision()
+                                    }))
+                            {
+                                if let (Some(scrub), Some(draft)) =
+                                    (self.inspector_scrub.take(), &mut self.draft)
+                                {
+                                    if let Some((_, original)) = scrub.originals().first() {
+                                        draft.transform = original.clone();
+                                    }
+                                }
+                                self.inspector_scrub_release =
+                                    viewport_transform::PointerRelease::Pending;
+                                if escape_pressed {
+                                    ui.input_mut(|input| {
+                                        input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                                    });
+                                }
+                                ui.ctx().request_repaint();
+                            } else if transform_edit.dragging {
+                                if self.inspector_scrub.is_none() {
+                                    if let Some(index) = self.selected_index {
+                                        self.inspector_scrub =
+                                            self.begin_inspector_scrub(vec![index]);
+                                    }
+                                }
+                                if let (Some(scrub), Some(draft)) =
+                                    (&mut self.inspector_scrub, &self.draft)
+                                {
+                                    scrub.stage(std::slice::from_ref(&draft.transform));
+                                    ui.ctx().request_repaint();
+                                }
+                            } else if transform_edit.released {
+                                self.inspector_scrub = None;
+                                if self.draft_dirty() {
+                                    submit = true;
+                                }
+                                ui.ctx().request_repaint();
+                            } else if self.inspector_scrub.is_some() {
+                                self.inspector_scrub = None;
+                                ui.ctx().request_repaint();
                             }
                             if self.selected_index.is_some() {
                                 self.local_transform_menu(ui);
@@ -5589,5 +5783,527 @@ mod tests {
         assert!(!reopened.scene().objects[0].enabled);
         assert_eq!(reopened.scene().objects[0].transform.translation[0], 4.0);
         assert_eq!(reopened.revision(), 0);
+    }
+
+    fn run_workspace_frame(
+        ctx: &egui::Context,
+        editor: &mut ComponentWorkspace,
+        time: &mut f64,
+        events: Vec<egui::Event>,
+    ) -> Vec<egui::epaint::ClippedShape> {
+        run_workspace_frame_with_modifiers(ctx, editor, time, egui::Modifiers::NONE, events)
+    }
+
+    fn run_workspace_frame_with_modifiers(
+        ctx: &egui::Context,
+        editor: &mut ComponentWorkspace,
+        time: &mut f64,
+        modifiers: egui::Modifiers,
+        mut events: Vec<egui::Event>,
+    ) -> Vec<egui::epaint::ClippedShape> {
+        *time += 0.1;
+        events.insert(0, egui::Event::ModifiersChanged(modifiers));
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                focused: true,
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280.0, 800.0),
+                )),
+                time: Some(*time),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                editor.show_workspace(ui, false);
+            },
+        );
+        output.textures_delta.clear();
+        output.shapes
+    }
+
+    fn find_inspector_axis(
+        shapes: &[egui::epaint::ClippedShape],
+        row_label: &str,
+        axis: usize,
+    ) -> egui::Pos2 {
+        let axis_label = ["X", "Y", "Z"][axis];
+        let centers = |label: &str| {
+            shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text) if text.galley.job.text == label => {
+                        Some(egui::Rect::from_min_size(text.pos, text.galley.size()).center())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let row = centers(row_label)
+            .into_iter()
+            .find(|point| point.x > 640.0)
+            .unwrap_or_else(|| panic!("missing {row_label} label in Inspector"));
+        centers(axis_label)
+            .into_iter()
+            .filter(|point| point.x > 640.0 && point.y >= row.y - 10.0)
+            .min_by(|a, b| a.y.total_cmp(&b.y).then_with(|| a.x.total_cmp(&b.x)))
+            .unwrap_or_else(|| panic!("missing {axis_label} axis letter on {row_label}"))
+    }
+
+    #[test]
+    fn inspector_axis_scrub_updates_preview_live_and_commits_one_undo() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.objects[0].transform.rotation = [0.0; 3];
+        scene.objects[0].transform.scale = [1.0; 3];
+        let parent_id = scene.objects[0].id.clone();
+        scene.objects[1].parent = Some(parent_id.clone());
+        scene.objects.push(ObjectNode {
+            id: "child-spot".into(),
+            name: "Child Spot".into(),
+            enabled: true,
+            parent: Some(parent_id.clone()),
+            transform: Transform {
+                translation: [0.0, 2.0, 3.0],
+                ..Default::default()
+            },
+            components: vec![{
+                let spot = rot_scene::Light::spot(None);
+                ComponentInstance {
+                    id: "spot-light".into(),
+                    enabled: true,
+                    kind: Component::Light {
+                        color: spot.color,
+                        intensity: spot.intensity,
+                        kind: spot.kind,
+                    },
+                }
+            }],
+        });
+
+        let mut editor =
+            ComponentWorkspace::new(path, ComponentSession::new(scene.clone()).unwrap());
+        editor.select(Some(parent_id.clone()));
+        let ctx = egui::Context::default();
+        crate::editor_theme::configure(&ctx);
+        let mut time = 0.0;
+        run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+        let shapes = run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+
+        let initial_parent_mat = editor.active_preview().unwrap().draw_matrices()[0];
+        let initial_child_mat = editor.active_preview().unwrap().draw_matrices()[1];
+        let initial_spot_pos = editor
+            .active_preview()
+            .unwrap()
+            .scene()
+            .lighting
+            .light("spot-light")
+            .unwrap()
+            .transform
+            .translation;
+        let initial_parent_tx = editor.session.scene().objects[0].transform.translation[0];
+
+        // 1) Scrub Position X by +100 px (step 0.01 -> +1.0)
+        let pos_x = find_inspector_axis(&shapes, "Position", 0);
+        run_workspace_frame(
+            &ctx,
+            &mut editor,
+            &mut time,
+            vec![
+                egui::Event::PointerMoved(pos_x),
+                egui::Event::PointerButton {
+                    pos: pos_x,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        for step in 1..=10 {
+            let pos = pos_x + egui::vec2(10.0 * step as f32, 0.0);
+            run_workspace_frame(
+                &ctx,
+                &mut editor,
+                &mut time,
+                vec![egui::Event::PointerMoved(pos)],
+            );
+        }
+        assert_eq!(editor.session.revision(), 0, "no commit before release");
+        assert!(editor.inspector_scrub.is_some());
+        let live_preview = editor.active_preview().unwrap();
+        assert!(
+            (live_preview.draw_matrices()[0].w_axis.x - (initial_parent_mat.w_axis.x + 1.0)).abs()
+                < 1e-3
+        );
+        assert!(
+            (live_preview.draw_matrices()[1].w_axis.x - (initial_child_mat.w_axis.x + 1.0)).abs()
+                < 1e-3,
+            "child mesh updates live mid-drag"
+        );
+        let live_spot_pos = live_preview
+            .scene()
+            .lighting
+            .light("spot-light")
+            .unwrap()
+            .transform
+            .translation;
+        assert!(
+            (live_spot_pos[0] - (initial_spot_pos[0] + 1.0)).abs() < 1e-3,
+            "child spot light updates live mid-drag"
+        );
+
+        run_workspace_frame(
+            &ctx,
+            &mut editor,
+            &mut time,
+            vec![egui::Event::PointerButton {
+                pos: pos_x + egui::vec2(100.0, 0.0),
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+        assert!(editor.inspector_scrub.is_none());
+        assert_eq!(editor.session.revision(), 1, "one commit on release");
+        assert!(
+            (editor.session.scene().objects[0].transform.translation[0]
+                - (initial_parent_tx + 1.0))
+                .abs()
+                < 1e-3
+        );
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene(), &scene, "one Undo restores Position");
+
+        // 2) Scrub Rotation Y with Shift held (10x fast)
+        let shapes = run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+        let rot_y = find_inspector_axis(&shapes, "Rotation", 1);
+        run_workspace_frame(
+            &ctx,
+            &mut editor,
+            &mut time,
+            vec![egui::Event::PointerMoved(rot_y)],
+        );
+        run_workspace_frame_with_modifiers(
+            &ctx,
+            &mut editor,
+            &mut time,
+            egui::Modifiers::SHIFT,
+            vec![egui::Event::PointerButton {
+                pos: rot_y,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::SHIFT,
+            }],
+        );
+        run_workspace_frame_with_modifiers(
+            &ctx,
+            &mut editor,
+            &mut time,
+            egui::Modifiers::SHIFT,
+            vec![egui::Event::PointerMoved(rot_y + egui::vec2(9.0, 0.0))],
+        );
+        let rev_before_release = editor.session.revision();
+        assert!(editor.inspector_scrub.is_some());
+        let rot_preview = editor.active_preview().unwrap();
+        assert_ne!(
+            rot_preview.draw_matrices()[1],
+            initial_child_mat,
+            "child mesh rotates live mid-drag"
+        );
+        let spot_rot = rot_preview
+            .scene()
+            .lighting
+            .light("spot-light")
+            .unwrap()
+            .transform
+            .rotation;
+        assert!(
+            spot_rot[1].abs() > 1.0,
+            "spot light rotated live: {spot_rot:?}"
+        );
+        run_workspace_frame_with_modifiers(
+            &ctx,
+            &mut editor,
+            &mut time,
+            egui::Modifiers::SHIFT,
+            vec![egui::Event::PointerButton {
+                pos: rot_y + egui::vec2(9.0, 0.0),
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::SHIFT,
+            }],
+        );
+        assert_eq!(editor.session.revision(), rev_before_release + 1);
+        let committed_rot_y = editor.session.scene().objects[0].transform.rotation[1].to_degrees();
+        assert!(
+            (committed_rot_y - 90.0).abs() < 1e-2,
+            "Shift+Rotation scrub applied 10x speed: {committed_rot_y} deg"
+        );
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene(), &scene);
+
+        // 3) Scrub Scale Z with Alt held (0.1x precision)
+        let shapes = run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+        let scale_z = find_inspector_axis(&shapes, "Scale", 2);
+        run_workspace_frame(
+            &ctx,
+            &mut editor,
+            &mut time,
+            vec![egui::Event::PointerMoved(scale_z)],
+        );
+        run_workspace_frame_with_modifiers(
+            &ctx,
+            &mut editor,
+            &mut time,
+            egui::Modifiers::ALT,
+            vec![egui::Event::PointerButton {
+                pos: scale_z,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::ALT,
+            }],
+        );
+        run_workspace_frame_with_modifiers(
+            &ctx,
+            &mut editor,
+            &mut time,
+            egui::Modifiers::ALT,
+            vec![egui::Event::PointerMoved(scale_z + egui::vec2(100.0, 0.0))],
+        );
+        assert!(editor.inspector_scrub.is_some());
+        let scale_preview = editor.active_preview().unwrap();
+        assert!(
+            (scale_preview.draw_matrices()[0].z_axis.z - (initial_parent_mat.z_axis.z + 0.1)).abs()
+                < 1e-3,
+            "parent scale updates live with Alt 0.1x speed"
+        );
+        let rev_before_scale_release = editor.session.revision();
+        run_workspace_frame_with_modifiers(
+            &ctx,
+            &mut editor,
+            &mut time,
+            egui::Modifiers::ALT,
+            vec![egui::Event::PointerButton {
+                pos: scale_z + egui::vec2(100.0, 0.0),
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::ALT,
+            }],
+        );
+        assert_eq!(editor.session.revision(), rev_before_scale_release + 1);
+        assert!((editor.session.scene().objects[0].transform.scale[2] - 1.1).abs() < 1e-3);
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene(), &scene);
+    }
+
+    #[test]
+    fn inspector_axis_scrub_escape_cancels_preview_and_suppresses_remaining_drag() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        let scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path, ComponentSession::new(scene.clone()).unwrap());
+        let ctx = egui::Context::default();
+        crate::editor_theme::configure(&ctx);
+        let mut time = 0.0;
+        run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+        let shapes = run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+        let original_mat = editor.active_preview().unwrap().draw_matrices()[0];
+        let pos_x = find_inspector_axis(&shapes, "Position", 0);
+
+        run_workspace_frame(
+            &ctx,
+            &mut editor,
+            &mut time,
+            vec![
+                egui::Event::PointerMoved(pos_x),
+                egui::Event::PointerButton {
+                    pos: pos_x,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        run_workspace_frame(
+            &ctx,
+            &mut editor,
+            &mut time,
+            vec![egui::Event::PointerMoved(pos_x + egui::vec2(50.0, 0.0))],
+        );
+        assert!(editor.inspector_scrub.is_some());
+        assert_ne!(
+            editor.active_preview().unwrap().draw_matrices()[0],
+            original_mat
+        );
+
+        // Escape cancels live preview and restores the draft transform.
+        run_workspace_frame(
+            &ctx,
+            &mut editor,
+            &mut time,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(editor.inspector_scrub.is_none());
+        assert_eq!(
+            editor.active_preview().unwrap().draw_matrices()[0],
+            original_mat
+        );
+        assert_eq!(
+            editor.draft.as_ref().unwrap().transform,
+            scene.objects[0].transform
+        );
+
+        // Moving pointer while button stays down must stay suppressed, and release must not commit.
+        run_workspace_frame(
+            &ctx,
+            &mut editor,
+            &mut time,
+            vec![egui::Event::PointerMoved(pos_x + egui::vec2(80.0, 0.0))],
+        );
+        run_workspace_frame(
+            &ctx,
+            &mut editor,
+            &mut time,
+            vec![egui::Event::PointerButton {
+                pos: pos_x + egui::vec2(80.0, 0.0),
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(editor.inspector_scrub.is_none());
+        assert_eq!(editor.session.revision(), 0);
+        assert_eq!(editor.session.scene(), &scene);
+        assert_eq!(
+            editor.draft.as_ref().unwrap().transform,
+            scene.objects[0].transform
+        );
+    }
+
+    #[test]
+    fn multi_inspector_axis_scrub_previews_live_and_commits_one_undo() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.objects[0].transform.translation = [1.0, 0.0, 0.0];
+        scene.objects[1].transform.translation = [5.0, 0.0, 0.0];
+        let mut editor =
+            ComponentWorkspace::new(path, ComponentSession::new(scene.clone()).unwrap());
+        editor.selection = [scene.objects[0].id.clone(), scene.objects[1].id.clone()]
+            .into_iter()
+            .collect();
+        editor.rebuild_draft();
+        assert!(editor.multi_draft.is_some());
+
+        let ctx = egui::Context::default();
+        crate::editor_theme::configure(&ctx);
+        let mut time = 0.0;
+        run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+        let shapes = run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+        let pos_x = find_inspector_axis(&shapes, "Position", 0);
+
+        run_workspace_frame(
+            &ctx,
+            &mut editor,
+            &mut time,
+            vec![
+                egui::Event::PointerMoved(pos_x),
+                egui::Event::PointerButton {
+                    pos: pos_x,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        for step in 1..=5 {
+            run_workspace_frame(
+                &ctx,
+                &mut editor,
+                &mut time,
+                vec![egui::Event::PointerMoved(
+                    pos_x + egui::vec2(20.0 * step as f32, 0.0),
+                )],
+            );
+        }
+        assert_eq!(editor.session.revision(), 0);
+        assert!(editor.inspector_scrub.is_some());
+        let live = editor.active_preview().unwrap().draw_matrices();
+        assert!((live[0].w_axis.x - 2.0).abs() < 1e-3);
+        assert!((live[1].w_axis.x - 6.0).abs() < 1e-3);
+
+        run_workspace_frame(
+            &ctx,
+            &mut editor,
+            &mut time,
+            vec![egui::Event::PointerButton {
+                pos: pos_x + egui::vec2(100.0, 0.0),
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+        assert!(editor.inspector_scrub.is_none());
+        assert_eq!(editor.session.revision(), 1);
+        assert!((editor.session.scene().objects[0].transform.translation[0] - 2.0).abs() < 1e-3);
+        assert!((editor.session.scene().objects[1].transform.translation[0] - 6.0).abs() < 1e-3);
+
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene(), &scene);
+    }
+
+    #[test]
+    fn inspector_axis_click_without_drag_does_not_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        let scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path, ComponentSession::new(scene.clone()).unwrap());
+        let ctx = egui::Context::default();
+        crate::editor_theme::configure(&ctx);
+        let mut time = 0.0;
+        run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+        let shapes = run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+        let pos_x = find_inspector_axis(&shapes, "Position", 0);
+
+        run_workspace_frame(
+            &ctx,
+            &mut editor,
+            &mut time,
+            vec![
+                egui::Event::PointerMoved(pos_x),
+                egui::Event::PointerButton {
+                    pos: pos_x,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        run_workspace_frame(
+            &ctx,
+            &mut editor,
+            &mut time,
+            vec![egui::Event::PointerButton {
+                pos: pos_x,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+        assert!(editor.inspector_scrub.is_none());
+        assert_eq!(editor.session.revision(), 0);
+        assert_eq!(editor.session.scene(), &scene);
     }
 }
