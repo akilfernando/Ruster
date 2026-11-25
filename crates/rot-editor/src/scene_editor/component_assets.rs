@@ -974,9 +974,17 @@ impl Browser {
         (selected, place)
     }
 
-    pub(super) fn selected_texture(&self) -> Option<&str> {
+    pub(super) fn selected_usage_asset(&self) -> Option<(&str, AssetKind)> {
         let row = self.rows.get(*self.by_id.get(self.selected.as_ref()?)?)?;
-        (row.registered && row.kind == "Texture").then_some(row.id.as_str())
+        if !row.registered {
+            return None;
+        }
+        let kind = match row.kind {
+            "Texture" => AssetKind::Texture,
+            kind if kind == Text::ComponentScript.plain() => AssetKind::Script,
+            _ => return None,
+        };
+        Some((&row.id, kind))
     }
 
     pub(super) fn inspect(

@@ -1,13 +1,15 @@
-//! Exact authored texture references, indexed on request for one texture.
+//! Exact authored uses, indexed on demand for one asset.
 use super::ComponentWorkspace;
 use crate::{editor_theme, strings::Text, ui_kit::tokens::ROW_HEIGHT};
 use eframe::egui;
-#[cfg(unix)]
-use rot_assets::AssetKind;
-use rot_scene::component_scene::{Component, ComponentScene};
+use rot_assets::{AssetKind, AssetStatus};
+use rot_scene::component_scene::{Component, ComponentScene, ScriptSourceKind};
 #[cfg(unix)]
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 #[cfg(unix)]
 const PAGE_SIZE: usize = 16;
@@ -44,15 +46,40 @@ struct Use {
     prefab_owned: bool,
 }
 
-pub(super) struct TextureUses {
-    revision: u64,
-    asset_id: String,
+struct TextureUses {
     materials: Vec<String>,
     rows: Vec<Use>,
 }
 
+pub(super) struct AssetUses {
+    revision: u64,
+    asset_id: String,
+    rows: Rows,
+}
+
+enum Rows {
+    Texture(TextureUses),
+    Script(Vec<(usize, usize)>),
+}
+
+impl Rows {
+    fn len(&self) -> usize {
+        match self {
+            Self::Texture(uses) => uses.rows.len(),
+            Self::Script(rows) => rows.len(),
+        }
+    }
+
+    fn attachment(&self, index: usize) -> Option<(usize, usize)> {
+        match self {
+            Self::Texture(uses) => uses.rows.get(index)?.renderer,
+            Self::Script(rows) => rows.get(index).copied(),
+        }
+    }
+}
+
 pub(super) struct Dialog {
-    uses: TextureUses,
+    uses: Arc<AssetUses>,
     selected: usize,
     initial_focus: bool,
 }
@@ -60,14 +87,11 @@ pub(super) struct Dialog {
 impl TextureUses {
     fn build(
         scene: &ComponentScene,
-        revision: u64,
         asset_id: &str,
         hierarchy_rows: &[(usize, usize)],
         parents: &[Option<usize>],
     ) -> Self {
         let mut result = Self {
-            revision,
-            asset_id: asset_id.into(),
             materials: Vec::new(),
             rows: Vec::new(),
         };
@@ -158,26 +182,51 @@ impl TextureUses {
 }
 
 impl ComponentWorkspace {
-    fn texture_uses(&mut self, asset_id: &str) -> &TextureUses {
+    fn asset_uses(&mut self, asset_id: &str, kind: AssetKind) -> &Arc<AssetUses> {
         let revision = self.session.revision();
-        if self
-            .texture_uses
-            .as_ref()
-            .is_none_or(|uses| uses.revision != revision || uses.asset_id != asset_id)
-        {
-            self.texture_uses = Some(TextureUses::build(
-                self.session.scene(),
+        let is_script = kind == AssetKind::Script;
+        if self.asset_uses.as_ref().is_none_or(|uses| {
+            uses.revision != revision
+                || uses.asset_id != asset_id
+                || matches!(uses.rows, Rows::Script(_)) != is_script
+        }) {
+            let scene = self.session.scene();
+            let rows = if is_script {
+                let mut rows = Vec::new();
+                for (index, object) in scene.objects.iter().enumerate() {
+                    for (component_index, component) in object.components.iter().enumerate() {
+                        if matches!(
+                            &component.kind,
+                            Component::Script {
+                                binding,
+                                source_kind: Some(ScriptSourceKind::Asset),
+                                ..
+                            } if binding.source_id == asset_id
+                        ) {
+                            rows.push((index, component_index));
+                        }
+                    }
+                }
+                Rows::Script(rows)
+            } else {
+                Rows::Texture(TextureUses::build(
+                    scene,
+                    asset_id,
+                    &self.rows,
+                    &self.parents,
+                ))
+            };
+            self.asset_uses = Some(Arc::new(AssetUses {
                 revision,
-                asset_id,
-                &self.rows,
-                &self.parents,
-            ));
+                asset_id: asset_id.into(),
+                rows,
+            }));
         }
-        self.texture_uses.as_ref().expect("texture uses")
+        self.asset_uses.as_ref().expect("asset uses")
     }
 
     #[cfg(unix)]
-    pub(super) fn inspect_texture_uses(
+    pub(super) fn inspect_asset_uses(
         &mut self,
         token: &str,
         args: &Value,
@@ -268,17 +317,20 @@ impl ComponentWorkspace {
             .or(derived.then_some(AssetKind::Texture));
         let status = info
             .map(|info| match info.status {
-                rot_assets::AssetStatus::Ready => "ready",
-                rot_assets::AssetStatus::Invalid => "invalid",
-                rot_assets::AssetStatus::Missing => "missing",
+                AssetStatus::Ready => "ready",
+                AssetStatus::Invalid => "invalid",
+                AssetStatus::Missing => "missing",
             })
             .unwrap_or(if derived { "ready" } else { "missing" });
-        if kind.is_some_and(|kind| kind != AssetKind::Texture) {
-            return Err(("not_texture", "Use the ID of a texture asset.".into()));
+        if kind.is_some_and(|kind| !matches!(kind, AssetKind::Texture | AssetKind::Script)) {
+            return Err((
+                "not_texture",
+                "Use the ID of a texture or Lua script asset.".into(),
+            ));
         }
-        self.texture_uses(id);
-        let uses = self.texture_uses.as_ref().expect("texture uses");
-        if kind.is_none() && uses.rows.is_empty() {
+        self.asset_uses(id, kind.unwrap_or(AssetKind::Texture));
+        let uses = self.asset_uses.as_ref().expect("asset uses");
+        if kind.is_none() && uses.rows.len() == 0 {
             return Err((
                 "asset_not_found",
                 "No catalog texture or authored texture reference has this ID.".into(),
@@ -289,42 +341,52 @@ impl ComponentWorkspace {
         }
         let scene = self.session.scene();
         let end = (start + PAGE_SIZE).min(uses.rows.len());
-        let rows = uses.rows[start..end].iter().map(|row| {
-            let material = &uses.materials[row.material];
-            let owner = row.renderer.map(|(index, renderer)| {
-                let object = &scene.objects[index];
-                (&object.id, &object.name, &object.components[renderer].id, object.enabled)
-            });
-            json!({
-                "material_id": material, "material_name": scene.materials[material].name,
-                "slot": row.slot.wire(), "object_id": owner.map(|owner| owner.0),
-                "object_name": owner.map(|owner| owner.1), "renderer_id": owner.map(|owner| owner.2),
-                "object_enabled": owner.map(|owner| owner.3),
-                "renderer_enabled": owner.map(|_| row.enabled),
-                "effectively_enabled": owner.map(|_| row.effectively_enabled),
-                "prefab_owned": row.prefab_owned,
-            })
-        }).collect::<Vec<_>>();
-        Ok(
-            json!({"asset_id":id, "asset_status":status, "asset_revision":asset_revision.to_string(),
-            "total":uses.rows.len(), "next_offset": (end < uses.rows.len()).then(|| end.to_string()),
-            "uses":rows}),
-        )
+        let mut result = json!({"asset_id":id, "asset_status":status,
+            "asset_revision":asset_revision.to_string(), "total":uses.rows.len(),
+            "next_offset": (end < uses.rows.len()).then(|| end.to_string())});
+        result["uses"] = match &uses.rows {
+            Rows::Texture(uses) => uses.rows[start..end].iter().map(|row| {
+                let material = &uses.materials[row.material];
+                let owner = row.renderer.map(|(index, renderer)| {
+                    let object = &scene.objects[index];
+                    (&object.id, &object.name, &object.components[renderer].id, object.enabled)
+                });
+                json!({
+                    "material_id": material, "material_name": scene.materials[material].name,
+                    "slot": row.slot.wire(), "object_id": owner.map(|owner| owner.0),
+                    "object_name": owner.map(|owner| owner.1), "renderer_id": owner.map(|owner| owner.2),
+                    "object_enabled": owner.map(|owner| owner.3),
+                    "renderer_enabled": owner.map(|_| row.enabled),
+                    "effectively_enabled": owner.map(|_| row.effectively_enabled),
+                    "prefab_owned": row.prefab_owned,
+                })
+            }).collect(),
+            Rows::Script(uses) => {
+                result["asset_kind"] = json!("script");
+                uses[start..end].iter().map(|&(index, component)| {
+                    let object = &scene.objects[index];
+                    let component = &object.components[component];
+                    json!({"object_id": object.id, "object_name": object.name,
+                        "component_id": component.id, "object_enabled": object.enabled,
+                        "component_enabled": component.enabled})
+                }).collect()
+            }
+        };
+        Ok(result)
     }
 
-    pub(super) fn begin_texture_uses(&mut self, asset_id: String) {
+    pub(super) fn begin_asset_uses(&mut self, asset_id: String, kind: AssetKind) {
         if !self.authored_edit_pending() {
-            self.texture_uses(&asset_id);
-            self.texture_uses_dialog = Some(Dialog {
-                uses: self.texture_uses.take().expect("texture uses"),
+            self.asset_uses_dialog = Some(Dialog {
+                uses: Arc::clone(self.asset_uses(&asset_id, kind)),
                 selected: 0,
                 initial_focus: true,
             });
         }
     }
 
-    pub(super) fn show_texture_uses(&mut self, ctx: &egui::Context) {
-        let Some(mut dialog) = self.texture_uses_dialog.take() else {
+    pub(super) fn show_asset_uses(&mut self, ctx: &egui::Context) {
+        let Some(mut dialog) = self.asset_uses_dialog.take() else {
             return;
         };
         if dialog.uses.revision != self.session.revision() {
@@ -337,15 +399,46 @@ impl ComponentWorkspace {
         let mut reveal = false;
         let mut close = false;
         let enter = !dialog.initial_focus && ctx.input(|input| input.key_pressed(egui::Key::Enter));
-        let response = egui::Modal::new(egui::Id::unique("component_texture_uses"))
+        let response = egui::Modal::new(egui::Id::unique("component_asset_uses"))
             .frame(editor_theme::dialog_frame(ctx))
             .show(ctx, |ui| {
                 ui.set_width((ctx.content_rect().width() - 64.).clamp(160., 560.));
-                ui.heading(Text::TextureUses.plain());
+                let script = matches!(uses.rows, Rows::Script(_));
+                ui.heading(
+                    if script {
+                        Text::ScriptUses
+                    } else {
+                        Text::TextureUses
+                    }
+                    .plain(),
+                );
                 ui.add(egui::Label::new(&uses.asset_id).selectable(true).truncate())
                     .on_hover_text(&uses.asset_id);
-                if uses.rows.is_empty() {
-                    ui.label(Text::TextureUsesEmpty.plain());
+                if script {
+                    let status = self
+                        .assets
+                        .as_ref()
+                        .and_then(|assets| assets.asset_info(&uses.asset_id))
+                        .map_or(&AssetStatus::Missing, |info| &info.status);
+                    match status {
+                        AssetStatus::Missing => {
+                            ui.label(Text::AssetSourceMissing.plain());
+                        }
+                        AssetStatus::Invalid => {
+                            ui.label(Text::AssetInvalid.plain());
+                        }
+                        AssetStatus::Ready => {}
+                    }
+                }
+                if uses.rows.len() == 0 {
+                    ui.label(
+                        if script {
+                            Text::ScriptUsesEmpty
+                        } else {
+                            Text::TextureUsesEmpty
+                        }
+                        .plain(),
+                    );
                 } else {
                     ui.label(format!(
                         "{} {}",
@@ -389,34 +482,48 @@ impl ComponentWorkspace {
                     }
                     scroll.show_rows(ui, ROW_HEIGHT, uses.rows.len(), |ui, range| {
                         for index in range {
-                            let row = &uses.rows[index];
-                            let material = &uses.materials[row.material];
-                            let value = &scene.materials[material];
-                            let owner = row.renderer.map(|(object, renderer)| {
-                                let object = &scene.objects[object];
-                                (&object.name, &object.components[renderer].id)
-                            });
-                            let (name, id) = owner
-                                .map_or((Text::TextureUsesUnassigned.plain(), ""), |(name, id)| {
-                                    (name.as_str(), id.as_str())
-                                });
-                            let mut label = format!(
-                                "{name}  ·  {}  ·  {}",
-                                value.name.as_deref().unwrap_or(material),
-                                row.slot.label()
-                            );
-                            if owner.is_some() && !row.effectively_enabled {
-                                label.push_str("  ·  Disabled");
-                            }
-                            if row.prefab_owned {
-                                label.push_str("  ·  Prefab");
-                            }
+                            let (label, tooltip) = match &uses.rows {
+                                Rows::Texture(uses) => {
+                                    let row = &uses.rows[index];
+                                    let material = &uses.materials[row.material];
+                                    let value = &scene.materials[material];
+                                    let owner = row.renderer.map(|(object, renderer)| {
+                                        let object = &scene.objects[object];
+                                        (&object.name, &object.components[renderer].id)
+                                    });
+                                    let (name, id) = owner.map_or(
+                                        (Text::TextureUsesUnassigned.plain(), ""),
+                                        |(name, id)| (name.as_str(), id.as_str()),
+                                    );
+                                    let mut label = format!(
+                                        "{name}  ·  {}  ·  {}",
+                                        value.name.as_deref().unwrap_or(material),
+                                        row.slot.label()
+                                    );
+                                    if owner.is_some() && !row.effectively_enabled {
+                                        label.push_str("  ·  Disabled");
+                                    }
+                                    if row.prefab_owned {
+                                        label.push_str("  ·  Prefab");
+                                    }
+                                    let tooltip = format!("{label}\n{material}\n{id}");
+                                    (label, tooltip)
+                                }
+                                Rows::Script(rows) => {
+                                    let (owner, component) = rows[index];
+                                    let object = &scene.objects[owner];
+                                    let id = &object.components[component].id;
+                                    let label = format!("{} · {} · {id}", object.name, object.id);
+                                    let tooltip = format!("{}\n{}\n{id}", object.name, object.id);
+                                    (label, tooltip)
+                                }
+                            };
                             let response = ui
                                 .add(
                                     egui::Button::selectable(index == dialog.selected, &label)
                                         .truncate(),
                                 )
-                                .on_hover_text(format!("{label}\n{material}\n{id}"));
+                                .on_hover_text(tooltip);
                             if response.clicked() {
                                 dialog.selected = index;
                                 focus.request_focus();
@@ -428,48 +535,65 @@ impl ComponentWorkspace {
                         }
                     });
                 }
-                if let Some(row) = uses.rows.get(dialog.selected) {
-                    let material = &uses.materials[row.material];
-                    let (object, renderer) = row.renderer.map_or(
-                        (Text::TextureUsesUnassigned.plain(), ""),
-                        |(index, renderer)| {
+                match &uses.rows {
+                    Rows::Texture(uses) => {
+                        if let Some(row) = uses.rows.get(dialog.selected) {
+                            let material = &uses.materials[row.material];
+                            let (object, renderer) = row.renderer.map_or(
+                                (Text::TextureUsesUnassigned.plain(), ""),
+                                |(index, renderer)| {
+                                    let object = &scene.objects[index];
+                                    (
+                                        object.name.as_str(),
+                                        object.components[renderer].id.as_str(),
+                                    )
+                                },
+                            );
+                            let label = format!(
+                                "{object} · {} · {}",
+                                scene.materials[material]
+                                    .name
+                                    .as_deref()
+                                    .unwrap_or(material),
+                                row.slot.label()
+                            );
+                            ui.add(egui::Label::new(&label).truncate())
+                                .on_hover_text(&label);
+                            if !renderer.is_empty() {
+                                ui.horizontal(|ui| {
+                                    ui.label(Text::TextureUsesRenderer.plain());
+                                    ui.add(egui::Label::new(renderer).selectable(true).truncate())
+                                        .on_hover_text(renderer);
+                                });
+                            }
+                        }
+                    }
+                    Rows::Script(rows) => {
+                        if let Some(&(index, component)) = rows.get(dialog.selected) {
                             let object = &scene.objects[index];
-                            (
-                                object.name.as_str(),
-                                object.components[renderer].id.as_str(),
-                            )
-                        },
-                    );
-                    let label = format!(
-                        "{object} · {} · {}",
-                        scene.materials[material]
-                            .name
-                            .as_deref()
-                            .unwrap_or(material),
-                        row.slot.label()
-                    );
-                    ui.add(egui::Label::new(&label).truncate())
-                        .on_hover_text(&label);
-                    if !renderer.is_empty() {
-                        ui.horizontal(|ui| {
-                            ui.label(Text::TextureUsesRenderer.plain());
-                            ui.add(egui::Label::new(renderer).selectable(true).truncate())
-                                .on_hover_text(renderer);
-                        });
+                            for (label, value) in [
+                                (Text::ObjectId, &object.id),
+                                (Text::ScriptUsesComponent, &object.components[component].id),
+                            ] {
+                                ui.horizontal(|ui| {
+                                    ui.label(label.plain());
+                                    ui.add(egui::Label::new(value).selectable(true).truncate())
+                                        .on_hover_text(value);
+                                });
+                            }
+                        }
                     }
                 }
                 ui.separator();
                 ui.horizontal_wrapped(|ui| {
                     reveal |= ui
                         .add_enabled(
-                            uses.rows
-                                .get(dialog.selected)
-                                .is_some_and(|row| row.renderer.is_some()),
+                            uses.rows.attachment(dialog.selected).is_some(),
                             egui::Button::new(Text::TextureUsesReveal.plain()),
                         )
                         .clicked();
                     let button = ui.button(Text::TextureUsesClose.plain());
-                    if dialog.initial_focus && uses.rows.is_empty() {
+                    if dialog.initial_focus && uses.rows.len() == 0 {
                         button.request_focus();
                     }
                     close |= button.clicked();
@@ -477,13 +601,11 @@ impl ComponentWorkspace {
             });
         dialog.initial_focus = false;
         if reveal {
-            if let Some((index, renderer)) =
-                uses.rows.get(dialog.selected).and_then(|row| row.renderer)
-            {
+            if let Some((index, component)) = uses.rows.attachment(dialog.selected) {
                 if !self.authored_edit_pending() {
                     let object = &self.session.scene().objects[index];
                     let id = object.id.clone();
-                    self.texture_use_reveal = Some((index, object.components[renderer].id.clone()));
+                    self.asset_use_reveal = Some((index, object.components[component].id.clone()));
                     self.select(Some(id));
                     self.edit_scene_during_play = true;
                     ctx.request_repaint();
@@ -492,7 +614,7 @@ impl ComponentWorkspace {
             }
         }
         if !close && !response.should_close() {
-            self.texture_uses_dialog = Some(dialog);
+            self.asset_uses_dialog = Some(dialog);
         }
     }
 }
@@ -503,6 +625,111 @@ mod tests {
     use rot_assets::{AssetStore, TextureRole};
     use rot_scene::component_scene::{ComponentSession, PrefabSource};
     use rot_scene::{OpaqueMaterial, Scene, Session};
+
+    #[test]
+    fn script_uses_keep_exact_attachments_across_rename_detach_and_undo() {
+        let folder = tempfile::tempdir().unwrap();
+        let root = folder.path();
+        std::fs::create_dir(root.join("Assets")).unwrap();
+        for file in ["Motor.lua", "Other.lua"] {
+            std::fs::write(root.join("Assets").join(file), "return nil").unwrap();
+        }
+        let (store, _) = AssetStore::open_project(root).unwrap();
+        let asset = |source: &str| {
+            store
+                .infos()
+                .find(|info| info.source == source)
+                .unwrap()
+                .id
+                .clone()
+        };
+        let motor = asset("Assets/Motor.lua");
+        let other = asset("Assets/Other.lua");
+
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("scene")).unwrap()).unwrap();
+        for index in 0..18 {
+            let owner = format!("machine-{index}");
+            let node = serde_json::from_value(json!({
+                "id":owner, "name":"Machine", "enabled":true, "transform":rot_scene::Transform::default(),
+                "components":[{
+                    "id":format!("script-{index}"), "type":"script", "enabled":true,
+                    "source_kind":"asset", "binding":{
+                        "object_id":owner,"enabled":true,"source_id":if index < 17 { &motor } else { &other },
+                        "properties":{}, "state_defaults":{}, "commands":{},
+                    }
+                }]
+            })).unwrap();
+            scene.objects.push(node);
+        }
+        let path = root.join("scene.json");
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.assets = Some(store);
+        let inspect = |editor: &mut ComponentWorkspace, args: Value| {
+            editor.ai_command("scene-session", "asset_inspect", &args)
+        };
+        let query = json!({"usage_asset_id":motor});
+        let first = inspect(&mut editor, query.clone());
+        assert_eq!(first["ok"], true, "{first}");
+        let page = &first["result"];
+        assert_eq!(page["asset_kind"], "script");
+        assert_eq!(page["asset_status"], "ready");
+        assert_eq!(page["total"], 17);
+        assert_eq!(page["next_offset"], "16");
+        assert_eq!(page["uses"][0]["object_name"], "Machine");
+        assert_eq!(page["uses"][1]["object_name"], "Machine");
+        assert_eq!(page["uses"][1]["object_id"], "machine-1");
+        assert_eq!(page["uses"][1]["component_id"], "script-1");
+        let mut next = json!({"usage_asset_id":motor, "offset":"16",
+            "expected_session_token":page["session_token"], "expected_revision":page["revision"],
+            "expected_asset_revision":page["asset_revision"]});
+        let cached = Arc::clone(editor.asset_uses.as_ref().unwrap());
+        let second = inspect(&mut editor, next.clone());
+        assert_eq!(second["result"]["uses"][0]["component_id"], "script-16");
+        assert_eq!(second["result"]["next_offset"], Value::Null);
+        assert!(Arc::ptr_eq(&cached, editor.asset_uses.as_ref().unwrap()));
+
+        editor
+            .assets
+            .as_mut()
+            .unwrap()
+            .rename(&motor, "Assets/Renamed.lua")
+            .unwrap();
+        assert_eq!(
+            inspect(&mut editor, next.clone())["error"]["code"],
+            "stale_asset_revision"
+        );
+        let renamed = inspect(&mut editor, query.clone());
+        assert_eq!(renamed["result"]["uses"], page["uses"]);
+        assert!(Arc::ptr_eq(&cached, editor.asset_uses.as_ref().unwrap()));
+        next["expected_asset_revision"] = renamed["result"]["asset_revision"].clone();
+
+        let removed = editor.ai_command(
+            "scene-session",
+            "scene_components_edit",
+            &json!({
+                "expected_session_token":"scene-session", "expected_revision":"0", "edits":[
+                    {"operation":"remove","object_id":"machine-1","component_id":"script-1"}
+                ]
+            }),
+        );
+        assert_eq!(removed["ok"], true, "{removed}");
+        assert_eq!(
+            inspect(&mut editor, next)["error"]["code"],
+            "stale_revision"
+        );
+        assert_eq!(inspect(&mut editor, query.clone())["result"]["total"], 16);
+        editor.command(super::super::Action::Undo);
+        assert_eq!(inspect(&mut editor, query.clone())["result"]["total"], 17);
+
+        std::fs::remove_file(root.join("Assets/Renamed.lua")).unwrap();
+        assert!(editor.assets.as_mut().unwrap().refresh(&motor).is_err());
+        let missing = inspect(&mut editor, query);
+        assert_eq!(missing["result"]["asset_status"], "missing");
+        assert_eq!(missing["result"]["total"], 17);
+    }
 
     #[test]
     fn exact_texture_pages_include_disabled_renderers_prefabs_and_unassigned_materials() {

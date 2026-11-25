@@ -55,8 +55,8 @@ mod component_hud;
 #[path = "component_material.rs"]
 pub(super) mod component_material;
 
-#[path = "component_texture_uses.rs"]
-mod component_texture_uses;
+#[path = "component_asset_uses.rs"]
+mod component_asset_uses;
 
 #[path = "component_sensor.rs"]
 pub(super) mod component_sensor;
@@ -323,9 +323,9 @@ pub(super) struct ComponentWorkspace {
     camera_authoring: component_camera::Authoring,
     spot_aim: Option<component_spot::AimPicker>,
     material_usage: component_material::Usage,
-    texture_uses: Option<component_texture_uses::TextureUses>,
-    texture_uses_dialog: Option<component_texture_uses::Dialog>,
-    texture_use_reveal: Option<(usize, String)>,
+    asset_uses: Option<std::sync::Arc<component_asset_uses::AssetUses>>,
+    asset_uses_dialog: Option<component_asset_uses::Dialog>,
+    asset_use_reveal: Option<(usize, String)>,
     edit_scene_during_play: bool,
     component_picker: component_inspector::ComponentPicker,
     error: Option<String>,
@@ -511,9 +511,9 @@ impl ComponentWorkspace {
             spot_aim: None,
             camera_authoring: Default::default(),
             material_usage: component_material::Usage::default(),
-            texture_uses: None,
-            texture_uses_dialog: None,
-            texture_use_reveal: None,
+            asset_uses: None,
+            asset_uses_dialog: None,
+            asset_use_reveal: None,
             edit_scene_during_play: false,
             component_picker: Default::default(),
             error: None,
@@ -2760,7 +2760,7 @@ impl ComponentWorkspace {
             || build_open
             || publishing
             || self.surface_edit_pending()
-            || self.texture_uses_dialog.is_some()
+            || self.asset_uses_dialog.is_some()
             || self.play_checks.open;
         #[cfg(target_os = "linux")]
         self.asset_import_frame(&ctx, blocked);
@@ -3148,7 +3148,7 @@ impl ComponentWorkspace {
                             .iter()
                             .position(|object| object.id == id)
                     })
-                    .or_else(|| self.texture_use_reveal.as_ref().map(|(index, _)| *index));
+                    .or_else(|| self.asset_use_reveal.as_ref().map(|(index, _)| *index));
                 if let Some(index) = reveal {
                     self.reveal_hierarchy_ancestors(index);
                     self.hierarchy_focus = Some((index, true));
@@ -3446,7 +3446,7 @@ impl ComponentWorkspace {
                 ui.heading(Text::ComponentInspector.plain());
                 if self.asset_browser.selected.is_some() {
                     let can_place = !blocked && !self.runtime.in_play_mode();
-                    if let Some(id) = self.asset_browser.selected_texture() {
+                    if let Some((id, kind)) = self.asset_browser.selected_usage_asset() {
                         if ui
                             .add_enabled(
                                 !blocked && !self.authored_edit_pending(),
@@ -3454,7 +3454,7 @@ impl ComponentWorkspace {
                             )
                             .clicked()
                         {
-                            self.begin_texture_uses(id.to_owned());
+                            self.begin_asset_uses(id.to_owned(), kind);
                         }
                     }
                     self.update_sound_audition();
@@ -3569,7 +3569,7 @@ impl ComponentWorkspace {
                                             allow_animation_preview: allow_spot_aim && !blocked,
 
                                             reveal: self
-                                                .texture_use_reveal
+                                                .asset_use_reveal
                                                 .as_ref()
                                                 .map(|(_, id)| id.as_str()),
                                         },
@@ -3676,8 +3676,8 @@ impl ComponentWorkspace {
         self.show_spot_aim(&ctx);
         self.show_box_fit(&ctx);
         self.show_unpack_prefab(&ctx);
-        self.texture_use_reveal = None;
-        self.show_texture_uses(&ctx);
+        self.asset_use_reveal = None;
+        self.show_asset_uses(&ctx);
         if let Some(document) = self.show_new_scene(&ctx) {
             return Some(document);
         }

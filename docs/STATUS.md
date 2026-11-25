@@ -113,6 +113,12 @@ rendered capture p50/p95 was 126.8/138.5 ms for one batch edit and
 129.0/144.8 ms and paste 127.4/141.3 ms. Each group had 12 samples.
 The native metric includes MCP and GPU readback.
 
+**Find Uses for Lua sources** lists exact Script attachments by stable ID,
+including missing registered sources. Keyboard Reveal opened the selected
+carrier under its folded parent. Approved Claude found both attachments
+after rename. In the 5,000-object release scene, MCP request-to-result
+p50/p95 was 1.7/63.4 ms cold and 1.2/62.6 ms for the next guarded page.
+
 **Scene overlays** keep Stats and the projection caption legible as the
 background changes. Plain Light screenshots covered bright and dark
 backgrounds, and keyboard and pointer controls kept their existing behavior.

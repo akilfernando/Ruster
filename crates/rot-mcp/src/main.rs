@@ -718,7 +718,7 @@ fn tools() -> Value {
             properties.insert("model_offset".into(), decimal.clone());
             properties.insert("prefab_offset".into(), decimal.clone());
             properties.insert("issue_offset".into(), decimal.clone());
-            properties.insert("usage_asset_id".into(), json!({"type":"string","description":"Exact v23 texture ID. Use offset for usage pages."}));
+            properties.insert("usage_asset_id".into(), json!({"type":"string","description":"Exact v23 texture or Lua script asset ID. Use offset for usage pages."}));
             properties.insert("expected_session_token".into(), json!({"type":"string"}));
             properties.insert("expected_revision".into(), decimal.clone());
             properties.insert("expected_asset_revision".into(), decimal.clone());

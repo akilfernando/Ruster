@@ -392,6 +392,12 @@ Use the arrow keys to select a result and press Enter, or choose
 **Reveal in Scene**, to select its object and open the exact renderer.
 Escape closes the list. Revealing an object does not change the scene.
 
+You can also select a registered Lua source in **Assets** and choose
+**Find Uses in Scene** to see which Scripts use it. The object and component
+IDs distinguish attachments on same-named objects. Choose **Reveal in Scene**
+to open the exact Script and expand any folded parent branches. The list
+still shows attachments when the registered source is missing.
+
 ## Set scene display in v23
 
 Open **Edit → Scene Display** with or without an object selected.

@@ -83,6 +83,9 @@ connected project.
   unassigned materials with null owner and renderer IDs. Known authored IDs
   still report uses if their source is missing. Different interpretations
   of a PNG have different IDs.
+  For a registered Lua source, the same query returns an `asset_kind`
+  of `script` and a row with `object_id`, `object_name`, and `component_id`
+  for every attachment.
   For the next page, pass the same `usage_asset_id`, `offset` from
   `next_offset`, and set `expected_session_token`, `expected_revision`,
   and `expected_asset_revision` from `session_token`, `revision`, and
