@@ -62,8 +62,33 @@ impl OutputFormat {
 }
 
 enum BuildArtifact {
-    Folder(PathBuf),
+    Folder(FolderArtifact),
     Archive(ArchiveArtifact),
+}
+
+struct FolderArtifact {
+    path: PathBuf,
+    directory: fs::File,
+}
+
+impl FolderArtifact {
+    fn path_to_open(&self) -> Result<&Path, Text> {
+        let expected = self
+            .directory
+            .metadata()
+            .map_err(|_| Text::BuildFolderUnavailable)?;
+        if self.path.symlink_metadata().is_ok_and(|now| {
+            now.is_dir() && now.dev() == expected.dev() && now.ino() == expected.ino()
+        }) && self
+            .path
+            .canonicalize()
+            .is_ok_and(|resolved| resolved == self.path)
+        {
+            Ok(&self.path)
+        } else {
+            Err(Text::BuildFolderUnavailable)
+        }
+    }
 }
 
 struct ArchiveArtifact {
@@ -283,7 +308,7 @@ impl BuildRequest {
         cancel: &AtomicBool,
     ) -> Result<PathBuf, PublishError> {
         match self.publish_output(destination, player, cancel, OutputFormat::Folder, || {})? {
-            BuildArtifact::Folder(application) => Ok(application),
+            BuildArtifact::Folder(folder) => Ok(folder.path.join(APPLICATION)),
             BuildArtifact::Archive(_) => unreachable!("folder request"),
         }
     }
@@ -439,10 +464,18 @@ impl BuildRequest {
                 bytes,
             }));
         }
+        // Keep the staged directory identity through rename, even if a later
+        // deletion and replacement would otherwise permit inode reuse.
+        let directory = fs::File::open(stage).map_err(|error| {
+            BuildFailureKind::BuildFailed.detail(format!("Reading staged build folder: {error}"))
+        })?;
         renameat_with(CWD, stage, CWD, &destination, RenameFlags::NOREPLACE)
             .map_err(publish_error)?;
         let _ = staging.keep();
-        Ok(BuildArtifact::Folder(destination.join(APPLICATION)))
+        Ok(BuildArtifact::Folder(FolderArtifact {
+            path: destination,
+            directory,
+        }))
     }
     fn stage_scene(
         self,
@@ -597,6 +630,8 @@ pub(super) struct BuildUi {
     path: Option<String>,
     format: OutputFormat,
     archive: Option<ArchiveArtifact>,
+    folder: Option<FolderArtifact>,
+    folder_open_error: Option<Text>,
     player_window: Option<(PlayerWindow, String)>,
     startup: Option<StartupSelection>,
     focus: bool,
@@ -709,6 +744,7 @@ impl BuildUi {
         self.focus = true;
         self.show_failure = false;
         self.details_open = false;
+        self.folder_open_error = None;
     }
 
     pub(super) fn is_open(&self) -> bool {
@@ -788,9 +824,17 @@ impl BuildUi {
         };
         let run = worker.run && !worker.cancel.load(Ordering::Relaxed);
         self.worker = None;
+        self.folder = None;
         let outcome = match result {
-            Ok(BuildArtifact::Folder(application)) if run => Self::launch(&application),
-            Ok(BuildArtifact::Folder(_)) => BuildOutcome::Built,
+            Ok(BuildArtifact::Folder(folder)) => {
+                let outcome = if run {
+                    Self::launch(&folder.path.join(APPLICATION))
+                } else {
+                    BuildOutcome::Built
+                };
+                self.folder = Some(folder);
+                outcome
+            }
             Ok(BuildArtifact::Archive(artifact)) => {
                 self.archive = Some(artifact);
                 BuildOutcome::Built
@@ -810,7 +854,26 @@ impl BuildUi {
         self.outcome = Some(outcome);
     }
 
-    pub(super) fn show_archive(&self, ui: &mut egui::Ui) -> Option<String> {
+    pub(super) fn show_artifact(&self, ui: &mut egui::Ui) -> Option<String> {
+        if self.folder.is_some() {
+            self.show_folder(ui).map(|error| error.plain().into())
+        } else {
+            self.show_archive(ui)
+        }
+    }
+
+    fn show_folder(&self, ui: &mut egui::Ui) -> Option<Text> {
+        let folder = self.folder.as_ref()?;
+        if !ui_kit::button(ui, Text::BuildOpenFolder.plain()).clicked() {
+            return None;
+        }
+        folder
+            .path_to_open()
+            .and_then(Self::open_in_file_manager)
+            .err()
+    }
+
+    fn show_archive(&self, ui: &mut egui::Ui) -> Option<String> {
         let archive = self.archive.as_ref()?;
         if !ui
             .button(Text::BuildShowArchive.plain())
@@ -830,14 +893,20 @@ impl BuildUi {
         {
             return Some(Text::BuildArchiveUnavailable.plain().into());
         }
-        match std::process::Command::new("xdg-open").arg(parent).spawn() {
+        Self::open_in_file_manager(parent)
+            .err()
+            .map(|error| error.plain().into())
+    }
+
+    fn open_in_file_manager(path: &Path) -> Result<(), Text> {
+        match std::process::Command::new("xdg-open").arg(path).spawn() {
             Ok(mut child) => {
                 std::thread::spawn(move || {
                     let _ = child.wait();
                 });
-                None
+                Ok(())
             }
-            Err(_) => Some(Text::AssetOpenFileManagerError.plain().into()),
+            Err(_) => Err(Text::AssetOpenFileManagerError),
         }
     }
 
@@ -911,6 +980,12 @@ impl BuildUi {
                 let failure = self.outcome.as_ref().filter(|_| self.show_failure);
                 if let Some(BuildOutcome::LaunchFailed(failure)) = failure {
                     Self::show_failure(ui, failure, &mut self.details_open);
+                    if let Some(error) = self.show_folder(ui) {
+                        self.folder_open_error = Some(error);
+                    }
+                    if let Some(error) = self.folder_open_error {
+                        ui.colored_label(editor_theme::colors(ui).error, error.plain());
+                    }
                     let button = ui
                         .with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
                             editor_theme::primary_button(ui, Text::CloseErrorDetails.plain())
@@ -1105,6 +1180,8 @@ impl BuildUi {
             self.show_failure = false;
             self.outcome = None;
             self.archive = None;
+            self.folder = None;
+            self.folder_open_error = None;
             let path = self.path.as_deref().expect("open build dialog").trim();
             match self.start(ctx, session, assets, PathBuf::from(path), run) {
                 Ok(worker) => {
@@ -2300,12 +2377,18 @@ f 1 2 3
             super::super::project_startup::Observation::read(root.path()),
         );
         assert_eq!(ui.inspect()["state"], "cancelled");
-        let application = root.path().join(APPLICATION);
+        let output_parent = root.path().canonicalize().unwrap().join("Build Exports");
+        let output = output_parent.join("Published Folder");
+        fs::create_dir_all(&output).unwrap();
+        let application = output.join(APPLICATION);
         fs::write(&application, b"#!/no-such-rot-build-interpreter\n").unwrap();
         fs::set_permissions(&application, fs::Permissions::from_mode(0o755)).unwrap();
         deliver(
             &mut ui,
-            Ok(BuildArtifact::Folder(application.clone())),
+            Ok(BuildArtifact::Folder(FolderArtifact {
+                path: output.clone(),
+                directory: fs::File::open(&output).unwrap(),
+            })),
             false,
         );
         assert!(ui.is_open());
@@ -2325,5 +2408,27 @@ f 1 2 3
                 "recovery":Text::BuildRunManually.plain(),
             }})
         );
+        let folder = ui
+            .folder
+            .as_ref()
+            .expect("published output survives launch failure");
+        assert_eq!(folder.path_to_open(), Ok(output.as_path()));
+        let moved_folder = output_parent.join("Moved Folder");
+        fs::rename(&output, &moved_folder).unwrap();
+        assert_eq!(folder.path_to_open(), Err(Text::BuildFolderUnavailable));
+        std::os::unix::fs::symlink(&moved_folder, &output).unwrap();
+        assert_eq!(folder.path_to_open(), Err(Text::BuildFolderUnavailable));
+        fs::remove_file(&output).unwrap();
+        fs::create_dir(&output).unwrap();
+        assert_eq!(folder.path_to_open(), Err(Text::BuildFolderUnavailable));
+
+        fs::remove_dir(&output).unwrap();
+        fs::rename(&moved_folder, &output).unwrap();
+        let moved_parent = root.path().join("Redirected Parent");
+        fs::rename(&output_parent, &moved_parent).unwrap();
+        std::os::unix::fs::symlink(&moved_parent, &output_parent).unwrap();
+        assert_eq!(folder.path_to_open(), Err(Text::BuildFolderUnavailable));
+        deliver(&mut ui, Err(PublishError::Cancelled), true);
+        assert!(ui.folder.is_none());
     }
 }

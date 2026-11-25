@@ -2999,7 +2999,7 @@ impl ComponentWorkspace {
                         ui.add(egui::Label::new(crate::strings::tr(ui.ctx(), status)).truncate());
                         #[cfg(target_os = "linux")]
                         {
-                            reveal_error = self.build.show_archive(ui);
+                            reveal_error = self.build.show_artifact(ui);
                         }
                     });
                 } else if light_budget_exceeded {

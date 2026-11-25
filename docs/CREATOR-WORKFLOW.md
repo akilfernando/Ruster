@@ -924,6 +924,10 @@ Renderers, use `scene_components_edit` with the component ID.
 On Linux, save the v23 scene, then use **File → Build…**. Choose a new
 folder and select **Build** or **Build and Run**. The folder contains an
 `application` executable, the saved v23 scene, and its project assets.
+Choose **Open Build Folder** in the build status to open that output in
+your file manager. The action is also available when the folder publishes
+successfully and the player fails to launch.
+
 To share one file, select **Linux archive (.tar.gz)** under **Output
 Format**. Enter a new **Archive File** path and choose **Build**. After
 compression, **Show Archive** opens its containing folder. The archive

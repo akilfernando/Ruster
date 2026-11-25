@@ -263,6 +263,8 @@ editor_text! {
     BuildArchiveFormat => "Linux archive (.tar.gz)",
     BuildArchiveFile => "Archive File",
     BuildCompressingArchive => "Compressing Archive…",
+    BuildOpenFolder => "Open Build Folder",
+    BuildFolderUnavailable => "The build folder moved or changed. Build again to a new folder.",
     BuildShowArchive => "Show Archive",
     BuildArchiveUnavailable => "The archive is missing or has moved.",
     ComponentBuild => "Build",

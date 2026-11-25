@@ -675,7 +675,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-33 Play Checks for v23 Hierarchies | Run saved input and local translation checks on compatible v23 assemblies and imported animation. | done · 2026-11-25 · An imported sliding gate under a translated parent reached local X=3 after a saved button sequence. Native reopen, approved Claude and ordinary Play agreed. A changed clip made the old check stale. |
 | C-34 Camera-Only GLB Rigs | Import a static camera rig and choose an imported lens to shoot an existing v23 set. | done · 2026-11-25 · Native and approved MCP placed both lenses from a JSON-only Blender rig. Camera activation, Undo and a malformed reimport kept the expected camera. Save, reopen and relocated Vulkan matched the orthographic framing. |
 | C-35 Organize Play Checks | Open on clear results and keep check editing in its own view with stable controls. | done · 2026-11-25 · Results shows one summary and expected/actual values for failures. Edit Check retains drafts and keeps the footer visible at frame 120. Native keyboard checks and Terra review covered the dialog down to 960 × 640. |
-| C-36 Open Build Folder | Open the actual published Linux folder from the editor's build status. | in progress — Codex Sol, 2026-11-25 |
+| C-36 Open Build Folder | Open the actual published Linux folder from the editor's build status. | done · 2026-11-25 · Native Tab and Enter sent the exact custom output path to a scoped file-manager opener. Folder, launch-failed and archive flows passed. A relocated build ran headlessly and a redirected path was refused. |
 
 ### C-04 implementation brief
 
