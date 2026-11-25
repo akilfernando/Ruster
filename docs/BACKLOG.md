@@ -695,7 +695,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-53 Compact Indexed PNG | Use opaque 1-, 2- and 4-bit indexed PNGs as base-color textures. | done · 2026-11-25 · Odd-width rows matched RGB at every mip. An indexed sign was assigned in the editor and inspected by approved Claude. A malformed refresh kept the accepted texture. Reopen and relocated Vulkan matched the RGB reference. |
 | C-54 Create and Bind Box Sensor | Create a stationary Box Sensor for a Kinematic Sphere Script from its named binding dialog. | done · 2026-11-25 · Native and approved Claude created and bound a unit sensor in one Undo. Cancel and Redo preserved exact identities. In editor and relocated playback, the trolley entered at tick 5, emitted one cue, and exited at tick 12. |
 | C-55 Inspector Validation Feedback | Dismiss draft errors when their Inspector edit is restored or canceled. | done · 2026-11-25 · A rejected blank name kept the committed name. Retyping the saved name or pressing Escape cleared the warning without another Apply or Undo entry. Separate scene errors stayed visible. |
-| C-56 Frame Lighting Rigs | Frame visible lights and meshless v23 rigs from the Hierarchy or approved MCP. | in progress — Codex Sol, 2026-11-25 |
+| C-56 Frame Lighting Rigs | Frame visible lights and meshless v23 rigs from the Hierarchy or approved MCP. | done · 2026-11-25 · Native Frame Selected fit a folded Blender rig and a single light at their exact pivots. Approved Claude framed the same rig from Top. Hiding a light narrowed the fit and changing range left it unchanged. |
 
 ### C-04 implementation brief
 

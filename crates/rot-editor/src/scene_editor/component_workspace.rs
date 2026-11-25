@@ -2142,9 +2142,11 @@ impl ComponentWorkspace {
         let aspect = self.viewport_aspect.ok_or("Open the Scene view first.")?;
         let scene = self.session.scene();
         let mut ids = HashSet::new();
+        let mut lights = Vec::new();
         let mut root_depth = None;
         for &(index, depth) in &self.rows {
-            let id = scene.objects[index].id.as_str();
+            let object = &scene.objects[index];
+            let id = object.id.as_str();
             if root_depth.is_some_and(|root| depth <= root) {
                 root_depth = None;
             }
@@ -2155,6 +2157,10 @@ impl ComponentWorkspace {
             }
             if root_depth.is_some() {
                 ids.insert(id);
+                lights.extend(object.components.iter().filter_map(|component| {
+                    (component.enabled && matches!(component.kind, Component::Light { .. }))
+                        .then_some(component.id.as_str())
+                }));
             }
         }
         if ids.is_empty() {
@@ -2165,15 +2171,16 @@ impl ComponentWorkspace {
             .map(|preview| &preview.projection)
             .or_else(|| self.preview.as_ref().ok())
             .and_then(|preview| {
-                preview.framed_camera(
+                preview.framed_camera_with_lights(
                     &ids,
+                    lights.into_iter(),
                     &self.meshes,
                     aspect,
                     self.navigation.camera,
                     direction,
                 )
             })
-            .ok_or("The selected hierarchy has no visible geometry to frame.")?;
+            .ok_or("The selected hierarchy has no visible geometry or lights to frame.")?;
         self.navigation.camera = Some(camera);
         self.navigation.clear_fit_error = true;
         Ok(camera)
@@ -4645,6 +4652,150 @@ mod tests {
         assert_eq!(editor.session.revision(), 0);
         assert!(!editor.session.is_dirty());
         assert!(matches!(editor.session.undo(0), Err(SceneError::NoUndo)));
+    }
+
+    #[test]
+    fn frame_light_rig_uses_only_projected_pivots_and_selected_visible_meshes() {
+        let project = tempfile::tempdir().unwrap();
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("rig")).unwrap()).unwrap();
+        let object =
+            |id: &str, parent: Option<&str>, translation, enabled, components| ObjectNode {
+                id: id.into(),
+                name: id.into(),
+                parent: parent.map(str::to_owned),
+                enabled,
+                transform: Transform {
+                    translation,
+                    ..Default::default()
+                },
+                components,
+            };
+        let light = |id: &str, range, enabled| ComponentInstance {
+            id: id.into(),
+            enabled,
+            kind: Component::Light {
+                color: [1.; 3],
+                intensity: 0.,
+                kind: rot_scene::LightKind::Point { range },
+            },
+        };
+        scene.objects = vec![
+            object("rig", None, [10., 3., 0.], true, vec![]),
+            object(
+                "near",
+                Some("rig"),
+                [-3., 1., 0.],
+                true,
+                vec![light("near-light", 1., true)],
+            ),
+            object(
+                "far",
+                Some("rig"),
+                [5., -1., 2.],
+                true,
+                vec![light("far-light", 600., true)],
+            ),
+            object(
+                "hidden",
+                Some("rig"),
+                [100., 25., -50.],
+                true,
+                vec![light("hidden-light", 1., true)],
+            ),
+            object(
+                "disabled-branch",
+                Some("rig"),
+                [200., 75., -50.],
+                false,
+                vec![],
+            ),
+            object(
+                "disabled-leaf",
+                Some("disabled-branch"),
+                [200., 75., -50.],
+                true,
+                vec![light("branch-light", 1., true)],
+            ),
+            object(
+                "disabled-component",
+                Some("rig"),
+                [500., 25., -50.],
+                true,
+                vec![light("disabled-light", 1., false)],
+            ),
+            // An unrelated component ID can equal the selected owner ID.
+            object(
+                "unrelated",
+                None,
+                [900., 0., 0.],
+                true,
+                vec![light("rig", 1., true)],
+            ),
+            object(
+                "mesh",
+                None,
+                [10., 3., 8.],
+                true,
+                vec![ComponentInstance {
+                    id: "mesh-draw".into(),
+                    enabled: true,
+                    kind: Component::MeshRenderer {
+                        geometry: Geometry::Cube,
+                        tint: [1.; 4],
+                        material: None,
+                    },
+                }],
+            ),
+            object("empty", None, [0.; 3], true, vec![]),
+        ];
+        let path = project.path().join("scene.json");
+        let mut editor =
+            ComponentWorkspace::new(path, ComponentSession::new(scene.clone()).unwrap());
+        editor.scene_view.hidden.insert("hidden".into());
+        editor.refresh_view();
+        editor.collapsed_objects.insert("rig".into());
+        editor.refresh_disclosure();
+        assert!(editor.visible_row_of(1).is_none());
+        editor.viewport_aspect = Some(0.5);
+
+        let top = editor
+            .frame_objects(Some("near"), Some(rot_render::ViewPreset::Top))
+            .unwrap();
+        assert_eq!(top.target, [7., 4., 0.]);
+        assert_eq!(top.distance, 3.);
+        assert!(top.orthographic);
+        let rig = editor.frame_objects(Some("rig"), None).unwrap();
+        assert_eq!(rig.target, [11., 3., 1.]);
+        assert!((rig.distance - 3. * 72_f32.sqrt()).abs() < 1e-5);
+        assert_eq!(
+            (rig.yaw, rig.pitch, rig.orthographic),
+            (top.yaw, top.pitch, top.orthographic)
+        );
+        assert!(rig.matrices(0.5).is_some());
+
+        let mut far = editor.session.scene().objects[2].clone();
+        let Component::Light { kind, .. } = &mut far.components[0].kind else {
+            unreachable!()
+        };
+        *kind = rot_scene::LightKind::Point { range: 0.5 };
+        editor.session.put_object(0, far).unwrap();
+        editor.refresh();
+        assert_eq!(editor.frame_objects(Some("rig"), None), Ok(rig));
+
+        editor.selection = ["rig".into(), "mesh".into()].into();
+        let mixed = editor.frame_objects(None, None).unwrap();
+        assert_eq!(mixed.target, [11., 3., 4.25]);
+        assert!((mixed.distance - 3. * (64_f32 + 4. + 8.5 * 8.5).sqrt()).abs() < 1e-5);
+        for id in ["hidden", "disabled-leaf", "disabled-component", "empty"] {
+            assert!(editor.frame_objects(Some(id), None).is_err());
+            assert_eq!(editor.navigation.camera, Some(mixed));
+        }
+        editor.viewport_aspect = Some(f32::NAN);
+        assert!(editor.frame_objects(Some("rig"), None).is_err());
+        assert_eq!(editor.navigation.camera, Some(mixed));
+        assert_eq!(editor.session.revision(), 1);
+        assert!(editor.collapsed_objects.contains("rig"));
     }
 
     #[test]

@@ -856,6 +856,14 @@ impl Camera {
         meshes: &BTreeMap<String, Arc<rot_assets::Mesh>>,
         aspect: f32,
     ) -> Option<Self> {
+        Self::fit_objects_with_points(objects, std::iter::empty(), meshes, aspect)
+    }
+    fn fit_objects_with_points<'a>(
+        objects: impl Iterator<Item = (&'a Object, Mat4)>,
+        points: impl Iterator<Item = DVec3>,
+        meshes: &BTreeMap<String, Arc<rot_assets::Mesh>>,
+        aspect: f32,
+    ) -> Option<Self> {
         if !aspect.is_finite() || aspect <= 0.0 {
             return None;
         }
@@ -888,6 +896,14 @@ impl Camera {
                     }
                 }
             }
+        }
+        for point in points {
+            if !point.is_finite() {
+                return None;
+            }
+            count += 1;
+            low = low.min(point);
+            high = high.max(point);
         }
         let (target, distance) = if count == 0 {
             (DVec3::ZERO, 8.0)
@@ -5079,6 +5095,20 @@ mod tests {
                     expected
                 );
             }
+        }
+    }
+
+    #[test]
+    fn point_fit_refuses_nonfinite_or_out_of_range_pivots() {
+        let meshes = BTreeMap::new();
+        for point in [DVec3::splat(f64::NAN), DVec3::splat(1.0e8)] {
+            assert!(Camera::fit_objects_with_points(
+                std::iter::empty(),
+                std::iter::once(point),
+                &meshes,
+                1.0
+            )
+            .is_none());
         }
     }
 

@@ -401,6 +401,12 @@ saved values again or is canceled. Native editing verified that restoring
 a blank name left the revision unchanged. A valid later rename applied
 once and shared Undo. Separate scene errors keep their own status.
 
+**Frame Selected** now includes visible lamp pivots in v23. The native
+Hierarchy command framed a folded meshless Blender rig and one lamp
+without changing the view orientation. Approved Claude framed the rig
+from Top. Hiding a lamp narrowed the fit, and increasing its range left
+the camera unchanged.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added

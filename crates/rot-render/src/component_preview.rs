@@ -193,13 +193,34 @@ impl ComponentPreview {
         current: Option<CameraState>,
         direction: Option<ViewPreset>,
     ) -> Option<CameraState> {
-        let mut matches = self
+        self.framed_camera_with_lights(ids, std::iter::empty(), meshes, aspect, current, direction)
+    }
+
+    /// Fit visible mesh owners and projected Light component IDs in their separate
+    /// namespaces. Lights contribute their current world pivots.
+    pub fn framed_camera_with_lights<'a>(
+        &self,
+        mesh_owner_ids: &std::collections::HashSet<&str>,
+        light_component_ids: impl Iterator<Item = &'a str>,
+        meshes: &BTreeMap<String, Arc<rot_assets::Mesh>>,
+        aspect: f32,
+        current: Option<CameraState>,
+        direction: Option<ViewPreset>,
+    ) -> Option<CameraState> {
+        let mut objects = self
             .draw_scene()
             .objects()
-            .filter(|(object, _)| ids.contains(object.id.as_str()))
+            .filter(|(object, _)| mesh_owner_ids.contains(object.id.as_str()))
             .peekable();
-        matches.peek()?;
-        let fit = Camera::fit_objects(matches, meshes, aspect)?;
+        let mut points = light_component_ids
+            .filter_map(|id| self.scene.lighting.light(id))
+            .filter(|light| light.enabled)
+            .map(|light| DVec3::from(light.transform.translation.map(f64::from)))
+            .peekable();
+        if objects.peek().is_none() && points.peek().is_none() {
+            return None;
+        }
+        let fit = Camera::fit_objects_with_points(objects, points, meshes, aspect)?;
         let mut camera = current.map_or(fit, Camera::from_state);
         camera.frame(fit);
         if let Some(direction) = direction {
