@@ -430,6 +430,11 @@ its Type filter. Native pointer and keyboard checks kept the selected
 sound in the Inspector, including when it came from another folder.
 Focus returned to the search field and the scene stayed unchanged.
 
+**Escape in Project Scenes** clears a nonempty focused search before
+closing the picker. Native checks recovered both saved rows, canceled
+without changing scenes, and then opened the other scene from the
+restored results. Clearing reused the cached listing.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added

@@ -162,8 +162,22 @@ impl Picker {
     }
 
     pub fn show(&mut self, ctx: &egui::Context, dirty: bool) -> Option<Outcome> {
+        let search_id = egui::Id::unique("project-scenes-search");
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-            return Some(Outcome::Cancel);
+            let search_owns_escape = self.loading.is_none()
+                && self.chosen.is_none()
+                && !self.search.is_empty()
+                && ctx.memory(|memory| match memory.focused() {
+                    Some(id) => id == search_id,
+                    // egui can release text focus while processing this Escape.
+                    None => memory.had_focus_last_frame(search_id),
+                });
+            if !search_owns_escape {
+                return Some(Outcome::Cancel);
+            }
+            self.search.clear();
+            self.search();
+            self.search_focus = true;
         }
         if std::mem::take(&mut self.initial_scan) {
             self.refresh(ctx);
@@ -245,7 +259,6 @@ impl Picker {
                         }
                     });
                 } else {
-                    let search_id = ui.make_persistent_id("search-scenes");
                     let (up, down) = if self.loading.is_none()
                         && ui.memory(|memory| memory.has_focus(search_id))
                     {
@@ -368,5 +381,86 @@ impl Picker {
     pub fn problem(&mut self, error: String) {
         self.error = Some(error);
         self.search_focus = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_scenes_escape_restores_cached_rows_and_search_focus_before_cancelling() {
+        let project = tempfile::tempdir().unwrap();
+        let active = project.path().join("current.scene.json");
+        for file in [
+            "Harbor.scene.json",
+            "Harbor Night.scene.json",
+            "Rail.scene.json",
+        ] {
+            std::fs::write(project.path().join(file), "{}").unwrap();
+        }
+        let directory = ProjectDirectory::capture(project.path()).unwrap();
+        // Load the listing once. Subsequent events cannot scan this fixture.
+        let rows = directory
+            .scene_rows("current.scene.json", &AtomicBool::new(false))
+            .unwrap();
+        let mut picker = Picker::new(Purpose::Open, Err("Cached listing only".into()), &active);
+        picker.rows = rows;
+        picker.initial_scan = false;
+        picker.search();
+        assert_eq!(picker.matches.len(), 3);
+
+        let ctx = egui::Context::default();
+        let frame = |picker: &mut Picker, events| {
+            let mut outcome = None;
+            ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    outcome = picker.show(ui.ctx(), false);
+                },
+            )
+            .textures_delta
+            .clear();
+            outcome
+        };
+        let key = |key| {
+            [true, false]
+                .into_iter()
+                .map(|pressed| egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .collect()
+        };
+
+        assert!(frame(&mut picker, vec![]).is_none());
+        let search_focus = ctx.memory(|memory| memory.focused()).unwrap();
+        assert!(frame(&mut picker, vec![egui::Event::Text("Harbor".into())]).is_none());
+        assert_eq!(picker.matches.len(), 2);
+        assert!(frame(&mut picker, key(egui::Key::ArrowDown)).is_none());
+        assert_eq!(picker.selected, 1);
+        assert!(frame(&mut picker, key(egui::Key::ArrowUp)).is_none());
+        assert_eq!(picker.selected, 0);
+        assert!(frame(&mut picker, key(egui::Key::Enter)).is_none());
+        assert!(picker.loading.is_none());
+        assert!(frame(&mut picker, vec![]).is_none());
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(search_focus));
+
+        assert!(frame(&mut picker, key(egui::Key::Escape)).is_none());
+        assert!(picker.search.is_empty());
+        assert_eq!(picker.matches.len(), 3);
+        assert!(picker.scan.is_none());
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(search_focus));
+        assert!(matches!(
+            frame(&mut picker, key(egui::Key::Escape)),
+            Some(Outcome::Cancel)
+        ));
     }
 }

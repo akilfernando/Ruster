@@ -164,7 +164,9 @@ same title and window.
 Choose **File → Open Scene…**, press **Ctrl+O**, or run **Open Scene** from the
 command palette. **Project Scenes** lists saved scenes in the current project
 folder and marks the open scene, startup scene and Start destination. Search
-by name, use the arrow keys and Enter, or double-click a row. **Browse…**
+by name, use the arrow keys and Enter, or double-click a row. When search
+has focus, Escape clears a query first. Press Escape again to close
+**Project Scenes**. **Browse…**
 opens a scene by its explicit path, including one outside the project.
 Refresh the list after changing files outside the editor. Unsaved work still
 offers **Save and Open**, **Discard and Open**, and **Cancel**.
