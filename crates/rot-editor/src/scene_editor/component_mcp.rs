@@ -1445,6 +1445,9 @@ impl ComponentWorkspace {
                 response["number_property_guidance"] = json!(
                     r#"Read properties["speed"] in Lua. Use scene_components_edit operation set_script_number with exact object_id, component_id, name and finite numeric value. Use value:null to remove."#
                 );
+                response["boolean_property_guidance"] = json!(
+                    r#"Read properties["auto_start"] in Lua. Use scene_components_edit operation set_script_bool with exact object_id, component_id, name and Boolean value. Use value:null to remove. False is an explicit value."#
+                );
                 response["movement_guidance"] = json!("An exact replace can set component.movement to kinematic_sphere or ordinary (omission keeps it). Kinematic Sphere needs a flat scene, one enabled mover, an enabled uniformly scaled Blocker Sphere, and stationary blockers. Call host.move_and_slide({dx,dy,dz}) once per Step, use suggested_translation, and return {transform=object}.");
                 response["sound_cue_guidance"] = json!(
                     r#"File-backed Object Lua calls host.play_sound("cue-name"). Use binding.properties sound_ref value {asset_id,gain}. For positional add playback:{type:"positional",range:10} and activate a Transform Game Camera. Omit playback for 2D. Find WAVs in asset_inspect and pin expected_asset_revision."#
@@ -1808,6 +1811,12 @@ enum ComponentEdit {
         name: String,
         value: Value,
     },
+    SetScriptBool {
+        object_id: String,
+        component_id: String,
+        name: String,
+        value: Value,
+    },
     SetEnabled {
         object_id: String,
         component_id: String,
@@ -1825,6 +1834,7 @@ impl ComponentEdit {
             Self::Add { object_id, .. }
             | Self::Replace { object_id, .. }
             | Self::SetScriptNumber { object_id, .. }
+            | Self::SetScriptBool { object_id, .. }
             | Self::SetEnabled { object_id, .. }
             | Self::Remove { object_id, .. } => object_id,
         };
@@ -1889,8 +1899,34 @@ impl ComponentEdit {
                     }
                     _ => return Err(invalid_component_arguments()),
                 };
-                super::component_number::edit(object, &component_id, &name, number)
-                    .map_err(|message| ("invalid_arguments", message))?;
+                super::component_property::edit(
+                    object,
+                    &component_id,
+                    &name,
+                    super::component_property::Kind::Number,
+                    number.map(rot_scene::PropertyValue::Number),
+                )
+                .map_err(|message| ("invalid_arguments", message))?;
+            }
+            Self::SetScriptBool {
+                component_id,
+                name,
+                value,
+                ..
+            } => {
+                let value = match value {
+                    Value::Null => None,
+                    Value::Bool(value) => Some(rot_scene::PropertyValue::Bool(value)),
+                    _ => return Err(invalid_component_arguments()),
+                };
+                super::component_property::edit(
+                    object,
+                    &component_id,
+                    &name,
+                    super::component_property::Kind::Bool,
+                    value,
+                )
+                .map_err(|message| ("invalid_arguments", message))?;
             }
             Self::SetEnabled {
                 component_id,
@@ -2058,6 +2094,81 @@ mod tests {
         let collision = editor.ai_command("session", "scene_components_edit", &request);
         assert_eq!(collision["ok"], false);
         assert_eq!(editor.session.revision(), 1);
+        editor.command(Action::Undo);
+        assert_eq!(editor.session.scene(), &scene);
+    }
+
+    #[test]
+    fn script_boolean_edits_preserve_explicit_false_and_share_history() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        for (index, object) in scene.objects.iter_mut().take(2).enumerate() {
+            object.components.push(
+                serde_json::from_value(json!({
+                    "id":format!("machine-script-{index}"), "enabled":true,"type":"script","source_kind":"asset",
+                    "binding":{"object_id":object.id,"enabled":true,"source_id":"shared-drive",
+                        "properties":{
+                            "auto_start":{"type":"bool","value":true},
+                            "speed":{"type":"number","value":index + 1},
+                            "horn":{"type":"sound_ref","value":{"asset_id":"horn-wav","gain":0.5}}
+                        }}
+                }))
+                .unwrap(),
+            );
+        }
+        scene.save_new(&path).unwrap();
+        let id = &scene.objects[0].id;
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let mut request = json!({
+            "expected_session_token":"session","expected_revision":"0","edits":[
+                {"operation":"set_script_bool","object_id":id,"component_id":"machine-script-0",
+                    "name":"auto_start","value":false}
+            ]
+        });
+        let edited = editor.ai_command("session", "scene_components_edit", &request);
+        assert_eq!(edited["result"]["revision"], "1", "{edited}");
+        let properties = |editor: &ComponentWorkspace| {
+            editor
+                .inspect_components(&json!({"object_id":id,"component_id":"machine-script-0"}))
+                .unwrap()["component"]["binding"]["properties"]
+                .clone()
+        };
+        let changed = properties(&editor);
+        assert_eq!(
+            changed,
+            json!({
+                "auto_start":{"type":"bool","value":false},
+                "speed":{"type":"number","value":1.0},
+                "horn":{"type":"sound_ref","value":{"asset_id":"horn-wav","gain":0.5}}
+            })
+        );
+        assert_eq!(editor.session.scene().objects[1], scene.objects[1]);
+
+        let stale = editor.ai_command("session", "scene_components_edit", &request);
+        assert_eq!(stale["error"]["code"], "stale_revision");
+        request["expected_revision"] = json!("1");
+        for (name, value) in [("speed", json!(true)), ("horn", Value::Null)] {
+            request["edits"][0]["name"] = json!(name);
+            request["edits"][0]["value"] = value;
+            let collision = editor.ai_command("session", "scene_components_edit", &request);
+            assert_eq!(collision["error"]["code"], "invalid_arguments");
+        }
+        assert_eq!(editor.session.revision(), 1);
+        assert_eq!(properties(&editor), changed);
+
+        request["edits"][0]["name"] = json!("auto_start");
+        request["edits"][0]["value"] = Value::Null;
+        let removed = editor.ai_command("session", "scene_components_edit", &request);
+        assert_eq!(removed["result"]["revision"], "2", "{removed}");
+        assert!(properties(&editor).get("auto_start").is_none());
+        editor.command(Action::Undo);
+        assert_eq!(properties(&editor), changed);
+        assert!(editor.save());
+        let reopened =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        assert_eq!(properties(&reopened), changed);
         editor.command(Action::Undo);
         assert_eq!(editor.session.scene(), &scene);
     }

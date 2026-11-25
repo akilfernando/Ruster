@@ -906,6 +906,7 @@ fn listed() -> Value {
                 );
             }
             properties.insert("operation".into(), json!({"enum":operations}));
+            properties.insert("value".into(), json!({"type":["number","boolean","null"]}));
             *edits = object_schema(json!(properties), vec!["operation", "object_id"]);
         }
         compact(schema);
@@ -1999,6 +2000,14 @@ mod tests {
             .as_array()
             .unwrap()
             .contains(&json!("fit_box_to_mesh")));
+        assert!(edit_fields["operation"]["enum"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("set_script_bool")));
+        assert_eq!(
+            edit_fields["value"]["type"],
+            json!(["number", "boolean", "null"])
+        );
         assert_eq!(edit_fields["renderer_component_id"]["type"], "string");
         let required = schema["required"].as_array().unwrap();
         for (guard, _) in SCENE_GUARDS {

@@ -64,8 +64,8 @@ pub(super) mod component_sensor;
 #[path = "component_sound_audition.rs"]
 mod component_sound_audition;
 
-#[path = "component_number.rs"]
-pub(super) mod component_number;
+#[path = "component_property.rs"]
+pub(super) mod component_property;
 
 #[path = "component_sound.rs"]
 pub(super) mod component_sound;
@@ -314,7 +314,7 @@ pub(super) struct ComponentWorkspace {
     animator_draft_revisions: BTreeMap<String, u64>,
     multi_draft: Option<MultiInspector>,
     material_draft: Option<component_material::Draft>,
-    script_number: Option<component_number::Draft>,
+    script_property: Option<component_property::Draft>,
     sound_cue: Option<component_sound::Draft>,
     sound_audition: component_sound_audition::SoundAudition,
     sensor_binding: Option<component_sensor::Draft>,
@@ -501,7 +501,7 @@ impl ComponentWorkspace {
             animator_draft_revisions: BTreeMap::new(),
             multi_draft: None,
             material_draft: None,
-            script_number: None,
+            script_property: None,
             sound_cue: None,
             sound_audition: Default::default(),
             sensor_binding: None,
@@ -960,7 +960,7 @@ impl ComponentWorkspace {
     pub(super) fn surface_edit_pending(&self) -> bool {
         self.material_draft.is_some()
             || self.game_hud.is_some()
-            || self.script_number.is_some()
+            || self.script_property.is_some()
             || self.sound_cue.is_some()
             || self.sensor_binding.is_some()
             || self.display_draft.is_some()
@@ -2697,7 +2697,7 @@ impl ComponentWorkspace {
             || self.defer_display_close(&ctx)
             || self.defer_game_hud_close(&ctx)
             || self.defer_camera_close(&ctx)
-            || self.defer_script_number_close(&ctx)
+            || self.defer_script_property_close(&ctx)
             || ((self.input_actions.pending() || self.player_pending())
                 && ctx.input(|input| input.viewport().close_requested()));
         if surface_close_pending && (self.input_actions.pending() || self.player_pending()) {
@@ -3563,8 +3563,8 @@ impl ComponentWorkspace {
                                     if let Some(request) = edits.sensor_binding {
                                         self.begin_sensor_binding(request);
                                     }
-                                    if let Some(request) = edits.script_number {
-                                        self.begin_script_number(request);
+                                    if let Some(request) = edits.script_property {
+                                        self.begin_script_property(request);
                                     }
                                     if let Some(request) = edits.sound_cue {
                                         self.begin_sound_cue(request);
@@ -3633,7 +3633,7 @@ impl ComponentWorkspace {
         self.show_project_settings(&ctx);
         self.show_material_draft(&ctx);
         self.show_sound_cue(&ctx);
-        self.show_script_number(&ctx);
+        self.show_script_property(&ctx);
         self.show_sensor_binding(&ctx);
         self.update_sound_audition();
         self.show_game_hud(&ctx);

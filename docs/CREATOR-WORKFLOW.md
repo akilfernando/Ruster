@@ -1143,6 +1143,17 @@ Attach the same Lua file to another object and set its own value there.
 The change is one Undo step and the next Play uses the latest values. Add a
 fallback in Lua if you plan to run the script without the property.
 
+For a per-object switch, choose **Add Boolean Property** under **Boolean
+Properties**. Name it `auto_start`, set the **Value** checkbox, and choose
+**Apply**. Lua reads a checked box as `true`, an unchecked box as `false`,
+and a removed property as `nil`. Use an explicit nil check if your default
+should be true.
+
+```lua
+local auto_start = properties["auto_start"]
+if auto_start == nil then auto_start = true end
+```
+
 ### Copy a local Transform
 
 Select one object and open **Local Transform** in its Inspector. Choose

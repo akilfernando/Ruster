@@ -35,6 +35,7 @@ pub(super) fn list() -> [Value; 2] {
         object_schema(json!({"operation":{"const":"aim_spot_at_object"},"object_id":id,"component_id":id,"target_object_id":id}),vec!["operation","object_id","component_id","target_object_id"]),
         object_schema(json!({"operation":{"const":"fit_box_to_mesh"},"object_id":id,"component_id":id,"renderer_component_id":id}),vec!["operation","object_id","component_id"]),
         object_schema(json!({"operation":{"const":"set_script_number"},"object_id":id,"component_id":id,"name":id,"value":{"type":["number","null"]}}),vec!["operation","object_id","component_id","name","value"]),
+        object_schema(json!({"operation":{"const":"set_script_bool"},"object_id":id,"component_id":id,"name":id,"value":{"type":["boolean","null"]}}),vec!["operation","object_id","component_id","name","value"]),
         object_schema(json!({"operation":{"const":"set_enabled"},"object_id":id,"component_id":id,"enabled":{"type":"boolean"}}),vec!["operation","object_id","component_id","enabled"])
     ]});
     [
@@ -122,7 +123,7 @@ pub(super) fn valid(name: &str, args: &Value) -> bool {
                                         && id(&edit["component_id"])
                                         && edit.get("renderer_component_id").is_none_or(id)
                                 }
-                                Some("set_script_number") => {
+                                Some(operation @ ("set_script_number" | "set_script_bool")) => {
                                     exact_keys(
                                         op,
                                         &[
@@ -136,7 +137,11 @@ pub(super) fn valid(name: &str, args: &Value) -> bool {
                                     ) && id(&edit["component_id"])
                                         && id(&edit["name"])
                                         && (edit["value"].is_null()
-                                            || edit["value"].as_f64().is_some_and(f64::is_finite))
+                                            || if operation == "set_script_bool" {
+                                                edit["value"].is_boolean()
+                                            } else {
+                                                edit["value"].as_f64().is_some_and(f64::is_finite)
+                                            })
                                 }
                                 Some("set_enabled") => {
                                     exact_keys(

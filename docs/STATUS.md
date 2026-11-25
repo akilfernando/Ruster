@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-11-24. See the [archive](archive/STATUS-2026-11-17.md) for earlier status.
+Updated 2026-11-25. See the [archive](archive/STATUS-2026-11-17.md) for earlier status.
 
 ## Where to work
 
@@ -112,6 +112,12 @@ rendered capture p50/p95 was 126.8/138.5 ms for one batch edit and
 127.2/135.8 ms for one paste. For 100 objects, batch measured
 129.0/144.8 ms and paste 127.4/141.3 ms. Each group had 12 samples.
 The native metric includes MCP and GPU readback.
+
+**Boolean Properties** add per-object switches to file-backed Lua. Native
+keyboard authoring and approved Claude edits preserved numbers and sound
+cues, shared Undo, and kept `false` distinct from an unset value after
+reopening. Over 120 ticks, the relocated Vulkan build moved the enabled
+carrier six units and left the disabled carrier in place.
 
 **Number Properties** let v23 objects sharing a file-backed Lua script
 use different finite values. The Inspector shows the exact Lua property
@@ -644,7 +650,7 @@ cover 5,000 and 50,000 objects. Desktop frame rates remain unverified.
 In v23, create projects and scenes, assemble component hierarchies and
 prefabs, and edit transforms, lighting, cameras, colliders and opaque
 materials. Import OBJ, PNG, WAV and supported GLB assets. Attach Lua files,
-set per-object properties, and test gameplay in Play. Build packages
+set per-object number and Boolean properties, and test gameplay in Play. Build packages
 supported scenes as a runnable Linux folder or portable archive. Approved
 AI apps can work alongside the editor through MCP and share Undo. Legacy
 scenes retain a 256-object limit and use the prepared runtime kit for
