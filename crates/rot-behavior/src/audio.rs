@@ -101,16 +101,88 @@ pub(super) fn resolve_cues(
         } else {
             local
         };
-        let delta = glam::DVec3::from_array(transform.translation.map(f64::from)) - eye;
-        let distance = delta.length();
-        cue.gain *= (1.0 - distance / range).max(0.0);
-        cue.pan = Some(if distance > 0.0 {
-            (delta / distance).dot(right).clamp(-1.0, 1.0)
-        } else {
-            0.0
-        });
+        apply_attenuation(
+            cue,
+            glam::DVec3::from_array(transform.translation.map(f64::from)),
+            range,
+            eye,
+            right,
+        );
     }
     Ok(())
+}
+
+pub(super) fn emitters_component(
+    scripts: &[crate::component_runtime::ComponentScriptSlot],
+    authoring: &Authoring,
+    has_listener: bool,
+) -> Result<BTreeMap<String, usize>, Diagnostic> {
+    let mut emitters = BTreeMap::new();
+    for slot in scripts {
+        let binding = &authoring.bindings[&slot.component_id];
+        let Some((name, _)) = binding.properties.iter().find(|(_, property)| {
+            matches!(property, PropertyValue::SoundRef(sound) if sound.playback.range().is_some())
+        }) else {
+            continue;
+        };
+        if !matches!(binding.target, rot_scene::BindingTarget::Object(_)) || !has_listener {
+            return Err(Diagnostic::plain(
+                DiagnosticCode::InvalidAuthoring,
+                Phase::Setup,
+                &format!(
+                    "Cue {name}: positional sound requires an Object Lua owner and an enabled active Transform Game Camera."
+                ),
+            )
+            .context(
+                &slot.component_id,
+                binding,
+                authoring.sources.get(&binding.source_id),
+            ));
+        }
+        emitters.insert(slot.component_id.clone(), slot.owner_index);
+    }
+    Ok(emitters)
+}
+
+pub(super) fn resolve_cues_component(
+    cues: &mut [AudioCue],
+    emitters: &BTreeMap<String, usize>,
+    listener: Option<TransformCameraPose>,
+    world: &[glam::DMat4],
+) {
+    if !cues.iter().any(|cue| cue.range.is_some()) {
+        return;
+    }
+    let listener = listener.expect("validated positional listener");
+    let eye = glam::DVec3::from_array(listener.eye.map(f64::from));
+    let forward = glam::DVec3::from_array(listener.forward.map(f64::from));
+    let up = glam::DVec3::from_array(listener.up.map(f64::from));
+    let right = forward.cross(up).normalize();
+    for cue in cues {
+        let Some(range) = cue.range.take() else {
+            continue;
+        };
+        let owner_index = emitters[&cue.binding_id];
+        let position = world[owner_index].w_axis.truncate();
+        apply_attenuation(cue, position, range, eye, right);
+    }
+}
+
+fn apply_attenuation(
+    cue: &mut AudioCue,
+    position: glam::DVec3,
+    range: f64,
+    eye: glam::DVec3,
+    right: glam::DVec3,
+) {
+    let delta = position - eye;
+    let distance = delta.length();
+    cue.gain *= (1.0 - distance / range).max(0.0);
+    cue.pan = Some(if distance > 0.0 {
+        (delta / distance).dot(right).clamp(-1.0, 1.0)
+    } else {
+        0.0
+    });
 }
 
 pub(super) fn install_sound_host<'scope, 'env: 'scope>(

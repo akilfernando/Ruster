@@ -25,7 +25,7 @@ pub const MAX_MATERIALS: usize = 64;
 mod imported;
 pub use imported::ImportedPlacement;
 mod draw_frame;
-pub use draw_frame::{draw_matrix, HierarchyDraw, SceneDrawFrame};
+pub use draw_frame::{draw_matrix, ComponentDrawPlan, HierarchyDraw, SceneDrawFrame};
 mod hierarchy;
 pub use hierarchy::{Group, Hierarchy, ParentPath, ResolvedPoses, TransformRequest};
 mod animation;

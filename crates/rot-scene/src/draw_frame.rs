@@ -1,7 +1,14 @@
 //! Immutable runtime scene data shared by simulation and viewport consumers.
-use crate::component_scene::{AttachedLights, TransformCameraPose};
-use crate::{Lighting, ResolvedPlayerView, ResolvedPoses, Scene, SceneError, Transform};
-use glam::{EulerRot, Mat4, Quat, Vec3};
+use crate::component_scene::{
+    AttachedLights, CameraView, Component, ComponentScene, Geometry, ObjectHierarchy,
+    TransformCameraPose, TransformLens,
+};
+use crate::{
+    Light, LightKind, Lighting, Object, PlayerView, ResolvedPlayerView, ResolvedPoses, Scene,
+    SceneError, Transform, MAX_DIRECTIONAL_LIGHTS, MAX_POINT_LIGHTS,
+};
+use glam::{DMat4, DQuat, EulerRot, Mat3, Mat4, Quat, Vec3};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -9,6 +16,7 @@ pub struct SceneDrawFrame {
     scene: Arc<Scene>,
     hierarchy: Option<Arc<HierarchyDraw>>,
     transform_camera: Option<TransformCameraPose>,
+    component_backed: bool,
 }
 
 impl SceneDrawFrame {
@@ -21,7 +29,26 @@ impl SceneDrawFrame {
             scene,
             hierarchy,
             transform_camera: None,
+            component_backed: false,
         }
+    }
+
+    /// Build a draw frame directly from precomputed flat component world matrices and lighting.
+    pub fn component_frame(
+        scene: Arc<Scene>,
+        hierarchy: Arc<HierarchyDraw>,
+        transform_camera: Option<TransformCameraPose>,
+    ) -> Self {
+        Self {
+            scene,
+            hierarchy: Some(hierarchy),
+            transform_camera,
+            component_backed: true,
+        }
+    }
+
+    pub fn is_component_frame(&self) -> bool {
+        self.component_backed
     }
 
     pub fn scene(&self) -> &Scene {
@@ -140,6 +167,20 @@ impl HierarchyDraw {
         self.player_view
     }
 
+    /// Construct prepared draw rows, lighting and resolved player view directly for a component frame.
+    pub fn from_component_frame(
+        matrices: Vec<Mat4>,
+        lighting: Arc<Lighting>,
+        player_view: Option<ResolvedPlayerView>,
+    ) -> Self {
+        Self {
+            matrices,
+            lighting,
+            player_view,
+            has_attached_lights: true,
+        }
+    }
+
     /// Leaf commits update only the validated changed matrices and light poses.
     pub fn update_leaves<'a>(
         &mut self,
@@ -182,4 +223,267 @@ pub fn draw_matrix(transform: &Transform) -> Mat4 {
         ),
         Vec3::from(transform.translation),
     )
+}
+
+#[derive(Clone, Debug)]
+enum RuntimeCamera {
+    None,
+    Transform {
+        owner_index: usize,
+        lens: TransformLens,
+    },
+    Orbit {
+        view: PlayerView,
+        follow_index: Option<usize>,
+    },
+}
+
+#[derive(Clone, Debug)]
+struct LightOwner {
+    id: String,
+    owner_index: usize,
+    is_spot: bool,
+    is_directional: bool,
+}
+
+/// Precomputed draw topology for a component scene; per-tick updates rebuild only matrices, lights, and camera pose.
+#[derive(Clone, Debug)]
+pub struct ComponentDrawPlan {
+    base_scene: Arc<Scene>,
+    draw_owners: Vec<usize>,
+    light_owners: Vec<LightOwner>,
+    camera: RuntimeCamera,
+    light_budget_exceeded: bool,
+}
+
+impl ComponentDrawPlan {
+    pub fn new(
+        scene: &ComponentScene,
+        hierarchy: &ObjectHierarchy,
+        indices: &HashMap<String, usize>,
+        revision: u64,
+    ) -> Result<Self, SceneError> {
+        let mut base = Scene::empty(scene.id.clone());
+        base.revision = revision;
+        base.materials.clone_from(&scene.materials);
+        base.display = scene.display;
+        base.background = scene.background;
+        let camera = match scene.effective_camera(hierarchy) {
+            Some((owner_index, CameraView::Transform(lens))) => RuntimeCamera::Transform {
+                owner_index,
+                lens: lens.clone(),
+            },
+            Some((_, CameraView::Orbit(view))) => {
+                base.player_view = Some(view.clone());
+                let follow_index = view
+                    .followed_target()
+                    .and_then(|id| indices.get(id).copied());
+                RuntimeCamera::Orbit {
+                    view: view.clone(),
+                    follow_index,
+                }
+            }
+            None => RuntimeCamera::None,
+        };
+        let mut draw_owners = Vec::new();
+        let mut light_owners = Vec::new();
+        let mut lights = BTreeMap::new();
+        let mut point_lights = 0;
+        let mut directional_lights = 0;
+        let mut light_budget_exceeded = false;
+        let mut authored_lighting = scene.ambient.is_some();
+        for (index, object) in scene.objects.iter().enumerate() {
+            authored_lighting |= object
+                .components
+                .iter()
+                .any(|component| matches!(component.kind, Component::Light { .. }));
+            if !hierarchy.effectively_enabled[index] {
+                continue;
+            }
+            for component in object.components.iter().filter(|item| item.enabled) {
+                match &component.kind {
+                    Component::MeshRenderer {
+                        geometry,
+                        tint,
+                        material,
+                    } => {
+                        let mut draw = Object::cube(object.id.clone(), Some(object.name.clone()));
+                        draw.transform = object.transform.clone();
+                        draw.color = *tint;
+                        draw.material.clone_from(material);
+                        match geometry {
+                            Geometry::Cube => {}
+                            Geometry::Primitive { shape } => draw.primitive = Some(*shape),
+                            Geometry::Imported { asset } => draw.mesh = Some(asset.clone()),
+                        }
+                        base.objects.push(draw);
+                        draw_owners.push(index);
+                    }
+                    Component::Light {
+                        color,
+                        intensity,
+                        kind,
+                    } => {
+                        let (count, limit) = match kind {
+                            LightKind::Point { .. } | LightKind::Spot { .. } => {
+                                (&mut point_lights, MAX_POINT_LIGHTS)
+                            }
+                            LightKind::Directional { .. } => {
+                                (&mut directional_lights, MAX_DIRECTIONAL_LIGHTS)
+                            }
+                        };
+                        if *count == limit {
+                            light_budget_exceeded = true;
+                            continue;
+                        }
+                        *count += 1;
+                        light_owners.push(LightOwner {
+                            id: component.id.clone(),
+                            owner_index: index,
+                            is_spot: matches!(kind, LightKind::Spot { .. }),
+                            is_directional: matches!(kind, LightKind::Directional { .. }),
+                        });
+                        lights.insert(
+                            component.id.clone(),
+                            Light {
+                                name: Some(object.name.clone()),
+                                transform: object.transform.clone(),
+                                enabled: true,
+                                color: *color,
+                                intensity: *intensity,
+                                kind: kind.clone(),
+                            },
+                        );
+                    }
+                    Component::Camera { .. }
+                    | Component::Collider { .. }
+                    | Component::Animator { .. }
+                    | Component::Script { .. } => {}
+                }
+            }
+        }
+        if authored_lighting {
+            base.lighting = Lighting::Authored {
+                ambient: scene.ambient.clone().unwrap_or_default(),
+                lights,
+            };
+        }
+        base.lighting.validate()?;
+        Ok(Self {
+            base_scene: Arc::new(base),
+            draw_owners,
+            light_owners,
+            camera,
+            light_budget_exceeded,
+        })
+    }
+
+    pub fn light_budget_exceeded(&self) -> bool {
+        self.light_budget_exceeded
+    }
+
+    pub fn has_transform_camera(&self) -> bool {
+        matches!(self.camera, RuntimeCamera::Transform { .. })
+    }
+
+    pub fn base_scene(&self) -> &Arc<Scene> {
+        &self.base_scene
+    }
+
+    /// Build an immutable draw frame from evaluated world transforms without mutating `base_scene`.
+    pub fn build_frame(
+        &self,
+        scene: &ComponentScene,
+        world: &[DMat4],
+        rotations: &[DQuat],
+    ) -> Result<SceneDrawFrame, SceneError> {
+        let mut matrices = Vec::with_capacity(self.draw_owners.len());
+        for &owner in &self.draw_owners {
+            matrices.push(component_draw_matrix(
+                world[owner],
+                &scene.objects[owner].id,
+            )?);
+        }
+        let mut lighting = self.base_scene.lighting.clone();
+        if !self.light_owners.is_empty() {
+            let Lighting::Authored { lights, .. } = &mut lighting else {
+                unreachable!("light_owners require Authored lighting");
+            };
+            for entry in &self.light_owners {
+                let pose = component_light_transform(
+                    world[entry.owner_index],
+                    entry.is_directional,
+                    &scene.objects[entry.owner_index].id,
+                    entry.is_spot.then_some(rotations[entry.owner_index]),
+                )?;
+                lights.get_mut(&entry.id).expect("planned light").transform = pose;
+            }
+            lighting.validate()?;
+        }
+        let (player_view, transform_camera) = match &self.camera {
+            RuntimeCamera::None => (None, None),
+            RuntimeCamera::Transform { owner_index, lens } => (
+                None,
+                Some(lens.resolve_pose(world[*owner_index], rotations[*owner_index])?),
+            ),
+            RuntimeCamera::Orbit { view, follow_index } => {
+                let pos = follow_index.map(|i| world[i].w_axis.truncate().to_array());
+                (Some(view.resolve_world_anchor(pos)?), None)
+            }
+        };
+        Ok(SceneDrawFrame::component_frame(
+            Arc::clone(&self.base_scene),
+            Arc::new(HierarchyDraw::from_component_frame(
+                matrices,
+                Arc::new(lighting),
+                player_view,
+            )),
+            transform_camera,
+        ))
+    }
+}
+
+fn component_draw_matrix(world: DMat4, id: &str) -> Result<Mat4, SceneError> {
+    let matrix = world.as_mat4();
+    let linear = Mat3::from_mat4(matrix);
+    let determinant = linear.determinant();
+    if !matrix.is_finite()
+        || !determinant.is_finite()
+        || determinant <= 0.0
+        || !linear.inverse().is_finite()
+    {
+        return Err(SceneError::Invalid(format!(
+            "world transform on {id} exceeds renderer precision"
+        )));
+    }
+    Ok(matrix)
+}
+
+fn component_light_transform(
+    world: DMat4,
+    is_directional: bool,
+    id: &str,
+    rotation: Option<DQuat>,
+) -> Result<Transform, SceneError> {
+    let mut transform = Transform {
+        translation: world.w_axis.truncate().as_vec3().to_array(),
+        ..Transform::default()
+    };
+    if let Some(rotation) = rotation {
+        let (z, y, x) = rotation.normalize().to_euler(EulerRot::ZYX);
+        transform.rotation = [x as f32, y as f32, z as f32];
+    } else if is_directional {
+        let direction = world.z_axis.truncate();
+        let magnitude = direction.abs().max_element();
+        if !magnitude.is_finite() || magnitude == 0.0 {
+            return Err(SceneError::Invalid(format!(
+                "world direction on {id} exceeds renderer precision"
+            )));
+        }
+        let axis = (direction / magnitude).normalize().as_vec3();
+        let (z, y, x) = Quat::from_rotation_arc(Vec3::Z, axis).to_euler(EulerRot::ZYX);
+        transform.rotation = [x, y, z];
+    }
+    transform.validate()?;
+    Ok(transform)
 }

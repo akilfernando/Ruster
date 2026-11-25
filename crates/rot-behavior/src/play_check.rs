@@ -265,11 +265,18 @@ impl Expectation {
     ) -> Option<StateValue> {
         match &self.select {
             Selection::Tick => Some(StateValue::Number(tick as f64)),
-            Selection::Translation { object_id } => scene
-                .objects
-                .iter()
-                .find(|object| object.id == *object_id)
-                .map(|object| StateValue::Vec3(object.transform.translation.map(f64::from))),
+            Selection::Translation { object_id } => {
+                if let Some(translation) =
+                    runtime.and_then(|runtime| runtime.object_translation(object_id))
+                {
+                    return Some(StateValue::Vec3(translation.map(f64::from)));
+                }
+                scene
+                    .objects
+                    .iter()
+                    .find(|object| object.id == *object_id)
+                    .map(|object| StateValue::Vec3(object.transform.translation.map(f64::from)))
+            }
             Selection::State { binding_id, field } => {
                 runtime?.state().binding(binding_id)?.get(field).cloned()
             }
@@ -410,10 +417,30 @@ pub fn run_static(
     run_with_source(CheckSource::Static(scene), case, Ok(identity), cancel)
 }
 
+/// Run a Play Check directly against an authored/baked v23 `ComponentScene` using `ComponentRuntime`.
+pub fn run_component(
+    scene: &rot_scene::component_scene::ComponentScene,
+    case: &PlayCheck,
+    identity: CheckIdentity,
+    clips: &crate::Clips,
+    cancel: Arc<AtomicBool>,
+) -> Report {
+    run_with_source(
+        CheckSource::Component(scene, clips),
+        case,
+        Ok(identity),
+        cancel,
+    )
+}
+
 enum CheckSource<'a> {
     Behavior(&'a Session, &'a crate::Clips),
     Projected(&'a Session, &'a crate::Clips),
     Static(&'a rot_scene::Scene),
+    Component(
+        &'a rot_scene::component_scene::ComponentScene,
+        &'a crate::Clips,
+    ),
 }
 
 fn run_with_source(
@@ -468,6 +495,7 @@ fn run_with_source(
         CheckSource::Behavior(session, _) | CheckSource::Projected(session, _) => {
             &session.authoring().actions
         }
+        CheckSource::Component(scene, _) => &scene.actions,
         CheckSource::Static(_) => &empty_actions,
     };
     for (index, frame) in case.frames.iter().enumerate() {
@@ -496,7 +524,32 @@ fn run_with_source(
     let (scene, runtime) = match source {
         CheckSource::Static(scene) => {
             report.completed_tick = case.frames.len() as u64;
-            (scene, None)
+            (Some(scene), None)
+        }
+        CheckSource::Component(component_scene, clips) => {
+            let limits = Limits {
+                fixed_dt: Duration::from_nanos(current.tick_nanos).as_secs_f64(),
+                ..Limits::default()
+            };
+            let mut engine = match Engine::with_cancellation(limits, cancel.clone()) {
+                Ok(engine) => engine,
+                Err(failure) => return report.script_error(failure),
+            };
+            engine.set_clips(clips.clone());
+            let mut runtime = match engine.reset_component(component_scene, 0) {
+                Ok(runtime) => runtime,
+                Err(failure) => return report.script_error(failure),
+            };
+            for frame in &case.frames {
+                if let Some((status, message)) = stopped() {
+                    return report.finish(status, message);
+                }
+                if let Err(failure) = engine.step_with_input(&mut runtime, frame) {
+                    return report.script_error(failure);
+                }
+                report.completed_tick = runtime.tick();
+            }
+            (None, Some(runtime))
         }
         CheckSource::Behavior(session, clips) | CheckSource::Projected(session, clips) => {
             let limits = Limits {
@@ -526,10 +579,12 @@ fn run_with_source(
                 }
                 report.completed_tick = runtime.tick();
             }
-            (session.scene(), Some(runtime))
+            (Some(session.scene()), Some(runtime))
         }
     };
-    let scene = runtime.as_ref().map_or(scene, Runtime::scene);
+    let scene = runtime
+        .as_ref()
+        .map_or_else(|| scene.expect("static or session scene"), Runtime::scene);
     if let Some((status, message)) = stopped() {
         return report.finish(status, message);
     }

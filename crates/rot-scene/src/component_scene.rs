@@ -1,12 +1,12 @@
 //! Component scene data and hierarchy for C-02. The existing scene loader
 //! remains the entry point until migration and consumer integration land.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
 
-use glam::DMat4;
+use glam::{DMat4, DQuat, EulerRot};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -14,8 +14,8 @@ use crate::{
     input::{validate_action_map, ActionMap},
     strict_json, validate_id, validate_name, Ambient, AnimationBinding, BackgroundColor,
     BehaviorBinding, BehaviorSource, BindingTarget, Collider, ColliderRole, ColliderShape,
-    DisplayProfile, Light, LightKind, Lighting, OpaqueMaterial, PlayerView, Primitive, SceneError,
-    Session, Transform,
+    DisplayProfile, Light, LightKind, Lighting, OpaqueMaterial, PlayerView, Primitive,
+    PropertyValue, SceneError, Session, SoundAssetReferences, Transform, MAX_SOURCES,
 };
 
 #[path = "component_behavior.rs"]
@@ -761,6 +761,235 @@ impl ComponentScene {
         Ok(world)
     }
 
+    /// Collect all WAV sound asset IDs referenced by authored Script bindings.
+    pub fn sound_asset_references(&self) -> SoundAssetReferences {
+        let mut refs = SoundAssetReferences::default();
+        for component in self.objects.iter().flat_map(|object| &object.components) {
+            let Component::Script { binding, .. } = &component.kind else {
+                continue;
+            };
+            for property in binding.properties.values() {
+                if let PropertyValue::SoundRef(sound) = property {
+                    refs.uses_sound = true;
+                    if let Some(id) = &sound.asset_id {
+                        refs.assets.insert(id.clone());
+                    }
+                }
+            }
+        }
+        refs
+    }
+
+    /// Clip IDs required by active Animator components on effectively-enabled objects.
+    pub fn active_animation_clip_ids(&self, hierarchy: &ObjectHierarchy) -> BTreeSet<&str> {
+        self.objects
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| hierarchy.effectively_enabled[*index])
+            .flat_map(|(_, object)| &object.components)
+            .filter(|component| component.enabled)
+            .filter_map(|component| match &component.kind {
+                Component::Animator { binding, .. } => Some(binding.clip.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Clip IDs referenced by any Animator component in the scene (including disabled ones).
+    pub fn all_animation_clip_ids(&self) -> BTreeSet<&str> {
+        self.objects
+            .iter()
+            .flat_map(|object| &object.components)
+            .filter_map(|component| match &component.kind {
+                Component::Animator { binding, .. } => Some(binding.clip.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Resolve world affine matrices into a reusable flat buffer in parent-first order.
+    pub fn resolve_world_matrices_into(
+        &self,
+        hierarchy: &ObjectHierarchy,
+        local: &[Transform],
+        out: &mut Vec<DMat4>,
+    ) -> Result<(), SceneError> {
+        out.resize(local.len(), DMat4::IDENTITY);
+        for &index in &hierarchy.order {
+            let affine = local[index].affine_matrix();
+            let matrix = hierarchy.parents[index].map_or(affine, |parent| out[parent] * affine);
+            if !matrix.is_finite() {
+                return Err(SceneError::Invalid(format!(
+                    "world transform overflow on {}",
+                    self.objects[index].id
+                )));
+            }
+            out[index] = matrix;
+        }
+        Ok(())
+    }
+
+    /// Resolve composed world rotations into a reusable flat buffer in parent-first order.
+    pub fn resolve_world_rotations_into(
+        &self,
+        hierarchy: &ObjectHierarchy,
+        local: &[Transform],
+        out: &mut Vec<DQuat>,
+    ) {
+        out.resize(local.len(), DQuat::IDENTITY);
+        for &index in &hierarchy.order {
+            let [x, y, z] = local[index].rotation.map(f64::from);
+            let local_rotation = DQuat::from_euler(EulerRot::ZYX, z, y, x);
+            out[index] = hierarchy.parents[index]
+                .map_or(local_rotation, |parent| out[parent] * local_rotation);
+        }
+    }
+
+    /// Build a runtime authoring view where script binding enabled states reflect object hierarchy.
+    pub fn authoring_snapshot(&self, hierarchy: &ObjectHierarchy) -> crate::Authoring {
+        let mut bindings = BTreeMap::new();
+        for (index, object) in self.objects.iter().enumerate() {
+            for component in &object.components {
+                if let Component::Script { binding, .. } = &component.kind {
+                    let mut entry = binding.clone();
+                    entry.enabled = binding.enabled
+                        && component.enabled
+                        && hierarchy.effectively_enabled[index];
+                    bindings.insert(component.id.clone(), entry);
+                }
+            }
+        }
+        crate::Authoring {
+            sources: self.sources.clone(),
+            bindings,
+            actions: self.actions.clone(),
+            hud: self.hud.clone(),
+        }
+    }
+
+    /// Project-authored Lua IDs are independent of embedded source IDs.
+    pub fn script_asset_ids(&self) -> BTreeSet<&str> {
+        self.objects
+            .iter()
+            .flat_map(|object| &object.components)
+            .filter_map(|component| match &component.kind {
+                Component::Script {
+                    binding,
+                    source_kind: Some(_),
+                    ..
+                } => Some(binding.source_id.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Replace file references on a detached runtime/build copy. The caller
+    /// establishes authority for every distinct accepted source before binding.
+    pub fn bake_script_assets(
+        &mut self,
+        sources: BTreeMap<String, BehaviorSource>,
+    ) -> Result<(), SceneError> {
+        self.bake_script_assets_with_keys(sources).map(drop)
+    }
+
+    /// The baked source IDs for each authored asset and movement mode.
+    pub fn bake_script_assets_with_keys(
+        &mut self,
+        mut sources: BTreeMap<String, BehaviorSource>,
+    ) -> Result<BTreeMap<String, BTreeMap<ScriptMovement, String>>, SceneError> {
+        let required = self.script_asset_ids();
+        if let Some(id) = required.iter().find(|id| !sources.contains_key(**id)) {
+            return Err(SceneError::Invalid(format!(
+                "Lua asset {id} is unavailable"
+            )));
+        }
+        if sources.len() != required.len() {
+            return Err(SceneError::Invalid(
+                "Lua assets do not match the script references".into(),
+            ));
+        }
+        if sources.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+        let variants: BTreeSet<_> = self
+            .objects
+            .iter()
+            .flat_map(|object| &object.components)
+            .filter_map(|component| match &component.kind {
+                Component::Script {
+                    binding,
+                    source_kind: Some(_),
+                    movement,
+                } => Some((binding.source_id.clone(), *movement)),
+                _ => None,
+            })
+            .collect();
+        if self.sources.len().saturating_add(variants.len()) > MAX_SOURCES {
+            return Err(SceneError::Invalid("script source limit exceeded".into()));
+        }
+        drop(required);
+        let reserved: HashSet<_> = self
+            .objects
+            .iter()
+            .flat_map(|object| &object.components)
+            .filter_map(|component| match &component.kind {
+                Component::Script {
+                    binding,
+                    source_kind: None,
+                    ..
+                } => Some(binding.source_id.as_str()),
+                _ => None,
+            })
+            .collect();
+        for source in sources.values() {
+            source.validate()?;
+        }
+        let mut keys = BTreeMap::new();
+        let mut index = 1;
+        let mut variants = variants.into_iter().peekable();
+        while let Some((asset, movement)) = variants.next() {
+            let mut source = if variants.peek().is_some_and(|(next, _)| next == &asset) {
+                sources[&asset].clone()
+            } else {
+                sources.remove(&asset).expect("verified asset source")
+            };
+            if movement == ScriptMovement::KinematicSphere {
+                source.host_api_version = crate::KINEMATIC_HOST_API_VERSION;
+            }
+            let key = loop {
+                let candidate = format!("asset-lua-{index}");
+                index += 1;
+                if !self.sources.contains_key(&candidate) && !reserved.contains(candidate.as_str())
+                {
+                    break candidate;
+                }
+            };
+            self.sources.insert(key.clone(), source);
+            keys.entry(asset)
+                .or_insert_with(BTreeMap::new)
+                .insert(movement, key);
+        }
+        for component in self
+            .objects
+            .iter_mut()
+            .flat_map(|object| &mut object.components)
+        {
+            if let Component::Script {
+                binding,
+                source_kind,
+                movement,
+            } = &mut component.kind
+            {
+                if source_kind.is_some() {
+                    binding.source_id = keys[&binding.source_id][movement].clone();
+                    *source_kind = None;
+                    *movement = ScriptMovement::Ordinary;
+                }
+            }
+        }
+        Ok(keys)
+    }
+
     /// The eye uses the full affine position. Compose authored rotations
     /// separately so scale and shear never change the lens orientation.
     pub fn transform_camera_pose(
@@ -977,8 +1206,36 @@ pub struct ObjectNode {
     pub components: Vec<ComponentInstance>,
 }
 
+impl ObjectNode {
+    /// Eligible authored shape and composition for a stationary kinematic sensor.
+    /// Callers also rule out children and self-binding.
+    pub fn is_stationary_box_sensor(&self) -> bool {
+        if !self.enabled || self.parent.is_some() {
+            return false;
+        }
+        let mut renderers = 0;
+        let mut colliders = 0;
+        for component in &self.components {
+            match &component.kind {
+                Component::MeshRenderer { .. } => renderers += 1,
+                Component::Collider {
+                    role: ColliderRole::Sensor,
+                    shape: ColliderShape::Box { .. },
+                    ..
+                } if component.enabled => colliders += 1,
+                Component::Collider { .. } | Component::Light { .. } => return false,
+                Component::Script { binding, .. } if binding.enabled => return false,
+                Component::Animator { .. } if component.enabled => return false,
+                _ => {}
+            }
+        }
+        renderers <= 1 && colliders == 1
+    }
+}
+
 /// Validated indices into the original object slice. Rebuild after topology
 /// or enabled-state edits.
+#[derive(Clone, Debug)]
 pub struct ObjectHierarchy {
     pub order: Vec<usize>,
     pub parents: Vec<Option<usize>>,

@@ -69,6 +69,14 @@ pub(super) struct QueryInvocation {
     scene_revision: u64,
 }
 
+pub(super) struct ComponentQueryInput<'a> {
+    pub colliders: &'a [spatial::ComponentColliderSlot],
+    pub local: &'a [Transform],
+    pub world: &'a [glam::DMat4],
+    pub rotations: &'a [glam::DQuat],
+    pub parents: &'a [Option<usize>],
+}
+
 impl Engine {
     pub(super) fn query_invocation(
         &self,
@@ -116,6 +124,218 @@ impl Engine {
             scene_revision: scene.revision,
         }))
     }
+
+    pub(super) fn query_invocation_component(
+        &self,
+        snapshot: ComponentQueryInput<'_>,
+        authoring: &Authoring,
+        snapshot_tick: u64,
+        scene_revision: u64,
+        kinematic_owner: Option<&KinematicOwner>,
+    ) -> Result<Option<QueryInvocation>, Diagnostic> {
+        if !authoring.bindings.values().any(|binding| {
+            binding.enabled
+                && authoring
+                    .sources
+                    .get(&binding.source_id)
+                    .is_some_and(|source| {
+                        matches!(
+                            source.host_api_version,
+                            SPATIAL_HOST_API_VERSION
+                                | STATE_HOST_API_VERSION
+                                | LIFECYCLE_HOST_API_VERSION
+                                | GROUP_ROTATION_HOST_API_VERSION
+                                | KINEMATIC_HOST_API_VERSION
+                        )
+                    })
+        }) {
+            return Ok(None);
+        }
+        self.check_cancelled()?;
+        let world = SpatialWorld::from_component_world(
+            snapshot.colliders,
+            snapshot.local,
+            snapshot.world,
+            snapshot.rotations,
+            snapshot.parents,
+        )
+        .map_err(|message| {
+            Diagnostic::plain(DiagnosticCode::InvalidAuthoring, Phase::Setup, &message)
+        })?;
+        let controller = kinematic_owner.cloned().map(|owner| Controller {
+            owner,
+            translation: Cell::new(None),
+        });
+        self.check_cancelled()?;
+        Ok(Some(QueryInvocation {
+            world,
+            controller,
+            calls: Cell::new(0),
+            observations: RefCell::new(Vec::new()),
+            cancel: self.cancel.clone(),
+            debugger: self.debugger.clone(),
+            failure: self.failure.clone(),
+            snapshot_tick,
+            scene_revision,
+        }))
+    }
+}
+
+/// Validate and resolve kinematic sphere mover constraints directly on a `ComponentScene`.
+pub(super) fn kinematic_owner_component(
+    scene: &rot_scene::component_scene::ComponentScene,
+    hierarchy: &rot_scene::component_scene::ObjectHierarchy,
+    indices: &std::collections::HashMap<String, usize>,
+    animated_objects: &std::collections::HashSet<usize>,
+) -> Result<Option<KinematicOwner>, String> {
+    use rot_scene::component_scene::Component;
+    use rot_scene::{BindingTarget, ColliderRole, ColliderShape};
+
+    let mut movers = scene
+        .objects
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| hierarchy.effectively_enabled[*index])
+        .flat_map(|(index, object)| {
+            object
+                .components
+                .iter()
+                .map(move |component| (index, object, component))
+        })
+        .filter_map(|(index, object, component)| {
+            let Component::Script { binding, .. } = &component.kind else {
+                return None;
+            };
+            if !component.enabled || !binding.enabled {
+                return None;
+            }
+            let source = scene.sources.get(&binding.source_id)?;
+            (source.language_id == LANGUAGE_ID
+                && source.host_api_version == KINEMATIC_HOST_API_VERSION)
+                .then_some((index, object, component.id.as_str(), binding))
+        });
+
+    let Some((owner_index, mover, binding_id, binding)) = movers.next() else {
+        return Ok(None);
+    };
+    if movers.next().is_some() {
+        return Err("API7 requires at most one enabled kinematic mover".into());
+    }
+    if mover.parent.is_some() {
+        return Err("API7 kinematic mover must be a root object".into());
+    }
+    if animated_objects.contains(&owner_index) {
+        return Err("API7 mover cannot be driven by an Animator".into());
+    }
+    let BindingTarget::Object(object_id) = &binding.target else {
+        return Err("API7 requires an Object target".into());
+    };
+    if object_id != &mover.id {
+        return Err("API7 mover does not exist".into());
+    }
+    let has_sphere_blocker = mover.components.iter().any(|component| {
+        component.enabled
+            && matches!(
+                component.kind,
+                Component::Collider {
+                    role: ColliderRole::Blocker,
+                    shape: ColliderShape::Sphere { .. },
+                    ..
+                }
+            )
+    });
+    if !has_sphere_blocker {
+        return Err("API7 mover requires an enabled blocker sphere with uniform scale".into());
+    }
+    for (index, object) in scene.objects.iter().enumerate() {
+        if index == owner_index || !hierarchy.effectively_enabled[index] {
+            continue;
+        }
+        let has_blocker = object.components.iter().any(|component| {
+            component.enabled
+                && matches!(
+                    component.kind,
+                    Component::Collider {
+                        role: ColliderRole::Blocker,
+                        ..
+                    }
+                )
+        });
+        let has_active_script = object.components.iter().any(|component| {
+            component.enabled
+                && matches!(
+                    &component.kind,
+                    Component::Script { binding, .. }
+                        if binding.enabled
+                            && matches!(&binding.target, BindingTarget::Object(id) if id == &object.id)
+                )
+        });
+        if has_blocker && has_active_script {
+            return Err(format!(
+                "API7 blocker {:?} must be stationary; disable its behavior binding",
+                object.id
+            ));
+        }
+    }
+    let parents: std::collections::HashSet<usize> =
+        hierarchy.parents.iter().flatten().copied().collect();
+    for (name, property) in &binding.properties {
+        let PropertyValue::SensorRef(id) = property else {
+            continue;
+        };
+        let valid = indices
+            .get(id.as_str())
+            .copied()
+            .filter(|&target_index| {
+                target_index != owner_index
+                    && hierarchy.effectively_enabled[target_index]
+                    && !parents.contains(&target_index)
+                    && !animated_objects.contains(&target_index)
+                    && scene.objects[target_index].is_stationary_box_sensor()
+            })
+            .is_some();
+        if !valid {
+            return Err(format!(
+                "Binding {binding_id}, sensor {name:?} targets {id:?}: choose an enabled, stationary Box Collider Sensor."
+            ));
+        }
+    }
+    Ok(Some(KinematicOwner {
+        binding_id: binding_id.to_owned(),
+        object_id: mover.id.clone(),
+    }))
+}
+
+/// Check kinematic admission rules on an authored/baked component scene without running Lua.
+pub fn validate_kinematic_component_scene(
+    scene: &rot_scene::component_scene::ComponentScene,
+) -> Result<(), String> {
+    use rot_scene::component_scene::Component;
+    let hierarchy = scene.validate().map_err(|error| error.to_string())?;
+    let indices: std::collections::HashMap<String, usize> = scene
+        .objects
+        .iter()
+        .enumerate()
+        .map(|(index, object)| (object.id.clone(), index))
+        .collect();
+    let mut animated_objects = std::collections::HashSet::new();
+    for (index, object) in scene.objects.iter().enumerate() {
+        if !hierarchy.effectively_enabled[index] {
+            continue;
+        }
+        for component in &object.components {
+            if let Component::Animator { binding, .. } = &component.kind {
+                if component.enabled {
+                    for target_id in binding.targets.values() {
+                        if let Some(&target_index) = indices.get(target_id.as_str()) {
+                            animated_objects.insert(target_index);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    kinematic_owner_component(scene, &hierarchy, &indices, &animated_objects).map(drop)
 }
 
 pub(super) fn kinematic_owner(

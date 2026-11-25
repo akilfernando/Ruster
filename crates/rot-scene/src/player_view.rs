@@ -133,6 +133,48 @@ impl PlayerView {
             vertical_fov_degrees: self.vertical_fov_degrees,
         })
     }
+
+    /// Resolve an Orbit view from a known target world position (flat-array runtime).
+    pub fn resolve_world_anchor(
+        &self,
+        follow_world_position: Option<[f64; 3]>,
+    ) -> Result<ResolvedPlayerView, SceneError> {
+        self.validate_settings()?;
+        let anchor = match &self.anchor {
+            PlayerAnchor::Fixed { position } => *position,
+            PlayerAnchor::Follow { target_id, offset } => {
+                let position = follow_world_position.ok_or_else(|| {
+                    SceneError::Invalid(format!(
+                        "Player view target {target_id} must be an existing Object or Group; clear or retarget the player view first"
+                    ))
+                })?;
+                let mut anchor = [0.0; 3];
+                for ((out, pos), off) in anchor.iter_mut().zip(position).zip(*offset) {
+                    let resolved = pos + f64::from(off);
+                    if !resolved.is_finite() || resolved.abs() > 10_000.0 {
+                        return Err(SceneError::Invalid(
+                            "Resolved player view anchor must remain within ±10000 world units"
+                                .into(),
+                        ));
+                    }
+                    *out = resolved as f32;
+                }
+                anchor
+            }
+        };
+        if !coordinate(anchor) {
+            return Err(SceneError::Invalid(
+                "Player view anchor must be finite and within ±10000 world units".into(),
+            ));
+        }
+        Ok(ResolvedPlayerView {
+            anchor,
+            yaw: self.yaw,
+            pitch: self.pitch,
+            distance: self.distance,
+            vertical_fov_degrees: self.vertical_fov_degrees,
+        })
+    }
 }
 
 impl Scene {

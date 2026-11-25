@@ -1,42 +1,15 @@
 //! Temporary input adapter for the legacy behavior runtime.
 use super::{
-    AnimatorStart, CameraView, Component, ComponentScene, Geometry, ObjectNode, ScriptMovement,
+    AnimatorStart, CameraView, Component, ComponentScene, Geometry, ObjectNode,
     TransformCameraPose, TransformLens,
 };
 use crate::{
-    Authoring, BehaviorSource, BindingTarget, Collider, Group, HiddenMeshRenderers, Light,
-    LightKind, Lighting, Object, Scene, SceneError, Session, MAX_POINT_LIGHTS, MAX_SOURCES,
+    Authoring, BindingTarget, Collider, Group, HiddenMeshRenderers, Light, LightKind, Lighting,
+    Object, Scene, SceneError, Session, MAX_POINT_LIGHTS,
 };
 use glam::{DMat4, DQuat, DVec3, EulerRot};
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
-
-impl ObjectNode {
-    /// Eligible authored shape and composition for a stationary kinematic sensor.
-    /// Callers also rule out children and self-binding.
-    pub fn is_stationary_box_sensor(&self) -> bool {
-        if !self.enabled || self.parent.is_some() {
-            return false;
-        }
-        let mut renderers = 0;
-        let mut colliders = 0;
-        for component in &self.components {
-            match &component.kind {
-                Component::MeshRenderer { .. } => renderers += 1,
-                Component::Collider {
-                    role: crate::ColliderRole::Sensor,
-                    shape: crate::ColliderShape::Box { .. },
-                    ..
-                } if component.enabled => colliders += 1,
-                Component::Collider { .. } | Component::Light { .. } => return false,
-                Component::Script { binding, .. } if binding.enabled => return false,
-                Component::Animator { .. } if component.enabled => return false,
-                _ => {}
-            }
-        }
-        renderers <= 1 && colliders == 1
-    }
-}
 
 /// Runtime-only immutable lookup for a component camera's projected transform chain.
 #[derive(Clone, Debug)]
@@ -247,129 +220,6 @@ pub struct BehaviorInput {
 }
 
 impl ComponentScene {
-    /// Project-authored Lua IDs are independent of embedded source IDs.
-    pub fn script_asset_ids(&self) -> std::collections::BTreeSet<&str> {
-        self.objects
-            .iter()
-            .flat_map(|object| &object.components)
-            .filter_map(|component| match &component.kind {
-                Component::Script {
-                    binding,
-                    source_kind: Some(_),
-                    ..
-                } => Some(binding.source_id.as_str()),
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// Replace file references on a detached runtime/build copy. The caller
-    /// establishes authority for every distinct accepted source before binding.
-    pub fn bake_script_assets(
-        &mut self,
-        sources: BTreeMap<String, BehaviorSource>,
-    ) -> Result<(), SceneError> {
-        self.bake_script_assets_with_keys(sources).map(drop)
-    }
-
-    /// The baked source IDs for each authored asset and movement mode.
-    pub fn bake_script_assets_with_keys(
-        &mut self,
-        mut sources: BTreeMap<String, BehaviorSource>,
-    ) -> Result<BTreeMap<String, BTreeMap<ScriptMovement, String>>, SceneError> {
-        let required = self.script_asset_ids();
-        if let Some(id) = required.iter().find(|id| !sources.contains_key(**id)) {
-            return Err(SceneError::Invalid(format!(
-                "Lua asset {id} is unavailable"
-            )));
-        }
-        if sources.len() != required.len() {
-            return Err(SceneError::Invalid(
-                "Lua assets do not match the script references".into(),
-            ));
-        }
-        if sources.is_empty() {
-            return Ok(BTreeMap::new());
-        }
-        let variants: BTreeSet<_> = self
-            .objects
-            .iter()
-            .flat_map(|object| &object.components)
-            .filter_map(|component| match &component.kind {
-                Component::Script {
-                    binding,
-                    source_kind: Some(_),
-                    movement,
-                } => Some((binding.source_id.clone(), *movement)),
-                _ => None,
-            })
-            .collect();
-        if self.sources.len().saturating_add(variants.len()) > MAX_SOURCES {
-            return Err(SceneError::Invalid("script source limit exceeded".into()));
-        }
-        drop(required);
-        let reserved: HashSet<_> = self
-            .objects
-            .iter()
-            .flat_map(|object| &object.components)
-            .filter_map(|component| match &component.kind {
-                Component::Script {
-                    binding,
-                    source_kind: None,
-                    ..
-                } => Some(binding.source_id.as_str()),
-                _ => None,
-            })
-            .collect();
-        for source in sources.values() {
-            source.validate()?;
-        }
-        let mut keys = BTreeMap::new();
-        let mut index = 1;
-        let mut variants = variants.into_iter().peekable();
-        while let Some((asset, movement)) = variants.next() {
-            let mut source = if variants.peek().is_some_and(|(next, _)| next == &asset) {
-                sources[&asset].clone()
-            } else {
-                sources.remove(&asset).expect("verified asset source")
-            };
-            if movement == ScriptMovement::KinematicSphere {
-                source.host_api_version = crate::KINEMATIC_HOST_API_VERSION;
-            }
-            let key = loop {
-                let candidate = format!("asset-lua-{index}");
-                index += 1;
-                if !self.sources.contains_key(&candidate) && !reserved.contains(candidate.as_str())
-                {
-                    break candidate;
-                }
-            };
-            self.sources.insert(key.clone(), source);
-            keys.entry(asset)
-                .or_insert_with(BTreeMap::new)
-                .insert(movement, key);
-        }
-        for component in self
-            .objects
-            .iter_mut()
-            .flat_map(|object| &mut object.components)
-        {
-            if let Component::Script {
-                binding,
-                source_kind,
-                movement,
-            } = &mut component.kind
-            {
-                if source_kind.is_some() {
-                    binding.source_id = keys[&binding.source_id][movement].clone();
-                    *source_kind = None;
-                    *movement = ScriptMovement::Ordinary;
-                }
-            }
-        }
-        Ok(keys)
-    }
-
     /// Extract a fresh behavior runtime input. The projection is fallible because
     /// the old runtime cannot target every object/component combination.
     pub fn behavior_input(&self) -> Result<(Scene, Authoring), SceneError> {

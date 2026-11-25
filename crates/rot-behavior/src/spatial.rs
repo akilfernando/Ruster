@@ -74,11 +74,73 @@ impl Entry {
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct ComponentColliderSlot {
+    pub owner_index: usize,
+    pub owner_id: String,
+    pub collider: Collider,
+}
+
+pub(crate) fn world_collider_transform(
+    local: &Transform,
+    world: glam::DMat4,
+    rotation: glam::DQuat,
+    has_parent: bool,
+) -> Result<Transform, String> {
+    if !has_parent {
+        return Ok(local.clone());
+    }
+    let scale = [
+        world.x_axis.truncate().length() as f32,
+        world.y_axis.truncate().length() as f32,
+        world.z_axis.truncate().length() as f32,
+    ];
+    let (z, y, x) = rotation.normalize().to_euler(glam::EulerRot::ZYX);
+    let transform = Transform {
+        translation: world.w_axis.truncate().as_vec3().to_array(),
+        rotation: [x as f32, y as f32, z as f32],
+        scale,
+    };
+    transform.validate().map_err(|error| error.to_string())?;
+    Ok(transform)
+}
+
 pub(crate) struct SpatialWorld {
     entries: Vec<Entry>,
 }
 
 impl SpatialWorld {
+    pub(crate) fn from_component_world(
+        colliders: &[ComponentColliderSlot],
+        local: &[Transform],
+        world: &[glam::DMat4],
+        rotations: &[glam::DQuat],
+        parents: &[Option<usize>],
+    ) -> Result<Self, String> {
+        let mut entries = Vec::with_capacity(colliders.len());
+        for slot in colliders {
+            let owner = world_collider_transform(
+                &local[slot.owner_index],
+                world[slot.owner_index],
+                rotations[slot.owner_index],
+                parents[slot.owner_index].is_some(),
+            )?;
+            if let Some(resolved) = slot
+                .collider
+                .resolve(&owner)
+                .map_err(|error| error.to_string())?
+            {
+                entries.push(Entry {
+                    id: slot.owner_id.clone(),
+                    resolved,
+                    owner,
+                    collider: slot.collider,
+                });
+            }
+        }
+        entries.sort_by(|left, right| left.id.cmp(&right.id));
+        Ok(Self { entries })
+    }
     pub(crate) fn new(scene: &Scene) -> Result<Self, String> {
         scene.validate().map_err(|error| error.to_string())?;
         let poses = scene.resolve_poses().map_err(|error| error.to_string())?;

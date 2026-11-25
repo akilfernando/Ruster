@@ -3,7 +3,7 @@
 use crate::{validate_id, Scene, SceneDelta, SceneError, Session};
 use glam::{DQuat, EulerRot};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 pub const MAX_ANIMATIONS: usize = 16;
 pub const MAX_ANIMATION_TARGETS: usize = 64;
@@ -277,6 +277,46 @@ impl Clip {
                 return Err(invalid(format!("animation target {id} is missing")));
             };
             track.apply(time, transform);
+        }
+        Ok(())
+    }
+
+    /// Pre-resolve each track in this clip to an object index in the component slice.
+    pub fn resolve_indexed_tracks(
+        &self,
+        binding: &AnimationBinding,
+        indices: &HashMap<String, usize>,
+    ) -> Result<Vec<(usize, usize)>, SceneError> {
+        self.tracks
+            .iter()
+            .enumerate()
+            .map(|(track_index, track)| {
+                let id = binding.targets.get(&track.node).ok_or_else(|| {
+                    invalid(format!(
+                        "animation clip animates node {:?}, which this placement does not map; Place the model again",
+                        track.node
+                    ))
+                })?;
+                let &object_index = indices
+                    .get(id.as_str())
+                    .ok_or_else(|| invalid(format!("animation target {id} is missing")))?;
+                Ok((track_index, object_index))
+            })
+            .collect()
+    }
+
+    /// Sample pre-resolved tracks directly into flat local transforms and validate each touched transform.
+    pub fn apply_indexed(
+        &self,
+        resolved: &[(usize, usize)],
+        looping: bool,
+        seconds: f64,
+        transforms: &mut [crate::Transform],
+    ) -> Result<(), SceneError> {
+        let time = self.local_time(seconds, looping);
+        for &(track_index, object_index) in resolved {
+            self.tracks[track_index].apply(time, &mut transforms[object_index]);
+            transforms[object_index].validate()?;
         }
         Ok(())
     }

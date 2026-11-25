@@ -43,7 +43,8 @@ mod spatial_host;
 use spatial_host::{
     install_kinematic, install_spatial, kinematic_owner, KinematicOwner, QueryInvocation,
 };
-pub use spatial_host::{QueryObservation, QueryResult};
+pub use spatial_host::{validate_kinematic_component_scene, QueryObservation, QueryResult};
+mod component_runtime;
 
 /// Exact current editor/Scene11 export quantum (~60Hz). The public Engine
 /// Limits default retains its original numerical dt for API1 callers.
@@ -275,8 +276,45 @@ pub struct Runtime {
     animation_starts: Vec<Option<u64>>,
     transform_camera_binding: Option<Arc<TransformCameraBinding>>,
     state: Arc<RuntimeState>,
+    component_world: Option<component_runtime::ComponentWorld>,
 }
 impl Runtime {
+    pub fn component_scene(&self) -> Option<&rot_scene::component_scene::ComponentScene> {
+        self.component_world
+            .as_ref()
+            .map(|world| world.scene.as_ref())
+    }
+    pub fn component_transforms(&self) -> Option<&[Transform]> {
+        self.component_world
+            .as_ref()
+            .map(|world| world.local_transforms.as_slice())
+    }
+    pub fn world_matrices(&self) -> Option<&[glam::DMat4]> {
+        self.component_world
+            .as_ref()
+            .map(|world| world.world_matrices.as_slice())
+    }
+    pub fn object_translation(&self, object_id: &str) -> Option<[f32; 3]> {
+        if let Some(world) = &self.component_world {
+            let &index = world.object_indices.get(object_id)?;
+            return Some(world.local_transforms[index].translation);
+        }
+        self.scene()
+            .objects
+            .iter()
+            .find(|object| object.id == object_id)
+            .map(|object| object.transform.translation)
+    }
+    pub fn is_static_component(&self) -> bool {
+        self.component_world
+            .as_ref()
+            .is_some_and(component_runtime::ComponentWorld::is_static)
+    }
+    pub fn light_budget_exceeded(&self) -> bool {
+        self.component_world
+            .as_ref()
+            .is_some_and(|world| world.draw_plan.light_budget_exceeded())
+    }
     pub fn transform_camera(&self) -> Option<TransformCameraPose> {
         self.draw_frame.transform_camera()
     }
@@ -338,13 +376,21 @@ struct CachedMain {
     main: Function,
 }
 #[derive(Clone, Copy)]
-struct HostInput<'a> {
-    api_version: u32,
-    frame: &'a ValidatedActionFrame,
-    spatial: Option<&'a QueryInvocation>,
-    audio: Option<&'a RefCell<Vec<AudioCue>>>,
-    binding_id: &'a str,
-    state: &'a RuntimeState,
+pub(crate) struct HostInput<'a> {
+    pub(crate) api_version: u32,
+    pub(crate) frame: &'a ValidatedActionFrame,
+    pub(crate) spatial: Option<&'a QueryInvocation>,
+    pub(crate) audio: Option<&'a RefCell<Vec<AudioCue>>>,
+    pub(crate) binding_id: &'a str,
+    pub(crate) state: &'a RuntimeState,
+}
+#[derive(Clone, Copy)]
+pub(crate) enum ResolveSnapshot<'a> {
+    Legacy(&'a Scene),
+    Component {
+        transforms: &'a [Transform],
+        indices: &'a std::collections::HashMap<String, usize>,
+    },
 }
 #[derive(Clone, Copy)]
 struct TickInput<'a> {
@@ -951,6 +997,7 @@ impl Engine {
             animations,
             transform_camera_binding,
             state,
+            component_world: None,
         })
     }
     /// Atomic fixed-dt update in stable binding-ID order against one tick-start snapshot.
@@ -965,6 +1012,9 @@ impl Engine {
         runtime: &mut Runtime,
         input: &ActionFrame,
     ) -> Result<(), Diagnostic> {
+        if runtime.component_world.is_some() {
+            return self.step_component_with_input(runtime, input);
+        }
         let input = input
             .validate_against(&runtime.authoring.actions)
             .map_err(|e| {
@@ -1329,7 +1379,7 @@ impl Engine {
                 &main,
                 input,
                 &binding.properties,
-                snapshot.clone(),
+                ResolveSnapshot::Legacy(snapshot.as_ref()),
                 dt,
                 HostInput {
                     api_version: source.host_api_version,
@@ -1383,7 +1433,7 @@ impl Engine {
             main,
             Some(input),
             properties,
-            snapshot,
+            ResolveSnapshot::Legacy(snapshot.as_ref()),
             dt,
             HostInput {
                 api_version: HOST_API_VERSION,
@@ -1404,12 +1454,12 @@ impl Engine {
             })
         })
     }
-    fn evaluate_with_input(
+    pub(crate) fn evaluate_with_input(
         &self,
         main: &Function,
         input: Option<&Transform>,
         properties: &BTreeMap<String, PropertyValue>,
-        snapshot: Arc<Scene>,
+        snapshot: ResolveSnapshot<'_>,
         dt: f64,
         host_input: HostInput<'_>,
     ) -> Result<BindingOutput, Diagnostic> {
@@ -1418,7 +1468,7 @@ impl Engine {
         self.lua
             .scope(|scope| {
                 Ok((|| -> Result<BindingOutput, Diagnostic> {
-                    let (environment, host) = environment(&self.lua, scope, &snapshot, host_input)
+                    let (environment, host) = environment(&self.lua, scope, snapshot, host_input)
                         .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
                     if host_input.api_version == KINEMATIC_HOST_API_VERSION {
                         install_kinematic(scope, &host, host_input, properties)
@@ -1593,9 +1643,9 @@ fn read_group_rotation(output: &Table, input: &Transform) -> mlua::Result<Bindin
     })
 }
 
-struct BindingOutput {
-    transform: Option<Transform>,
-    state: StateFields,
+pub(crate) struct BindingOutput {
+    pub(crate) transform: Option<Transform>,
+    pub(crate) state: StateFields,
 }
 
 fn state_read(
@@ -1710,7 +1760,7 @@ fn install_state_host<'scope, 'env: 'scope>(
 fn environment<'scope, 'env: 'scope>(
     lua: &Lua,
     scope: &'scope mlua::Scope<'scope, 'env>,
-    snapshot: &'env Scene,
+    snapshot: ResolveSnapshot<'env>,
     input: HostInput<'env>,
 ) -> mlua::Result<(Table, Table)> {
     let environment = base_environment(lua)?;
@@ -1726,12 +1776,18 @@ fn environment<'scope, 'env: 'scope>(
                     return Err(mlua::Error::runtime("object reference exceeds128 bytes"));
                 }
                 let id = id.to_str()?;
-                snapshot
-                    .objects
-                    .iter()
-                    .find(|o| o.id == id.as_ref())
-                    .map(|o| transform_table(lua, &o.transform))
-                    .transpose()
+                let transform = match snapshot {
+                    ResolveSnapshot::Legacy(scene) => scene
+                        .objects
+                        .iter()
+                        .find(|o| o.id == id.as_ref())
+                        .map(|o| &o.transform),
+                    ResolveSnapshot::Component {
+                        transforms,
+                        indices,
+                    } => indices.get(id.as_ref()).map(|&index| &transforms[index]),
+                };
+                transform.map(|t| transform_table(lua, t)).transpose()
             })?,
         )?;
     }
