@@ -34,6 +34,8 @@ package in your lane under **Now**. How to work is in the
 
 One line each. Anyone may add; the user or a planning pass orders them.
 
+- Plain Light Scene view: dark Stats and Persp overlay labels lose contrast over dark geometry or backgrounds. Observed during C-30 visual review.
+
 - CI efficiency (2026-11-24 retrospective): Documentation-only changes under `docs/` now skip Rust setup and caching. C-26 through C-28 spent about 22 of 29 hosted job minutes outside the change-aware gate. For code changes, compare total job times for the full `target` cache and a smaller cache, including rebuild and save costs.
 - Grouping is blocked scene-wide by input actions, a HUD, ordinary script
   sources, or object/application script attachments. C-02/C-03 must preserve
@@ -669,7 +671,7 @@ The user authorized starting Phase 2 on 2026-11-19 after the independent Phase 1
 | C-27 Number Properties for Object Lua | Tune a shared file-backed Lua script independently on each v23 object. | done · Two carriers shared one Lua file and used separate speeds. The Inspector supported keyboard entry, removal and shared Undo. Approved Claude changed one number and preserved the existing sound cue. After save and reopen, both editor Play and the relocated Linux build moved the carriers according to their independent values. |
 | C-28 Copy and Paste Local Transform | Reuse selected parent-local Transform channels on one or more v23 objects. | done · Inspector Copy snapshots an authored Transform. Paste Position, Rotation, Scale and All share one Undo across targets. Approved Claude copied the current source rotation by exact IDs. Three parented lamps kept distinct world beam directions in editor and relocated Vulkan, and the prefab lamp kept its prior Scale override. |
 | C-29 Boolean Properties for Object Lua | Toggle behavior per v23 object using one shared file-backed Lua script. | done · 2026-11-25 · Tab and Space set the Boolean in the Inspector. Approved Claude set an explicit false through MCP. Shared Undo, reopen, and a relocated Vulkan build preserved distinct carrier behavior alongside existing speed and sound properties. |
-| C-30 Frame from Hierarchy | Double-click a v23 Hierarchy object to select and frame its assembly in the Scene view. | in progress — Codex Sol, 2026-11-25 |
+| C-30 Frame from Hierarchy | Double-click a v23 Hierarchy object to select and frame its assembly in the Scene view. | done · 2026-11-25 · A folded station arch framed its posts, crossbar and imported lamp with the existing Frame camera. Single click and Ctrl-selection left the camera fixed. Rot and Plain Light confirmed the full assembly and checked that scene bytes and revision stayed the same. |
 
 ### C-04 implementation brief
 

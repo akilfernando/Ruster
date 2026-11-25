@@ -301,6 +301,7 @@ pub(super) struct ComponentWorkspace {
     collapsed_objects: HashSet<String>,
     visible_rows: Option<Vec<usize>>,
     hierarchy_focus: Option<(usize, bool)>,
+    hierarchy_name_click: Option<egui::Id>,
     hierarchy_search: component_hierarchy_search::Search,
     hierarchy_search_index: component_hierarchy_search::SearchIndex,
     hierarchy_search_reveal: Option<String>,
@@ -428,6 +429,7 @@ impl ComponentWorkspace {
             collapsed_objects: HashSet::new(),
             visible_rows: None,
             hierarchy_focus: None,
+            hierarchy_name_click: None,
             hierarchy_search: Default::default(),
             hierarchy_search_index: Default::default(),
             hierarchy_search_reveal: None,
@@ -1977,6 +1979,15 @@ fn hierarchy_rows(objects: &[ObjectNode]) -> (Vec<(usize, usize)>, Vec<Option<us
 }
 
 impl ComponentWorkspace {
+    fn select_and_frame_hierarchy_name(&mut self, index: usize) {
+        if self.authored_edit_pending() || self.ai_transition_pending() {
+            return;
+        }
+        let id = self.session.scene().objects[index].id.clone();
+        self.select(Some(id));
+        self.error = self.frame_objects(None, None).err().map(str::to_owned);
+    }
+
     fn frame_objects(
         &mut self,
         target: Option<&str>,
@@ -3096,6 +3107,12 @@ impl ComponentWorkspace {
                 editor_theme::text_menu(ui, Text::ComponentCreate.plain(), |ui| {
                     self.create_menu(ui)
                 });
+                // egui tracks click counts across widgets. Require both clicks on
+                // this name button, including when a disclosure is nearby.
+                let prior_name_click = ui
+                    .input(|input| input.pointer.any_released())
+                    .then(|| self.hierarchy_name_click.take())
+                    .flatten();
                 if self.show_hierarchy_search(ui, blocked || transform_active) {
                     return;
                 }
@@ -3109,6 +3126,8 @@ impl ComponentWorkspace {
                 let mut deleted = None;
                 let mut child = None;
                 let mut framed = None;
+                let mut select_and_frame = None;
+                let mut name_click = None;
                 let mut grouped = None;
                 let mut grounded = None;
                 let mut duplicated = None;
@@ -3253,12 +3272,9 @@ impl ComponentWorkspace {
                                 if response.clicked() {
                                     response.request_focus();
                                     selection_focus = Some((index, false));
-                                    let modifiers = ui.input(|input| {
-                                        input
-                                            .events
-                                            .iter()
-                                            .rev()
-                                            .find_map(|event| match event {
+                                    let (pointer_modifiers, modifiers) = ui.input(|input| {
+                                        let pointer_modifiers = input.events.iter().rev().find_map(
+                                            |event| match event {
                                                 egui::Event::PointerButton {
                                                     button: egui::PointerButton::Primary,
                                                     pressed: false,
@@ -3266,9 +3282,22 @@ impl ComponentWorkspace {
                                                     ..
                                                 } => Some(*modifiers),
                                                 _ => None,
-                                            })
-                                            .unwrap_or(input.modifiers)
+                                            },
+                                        );
+                                        (
+                                            pointer_modifiers,
+                                            pointer_modifiers.unwrap_or(input.modifiers),
+                                        )
                                     });
+                                    if !blocked && pointer_modifiers == Some(egui::Modifiers::NONE)
+                                    {
+                                        name_click = Some(response.id);
+                                        if prior_name_click == Some(response.id)
+                                            && response.double_clicked()
+                                        {
+                                            select_and_frame = Some(index);
+                                        }
+                                    }
                                     selected = Some(Some((row, modifiers)));
                                 }
                                 response.context_menu(|ui| {
@@ -3364,6 +3393,9 @@ impl ComponentWorkspace {
                         });
                     }
                 });
+                if name_click.is_some() {
+                    self.hierarchy_name_click = name_click;
+                }
                 if let Some(index) = toggle {
                     self.toggle_disclosure(index);
                     ui.ctx().request_repaint();
@@ -3381,6 +3413,8 @@ impl ComponentWorkspace {
                     self.ground_from_ui(Some(&id));
                 } else if let Some(id) = duplicated {
                     self.duplicate_from_ui(Some(&id));
+                } else if let Some(index) = select_and_frame {
+                    self.select_and_frame_hierarchy_name(index);
                 } else if let Some(id) = framed {
                     self.error = self.frame_objects(Some(&id), None).err().map(str::to_owned);
                 } else if let Some(id) = prefab.filter(|_| self.apply()) {
@@ -4235,6 +4269,43 @@ mod tests {
         assert_eq!(editor.session.scene(), &scene);
         assert_eq!(editor.session.revision(), 0);
         assert_eq!(std::fs::read(&editor.path).unwrap(), disk);
+    }
+
+    #[test]
+    fn hierarchy_name_frames_collapsed_descendants_without_editing_scene() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let assembly = scene.objects[0].id.clone();
+        let child = scene.objects[1].id.clone();
+        scene.objects[0].components.clear();
+        scene.objects[1].parent = Some(assembly.clone());
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.viewport_aspect = Some(1.5);
+        let expected_camera = editor.frame_objects(Some(&child), None).unwrap();
+        editor.navigation.camera = None;
+        editor.toggle_disclosure(0);
+        assert!(editor.visible_row_of(1).is_none());
+
+        editor.select(Some(child.clone()));
+        editor.draft.as_mut().unwrap().name = "Pending name".into();
+        editor.select_and_frame_hierarchy_name(0);
+        assert_eq!(editor.target_ids(None), [child]);
+        assert_eq!(editor.draft.as_ref().unwrap().name, "Pending name");
+        assert_eq!(editor.navigation.camera, None);
+
+        editor.rebuild_draft();
+        editor.select_and_frame_hierarchy_name(0);
+        assert_eq!(editor.target_ids(None), [assembly]);
+        assert_eq!(editor.navigation.camera, Some(expected_camera));
+        assert!(editor.visible_row_of(1).is_none());
+        assert!(editor.error.is_none());
+        assert_eq!(editor.session.scene(), &scene);
+        assert_eq!(editor.session.revision(), 0);
+        assert!(!editor.session.is_dirty());
+        assert!(matches!(editor.session.undo(0), Err(SceneError::NoUndo)));
     }
 
     #[test]

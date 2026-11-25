@@ -63,8 +63,10 @@ U increases around the side toward −X, +Z, then +X. V runs from bottom to
 top. Each cap uses its own planar UVs. Cap U follows +X, with V following
 −Z on top and +Z on the bottom.
 
-Select the parent and press **F**, or choose **Frame Selected** from its
-Hierarchy menu, to fit its visible geometry and child parts. For an
+Double-click the parent's name in the v23 Hierarchy to select it and fit
+its visible geometry and child parts, even when its branch is folded.
+You can also select the parent and press **F** or choose **Frame Selected**
+from its Hierarchy menu. For an
 orthographic check, choose **Front**, **Right**, or **Top** from **View
 Presets**. An approved MCP client can call `viewport_frame` with the parent
 ID and `front`, `side`, or `top`, then call `viewport_screenshot` for each
