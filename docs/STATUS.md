@@ -350,6 +350,14 @@ matched signed poses at 12 ticks. With 16 active bindings and identical
 movement, warmed release Step p95 was 189–191 µs for fallback values and
 207 µs for supplied vectors.
 
+**GLB triangle strips and fans** become ordinary mesh triangles at import.
+A generated strip with degenerate connectors and an indexless fan matched
+their explicit-triangle references pixel for pixel in the editor's front
+and back views. A malformed reimport kept the accepted mesh. The relocated
+Vulkan build preserved the expected winding and UVs. Warm release decode
+p95 for a 24,000-triangle surface was 9.05–9.31 ms for the old list path,
+8.80–9.01 ms for the new list path, and 8.77–8.92 ms for the strip.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added

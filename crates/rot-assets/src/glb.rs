@@ -1025,6 +1025,13 @@ impl PlacementPose {
     }
 }
 
+#[derive(Clone, Copy)]
+enum SurfaceTopology {
+    Triangles,
+    Strip,
+    Fan,
+}
+
 struct Decoder<'a> {
     doc: Document<'a>,
     bin: &'a [u8],
@@ -1155,9 +1162,16 @@ impl Decoder<'_> {
     }
 
     fn mesh(&mut self, primitive: Primitive, textured: bool) -> Result<ModelResource, AssetError> {
-        if primitive.mode.unwrap_or(4) != 4 {
-            return Err(error("GLB primitive mode must be TRIANGLES"));
-        }
+        let topology = match primitive.mode.unwrap_or(4) {
+            4 => SurfaceTopology::Triangles,
+            5 => SurfaceTopology::Strip,
+            6 => SurfaceTopology::Fan,
+            _ => {
+                return Err(error(
+                    "GLB primitive mode must be TRIANGLES, TRIANGLE_STRIP or TRIANGLE_FAN",
+                ))
+            }
+        };
         let positions = self.vectors::<3>(primitive.attributes.positions, "VEC3")?;
         if let Some(tangents) = primitive.attributes.tangents {
             if self.rows(tangents, "VEC4", 4, 5126)?.len() != positions.len() {
@@ -1188,12 +1202,21 @@ impl Decoder<'_> {
                 "GLB mesh attribute counts, unit normals or textured TEXCOORD_0 are invalid",
             ));
         }
+        let mut index_limit = positions.len();
         let indices: Vec<u32> = if let Some(i) = primitive.indices {
             let component = at(&self.doc.accessors, i, "index accessor")?.component_type;
             if !matches!(component, 5121 | 5123 | 5125) {
                 return Err(error(
                     "GLB indices require unsigned byte, short or int components",
                 ));
+            }
+            if !matches!(topology, SurfaceTopology::Triangles) {
+                // glTF reserves the largest value of each index type.
+                index_limit = index_limit.min(match component {
+                    5121 => usize::from(u8::MAX),
+                    5123 => usize::from(u16::MAX),
+                    _ => u32::MAX as usize,
+                });
             }
             self.rows(i, "SCALAR", 1, component)?
                 .map(|row| match component {
@@ -1205,10 +1228,13 @@ impl Decoder<'_> {
         } else {
             (0..positions.len() as u32).collect()
         };
-        if indices.is_empty()
-            || !indices.len().is_multiple_of(3)
-            || indices.len() / 3 > MAX_TRIANGLES
-            || indices.iter().any(|i| *i as usize >= positions.len())
+        let triangles = match topology {
+            SurfaceTopology::Triangles if indices.len().is_multiple_of(3) => indices.len() / 3,
+            SurfaceTopology::Triangles => 0,
+            SurfaceTopology::Strip | SurfaceTopology::Fan => indices.len().saturating_sub(2),
+        };
+        if !(1..=MAX_TRIANGLES).contains(&triangles)
+            || indices.iter().any(|i| *i as usize >= index_limit)
         {
             return Err(error("GLB triangle index count or range is invalid"));
         }
@@ -1230,10 +1256,10 @@ impl Decoder<'_> {
                 writeln!(bytes, "vn {} {} {}", n[0], n[1], n[2])?;
             }
         }
-        for triangle in indices.as_chunks::<3>().0 {
+        let mut write_triangle = |triangle: [u32; 3]| -> Result<(), std::io::Error> {
             if triangle_normal(triangle.map(|index| positions[index as usize])).is_none() {
                 self.skipped_triangles += 1;
-                continue;
+                return Ok(());
             }
             write!(bytes, "f")?;
             for i in triangle.iter().map(|i| i + 1) {
@@ -1244,7 +1270,30 @@ impl Decoder<'_> {
                     (false, false) => write!(bytes, " {i}")?,
                 }
             }
-            writeln!(bytes)?;
+            writeln!(bytes)
+        };
+        match topology {
+            SurfaceTopology::Triangles => {
+                for &triangle in indices.as_chunks::<3>().0 {
+                    write_triangle(triangle)?;
+                }
+            }
+            SurfaceTopology::Strip => {
+                // Use the original window number even when a connector is degenerate.
+                for (window, &[a, b, c]) in indices.array_windows::<3>().enumerate() {
+                    write_triangle(if window.is_multiple_of(2) {
+                        [a, b, c]
+                    } else {
+                        [a, c, b]
+                    })?;
+                }
+            }
+            SurfaceTopology::Fan => {
+                let anchor = indices[0];
+                for &[a, b] in indices[1..].array_windows::<2>() {
+                    write_triangle([a, b, anchor])?;
+                }
+            }
         }
         let mesh = parse_obj_with_normal_policy(&bytes, MeshNormalPolicy::AuthoredWhenComplete)
             .map_err(|e| error(format!("GLB generated triangle payload: {e}")))?;
@@ -2065,6 +2114,127 @@ pub(super) fn decode_accepted(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    fn surface_glb(mode: Option<u32>, positions: &[[f32; 3]], indices: Option<&[u16]>) -> Vec<u8> {
+        let mut bin: Vec<_> = positions
+            .iter()
+            .flatten()
+            .flat_map(|value| value.to_le_bytes())
+            .collect();
+        let mut views = vec![json!({"buffer":0,"byteLength":bin.len()})];
+        let mut accessors = vec![
+            json!({"bufferView":0,"componentType":5126,"count":positions.len(),"type":"VEC3"}),
+        ];
+        let mut primitive = json!({"attributes":{"POSITION":0}});
+        if let Some(mode) = mode {
+            primitive["mode"] = json!(mode);
+        }
+        if let Some(indices) = indices {
+            views.push(json!({"buffer":0,"byteOffset":bin.len(),"byteLength":indices.len()*2}));
+            bin.extend(indices.iter().flat_map(|index| index.to_le_bytes()));
+            accessors.push(
+                json!({"bufferView":1,"componentType":5123,"count":indices.len(),"type":"SCALAR"}),
+            );
+            primitive["indices"] = json!(1);
+        }
+        let doc = json!({
+            "asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],
+            "nodes":[{"name":"Surface","mesh":0}],"meshes":[{"primitives":[primitive]}],
+            "buffers":[{"byteLength":bin.len()}],"bufferViews":views,"accessors":accessors,
+        });
+        bin.resize(bin.len().next_multiple_of(4), 0);
+        crate::fixtures::pack_glb(&doc, &bin)
+    }
+
+    fn generated_obj(model: &DecodedModel) -> &[u8] {
+        model
+            .resources
+            .values()
+            .next()
+            .unwrap()
+            .bytes
+            .as_deref()
+            .unwrap()
+    }
+
+    #[test]
+    fn glb_strip_retains_original_window_parity_through_degenerate_connector() {
+        let positions = [
+            [0., 0., 0.],
+            [1., 0., 0.],
+            [0., 1., 0.],
+            [-1., 2., 0.],
+            [-2., 1., 0.],
+            [-3., 3., 0.],
+        ];
+        let strip = surface_glb(Some(5), &positions, Some(&[0, 1, 2, 3, 4, 5]));
+        let triangles = surface_glb(None, &positions, Some(&[0, 1, 2, 2, 3, 4, 3, 5, 4]));
+        let strip = decode("surface", "surface.glb", &strip).unwrap();
+        let triangles = decode("surface", "surface.glb", &triangles).unwrap();
+        assert_eq!(generated_obj(&strip), generated_obj(&triangles));
+        assert!(strip
+            .info
+            .warnings
+            .iter()
+            .any(|warning| warning == "Skipped 1 degenerate triangle."));
+    }
+
+    #[test]
+    fn glb_fan_closes_only_with_explicit_final_vertex() {
+        let positions = [
+            [0., 0., 0.],
+            [1., 0., 0.],
+            [0., 1., 0.],
+            [-1., 0., 0.],
+            [0., -1., 0.],
+            [1., 0., 0.],
+        ];
+        let triangles = surface_glb(
+            Some(4),
+            &positions,
+            Some(&[1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5, 0]),
+        );
+        let fan = surface_glb(Some(6), &positions, None);
+        let indexed = surface_glb(Some(6), &positions, Some(&[0, 1, 2, 3, 4, 5]));
+        let triangles = decode("surface", "surface.glb", &triangles).unwrap();
+        for source in [fan, indexed] {
+            let fan = decode("surface", "surface.glb", &source).unwrap();
+            assert_eq!(generated_obj(&fan), generated_obj(&triangles));
+        }
+        let open = surface_glb(Some(6), &positions[..5], None);
+        let open = decode("surface", "surface.glb", &open).unwrap();
+        let obj = std::str::from_utf8(generated_obj(&open)).unwrap();
+        assert_eq!(obj.lines().filter(|line| line.starts_with("f ")).count(), 3);
+    }
+
+    #[test]
+    fn glb_surface_rejects_malformed_expansion_and_keeps_last_good() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("surface.glb");
+        let positions = [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]];
+        std::fs::write(&path, surface_glb(Some(5), &positions, None)).unwrap();
+        let mut store = AssetStore::open(root.path()).unwrap();
+        let accepted = store.import_glb_at(0, "surface", "surface.glb").unwrap();
+        let too_many = vec![0; MAX_TRIANGLES + 3];
+        for (mode, indices, expected) in [
+            (1, &[0, 1, 2][..], "primitive mode must be"),
+            (5, &[0, 1][..], "triangle index count or range"),
+            (6, &[0, 1, 3], "triangle index count or range"),
+            (5, too_many.as_slice(), "triangle index count or range"),
+            (6, &[0, 0, 1, 1], "generated triangle payload"),
+        ] {
+            std::fs::write(&path, surface_glb(Some(mode), &positions, Some(indices))).unwrap();
+            let error = store
+                .refresh_glb_at(store.revision(), "surface")
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(expected), "{error}");
+            assert_eq!(store.model("surface"), Some(&accepted));
+        }
+        let reopened = AssetStore::open(root.path()).unwrap();
+        assert_eq!(reopened.model("surface"), Some(&accepted));
+    }
 
     #[test]
     fn sampler_matches_explicit_filters_and_reports_approximations() {

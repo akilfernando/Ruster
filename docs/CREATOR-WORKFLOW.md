@@ -257,7 +257,8 @@ To assign a mesh to an existing object, select the object and choose its file
 in **Mesh Renderer → Geometry**. Click **Apply**, then save the scene.
 
 Double-click an imported GLB or choose **Place in Scene** to create an
-editable hierarchy. Placement copies the node names, local transforms, and
+editable hierarchy. GLB surfaces can use triangle lists, strips, or fans,
+with or without indices. Placement copies the node names, local transforms, and
 materials into the scene. Rot accepts node matrices that can be represented
 as translation, rotation, and positive scale. Unnamed and repeated-name nodes
 use their source node indices for identity. Keep those indices stable when
