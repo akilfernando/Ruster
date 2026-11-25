@@ -545,6 +545,11 @@ between controls and Escape cancels capture or the edit. Each Apply shares
 one Undo. You can bind up to four logical keys per action and author up to
 32 actions. Escape and Tab are reserved.
 
+F11 switches the Linux player between windowed and fullscreen. Input
+Actions marks any existing F11 bindings. To replace one, choose **Edit**,
+then choose a key from the picker or use **Capture**, and select **Apply
+Action**. Approved MCP action reads and writes also report this conflict.
+
 In a file attached through the Script component, read the stable IDs using
 the fourth `update` argument. Button state includes `held`, `pressed`, and
 `released`. An axis returns −1, 0, or +1. Opposite sides held together cancel

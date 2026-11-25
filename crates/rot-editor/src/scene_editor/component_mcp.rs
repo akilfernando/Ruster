@@ -186,7 +186,12 @@ impl ComponentWorkspace {
                 .iter()
                 .skip(offset)
                 .take(16)
-                .map(|(id, definition)| json!({"id":id,"definition":definition}))
+                .map(|(id, definition)| {
+                    crate::input_ui::with_binding_warnings(
+                        json!({"id":id,"definition":definition}),
+                        Some(definition),
+                    )
+                })
                 .collect();
             let end = offset.saturating_add(items.len());
             return Ok(json!({
@@ -196,7 +201,7 @@ impl ComponentWorkspace {
                 "guidance": {
                     "action_limit": rot_scene::input::MAX_ACTIONS,
                     "keys_per_action": rot_scene::input::MAX_KEYS_PER_ACTION,
-                    "keys": "Use lowercase letters, 0–9, arrow_up, arrow_down, arrow_left, arrow_right, space, enter, navigation keys, or f1–f12. Escape and Tab are reserved.",
+                    "keys": "Use lowercase letters, 0–9, arrow_up, arrow_down, arrow_left, arrow_right, space, enter, navigation keys, or f1–f12. Escape and Tab are reserved. F11 toggles fullscreen in the Linux player.",
                     "file_lua_api": 2,
                 },
             }));
@@ -412,7 +417,10 @@ impl ComponentWorkspace {
                 .actions
                 .get(id)
                 .ok_or(("action_not_found", "This action no longer exists.".into()))?;
-            return Ok(json!({"action_id":id,"definition":definition}));
+            return Ok(crate::input_ui::with_binding_warnings(
+                json!({"action_id":id,"definition":definition}),
+                Some(definition),
+            ));
         }
         if self.ai_transition_pending() || self.authored_edit_pending() {
             return Err((
@@ -450,9 +458,10 @@ impl ComponentWorkspace {
             if next != revision {
                 self.refresh();
             }
-            return Ok(
+            return Ok(crate::input_ui::with_binding_warnings(
                 json!({"action_id":id,"changed":next != revision,"dirty":self.session.is_dirty()}),
-            );
+                self.session.scene().actions.get(id),
+            ));
         }
 
         if op == "scene_components_edit" {
@@ -2290,6 +2299,63 @@ mod tests {
         assert_eq!(properties(&reopened), changed);
         editor.command(Action::Undo);
         assert_eq!(editor.session.scene(), &scene);
+    }
+
+    #[test]
+    fn f11_binding_warnings_preserve_and_repair_saved_button_and_axis_definitions() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("keys.scene");
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("keys")).unwrap()).unwrap();
+        let button = json!({"kind":{"type":"button","keys":["f11","f12"]}});
+        let axis = json!({"kind":{"type":"axis1d","negative":["a"],"positive":["f11"]}});
+        for (id, definition) in [("button", &button), ("axis", &axis)] {
+            scene.actions.insert(
+                id.into(),
+                serde_json::from_value(definition.clone()).unwrap(),
+            );
+        }
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let cmd =
+            |editor: &mut ComponentWorkspace, op, args| editor.ai_command("session", op, &args);
+        let list = cmd(&mut editor, "behavior_inspect", json!({"kind":"actions"}));
+        let warnings = json!([{"code":"player_fullscreen_shortcut","key":"f11","platform":"linux",
+            "message":Text::InputF11Conflict.plain()}]);
+        for ((id, definition), item) in [("axis", &axis), ("button", &button)]
+            .into_iter()
+            .zip(list["result"]["page"]["items"].as_array().unwrap())
+        {
+            assert_eq!(item["id"], id);
+            assert_eq!(&item["definition"], definition);
+            assert_eq!(item["binding_warnings"], warnings);
+            let request =
+                json!({"expected_session_token":"session","expected_revision":"0","action_id":id});
+            let exact = cmd(&mut editor, "behavior_action", request.clone());
+            assert_eq!(&exact["result"]["definition"], definition);
+            assert_eq!(exact["result"]["binding_warnings"], warnings);
+            let mut edit = request;
+            edit["definition"] = definition.clone();
+            edit["definition"]["label"] = json!("Preserved");
+            let revised = cmd(&mut editor, "behavior_action_set", edit);
+            assert_eq!(revised["result"]["binding_warnings"], warnings);
+            editor.command(Action::Undo);
+            // Reopen to exercise existing storage and restore the local revision.
+            assert!(editor.save());
+            editor = ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+            assert_eq!(editor.session.scene().actions, scene.actions);
+        }
+        let repaired = cmd(
+            &mut editor,
+            "behavior_action_set",
+            json!({
+                "expected_session_token":"session","expected_revision":"0","action_id":"axis",
+                "definition":{"kind":{"type":"axis1d","negative":["a"],"positive":["d"]}}
+            }),
+        );
+        assert_eq!(repaired["result"]["changed"], true);
+        assert!(repaired["result"].get("binding_warnings").is_none());
     }
 
     #[test]

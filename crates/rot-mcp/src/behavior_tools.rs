@@ -1,7 +1,7 @@
 //! Bounded data authoring only; execution remains an editor-owned asynchronous workflow.
 use serde_json::{json, Map, Value};
 const TOOLS: &[(&str,&str,&[&str])] = &[
-    ("behavior_inspect","Page through source/binding summaries, full action definitions or missing-reference diagnostics, at most16 rows; no source/property bodies.",&["kind"]),
+    ("behavior_inspect","Page through source/binding summaries, full action definitions with binding warnings, or missing-reference diagnostics, at most16 rows; no source/property bodies.",&["kind"]),
     ("behavior_source","Read one embedded source as base64 UTF-8 with SHA256; no filesystem access.",&["source_id"]),
     ("behavior_source_set","Upsert embedded source data, including unfinished code. host_api_version is a positive u32; Lua API7 opts into owned-sphere move-and-slide. Shared Undo; no compilation or execution; runtime validates supported versions and owner constraints.",&["source_id","label","language_id","host_api_version","text_base64"]),
     ("behavior_source_remove","Remove embedded source; dependent bindings remain repairable. Shared Undo.",&["source_id"]),
@@ -15,8 +15,8 @@ const TOOLS: &[(&str,&str,&[&str])] = &[
     ("behavior_state_default_set","Set/remove one authored state field through shared Undo. Number, Bool, Text and Vec3 only,64fields/16KiB per owner and1MiB total. Null removes. Requires clean drafts. Current runtime stays unchanged until Reset.",&["binding_id","name","value"]),
     ("behavior_command","Read one complete authored command definition or null for absent; binding summaries expose IDs and argument counts only.",&["binding_id","command_id"]),
     ("behavior_command_set","Set/remove one Application command definition through shared Undo. Up to16 commands,16 typed arguments and16KiB normalized argument payload per command. Null removes. Clean drafts required.",&["binding_id","command_id","definition"]),
-    ("behavior_action","Read one complete authored action definition under current scene session/revision authority; no live key state.",&["action_id"]),
-    ("behavior_action_set","Replace/upsert a complete authored action definition. At most32 actions including unbound definitions; at most4 total logical keys per action. Cross-action key sharing is allowed; v23 Buttons may also bind primary_mouse (boolean); repeated/opposite keys and reserved Escape/Tab reject. Shared Undo, clean human drafts required; live runtime map stays immutable until Reset.",&["action_id","definition"]),
+    ("behavior_action","Read one complete authored action definition under current scene session/revision authority, with any Linux player F11 conflict.",&["action_id"]),
+    ("behavior_action_set","Replace/upsert a complete authored action definition. At most32 actions including unbound definitions; at most4 total logical keys per action. Cross-action key sharing is allowed; v23 Buttons may also bind primary_mouse (boolean); repeated/opposite keys and reserved Escape/Tab reject. F11 is preserved with a warning because the Linux player consumes it for fullscreen. Shared Undo, clean human drafts required; live runtime map stays immutable until Reset.",&["action_id","definition"]),
     ("behavior_action_remove","Remove one authored action definition through shared Undo. Reversible action IDs remain reserved; Undo restores them. Existing script references remain available for repair; no live runtime map mutation.",&["action_id"]),
 ];
 pub fn supported(name: &str) -> bool {
@@ -38,7 +38,7 @@ fn optional(name: &str) -> &'static [&'static str] {
 }
 fn action_keys_schema() -> Value {
     json!({"type":"array","maxItems":4,"items":{"type":"string","minLength":1,"maxLength":16,"pattern":"^[a-z0-9_]+$"},
-        "description":"Logical IDs: a..z, 0..9, arrow_left/right/up/down, space, enter, backspace, delete, insert, home, end, page_up/down, f1..f12. Escape/Tab are reserved. No physical-key fallback, modifiers or chords. Empty means unbound. The editor validates membership, repeats and axis overlap."})
+        "description":"Logical IDs: a..z, 0..9, arrow_left/right/up/down, space, enter, backspace, delete, insert, home, end, page_up/down, f1..f12. Escape/Tab are reserved. F11 is valid in saved maps but toggles fullscreen in the Linux player. No physical-key fallback, modifiers or chords. Empty means unbound. The editor validates membership, repeats and axis overlap."})
 }
 fn action_definition_schema() -> Value {
     super::object_schema(

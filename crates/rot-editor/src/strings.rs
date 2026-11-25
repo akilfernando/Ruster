@@ -1466,6 +1466,8 @@ editor_text! {
     GameControlsRelease => "Press Escape to return to editor shortcuts.",
     HistoryChanged => "History changed.",
     InputActionsStopPlay => "Stop Play and finish pending changes to edit Input Actions.",
+    InputF11Conflict => "F11 toggles fullscreen in the Linux player.",
+    InputF11CaptureConflict => "F11 toggles fullscreen in the Linux player. Choose another key.",
     InputActionsCloseDraft => "Apply or cancel the Input Action changes before closing.",
     InputActionApplied => "Input action applied.",
     NewSceneFinishBeforeClose => "Finish or cancel New Scene before closing.",

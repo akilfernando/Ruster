@@ -142,7 +142,12 @@ impl SceneEditor {
                         .iter()
                         .skip(offset)
                         .take(16)
-                        .map(|(id, definition)| json!({"id":id,"definition":definition}))
+                        .map(|(id, definition)| {
+                            crate::input_ui::with_binding_warnings(
+                                json!({"id":id,"definition":definition}),
+                                Some(definition),
+                            )
+                        })
                         .collect();
                     let end = offset.saturating_add(items.len());
                     serde_json::to_value(rot_scene::AuthoringPage {
@@ -181,9 +186,10 @@ impl SceneEditor {
                     .session
                     .action(string(args, "action_id")?)
                     .ok_or_else(|| error("action_not_found"))?;
-                return Ok(
+                return Ok(crate::input_ui::with_binding_warnings(
                     json!({"session_token":token,"revision":revision.to_string(),"action_id":args["action_id"],"definition":definition}),
-                );
+                    Some(definition),
+                ));
             }
             "behavior_source" => {
                 let value = self
@@ -361,9 +367,14 @@ impl SceneEditor {
         if next != revision {
             self.notice = Text::BehaviorCommandsAiUpdatedScriptSettings.plain().into();
         }
-        Ok(
-            json!({"session_token":token,"revision":next.to_string(),"changed":next!=revision,"dirty":self.session.is_dirty()}),
-        )
+        let receipt = json!({"session_token":token,"revision":next.to_string(),"changed":next!=revision,"dirty":self.session.is_dirty()});
+        if op == "behavior_action_set" {
+            return Ok(crate::input_ui::with_binding_warnings(
+                receipt,
+                self.session.action(string(args, "action_id")?),
+            ));
+        }
+        Ok(receipt)
     }
 }
 

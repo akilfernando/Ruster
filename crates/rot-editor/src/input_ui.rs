@@ -78,6 +78,25 @@ fn keys(kind: &ActionKind) -> impl Iterator<Item = InputKey> + '_ {
     first.iter().chain(second).copied()
 }
 
+fn has_player_shortcut(kind: &ActionKind) -> bool {
+    keys(kind).any(|key| key == InputKey::F11)
+}
+
+pub(super) fn with_binding_warnings(
+    mut result: serde_json::Value,
+    definition: Option<&ActionDefinition>,
+) -> serde_json::Value {
+    if definition.is_some_and(|definition| has_player_shortcut(&definition.kind)) {
+        result["binding_warnings"] = serde_json::json!([{
+            "code":"player_fullscreen_shortcut",
+            "key":InputKey::F11,
+            "platform":"linux",
+            "message":Text::InputF11Conflict.plain(),
+        }]);
+    }
+    result
+}
+
 fn unbound(kind: &ActionKind) -> ActionKind {
     match kind {
         ActionKind::Button { .. } => ActionKind::Button {
@@ -522,6 +541,10 @@ impl InputUi {
             ui.memory_mut(|memory| memory.request_focus(capture.focus));
             return;
         }
+        if key == egui::Key::F11 {
+            self.message = Text::InputF11CaptureConflict.plain().into();
+            return;
+        }
         let key = InputKey::from_logical_name(key.name());
         if modifiers.ctrl
             || modifiers.alt
@@ -748,6 +771,12 @@ impl InputUi {
                                     action.label.as_deref().unwrap_or(id)
                                 ));
                                 ui.weak(hint(&action.kind));
+                                if has_player_shortcut(&action.kind) {
+                                    ui.colored_label(
+                                        ui.visuals().warn_fg_color,
+                                        Text::InputF11Conflict.plain(),
+                                    );
+                                }
                                 for conflict in conflicts(session, id, &action.kind) {
                                     ui.colored_label(ui.visuals().warn_fg_color, conflict);
                                 }
@@ -1186,6 +1215,14 @@ struct KeyRows {
     changed: bool,
 }
 
+fn key_choice_allowed(choice: InputKey, current: Option<InputKey>) -> bool {
+    match choice {
+        InputKey::Escape | InputKey::Tab => false,
+        InputKey::F11 => current == Some(InputKey::F11),
+        _ => true,
+    }
+}
+
 fn key_rows(
     ui: &mut egui::Ui,
     side: Side,
@@ -1212,7 +1249,7 @@ fn key_rows(
                         .selected_text(key.logical_name())
                         .show_ui(ui, |ui| {
                             for choice in InputKey::ALL {
-                                if matches!(choice, InputKey::Escape | InputKey::Tab)
+                                if !key_choice_allowed(*choice, Some(*key))
                                     || (occupied.contains(choice) && *choice != *key)
                                 {
                                     continue;
@@ -1257,7 +1294,10 @@ fn key_rows(
                     if unbind.clicked() && admit {
                         remove = Some(index);
                     }
-                })
+                });
+                if *key == InputKey::F11 {
+                    ui.colored_label(ui.visuals().warn_fg_color, Text::InputF11Conflict.plain());
+                }
             });
         }
         let add = ui.add_enabled(occupied.len() < 4, egui::Button::new(Text::AddKey.plain()));
@@ -1266,9 +1306,10 @@ fn key_rows(
             add.scroll_to_me(None);
         }
         if add.clicked() && admit {
-            if let Some(key) = InputKey::ALL.iter().find(|key| {
-                !matches!(key, InputKey::Escape | InputKey::Tab) && !occupied.contains(key)
-            }) {
+            if let Some(key) = InputKey::ALL
+                .iter()
+                .find(|key| key_choice_allowed(**key, None) && !occupied.contains(key))
+            {
                 values.push(*key);
                 result.changed = true;
             }
@@ -1912,6 +1953,17 @@ mod tests {
             "enabled Cancel capture owns keyboard focus"
         );
         let before = editor.generation();
+        let (_, edits, passes, _) = frame(&ctx, &mut editor, &session, key(egui::Key::F11), true);
+        assert!(passes >= 2);
+        assert_eq!(edits, 0);
+        assert!(editor.capturing(), "F11 leaves capture active");
+        assert_eq!(editor.message, Text::InputF11CaptureConflict.plain());
+        assert_eq!(editor.generation(), before);
+        assert!(!key_choice_allowed(InputKey::F11, None));
+        assert!(!key_choice_allowed(InputKey::F11, Some(InputKey::A)));
+        assert!(key_choice_allowed(InputKey::F11, Some(InputKey::F11)));
+        assert!(key_choice_allowed(InputKey::F12, Some(InputKey::F11)));
+
         let (_, edits, passes, _) = frame(&ctx, &mut editor, &session, key(egui::Key::Enter), true);
         assert!(passes >= 2);
         assert_eq!(edits, 0);

@@ -371,6 +371,12 @@ parents. A textured courtyard floor kept its dimensions and orientation
 through shared history, reopen, and a relocated Vulkan build. The build
 included the compass texture and used the built-in geometry directly.
 
+**F11 binding warnings** identify the Linux fullscreen shortcut in Input
+Actions and approved MCP action responses. Existing Button and Axis
+bindings keep their saved values until edited. The picker and Capture
+guide the creator to a replacement. In the relocated Linux player, F11
+toggled fullscreen and the replacement H moved the Lua witness once.
+
 **Orthographic GLB cameras** place editable v23 Camera components on the
 original nodes. The Blender workshop kept its rolled camera and a second
 node sharing the lens under their imported parent. Explicit Reimport added
