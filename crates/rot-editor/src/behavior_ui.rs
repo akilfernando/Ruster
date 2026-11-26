@@ -2667,7 +2667,7 @@ impl RuntimeUi {
                     .set_breakpoints(key, self.debug.points.clone())
                     .map_err(|e| e.to_string())?;
                 self.captured = Some(Arc::new(rot_scene::Authoring {
-                    sources: component_scene.sources.clone(),
+                    sources: component_scene.script_sources_snapshot(),
                     actions: component_scene.actions.clone(),
                     hud: component_scene.hud.clone(),
                     ..Default::default()
@@ -2955,13 +2955,18 @@ impl RuntimeUi {
                                 self.stale = self.frame.is_some();
                             }
                             let summary = play_failure(operation).plain();
-                            let file = diagnostic
-                                .source_id
-                                .as_deref()
-                                .filter(|id| id.starts_with("asset-lua-"))
-                                .and_then(|id| self.captured.as_ref()?.sources.get(id))
-                                .and_then(|source| source.label.as_deref())
-                                .filter(|path| path.ends_with(".lua"));
+                            let file = diagnostic.source_id.as_deref().and_then(|id| {
+                                self.project_sources
+                                    .get(id)
+                                    .map(|source| source.source.as_str())
+                                    .or_else(|| {
+                                        id.starts_with("asset-lua-")
+                                            .then_some(id)
+                                            .and_then(|id| self.captured.as_ref()?.sources.get(id))
+                                            .and_then(|source| source.label.as_deref())
+                                            .filter(|path| path.ends_with(".lua"))
+                                    })
+                            });
                             let summary = file.map_or_else(
                                 || summary.to_owned(),
                                 |path| format!("{summary} {path}"),

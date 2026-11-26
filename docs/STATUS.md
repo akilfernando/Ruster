@@ -41,8 +41,10 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   - `C-10`: file-backed `on_start` and `on_update` retain per-component
     Lua state and reload on save in Play. `host.find` reads another object's
     committed local Transform and `set_transform` stages writes on the
-    same tick transaction. Existing `update` scripts still run. Other
-    component access, spawn/destroy and the wider API cutover remain open.
+    same tick transaction. New Builds bake file scripts without a numbered
+    contract. Existing `update` scripts and packages still run. Other
+    component access, spawn/destroy and remaining callback capabilities are
+    open.
   - `C-EXIT`: [Rot Yard](../examples/rot-yard/README.md) has a scripted Blender
     gate, a Kenney CC0 pack, and a 5,000-object linked-prefab level.
     The Riverside scene exceeded 60 fps on the focused Wayland desktop.

@@ -511,8 +511,10 @@ on the next Play.
 
 Use **Rename…** on the file in Assets to keep its ID and attachments.
 A linked prefab can reuse the same asset. Saving the scene records the
-asset reference. Linux Build verifies the accepted source and embeds it
-in the packaged scene so the standalone can run independently.
+asset reference. Linux Build verifies the accepted file and embeds its Lua
+text and project-relative provenance. New baked files carry no numbered
+host API. Existing packages and files that export `update` retain their
+callback behavior.
 
 ## Move another scene object from Lua
 

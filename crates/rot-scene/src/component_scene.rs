@@ -16,6 +16,7 @@ use crate::{
     BehaviorBinding, BehaviorSource, BindingTarget, Collider, ColliderRole, ColliderShape,
     DisplayProfile, Light, LightKind, Lighting, OpaqueMaterial, PlayerView, Primitive,
     PropertyValue, SceneError, Session, SoundAssetReferences, Transform, MAX_SOURCES,
+    MAX_SOURCE_BYTES,
 };
 
 #[path = "component_session.rs"]
@@ -53,12 +54,70 @@ pub struct ComponentScene {
     pub ambient: Option<Ambient>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub sources: BTreeMap<String, BehaviorSource>,
+    /// Accepted file content embedded for Play, Play Checks, and Build.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub script_files: BTreeMap<String, ScriptFile>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub actions: ActionMap,
     #[serde(default, skip_serializing_if = "Hud::is_default")]
     pub hud: Hud,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gameplay_camera: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScriptFile {
+    pub asset_id: String,
+    /// Exact project-relative provenance. The runtime never opens this path.
+    pub path: String,
+    pub text: String,
+}
+
+impl ScriptFile {
+    pub fn validate(&self) -> Result<(), SceneError> {
+        validate_id(&self.asset_id)?;
+        if self.path.len() > 256
+            || self.path.contains(['\\', '\0'])
+            || self.path.split('/').any(|part| {
+                part.is_empty() || part == "." || part == ".." || part.starts_with(".rot-")
+            })
+            || self.text.len() > MAX_SOURCE_BYTES
+        {
+            return Err(SceneError::Invalid(
+                "baked Lua files need project-relative provenance and at most 16 KiB of UTF-8 text"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Runtime view for legacy update, debugger and audio consumers. Numbered
+    /// host contracts are never serialized for baked file-backed scripts.
+    pub fn compatibility_source(&self, movement: ScriptMovement) -> BehaviorSource {
+        let label: String = self
+            .path
+            .chars()
+            .map(|ch| if ch.is_control() { '�' } else { ch })
+            .collect();
+        let label = label.trim();
+        let label = if label.len() <= 128 {
+            label.to_owned()
+        } else {
+            let prefix = "…/";
+            let cutoff = label.ceil_char_boundary(label.len() - (128 - prefix.len()));
+            format!("{prefix}{}", &label[cutoff..])
+        };
+        BehaviorSource {
+            label: (!label.is_empty()).then_some(label),
+            language_id: "lua54".into(),
+            host_api_version: match movement {
+                ScriptMovement::Ordinary => crate::INPUT_HOST_API_VERSION,
+                ScriptMovement::KinematicSphere => crate::KINEMATIC_HOST_API_VERSION,
+            },
+            text: self.text.clone(),
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -369,6 +428,20 @@ impl ComponentScene {
             validate_id(id)?;
             source.validate()?;
         }
+        for (id, file) in &self.script_files {
+            validate_id(id)?;
+            file.validate()?;
+            if self.sources.contains_key(id) {
+                return Err(SceneError::Invalid(format!(
+                    "duplicate script source ID: {id}"
+                )));
+            }
+        }
+        if !self.script_files.is_empty()
+            && self.sources.len() + self.script_files.len() > MAX_SOURCES
+        {
+            return Err(SceneError::Invalid("script source limit exceeded".into()));
+        }
         validate_action_map(&self.actions)?;
         self.hud.validate()?;
         let object_indices: HashMap<_, _> = self
@@ -380,6 +453,7 @@ impl ComponentScene {
         prefab::validate_instances(self, &object_indices)?;
         let mut ids = HashSet::new();
         let mut driven = HashSet::new();
+        let mut baked_movements = HashMap::new();
         let mut gameplay_camera_found = self.gameplay_camera.is_none();
         for (owner, object) in self.objects.iter().enumerate() {
             for component in &object.components {
@@ -420,13 +494,26 @@ impl ComponentScene {
                         movement,
                     } => {
                         binding.validate()?;
-                        if source_kind.is_none() && !movement.is_ordinary() {
+                        let baked_file = source_kind.is_none()
+                            && self.script_files.contains_key(&binding.source_id);
+                        let file_backed = source_kind.is_some() || baked_file;
+                        if baked_file
+                            && baked_movements
+                                .insert(binding.source_id.as_str(), *movement)
+                                .is_some_and(|previous| previous != *movement)
+                        {
+                            return Err(SceneError::Invalid(format!(
+                                "baked Lua source {} has conflicting movement modes",
+                                binding.source_id
+                            )));
+                        }
+                        if !file_backed && !movement.is_ordinary() {
                             return Err(SceneError::Invalid(format!(
                                 "Kinematic Sphere mode requires a file-backed Object Lua script ({})",
                                 component.id
                             )));
                         }
-                        if source_kind.is_some()
+                        if file_backed
                             && (!matches!(binding.target, BindingTarget::Object(_))
                                 || binding.properties.values().any(|property| {
                                     !matches!(
@@ -444,7 +531,7 @@ impl ComponentScene {
                                 component.id
                             )));
                         }
-                        if source_kind.is_none()
+                        if !file_backed
                             && binding.properties.values().any(|property| {
                                 matches!(property, crate::PropertyValue::SensorRef(_))
                             })
@@ -727,6 +814,7 @@ impl ComponentScene {
             background: None,
             ambient,
             sources: authoring.sources.clone(),
+            script_files: BTreeMap::new(),
             actions: authoring.actions.clone(),
             hud: authoring.hud.clone(),
             gameplay_camera,
@@ -842,6 +930,29 @@ impl ComponentScene {
         }
     }
 
+    /// Snapshot both stored sources and the runtime compatibility view of baked files.
+    pub fn script_sources_snapshot(&self) -> BTreeMap<String, BehaviorSource> {
+        let mut sources = self.sources.clone();
+        if self.script_files.is_empty() {
+            return sources;
+        }
+        for component in self.objects.iter().flat_map(|object| &object.components) {
+            if let Component::Script {
+                binding,
+                source_kind: None,
+                movement,
+            } = &component.kind
+            {
+                if let Some(file) = self.script_files.get(&binding.source_id) {
+                    sources
+                        .entry(binding.source_id.clone())
+                        .or_insert_with(|| file.compatibility_source(*movement));
+                }
+            }
+        }
+        sources
+    }
+
     /// Build a runtime authoring view where script binding enabled states reflect object hierarchy.
     pub fn authoring_snapshot(&self, hierarchy: &ObjectHierarchy) -> crate::Authoring {
         let mut bindings = BTreeMap::new();
@@ -857,7 +968,7 @@ impl ComponentScene {
             }
         }
         crate::Authoring {
-            sources: self.sources.clone(),
+            sources: self.script_sources_snapshot(),
             bindings,
             actions: self.actions.clone(),
             hud: self.hud.clone(),
@@ -884,7 +995,7 @@ impl ComponentScene {
     /// establishes authority for every distinct accepted source before binding.
     pub fn bake_script_assets(
         &mut self,
-        sources: BTreeMap<String, BehaviorSource>,
+        sources: BTreeMap<String, ScriptFile>,
     ) -> Result<(), SceneError> {
         self.bake_script_assets_with_keys(sources).map(drop)
     }
@@ -892,7 +1003,7 @@ impl ComponentScene {
     /// The baked source IDs for each authored asset and movement mode.
     pub fn bake_script_assets_with_keys(
         &mut self,
-        mut sources: BTreeMap<String, BehaviorSource>,
+        mut sources: BTreeMap<String, ScriptFile>,
     ) -> Result<BTreeMap<String, BTreeMap<ScriptMovement, String>>, SceneError> {
         let required = self.script_asset_ids();
         if let Some(id) = required.iter().find(|id| !sources.contains_key(**id)) {
@@ -921,7 +1032,13 @@ impl ComponentScene {
                 _ => None,
             })
             .collect();
-        if self.sources.len().saturating_add(variants.len()) > MAX_SOURCES {
+        if self
+            .sources
+            .len()
+            .saturating_add(self.script_files.len())
+            .saturating_add(variants.len())
+            > MAX_SOURCES
+        {
             return Err(SceneError::Invalid("script source limit exceeded".into()));
         }
         drop(required);
@@ -938,30 +1055,34 @@ impl ComponentScene {
                 _ => None,
             })
             .collect();
-        for source in sources.values() {
+        for (id, source) in &sources {
             source.validate()?;
+            if id != &source.asset_id {
+                return Err(SceneError::Invalid(format!(
+                    "Lua asset {id} has mismatched provenance"
+                )));
+            }
         }
         let mut keys = BTreeMap::new();
         let mut index = 1;
         let mut variants = variants.into_iter().peekable();
         while let Some((asset, movement)) = variants.next() {
-            let mut source = if variants.peek().is_some_and(|(next, _)| next == &asset) {
+            let source = if variants.peek().is_some_and(|(next, _)| next == &asset) {
                 sources[&asset].clone()
             } else {
                 sources.remove(&asset).expect("verified asset source")
             };
-            if movement == ScriptMovement::KinematicSphere {
-                source.host_api_version = crate::KINEMATIC_HOST_API_VERSION;
-            }
             let key = loop {
-                let candidate = format!("asset-lua-{index}");
+                let candidate = format!("file-lua-{index}");
                 index += 1;
-                if !self.sources.contains_key(&candidate) && !reserved.contains(candidate.as_str())
+                if !self.sources.contains_key(&candidate)
+                    && !self.script_files.contains_key(&candidate)
+                    && !reserved.contains(candidate.as_str())
                 {
                     break candidate;
                 }
             };
-            self.sources.insert(key.clone(), source);
+            self.script_files.insert(key.clone(), source);
             keys.entry(asset)
                 .or_insert_with(BTreeMap::new)
                 .insert(movement, key);
@@ -980,7 +1101,6 @@ impl ComponentScene {
                 if source_kind.is_some() {
                     binding.source_id = keys[&binding.source_id][movement].clone();
                     *source_kind = None;
-                    *movement = ScriptMovement::Ordinary;
                 }
             }
         }
@@ -1682,6 +1802,7 @@ mod tests {
             background: None,
             ambient: None,
             sources: BTreeMap::new(),
+            script_files: BTreeMap::new(),
             actions: ActionMap::new(),
             hud: Hud::default(),
             gameplay_camera: None,
@@ -1745,6 +1866,7 @@ mod tests {
             background: None,
             ambient: None,
             sources: BTreeMap::new(),
+            script_files: BTreeMap::new(),
             actions: ActionMap::new(),
             hud: Hud::default(),
             gameplay_camera: None,

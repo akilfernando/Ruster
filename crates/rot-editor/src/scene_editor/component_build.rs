@@ -525,7 +525,7 @@ impl BuildRequest {
                     let text = String::from_utf8(bytes).map_err(|_| {
                         rot_assets::AssetError(format!("Lua source {path} must be UTF-8."))
                     })?;
-                    lua_sources.insert(id.to_owned(), super::script_assets::source(path, text));
+                    lua_sources.insert(id.to_owned(), super::script_assets::source(id, path, text));
                     return Ok(());
                 }
                 let (extension, map) = if mesh_ids.contains(id) {
@@ -573,11 +573,9 @@ impl BuildRequest {
                 .map_err(|error| error.to_string())?;
             for (id, source) in &lua_sources {
                 cancelled()?;
-                engine.check_source(id, source).map_err(|error| {
-                    BuildFailureKind::AssetUnavailable.detail(format!(
-                        "Lua source {}: {error}",
-                        source.label.as_deref().unwrap_or(id)
-                    ))
+                engine.check_script_file(id, source).map_err(|error| {
+                    BuildFailureKind::AssetUnavailable
+                        .detail(format!("Lua source {}: {error}", source.path))
                 })?;
             }
             authored
@@ -2034,7 +2032,7 @@ f 1 2 3
             end
             o.rotation[3] = 1
             return o
-        end}"#;
+        end, on_update=function() math.abs(nil) end}"#;
         let changed = original.replace("= 1", "= 2");
         assert_eq!(original.len(), changed.len());
         fs::write(&source, original).unwrap();
@@ -2118,20 +2116,22 @@ f 1 2 3
         capture(&assets)
             .publish(&destination, &player, &not_cancelled)
             .unwrap();
-        let baked = ComponentScene::open(destination.join("scene.json")).unwrap();
+        let bytes = fs::read(destination.join("scene.json")).unwrap();
+        let baked = ComponentScene::read_json(bytes.as_slice()).unwrap();
+        let wire: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(wire["scene"].get("sources").is_none());
         assert!(baked.script_asset_ids().is_empty());
-        assert_eq!(baked.sources.len(), 2);
-        assert!(baked.sources.values().all(|source| source.text == changed));
+        assert_eq!(baked.script_files.len(), 2);
+        assert!(baked.script_files.values().all(|file| {
+            file.text == changed && file.asset_id == "spin" && file.path == "Assets/spin.lua"
+        }));
         let mut engine = rot_behavior::Engine::new(Default::default()).unwrap();
         let mut runtime = engine.reset_component(&baked, 0).unwrap();
         let authoring = runtime.authoring_snapshot().clone();
-        for (owner, api) in [
-            (&scene.objects[0], rot_behavior::INPUT_HOST_API_VERSION),
-            (&scene.objects[1], rot_behavior::KINEMATIC_HOST_API_VERSION),
-        ] {
-            let binding = &authoring.bindings[&format!("{}-script", owner.id)];
-            assert_eq!(authoring.sources[&binding.source_id].host_api_version, api);
-        }
+        let ordinary_id = &authoring.bindings[&format!("{}-script", scene.objects[0].id)].source_id;
+        let kinematic_id =
+            &authoring.bindings[&format!("{}-script", scene.objects[1].id)].source_id;
+        assert_ne!(ordinary_id, kinematic_id);
         engine.step(&mut runtime).unwrap();
         let moved = runtime.component_transforms().unwrap()[1].clone();
         assert_ne!(moved.translation, scene.objects[1].transform.translation);
@@ -2146,6 +2146,23 @@ f 1 2 3
         assert_eq!(runtime.tick(), 1);
         assert_eq!(runtime.component_transforms().unwrap()[1], moved);
         assert_eq!(ComponentScene::open(path).unwrap(), scene);
+
+        let mut persistent_kinematic = baked;
+        persistent_kinematic
+            .script_files
+            .get_mut(kinematic_id)
+            .unwrap()
+            .text = "return {on_update=function(o) o.translation[1] = 1 end}".into();
+        let error = engine
+            .reset_component(&persistent_kinematic, 0)
+            .unwrap_err();
+        assert_eq!(
+            error.binding_id.as_deref(),
+            Some(format!("{}-script", scene.objects[1].id).as_str())
+        );
+        assert!(error
+            .message
+            .contains("Kinematic Sphere scripts require update"));
     }
 
     #[test]

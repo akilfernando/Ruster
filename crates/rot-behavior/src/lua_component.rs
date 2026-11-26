@@ -15,9 +15,9 @@ use super::{
     LANGUAGE_ID,
 };
 
-/// Baked file IDs have been used since before component callbacks were added.
-/// A legacy update callback always wins when probing their returned table.
-pub(super) fn file_source(id: &str, source: &BehaviorSource) -> bool {
+/// Before baked files carried explicit provenance, these were identified by
+/// their generated ID and label. Keep old packages on that admission path.
+pub(super) fn legacy_file_source(id: &str, source: &BehaviorSource) -> bool {
     source.language_id == LANGUAGE_ID
         && source.host_api_version == INPUT_HOST_API_VERSION
         && id.starts_with("asset-lua-")
@@ -25,6 +25,11 @@ pub(super) fn file_source(id: &str, source: &BehaviorSource) -> bool {
             .label
             .as_deref()
             .is_some_and(|path| path.ends_with(".lua"))
+}
+
+pub(super) enum ModuleProbe<'a> {
+    Ordinary(&'a mut Option<Module>),
+    Kinematic,
 }
 
 #[derive(Debug)]
@@ -263,10 +268,10 @@ impl Engine {
     pub(super) fn load_replacement_module(
         &mut self,
         id: &str,
-        source: &BehaviorSource,
+        text: &str,
     ) -> Result<Module, Diagnostic> {
         self.binding_count.set(0);
-        let main = self.compile(id, source)?;
+        let main = self.compile_lua(id, text)?;
         // Detach the environment from the cached chunk after this call. Lua
         // closures already created by the chunk retain their own environment.
         main.set_environment(

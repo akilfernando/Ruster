@@ -702,6 +702,7 @@ impl PrefabSource {
             background: None,
             ambient: None,
             sources,
+            script_files: BTreeMap::new(),
             actions: BTreeMap::new(),
             hud: Default::default(),
             gameplay_camera: None,

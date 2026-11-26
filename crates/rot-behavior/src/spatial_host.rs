@@ -228,7 +228,7 @@ pub(super) fn kinematic_owner_component(
     indices: &std::collections::HashMap<String, usize>,
     animated_objects: &std::collections::HashSet<usize>,
 ) -> Result<Option<KinematicOwner>, String> {
-    use rot_scene::component_scene::Component;
+    use rot_scene::component_scene::{Component, ScriptMovement};
     use rot_scene::{BindingTarget, ColliderRole, ColliderShape};
 
     let mut movers = scene
@@ -243,16 +243,27 @@ pub(super) fn kinematic_owner_component(
                 .map(move |component| (index, object, component))
         })
         .filter_map(|(index, object, component)| {
-            let Component::Script { binding, .. } = &component.kind else {
+            let Component::Script {
+                binding,
+                source_kind,
+                movement,
+            } = &component.kind
+            else {
                 return None;
             };
             if !component.enabled || !binding.enabled {
                 return None;
             }
-            let source = scene.sources.get(&binding.source_id)?;
-            (source.language_id == LANGUAGE_ID
-                && source.host_api_version == KINEMATIC_HOST_API_VERSION)
-                .then_some((index, object, component.id.as_str(), binding))
+            let kinematic =
+                if source_kind.is_none() && scene.script_files.contains_key(&binding.source_id) {
+                    *movement == ScriptMovement::KinematicSphere
+                } else {
+                    scene.sources.get(&binding.source_id).is_some_and(|source| {
+                        source.language_id == LANGUAGE_ID
+                            && source.host_api_version == KINEMATIC_HOST_API_VERSION
+                    })
+                };
+            kinematic.then_some((index, object, component.id.as_str(), binding))
         });
 
     let Some((owner_index, mover, binding_id, binding)) = movers.next() else {

@@ -50,13 +50,13 @@ mod lua_component;
 pub const DEFAULT_FIXED_TICK: std::time::Duration = std::time::Duration::from_nanos(16_666_667);
 pub const LANGUAGE_ID: &str = "lua54";
 pub const HOST_API_VERSION: u32 = 1;
-/// Explicit opt-in logical-action queries; API1 environments remain unchanged.
-pub const INPUT_HOST_API_VERSION: u32 = 2;
 /// Explicit opt-in primitive spatial queries, retaining API2 action queries.
 pub const SPATIAL_HOST_API_VERSION: u32 = 3;
 pub const STATE_HOST_API_VERSION: u32 = 4;
 pub const LIFECYCLE_HOST_API_VERSION: u32 = 5;
-pub use rot_scene::{GROUP_ROTATION_HOST_API_VERSION, KINEMATIC_HOST_API_VERSION};
+pub use rot_scene::{
+    GROUP_ROTATION_HOST_API_VERSION, INPUT_HOST_API_VERSION, KINEMATIC_HOST_API_VERSION,
+};
 /// Check the existing kinematic admission rules without running Lua.
 pub fn validate_kinematic_scene(scene: &Scene, authoring: &Authoring) -> Result<(), String> {
     kinematic_owner(scene, authoring).map(drop)
@@ -709,6 +709,22 @@ impl Engine {
         self.compile(id, source).map(drop)
     }
 
+    /// Check accepted file-backed Lua text without running it.
+    pub fn check_script_file(
+        &mut self,
+        id: &str,
+        file: &rot_scene::component_scene::ScriptFile,
+    ) -> Result<(), Diagnostic> {
+        file.validate().map_err(|error| {
+            Diagnostic::plain(
+                DiagnosticCode::InvalidAuthoring,
+                Phase::Compile,
+                &error.to_string(),
+            )
+        })?;
+        self.compile_lua(id, &file.text).map(drop)
+    }
+
     fn compile(&mut self, id: &str, source: &BehaviorSource) -> Result<Function, Diagnostic> {
         if source.language_id != LANGUAGE_ID
             || !matches!(
@@ -728,7 +744,11 @@ impl Engine {
                 "this provisional backend supports lua54 host API1–7; authored data is preserved",
             ));
         }
-        let hash = source_hash(&source.text);
+        self.compile_lua(id, &source.text)
+    }
+
+    fn compile_lua(&mut self, id: &str, text: &str) -> Result<Function, Diagnostic> {
+        let hash = source_hash(text);
         if let Some(entry) = self.cache.get(id) {
             if entry.hash == hash {
                 return Ok(entry.main.clone());
@@ -744,7 +764,7 @@ impl Engine {
             .map_err(|e| self.error(e, Phase::Compile, DiagnosticCode::Runtime))?;
         let main = self
             .lua
-            .load(&source.text)
+            .load(text)
             .set_name(format!("@rot/{id}"))
             .set_mode(ChunkMode::Text)
             .into_function()
@@ -1338,7 +1358,7 @@ impl Engine {
         snapshot: ResolveSnapshot<'_>,
         dt: f64,
         host_input: HostInput<'_>,
-        probe: Option<&mut Option<lua_component::Module>>,
+        probe: Option<lua_component::ModuleProbe<'_>>,
     ) -> Result<BindingOutput, Diagnostic> {
         // Scope expires host callbacks and drops their Rust captures synchronously,
         // even if authored Lua leaves unreachable cycles awaiting a later VM GC.
@@ -1366,6 +1386,13 @@ impl Engine {
                         .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
                     if let Some(probe) = probe {
                         if let Some(module) = self.component_module(&module)? {
+                            let lua_component::ModuleProbe::Ordinary(probe) = probe else {
+                                return Err(Diagnostic::plain(
+                                    DiagnosticCode::UnsupportedBackend,
+                                    Phase::Module,
+                                    "Kinematic Sphere scripts require update and host.move_and_slide. The on_start/on_update API does not have a kinematic controller yet.",
+                                ));
+                            };
                             let transform = module.start(self, input.expect("Object input"), properties)?;
                             *probe = Some(module);
                             return Ok(BindingOutput { transform, state: StateFields::new() });

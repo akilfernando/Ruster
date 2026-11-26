@@ -6,11 +6,13 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use glam::{DMat4, DQuat};
-use rot_scene::component_scene::{AnimatorStart, Component, ComponentScene, ObjectHierarchy};
+use rot_scene::component_scene::{
+    AnimatorStart, Component, ComponentScene, ObjectHierarchy, ScriptFile, ScriptMovement,
+};
 use rot_scene::input::{ActionFrame, ActionValue, ValidatedActionFrame};
 use rot_scene::{Authoring, BehaviorSource, BindingTarget, Clip, ComponentDrawPlan, Transform};
 
-use super::lua_component::{self, CurrentCallback, Module, Modules, ObjectLookup};
+use super::lua_component::{self, CurrentCallback, Module, ModuleProbe, Modules, ObjectLookup};
 use super::spatial::{world_collider_transform, ComponentColliderSlot};
 use super::spatial_host::{kinematic_owner_component, ComponentQueryInput};
 use super::{
@@ -25,6 +27,7 @@ pub(super) struct ComponentScriptSlot {
     pub(super) owner_index: usize,
     pub(super) owner_id: String,
     pub(super) has_object_input: bool,
+    movement: ScriptMovement,
 }
 
 #[derive(Clone, Debug)]
@@ -165,6 +168,47 @@ impl Engine {
         source_id: &str,
         source: BehaviorSource,
     ) -> Result<bool, Diagnostic> {
+        self.replace_component_source(runtime, source_id, source, None)
+    }
+
+    /// Reload a captured file by baked ID and exact project asset provenance.
+    pub fn reload_component_file(
+        &mut self,
+        runtime: &mut Runtime,
+        source_id: &str,
+        file: ScriptFile,
+    ) -> Result<bool, Diagnostic> {
+        let Some(captured) = runtime
+            .component_scene()
+            .and_then(|scene| scene.script_files.get(source_id))
+        else {
+            return Ok(false);
+        };
+        if captured.asset_id != file.asset_id {
+            return Err(diag(
+                DiagnosticCode::InvalidAuthoring,
+                Phase::Setup,
+                "Replacement Lua file does not match the captured project asset",
+            ));
+        }
+        file.validate().map_err(|error| {
+            diag(
+                DiagnosticCode::InvalidAuthoring,
+                Phase::Setup,
+                &error.to_string(),
+            )
+        })?;
+        let source = file.compatibility_source(ScriptMovement::Ordinary);
+        self.replace_component_source(runtime, source_id, source, Some(&file.path))
+    }
+
+    fn replace_component_source(
+        &mut self,
+        runtime: &mut Runtime,
+        source_id: &str,
+        source: BehaviorSource,
+        file_path: Option<&str>,
+    ) -> Result<bool, Diagnostic> {
         let Some(world) = &runtime.component_world else {
             return Ok(false);
         };
@@ -211,14 +255,17 @@ impl Engine {
                         &error.to_string(),
                     )
                 })?;
-                if !lua_component::file_source(source_id, &source) {
+                if file_path.is_none()
+                    && (world.scene.script_files.contains_key(source_id)
+                        || !lua_component::legacy_file_source(source_id, &source))
+                {
                     return Err(diag(
                         DiagnosticCode::UnsupportedBackend,
                         Phase::Compile,
                         "Replacement must be a file-backed Lua component",
                     ));
                 }
-                let mut module = self.load_replacement_module(source_id, &source)?;
+                let mut module = self.load_replacement_module(source_id, &source.text)?;
                 let implicit = module.start(
                     self,
                     &world.local_transforms[slot.owner_index],
@@ -237,10 +284,10 @@ impl Engine {
             })();
             let module = stage.map_err(|error| {
                 let mut error = error.context(&slot.component_id, binding, Some(&source));
-                if let Some(path) = &source.label {
+                if let Some(path) = file_path.or(source.label.as_deref()) {
                     let location = error
                         .line
-                        .map_or_else(|| path.clone(), |line| format!("{path}:{line}"));
+                        .map_or_else(|| path.to_owned(), |line| format!("{path}:{line}"));
                     error.message =
                         super::bounded_message(&format!("{location}: {}", error.message));
                 }
@@ -383,7 +430,9 @@ impl Engine {
                     continue;
                 }
                 match &component.kind {
-                    Component::Script { binding, .. } if binding.enabled => {
+                    Component::Script {
+                        binding, movement, ..
+                    } if binding.enabled => {
                         let has_object_input = match &binding.target {
                             BindingTarget::Object(id) | BindingTarget::Group(id) => {
                                 if animated_objects.contains(&owner_index) {
@@ -405,6 +454,7 @@ impl Engine {
                             owner_index,
                             owner_id: object.id.clone(),
                             has_object_input,
+                            movement: *movement,
                         });
                     }
                     Component::Collider {
@@ -574,11 +624,14 @@ impl Engine {
                 .iter()
                 .any(|slot| {
                     let binding = &authoring.bindings[&slot.component_id];
+                    if scene.script_files.contains_key(&binding.source_id) {
+                        return slot.movement == ScriptMovement::Ordinary;
+                    }
                     authoring
                         .sources
                         .get(&binding.source_id)
                         .is_some_and(|source| {
-                            lua_component::file_source(&binding.source_id, source)
+                            lua_component::legacy_file_source(&binding.source_id, source)
                         })
                 })
                 .then(|| {
@@ -610,6 +663,7 @@ impl Engine {
                 let output = self.evaluate_component_binding(
                     slot,
                     &authoring,
+                    &scene.script_files,
                     &local_transforms,
                     &object_indices,
                     0.0,
@@ -934,6 +988,7 @@ impl Engine {
                 self.evaluate_component_binding(
                     slot,
                     &runtime.authoring,
+                    &world.scene.script_files,
                     &world.local_transforms,
                     &world.object_indices,
                     self.limits.fixed_dt,
@@ -1020,6 +1075,7 @@ impl Engine {
         &mut self,
         slot: &ComponentScriptSlot,
         authoring: &Authoring,
+        files: &BTreeMap<String, ScriptFile>,
         local_transforms: &[Transform],
         object_indices: &HashMap<String, usize>,
         dt: f64,
@@ -1031,6 +1087,7 @@ impl Engine {
     ) -> Result<BindingOutput, Diagnostic> {
         let binding = &authoring.bindings[&slot.component_id];
         let source = authoring.sources.get(&binding.source_id);
+        let file = files.get(&binding.source_id);
         let result = (|| {
             let source = source.ok_or_else(|| {
                 diag(
@@ -1067,19 +1124,24 @@ impl Engine {
                     "Application command declarations require lua54 host API5",
                 ));
             }
-            let main = self
-                .compile(&binding.source_id, source)
-                .map_err(|mut failure| {
-                    if let Some(path) = source.label.as_deref().filter(|path| {
+            let main = match file {
+                Some(file) => self.compile_lua(&binding.source_id, &file.text),
+                None => self.compile(&binding.source_id, source),
+            }
+            .map_err(|mut failure| {
+                let path = file.map(|file| file.path.as_str()).or_else(|| {
+                    source.label.as_deref().filter(|path| {
                         binding.source_id.starts_with("asset-lua-") && path.ends_with(".lua")
-                    }) {
-                        failure.message =
-                            super::bounded_message(&format!("{path}: {}", failure.message));
-                        failure.context(&slot.component_id, binding, Some(source))
-                    } else {
-                        failure
-                    }
-                })?;
+                    })
+                });
+                if let Some(path) = path {
+                    failure.message =
+                        super::bounded_message(&format!("{path}: {}", failure.message));
+                    failure.context(&slot.component_id, binding, Some(source))
+                } else {
+                    failure
+                }
+            })?;
             if let Some(session) = self.debugger.borrow_mut().as_mut() {
                 session.context(super::debug::Context {
                     source_id: binding.source_id.clone(),
@@ -1112,9 +1174,17 @@ impl Engine {
                 .has_object_input
                 .then(|| &local_transforms[slot.owner_index]);
             let mut detected = None;
-            let probe = probe.filter(|_| {
-                matches!(binding.target, BindingTarget::Object(_))
-                    && lua_component::file_source(&binding.source_id, source)
+            let module_probe = probe.as_ref().and_then(|_| {
+                if file.is_some() && slot.movement == ScriptMovement::KinematicSphere {
+                    Some(ModuleProbe::Kinematic)
+                } else if file.is_some()
+                    || (matches!(binding.target, BindingTarget::Object(_))
+                        && lua_component::legacy_file_source(&binding.source_id, source))
+                {
+                    Some(ModuleProbe::Ordinary(&mut detected))
+                } else {
+                    None
+                }
             });
             let result = self.evaluate_with_module_probe(
                 &main,
@@ -1133,7 +1203,7 @@ impl Engine {
                     binding_id: &slot.component_id,
                     state,
                 },
-                probe.as_ref().map(|_| &mut detected),
+                module_probe,
             );
             if let (Some(probe), Some(mut module)) = (probe, detected) {
                 module
@@ -1198,16 +1268,20 @@ mod tests {
             background: None,
             ambient: None,
             sources: BTreeMap::new(),
+            script_files: BTreeMap::new(),
             actions: BTreeMap::new(),
             hud: Default::default(),
             gameplay_camera: None,
         }
     }
 
-    fn file_script(text: &str) -> BehaviorSource {
-        BehaviorSource {
-            label: Some("Scripts/gate.lua".into()),
-            ..script_source(text, super::super::INPUT_HOST_API_VERSION)
+    const GATE_FILE_ID: &str = "sliding-gate";
+
+    fn file_script(text: &str) -> ScriptFile {
+        ScriptFile {
+            asset_id: "gate-file".into(),
+            path: "Scripts/gate.lua".into(),
+            text: text.into(),
         }
     }
 
@@ -1253,9 +1327,21 @@ mod tests {
                 }],
             });
         }
-        scene
-            .bake_script_assets(BTreeMap::from([("gate-file".into(), file_script(text))]))
+        let keys = scene
+            .bake_script_assets_with_keys(BTreeMap::from([("gate-file".into(), file_script(text))]))
             .unwrap();
+        let generated_id = &keys["gate-file"][&ScriptMovement::Ordinary];
+        let file = scene.script_files.remove(generated_id).unwrap();
+        scene.script_files.insert(GATE_FILE_ID.into(), file);
+        for component in scene
+            .objects
+            .iter_mut()
+            .flat_map(|object| &mut object.components)
+        {
+            if let Component::Script { binding, .. } = &mut component.kind {
+                binding.source_id = GATE_FILE_ID.into();
+            }
+        }
         scene
     }
 
@@ -1300,6 +1386,43 @@ mod tests {
         engine.step_with_input(&mut runtime, &held).unwrap();
         assert_eq!(runtime.object_translation("left"), Some([3.0, 1.0, 0.0]));
         assert_eq!(runtime.object_translation("right"), Some([6.0, 1.0, 0.0]));
+    }
+
+    #[test]
+    fn numbered_baked_artifacts_preserve_admission_and_unknown_versions() {
+        let mut scene = shared_module_scene(
+            "return {on_update = function(transform) transform.translation[1] = 2 end}",
+        );
+        let old_id = "asset-lua-1";
+        let file = scene.script_files.remove(GATE_FILE_ID).unwrap();
+        scene.sources.insert(
+            old_id.into(),
+            file.compatibility_source(ScriptMovement::Ordinary),
+        );
+        for component in scene
+            .objects
+            .iter_mut()
+            .flat_map(|object| &mut object.components)
+        {
+            if let Component::Script { binding, .. } = &mut component.kind {
+                binding.source_id = old_id.into();
+            }
+        }
+        let roundtrip = |scene: &ComponentScene| {
+            let mut bytes = Vec::new();
+            scene.write_json(&mut bytes).unwrap();
+            let decoded = ComponentScene::read_json(bytes.as_slice()).unwrap();
+            assert_eq!(&decoded, scene);
+            decoded
+        };
+        let mut engine = Engine::new(Limits::default()).unwrap();
+        let mut runtime = engine.reset_component(&roundtrip(&scene), 0).unwrap();
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.object_translation("left"), Some([2.0, 0.0, 0.0]));
+
+        scene.sources.get_mut(old_id).unwrap().host_api_version = 99;
+        let error = engine.reset_component(&roundtrip(&scene), 0).unwrap_err();
+        assert_eq!(error.code, DiagnosticCode::UnsupportedBackend);
     }
 
     #[test]
@@ -1381,7 +1504,7 @@ mod tests {
         "#,
         );
         assert!(engine
-            .reload_component_source(&mut runtime, "asset-lua-1", replacement)
+            .reload_component_file(&mut runtime, GATE_FILE_ID, replacement)
             .unwrap());
         assert_eq!(runtime.tick(), 2);
         engine.step(&mut runtime).unwrap();
@@ -1521,9 +1644,9 @@ mod tests {
         assert_eq!(runtime.tick(), 0);
         assert_eq!(runtime.object_translation("panel"), Some([0.0, 0.0, 0.0]));
         assert!(engine
-            .reload_component_source(
+            .reload_component_file(
                 &mut runtime,
-                "asset-lua-1",
+                GATE_FILE_ID,
                 file_script(
                     r#"
                     local panel
@@ -1550,9 +1673,9 @@ mod tests {
         assert_eq!(runtime.object_translation("panel"), Some([2.0, 0.0, 0.0]));
 
         let error = engine
-            .reload_component_source(
+            .reload_component_file(
                 &mut runtime,
-                "asset-lua-1",
+                GATE_FILE_ID,
                 file_script(
                     r#"
                     return { on_start = function(transform, props, host)
@@ -1674,7 +1797,7 @@ mod tests {
             ("wall-parent", "blocker", false),
             ("sensor", "sensor", false),
         ] {
-            scene.sources.get_mut("asset-lua-1").unwrap().text = format!(
+            scene.script_files.get_mut(GATE_FILE_ID).unwrap().text = format!(
                 r#"
                 local ticks = 0
                 return {{ on_update = function(transform, props, dt, host)
@@ -1730,9 +1853,9 @@ mod tests {
         let mut runtime = engine.reset_component(&scene, 0).unwrap();
         engine.step(&mut runtime).unwrap();
         let error = engine
-            .reload_component_source(
+            .reload_component_file(
                 &mut runtime,
-                "asset-lua-1",
+                GATE_FILE_ID,
                 file_script("return {\n    on_update = function(\n}"),
             )
             .unwrap_err();
@@ -1750,7 +1873,7 @@ mod tests {
         assert_eq!(runtime.object_translation("right"), Some([2.0, 0.0, 0.0]));
         assert_eq!(engine.step(&mut runtime).unwrap_err().phase, Phase::Setup);
 
-        let replacement = file_script(
+        let mut replacement = file_script(
             r#"
             local start
             return {
@@ -1764,8 +1887,17 @@ mod tests {
             }
         "#,
         );
+        let wrong_asset = ScriptFile {
+            asset_id: "other-file".into(),
+            ..replacement.clone()
+        };
+        let error = engine
+            .reload_component_file(&mut runtime, GATE_FILE_ID, wrong_asset)
+            .unwrap_err();
+        assert!(error.message.contains("captured project asset"));
+        replacement.path = "Assets/renamed gate.lua".into();
         assert!(engine
-            .reload_component_source(&mut runtime, "asset-lua-1", replacement)
+            .reload_component_file(&mut runtime, GATE_FILE_ID, replacement)
             .unwrap());
         assert_eq!(runtime.tick(), 2);
         assert_eq!(runtime.object_translation("left"), Some([2.0, 0.0, 0.0]));

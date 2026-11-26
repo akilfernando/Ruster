@@ -181,7 +181,7 @@ pub(super) enum Command {
         scene_id: String,
         source_id: String,
         provenance: crate::scene_editor::script_assets::ProjectSource,
-        source: rot_scene::BehaviorSource,
+        source: rot_scene::component_scene::ScriptFile,
     },
     Play {
         key: RunKey,
@@ -1488,7 +1488,7 @@ fn process(
             let result = execution
                 .engine
                 .as_mut()?
-                .reload_component_source(runtime, &source_id, source);
+                .reload_component_file(runtime, &source_id, source);
             Some(Event::ScriptReload {
                 key,
                 scene_id,

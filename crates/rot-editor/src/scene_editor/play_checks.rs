@@ -384,7 +384,7 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
                     .resource_identity_with_scripts(|id, text| {
                         let path = assets.script_path(id).expect("verified script path");
                         script_sources
-                            .insert(id.to_owned(), super::script_assets::source(path, text));
+                            .insert(id.to_owned(), super::script_assets::source(id, path, text));
                     })
                     .map_err(|error| error.to_string()),
                 None => Ok(rot_assets::empty_resource_identity()),
@@ -508,7 +508,7 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
 
 fn component_check_runtime(
     pin: SavedComponentPin,
-    scripts: BTreeMap<String, rot_scene::BehaviorSource>,
+    scripts: BTreeMap<String, rot_scene::component_scene::ScriptFile>,
 ) -> Result<RuntimeScene, String> {
     let mut scene = pin.scene().clone();
     scene

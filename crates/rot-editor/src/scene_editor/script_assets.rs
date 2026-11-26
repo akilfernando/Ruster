@@ -1,27 +1,13 @@
 use rot_assets::AssetStore;
-use rot_scene::{component_scene::ComponentScene, BehaviorSource};
+use rot_scene::component_scene::{ComponentScene, ScriptFile};
 use std::collections::BTreeMap;
 
 const _: () = assert!(rot_assets::MAX_LUA_SOURCE_BYTES == rot_scene::MAX_SOURCE_BYTES);
 
-pub(super) fn source(path: &str, text: String) -> BehaviorSource {
-    const MAX_LABEL_BYTES: usize = 128;
-    let clean: String = path
-        .chars()
-        .map(|ch| if ch.is_control() { '�' } else { ch })
-        .collect();
-    let clean = clean.trim();
-    let label = if clean.len() <= MAX_LABEL_BYTES {
-        clean.to_owned()
-    } else {
-        let prefix = "…/";
-        let cutoff = clean.ceil_char_boundary(clean.len() - (MAX_LABEL_BYTES - prefix.len()));
-        format!("{prefix}{}", &clean[cutoff..])
-    };
-    BehaviorSource {
-        label: Some(label),
-        language_id: rot_behavior::LANGUAGE_ID.into(),
-        host_api_version: rot_behavior::INPUT_HOST_API_VERSION,
+pub(super) fn source(id: &str, path: &str, text: String) -> ScriptFile {
+    ScriptFile {
+        asset_id: id.to_owned(),
+        path: path.to_owned(),
         text,
     }
 }
@@ -30,7 +16,7 @@ pub(crate) fn reload_candidate(
     store: &AssetStore,
     asset_id: &str,
     observed_hash: &str,
-) -> Option<(ProjectSource, BehaviorSource)> {
+) -> Option<(ProjectSource, ScriptFile)> {
     let (info, text) = store.ready_script(asset_id)?;
     let hash = info.hash.as_ref()?;
     (hash != observed_hash).then(|| {
@@ -40,7 +26,7 @@ pub(crate) fn reload_candidate(
                 source: info.source.clone(),
                 accepted_hash: hash.clone(),
             },
-            source(&info.source, text.to_string()),
+            source(asset_id, &info.source, text.to_string()),
         )
     })
 }
@@ -164,7 +150,7 @@ fn resolve(
                 )
             })?
         };
-        sources.insert(id.to_owned(), source(&info.source, text.to_string()));
+        sources.insert(id.to_owned(), source(id, &info.source, text.to_string()));
     }
     let mut resolved = scene.clone();
     let keys = resolved
@@ -209,7 +195,7 @@ mod tests {
             return {update=function(transform, properties, dt, host)
                 if host.button("fire").pressed then host.play_sound("confirm") end
                 return transform
-            end}
+            end, on_update=function() math.abs(nil) end}
         "#,
         )
         .unwrap();
@@ -258,8 +244,9 @@ mod tests {
         scene.validate().unwrap();
         let (baked, provenance) = resolved_for_play(&scene, Some(&store)).unwrap();
         let baked = baked.unwrap();
-        assert_eq!(baked.sources.len(), 1);
-        let track = &provenance[baked.sources.keys().next().unwrap()];
+        assert!(baked.sources.is_empty());
+        assert_eq!(baked.script_files.len(), 1);
+        let track = &provenance[baked.script_files.keys().next().unwrap()];
         assert_eq!(track.asset_id, "shared");
         assert_eq!(track.source, "Assets/shared.lua");
         assert_eq!(
@@ -423,9 +410,11 @@ mod tests {
         let (baked, provenance) = resolved_for_play(&scene, Some(&assets)).unwrap();
         let baked = baked.unwrap();
         assert_eq!(provenance.len(), 2);
-        for (key, source) in baked.sources {
+        for (key, source) in baked.script_files {
             let original = &provenance[&key];
             assert_eq!(original.asset_id, "drive");
+            assert_eq!(original.asset_id, source.asset_id);
+            assert_eq!(original.source, source.path);
             assert_eq!(
                 original.accepted_hash,
                 rot_behavior::source_hash(&source.text)
@@ -458,7 +447,7 @@ mod tests {
         let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
         let object = &mut scene.objects[0];
         for (id, source_id, source_kind) in [
-            ("embedded", "asset-lua-1", None),
+            ("embedded", "file-lua-1", None),
             ("file", "spin", Some(ScriptSourceKind::Asset)),
         ] {
             object.components.push(ComponentInstance {
@@ -480,12 +469,13 @@ mod tests {
         }
         let original = scene.clone();
         let baked = resolved(&scene, Some(&assets), true).unwrap().unwrap();
-        assert!(!baked.sources.contains_key("asset-lua-1"));
-        assert!(baked.sources.contains_key("asset-lua-2"));
+        assert!(baked.sources.is_empty());
+        assert!(!baked.script_files.contains_key("file-lua-1"));
+        assert!(baked.script_files.contains_key("file-lua-2"));
         assert!(matches!(
             &baked.objects[0].components[1].kind,
             Component::Script { binding, source_kind: None, .. }
-                if binding.source_id == "asset-lua-1"));
+                if binding.source_id == "file-lua-1"));
         assert_eq!(scene, original);
     }
 }
