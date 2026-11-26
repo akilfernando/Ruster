@@ -33,12 +33,11 @@ One line each. Anyone may add; the user or a planning pass orders them.
 
 ## Now — Phase 3A: Look (PBR & Scene Scale)
 
-`L-01` (`71aacda`), `L-02` (`611a640`), and `L-03` (`93d7390`) shipped on `2026-11-26`. Continue Phase 3A with `L-04` below.
+`L-01` (`71aacda`), `L-02` (`611a640`), `L-03` (`93d7390`), and `L-04` (`16a3859`) shipped on `2026-11-26`. Continue Phase 3A with `L-05` below.
 
 | Package | Outcome | Status & remaining gap |
 | --- | --- | --- |
-| `L-04` Sky & image-based lighting | Procedural physical sky + environment irradiance/specular IBL reflection so metallic and smooth surfaces reflect the world naturally (Size M, *brief needed*). | `open` · Design sky parameters, prefiltered environment/irradiance GPU bindings, and `surface.wgsl` + editor/MCP wiring. |
-| `L-05` Alpha transparency | Alpha modes (`Opaque` / `Mask` cutout / `Blend` back-to-front sorted pass) with glTF `alphaMode`/`alphaCutoff` and shadow cutout parity (Size M, *brief needed*). | `open` · Blocked behind `L-04` only by ordering. |
+| `L-05` Alpha transparency | Alpha modes (`Opaque` / `Mask` cutout / `Blend` back-to-front sorted pass) with glTF `alphaMode`/`alphaCutoff` and shadow cutout parity (Size M, *brief needed*). | `open` · Wire `alpha_mode`/`alpha_cutoff` end-to-end across `rot-assets`, `rot-scene`, `rot-render`, `rot-editor`, and `rot-mcp`. |
 | `L-06` Frustum culling & dirty-range instancing | View-frustum culling and dirty-range GPU instance uploads for scaled scenes within the 60 fps 1080p budget (Size M, *brief needed*). | `open` · Follow `L-05`. |
 | `L-EXIT` Phase 3A exit gate | Khronos PBR sample assets (`DamagedHelmet`, `MetalRoughSpheres`, transparent/cutout assets) render recognizably within frame budgets (Size S, *brief needed*). | `open` · Closes Phase 3A after `L-06`. |
 
@@ -96,7 +95,12 @@ completed packages:
   `emissive_texture`, `occlusion_texture`, tangent +Y UV fix, 6-role
   `TextureRole`, glTF/editor/MCP wiring, RTX 4060 probes green, headless 5k
   1080p 4× MSAA CPU p50 `0.442 ms` / GPU p50 `0.294 ms` / frame p50
-  `1.114 ms`).
+  `1.114 ms`), and `L-04` (`2026-11-26`, `16a3859`: procedural physical `Sky`
+  backdrop + Daylight/Studio/Sunset presets, lazy GPU `64×64` GGX BRDF LUT +
+  `64×64×6` 5-mip prefiltered specular cubemap, L2 SH diffuse irradiance,
+  multiscattering split-sum IBL in `surface.wgsl`, Scene Display UI +
+  `scene_display_set` MCP wiring, RTX 4060 probes green, headless 5k 1080p
+  4× MSAA CPU p50 `0.423 ms` / GPU p50 `0.292 ms` / frame p50 `0.980 ms`).
 - **Phase 2 — Core completed packages:** `C-00a` (retired legacy logistics
   crates, Rhai mode, editor logistics UI, and superseded MCP
   enrollment/registry plumbing; promoted `crates/rot-support`), `C-01` (v23

@@ -13,7 +13,7 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
-## Current phase — Phase 3A: Look (Next: `L-04`)
+## Current phase — Phase 3A: Look (Next: `L-05`)
 
 - **Done:** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`, `A-01`–`A-07`,
   `P-01`–`P-02`), `C-00a` (retired legacy logistics crates, Rhai mode, editor
@@ -56,10 +56,16 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   `321.5 → 245.8 us`), and `L-03` Full metallic-roughness PBR (`93d7390`:
   `metallic` + `metallic_texture`, tangent-space `normal_texture` +
   `normal_scale`, `emissive_texture`, `occlusion_texture` + `occlusion_strength`,
-  tangent +Y UV fix, 6-role `TextureRole`, glTF/editor/MCP wiring, RTX 4060
+  `surface.wgsl`, tangent +Y UV fix, 6-role `TextureRole`, glTF/editor/MCP wiring, RTX 4060
   probes green, headless 5k 1080p 4× MSAA CPU p50 `0.442 ms` / GPU p50
-  `0.294 ms` / frame p50 `1.114 ms`).
-- **Next:** `L-04` Sky & image-based lighting (Phase 3A).
+  `0.294 ms` / frame p50 `1.114 ms`), and `L-04` Sky & image-based lighting
+  (`16a3859`: procedural physical `Sky` backdrop + Daylight/Studio/Sunset
+  presets, lazy GPU `64×64` GGX BRDF LUT + `64×64×6` 5-mip prefiltered specular
+  cubemap, L2 SH diffuse irradiance, multiscattering split-sum IBL in
+  `surface.wgsl`, Scene Display UI + `scene_display_set` MCP wiring, RTX 4060
+  probes green, headless 5k 1080p 4× MSAA CPU p50 `0.423 ms` / GPU p50
+  `0.292 ms` / frame p50 `0.980 ms`).
+- **Next:** `L-05` Alpha transparency (`Opaque` / `Mask` / `Blend`) (Phase 3A).
 
 ## What a creator can do today
 
