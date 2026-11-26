@@ -1,5 +1,7 @@
 //! The editor owns v23 scenes through ComponentSession. The viewport receives
 //! a disposable projection and cannot change the authored document.
+#[cfg(target_os = "linux")]
+use super::project_picker;
 use super::project_scenes::{
     Outcome as SceneChoice, Picker as ScenesPicker, Purpose as ScenePickerPurpose,
 };
@@ -7,7 +9,7 @@ use super::{
     component_inspector, component_live,
     component_multi::MultiInspector,
     component_view::Flag,
-    hud_interaction, palette, project_picker,
+    hud_interaction, palette,
     project_settings::{self, ProjectPage},
     OpenedScene,
 };
@@ -819,7 +821,6 @@ impl ComponentWorkspace {
         }
     }
 
-    #[cfg(unix)]
     pub(super) fn ai_document(&self) -> (&std::path::Path, &str, u64) {
         (
             &self.path,

@@ -4,6 +4,7 @@ mod native;
 #[cfg(unix)]
 mod prompt;
 use super::*;
+#[cfg(unix)]
 use crate::strings::Text;
 #[cfg(unix)]
 pub(super) use prompt::TrustUi;

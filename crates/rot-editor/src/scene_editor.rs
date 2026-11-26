@@ -45,7 +45,9 @@ use eframe::{
     egui_wgpu::{WgpuSetup, WgpuSetupCreateNew},
 };
 use rot_scene::component_scene::{ComponentSession, FORMAT_VERSION};
-use serde_json::{json, Value};
+#[cfg(unix)]
+use serde_json::json;
+use serde_json::Value;
 #[cfg(test)]
 use std::time::Duration;
 use std::{

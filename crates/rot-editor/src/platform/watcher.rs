@@ -260,4 +260,5 @@ mod imp {
     }
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(unused_imports))]
 pub use imp::{wake_channel, AssetWatcher, WakeReceiver, WakeSender};

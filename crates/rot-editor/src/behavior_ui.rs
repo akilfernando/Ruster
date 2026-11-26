@@ -3415,7 +3415,6 @@ impl RuntimeUi {
     }
 }
 
-#[cfg(unix)]
 pub(crate) fn transform_camera_observation(
     camera: rot_scene::component_scene::TransformCameraPose,
 ) -> serde_json::Value {

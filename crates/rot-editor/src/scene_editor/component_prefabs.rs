@@ -2,12 +2,16 @@
 use super::{project_directory, ComponentWorkspace, Transform};
 use crate::{editor_theme, strings::Text};
 use eframe::egui;
-use rot_assets::{AssetStatus, PrefabFile, ProjectFileIssue};
+use rot_assets::PrefabFile;
+#[cfg(target_os = "linux")]
+use rot_assets::{AssetStatus, ProjectFileIssue};
 use rot_scene::{
     component_scene::{PrefabFields, PrefabFileEdit, PrefabProperty, PrefabSource},
     SceneError,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+#[cfg(target_os = "linux")]
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 

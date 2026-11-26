@@ -1,5 +1,6 @@
 //! Low-level OS primitives for local editor discovery, socket IPC, and trust files.
 use std::io;
+#[cfg(unix)]
 use std::path::Path;
 
 #[cfg(unix)]

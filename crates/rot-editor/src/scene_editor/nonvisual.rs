@@ -69,6 +69,8 @@ impl Host {
     }
 
     pub(super) fn service_bridge(&mut self, ctx: &egui::Context) {
+        #[cfg(not(unix))]
+        let _ = ctx;
         #[cfg(unix)]
         self.poll_connection(ctx);
         #[cfg(unix)]

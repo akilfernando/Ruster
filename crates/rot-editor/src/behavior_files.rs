@@ -1,16 +1,15 @@
 //! Explicit project-local working-copy jobs. Embedded text stays authoritative.
 //! Call synchronously off the UI thread; this module owns no queue, watcher or process.
 //! Locks/hash guards coordinate trusted local writers, not hostile path replacement.
+use std::path::PathBuf;
 #[cfg(test)]
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     io::{Read, Write},
 };
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-};
+#[cfg(any(target_os = "linux", test))]
+use std::{path::Path, process::Command};
 
 #[cfg(test)]
 use rot_scene::{
