@@ -1,4 +1,6 @@
 //! Invocation-scoped Lua query admission and copied, commit-staged observations.
+use std::collections::HashMap;
+
 use super::*;
 use spatial::{OverlapResult, SlideOutcome, SlideResult, SpatialWorld, SweepOutcome, SweepResult};
 
@@ -50,6 +52,44 @@ pub enum QueryResult {
 pub(super) struct KinematicOwner {
     binding_id: String,
     object_id: String,
+}
+
+impl KinematicOwner {
+    pub(super) fn protected_component_transforms(
+        &self,
+        authoring: &Authoring,
+        indices: &HashMap<String, usize>,
+        hierarchy: &rot_scene::component_scene::ObjectHierarchy,
+        colliders: &[spatial::ComponentColliderSlot],
+    ) -> HashMap<usize, &'static str> {
+        let mut protected = HashMap::from([(
+            indices[&self.object_id],
+            "this write would move the kinematic actor outside its controller",
+        )]);
+        for slot in colliders {
+            if slot.collider.role == rot_scene::ColliderRole::Blocker {
+                protected
+                    .entry(slot.owner_index)
+                    .or_insert("this write would move a stationary kinematic blocker");
+            }
+        }
+        for property in authoring.bindings[&self.binding_id].properties.values() {
+            if let PropertyValue::SensorRef(id) = property {
+                protected
+                    .entry(indices[id])
+                    .or_insert("this write would move a stationary kinematic sensor");
+            }
+        }
+        // A local write also moves descendants. Propagate from leaves to roots
+        // so common ancestors of many colliders are visited only once.
+        for &index in hierarchy.order.iter().rev() {
+            if let (Some(parent), Some(&reason)) = (hierarchy.parents[index], protected.get(&index))
+            {
+                protected.entry(parent).or_insert(reason);
+            }
+        }
+        protected
+    }
 }
 
 struct Controller {

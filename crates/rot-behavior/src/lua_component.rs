@@ -4,14 +4,15 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
-use mlua::{Function, Lua, Table, UserData, UserDataFields, Value};
+use mlua::{Function, Lua, Table, UserData, UserDataFields, UserDataMethods, Value};
 use rot_scene::component_scene::ObjectNode;
 use rot_scene::input::ValidatedActionFrame;
 use rot_scene::{BehaviorSource, PropertyValue, Transform};
 
 use super::{
-    action_axis, action_button, base_environment, property_value, read_transform, transform_table,
-    Diagnostic, DiagnosticCode, Engine, Phase, INPUT_HOST_API_VERSION, LANGUAGE_ID,
+    action_axis, action_button, base_environment, property_value, read_transform, same_transform,
+    transform_table, Diagnostic, DiagnosticCode, Engine, Phase, INPUT_HOST_API_VERSION,
+    LANGUAGE_ID,
 };
 
 /// Baked file IDs have been used since before component callbacks were added.
@@ -77,15 +78,31 @@ impl Modules {
 pub(super) struct ObjectLookup {
     ids: Arc<HashMap<String, usize>>,
     names: HashMap<String, usize>,
+    protected: HashMap<usize, String>,
 }
 
 impl ObjectLookup {
-    pub(super) fn new(objects: &[ObjectNode], ids: Arc<HashMap<String, usize>>) -> Self {
+    pub(super) fn new(
+        objects: &[ObjectNode],
+        ids: Arc<HashMap<String, usize>>,
+        protections: HashMap<usize, &'static str>,
+    ) -> Self {
         let mut names = HashMap::with_capacity(objects.len());
         for (index, object) in objects.iter().enumerate() {
             names.entry(object.name.clone()).or_insert(index);
         }
-        Self { ids, names }
+        let protected = protections
+            .into_iter()
+            .map(|(index, reason)| {
+                let id = &objects[index].id;
+                (index, format!("cannot set Transform of {id:?}: {reason}"))
+            })
+            .collect();
+        Self {
+            ids,
+            names,
+            protected,
+        }
     }
 }
 
@@ -97,6 +114,7 @@ struct CallbackSnapshot {
     input: ValidatedActionFrame,
     lookup: Rc<ObjectLookup>,
     transforms: Arc<Vec<Transform>>,
+    writes: RefCell<BTreeMap<usize, Transform>>,
 }
 
 impl CurrentCallback {
@@ -110,9 +128,18 @@ impl CurrentCallback {
             input: input.clone(),
             lookup: Rc::clone(lookup),
             transforms: Arc::clone(transforms),
+            writes: RefCell::default(),
         });
         debug_assert!(previous.is_none());
         Self(lua.clone())
+    }
+
+    pub(super) fn take_writes(&self) -> BTreeMap<usize, Transform> {
+        self.0
+            .app_data_ref::<CallbackSnapshot>()
+            .expect("live callback snapshot")
+            .writes
+            .take()
     }
 }
 
@@ -132,21 +159,43 @@ struct ObjectHandle {
     index: usize,
 }
 
+impl ObjectHandle {
+    fn index_in(&self, snapshot: &CallbackSnapshot) -> Option<usize> {
+        let owner = self.lookup.upgrade()?;
+        Rc::ptr_eq(&owner, &snapshot.lookup).then_some(self.index)
+    }
+}
+
 impl UserData for ObjectHandle {
     fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
         fields.add_field_method_get("transform", |lua, object| {
             let snapshot = current_callback(lua)?;
-            let Some(owner) = object.lookup.upgrade() else {
-                return Ok(None);
-            };
-            if !Rc::ptr_eq(&owner, &snapshot.lookup) {
-                return Ok(None);
-            }
-            snapshot
-                .transforms
-                .get(object.index)
+            object
+                .index_in(&snapshot)
+                .and_then(|index| snapshot.transforms.get(index))
                 .map(|transform| transform_table(lua, transform))
                 .transpose()
+        });
+    }
+
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("set_transform", |lua, object, pose: Table| {
+            let snapshot = current_callback(lua)?;
+            let index = object.index_in(&snapshot).ok_or_else(|| {
+                mlua::Error::runtime(
+                    "set_transform requires an object from the current Play session",
+                )
+            })?;
+            let transform = read_transform(&pose)?;
+            if let Some(reason) = snapshot.lookup.protected.get(&index) {
+                if same_transform(&snapshot.transforms[index], &transform) {
+                    // A protected no-op must not overwrite an Animator or controller's staged pose.
+                    return Ok(());
+                }
+                return Err(mlua::Error::runtime(reason.as_str()));
+            }
+            snapshot.writes.borrow_mut().insert(index, transform);
+            Ok(())
         });
     }
 }

@@ -65,7 +65,20 @@
             1.0
           ]
         },
-        "components": []
+        "components": [
+          {
+            "id": "gate-script",
+            "enabled": true,
+            "type": "script",
+            "source_kind": "asset",
+            "binding": {
+              "object_id": "model-18eb37ac6676856a-0",
+              "source_id": "sliding-gate-motion",
+              "enabled": true,
+              "properties": {}
+            }
+          }
+        ]
       },
       {
         "id": "model-18eb37ac6676856a-0-node-0",
@@ -105,18 +118,6 @@
               1.0
             ],
             "material": "model-18eb37ac6676856a-0-material-0"
-          },
-          {
-            "id": "gate-script",
-            "enabled": true,
-            "type": "script",
-            "source_kind": "asset",
-            "binding": {
-              "object_id": "model-18eb37ac6676856a-0-node-0",
-              "source_id": "sliding-gate-motion",
-              "enabled": true,
-              "properties": {}
-            }
           }
         ]
       },

@@ -56,10 +56,66 @@ impl ComponentWorld {
     pub(crate) fn is_static(&self) -> bool {
         self.scripts.is_empty() && self.animations.is_empty()
     }
+
+    fn resolve_staged_transforms(
+        &self,
+        local: &[Transform],
+    ) -> Result<(Vec<DMat4>, Vec<DQuat>, rot_scene::SceneDrawFrame), Diagnostic> {
+        let mut world = Vec::with_capacity(local.len());
+        let mut rotations = Vec::with_capacity(local.len());
+        let invalid = |error: rot_scene::SceneError| {
+            diag(
+                DiagnosticCode::InvalidOutput,
+                Phase::Commit,
+                &error.to_string(),
+            )
+        };
+        self.scene
+            .resolve_world_matrices_into(&self.hierarchy, local, &mut world)
+            .map_err(invalid)?;
+        self.scene
+            .resolve_world_rotations_into(&self.hierarchy, local, &mut rotations);
+        validate_component_colliders(
+            &self.scene,
+            &self.colliders,
+            local,
+            &world,
+            &rotations,
+            &self.hierarchy.parents,
+            Phase::Commit,
+        )?;
+        let draw = self
+            .draw_plan
+            .build_frame(&self.scene, &world, &rotations)
+            .map_err(invalid)?;
+        Ok((world, rotations, draw))
+    }
 }
 
 fn diag(code: DiagnosticCode, phase: Phase, message: &str) -> Diagnostic {
     Diagnostic::plain(code, phase, message)
+}
+
+fn stage_file_transforms(
+    callback: &CurrentCallback,
+    committed: &[Transform],
+    staged: &mut Option<Vec<Transform>>,
+    owner_index: usize,
+    implicit: Option<Transform>,
+) {
+    let mut stage = |index, pose| {
+        if !same_transform(&staged.as_deref().unwrap_or(committed)[index], &pose) {
+            staged.get_or_insert_with(|| committed.to_vec())[index] = pose;
+        }
+    };
+    for (index, pose) in callback.take_writes() {
+        stage(index, pose);
+    }
+    if let Some(pose) = implicit {
+        if !same_transform(&committed[owner_index], &pose) {
+            stage(owner_index, pose);
+        }
+    }
 }
 
 fn validate_component_colliders(
@@ -140,9 +196,10 @@ impl Engine {
             runtime.commit_revision,
             true,
         );
-        let _callback =
+        let callback =
             CurrentCallback::new(&self.lua, &input, &modules.lookup, &world.local_transforms);
         let mut replacements = Vec::new();
+        let mut staged_transforms = None;
         for index in affected {
             let slot = &world.scripts[index];
             let binding = &runtime.authoring.bindings[&slot.component_id];
@@ -162,11 +219,18 @@ impl Engine {
                     ));
                 }
                 let mut module = self.load_replacement_module(source_id, &source)?;
-                module.start(
+                let implicit = module.start(
                     self,
                     &world.local_transforms[slot.owner_index],
                     &binding.properties,
                 )?;
+                stage_file_transforms(
+                    &callback,
+                    &world.local_transforms,
+                    &mut staged_transforms,
+                    slot.owner_index,
+                    implicit,
+                );
                 module.source_hash.clone_from(&self.cache[source_id].hash);
                 module.last_attempt = runtime.tick;
                 Ok(module)
@@ -183,6 +247,9 @@ impl Engine {
                 error
             })?;
             replacements.push((index, module));
+        }
+        if let Some(trial) = staged_transforms {
+            world.resolve_staged_transforms(&trial)?;
         }
         self.check_cancelled()?;
         modules.instances.extend(replacements);
@@ -502,7 +569,7 @@ impl Engine {
             )?;
             let audio_cues = RefCell::new(Vec::new());
             let mut trial_transforms: Option<Vec<Transform>> = None;
-            let mut start_transforms = Vec::new();
+            let mut start_transforms = None;
             lookup = scripts
                 .iter()
                 .any(|slot| {
@@ -515,9 +582,24 @@ impl Engine {
                         })
                 })
                 .then(|| {
+                    let mut protected =
+                        kinematic_owner.as_ref().map_or_else(HashMap::new, |owner| {
+                            owner.protected_component_transforms(
+                                &authoring,
+                                &object_indices,
+                                &hierarchy,
+                                &colliders,
+                            )
+                        });
+                    protected.extend(
+                        animated_objects
+                            .iter()
+                            .map(|&index| (index, "an Animator controls this Transform")),
+                    );
                     Rc::new(ObjectLookup::new(
                         &scene.objects,
                         Arc::clone(&object_indices),
+                        protected,
                     ))
                 });
             let callback = lookup
@@ -539,11 +621,13 @@ impl Engine {
                 )?;
                 if let Some(module) = module {
                     modules.insert(index, module);
-                    if let Some(transform) = output.transform {
-                        if !same_transform(&local_transforms[slot.owner_index], &transform) {
-                            start_transforms.push((slot.owner_index, transform));
-                        }
-                    }
+                    stage_file_transforms(
+                        callback.as_ref().expect("file callback snapshot"),
+                        &local_transforms,
+                        &mut start_transforms,
+                        slot.owner_index,
+                        output.transform,
+                    );
                 } else if let Some(transform) = output.transform {
                     if !same_transform(&local_transforms[slot.owner_index], &transform) {
                         trial_transforms.get_or_insert_with(|| local_transforms.as_ref().clone())
@@ -595,11 +679,8 @@ impl Engine {
                     })?;
             }
             trial_state.validate_total()?;
-            if !start_transforms.is_empty() {
-                let local = Arc::make_mut(&mut local_transforms);
-                for (index, transform) in start_transforms {
-                    local[index] = transform;
-                }
+            if let Some(start_transforms) = start_transforms {
+                local_transforms = Arc::new(start_transforms);
                 scene
                     .resolve_world_matrices_into(&hierarchy, &local_transforms, &mut world_matrices)
                     .map_err(|error| {
@@ -831,14 +912,22 @@ impl Engine {
                 if let Some(session) = self.debugger.borrow_mut().as_mut() {
                     session.clear();
                 }
+                let implicit = result.map_err(|error| {
+                    error.context(
+                        &slot.component_id,
+                        binding,
+                        runtime.authoring.sources.get(&binding.source_id),
+                    )
+                })?;
+                stage_file_transforms(
+                    callback.as_ref().expect("file callback snapshot"),
+                    &world.local_transforms,
+                    &mut staged_transforms,
+                    slot.owner_index,
+                    implicit,
+                );
                 BindingOutput {
-                    transform: result.map_err(|error| {
-                        error.context(
-                            &slot.component_id,
-                            binding,
-                            runtime.authoring.sources.get(&binding.source_id),
-                        )
-                    })?,
+                    transform: None,
                     state: rot_scene::StateFields::new(),
                 }
             } else {
@@ -875,45 +964,10 @@ impl Engine {
         }
         drop(callback);
 
-        let staged_frames = if let Some(ref next_local) = staged_transforms {
-            let mut next_world = Vec::with_capacity(next_local.len());
-            let mut next_rot = Vec::with_capacity(next_local.len());
-            world
-                .scene
-                .resolve_world_matrices_into(&world.hierarchy, next_local, &mut next_world)
-                .map_err(|error| {
-                    diag(
-                        DiagnosticCode::InvalidOutput,
-                        Phase::Commit,
-                        &error.to_string(),
-                    )
-                })?;
-            world
-                .scene
-                .resolve_world_rotations_into(&world.hierarchy, next_local, &mut next_rot);
-            validate_component_colliders(
-                &world.scene,
-                &world.colliders,
-                next_local,
-                &next_world,
-                &next_rot,
-                &world.hierarchy.parents,
-                Phase::Commit,
-            )?;
-            let next_draw = world
-                .draw_plan
-                .build_frame(&world.scene, &next_world, &next_rot)
-                .map_err(|error| {
-                    diag(
-                        DiagnosticCode::InvalidOutput,
-                        Phase::Commit,
-                        &error.to_string(),
-                    )
-                })?;
-            Some((next_world, next_rot, next_draw))
-        } else {
-            None
-        };
+        let staged_frames = staged_transforms
+            .as_ref()
+            .map(|local| world.resolve_staged_transforms(local))
+            .transpose()?;
 
         staged_state.validate_total()?;
         let transform_camera = staged_frames
@@ -1334,6 +1388,328 @@ mod tests {
         assert_eq!(runtime.object_translation("right"), Some([8.0, 6.0, 0.0]));
         engine.step(&mut runtime).unwrap();
         assert_eq!(runtime.object_translation("right"), Some([9.0, 6.0, 0.0]));
+    }
+
+    fn add_test_object(
+        scene: &mut ComponentScene,
+        id: &str,
+        parent: Option<&str>,
+        components: Vec<ComponentInstance>,
+    ) {
+        scene.objects.push(ObjectNode {
+            id: id.into(),
+            name: id.into(),
+            enabled: true,
+            parent: parent.map(str::to_owned),
+            transform: Transform::default(),
+            components,
+        });
+    }
+
+    #[test]
+    fn explicit_transform_writes_merge_in_script_order_from_committed_reads() {
+        let mut scene = shared_module_scene(
+            r#"
+            local target, owner, ticks
+            local function write_x(object, x)
+                local pose = object.transform
+                pose.translation[1] = x
+                object:set_transform(pose)
+            end
+            return {
+                on_start = function(transform, props, host)
+                    target = host.find("target")
+                    ticks = 0
+                    if props.speed == 1 then
+                        owner = host.find("left")
+                        write_x(target, 2)
+                        write_x(owner, 8)
+                        transform.translation[1] = 7
+                    else
+                        transform.translation[2] = target.transform.translation[1]
+                        write_x(target, 12)
+                    end
+                end,
+                on_update = function(transform, props)
+                    ticks = ticks + 1
+                    if props.speed == 1 then
+                        write_x(owner, 8)
+                        write_x(owner, 9)
+                        write_x(target, 30)
+                    else
+                        local committed = target.transform
+                        transform.translation[2] = committed.translation[1]
+                        if ticks == 1 then
+                            target:set_transform(committed)
+                        else
+                            write_x(target, 40)
+                        end
+                    end
+                end,
+            }
+        "#,
+        );
+        scene.objects.swap(0, 1);
+        add_test_object(&mut scene, "target", None, Vec::new());
+        add_test_object(
+            &mut scene,
+            "child",
+            Some("target"),
+            vec![ComponentInstance {
+                id: "child-mesh".into(),
+                enabled: true,
+                kind: Component::MeshRenderer {
+                    geometry: Geometry::Cube,
+                    tint: [1.0; 4],
+                    material: None,
+                },
+            }],
+        );
+        let rendered_x = |runtime: &Runtime| {
+            runtime.draw_frame().hierarchy().unwrap().matrices()[0]
+                .w_axis
+                .x
+        };
+        let mut engine = Engine::new(Limits::default()).unwrap();
+        let mut runtime = engine.reset_component(&scene, 0).unwrap();
+        assert_eq!(runtime.object_translation("left"), Some([7.0, 0.0, 0.0]));
+        assert_eq!(runtime.object_translation("right"), Some([0.0, 0.0, 0.0]));
+        assert_eq!(rendered_x(&runtime), 12.0);
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.object_translation("left"), Some([9.0, 0.0, 0.0]));
+        assert_eq!(runtime.object_translation("right"), Some([0.0, 12.0, 0.0]));
+        assert_eq!(rendered_x(&runtime), 12.0);
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(rendered_x(&runtime), 40.0);
+    }
+
+    #[test]
+    fn later_script_fault_rolls_back_explicit_transforms_and_reload_leaves_pose_committed() {
+        let mut scene = shared_module_scene(
+            r#"
+            return { on_update = function(transform, props, dt, host)
+                local panel = host.find("panel")
+                local pose = panel.transform
+                pose.translation[1] = 30
+                if props.speed == 2 then
+                    pose.scale[1] = 0
+                end
+                panel:set_transform(pose)
+            end }
+        "#,
+        );
+        add_test_object(
+            &mut scene,
+            "panel",
+            None,
+            vec![ComponentInstance {
+                id: "panel-collider".into(),
+                enabled: true,
+                kind: Component::Collider {
+                    role: ColliderRole::Blocker,
+                    shape: ColliderShape::Sphere { radius: 0.25 },
+                    offset: [0.0; 3],
+                },
+            }],
+        );
+        let mut engine = Engine::new(Limits::default()).unwrap();
+        let mut runtime = engine.reset_component(&scene, 0).unwrap();
+        let error = engine.step(&mut runtime).unwrap_err();
+        assert_eq!(error.binding_id.as_deref(), Some("right-script"));
+        assert_eq!(error.phase, Phase::Update);
+        assert!(error.line.is_some());
+        assert_eq!(runtime.tick(), 0);
+        assert_eq!(runtime.object_translation("panel"), Some([0.0, 0.0, 0.0]));
+        assert!(engine
+            .reload_component_source(
+                &mut runtime,
+                "asset-lua-1",
+                file_script(
+                    r#"
+                    local panel
+                    return {
+                        on_start = function(transform, props, host)
+                            panel = host.find("panel")
+                            local pose = panel.transform
+                            pose.translation[1] = 80
+                            panel:set_transform(pose)
+                        end,
+                        on_update = function(transform, props)
+                            local pose = panel.transform
+                            pose.translation[1] = pose.translation[1] + props.speed
+                            panel:set_transform(pose)
+                        end,
+                    }
+                    "#,
+                ),
+            )
+            .unwrap());
+        assert_eq!(runtime.tick(), 0);
+        assert_eq!(runtime.object_translation("panel"), Some([0.0, 0.0, 0.0]));
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.object_translation("panel"), Some([2.0, 0.0, 0.0]));
+
+        let error = engine
+            .reload_component_source(
+                &mut runtime,
+                "asset-lua-1",
+                file_script(
+                    r#"
+                    return { on_start = function(transform, props, host)
+                        local panel = host.find("panel")
+                        local pose = panel.transform
+                        pose.scale[1] = 2
+                        panel:set_transform(pose)
+                    end }
+                    "#,
+                ),
+            )
+            .unwrap_err();
+        assert_eq!(error.phase, Phase::Commit);
+        assert!(error.message.contains("panel collider"));
+        assert_eq!(runtime.object_translation("panel"), Some([2.0, 0.0, 0.0]));
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.object_translation("panel"), Some([4.0, 0.0, 0.0]));
+    }
+
+    #[test]
+    fn transform_setter_respects_animator_and_kinematic_ownership() {
+        use rot_scene::input::ButtonState;
+        let mut scene = shared_module_scene("return { on_update = function() end }");
+        scene.sources.insert(
+            "controller".into(),
+            script_source(
+                "return { update = function(transform) return { transform = transform } end }",
+                KINEMATIC_HOST_API_VERSION,
+            ),
+        );
+        let collider = |id: &str, role, shape| ComponentInstance {
+            id: id.into(),
+            enabled: true,
+            kind: Component::Collider {
+                role,
+                shape,
+                offset: [0.0; 3],
+            },
+        };
+        let box_shape = ColliderShape::Box {
+            half_extents: [0.5; 3],
+        };
+        add_test_object(
+            &mut scene,
+            "actor",
+            None,
+            vec![
+                collider(
+                    "actor-collider",
+                    ColliderRole::Blocker,
+                    ColliderShape::Sphere { radius: 0.25 },
+                ),
+                ComponentInstance {
+                    id: "kinematic-script".into(),
+                    enabled: true,
+                    kind: Component::Script {
+                        source_kind: None,
+                        movement: Default::default(),
+                        binding: BehaviorBinding {
+                            source_id: "controller".into(),
+                            target: BindingTarget::Object("actor".into()),
+                            enabled: true,
+                            properties: BTreeMap::from([(
+                                "checkpoint".into(),
+                                rot_scene::PropertyValue::SensorRef("sensor".into()),
+                            )]),
+                            state_defaults: BTreeMap::new(),
+                            commands: BTreeMap::new(),
+                        },
+                    },
+                },
+            ],
+        );
+        add_test_object(&mut scene, "wall-parent", None, Vec::new());
+        add_test_object(
+            &mut scene,
+            "wall",
+            Some("wall-parent"),
+            vec![collider("wall-collider", ColliderRole::Blocker, box_shape)],
+        );
+        add_test_object(
+            &mut scene,
+            "sensor",
+            None,
+            vec![collider("sensor-collider", ColliderRole::Sensor, box_shape)],
+        );
+        add_test_object(
+            &mut scene,
+            "rig",
+            None,
+            vec![ComponentInstance {
+                id: "animator".into(),
+                enabled: true,
+                kind: Component::Animator {
+                    binding: AnimationBinding {
+                        clip: "lift".into(),
+                        looping: false,
+                        targets: BTreeMap::from([("Panel".into(), "animated".into())]),
+                    },
+                    start_playback: AnimatorStart::OnButtonPress {
+                        action_id: "slide".into(),
+                    },
+                    playback_speed: 1.0,
+                },
+            }],
+        );
+        add_test_object(&mut scene, "animated", Some("rig"), Vec::new());
+        let clip = Clip::decode(
+            br#"{"format":"rot-clip","version":1,"duration":1.0,"tracks":[
+            {"node":"Panel","property":"translation","interpolation":"linear","times":[0.0,1.0],"values":[[0.0,0.0,0.0],[1.0,0.0,0.0]]}]}"#,
+        ).unwrap();
+        let mut engine = Engine::new(Limits::default()).unwrap();
+        engine.set_clips(BTreeMap::from([("lift".into(), Arc::new(clip))]));
+        for (target, protected_by, play_clip) in [
+            ("animated", "Animator", false),
+            ("animated", "Animator", true),
+            ("actor", "kinematic actor", false),
+            ("wall", "blocker", false),
+            ("wall-parent", "blocker", false),
+            ("sensor", "sensor", false),
+        ] {
+            scene.sources.get_mut("asset-lua-1").unwrap().text = format!(
+                r#"
+                local ticks = 0
+                return {{ on_update = function(transform, props, dt, host)
+                    local object = host.find("{target}")
+                    local pose = object.transform
+                    ticks = ticks + 1
+                    if ticks == 3 then pose.translation[1] = pose.translation[1] + 1 end
+                    object:set_transform(pose)
+                end }}
+                "#,
+            );
+            let mut runtime = engine.reset_component(&scene, 0).unwrap();
+            let input = if play_clip {
+                ActionFrame(BTreeMap::from([(
+                    "slide".into(),
+                    ActionValue::Button(ButtonState {
+                        held: true,
+                        pressed: true,
+                        released: false,
+                    }),
+                )]))
+            } else {
+                ActionFrame::default()
+            };
+            engine.step_with_input(&mut runtime, &input).unwrap();
+            engine.step(&mut runtime).unwrap();
+            let committed = runtime.object_translation(target).unwrap();
+            assert_eq!(committed[0] > 0.0, play_clip);
+            let error = engine.step(&mut runtime).unwrap_err();
+            assert_eq!(error.binding_id.as_deref(), Some("left-script"));
+            assert!(error.line.is_some());
+            assert!(error.message.contains(protected_by), "{error}");
+            assert_eq!(runtime.tick(), 2);
+            assert_eq!(runtime.object_translation(target), Some(committed));
+        }
     }
 
     #[test]
