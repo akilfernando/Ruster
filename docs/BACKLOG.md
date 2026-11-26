@@ -33,12 +33,11 @@ One line each. Anyone may add; the user or a planning pass orders them.
 
 ## Now — Phase 3A: Look (PBR & Scene Scale)
 
-`L-01` (`71aacda`), `L-02` (`611a640`), `L-03` (`93d7390`), `L-04` (`16a3859`), and `L-05` (`4f8e16d`) shipped on `2026-11-26`. Continue Phase 3A with `L-06` below.
+`L-01` (`71aacda`), `L-02` (`611a640`), `L-03` (`93d7390`), `L-04` (`16a3859`), `L-05` (`4f8e16d`), and `L-06` (`3264a4e`) shipped on `2026-11-26`. Close Phase 3A with `L-EXIT` below.
 
 | Package | Outcome | Status & remaining gap |
 | --- | --- | --- |
-| `L-06` Frustum culling & dirty-range instancing | View-frustum culling and dirty-range GPU instance uploads for scaled scenes within the 60 fps 1080p budget (Size M, *brief needed*). | `open` · Next in Phase 3A after `L-05`. |
-| `L-EXIT` Phase 3A exit gate | Khronos PBR sample assets (`DamagedHelmet`, `MetalRoughSpheres`, transparent/cutout assets) render recognizably within frame budgets (Size S, *brief needed*). | `open` · Closes Phase 3A after `L-06`. |
+| `L-EXIT` Phase 3A exit gate | Khronos PBR sample assets (`DamagedHelmet`, `MetalRoughSpheres`, transparent/cutout assets) render recognizably within frame budgets (Size S, *brief needed*). | `open` · Next and final step to close Phase 3A. |
 
 ## Later
 
@@ -104,7 +103,13 @@ completed packages:
   straight-alpha `BaseColor` PNG/mip preservation, glTF `alphaMode`/`alphaCutoff`/
   `opacity`, `shadow_depth_mask.wgsl` cutout shadows + `Blend` exclusion, material UI
   & MCP `opacity`/`alpha_mode`/`alpha_cutoff`, RTX 4060 probes green, headless 5k
-  1080p 4× MSAA CPU p50 `0.458 ms` / GPU p50 `0.292 ms` / frame p50 `1.213 ms`).
+  1080p 4× MSAA CPU p50 `0.458 ms` / GPU p50 `0.292 ms` / frame p50 `1.213 ms`), and `L-06`
+  (`2026-11-26`, `3264a4e`: Gribb-Hartmann wgpu `[0, 1]` world-AABB frustum culling
+  retaining off-camera shadow casters via `visible_range` vs `range`,
+  `InstanceUploadTracker` dirty-range GPU uploads with gap coalescing, RTX 4060
+  probes green, steady `0 B` instance upload; 5k CPU p50 `0.554 ms` / GPU p50
+  `0.291 ms` / frame p50 `1.211 ms` / p95 `1.557 ms`; 50k CPU p50 `3.976 ms` /
+  GPU p50 `0.520 ms` / frame p50 `4.942 ms` / p95 `5.647 ms`).
 - **Phase 2 — Core completed packages:** `C-00a` (retired legacy logistics
   crates, Rhai mode, editor logistics UI, and superseded MCP
   enrollment/registry plumbing; promoted `crates/rot-support`), `C-01` (v23

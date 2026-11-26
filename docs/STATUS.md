@@ -13,7 +13,7 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
-## Current phase — Phase 3A: Look (Next: `L-06`)
+## Current phase — Phase 3A: Look (Next: `L-EXIT`)
 
 - **Done:** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`, `A-01`–`A-07`,
   `P-01`–`P-02`), `C-00a` (retired legacy logistics crates, Rhai mode, editor
@@ -69,8 +69,12 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   `BaseColor` PNG/mips, glTF `alphaMode`/`alphaCutoff`/`opacity`,
   `shadow_depth_mask.wgsl` cutout shadows + `Blend` exclusion, material UI & MCP
   wiring, RTX 4060 probes green, headless 5k 1080p 4× MSAA CPU p50 `0.458 ms` / GPU
-  p50 `0.292 ms` / frame p50 `1.213 ms`).
-- **Next:** `L-06` Frustum culling & dirty-range instancing (Phase 3A).
+  p50 `0.292 ms` / frame p50 `1.213 ms`), and `L-06` Frustum culling & dirty-range
+  instancing (`3264a4e`: Gribb-Hartmann `[0, 1]` world-AABB culling with shadow
+  caster retention, `InstanceUploadTracker` gap-coalesced uploads, `0 B` steady
+  state, RTX 4060 probes green, 5k frame p50 `1.211 ms` / p95 `1.557 ms`, 50k
+  frame p50 `4.942 ms` / p95 `5.647 ms`).
+- **Next:** `L-EXIT` Phase 3A exit gate (Khronos PBR samples & frame budgets).
 
 ## What a creator can do today
 
