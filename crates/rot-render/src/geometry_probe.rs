@@ -147,6 +147,7 @@ fn verify_case(
                     response: [0.; 4],
                 }],
                 range: index as u32..index as u32 + 1,
+                visible_range: index as u32..index as u32 + 1,
             }
         })
         .collect();
@@ -185,6 +186,7 @@ fn verify_case(
         lighting: LightingPacket::legacy(),
         size: egui::vec2(width as f32, 192.),
         cpu_us: 0.,
+        culled_objects: 0,
         shadow: None,
         context,
         receipt: FrameReceipt::default(),

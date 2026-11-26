@@ -379,6 +379,7 @@ fn verify_mesh_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue) {
             }),
             instances: Vec::new(),
             range: 0..0,
+            visible_range: 0..0,
         })
         .collect::<Vec<_>>();
     let mut assets = asset_gpu::AssetGpu::default();
@@ -883,6 +884,7 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
                     response: [0.; 4],
                 }],
                 range: 0..1,
+                visible_range: 0..1,
             }],
             camera: Mat4::IDENTITY.to_cols_array(),
             camera_eye_mode: [0., 0., 2., 1.],
@@ -890,6 +892,7 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
             lighting: packet,
             size: egui::vec2(64., 64.),
             cpu_us: 0.,
+            culled_objects: 0,
             shadow: None,
             context: context.clone(),
             receipt: FrameReceipt::default(),
@@ -1356,6 +1359,7 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
                         occlusion: None,
                         mesh: Some(mesh.clone()),
                         range: index..index + 1,
+                        visible_range: index..index + 1,
                         instances: vec![Instance {
                             uv_transform: [1.0, 1.0, 0.0, 0.0],
                             emission_color: [0.0; 4],
@@ -1396,6 +1400,7 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
                 lighting,
                 size: egui::vec2(64., 64.),
                 cpu_us: 0.,
+                culled_objects: 0,
                 shadow: None,
                 context: context.clone(),
                 receipt: FrameReceipt::default(),
@@ -1649,6 +1654,7 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
     verify_pbr_maps(device, queue);
     verify_sky_and_ibl(device, queue);
     verify_alpha_transparency(device, queue);
+    verify_frustum_and_dirty_instancing(device, queue);
     eprintln!("GPU probe: production dielectric/PBR/HDR/exposure/custom restore and both output conventions passed");
 }
 
@@ -1765,6 +1771,7 @@ fn verify_pbr_maps(device: &wgpu::Device, queue: &wgpu::Queue) {
             binding,
             mesh: Some(quad.clone()),
             range: 0..1,
+            visible_range: 0..1,
             instances: vec![Instance {
                 model: Mat4::IDENTITY.to_cols_array_2d(),
                 normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
@@ -1807,6 +1814,7 @@ fn verify_pbr_maps(device: &wgpu::Device, queue: &wgpu::Queue) {
             lighting: LightingPacket::try_pack(light).unwrap(),
             size: egui::vec2(256., 192.),
             cpu_us: 0.,
+            culled_objects: 0,
             shadow: None,
             context: context.clone(),
             receipt: FrameReceipt::default(),
@@ -2045,6 +2053,7 @@ fn verify_sky_and_ibl(device: &wgpu::Device, queue: &wgpu::Queue) {
                     binding,
                     mesh: Some(quad.clone()),
                     range: 0..1,
+                    visible_range: 0..1,
                     instances: vec![Instance {
                         model: Mat4::IDENTITY.to_cols_array_2d(),
                         normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
@@ -2083,6 +2092,7 @@ fn verify_sky_and_ibl(device: &wgpu::Device, queue: &wgpu::Queue) {
                 lighting: LightingPacket::try_pack(light).unwrap(),
                 size: egui::vec2(256., 192.),
                 cpu_us: 0.,
+                culled_objects: 0,
                 shadow: None,
                 context: context.clone(),
                 receipt: FrameReceipt::default(),
@@ -2466,6 +2476,7 @@ pub(super) fn verify_cube_material(device: &wgpu::Device, queue: &wgpu::Queue) {
                 binding,
                 mesh: None,
                 range: 0..1,
+                visible_range: 0..1,
                 instances: vec![Instance {
                     uv_transform: [1.0, 1.0, 0.0, 0.0],
                     emission_color: [0.0; 4],
@@ -2492,6 +2503,7 @@ pub(super) fn verify_cube_material(device: &wgpu::Device, queue: &wgpu::Queue) {
             lighting: LightingPacket::try_pack(light).unwrap(),
             size: egui::vec2(256., 192.),
             cpu_us: 0.,
+            culled_objects: 0,
             shadow: None,
             context: context.clone(),
             receipt: FrameReceipt::default(),
@@ -2647,6 +2659,7 @@ fn verify_alpha_transparency(device: &wgpu::Device, queue: &wgpu::Queue) {
             lighting: LightingPacket::try_pack(&lighting).unwrap(),
             size: egui::vec2(256., 192.),
             cpu_us: 0.,
+            culled_objects: 0,
             shadow: None,
             context: context.clone(),
             receipt: FrameReceipt::default(),
@@ -2713,6 +2726,7 @@ fn verify_alpha_transparency(device: &wgpu::Device, queue: &wgpu::Queue) {
                     mesh: None,
                     instances: vec![bg_instance([0., 0., 1.])],
                     range: 0..1,
+                    visible_range: 0..1,
                 },
                 DrawGroup {
                     alpha_mode: AlphaMode::Mask,
@@ -2729,6 +2743,7 @@ fn verify_alpha_transparency(device: &wgpu::Device, queue: &wgpu::Queue) {
                     mesh: None,
                     instances: vec![front_instance(0., [1., 1., 1.], 1.0, 0.5)],
                     range: 1..2,
+                    visible_range: 1..2,
                 },
             ],
             display,
@@ -2762,6 +2777,7 @@ fn verify_alpha_transparency(device: &wgpu::Device, queue: &wgpu::Queue) {
                     mesh: None,
                     instances: vec![bg_instance([0., 0., 1.])],
                     range: 0..1,
+                    visible_range: 0..1,
                 },
                 DrawGroup {
                     alpha_mode: AlphaMode::Blend,
@@ -2778,6 +2794,7 @@ fn verify_alpha_transparency(device: &wgpu::Device, queue: &wgpu::Queue) {
                     mesh: None,
                     instances: vec![front_instance(0., [1., 0., 0.], 0.5, -2.0)],
                     range: 1..2,
+                    visible_range: 1..2,
                 },
             ],
             display,
@@ -2806,6 +2823,7 @@ fn verify_alpha_transparency(device: &wgpu::Device, queue: &wgpu::Queue) {
                     mesh: None,
                     instances: vec![bg_instance([0., 0., 1.])],
                     range: 0..1,
+                    visible_range: 0..1,
                 },
                 DrawGroup {
                     alpha_mode: AlphaMode::Blend,
@@ -2825,6 +2843,7 @@ fn verify_alpha_transparency(device: &wgpu::Device, queue: &wgpu::Queue) {
                         front_instance(0.0, [1., 0., 0.], 0.5, -2.0),
                     ],
                     range: 1..3,
+                    visible_range: 1..3,
                 },
             ],
             display,
@@ -2836,4 +2855,224 @@ fn verify_alpha_transparency(device: &wgpu::Device, queue: &wgpu::Queue) {
         );
     }
     eprintln!("GPU probe: AlphaMode Mask cutout and back-to-front Blend compositing passed");
+}
+
+/// Real GPU readback checks for dirty-range instance uploads (0 B steady state,
+/// exact 224 B single-instance update) and off-camera shadow casters excluded from
+/// color draw ranges (`visible_range`) while still casting shadows via `range`.
+fn verify_frustum_and_dirty_instancing(device: &wgpu::Device, queue: &wgpu::Queue) {
+    use rot_scene::{
+        AlphaMode, Ambient, DisplayProfile, Light, Lighting, ShadowQuality, SunShadow,
+    };
+
+    let r = Resources::new(device, queue, COLOR, 1);
+    let metrics = r.metrics.clone();
+    let mut resources = egui_wgpu::CallbackResources::default();
+    resources.insert(r);
+    let context = egui::Context::default();
+
+    let ambient = Lighting::Authored {
+        ambient: Ambient {
+            color: [1.; 3],
+            intensity: 1.,
+        },
+        lights: BTreeMap::new(),
+    };
+    let mut camera = Camera {
+        distance: 1.6,
+        ..Default::default()
+    };
+    camera.set_preset(ViewPreset::Front);
+    let (view, projection, _) = camera.matrices(256. / 192.);
+    let pixel = |bytes: &[u8], x: usize, y: usize| {
+        let offset = (y * 256 + x) * 4;
+        <[u8; 3]>::try_from(&bytes[offset..offset + 3]).unwrap()
+    };
+
+    let make_inst = |model: Mat4, rgb: [f32; 3]| {
+        let normal = Mat3::from_mat4(model).inverse().transpose();
+        Instance {
+            uv_transform: [1.0, 1.0, 0.0, 0.0],
+            emission_color: [0.0; 4],
+            pbr_params: [0.0, 1.0, 1.0, 1.0],
+            pbr_maps: [0.0, 0.0, 0.0, -1.0],
+            model: model.to_cols_array_2d(),
+            normal: normal.to_cols_array_2d().map(|c| [c[0], c[1], c[2], 0.]),
+            color: [1.; 4],
+            base_color: [rgb[0], rgb[1], rgb[2], 0.],
+            response: [0.; 4],
+        }
+    };
+
+    let mut instances: Vec<Instance> = (0..16)
+        .map(|i| {
+            let x = if i == 0 { 0.0 } else { 2.0 + i as f32 * 0.2 };
+            make_inst(Mat4::from_translation(Vec3::new(x, 0., 0.)), [1., 1., 1.])
+        })
+        .collect();
+
+    let mut run = |groups: Vec<DrawGroup>,
+                   vp: Mat4,
+                   eye: [f32; 4],
+                   lighting: &Lighting,
+                   culled: usize,
+                   shadow: Option<SunShadow>| {
+        context
+            .run_pass(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        complete_submitted_assets(device, queue, &context, &mut resources);
+        let callback = SceneCallback {
+            background: None,
+            sky: None,
+            inv_camera: vp.inverse().to_cols_array(),
+            show_editor_grid: false,
+            groups,
+            camera: vp.to_cols_array(),
+            camera_eye_mode: eye,
+            display: DisplayProfile::LegacySdr,
+            lighting: LightingPacket::try_pack(lighting).unwrap(),
+            size: egui::vec2(256., 192.),
+            cpu_us: 0.,
+            culled_objects: culled,
+            shadow,
+            context: context.clone(),
+            receipt: FrameReceipt::default(),
+            prepared: std::sync::atomic::AtomicBool::new(false),
+        };
+        selection_probe::render(device, queue, &mut resources, &callback, COLOR)
+    };
+
+    let make_group = |instances: Vec<Instance>, visible_len: u32| DrawGroup {
+        alpha_mode: AlphaMode::Opaque,
+        double_sided: false,
+        key: None,
+        primitive: None,
+        binding: BindingKey::default(),
+        texture: None,
+        roughness: None,
+        metallic: None,
+        normal: None,
+        emissive: None,
+        occlusion: None,
+        mesh: None,
+        range: 0..instances.len() as u32,
+        visible_range: 0..visible_len,
+        instances,
+    };
+
+    let stride = size_of::<Instance>() as u64;
+    let frame1 = run(
+        vec![make_group(instances.clone(), 16)],
+        projection * view,
+        camera.eye_mode(),
+        &ambient,
+        0,
+        None,
+    );
+    assert_eq!(pixel(&frame1, 128, 96), [255, 255, 255]);
+    {
+        let m = metrics.lock().unwrap();
+        assert_eq!(m.instance_uploads, 1);
+        assert_eq!(m.last_frame_instance_upload_bytes, 16 * stride);
+    }
+
+    let frame2 = run(
+        vec![make_group(instances.clone(), 16)],
+        projection * view,
+        camera.eye_mode(),
+        &ambient,
+        0,
+        None,
+    );
+    assert_eq!(frame2, frame1);
+    {
+        let m = metrics.lock().unwrap();
+        assert_eq!(
+            m.instance_uploads, 1,
+            "unchanged frame must emit zero instance writes"
+        );
+        assert_eq!(m.last_frame_instance_upload_bytes, 0);
+    }
+
+    instances[0] = make_inst(Mat4::IDENTITY, [1., 0., 0.]);
+    let frame3 = run(
+        vec![make_group(instances, 16)],
+        projection * view,
+        camera.eye_mode(),
+        &ambient,
+        0,
+        None,
+    );
+    assert_eq!(pixel(&frame3, 128, 96), [255, 0, 0]);
+    {
+        let m = metrics.lock().unwrap();
+        assert_eq!(m.instance_uploads, 2);
+        assert_eq!(
+            m.last_frame_instance_upload_bytes, stride,
+            "single edited instance must upload exactly one Instance struct"
+        );
+    }
+
+    // Off-camera shadow caster: visible_range=0..1 draws only floor, while range=0..2
+    // casts its Sun shadow onto the center of the visible floor.
+    let shadow_vp = Mat4::perspective_rh(45_f32.to_radians(), 256. / 192., 0.1, 100.)
+        * Mat4::look_at_rh(Vec3::new(0., 5., 5.), Vec3::ZERO, Vec3::Y);
+    let light_dir = Vec3::new(-4., 2., 0.).normalize();
+    let mut sun = Light::directional(None);
+    let q = Quat::from_rotation_arc(Vec3::Z, light_dir);
+    let (z, y, x) = q.to_euler(EulerRot::ZYX);
+    sun.transform.rotation = [x, y, z];
+    sun.color = [1., 1., 1.];
+    sun.intensity = 1.0;
+    let sun_lighting = Lighting::Authored {
+        ambient: Ambient {
+            color: [0.1, 0.1, 0.1],
+            intensity: 1.0,
+        },
+        lights: BTreeMap::from([("sun".into(), sun)]),
+    };
+    let floor = make_inst(
+        Mat4::from_scale_rotation_translation(
+            Vec3::new(12., 0.1, 6.),
+            Quat::IDENTITY,
+            Vec3::new(0., -0.05, 0.),
+        ),
+        [1., 1., 1.],
+    );
+    let offcamera_caster = make_inst(Mat4::from_translation(Vec3::new(-4., 2., 0.)), [1., 1., 1.]);
+    let lit_floor = run(
+        vec![make_group(vec![floor], 1)],
+        shadow_vp,
+        [0., 5., 5., 1.],
+        &sun_lighting,
+        0,
+        None,
+    );
+    let shadowed_floor = run(
+        vec![make_group(vec![floor, offcamera_caster], 1)],
+        shadow_vp,
+        [0., 5., 5., 1.],
+        &sun_lighting,
+        1,
+        Some(SunShadow {
+            enabled: true,
+            quality: ShadowQuality::Standard,
+            depth_bias_texels: 1.0,
+            normal_bias_texels: 0.5,
+        }),
+    );
+    assert!(
+        u16::from(pixel(&lit_floor, 128, 96)[0])
+            > u16::from(pixel(&shadowed_floor, 128, 96)[0]) + 60,
+        "Culled off-camera shadow caster must shadow the center floor without appearing in color pass ({:?} vs {:?})",
+        pixel(&lit_floor, 128, 96),
+        pixel(&shadowed_floor, 128, 96)
+    );
+    {
+        let m = metrics.lock().unwrap();
+        assert_eq!(m.objects, 1);
+        assert_eq!(m.culled_objects, 1);
+        assert_eq!(m.shadow_draw_calls, 1);
+    }
+    eprintln!("GPU probe: dirty-range instance uploads (0 B static, 224 B single edit) and culled shadow caster passed");
 }

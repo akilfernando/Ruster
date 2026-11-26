@@ -35,6 +35,28 @@ pub fn builtin_mesh(primitive: Primitive) -> &'static Arc<Mesh> {
     }
 }
 
+pub(crate) const CUBE_BOUNDS: (Vec3, Vec3) = (Vec3::ZERO, Vec3::splat(0.5));
+
+/// Cached local `(center, half_extents)` bounding box for a built-in primitive.
+pub(crate) fn builtin_bounds(primitive: Primitive) -> (Vec3, Vec3) {
+    static SPHERE: OnceLock<(Vec3, Vec3)> = OnceLock::new();
+    static CAPSULE: OnceLock<(Vec3, Vec3)> = OnceLock::new();
+    static PLANE: OnceLock<(Vec3, Vec3)> = OnceLock::new();
+    static CYLINDER: OnceLock<(Vec3, Vec3)> = OnceLock::new();
+    static TRIANGULAR_PRISM: OnceLock<(Vec3, Vec3)> = OnceLock::new();
+    let slot = match primitive {
+        Primitive::Plane => &PLANE,
+        Primitive::Cylinder => &CYLINDER,
+        Primitive::Sphere => &SPHERE,
+        Primitive::Capsule => &CAPSULE,
+        Primitive::TriangularPrism => &TRIANGULAR_PRISM,
+    };
+    *slot.get_or_init(|| {
+        crate::frustum::mesh_local_bounds(builtin_mesh(primitive))
+            .expect("built-in primitives are nonempty and finite")
+    })
+}
+
 /// Shared indexed geometry for the default Cube.
 pub fn builtin_cube() -> &'static Mesh {
     static CUBE: OnceLock<Mesh> = OnceLock::new();

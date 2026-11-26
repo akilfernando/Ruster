@@ -226,8 +226,11 @@ fn measure_scene(
         return Err(format!("Incomplete workload: expected {objects} objects at {SCREEN:?}, drew {} at {:?} over {} frames.", metrics.objects, metrics.target_size, metrics.frames));
     }
     println!(
-        "{objects} objects · {triangles} triangles · {} scene draws · {}× MSAA",
-        metrics.draw_calls, metrics.sample_count
+        "{objects} objects ({} culled) · {triangles} triangles · {} scene draws · {}× MSAA · steady instance upload {} B",
+        metrics.culled_objects,
+        metrics.draw_calls,
+        metrics.sample_count,
+        metrics.last_frame_instance_upload_bytes
     );
     summarize("CPU prepare", &metrics.cpu_prepare_us);
     summarize("GPU scene", &metrics.gpu_scene_us);

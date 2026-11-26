@@ -3,9 +3,11 @@ mod asset_gpu;
 pub mod benchmark;
 pub mod component_preview;
 mod editor_grid;
+mod frustum;
 #[cfg(test)]
 mod geometry_probe;
 mod ibl_gpu;
+mod instancing;
 mod lighting_gpu;
 mod material_gpu;
 mod primitives;
@@ -185,6 +187,10 @@ pub struct Metrics {
     /// Indexed scene draw calls in the last frame, excluding composite/UI.
     pub draw_calls: usize,
     pub instance_capacity_bytes: u64,
+    pub culled_objects: usize,
+    pub instance_uploads: u64,
+    pub instance_upload_bytes: u64,
+    pub last_frame_instance_upload_bytes: u64,
     pub target_bytes: u64,
     pub target_size: [u32; 2],
     pub target_requested_size: [u32; 2],
@@ -2184,6 +2190,149 @@ fn render_draw_scene(
         Ok(packet) => (packet, false),
         Err(_) => (LightingPacket::authored_dark(), true),
     };
+    let shadow = if invalid_lighting {
+        None
+    } else {
+        scene
+            .lighting
+            .lights()
+            .find_map(|(_, light)| match &light.kind {
+                rot_scene::LightKind::Directional { shadow } if light.enabled && shadow.enabled => {
+                    Some(*shadow)
+                }
+                _ => None,
+            })
+    };
+    let (groups, culled_objects, triangles) = build_draw_groups(
+        &draw,
+        scene,
+        meshes,
+        textures,
+        selected,
+        navigation.selection_feedback,
+        view_projection,
+        camera_eye_mode,
+        shadow.is_some(),
+    );
+    let draw_rect = player_content.unwrap_or(rect);
+    if paint_bars {
+        ui.painter().rect_filled(rect, 0., egui::Color32::BLACK);
+    }
+    let show_editor_grid = navigation.show_editor_grid && !navigation.player_view;
+    let receipt = if allow_solid_sdr
+        && scene.objects.is_empty()
+        && scene.display.is_legacy()
+        && scene.sky.is_none()
+        && !show_editor_grid
+    {
+        paint_solid_sdr(ui, draw_rect, scene.background);
+        FrameReceipt::default()
+    } else {
+        let receipt = FrameReceipt::scene_callback();
+        let inv_camera = if view_projection.determinant().abs() > 1e-12 {
+            view_projection.inverse().to_cols_array()
+        } else {
+            Mat4::IDENTITY.to_cols_array()
+        };
+        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+            draw_rect,
+            SceneCallback {
+                receipt: receipt.clone(),
+                groups,
+                camera: view_projection.to_cols_array(),
+                inv_camera,
+                show_editor_grid,
+                camera_eye_mode,
+                display: scene.display,
+                background: scene.background,
+                sky: scene.sky,
+                lighting,
+                size: draw_rect.size(),
+                cpu_us: start.elapsed().as_secs_f64() * 1.0e6,
+                culled_objects,
+                shadow,
+                context: ui.ctx().clone(),
+                prepared: std::sync::atomic::AtomicBool::new(false),
+            },
+        ));
+        receipt
+    };
+    if invalid_lighting {
+        ui.painter().text(
+            rect.left_bottom() + egui::vec2(8.0, -8.0),
+            egui::Align2::LEFT_BOTTOM,
+            navigation.wording.light_error,
+            egui::FontId::proportional(13.0),
+            egui::Color32::YELLOW,
+        );
+    }
+    if let Some(error) = fit_error {
+        let painter = ui.painter().with_clip_rect(rect);
+        let position = rect.left_top() + egui::vec2(8.0, 8.0);
+        let galley = painter.layout(
+            error.into(),
+            egui::TextStyle::Body.resolve(ui.style()),
+            ui.visuals().warn_fg_color,
+            (rect.width() - 16.0).max(1.0),
+        );
+        painter.rect_filled(
+            egui::Rect::from_min_size(
+                position - egui::vec2(4.0, 4.0),
+                galley.size() + egui::vec2(8.0, 8.0),
+            ),
+            4.0,
+            ui.visuals().extreme_bg_color,
+        );
+        painter.galley(position, galley, ui.visuals().warn_fg_color);
+    }
+    if !navigation.player_view {
+        if let Some(gizmo) = gizmo {
+            paint_gizmo(
+                &ui.painter().with_clip_rect(rect),
+                ui.visuals(),
+                camera,
+                gizmo,
+                navigation.wording,
+            );
+        }
+        let painter = ui.ctx().layer_painter(overlay_layer).with_clip_rect(rect);
+        if let (true, Some(anchor)) = (navigation.show_stats, stats_anchor) {
+            paint_stats(&painter, ui.visuals(), anchor, navigation, triangles);
+            // Live numbers at a few updates per second; nothing while closed.
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(250));
+        }
+    }
+    ViewportInteraction {
+        receipt,
+        rect,
+        player_content,
+        response,
+        picked,
+        box_selection,
+        fit_attempted: fitted,
+        fit_error,
+        view: view.to_cols_array_2d(),
+        projection: projection.to_cols_array_2d(),
+        gizmo_projection: gizmo_projection.to_cols_array_2d(),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_draw_groups(
+    draw: &DrawScene<'_>,
+    scene: &Scene,
+    meshes: &BTreeMap<String, Arc<rot_assets::Mesh>>,
+    textures: &BTreeMap<String, Arc<rot_assets::Texture>>,
+    selected: &[&str],
+    selection_feedback: bool,
+    view_projection: Mat4,
+    camera_eye_mode: [f32; 4],
+    shadow_enabled: bool,
+) -> (Vec<DrawGroup>, usize, u64) {
+    let frustum = frustum::Frustum::from_view_projection(view_projection);
+    let mut mesh_bounds: BTreeMap<&str, Option<(Vec3, Vec3)>> = BTreeMap::new();
+    let mut culled_objects = 0usize;
     let mut grouped = BTreeMap::new();
     let mut blended = Vec::new();
     let mut triangles = 0u64;
@@ -2256,13 +2405,13 @@ fn render_draw_scene(
                     f32::from(u8::from(
                         material.is_some_and(|m| m.roughness_texture.is_some()),
                     )),
-                    f32::from(u8::from(navigation.selection_feedback && is_selected)),
+                    f32::from(u8::from(selection_feedback && is_selected)),
                 ],
                 _ => [
                     0.,
                     0.,
                     0.,
-                    f32::from(u8::from(navigation.selection_feedback && is_selected)),
+                    f32::from(u8::from(selection_feedback && is_selected)),
                 ],
             },
         }
@@ -2325,26 +2474,48 @@ fn render_draw_scene(
         mesh: mesh.cloned(),
         instances: Vec::new(),
         range: 0..0,
+        visible_range: 0..0,
     };
     for (order_idx, (object, matrix)) in draw.objects().enumerate() {
         let mesh = object_mesh(object, meshes);
-        triangles += mesh.map_or(12, |mesh| mesh.indices.len() as u64 / 3);
         let key = mesh.and(object.mesh.as_deref());
         let primitive = object.mesh.is_none().then_some(object.primitive).flatten();
         let material = object
             .material
             .as_ref()
             .and_then(|id| scene.materials.get(id));
+        let alpha_mode = material.map_or(rot_scene::AlphaMode::Opaque, |m| m.alpha_mode);
+        let visible = frustum.as_ref().is_none_or(|frustum| {
+            let local_bounds = match (key, mesh, primitive) {
+                (Some(id), Some(mesh), _) => mesh_bounds
+                    .entry(id)
+                    .or_insert_with(|| frustum::mesh_local_bounds(mesh))
+                    .unwrap_or(primitives::CUBE_BOUNDS),
+                (_, _, Some(primitive)) => primitives::builtin_bounds(primitive),
+                _ => primitives::CUBE_BOUNDS,
+            };
+            let (world_center, world_extents) =
+                frustum::world_aabb(matrix, local_bounds.0, local_bounds.1);
+            frustum.intersects_aabb(world_center, world_extents)
+        });
+        if !visible {
+            culled_objects += 1;
+            if !shadow_enabled || alpha_mode == rot_scene::AlphaMode::Blend {
+                continue;
+            }
+        }
+        if visible {
+            triangles += mesh.map_or(12, |mesh| mesh.indices.len() as u64 / 3);
+        }
         let binding = draw_material_binding(object, mesh, material);
         let double_sided = material.is_some_and(|material| material.double_sided);
-        let alpha_mode = material.map_or(rot_scene::AlphaMode::Opaque, |m| m.alpha_mode);
         let mut base_color = object.color;
         if let Some(material) = material {
             for (channel, tint) in base_color[..3].iter_mut().zip(material.tint) {
                 *channel *= tint;
             }
         }
-        let is_selected = !selected.is_empty() && selected.contains(&object.id.as_str());
+        let is_selected = visible && !selected.is_empty() && selected.contains(&object.id.as_str());
         base_color[3] = if is_selected { 0.35 } else { 0.0 };
         let instance = make_instance(object, matrix, material, &binding, base_color, is_selected);
         if alpha_mode == rot_scene::AlphaMode::Blend {
@@ -2365,18 +2536,28 @@ fn render_draw_scene(
                 instance,
             ));
         } else {
-            let group = grouped
+            let entry = grouped
                 .entry((key, primitive, binding, double_sided, alpha_mode))
                 .or_insert_with(|| {
-                    make_group(key, primitive, binding, double_sided, alpha_mode, mesh)
+                    (
+                        make_group(key, primitive, binding, double_sided, alpha_mode, mesh),
+                        Vec::new(),
+                    )
                 });
-            group.instances.push(instance);
+            if visible {
+                entry.0.instances.push(instance);
+            } else {
+                entry.1.push(instance);
+            }
         }
     }
     let mut offset = 0;
     let mut groups: Vec<DrawGroup> = grouped
         .into_values()
-        .map(|mut group| {
+        .map(|(mut group, shadow_only)| {
+            let visible_len = group.instances.len() as u32;
+            group.instances.extend(shadow_only);
+            group.visible_range = offset..offset + visible_len;
             group.range = offset..offset + group.instances.len() as u32;
             offset = group.range.end;
             group
@@ -2396,6 +2577,7 @@ fn render_draw_scene(
                 let last = groups.last_mut().expect("checked");
                 last.instances.push(instance);
                 last.range.end += 1;
+                last.visible_range.end += 1;
                 offset += 1;
             } else {
                 let mut group = make_group(
@@ -2408,126 +2590,13 @@ fn render_draw_scene(
                 );
                 group.instances.push(instance);
                 group.range = offset..offset + 1;
+                group.visible_range = group.range.clone();
                 offset += 1;
                 groups.push(group);
             }
         }
     }
-    let draw_rect = player_content.unwrap_or(rect);
-    if paint_bars {
-        ui.painter().rect_filled(rect, 0., egui::Color32::BLACK);
-    }
-    let show_editor_grid = navigation.show_editor_grid && !navigation.player_view;
-    let receipt = if allow_solid_sdr
-        && scene.objects.is_empty()
-        && scene.display.is_legacy()
-        && scene.sky.is_none()
-        && !show_editor_grid
-    {
-        paint_solid_sdr(ui, draw_rect, scene.background);
-        FrameReceipt::default()
-    } else {
-        let receipt = FrameReceipt::scene_callback();
-        let inv_camera = if view_projection.determinant().abs() > 1e-12 {
-            view_projection.inverse().to_cols_array()
-        } else {
-            Mat4::IDENTITY.to_cols_array()
-        };
-        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-            draw_rect,
-            SceneCallback {
-                receipt: receipt.clone(),
-                groups,
-                camera: view_projection.to_cols_array(),
-                inv_camera,
-                show_editor_grid,
-                camera_eye_mode,
-                display: scene.display,
-                background: scene.background,
-                sky: scene.sky,
-                lighting,
-                size: draw_rect.size(),
-                cpu_us: start.elapsed().as_secs_f64() * 1.0e6,
-                shadow: if invalid_lighting {
-                    None
-                } else {
-                    scene
-                        .lighting
-                        .lights()
-                        .find_map(|(_, light)| match &light.kind {
-                            rot_scene::LightKind::Directional { shadow }
-                                if light.enabled && shadow.enabled =>
-                            {
-                                Some(*shadow)
-                            }
-                            _ => None,
-                        })
-                },
-                context: ui.ctx().clone(),
-                prepared: std::sync::atomic::AtomicBool::new(false),
-            },
-        ));
-        receipt
-    };
-    if invalid_lighting {
-        ui.painter().text(
-            rect.left_bottom() + egui::vec2(8.0, -8.0),
-            egui::Align2::LEFT_BOTTOM,
-            navigation.wording.light_error,
-            egui::FontId::proportional(13.0),
-            egui::Color32::YELLOW,
-        );
-    }
-    if let Some(error) = fit_error {
-        let painter = ui.painter().with_clip_rect(rect);
-        let position = rect.left_top() + egui::vec2(8.0, 8.0);
-        let galley = painter.layout(
-            error.into(),
-            egui::TextStyle::Body.resolve(ui.style()),
-            ui.visuals().warn_fg_color,
-            (rect.width() - 16.0).max(1.0),
-        );
-        painter.rect_filled(
-            egui::Rect::from_min_size(
-                position - egui::vec2(4.0, 4.0),
-                galley.size() + egui::vec2(8.0, 8.0),
-            ),
-            4.0,
-            ui.visuals().extreme_bg_color,
-        );
-        painter.galley(position, galley, ui.visuals().warn_fg_color);
-    }
-    if !navigation.player_view {
-        if let Some(gizmo) = gizmo {
-            paint_gizmo(
-                &ui.painter().with_clip_rect(rect),
-                ui.visuals(),
-                camera,
-                gizmo,
-                navigation.wording,
-            );
-        }
-        let painter = ui.ctx().layer_painter(overlay_layer).with_clip_rect(rect);
-        if let (true, Some(anchor)) = (navigation.show_stats, stats_anchor) {
-            paint_stats(&painter, ui.visuals(), anchor, navigation, triangles);
-            // Live numbers at a few updates per second; nothing while closed.
-            ui.ctx()
-                .request_repaint_after(std::time::Duration::from_millis(250));
-        }
-    }
-    ViewportInteraction {
-        receipt,
-        rect,
-        player_content,
-        response,
-        picked,
-        box_selection,
-        fit_attempted: fitted,
-        fit_error,
-        view: view.to_cols_array_2d(),
-        projection: projection.to_cols_array_2d(),
-        gizmo_projection: gizmo_projection.to_cols_array_2d(),
-    }
+    (groups, culled_objects, triangles)
 }
 
 // Built-in primitives resolve to shared engine geometry. The cube stays None so
@@ -3021,6 +3090,7 @@ struct Resources {
     shadows: shadow_gpu::ShadowGpu,
     builtin_appearance: bool,
     instances: wgpu::Buffer,
+    instance_uploads: instancing::InstanceUploadTracker,
     instance_layout: wgpu::BindGroupLayout,
     instance_bind: wgpu::BindGroup,
     capacity: usize,
@@ -3220,6 +3290,7 @@ impl Resources {
             shadows,
             builtin_appearance: true,
             instances,
+            instance_uploads: instancing::InstanceUploadTracker::default(),
             instance_layout,
             instance_bind,
             capacity: 1,
@@ -3248,6 +3319,7 @@ impl Resources {
         }
         self.capacity = count.next_power_of_two();
         self.instances = instance_buffer(device, self.capacity);
+        self.instance_uploads.clear();
         self.camera_bind =
             camera_bind_group(device, &self.camera_layout, &self.camera, &self.instances);
         self.instance_bind = instance_bind_group(device, &self.instance_layout, &self.instances);
@@ -3899,6 +3971,7 @@ struct DrawGroup {
     mesh: Option<Arc<rot_assets::Mesh>>,
     instances: Vec<Instance>,
     range: Range<u32>,
+    visible_range: Range<u32>,
 }
 impl DrawGroup {
     fn material_inputs(&self) -> (&BindingKey, MaterialTextureInputs<'_>) {
@@ -3928,6 +4001,7 @@ struct SceneCallback {
     lighting: LightingPacket,
     size: egui::Vec2,
     cpu_us: f64,
+    culled_objects: usize,
     shadow: Option<rot_scene::SunShadow>,
     context: egui::Context,
     // Callback resources are shared; a rejected callback must not composite
@@ -4046,8 +4120,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         // retains its existing alpha/color ABI and is never interpreted as a mask.
         let selection = r.builtin_appearance
             && self.groups.iter().any(|group| {
-                group
-                    .instances
+                group.instances[..group.visible_range.len()]
                     .iter()
                     .any(|instance| instance.response[3] > 0.)
             });
@@ -4078,15 +4151,16 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             .map(|group| group.instances.len())
             .sum::<usize>();
         r.ensure_instance_capacity(device, instance_count);
-        for group in &self.groups {
-            if !group.instances.is_empty() {
-                queue.write_buffer(
-                    &r.instances,
-                    u64::from(group.range.start) * size_of::<Instance>() as u64,
-                    bytemuck::cast_slice(&group.instances),
-                );
-            }
-        }
+        let upload_refs: Vec<(&[Instance], u32)> = self
+            .groups
+            .iter()
+            .map(|group| (group.instances.as_slice(), group.range.start))
+            .collect();
+        let (instance_uploads, instance_upload_bytes) =
+            r.instance_uploads
+                .sync(&upload_refs, instance_count, |offset, bytes| {
+                    queue.write_buffer(&r.instances, offset, bytes);
+                });
         queue.write_buffer(&r.camera, 0, bytemuck::cast_slice(&self.camera));
         queue.write_buffer(&r.camera, 64, bytemuck::cast_slice(&self.camera_eye_mode));
         let lighting_uploaded = r.lighting.prepare(queue, &self.lighting);
@@ -4176,6 +4250,9 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 &r.pipeline
             };
             let draw_group = |pass: &mut wgpu::RenderPass<'_>, group: &DrawGroup| {
+                if group.visible_range.is_empty() {
+                    return;
+                }
                 pass.set_bind_group(1, r.materials.bind(&group.binding), &[]);
                 let mesh = r.builtins.group_mesh(group, &r.meshes);
                 pass.set_pipeline(pipelines.for_mesh(mesh, group.double_sided, group.alpha_mode));
@@ -4189,7 +4266,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                         .slice(..),
                 );
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.count, 0, group.range.clone());
+                pass.draw_indexed(0..mesh.count, 0, group.visible_range.clone());
             };
             pass.set_bind_group(0, &r.camera_bind, &[]);
             pass.set_bind_group(2, &r.lighting.bind, &[]);
@@ -4251,11 +4328,8 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             };
             pass.set_bind_group(0, &r.camera_bind, &[]);
             for group in &self.groups {
-                if !group
-                    .instances
-                    .iter()
-                    .any(|instance| instance.response[3] > 0.5)
-                {
+                let visible = &group.instances[..group.visible_range.len()];
+                if !visible.iter().any(|instance| instance.response[3] > 0.5) {
                     continue;
                 }
                 let mesh = r.builtins.group_mesh(group, &r.meshes);
@@ -4263,20 +4337,21 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                 let mut cursor = 0;
-                while let Some(rel_start) = group.instances[cursor..]
+                while let Some(rel_start) = visible[cursor..]
                     .iter()
                     .position(|instance| instance.response[3] > 0.5)
                 {
                     let start = cursor + rel_start;
                     let end = start
-                        + group.instances[start..]
+                        + visible[start..]
                             .iter()
                             .position(|instance| instance.response[3] <= 0.5)
-                            .unwrap_or(group.instances.len() - start);
+                            .unwrap_or(visible.len() - start);
                     pass.draw_indexed(
                         0..mesh.count,
                         0,
-                        group.range.start + start as u32..group.range.start + end as u32,
+                        group.visible_range.start + start as u32
+                            ..group.visible_range.start + end as u32,
                     );
                     cursor = end;
                 }
@@ -4352,8 +4427,21 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         metrics.shadow_detail_limited = shadow.detail_limited;
         metrics.shadow_precision_limited = shadow.precision_limited;
         metrics.texture_bytes = r.materials.bytes();
-        metrics.draw_calls = self.groups.len() + usize::from(self.show_editor_grid);
-        metrics.objects = instance_count;
+        metrics.draw_calls = self
+            .groups
+            .iter()
+            .filter(|group| !group.visible_range.is_empty())
+            .count()
+            + usize::from(self.show_editor_grid);
+        metrics.objects = self
+            .groups
+            .iter()
+            .map(|group| group.visible_range.len())
+            .sum();
+        metrics.culled_objects = self.culled_objects;
+        metrics.instance_uploads += instance_uploads;
+        metrics.instance_upload_bytes += instance_upload_bytes;
+        metrics.last_frame_instance_upload_bytes = instance_upload_bytes;
         metrics.mesh_bytes = r.builtins.bytes()
             + r.zero_uv.size()
             + r.default_tangent.size()
@@ -4673,6 +4761,70 @@ mod tests {
             "real viewport Fit must consume hierarchy world poses"
         );
         assert_eq!(session.snapshot_bytes().unwrap(), before);
+    }
+
+    #[test]
+    fn frustum_culling_separates_visible_draws_and_offcamera_shadow_casters() {
+        let mut scene = Scene::empty("frustum-cull");
+        let mut visible = Object::cube("visible", None);
+        visible.transform.translation = [0., 0., 0.];
+        let mut culled_opaque = Object::cube("culled-opaque", None);
+        culled_opaque.transform.translation = [25., 0., 0.];
+        let blend_mat = rot_scene::OpaqueMaterial {
+            alpha_mode: rot_scene::AlphaMode::Blend,
+            opacity: 0.5,
+            ..Default::default()
+        };
+        scene.materials.insert("glass".into(), blend_mat);
+        let mut culled_blend = Object::cube("culled-blend", None);
+        culled_blend.transform.translation = [-25., 0., 0.];
+        culled_blend.material = Some("glass".into());
+        scene.objects = vec![visible, culled_opaque, culled_blend];
+
+        let mut camera = Camera {
+            distance: 5.0,
+            ..Default::default()
+        };
+        camera.set_preset(ViewPreset::Front);
+        let (view, projection, _) = camera.matrices(16. / 9.);
+        let draw = DrawScene::from(&scene);
+        let (no_shadow_groups, culled_no_shadow, triangles) = build_draw_groups(
+            &draw,
+            &scene,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &["culled-opaque"],
+            true,
+            projection * view,
+            camera.eye_mode(),
+            false,
+        );
+        assert_eq!(culled_no_shadow, 2);
+        assert_eq!(triangles, 12);
+        assert_eq!(no_shadow_groups.len(), 1);
+        assert_eq!(no_shadow_groups[0].instances.len(), 1);
+        assert_eq!(no_shadow_groups[0].range, 0..1);
+        assert_eq!(no_shadow_groups[0].visible_range, 0..1);
+
+        let (shadow_groups, culled_shadow, triangles_shadow) = build_draw_groups(
+            &draw,
+            &scene,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &["culled-opaque"],
+            true,
+            projection * view,
+            camera.eye_mode(),
+            true,
+        );
+        assert_eq!(culled_shadow, 2);
+        assert_eq!(triangles_shadow, 12);
+        assert_eq!(shadow_groups.len(), 1);
+        assert_eq!(shadow_groups[0].visible_range, 0..1);
+        assert_eq!(shadow_groups[0].range, 0..2);
+        assert_eq!(shadow_groups[0].instances.len(), 2);
+        // Culled selected object must not flag selection highlight in its instance.
+        assert_eq!(shadow_groups[0].instances[1].response[3], 0.0);
     }
     use super::*;
     #[test]

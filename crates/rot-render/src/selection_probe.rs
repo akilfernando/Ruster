@@ -75,6 +75,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue) {
                         occlusion: None,
                         mesh: Some(mesh.clone()),
                         range: index as u32..index as u32 + 1,
+                        visible_range: index as u32..index as u32 + 1,
                         instances: vec![Instance {
                             uv_transform: [1.0, 1.0, 0.0, 0.0],
                             emission_color: [0.0; 4],
@@ -110,6 +111,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue) {
                 lighting: LightingPacket::legacy(),
                 size: egui::vec2(256., 192.),
                 cpu_us: 0.,
+                culled_objects: 0,
                 shadow: None,
                 context: context.clone(),
                 receipt: FrameReceipt::default(),

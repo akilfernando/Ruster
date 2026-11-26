@@ -800,6 +800,7 @@ fn verify_alpha_shadows(device: &wgpu::Device, queue: &wgpu::Queue) {
                 mesh: None,
                 instances: vec![floor_instance],
                 range: 0..1,
+                visible_range: 0..1,
             },
             DrawGroup {
                 alpha_mode: caster_mode,
@@ -816,6 +817,7 @@ fn verify_alpha_shadows(device: &wgpu::Device, queue: &wgpu::Queue) {
                 mesh: Some(Arc::clone(&quad_mesh)),
                 instances: vec![caster_instance],
                 range: 1..2,
+                visible_range: 1..2,
             },
         ];
         let mut encoder = device.create_command_encoder(&Default::default());
