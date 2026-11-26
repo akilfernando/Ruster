@@ -318,7 +318,7 @@ fn run() -> Result<(), String> {
                 component_preview::project(&scene).map_err(|error| error.to_string())?,
             )
         }
-        None => LoadedPreview::Legacy(Scene::demo()),
+        None => LoadedPreview::Legacy(Box::new(Scene::demo())),
     };
     if options.objects == Some(256) {
         let LoadedPreview::Legacy(scene) = &mut preview else {

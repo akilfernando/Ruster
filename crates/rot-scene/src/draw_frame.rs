@@ -274,6 +274,7 @@ impl ComponentDrawPlan {
         base.display = scene.display;
         base.background = scene.background;
         base.sky = scene.sky;
+        base.fog = scene.fog;
         let camera = match scene.effective_camera(hierarchy) {
             Some((owner_index, CameraView::Transform(lens))) => RuntimeCamera::Transform {
                 owner_index,

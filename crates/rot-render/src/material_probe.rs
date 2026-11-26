@@ -861,6 +861,7 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
         let callback = SceneCallback {
             background: None,
             sky: None,
+            fog: None,
             inv_camera: Mat4::IDENTITY.to_cols_array(),
             show_editor_grid: false,
             groups: vec![DrawGroup {
@@ -1344,6 +1345,7 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
             let callback = SceneCallback {
                 background: None,
                 sky: None,
+                fog: None,
                 inv_camera: Mat4::IDENTITY.to_cols_array(),
                 show_editor_grid: false,
                 groups: (0..if mapped_case { 2 } else { 1 })
@@ -1815,6 +1817,7 @@ fn verify_pbr_maps(device: &wgpu::Device, queue: &wgpu::Queue) {
         let callback = SceneCallback {
             background: None,
             sky: None,
+            fog: None,
             inv_camera: Mat4::IDENTITY.to_cols_array(),
             show_editor_grid: false,
             groups: vec![group],
@@ -2096,6 +2099,7 @@ fn verify_sky_and_ibl(device: &wgpu::Device, queue: &wgpu::Queue) {
             let callback = SceneCallback {
                 background: Some(BackgroundColor::new([0., 0., 0.]).unwrap()),
                 sky,
+                fog: None,
                 inv_camera: vp.inverse().to_cols_array(),
                 show_editor_grid: false,
                 groups,
@@ -2479,6 +2483,7 @@ pub(super) fn verify_cube_material(device: &wgpu::Device, queue: &wgpu::Queue) {
         let callback = SceneCallback {
             background: None,
             sky: None,
+            fog: None,
             inv_camera: Mat4::IDENTITY.to_cols_array(),
             show_editor_grid: false,
             groups: vec![DrawGroup {
@@ -2672,6 +2677,7 @@ fn verify_alpha_transparency(device: &wgpu::Device, queue: &wgpu::Queue) {
         let callback = SceneCallback {
             background: None,
             sky: None,
+            fog: None,
             inv_camera: Mat4::IDENTITY.to_cols_array(),
             show_editor_grid: false,
             groups,
@@ -2949,6 +2955,7 @@ fn verify_frustum_and_dirty_instancing(device: &wgpu::Device, queue: &wgpu::Queu
         let callback = SceneCallback {
             background: None,
             sky: None,
+            fog: None,
             inv_camera: vp.inverse().to_cols_array(),
             show_editor_grid: false,
             groups,

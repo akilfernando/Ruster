@@ -46,6 +46,9 @@ struct IblUniform {
     sun_dir: vec4<f32>,
     sun_color: vec4<f32>,
     sh: array<vec4<f32>, 9>,
+    fog_color_mode: vec4<f32>,
+    fog_params: vec4<f32>,
+    fog_extra: vec4<f32>,
 };
 struct ClusterParams {
     view: mat4x4<f32>,
@@ -257,6 +260,49 @@ fn direct_response(albedo: vec3<f32>, n: vec3<f32>, view: vec3<f32>, light: vec3
     let diffuse = albedo * (1.0 - metallic) * ((vec3<f32>(1.0) - fresnel) / 3.14159265359);
     return (diffuse + distribution * visibility * fresnel) * nl;
 }
+fn apply_fog(color: vec3<f32>, world_pos: vec3<f32>, view_depth: f32) -> vec3<f32> {
+    let mode = ibl.fog_color_mode.w;
+    if mode < 0.5 {
+        return color;
+    }
+    let persp = camera.eye_mode.w > 0.5;
+    let ray = world_pos - camera.eye_mode.xyz;
+    let dist = select(max(view_depth, 0.0), length(ray), persp);
+    var factor = 0.0;
+    if mode < 1.5 {
+        factor = clamp(
+            (dist - ibl.fog_params.x) / max(ibl.fog_params.y - ibl.fog_params.x, 1e-4),
+            0.0,
+            1.0,
+        );
+    } else {
+        var height_scale = 1.0;
+        let falloff = ibl.fog_params.z;
+        if falloff > 1e-5 {
+            if persp {
+                let y0 = camera.eye_mode.y - ibl.fog_params.w;
+                let a = clamp(falloff * y0, -40.0, 40.0);
+                let b = falloff * ray.y;
+                if abs(b) < 1e-4 {
+                    height_scale = exp(-a);
+                } else {
+                    height_scale = exp(-a) * (1.0 - exp(-clamp(b, -40.0, 40.0))) / b;
+                }
+            } else {
+                let y = world_pos.y - ibl.fog_params.w;
+                height_scale = exp(-clamp(falloff * y, -40.0, 40.0));
+            }
+        }
+        let optical = max(ibl.fog_params.x * dist * max(height_scale, 0.0), 0.0);
+        if mode < 2.5 {
+            factor = 1.0 - exp(-optical);
+        } else {
+            factor = 1.0 - exp(-(optical * optical));
+        }
+    }
+    let clamped = clamp(factor, 0.0, clamp(ibl.fog_extra.x, 0.0, 1.0));
+    return mix(color, ibl.fog_color_mode.rgb, clamped);
+}
 // Saturate at the finite RGBA16F storage ceiling. Permitted grazing GGX
 // configurations can exceed it even with bounded lights and roughness>=.08.
 // This storage safeguard loses radiance above65504; it is not energy preservation.
@@ -343,15 +389,16 @@ fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
         let prefiltered = textureSampleLevel(ibl_specular, ibl_sampler, reflect_dir, roughness * 4.0).rgb;
         ibl_total = k_d * irr * ao + prefiltered * k_s * spec_occ;
     }
+    let view_pos_all = (cluster_params.view * vec4<f32>(v.world_position, 1.0)).xyz;
+    let sun_view_depth = max(-view_pos_all.z, 0.0);
     if lighting.mode_counts.x == 0u {
         let incoming = normalize(vec3<f32>(0.4, 0.8, 0.6));
         let fill = select(ambient_albedo * (0.28 * ao), ibl_total, ibl.params.x > 0.5 && response.x > 0.5);
-        let stored = hdr_storage(fill + 0.72 * direct_response(highlighted, n, view, incoming, response, metallic) + emission);
+        let lit = fill + 0.72 * direct_response(highlighted, n, view, incoming, response, metallic) + emission;
+        let stored = hdr_storage(apply_fog(lit, v.world_position, sun_view_depth));
         return vec4<f32>(stored.rgb, out_alpha);
     }
     var result = ambient_albedo * lighting.ambient.rgb * ao + ibl_total;
-    let view_pos_all = (cluster_params.view * vec4<f32>(v.world_position, 1.0)).xyz;
-    let sun_view_depth = max(-view_pos_all.z, 0.0);
     if lighting.mode_counts.z != 0u {
         var direct = lighting.directional_color_intensity.rgb * direct_response(highlighted, n, view, lighting.direction_to_light.xyz, response, metallic);
         // Shadow attenuates the entire Sun contribution, including specular.
@@ -421,5 +468,5 @@ fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
                 * shadow_vis;
         }
     }
-    return vec4<f32>(hdr_storage(result + emission).rgb, out_alpha);
+    return vec4<f32>(hdr_storage(apply_fog(result + emission, v.world_position, sun_view_depth)).rgb, out_alpha);
 }

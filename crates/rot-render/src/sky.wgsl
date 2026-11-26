@@ -12,6 +12,9 @@ struct IblUniform {
     sun_dir: vec4<f32>,
     sun_color: vec4<f32>,
     sh: array<vec4<f32>, 9>,
+    fog_color_mode: vec4<f32>,
+    fog_params: vec4<f32>,
+    fog_extra: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> sky_camera: SkyCamera;
@@ -51,6 +54,11 @@ fn sky_radiance(dir: vec3<f32>) -> vec3<f32> {
             + pow(mu, 128.0) * 1.2
             + smoothstep(0.9992, 0.9997, mu) * 8.0;
         radiance += ibl.sun_color.rgb * glow * intensity;
+    }
+    if ibl.fog_color_mode.w > 0.5 && ibl.fog_extra.y > 0.0 {
+        let horizon_mask = 1.0 - smoothstep(0.0, 0.35, max(d.y, 0.0));
+        let sky_fog = clamp(horizon_mask * ibl.fog_extra.y * ibl.fog_extra.x, 0.0, 1.0);
+        radiance = mix(radiance, ibl.fog_color_mode.rgb, sky_fog);
     }
     return clamp(radiance, vec3<f32>(0.0), vec3<f32>(65504.0));
 }

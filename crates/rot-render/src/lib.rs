@@ -2255,6 +2255,7 @@ fn render_draw_scene(
                 display: scene.display,
                 background: scene.background,
                 sky: scene.sky,
+                fog: scene.fog,
                 lighting,
                 size: draw_rect.size(),
                 cpu_us: start.elapsed().as_secs_f64() * 1.0e6,
@@ -4013,6 +4014,7 @@ struct SceneCallback {
     display: rot_scene::DisplayProfile,
     background: Option<rot_scene::BackgroundColor>,
     sky: Option<rot_scene::Sky>,
+    fog: Option<rot_scene::Fog>,
     lighting: PackedLighting,
     size: egui::Vec2,
     cpu_us: f64,
@@ -4179,9 +4181,14 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         queue.write_buffer(&r.camera, 0, bytemuck::cast_slice(&self.camera));
         queue.write_buffer(&r.camera, 64, bytemuck::cast_slice(&self.camera_eye_mode));
         let lighting_uploaded = r.lighting.prepare(queue, &self.lighting.uniform);
-        if r.ibl
-            .prepare(device, queue, encoder, self.sky, &self.lighting.uniform)
-        {
+        if r.ibl.prepare(
+            device,
+            queue,
+            encoder,
+            self.sky,
+            self.fog,
+            &self.lighting.uniform,
+        ) {
             r.lighting.rebuild_bind(device, &r.ibl, &r.cluster);
         }
         let draw_sky = r.builtin_appearance && self.sky.is_some_and(|sky| sky.show_backdrop);
@@ -4970,6 +4977,9 @@ mod tests {
                 offset_of!(ibl_gpu::IblUniform, sun_dir),
                 offset_of!(ibl_gpu::IblUniform, sun_color),
                 offset_of!(ibl_gpu::IblUniform, sh),
+                offset_of!(ibl_gpu::IblUniform, fog_color_mode),
+                offset_of!(ibl_gpu::IblUniform, fog_params),
+                offset_of!(ibl_gpu::IblUniform, fog_extra),
             ]
         );
         assert_eq!(

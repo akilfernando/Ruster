@@ -177,6 +177,7 @@ fn verify_case(
     let callback = SceneCallback {
         background: None,
         sky: None,
+        fog: None,
         inv_camera: Mat4::IDENTITY.to_cols_array(),
         show_editor_grid: false,
         groups,

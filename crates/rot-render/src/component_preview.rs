@@ -56,11 +56,13 @@ impl ComponentPreview {
         display: rot_scene::DisplayProfile,
         background: Option<rot_scene::BackgroundColor>,
         sky: Option<rot_scene::Sky>,
+        fog: Option<rot_scene::Fog>,
     ) {
         let scene = Arc::make_mut(&mut self.scene);
         scene.display = display;
         scene.background = background;
         scene.sky = sky;
+        scene.fog = fog;
     }
 
     pub fn draw_matrices(&self) -> &[Mat4] {
@@ -336,7 +338,7 @@ pub fn directional_light_forward(world: DMat4) -> Option<Vec3> {
 }
 
 pub enum LoadedPreview {
-    Legacy(Scene),
+    Legacy(Box<Scene>),
     Components(ComponentPreview),
 }
 
@@ -355,7 +357,7 @@ pub fn open(path: &Path) -> Result<LoadedPreview, SceneError> {
         Err(SceneError::UnsupportedVersion(version))
             if version < u64::from(component_scene::FORMAT_VERSION) =>
         {
-            Scene::load(path).map(LoadedPreview::Legacy)
+            Scene::load(path).map(Box::new).map(LoadedPreview::Legacy)
         }
         Err(error) => Err(error),
     }
@@ -388,6 +390,7 @@ pub fn project_editor_with_world(
     scene.display = component_scene.display;
     scene.background = component_scene.background;
     scene.sky = component_scene.sky;
+    scene.fog = component_scene.fog;
     let transform_camera = match component_scene.effective_camera(&hierarchy) {
         Some((index, CameraView::Transform(lens))) => {
             Some(component_scene.transform_camera_pose(index, &hierarchy, &world, lens)?)

@@ -838,6 +838,12 @@ fn listed() -> Value {
             );
             *edits = object_schema(json!(properties), vec!["operation", "object_id"]);
         }
+        if name == "scene_display_set" {
+            // Advertise compact fog/sky shapes; rot_tools describe exposes full bounds.
+            if let Some(props) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+                props.insert("fog".into(), json!({"type":["object","null"]}));
+            }
+        }
         compact(schema);
         let read_only = tool["annotations"]["readOnlyHint"] == true;
         let object = tool.as_object_mut().unwrap();

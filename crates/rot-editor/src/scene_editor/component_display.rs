@@ -8,7 +8,7 @@ use crate::{
     ui_kit,
 };
 use eframe::egui;
-use rot_scene::{BackgroundColor, DisplayProfile, SceneError, Sky};
+use rot_scene::{BackgroundColor, DisplayProfile, Fog, FogMode, SceneError, Sky};
 
 fn exposure_id() -> egui::Id {
     egui::Id::unique("v23_scene_display_exposure")
@@ -86,6 +86,157 @@ impl SkyDraft {
             ..self.sky
         }))
     }
+}
+
+struct FogDraft {
+    enabled: bool,
+    fog: Fog,
+    density: String,
+    start: String,
+    end: String,
+    height: String,
+    height_falloff: String,
+    max_opacity: String,
+    sky_affect: String,
+}
+
+impl FogDraft {
+    fn new(value: Option<Fog>) -> Self {
+        let fog = value.unwrap_or_else(Fog::mist);
+        Self {
+            enabled: value.is_some(),
+            fog,
+            density: format!("{}", fog.density),
+            start: format!("{}", fog.start),
+            end: format!("{}", fog.end),
+            height: format!("{}", fog.height),
+            height_falloff: format!("{}", fog.height_falloff),
+            max_opacity: format!("{}", fog.max_opacity),
+            sky_affect: format!("{}", fog.sky_affect),
+        }
+    }
+
+    fn set_preset(&mut self, preset: Fog) {
+        self.fog = preset;
+        self.density = format!("{}", preset.density);
+        self.start = format!("{}", preset.start);
+        self.end = format!("{}", preset.end);
+        self.height = format!("{}", preset.height);
+        self.height_falloff = format!("{}", preset.height_falloff);
+        self.max_opacity = format!("{}", preset.max_opacity);
+        self.sky_affect = format!("{}", preset.sky_affect);
+    }
+
+    fn value(&self) -> Result<Option<Fog>, Text> {
+        if !self.enabled {
+            return Ok(None);
+        }
+        let parse = |raw: &str| raw.trim().parse::<f32>().map_err(|_| Text::SceneFogInvalid);
+        let candidate = Fog {
+            mode: self.fog.mode,
+            color: self.fog.color,
+            density: parse(&self.density)?,
+            start: parse(&self.start)?,
+            end: parse(&self.end)?,
+            height: parse(&self.height)?,
+            height_falloff: parse(&self.height_falloff)?,
+            max_opacity: parse(&self.max_opacity)?,
+            sky_affect: parse(&self.sky_affect)?,
+        };
+        candidate
+            .validate()
+            .map(|()| Some(candidate))
+            .map_err(|_| Text::SceneFogInvalid)
+    }
+}
+
+fn edit_fog_field(ui: &mut egui::Ui, label_text: &str, buf: &mut String) {
+    ui_kit::property_row_with_label(ui, label_text, |ui, label| {
+        ui.add(
+            egui::TextEdit::singleline(buf)
+                .char_limit(16)
+                .desired_width(ui.available_width()),
+        )
+        .labelled_by(label);
+    });
+}
+
+fn edit_fog(ui: &mut egui::Ui, draft: &mut FogDraft) {
+    let selected = if !draft.enabled {
+        Text::SceneFogNone
+    } else {
+        match draft.fog.mode {
+            FogMode::Linear => Text::SceneFogLinear,
+            FogMode::Exponential => Text::SceneFogExponential,
+            FogMode::ExponentialSquared => Text::SceneFogExponentialSquared,
+        }
+    };
+    ui_kit::property_row_with_label(ui, Text::SceneFog.plain(), |ui, label| {
+        egui::ComboBox::from_id_salt("fog_mode")
+            .selected_text(selected.plain())
+            .show_ui(ui, |ui| {
+                for (choice, text) in [
+                    (None, Text::SceneFogNone),
+                    (Some(FogMode::Linear), Text::SceneFogLinear),
+                    (Some(FogMode::Exponential), Text::SceneFogExponential),
+                    (
+                        Some(FogMode::ExponentialSquared),
+                        Text::SceneFogExponentialSquared,
+                    ),
+                ] {
+                    let is_current = match choice {
+                        None => !draft.enabled,
+                        Some(mode) => draft.enabled && draft.fog.mode == mode,
+                    };
+                    if ui.selectable_label(is_current, text.plain()).clicked() {
+                        match choice {
+                            None => draft.enabled = false,
+                            Some(mode) => {
+                                draft.enabled = true;
+                                draft.fog.mode = mode;
+                            }
+                        }
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .labelled_by(label);
+    });
+    if !draft.enabled {
+        return;
+    }
+    ui_kit::property_row_with_label(ui, Text::SceneFogPreset.plain(), |ui, _| {
+        ui.horizontal(|ui| {
+            if ui.button(Text::SceneFogMist.plain()).clicked() {
+                draft.set_preset(Fog::mist());
+            }
+            if ui.button(Text::SceneFogGroundHaze.plain()).clicked() {
+                draft.set_preset(Fog::ground_haze());
+            }
+            if ui.button(Text::SceneFogLinear.plain()).clicked() {
+                draft.set_preset(Fog::linear_distance());
+            }
+        });
+    });
+    ui_kit::property_row_with_label(ui, Text::SceneFogColor.plain(), |ui, label| {
+        ui.color_edit_button_rgb(&mut draft.fog.color)
+            .labelled_by(label);
+    });
+    if draft.fog.mode == FogMode::Linear {
+        edit_fog_field(ui, Text::SceneFogStart.plain(), &mut draft.start);
+        edit_fog_field(ui, Text::SceneFogEnd.plain(), &mut draft.end);
+    } else {
+        edit_fog_field(ui, Text::SceneFogDensity.plain(), &mut draft.density);
+        edit_fog_field(ui, Text::SceneFogHeight.plain(), &mut draft.height);
+        edit_fog_field(
+            ui,
+            Text::SceneFogHeightFalloff.plain(),
+            &mut draft.height_falloff,
+        );
+    }
+    edit_fog_field(ui, Text::SceneFogMaxOpacity.plain(), &mut draft.max_opacity);
+    edit_fog_field(ui, Text::SceneFogSkyAffect.plain(), &mut draft.sky_affect);
 }
 
 fn srgb_hex(color: BackgroundColor) -> String {
@@ -247,6 +398,7 @@ pub(super) struct Draft {
     value: DisplayDraft,
     background: BackgroundDraft,
     sky: SkyDraft,
+    fog: FogDraft,
     opened_frame: Option<u64>,
     error: Option<String>,
 }
@@ -263,6 +415,7 @@ impl ComponentWorkspace {
             ),
             background: BackgroundDraft::new(self.session.scene().background),
             sky: SkyDraft::new(self.session.scene().sky),
+            fog: FogDraft::new(self.session.scene().fog),
             opened_frame: None,
             error: None,
         });
@@ -276,13 +429,14 @@ impl ComponentWorkspace {
         display: DisplayProfile,
         background: Option<BackgroundColor>,
         sky: Option<Sky>,
+        fog: Option<Fog>,
     ) -> Result<u64, SceneError> {
         let next = self
             .session
-            .set_display(revision, display, background, sky)?;
+            .set_display(revision, display, background, sky, fog)?;
         if revision != next {
             if let Ok(preview) = &mut self.preview {
-                preview.set_display(display, background, sky);
+                preview.set_display(display, background, sky, fog);
             }
             #[cfg(unix)]
             self.invalidate_display_capture();
@@ -363,10 +517,13 @@ impl ComponentWorkspace {
                 }
                 edit_background(ui, &mut draft.background);
                 edit_sky(ui, &mut draft.sky);
+                edit_fog(ui, &mut draft.fog);
                 if (draft.error.as_deref() == Some(Text::SceneBackgroundHexInvalid.plain())
                     && draft.background.value().is_ok())
                     || (draft.error.as_deref() == Some(Text::SceneSkyIntensityInvalid.plain())
                         && draft.sky.value().is_ok())
+                    || (draft.error.as_deref() == Some(Text::SceneFogInvalid.plain())
+                        && draft.fog.value().is_ok())
                 {
                     draft.error = None;
                 }
@@ -401,11 +558,22 @@ impl ComponentWorkspace {
                     .value()
                     .map_err(|_| Text::ComponentDisplayExposureInvalid)
                     .and_then(|display| {
-                        Ok((display, draft.background.value()?, draft.sky.value()?))
+                        Ok((
+                            display,
+                            draft.background.value()?,
+                            draft.sky.value()?,
+                            draft.fog.value()?,
+                        ))
                     });
                 draft.error = Some(match candidate {
-                    Ok((display, background, sky)) => {
-                        match self.commit_display(draft.value.revision, display, background, sky) {
+                    Ok((display, background, sky, fog)) => {
+                        match self.commit_display(
+                            draft.value.revision,
+                            display,
+                            background,
+                            sky,
+                            fog,
+                        ) {
                             Ok(_) => return,
                             Err(error) => error.to_string(),
                         }
@@ -431,10 +599,11 @@ impl ComponentWorkspace {
             exact_keys(
                 map,
                 &["expected_session_token", "expected_revision"],
-                &["display", "background", "sky"],
+                &["display", "background", "sky", "fog"],
             ) && (map.contains_key("display")
                 || map.contains_key("background")
-                || map.contains_key("sky"))
+                || map.contains_key("sky")
+                || map.contains_key("fog"))
         }) {
             return Err(fail("invalid_arguments", "Check the Scene Display fields."));
         }
@@ -480,8 +649,16 @@ impl ComponentWorkspace {
                     .map_err(|error| ("invalid_arguments".into(), error.to_string()))?,
             ),
         };
+        let fog = match args.get("fog") {
+            None => scene.fog,
+            Some(value) if value.is_null() => None,
+            Some(value) => Some(
+                serde_json::from_value(value.clone())
+                    .map_err(|error| ("invalid_arguments".into(), error.to_string()))?,
+            ),
+        };
         let next = self
-            .commit_display(revision, candidate, background, sky)
+            .commit_display(revision, candidate, background, sky, fog)
             .map_err(|error| {
                 let code = match error {
                     SceneError::RevisionOverflow => "revision_exhausted",
@@ -490,7 +667,7 @@ impl ComponentWorkspace {
                 (code.into(), error.to_string())
             })?;
         Ok(json!({
-            "display":candidate, "background":background, "sky":sky, "changed":next != revision, "dirty":self.session.is_dirty(),
+            "display":candidate, "background":background, "sky":sky, "fog":fog, "changed":next != revision, "dirty":self.session.is_dirty(),
         }))
     }
 }
@@ -790,5 +967,57 @@ mod tests {
         assert_eq!(undo["ok"], true, "{undo}");
         assert_eq!(editor.session.scene().sky, Some(sky));
         assert_eq!(editor.preview.as_ref().unwrap().scene().sky, Some(sky));
+    }
+
+    #[test]
+    fn fog_edits_preserve_omitted_fields_and_reset_with_shared_undo() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        let legacy = rot_scene::Session::new(rot_scene::Scene::demo()).unwrap();
+        let scene = ComponentScene::from_legacy(&legacy).unwrap();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let scene_display = |editor: &mut ComponentWorkspace,
+                             revision,
+                             patch: serde_json::Value| {
+            let mut args = json!({"expected_session_token":"scene", "expected_revision":revision});
+            args.as_object_mut()
+                .unwrap()
+                .extend(patch.as_object().unwrap().clone());
+            editor.ai_command("scene", "scene_display_set", &args)
+        };
+        let invalid = scene_display(
+            &mut editor,
+            "0",
+            json!({"fog":{"mode":"linear","color":[0.5,0.6,0.7],"start":50.0,"end":40.0}}),
+        );
+        assert_eq!(invalid["error"]["code"], "invalid_arguments");
+
+        let fog = Fog::ground_haze();
+        let changed = scene_display(&mut editor, "0", json!({"fog": fog}));
+        assert_eq!(changed["ok"], true, "{changed}");
+        assert_eq!(editor.session.scene().fog, Some(fog));
+        assert_eq!(editor.preview.as_ref().unwrap().scene().fog, Some(fog));
+
+        let background = [0.2, 0.3, 0.4];
+        let bg_only = scene_display(&mut editor, "1", json!({"background": background}));
+        assert_eq!(bg_only["ok"], true, "{bg_only}");
+        assert_eq!(editor.session.scene().fog, Some(fog));
+        assert_eq!(bg_only["result"]["fog"], json!(fog));
+
+        let reset = scene_display(&mut editor, "2", json!({"fog": null}));
+        assert_eq!(reset["result"]["fog"], serde_json::Value::Null);
+        assert_eq!(editor.session.scene().fog, None);
+        assert_eq!(editor.preview.as_ref().unwrap().scene().fog, None);
+
+        let undo = editor.ai_command(
+            "scene",
+            "scene_undo",
+            &json!({"expected_session_token":"scene", "expected_revision":"3"}),
+        );
+        assert_eq!(undo["ok"], true, "{undo}");
+        assert_eq!(editor.session.scene().fog, Some(fog));
+        assert_eq!(editor.preview.as_ref().unwrap().scene().fog, Some(fog));
     }
 }

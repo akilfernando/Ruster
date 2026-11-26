@@ -184,6 +184,146 @@ impl Sky {
     }
 }
 
+/// Atmospheric fog falloff curve.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FogMode {
+    Linear,
+    #[default]
+    Exponential,
+    ExponentialSquared,
+}
+
+fn default_fog_density() -> f32 {
+    0.015
+}
+fn default_fog_start() -> f32 {
+    10.0
+}
+fn default_fog_end() -> f32 {
+    120.0
+}
+fn default_fog_max_opacity() -> f32 {
+    1.0
+}
+fn default_fog_sky_affect() -> f32 {
+    0.5
+}
+
+fn check_finite_range(value: f32, lo: f32, hi: f32, label: &str) -> Result<(), SceneError> {
+    if value.is_finite() && (lo..=hi).contains(&value) {
+        Ok(())
+    } else {
+        Err(SceneError::Invalid(format!(
+            "fog {label} must be finite in {lo}..={hi}"
+        )))
+    }
+}
+
+fn validate_fog_color(rgb: &[f32; 3]) -> Result<(), SceneError> {
+    if rgb
+        .iter()
+        .all(|channel| channel.is_finite() && (0.0..=1.0).contains(channel))
+    {
+        Ok(())
+    } else {
+        Err(SceneError::Invalid(
+            "fog color must be finite linear RGB in 0..=1".into(),
+        ))
+    }
+}
+
+/// Scene-wide atmospheric distance and height fog settings.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Fog {
+    #[serde(default)]
+    pub mode: FogMode,
+    #[serde(deserialize_with = "deserialize_unit_rgb")]
+    pub color: [f32; 3],
+    #[serde(default = "default_fog_density")]
+    pub density: f32,
+    #[serde(default = "default_fog_start")]
+    pub start: f32,
+    #[serde(default = "default_fog_end")]
+    pub end: f32,
+    #[serde(default)]
+    pub height: f32,
+    #[serde(default)]
+    pub height_falloff: f32,
+    #[serde(default = "default_fog_max_opacity")]
+    pub max_opacity: f32,
+    #[serde(default = "default_fog_sky_affect")]
+    pub sky_affect: f32,
+}
+
+impl Default for Fog {
+    fn default() -> Self {
+        Self::mist()
+    }
+}
+
+impl Fog {
+    pub fn mist() -> Self {
+        Self {
+            mode: FogMode::Exponential,
+            color: [0.68, 0.76, 0.86],
+            density: 0.015,
+            start: 10.0,
+            end: 120.0,
+            height: 0.0,
+            height_falloff: 0.0,
+            max_opacity: 1.0,
+            sky_affect: 0.5,
+        }
+    }
+
+    pub fn ground_haze() -> Self {
+        Self {
+            mode: FogMode::ExponentialSquared,
+            color: [0.74, 0.79, 0.85],
+            density: 0.035,
+            start: 10.0,
+            end: 120.0,
+            height: 1.5,
+            height_falloff: 0.35,
+            max_opacity: 0.9,
+            sky_affect: 0.65,
+        }
+    }
+
+    pub fn linear_distance() -> Self {
+        Self {
+            mode: FogMode::Linear,
+            color: [0.70, 0.77, 0.86],
+            density: 0.015,
+            start: 15.0,
+            end: 140.0,
+            height: 0.0,
+            height_falloff: 0.0,
+            max_opacity: 1.0,
+            sky_affect: 0.5,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), SceneError> {
+        validate_fog_color(&self.color)?;
+        check_finite_range(self.density, 0.0, 1.0, "density")?;
+        check_finite_range(self.start, 0.0, 100_000.0, "start")?;
+        check_finite_range(self.end, 0.0, 100_000.0, "end")?;
+        if self.mode == FogMode::Linear && self.end <= self.start {
+            return Err(SceneError::Invalid(
+                "linear fog end must exceed start".into(),
+            ));
+        }
+        check_finite_range(self.height, -10_000.0, 10_000.0, "height")?;
+        check_finite_range(self.height_falloff, 0.0, 10.0, "height_falloff")?;
+        check_finite_range(self.max_opacity, 0.0, 1.0, "max_opacity")?;
+        check_finite_range(self.sky_affect, 0.0, 1.0, "sky_affect")?;
+        Ok(())
+    }
+}
+
 /// Scalar opaque dielectric response; ambient/environment policy is not data.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -415,5 +555,62 @@ mod tests {
         ] {
             assert!(bad.validate().is_err());
         }
+    }
+
+    #[test]
+    fn fog_wire_validates_presets_and_linear_bounds() {
+        for fog in [Fog::mist(), Fog::ground_haze(), Fog::linear_distance()] {
+            fog.validate().unwrap();
+            assert_eq!(
+                serde_json::from_value::<Fog>(serde_json::to_value(fog).unwrap()).unwrap(),
+                fog
+            );
+        }
+        let minimal: Fog = serde_json::from_value(json!({
+            "color": [0.4, 0.5, 0.6]
+        }))
+        .unwrap();
+        assert_eq!(minimal.mode, FogMode::Exponential);
+        assert_eq!(minimal.density, 0.015);
+        assert_eq!(minimal.start, 10.0);
+        assert_eq!(minimal.end, 120.0);
+        assert_eq!(minimal.max_opacity, 1.0);
+        assert_eq!(minimal.sky_affect, 0.5);
+
+        for bad in [
+            Fog {
+                mode: FogMode::Linear,
+                start: 50.0,
+                end: 50.0,
+                ..Fog::linear_distance()
+            },
+            Fog {
+                density: -0.01,
+                ..Fog::mist()
+            },
+            Fog {
+                height_falloff: 10.5,
+                ..Fog::ground_haze()
+            },
+            Fog {
+                max_opacity: 1.1,
+                ..Fog::mist()
+            },
+            Fog {
+                sky_affect: -0.1,
+                ..Fog::mist()
+            },
+            Fog {
+                color: [1.0, 0.0, 1.2],
+                ..Fog::mist()
+            },
+        ] {
+            assert!(bad.validate().is_err());
+        }
+        assert!(serde_json::from_value::<Fog>(json!({
+            "color": [0.4, 0.5, 0.6],
+            "extra": true
+        }))
+        .is_err());
     }
 }

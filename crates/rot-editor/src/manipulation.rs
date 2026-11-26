@@ -360,6 +360,7 @@ impl Clipboard {
             display: rot_scene::DisplayProfile::LegacySdr,
             background: None,
             sky: None,
+            fog: None,
             player_view: None,
             animations: Default::default(),
             id: "clipboard".into(),

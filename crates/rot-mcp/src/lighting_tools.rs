@@ -3,7 +3,7 @@ use serde_json::{json, Map, Value};
 
 const TOOLS: &[(&str, &str, &[&str])] = &[(
     "scene_display_set",
-    "Set Scene Display (display, background, sky). Omitted fields stay unchanged; null background/sky resets. Shared Undo edit.",
+    "Set Scene Display (display, background, sky, fog). Omitted fields stay unchanged; null resets. Shared Undo edit.",
     &[],
 )];
 
@@ -48,6 +48,27 @@ fn sky_schema() -> Value {
     ]})
 }
 
+fn fog_schema() -> Value {
+    let rgb = vector_schema(0.0, 1.0);
+    json!({"anyOf":[
+        super::object_schema(
+            json!({
+                "mode":{"enum":["linear","exponential","exponential_squared"]},
+                "color":rgb,
+                "density":{"type":"number","minimum":0.0,"maximum":1.0},
+                "start":{"type":"number","minimum":0.0,"maximum":100000.0},
+                "end":{"type":"number","minimum":0.0,"maximum":100000.0},
+                "height":{"type":"number","minimum":-10000.0,"maximum":10000.0},
+                "height_falloff":{"type":"number","minimum":0.0,"maximum":10.0},
+                "max_opacity":{"type":"number","minimum":0.0,"maximum":1.0},
+                "sky_affect":{"type":"number","minimum":0.0,"maximum":1.0}
+            }),
+            vec!["color"]
+        ),
+        {"type":"null"}
+    ]})
+}
+
 fn shape(field: &str) -> Value {
     match field {
         "expected_session_token" => json!({"type":"string","minLength":1,"maxLength":256,
@@ -58,6 +79,7 @@ fn shape(field: &str) -> Value {
         "background" => json!({"anyOf":[vector_schema(0.0, 1.0), {"type":"null"}],
             "description":"v23 linear RGB clear, or null for Engine Default."}),
         "sky" => sky_schema(),
+        "fog" => fog_schema(),
         _ => unreachable!("fixed lighting tool field"),
     }
 }
@@ -71,13 +93,15 @@ pub fn list() -> Vec<Value> {
                 .iter()
                 .map(|field| ((*field).into(), shape(field)))
                 .collect();
-            properties
-                .extend(["display", "background", "sky"].map(|field| (field.into(), shape(field))));
+            properties.extend(
+                ["display", "background", "sky", "fog"].map(|field| (field.into(), shape(field))),
+            );
             let mut schema = super::object_schema(Value::Object(properties), required);
             schema["anyOf"] = json!([
                 {"required":["display"]},
                 {"required":["background"]},
-                {"required":["sky"]}
+                {"required":["sky"]},
+                {"required":["fog"]}
             ]);
             json!({"name":name,"description":description,
                 "inputSchema":schema,
@@ -126,6 +150,54 @@ fn valid_sky(value: &Value) -> bool {
         })
 }
 
+fn valid_fog(value: &Value) -> bool {
+    if value.is_null() {
+        return true;
+    }
+    let Some(fog) = value.as_object() else {
+        return false;
+    };
+    if !super::exact_keys(
+        fog,
+        &["color"],
+        &[
+            "mode",
+            "density",
+            "start",
+            "end",
+            "height",
+            "height_falloff",
+            "max_opacity",
+            "sky_affect",
+        ],
+    ) {
+        return false;
+    }
+    let mode = fog.get("mode").map_or(Some("exponential"), Value::as_str);
+    let Some(mode) =
+        mode.filter(|m| matches!(*m, "linear" | "exponential" | "exponential_squared"))
+    else {
+        return false;
+    };
+    let start = fog.get("start").and_then(Value::as_f64).unwrap_or(10.0);
+    let end = fog.get("end").and_then(Value::as_f64).unwrap_or(120.0);
+    if mode == "linear" && end <= start {
+        return false;
+    }
+    vector(&fog["color"], 0.0, 1.0)
+        && fog.get("density").is_none_or(|v| number(v, 0.0, 1.0))
+        && fog.get("start").is_none_or(|v| number(v, 0.0, 100_000.0))
+        && fog.get("end").is_none_or(|v| number(v, 0.0, 100_000.0))
+        && fog
+            .get("height")
+            .is_none_or(|v| number(v, -10_000.0, 10_000.0))
+        && fog
+            .get("height_falloff")
+            .is_none_or(|v| number(v, 0.0, 10.0))
+        && fog.get("max_opacity").is_none_or(|v| number(v, 0.0, 1.0))
+        && fog.get("sky_affect").is_none_or(|v| number(v, 0.0, 1.0))
+}
+
 pub fn valid(name: &str, arguments: &Value) -> bool {
     let Some(required) = fields(name) else {
         return false;
@@ -136,10 +208,11 @@ pub fn valid(name: &str, arguments: &Value) -> bool {
     if !args.contains_key("display")
         && !args.contains_key("background")
         && !args.contains_key("sky")
+        && !args.contains_key("fog")
     {
         return false;
     }
-    super::exact_keys(args, &required, &["display", "background", "sky"])
+    super::exact_keys(args, &required, &["display", "background", "sky", "fog"])
         && args.iter().all(|(field, value)| match field.as_str() {
             "expected_revision" => super::canonical_u64(value),
             "expected_session_token" => value
@@ -148,6 +221,7 @@ pub fn valid(name: &str, arguments: &Value) -> bool {
             "display" => valid_display(value),
             "background" => value.is_null() || vector(value, 0.0, 1.0),
             "sky" => valid_sky(value),
+            "fog" => valid_fog(value),
             _ => false,
         })
 }
@@ -231,6 +305,26 @@ mod tests {
         ] {
             assert!(!supported(legacy));
             assert!(!valid(legacy, &json!({})));
+        }
+        for fog in [
+            json!({"color":[0.6,0.7,0.8]}),
+            json!({"mode":"linear","color":[0.6,0.7,0.8],"start":5,"end":80,"max_opacity":0.9}),
+            json!({"mode":"exponential_squared","color":[0.7,0.8,0.9],"density":0.03,"height":1.5,"height_falloff":0.4,"sky_affect":0.6}),
+            Value::Null,
+        ] {
+            let args = json!({"expected_session_token":"scene","expected_revision":"0","fog":fog});
+            assert!(valid("scene_display_set", &args), "{args}");
+        }
+        for bad_fog in [
+            json!({"mode":"linear","color":[0.6,0.7,0.8],"start":50,"end":40}),
+            json!({"color":[0.6,0.7,1.2]}),
+            json!({"color":[0.6,0.7,0.8],"density":1.1}),
+            json!({"color":[0.6,0.7,0.8],"height_falloff":11.0}),
+            json!({"color":[0.6,0.7,0.8],"extra":1}),
+        ] {
+            let args =
+                json!({"expected_session_token":"scene","expected_revision":"0","fog":bad_fog});
+            assert!(!valid("scene_display_set", &args), "{args}");
         }
     }
 }

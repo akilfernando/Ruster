@@ -11,7 +11,7 @@ const CUBE_MIPS: u32 = 5;
 const BRDF_SIZE: u32 = 64;
 
 #[repr(C, align(16))]
-#[derive(Clone, Copy, Pod, Zeroable)]
+#[derive(Clone, Copy, PartialEq, Pod, Zeroable)]
 pub(super) struct IblUniform {
     /// x: enabled (>0.5), y: show_backdrop (>0.5), z: intensity, w: sun_enabled (>0.5)
     pub params: [f32; 4],
@@ -21,6 +21,28 @@ pub(super) struct IblUniform {
     pub sun_dir: [f32; 4],
     pub sun_color: [f32; 4],
     pub sh: [[f32; 4]; 9],
+    /// rgb: linear fog color, w: mode (0 off, 1 linear, 2 exp, 3 exp2).
+    pub fog_color_mode: [f32; 4],
+    /// x: start (linear) or density (exp/exp2), y: end, z: height_falloff, w: height.
+    pub fog_params: [f32; 4],
+    /// x: max_opacity, y: sky_affect, z/w: reserved.
+    pub fog_extra: [f32; 4],
+}
+
+fn pack_fog(fog: Option<rot_scene::Fog>) -> ([f32; 4], [f32; 4], [f32; 4]) {
+    let Some(fog) = fog else {
+        return ([0.0; 4], [0.0; 4], [0.0; 4]);
+    };
+    let (mode_id, density_or_start) = match fog.mode {
+        rot_scene::FogMode::Linear => (1.0, fog.start),
+        rot_scene::FogMode::Exponential => (2.0, fog.density),
+        rot_scene::FogMode::ExponentialSquared => (3.0, fog.density),
+    };
+    (
+        [fog.color[0], fog.color[1], fog.color[2], mode_id],
+        [density_or_start, fog.end, fog.height_falloff, fog.height],
+        [fog.max_opacity, fog.sky_affect, 0.0, 0.0],
+    )
 }
 
 #[repr(C, align(16))]
@@ -462,11 +484,18 @@ impl IblGpu {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         sky: Option<rot_scene::Sky>,
+        fog: Option<rot_scene::Fog>,
         lighting: &LightingPacket,
     ) -> bool {
+        let (fog_color_mode, fog_params, fog_extra) = pack_fog(fog);
         let Some(sky) = sky else {
-            let off = IblUniform::zeroed();
-            if bytemuck::bytes_of(&self.current_uniform) != bytemuck::bytes_of(&off) {
+            let off = IblUniform {
+                fog_color_mode,
+                fog_params,
+                fog_extra,
+                ..IblUniform::zeroed()
+            };
+            if self.current_uniform != off {
                 queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&off));
                 self.current_uniform = off;
             }
@@ -525,6 +554,9 @@ impl IblGpu {
                 sun_dir: [key.sun_dir[0], key.sun_dir[1], key.sun_dir[2], 0.0],
                 sun_color: [key.sun_color[0], key.sun_color[1], key.sun_color[2], 0.0],
                 sh,
+                fog_color_mode,
+                fog_params,
+                fog_extra,
             };
             queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&next_uniform));
             self.current_uniform = next_uniform;
@@ -580,9 +612,14 @@ impl IblGpu {
             self.last_key = Some(key);
         } else {
             let show = f32::from(u8::from(sky.show_backdrop));
-            if self.current_uniform.params[0] != 1.0 || self.current_uniform.params[1] != show {
-                self.current_uniform.params[0] = 1.0;
-                self.current_uniform.params[1] = show;
+            let mut next = self.current_uniform;
+            next.params[0] = 1.0;
+            next.params[1] = show;
+            next.fog_color_mode = fog_color_mode;
+            next.fog_params = fog_params;
+            next.fog_extra = fog_extra;
+            if self.current_uniform != next {
+                self.current_uniform = next;
                 queue.write_buffer(
                     &self.uniform_buffer,
                     0,
@@ -783,5 +820,289 @@ mod tests {
         let up = eval_sh_irradiance(&sh, Vec3::Y);
         let down = eval_sh_irradiance(&sh, Vec3::NEG_Y);
         assert!(up.z > down.z * 2.0, "up={up:?} down={down:?}");
+    }
+
+    #[ignore = "requires GPU Vulkan adapter"]
+    #[test]
+    fn atmospheric_fog_gpu_probe() {
+        use super::super::*;
+        use crate::lighting_gpu::PackedLighting;
+        use crate::material_gpu::BindingKey;
+        use glam::{Mat4, Quat, Vec3};
+        use rot_scene::{
+            AlphaMode, Ambient, BackgroundColor, DisplayProfile, Fog, FogMode, Light, Lighting, Sky,
+        };
+        use std::collections::BTreeMap;
+
+        let mut setup = egui_wgpu::WgpuSetupCreateNew::without_display_handle();
+        setup.instance_descriptor.backends = wgpu::Backends::VULKAN;
+        configure_setup(&mut setup);
+        let instance = wgpu::Instance::new(setup.instance_descriptor);
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..Default::default()
+        }))
+        .expect("Vulkan adapter");
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&(setup.device_descriptor)(&adapter)))
+                .expect("Vulkan device");
+        let (device, queue) = (&device, &queue);
+        let mut r = Resources::new(device, queue, COLOR, 1);
+        r.enable_hdr(device, 1);
+        let mut resources = egui_wgpu::CallbackResources::default();
+        resources.insert(r);
+        let context = egui::Context::default();
+
+        let width = 320_u32;
+        let height = 240_u32;
+
+        let mut lights = BTreeMap::new();
+        let mut sun = Light::directional(None);
+        sun.intensity = 3.0;
+        sun.transform.rotation = [-std::f32::consts::FRAC_PI_4, 0.0, 0.0];
+        lights.insert("sun".into(), sun);
+        let packed = PackedLighting::try_pack(&Lighting::Authored {
+            ambient: Ambient {
+                color: [1.0; 3],
+                intensity: 0.4,
+            },
+            lights,
+        })
+        .unwrap();
+
+        let make_box = |pos: Vec3, scale: Vec3| Instance {
+            model: Mat4::from_scale_rotation_translation(scale, Quat::IDENTITY, pos)
+                .to_cols_array_2d(),
+            normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
+            color: [1.; 4],
+            base_color: [1.0, 0.05, 0.05, 0.],
+            response: [1., 0.9, 0., 0.],
+            emission_color: [0.; 4],
+            uv_transform: [1., 1., 0., 0.],
+            pbr_params: [0., 1., 1., 1.],
+            pbr_maps: [0., 0., 0., -1.0],
+        };
+        let opaque_group = |instances: Vec<Instance>| {
+            let count = instances.len() as u32;
+            DrawGroup {
+                alpha_mode: AlphaMode::Opaque,
+                double_sided: false,
+                key: None,
+                primitive: None,
+                binding: BindingKey::default(),
+                texture: None,
+                roughness: None,
+                metallic: None,
+                normal: None,
+                emissive: None,
+                occlusion: None,
+                mesh: None,
+                range: 0..count,
+                visible_range: 0..count,
+                instances,
+            }
+        };
+        let render = |resources: &mut egui_wgpu::CallbackResources,
+                      view: Mat4,
+                      proj: Mat4,
+                      eye: Vec3,
+                      sky: Option<Sky>,
+                      fog: Option<Fog>,
+                      groups: Vec<DrawGroup>| {
+            context
+                .run_pass(egui::RawInput::default(), |_| {})
+                .drop_without_applying_deltas();
+            let cb = SceneCallback {
+                background: Some(BackgroundColor::new([0.05, 0.05, 0.08]).unwrap()),
+                sky,
+                fog,
+                camera: (proj * view).to_cols_array(),
+                inv_camera: (proj * view).inverse().to_cols_array(),
+                cluster_camera: ClusterCamera::from_matrices(view, proj),
+                camera_view: view.to_cols_array(),
+                camera_projection: proj.to_cols_array(),
+                show_editor_grid: false,
+                camera_eye_mode: eye.extend(1.0).to_array(),
+                display: DisplayProfile::SurfaceHdr { exposure_stops: 0. },
+                lighting: packed.clone(),
+                groups,
+                size: egui::vec2(width as f32, height as f32),
+                cpu_us: 0.,
+                culled_objects: 0,
+                shadow: None,
+                context: context.clone(),
+                receipt: FrameReceipt::default(),
+                prepared: std::sync::atomic::AtomicBool::new(false),
+            };
+            selection_probe::render_sized(device, queue, resources, &cb, COLOR, [width, height])
+        };
+        let sample = |bytes: &[u8], vp: Mat4, world: Vec3| -> [u8; 3] {
+            let clip = vp * world.extend(1.0);
+            let ndc = clip.truncate() / clip.w;
+            assert!(
+                ndc.x.abs() <= 0.99 && ndc.y.abs() <= 0.99 && ndc.z >= 0.0 && ndc.z <= 1.0,
+                "world {world:?} out of view: ndc={ndc:?}"
+            );
+            let px = ((ndc.x * 0.5 + 0.5) * width as f32).clamp(0.0, (width - 1) as f32) as usize;
+            let py = ((0.5 - ndc.y * 0.5) * height as f32).clamp(0.0, (height - 1) as f32) as usize;
+            let off = (py * width as usize + px) * 4;
+            [bytes[off], bytes[off + 1], bytes[off + 2]]
+        };
+
+        // A. Linear fog: near clear red -> mid blend -> far fog color, then disabled restores far red.
+        let eye_a = Vec3::new(0.0, 2.0, 10.0);
+        let view_a = Mat4::look_at_rh(eye_a, Vec3::new(0.0, 2.0, -40.0), Vec3::Y);
+        let proj_a = Mat4::perspective_rh(
+            50.0_f32.to_radians(),
+            width as f32 / height as f32,
+            0.5,
+            200.0,
+        );
+        let vp_a = proj_a * view_a;
+        let make_boxes_a = || {
+            vec![opaque_group(vec![
+                make_box(Vec3::new(-1.2, 2.0, 4.0), Vec3::splat(0.6)),
+                make_box(Vec3::new(0.0, 2.0, -10.0), Vec3::splat(1.8)),
+                make_box(Vec3::new(4.0, 2.0, -32.0), Vec3::splat(3.5)),
+            ])]
+        };
+        let linear_fog = Fog {
+            mode: FogMode::Linear,
+            color: [0.05, 0.25, 0.85],
+            start: 10.0,
+            end: 30.0,
+            max_opacity: 1.0,
+            ..Fog::linear_distance()
+        };
+        let img_a = render(
+            &mut resources,
+            view_a,
+            proj_a,
+            eye_a,
+            None,
+            Some(linear_fog),
+            make_boxes_a(),
+        );
+        let p_near = sample(&img_a, vp_a, Vec3::new(-1.2, 2.0, 4.3));
+        let p_mid = sample(&img_a, vp_a, Vec3::new(0.0, 2.0, -9.1));
+        let p_far = sample(&img_a, vp_a, Vec3::new(4.0, 2.0, -30.25));
+        assert!(
+            p_near[0] > p_near[2] + 80,
+            "near box before start must stay red: {p_near:?}"
+        );
+        assert!(
+            p_far[2] > p_far[0] + 100,
+            "far box past end must take blue fog: {p_far:?}"
+        );
+        assert!(
+            p_mid[2] > p_near[2] + 40 && p_mid[0] > p_far[0] + 30,
+            "mid box must transition smoothly: near={p_near:?} mid={p_mid:?} far={p_far:?}"
+        );
+
+        let img_off = render(
+            &mut resources,
+            view_a,
+            proj_a,
+            eye_a,
+            None,
+            None,
+            make_boxes_a(),
+        );
+        let p_far_off = sample(&img_off, vp_a, Vec3::new(4.0, 2.0, -30.25));
+        assert!(
+            p_far_off[0] > p_far_off[2] + 80,
+            "disabling fog must restore red on far box: {p_far_off:?}"
+        );
+
+        // B. Exponential height fog: low elevation box at z=-25 heavily fogged vs high elevation clearer.
+        let eye_b = Vec3::new(0.0, 5.0, 10.0);
+        let view_b = Mat4::look_at_rh(eye_b, Vec3::new(0.0, 5.0, -25.0), Vec3::Y);
+        let proj_b = Mat4::perspective_rh(
+            55.0_f32.to_radians(),
+            width as f32 / height as f32,
+            0.5,
+            200.0,
+        );
+        let vp_b = proj_b * view_b;
+        let groups_b = vec![opaque_group(vec![
+            make_box(Vec3::new(-3.5, -2.0, -25.0), Vec3::splat(3.0)),
+            make_box(Vec3::new(3.5, 12.0, -25.0), Vec3::splat(3.0)),
+        ])];
+        let height_fog = Fog {
+            mode: FogMode::Exponential,
+            color: [0.05, 0.30, 0.85],
+            density: 0.14,
+            height: 0.0,
+            height_falloff: 0.7,
+            max_opacity: 1.0,
+            ..Fog::mist()
+        };
+        let img_b = render(
+            &mut resources,
+            view_b,
+            proj_b,
+            eye_b,
+            None,
+            Some(height_fog),
+            groups_b,
+        );
+        let low = sample(&img_b, vp_b, Vec3::new(-3.5, -2.0, -23.5));
+        let high = sample(&img_b, vp_b, Vec3::new(3.5, 12.0, -23.5));
+        assert!(
+            high[0] > low[0] + 60 && low[2] > high[2] + 60,
+            "height fog must obscure low elevation more than high: low={low:?} high={high:?}"
+        );
+
+        // C. Sky backdrop horizon fog blend leaves zenith sky blue while fogging horizon orange-red.
+        let eye_c = Vec3::new(0.0, 2.0, 0.0);
+        let view_c = Mat4::look_at_rh(eye_c, Vec3::new(0.0, 4.0, -10.0), Vec3::Y);
+        let proj_c = Mat4::perspective_rh(
+            60.0_f32.to_radians(),
+            width as f32 / height as f32,
+            0.5,
+            200.0,
+        );
+        let vp_c = proj_c * view_c;
+        let sky = Sky::daylight();
+        let img_sky_clear = render(
+            &mut resources,
+            view_c,
+            proj_c,
+            eye_c,
+            Some(sky),
+            None,
+            vec![],
+        );
+        let horizon_clear = sample(&img_sky_clear, vp_c, Vec3::new(0.0, 2.1, -10.0));
+        let sky_fog = Fog {
+            mode: FogMode::Exponential,
+            color: [0.95, 0.15, 0.05],
+            sky_affect: 0.95,
+            max_opacity: 1.0,
+            ..Fog::mist()
+        };
+        let img_sky_fog = render(
+            &mut resources,
+            view_c,
+            proj_c,
+            eye_c,
+            Some(sky),
+            Some(sky_fog),
+            vec![],
+        );
+        let horizon_fog = sample(&img_sky_fog, vp_c, Vec3::new(0.0, 2.1, -10.0));
+        let zenith_fog = sample(&img_sky_fog, vp_c, Vec3::new(0.0, 7.2, -10.0));
+        assert!(
+            horizon_fog[0] > horizon_clear[0] + 80,
+            "sky horizon must blend toward fog color: clear={horizon_clear:?} fog={horizon_fog:?}"
+        );
+        assert!(
+            zenith_fog[2] > zenith_fog[0] + 40,
+            "sky zenith must stay blue above horizon fog: zenith={zenith_fog:?}"
+        );
+
+        eprintln!(
+            "GPU probe: atmospheric_fog_gpu_probe passed (linear near={p_near:?} mid={p_mid:?} far={p_far:?}; height low={low:?} high={high:?}; sky horizon={horizon_fog:?} zenith={zenith_fog:?})"
+        );
     }
 }
