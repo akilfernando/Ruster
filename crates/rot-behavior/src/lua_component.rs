@@ -10,6 +10,7 @@ use rot_scene::input::ValidatedActionFrame;
 use rot_scene::{BehaviorSource, Light, PropertyValue, Transform};
 
 use super::component_topology::{ObjectSession, TopologyEdits};
+use super::spatial_host::QueryInvocation;
 use super::{
     action_axis, action_button, base_environment, property_value, read_transform, same_transform,
     transform_table, Diagnostic, DiagnosticCode, Engine, Phase, INPUT_HOST_API_VERSION,
@@ -171,6 +172,7 @@ struct CallbackSnapshot {
     lookup: Rc<ObjectLookup>,
     transforms: Arc<Vec<Transform>>,
     light_intensities: Arc<LightIntensities>,
+    queries: Rc<QueryInvocation>,
     writes: RefCell<CallbackWrites>,
     topology: RefCell<TopologyEdits>,
 }
@@ -197,12 +199,14 @@ impl CurrentCallback {
         lookup: &Rc<ObjectLookup>,
         transforms: &Arc<Vec<Transform>>,
         light_intensities: &Arc<LightIntensities>,
+        queries: &Rc<QueryInvocation>,
     ) -> Self {
         let previous = lua.set_app_data(CallbackSnapshot {
             input: input.clone(),
             lookup: Rc::clone(lookup),
             transforms: Arc::clone(transforms),
             light_intensities: Arc::clone(light_intensities),
+            queries: Rc::clone(queries),
             writes: RefCell::default(),
             topology: RefCell::default(),
         });
@@ -266,6 +270,16 @@ impl ObjectHandle {
             return None;
         }
         snapshot.lookup.ids.get(&self.id).copied()
+    }
+
+    fn query_id(&self, snapshot: &CallbackSnapshot) -> mlua::Result<&str> {
+        self.index_in(snapshot)
+            .map(|_| self.id.as_str())
+            .ok_or_else(|| {
+                mlua::Error::runtime(
+                    "spatial query requires live Object handles from the current Play session",
+                )
+            })
     }
 }
 
@@ -451,7 +465,11 @@ fn destroy_object(lua: &Lua, object: AnyUserData) -> mlua::Result<()> {
 }
 
 impl Engine {
-    pub(super) fn component_module(&self, module: &Table) -> Result<Option<Module>, Diagnostic> {
+    pub(super) fn component_module(
+        &self,
+        module: &Table,
+        binding_id: &str,
+    ) -> Result<Option<Module>, Diagnostic> {
         let parse = || -> mlua::Result<Option<Module>> {
             if !matches!(module.raw_get::<Value>("update")?, Value::Nil) {
                 return Ok(None);
@@ -501,6 +519,39 @@ impl Engine {
             )?;
             host.raw_set("spawn", self.lua.create_function(spawn_object)?)?;
             host.raw_set("destroy", self.lua.create_function(destroy_object)?)?;
+            let binding = Rc::<str>::from(binding_id);
+            let sweep_binding = Rc::clone(&binding);
+            host.raw_set(
+                "sweep",
+                self.lua
+                    .create_function(move |lua, (probe, delta): (AnyUserData, Table)| {
+                        let snapshot = current_callback(lua)?;
+                        let probe = probe.borrow::<ObjectHandle>()?;
+                        snapshot.queries.sweep_lua(
+                            lua,
+                            &sweep_binding,
+                            probe.query_id(&snapshot)?,
+                            delta,
+                        )
+                    })?,
+            )?;
+            host.raw_set(
+                "overlap",
+                self.lua.create_function(
+                    move |lua, (probe, position, sensor): (AnyUserData, Table, AnyUserData)| {
+                        let snapshot = current_callback(lua)?;
+                        let probe = probe.borrow::<ObjectHandle>()?;
+                        let sensor = sensor.borrow::<ObjectHandle>()?;
+                        snapshot.queries.overlap_lua(
+                            lua,
+                            &binding,
+                            probe.query_id(&snapshot)?,
+                            position,
+                            sensor.query_id(&snapshot)?,
+                        )
+                    },
+                )?,
+            )?;
             Ok(Some(Module {
                 start,
                 update,
@@ -516,6 +567,7 @@ impl Engine {
         &mut self,
         id: &str,
         text: &str,
+        binding_id: &str,
     ) -> Result<Module, Diagnostic> {
         self.binding_count.set(0);
         let main = self.compile_lua(id, text)?;
@@ -529,7 +581,7 @@ impl Engine {
         let result = main
             .call::<Table>(())
             .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))
-            .and_then(|module| self.component_module(&module));
+            .and_then(|module| self.component_module(&module, binding_id));
         let cleanup = self
             .lua
             .create_table()

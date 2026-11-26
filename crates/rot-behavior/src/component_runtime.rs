@@ -50,11 +50,11 @@ pub(crate) struct ComponentWorld {
     pub(crate) local_transforms: Arc<Vec<Transform>>,
     pub(crate) light_intensities: Arc<LightIntensities>,
     pub(crate) world_matrices: Arc<Vec<DMat4>>,
-    pub(crate) world_rotations: Vec<DQuat>,
+    pub(crate) world_rotations: Arc<Vec<DQuat>>,
     pub(crate) scripts: Vec<ComponentScriptSlot>,
     modules: Option<Rc<RefCell<Modules>>>,
     pub(crate) animations: Vec<ResolvedComponentAnimation>,
-    pub(crate) colliders: Vec<ComponentColliderSlot>,
+    pub(crate) colliders: Arc<Vec<ComponentColliderSlot>>,
     pub(crate) draw_plan: Arc<ComponentDrawPlan>,
     pub(crate) audio_emitters: Option<Arc<BTreeMap<String, usize>>>,
 }
@@ -84,8 +84,8 @@ impl RebuiltPopulation {
         world.object_indices = self.object_indices;
         world.local_transforms = self.local;
         world.world_matrices = Arc::new(self.world);
-        world.world_rotations = self.rotations;
-        world.colliders = self.colliders;
+        world.world_rotations = Arc::new(self.rotations);
+        world.colliders = Arc::new(self.colliders);
         world.draw_plan = self.draw_plan;
         world.light_intensities = self.light_intensities;
         modules.lookup = self.lookup;
@@ -96,6 +96,16 @@ impl RebuiltPopulation {
 impl ComponentWorld {
     pub(crate) fn is_static(&self) -> bool {
         self.scripts.is_empty() && self.animations.is_empty()
+    }
+
+    fn query_snapshot(&self) -> ComponentQueryInput {
+        ComponentQueryInput {
+            colliders: Arc::clone(&self.colliders),
+            local: Arc::clone(&self.local_transforms),
+            world: Arc::clone(&self.world_matrices),
+            rotations: Arc::clone(&self.world_rotations),
+            hierarchy: Arc::clone(&self.hierarchy),
+        }
     }
 
     fn resolve_staged_transforms(
@@ -497,12 +507,23 @@ impl Engine {
             runtime.commit_revision,
             true,
         );
+        let queries = self
+            .query_invocation_component(
+                || world.query_snapshot(),
+                true,
+                &runtime.authoring,
+                runtime.tick,
+                runtime.draw_frame.scene().revision,
+                runtime.kinematic_owner.as_ref(),
+            )?
+            .expect("component reload can run persistent queries");
         let callback = CurrentCallback::new(
             &self.lua,
             &input,
             &modules.lookup,
             &world.local_transforms,
             &world.light_intensities,
+            &queries,
         );
         let mut replacements = Vec::new();
         let mut staged_transforms = None;
@@ -537,7 +558,8 @@ impl Engine {
                         "Replacement must be a file-backed Lua component",
                     ));
                 }
-                let mut module = self.load_replacement_module(source_id, &source.text)?;
+                let mut module =
+                    self.load_replacement_module(source_id, &source.text, &slot.component_id)?;
                 let implicit = module.start(
                     self,
                     &world.local_transforms[slot.owner_index],
@@ -809,6 +831,10 @@ impl Engine {
                 )
             })?;
 
+        let colliders = Arc::new(colliders);
+        let mut world_matrices = Arc::new(world_matrices);
+        let mut world_rotations = Arc::new(world_rotations);
+
         let kinematic_owner =
             kinematic_owner_component(scene, &hierarchy, &object_indices, &animated_objects)
                 .map_err(|message| {
@@ -882,19 +908,6 @@ impl Engine {
             }
             state.validate_total()?;
             let mut trial_state = state.clone();
-            let queries = self.query_invocation_component(
-                ComponentQueryInput {
-                    colliders: &colliders,
-                    local: &local_transforms,
-                    world: &world_matrices,
-                    rotations: &world_rotations,
-                    parents: &hierarchy.parents,
-                },
-                &authoring,
-                0,
-                revision,
-                kinematic_owner.as_ref(),
-            )?;
             let audio_cues = RefCell::new(Vec::new());
             let mut trial_transforms: Option<Vec<Transform>> = None;
             let mut start_transforms = None;
@@ -939,6 +952,20 @@ impl Engine {
                         protected,
                     ))
                 });
+            let queries = self.query_invocation_component(
+                || ComponentQueryInput {
+                    colliders: Arc::clone(&colliders),
+                    local: Arc::clone(&local_transforms),
+                    world: Arc::clone(&world_matrices),
+                    rotations: Arc::clone(&world_rotations),
+                    hierarchy: Arc::clone(&hierarchy),
+                },
+                lookup.is_some(),
+                &authoring,
+                0,
+                revision,
+                kinematic_owner.as_ref(),
+            )?;
             let authored_lights = Arc::default();
             let callback = lookup.as_ref().map(|lookup| {
                 CurrentCallback::new(
@@ -947,6 +974,9 @@ impl Engine {
                     lookup,
                     &local_transforms,
                     &authored_lights,
+                    queries
+                        .as_ref()
+                        .expect("component callbacks can run queries"),
                 )
             });
             for (index, slot) in scripts.iter().enumerate() {
@@ -959,7 +989,7 @@ impl Engine {
                     &object_indices,
                     0.0,
                     &input,
-                    queries.as_ref(),
+                    queries.as_deref(),
                     has_sound_binding.then_some(&audio_cues),
                     &state,
                     Some(&mut module),
@@ -995,6 +1025,7 @@ impl Engine {
             if let Some(callback) = callback {
                 topology = callback.take_topology();
             }
+            drop(queries);
             if let Some(trial) = trial_transforms {
                 let mut trial_world = Vec::with_capacity(trial.len());
                 let mut trial_rot = Vec::with_capacity(trial.len());
@@ -1031,7 +1062,11 @@ impl Engine {
             if let Some(start_transforms) = start_transforms {
                 local_transforms = Arc::new(start_transforms);
                 scene
-                    .resolve_world_matrices_into(&hierarchy, &local_transforms, &mut world_matrices)
+                    .resolve_world_matrices_into(
+                        &hierarchy,
+                        &local_transforms,
+                        Arc::make_mut(&mut world_matrices),
+                    )
                     .map_err(|error| {
                         diag(
                             DiagnosticCode::InvalidOutput,
@@ -1042,7 +1077,7 @@ impl Engine {
                 scene.resolve_world_rotations_into(
                     &hierarchy,
                     &local_transforms,
-                    &mut world_rotations,
+                    Arc::make_mut(&mut world_rotations),
                 );
                 validate_component_colliders(
                     scene,
@@ -1101,7 +1136,7 @@ impl Engine {
                 object_indices,
                 local_transforms,
                 light_intensities: Arc::new(start_lights),
-                world_matrices: Arc::new(world_matrices),
+                world_matrices,
                 world_rotations,
                 scripts,
                 modules: lookup.and_then(|lookup| Modules::new(self, modules, lookup)),
@@ -1205,13 +1240,8 @@ impl Engine {
             false,
         );
         let queries = self.query_invocation_component(
-            ComponentQueryInput {
-                colliders: &world.colliders,
-                local: &world.local_transforms,
-                world: &world.world_matrices,
-                rotations: &world.world_rotations,
-                parents: &world.hierarchy.parents,
-            },
+            || world.query_snapshot(),
+            modules.is_some(),
             &runtime.authoring,
             runtime.tick,
             runtime.draw_frame.scene().revision,
@@ -1262,6 +1292,9 @@ impl Engine {
                 &modules.lookup,
                 &world.local_transforms,
                 &world.light_intensities,
+                queries
+                    .as_ref()
+                    .expect("component callbacks can run queries"),
             )
         });
         for (index, slot) in world.scripts.iter().enumerate() {
@@ -1319,7 +1352,7 @@ impl Engine {
                     &world.object_indices,
                     self.limits.fixed_dt,
                     &validated,
-                    queries.as_ref(),
+                    queries.as_deref(),
                     runtime.has_sound_binding.then_some(&audio_cues),
                     &runtime.state,
                     None,
@@ -1395,8 +1428,7 @@ impl Engine {
             audio::resolve_cues_component(&mut cues, emitters, transform_camera, active_world);
         }
         self.check_cancelled()?;
-        let observations =
-            queries.map_or_else(Vec::new, |queries| queries.observations.into_inner());
+        let observations = queries.map_or_else(Vec::new, |queries| queries.observations.take());
         runtime.audio_batch = (!cues.is_empty()).then_some(super::AudioBatch {
             tick: next,
             commit_revision,
@@ -1418,7 +1450,7 @@ impl Engine {
             runtime.draw_frame = next_draw;
             world_mut.local_transforms = Arc::new(next_local);
             world_mut.world_matrices = Arc::new(next_world);
-            world_mut.world_rotations = next_rot;
+            world_mut.world_rotations = Arc::new(next_rot);
         } else if let Some(frame) = staged_light_frame {
             runtime.draw_frame = frame;
         }
@@ -1913,6 +1945,240 @@ mod tests {
                 kind,
             },
         }
+    }
+
+    fn test_collider(id: &str, role: ColliderRole, shape: ColliderShape) -> ComponentInstance {
+        ComponentInstance {
+            id: id.into(),
+            enabled: true,
+            kind: Component::Collider {
+                role,
+                offset: [0.0; 3],
+                shape,
+            },
+        }
+    }
+
+    #[test]
+    fn persistent_and_numbered_queries_share_one_world_and_budget() {
+        use super::super::{QueryResult, SPATIAL_HOST_API_VERSION};
+        use rot_scene::input::ButtonState;
+        let mut scene = shared_module_scene(
+            r#"
+            local probe, wall, sensor, sweep, overlap, ticks
+            return {
+                on_start = function(transform, props, host)
+                    probe = host.find("probe")
+                    wall = host.find("wall")
+                    sensor = host.find("sensor")
+                    sweep, overlap = host.sweep, host.overlap
+                    ticks = 0
+                    if not overlap(probe, {5, 0, 0}, sensor).overlapping then
+                        transform.scale[1] = 0
+                    end
+                end,
+                on_update = function(transform, props, dt, host)
+                    ticks = ticks + 1
+                    local pose = wall.transform
+                    pose.translation[1] = ticks * 10
+                    wall:set_transform(pose)
+                    local hit = overlap(probe, {5, 0, 0}, sensor)
+                    if hit.probe_id ~= "probe" or hit.sensor_id ~= "sensor" or hit.position[1] ~= 5
+                        or not hit.overlapping or hit.signed_distance >= 0 then
+                        transform.scale[1] = 0
+                    end
+                    for i = 1, 15 do
+                        local result = sweep(probe, {4, 0, 0})
+                        if ticks == 1 and (result.outcome ~= "blocked" or result.target_id ~= "wall")
+                            or ticks == 2 and (result.outcome ~= "clear" or result.target_id ~= nil) then
+                            transform.scale[1] = 0
+                        end
+                    end
+                    transform.translation[1] = ticks
+                end,
+            }
+        "#,
+        );
+        let numbered = &mut scene.objects[1].components[0];
+        numbered.id = "z-numbered".into();
+        let Component::Script { binding, .. } = &mut numbered.kind else {
+            unreachable!()
+        };
+        binding.source_id = "numbered-queries".into();
+        scene.sources.insert(
+            "numbered-queries".into(),
+            script_source(
+                r#"
+            return { update = function(transform, props, dt, host)
+                local button = host.button("slide")
+                if dt > 0 and button.held then
+                    for i = 1, (button.pressed and 16 or 17) do
+                        host.sweep("probe", {4, 0, 0})
+                    end
+                end
+                return transform
+            end }
+        "#,
+                SPATIAL_HOST_API_VERSION,
+            ),
+        );
+        add_test_object(
+            &mut scene,
+            "probe",
+            None,
+            vec![test_collider(
+                "probe-ball",
+                ColliderRole::Blocker,
+                ColliderShape::Sphere { radius: 0.25 },
+            )],
+        );
+        for (id, role, x) in [
+            ("wall", ColliderRole::Blocker, 2.0),
+            ("sensor", ColliderRole::Sensor, 5.0),
+        ] {
+            add_test_object(
+                &mut scene,
+                id,
+                None,
+                vec![test_collider(
+                    &format!("{id}-box"),
+                    role,
+                    ColliderShape::Box {
+                        half_extents: [0.25, 0.5, 0.5],
+                    },
+                )],
+            );
+            scene.objects.last_mut().unwrap().transform.translation[0] = x;
+        }
+        let builds = super::super::spatial_host::component_world_builds;
+        let initial_builds = builds();
+        let mut engine = Engine::new(Limits::default()).unwrap();
+        let mut runtime = engine.reset_component(&scene, 7).unwrap();
+        assert_eq!(builds(), initial_builds + 1);
+        assert!(runtime.query_observations().is_empty());
+        let held = |pressed| {
+            ActionFrame(BTreeMap::from([(
+                "slide".into(),
+                ActionValue::Button(ButtonState {
+                    held: true,
+                    pressed,
+                    released: false,
+                }),
+            )]))
+        };
+        engine.step_with_input(&mut runtime, &held(true)).unwrap();
+        assert_eq!(builds(), initial_builds + 2);
+        assert_eq!(runtime.object_translation("wall"), Some([10.0, 0.0, 0.0]));
+        let committed = runtime.query_observations().to_vec();
+        assert_eq!(committed.len(), 32);
+        assert!(
+            matches!(&committed[0].query, QueryResult::Overlap { result } if result.overlapping)
+        );
+        assert!(committed.iter().enumerate().all(|(index, entry)| {
+            entry.scene_revision == 7 && entry.snapshot_tick == 0
+                && entry.binding_id == if index < 16 { "left-script" } else { "z-numbered" }
+                && (index == 0 || matches!(&entry.query, QueryResult::Sweep { result, .. } if result.target_id.as_deref() == Some("wall")))
+        }));
+
+        let error = engine
+            .step_with_input(&mut runtime, &held(false))
+            .unwrap_err();
+        assert_eq!(error.code, DiagnosticCode::QueryLimit);
+        assert_eq!(error.binding_id.as_deref(), Some("z-numbered"));
+        assert_eq!(builds(), initial_builds + 3);
+        assert_eq!(runtime.tick(), 1);
+        assert_eq!(runtime.object_translation("left"), Some([1.0, 0.0, 0.0]));
+        assert_eq!(runtime.object_translation("wall"), Some([10.0, 0.0, 0.0]));
+        assert_eq!(runtime.query_observations(), committed);
+
+        let replacement = file_script(
+            r#"
+            local result
+            return {
+                on_start = function(transform, props, host)
+                    result = host.sweep(host.find("probe"), {4, 0, 0})
+                    if result.outcome ~= "clear" then transform.scale[1] = 0 end
+                end,
+                on_update = function(transform)
+                    transform.translation[2] = result.suggested_translation[1]
+                end,
+            }
+        "#,
+        );
+        assert!(engine
+            .reload_component_file(&mut runtime, GATE_FILE_ID, replacement)
+            .unwrap());
+        assert_eq!(builds(), initial_builds + 4);
+        assert_eq!(runtime.query_observations(), committed);
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(builds(), initial_builds + 4);
+        assert!(runtime.query_observations().is_empty());
+        assert_eq!(runtime.object_translation("left"), Some([1.0, 4.0, 0.0]));
+    }
+
+    #[test]
+    fn query_handles_follow_committed_population_across_spawn_and_destroy() {
+        let start = super::super::spatial_host::component_world_builds();
+        let mut scene = shared_module_scene(
+            r#"
+            local probe
+            return {
+                on_start = function(transform, props, host)
+                    local template = host.find("template")
+                    probe = host.spawn(template, template.transform)
+                end,
+                on_update = function(transform, props, dt, host)
+                    if probe.transform ~= nil then host.destroy(probe) end
+                    local hit = host.sweep(probe, {0, 0, 0})
+                    if hit.outcome ~= "clear" then transform.scale[1] = 0 end
+                end,
+            }
+        "#,
+        );
+        scene.objects.truncate(1);
+        add_test_object(
+            &mut scene,
+            "template",
+            None,
+            vec![test_collider(
+                "probe-template",
+                ColliderRole::Blocker,
+                ColliderShape::Sphere { radius: 0.25 },
+            )],
+        );
+        scene.objects.last_mut().unwrap().enabled = false;
+        let mut engine = Engine::new(Limits::default()).unwrap();
+        let mut pending = scene.clone();
+        pending.script_files.get_mut(GATE_FILE_ID).unwrap().text = r#"
+            return { on_start = function(transform, props, host)
+                local template = host.find("template")
+                local probe = host.spawn(template, template.transform)
+                host.sweep(probe, {0, 0, 0})
+            end }
+        "#
+        .into();
+        let error = engine.reset_component(&pending, 0).unwrap_err();
+        assert_eq!(error.binding_id.as_deref(), Some("left-script"));
+        assert!(error.message.contains("requires live Object handles"));
+        assert_eq!(super::super::spatial_host::component_world_builds(), start);
+
+        let mut runtime = engine.reset_component(&scene, 0).unwrap();
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.object_translation("rot-spawn-1-o0"), None);
+        assert!(matches!(&runtime.query_observations()[0].query,
+            super::super::QueryResult::Sweep { probe_id, .. } if probe_id == "rot-spawn-1-o0"));
+        assert_eq!(
+            super::super::spatial_host::component_world_builds(),
+            start + 1
+        );
+        let error = engine.step(&mut runtime).unwrap_err();
+        assert_eq!(error.binding_id.as_deref(), Some("left-script"));
+        assert!(error.message.contains("requires live Object handles"));
+        assert_eq!(
+            super::super::spatial_host::component_world_builds(),
+            start + 1
+        );
+        assert_eq!(runtime.tick(), 1);
     }
 
     fn rendered_intensity(runtime: &Runtime, id: &str) -> f32 {
@@ -3262,6 +3528,14 @@ mod tests {
             })
             .collect();
 
+        scene.objects[0].components.push(test_collider(
+            "quiet-probe",
+            ColliderRole::Blocker,
+            ColliderShape::Sphere { radius: 0.25 },
+        ));
+        let builds = super::super::spatial_host::component_world_builds;
+        let initial_builds = builds();
+
         let mut engine = Engine::new(Limits::default()).unwrap();
         for has_script in [false, true] {
             if has_script {
@@ -3281,11 +3555,16 @@ mod tests {
             let world = runtime.component_world.as_ref().unwrap();
             let initial_population = Arc::clone(&world.scene);
             let initial_local = Arc::clone(&world.local_transforms);
+            let initial_colliders = Arc::clone(&world.colliders);
+            let initial_rotations = Arc::clone(&world.world_rotations);
             engine.step(&mut runtime).unwrap();
             let world = runtime.component_world.as_ref().unwrap();
             assert_eq!(runtime.tick(), 1);
             assert!(Arc::ptr_eq(&initial_population, &world.scene));
             assert!(Arc::ptr_eq(&initial_local, &world.local_transforms));
+            assert!(Arc::ptr_eq(&initial_colliders, &world.colliders));
+            assert!(Arc::ptr_eq(&initial_rotations, &world.world_rotations));
+            assert_eq!(builds(), initial_builds);
             assert!(Arc::ptr_eq(
                 &initial_scene,
                 &runtime.draw_frame().snapshot()

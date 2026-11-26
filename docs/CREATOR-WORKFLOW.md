@@ -556,6 +556,20 @@ tick commits. Calling `host.destroy` before then cancels the pending copy.
 Spawns and removals are local to the Play session, including in a built
 game. Rot Yard's `Gate Warning Marker.lua` uses these calls on **Space**.
 
+## Query colliders from Lua
+
+Call `host.sweep(probe, {dx, dy, dz})` with an object that has an enabled
+Sphere Collider. The world-space displacement tests the sphere against
+Blocker colliders. The result includes `outcome`, `target_id` when there is
+a hit, and `suggested_translation` when a candidate position is available.
+Pass that world-space position and an object with an enabled Sensor Collider
+to `host.overlap(probe, position, sensor)` and read `overlapping`.
+
+Both calls use the last committed scene and share a limit of 32 queries
+per tick. Transforms staged in the same tick use local coordinates. Rot
+Yard's gate stops when a sweep hits **Gate End Stop** and brightens the
+beacon when it enters the open-position sensor.
+
 ## Bind keyboard actions to Lua in v23
 
 Open **Edit → Project Settings… → Input Actions**, or find **Input Actions…**

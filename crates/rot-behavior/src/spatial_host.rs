@@ -1,4 +1,5 @@
 //! Invocation-scoped Lua query admission and copied, commit-staged observations.
+use std::cell::OnceCell;
 use std::collections::HashMap;
 
 use super::*;
@@ -98,7 +99,7 @@ struct Controller {
 }
 
 pub(super) struct QueryInvocation {
-    world: SpatialWorld,
+    world: QueryWorld,
     controller: Option<Controller>,
     calls: Cell<u32>,
     pub(super) observations: RefCell<Vec<QueryObservation>>,
@@ -109,12 +110,46 @@ pub(super) struct QueryInvocation {
     scene_revision: u64,
 }
 
-pub(super) struct ComponentQueryInput<'a> {
-    pub colliders: &'a [spatial::ComponentColliderSlot],
-    pub local: &'a [Transform],
-    pub world: &'a [glam::DMat4],
-    pub rotations: &'a [glam::DQuat],
-    pub parents: &'a [Option<usize>],
+enum QueryWorld {
+    Resolved(SpatialWorld),
+    Component(ComponentQueryInput, OnceCell<Result<SpatialWorld, String>>),
+}
+
+pub(super) struct ComponentQueryInput {
+    pub colliders: Arc<Vec<spatial::ComponentColliderSlot>>,
+    pub local: Arc<Vec<Transform>>,
+    pub world: Arc<Vec<glam::DMat4>>,
+    pub rotations: Arc<Vec<glam::DQuat>>,
+    pub hierarchy: Arc<rot_scene::component_scene::ObjectHierarchy>,
+}
+
+#[cfg(test)]
+thread_local! {
+    static COMPONENT_BUILDS: Cell<usize> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(super) fn component_world_builds() -> usize {
+    COMPONENT_BUILDS.get()
+}
+
+fn has_numbered_queries(authoring: &Authoring) -> bool {
+    authoring.bindings.values().any(|binding| {
+        binding.enabled
+            && authoring
+                .sources
+                .get(&binding.source_id)
+                .is_some_and(|source| {
+                    matches!(
+                        source.host_api_version,
+                        SPATIAL_HOST_API_VERSION
+                            | STATE_HOST_API_VERSION
+                            | LIFECYCLE_HOST_API_VERSION
+                            | GROUP_ROTATION_HOST_API_VERSION
+                            | KINEMATIC_HOST_API_VERSION
+                    )
+                })
+    })
 }
 
 impl Engine {
@@ -125,22 +160,7 @@ impl Engine {
         snapshot_tick: u64,
         kinematic_owner: Option<&KinematicOwner>,
     ) -> Result<Option<QueryInvocation>, Diagnostic> {
-        if !authoring.bindings.values().any(|binding| {
-            binding.enabled
-                && authoring
-                    .sources
-                    .get(&binding.source_id)
-                    .is_some_and(|source| {
-                        matches!(
-                            source.host_api_version,
-                            SPATIAL_HOST_API_VERSION
-                                | STATE_HOST_API_VERSION
-                                | LIFECYCLE_HOST_API_VERSION
-                                | GROUP_ROTATION_HOST_API_VERSION
-                                | KINEMATIC_HOST_API_VERSION
-                        )
-                    })
-        }) {
+        if !has_numbered_queries(authoring) {
             return Ok(None);
         }
         self.check_cancelled()?;
@@ -153,7 +173,7 @@ impl Engine {
         });
         self.check_cancelled()?;
         Ok(Some(QueryInvocation {
-            world,
+            world: QueryWorld::Resolved(world),
             controller,
             calls: Cell::new(0),
             observations: RefCell::new(Vec::new()),
@@ -167,48 +187,23 @@ impl Engine {
 
     pub(super) fn query_invocation_component(
         &self,
-        snapshot: ComponentQueryInput<'_>,
+        snapshot: impl FnOnce() -> ComponentQueryInput,
+        persistent: bool,
         authoring: &Authoring,
         snapshot_tick: u64,
         scene_revision: u64,
         kinematic_owner: Option<&KinematicOwner>,
-    ) -> Result<Option<QueryInvocation>, Diagnostic> {
-        if !authoring.bindings.values().any(|binding| {
-            binding.enabled
-                && authoring
-                    .sources
-                    .get(&binding.source_id)
-                    .is_some_and(|source| {
-                        matches!(
-                            source.host_api_version,
-                            SPATIAL_HOST_API_VERSION
-                                | STATE_HOST_API_VERSION
-                                | LIFECYCLE_HOST_API_VERSION
-                                | GROUP_ROTATION_HOST_API_VERSION
-                                | KINEMATIC_HOST_API_VERSION
-                        )
-                    })
-        }) {
+    ) -> Result<Option<Rc<QueryInvocation>>, Diagnostic> {
+        if !persistent && !has_numbered_queries(authoring) {
             return Ok(None);
         }
         self.check_cancelled()?;
-        let world = SpatialWorld::from_component_world(
-            snapshot.colliders,
-            snapshot.local,
-            snapshot.world,
-            snapshot.rotations,
-            snapshot.parents,
-        )
-        .map_err(|message| {
-            Diagnostic::plain(DiagnosticCode::InvalidAuthoring, Phase::Setup, &message)
-        })?;
         let controller = kinematic_owner.cloned().map(|owner| Controller {
             owner,
             translation: Cell::new(None),
         });
-        self.check_cancelled()?;
-        Ok(Some(QueryInvocation {
-            world,
+        Ok(Some(Rc::new(QueryInvocation {
+            world: QueryWorld::Component(snapshot(), OnceCell::new()),
             controller,
             calls: Cell::new(0),
             observations: RefCell::new(Vec::new()),
@@ -217,7 +212,7 @@ impl Engine {
             failure: self.failure.clone(),
             snapshot_tick,
             scene_revision,
-        }))
+        })))
     }
 }
 
@@ -466,6 +461,26 @@ pub(super) fn kinematic_owner(
 }
 
 impl QueryInvocation {
+    fn world(&self) -> mlua::Result<&SpatialWorld> {
+        match &self.world {
+            QueryWorld::Resolved(world) => Ok(world),
+            QueryWorld::Component(snapshot, cached) => cached
+                .get_or_init(|| {
+                    #[cfg(test)]
+                    COMPONENT_BUILDS.set(COMPONENT_BUILDS.get() + 1);
+                    SpatialWorld::from_component_world(
+                        &snapshot.colliders,
+                        &snapshot.local,
+                        &snapshot.world,
+                        &snapshot.rotations,
+                        &snapshot.hierarchy.parents,
+                    )
+                })
+                .as_ref()
+                .map_err(|message| mlua::Error::runtime(message.as_str())),
+        }
+    }
+
     pub(super) fn validate_kinematic_output(
         &self,
         binding_id: &str,
@@ -592,7 +607,7 @@ pub(super) fn install_kinematic<'scope, 'env: 'scope>(
             let delta = query_vector(delta)?;
             queries.admit()?;
             let result = queries
-                .world
+                .world()?
                 .move_and_slide(&controller.owner.object_id, delta, &|| queries.cancelled())
                 .map_err(mlua::Error::runtime)?;
             let translation = result.suggested_translation.ok_or_else(|| {
@@ -647,7 +662,7 @@ pub(super) fn install_kinematic<'scope, 'env: 'scope>(
             };
             queries.admit()?;
             let (was_inside, is_inside) = queries
-                .world
+                .world()?
                 .sensor_occupancy(&controller.owner.object_id, sensor_id, endpoint, &|| {
                     queries.cancelled()
                 })
@@ -700,80 +715,106 @@ pub(super) fn install_spatial<'scope, 'env: 'scope>(
     host.raw_set(
         "sweep",
         scope.create_function(move |lua, (id, delta): (mlua::LuaString, Table)| {
-            let id = object_id(&id)?;
-            let delta = query_vector(delta)?;
-            queries.admit()?;
-            let result = queries
-                .world
-                .sweep(&id, delta, &|| queries.cancelled())
-                .map_err(mlua::Error::runtime)?;
-            let copied = lua.create_table()?;
-            copied.raw_set(
-                "outcome",
-                match result.outcome {
-                    SweepOutcome::Clear => "clear",
-                    SweepOutcome::Blocked => "blocked",
-                    SweepOutcome::InitialOverlap => "initial_overlap",
-                    SweepOutcome::PrecisionLimited => "precision_limited",
-                },
-            )?;
-            copied.raw_set(
-                "suggested_translation",
-                result
-                    .suggested_translation
-                    .map(|value| lua.create_sequence_from(value))
-                    .transpose()?,
-            )?;
-            copied.raw_set("fraction", result.fraction)?;
-            copied.raw_set("target_id", result.target_id.clone())?;
-            copied.raw_set(
-                "point",
-                result
-                    .point
-                    .map(|value| lua.create_sequence_from(value))
-                    .transpose()?,
-            )?;
-            copied.raw_set(
-                "normal",
-                result
-                    .normal
-                    .map(|value| lua.create_sequence_from(value))
-                    .transpose()?,
-            )?;
-            copied.raw_set("clearance", result.clearance)?;
-            queries.observe(
-                input.binding_id,
-                QueryResult::Sweep {
-                    probe_id: id,
-                    delta,
-                    result,
-                },
-            );
-            Ok(copied)
+            queries.sweep_lua(lua, input.binding_id, &object_id(&id)?, delta)
         })?,
     )?;
     host.raw_set(
         "overlap",
         scope.create_function(
             move |lua, (id, position, sensor): (mlua::LuaString, Table, mlua::LuaString)| {
-                let id = object_id(&id)?;
-                let sensor = object_id(&sensor)?;
-                let position = query_vector(position)?;
-                queries.admit()?;
-                let result = queries
-                    .world
-                    .overlap(&id, position, &sensor, &|| queries.cancelled())
-                    .map_err(mlua::Error::runtime)?;
-                let copied = lua.create_table()?;
-                copied.raw_set("probe_id", result.probe_id.clone())?;
-                copied.raw_set("sensor_id", result.sensor_id.clone())?;
-                copied.raw_set("position", lua.create_sequence_from(result.position)?)?;
-                copied.raw_set("overlapping", result.overlapping)?;
-                copied.raw_set("signed_distance", result.signed_distance)?;
-                queries.observe(input.binding_id, QueryResult::Overlap { result });
-                Ok(copied)
+                queries.overlap_lua(
+                    lua,
+                    input.binding_id,
+                    &object_id(&id)?,
+                    position,
+                    &object_id(&sensor)?,
+                )
             },
         )?,
     )?;
     Ok(())
+}
+
+impl QueryInvocation {
+    pub(super) fn sweep_lua(
+        &self,
+        lua: &Lua,
+        binding: &str,
+        id: &str,
+        delta: Table,
+    ) -> mlua::Result<Table> {
+        let delta = query_vector(delta)?;
+        self.admit()?;
+        let result = self
+            .world()?
+            .sweep(id, delta, &|| self.cancelled())
+            .map_err(mlua::Error::runtime)?;
+        let copied = lua.create_table()?;
+        copied.raw_set(
+            "outcome",
+            match result.outcome {
+                SweepOutcome::Clear => "clear",
+                SweepOutcome::Blocked => "blocked",
+                SweepOutcome::InitialOverlap => "initial_overlap",
+                SweepOutcome::PrecisionLimited => "precision_limited",
+            },
+        )?;
+        copied.raw_set(
+            "suggested_translation",
+            result
+                .suggested_translation
+                .map(|value| lua.create_sequence_from(value))
+                .transpose()?,
+        )?;
+        copied.raw_set("fraction", result.fraction)?;
+        copied.raw_set("target_id", result.target_id.as_deref())?;
+        copied.raw_set(
+            "point",
+            result
+                .point
+                .map(|value| lua.create_sequence_from(value))
+                .transpose()?,
+        )?;
+        copied.raw_set(
+            "normal",
+            result
+                .normal
+                .map(|value| lua.create_sequence_from(value))
+                .transpose()?,
+        )?;
+        copied.raw_set("clearance", result.clearance)?;
+        self.observe(
+            binding,
+            QueryResult::Sweep {
+                probe_id: id.to_owned(),
+                delta,
+                result,
+            },
+        );
+        Ok(copied)
+    }
+
+    pub(super) fn overlap_lua(
+        &self,
+        lua: &Lua,
+        binding: &str,
+        id: &str,
+        position: Table,
+        sensor: &str,
+    ) -> mlua::Result<Table> {
+        let position = query_vector(position)?;
+        self.admit()?;
+        let result = self
+            .world()?
+            .overlap(id, position, sensor, &|| self.cancelled())
+            .map_err(mlua::Error::runtime)?;
+        let copied = lua.create_table()?;
+        copied.raw_set("probe_id", result.probe_id.as_str())?;
+        copied.raw_set("sensor_id", result.sensor_id.as_str())?;
+        copied.raw_set("position", lua.create_sequence_from(result.position)?)?;
+        copied.raw_set("overlapping", result.overlapping)?;
+        copied.raw_set("signed_distance", result.signed_distance)?;
+        self.observe(binding, QueryResult::Overlap { result });
+        Ok(copied)
+    }
 }

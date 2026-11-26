@@ -10,19 +10,29 @@ return {
     end,
     on_update = function(transform, props, dt, host)
         local held = host.button("slide_gate").held
-        local was_lit = not light or light.intensity == 6
-        if light then
-            light:set_intensity(held and 6 or 0.25)
-        end
+        local was_lit = not light or light.intensity > 0.25
+        local intensity = held and 6 or 0.25
         if panel and beacon and held and was_lit then
             local pose = panel.transform
             local endpoint = beacon.transform.translation[1]
             local x = pose.translation[1]
             local distance = 2 * dt
-            if x ~= endpoint then
-                pose.translation[1] = x + math.max(-distance, math.min(distance, endpoint - x))
-                panel:set_transform(pose)
+            local travel = math.max(-distance, math.min(distance, endpoint - x))
+            local sweep = host.sweep(panel, {travel, 0, 0})
+            if sweep.outcome == "clear" then
+                if travel ~= 0 then
+                    pose.translation[1] = x + travel
+                    panel:set_transform(pose)
+                end
+                if host.overlap(panel, sweep.suggested_translation, beacon).overlapping then
+                    intensity = 8
+                end
+            else
+                intensity = 2
             end
+        end
+        if light then
+            light:set_intensity(intensity)
         end
     end,
 }

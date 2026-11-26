@@ -130,6 +130,14 @@
               1.0
             ],
             "material": "model-18eb37ac6676856a-0-material-0"
+          },
+          {
+            "id": "gate-panel-probe",
+            "enabled": true,
+            "type": "collider",
+            "role": "blocker",
+            "offset": [0.0, 0.0, 0.0],
+            "shape": { "type": "sphere", "radius": 0.18 }
           }
         ]
       },
@@ -166,6 +174,35 @@
               "type": "point",
               "range": 8.0
             }
+          },
+          {
+            "id": "gate-open-sensor",
+            "enabled": true,
+            "type": "collider",
+            "role": "sensor",
+            "offset": [0.0, 0.0, -2.0],
+            "shape": { "type": "box", "half_extents": [0.2, 0.35, 0.25] }
+          }
+        ]
+      },
+      {
+        "id": "gate-end-stop",
+        "name": "Gate End Stop",
+        "enabled": true,
+        "parent": "model-18eb37ac6676856a-0",
+        "transform": {
+          "translation": [4.6, 1.2, 0.0],
+          "rotation": [0.0, 0.0, 0.0],
+          "scale": [1.0, 1.0, 1.0]
+        },
+        "components": [
+          {
+            "id": "gate-end-stop-box",
+            "enabled": true,
+            "type": "collider",
+            "role": "blocker",
+            "offset": [0.0, 0.0, 0.0],
+            "shape": { "type": "box", "half_extents": [0.11, 0.55, 0.4] }
           }
         ]
       },
