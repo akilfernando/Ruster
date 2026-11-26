@@ -1,6 +1,6 @@
 # Rot Engine Editor
 
-The native editor opens the project hub by default. It lists every project you have opened, newest first, with its path and when its scene last changed; **Search** filters the list, and right-click offers **Show in File Manager** and **Remove from List**. **New Project…** creates a named folder and its initial `scene.json` from a template: **Empty** (a sun only) or **Basic 3D** (ground, sun, a cube and a Game view camera). **Open Project…** accepts a scene file or a folder containing `scene.json`. On first launch the hub asks for a style, then offers **Connect an AI App…** once. On Linux, **Browse…** opens the system file chooser in the project forms, **Open scene**, and **Save As**. You can also type a path. From an open editor, **File → Switch Project…** opens the picker. Choose **Back to Editor** or press Escape to return. Save or resolve pending edits before switching. **File → New Project…** opens the same form after the current scene is saved and pending edits are resolved. It has two modes: generic 3D scenes with M6 content iteration, and the legacy v1 logistics scenario. Start the current content example with:
+The native editor opens the project hub by default. It lists every project you have opened, newest first, with its path and when its scene last changed; **Search** filters the list, and right-click offers **Show in File Manager** and **Remove from List**. **New Project…** creates a named folder and its initial `scene.json` from a template: **Empty** (a sun only) or **Basic 3D** (ground, sun, a cube and a Game view camera). **Open Project…** accepts a scene file or a folder containing `scene.json`. On first launch the hub asks for a style, then offers **Connect an AI App…** once. On Linux, **Browse…** opens the system file chooser in the project forms, **Open scene**, and **Save As**. You can also type a path. From an open editor, **File → Switch Project…** opens the picker. Choose **Back to Editor** or press Escape to return. Save or resolve pending edits before switching. **File → New Project…** opens the same form after the current scene is saved and pending edits are resolved. Start the current content example with:
 
 ```sh
 cargo run --locked -p rot-editor -- --scene examples/content/scene.json
@@ -428,7 +428,7 @@ shortcut remaps: if their keys are already assigned, the new action appears
 **Unbound** until captured in Workspace settings. Unbound actions persist safely
 and never consume input.
 
-No arguments opens an empty generic scene with explicit New/Open/recent choices. A recent scene is never opened automatically. `--scene PATH` opens a chosen scene; legacy logistics requires `--scenario PATH`. An untouched empty welcome scene closes without a discard prompt; authored changes and invalid drafts retain their recovery guards.
+Launch without arguments to open the Project Hub. Use `--scene PATH` to open a chosen scene directly. The editor upgrades supported older scenes in place to v23.
 
 Menus show current shortcuts. **Edit → Preferences…** (Ctrl+,) has General, Appearance, Viewport, Shortcuts, External Tools and AI pages; changes apply at once, each page has Reset to Defaults, and **Help → Keyboard Shortcuts…** opens the Shortcuts page, which lists every command with search and conflict warnings. Panels dock as tabs; **Window ▸ Layouts ▸ Reset Layout** restores the layout. UI scale and navigation speed are adjustable. Binding capture rejects conflicts, reserves Escape for cancellation, and offers reset. Default scene shortcuts are Ctrl+N/O/S/Shift+S, Ctrl+Z/Shift+Z, Ctrl+C/V/D, Delete, W/E/R for tools and F to frame selection. F2 renames the active object while retaining a larger selection; Ctrl+A selects every scene object, including filtered objects. Both are remappable and retain normal text-selection ownership inside fields. These are agent-selected defaults, not an accepted Unity/Unreal preset. Focused text fields, recovery/settings dialogs and active gestures own their input. Object and text clipboards remain separate as described above.
 
@@ -622,7 +622,11 @@ See the [adapter's save workflow](../rot-mcp/README.md#working-with-the-scene) f
 
 ## Export your creation
 
-**File → Export application…** (Ctrl+Shift+E, remappable) packages a clean saved current-format scene, current accepted OBJ meshes/material PNG dependencies and Lua behavior using a prepared Linux runtime template. Enter submits text fields, Tab traverses, Enter on Cancel or Escape cancels. Packaging runs off the UI thread with status/cancellation and fresh-file publication. See the [creator workflow](../../docs/CREATOR-WORKFLOW.md) for template preparation, scope, standalone execution and matching guarded MCP operations. Native MCP and direct-dialog verification pass within the recorded engineering scope; human acceptance remains separate.
+**File → Build…** packages a saved v23 scene and its runtime assets. It finds
+`rot-player` next to `rot-editor` and ships it as `application`. Choose a
+Linux folder or `.tar.gz` archive. Folder builds also offer **Build and Run**.
+See the [creator workflow](../../docs/CREATOR-WORKFLOW.md) for setup and
+running a relocated build.
 
 ## Color and native MCP viewport workflow
 

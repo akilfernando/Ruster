@@ -27,9 +27,8 @@ Familiarity for experienced Unity and Unreal creators, including everyday editor
 - **Content iteration:** search objects/assets, use contextual actions and drag a registered mesh onto an object. Explicit OBJ/shader refresh retains last-good content; derived binary caches and shared snapshots avoid unchanged parsing/full payload copies. Catalog/originals are authored; cache is disposable.
 - **Recoverable workspace:** remappable shortcuts, remembered layout/scale/camera/recent files and bounded background checkpoints. Crash recovery retains unfinished behavior sources, typed-property drafts and invalid field/name drafts as an unsaved copy, preserving externally changed originals. Physical-focus and human-familiarity acceptance remain separate.
 - **Provisional scripting workflow:** language-neutral sources, bindings and typed properties save with the scene and share bounded undo/redo and crash recovery. The generic editor includes a bounded provisional Lua 5.4 runtime, Zed/LuaLS working-copy support, and an owned debugger with breakpoints, locals, Next and Continue. Lua is not a permanent language choice; Rust remains the native application path.
-- **Independent application reuse:** the shared kit powers Yard and a non-game Motion Lab scene consumer. Both can be exported, independently edited, rebuilt and packaged as Linux development artifacts. Motion Lab consumes scenes from the generic editor; it does not replace that editor's source/history workflow. The earlier Rhai Motion Lab project format remains a separate compatibility path.
+- **Independent application reuse:** the shared kit powers Yard and a non-game Motion Lab scene consumer. Both can be exported, independently edited, rebuilt and packaged as Linux development artifacts. Motion Lab consumes scenes from the generic editor; it does not replace that editor's source/history workflow.
 - **Native MCP workflows:** an optional local MCP adapter exposes bounded scene, content, behavior, runtime and debugger tools against the displayed editor session, with revision checks and draft protection.
-- **A logistics reference application:** integer throughput simulation, saved scenarios, a schematic viewer and the original authoring workflow remain available separately.
 
 The current cumulative Linux workflow includes static GLB import and
 safe reimport, authored player view, fixed-input play checks, bounded
@@ -54,14 +53,17 @@ For a supplied evaluation source archive, extract it and enter its root director
 
 ```sh
 git clone https://github.com/akilfernando/Ruster.git
-cd Rot Engine
-cargo run --locked -p rot-editor -- --scene examples/arrangement.scene.json
+cd Ruster
+cargo build --locked -p rot-editor -p rot-player
+target/debug/rot-editor --scene examples/arrangement.scene.json
 ```
 
 To install the editor for your user, with a **Rot Engine** entry in the app
-launcher, run `python3 scripts/install_local.py`. It builds a release
-`rot-editor` and `rot-mcp` into `~/.local/bin` and keeps the version it
-replaced; `python3 scripts/install_local.py --rollback` restores that.
+launcher, run `python3 scripts/install_local.py`. It installs release builds
+of `rot-editor`, `rot-player`, and `rot-mcp` in `~/.local/bin`.
+Use `python3 scripts/install_local.py --rollback` to restore the previous
+version. The [creator workflow](docs/CREATOR-WORKFLOW.md) covers building a
+standalone Linux game from the editor.
 
 Run `cargo run --locked -p rot-editor` for a blank creation workspace. Scene sources, workspace preferences and local recovery records have separate lifetimes; see the [editor guide](crates/rot-editor/README.md).
 
@@ -100,14 +102,14 @@ Motion Lab is a non-game consumer of the shared scene runtime. Exports require t
 
 ### Try behavior scripting
 
-Open the generic Scene5 example in the editor, where behavior sources and their bindings/properties are authored with the scene:
+Open the generic scene example in the editor, where behavior sources and their bindings/properties are authored with the scene:
 
 ```sh
 cargo run --locked -p rot-editor -- --scene examples/motion-lab/resources/generic.scene.json
 cargo run --locked -p rot-motion-lab -- --scene examples/motion-lab/resources/generic.scene.json --headless --ticks 10
 ```
 
-Select an object to inspect its attached behavior. To add one, create/select an unattached object and choose **Behavior → Add behavior… → Lua follower**. Edit source or typed properties, then use **Reset** and **Play** above the viewport. Save/reopen retains behavior data with the scene; source and property edits participate in shared undo and recovery. For external editing, export or open the working copy in Zed; the editor generates LuaLS configuration and host/property types. The in-editor debugger supports source breakpoints, bounded locals, Next and Continue. Lua remains provisional, and human physical-focus/familiarity acceptance is still open. The separate legacy Rhai `project1` workflow remains available and is not silently converted to Scene5. See the [editor behavior guide](crates/rot-editor/README.md#embedded-behavior-authoring-and-execution), [Motion Lab guide](examples/motion-lab/README.md), [behavior backend](crates/rot-behavior/README.md) and [language decision gate](docs/decisions/0011-behavior-scripting-experiment.md).
+Select an object to inspect its attached behavior. To add one, create/select an unattached object and choose **Behavior → Add behavior… → Lua follower**. Edit source or typed properties, then use **Reset** and **Play** above the viewport. Save/reopen retains behavior data with the scene; source and property edits participate in shared undo and recovery. For external editing, export or open the working copy in Zed; the editor generates LuaLS configuration and host/property types. The in-editor debugger supports source breakpoints, bounded locals, Next and Continue. Lua remains provisional, and human physical-focus/familiarity acceptance is still open. See the [editor behavior guide](crates/rot-editor/README.md#embedded-behavior-authoring-and-execution), [Motion Lab guide](examples/motion-lab/README.md), [behavior backend](crates/rot-behavior/README.md) and [language decision gate](docs/decisions/0011-behavior-scripting-experiment.md).
 
 ### Imported content example
 
@@ -116,30 +118,17 @@ cargo run --locked -p rot-editor -- --scene examples/content/scene.json
 cargo run --locked -p rot-render -- --scene examples/content/scene.json --shader examples/content/scene.wgsl
 ```
 
-The project includes an original pyramid OBJ and stable-ID catalog. Use a disposable copy to try source edits, refresh and rename; see the [content workflow](crates/rot-editor/README.md#mesh-content-and-shader-iteration-m6) and [asset API/CLI](crates/rot-assets/README.md). Older supported scene files migrate on load; explicit Save writes current Scene9 data, including language-neutral behavior sources and bindings. Asset catalog operations persist independently of scene Undo/Discard.
+The project includes an original pyramid OBJ and stable-ID catalog. Use a disposable copy to try source edits, refresh and rename; see the [content workflow](crates/rot-editor/README.md#mesh-content-and-shader-iteration-m6) and [asset API/CLI](crates/rot-assets/README.md). The editor writes v23 and upgrades supported older scene files in place on open. Asset catalog operations persist independently of scene Undo/Discard.
 
 ### Optional MCP connection
 
-MCP is opt-in and currently attaches to one local Linux editor. No AI account or MCP service is required for manual use.
-
-```sh
-cargo build --locked -p rot-editor -p rot-mcp
-ROT_MCP_ENABLE=1 cargo run --locked -p rot-editor -- --scene examples/arrangement.scene.json
-```
-
-The editor prints a private socket path to stderr. Configure a stdio MCP client to launch the absolute path to `target/debug/rot-mcp` with that path in `ROT_MCP_SOCKET`. Start with `scene_inspect`; changes require the exact inspected session token and revision. Unapplied human drafts block agent edits, and agent changes share the editor's undo history.
-
-The current adapter exposes bounded tools across scene/content authoring, behavior data, runtime/debugging and explicitly granted scene persistence. The tested client is the official Python MCP SDK 2.3.0 with protocol revision 2025-06-18. The [MCP guide](crates/rot-mcp/README.md) includes client configuration, the reproducible SDK demo and connection limits. There are no shell or arbitrary file-access tools. Creator export adds shared asynchronous inspect/start/cancel with explicit `ROT_MCP_EXPORT_DIR` authority; see the [creator workflow](docs/CREATOR-WORKFLOW.md). Scene Save/SaveAs additionally requires an explicit `ROT_MCP_SAVE_DIR` grant; its independent persistence token protects against a human changing the save association.
-
-### Logistics reference
-
-```sh
-cargo run --locked -p rot-cli -- run examples/logistics.scenario.json --ticks 10
-cargo run --locked -p rot-editor -- --scenario examples/logistics.scenario.json
-cargo run --locked -p rot-viewer -- --scenario examples/logistics.scenario.json
-```
-
-The ten-tick logistics run produces 30 items, delivers 20 and leaves 10 in stock. Logistics scenarios and generic scenes have distinct identified formats; they are not silently converted. The direct-ash schematic viewer is retained as a reference experiment; new 3D work uses the shared renderer.
+Choose **Window → AI Connection… → Connect an AI App…** to register the
+adapter. From a development checkout, build it with
+`cargo build --locked -p rot-mcp` and use the executable at
+`target/debug/rot-mcp`. The editor asks for approval on the app's first
+connection. Start with `scene_inspect`. Agent edits share the editor's
+Undo history. See the [MCP guide](crates/rot-mcp/README.md) for manual
+registration and tool details.
 
 ## Development and verification
 

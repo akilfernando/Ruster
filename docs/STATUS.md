@@ -32,7 +32,8 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   textures, and fallback warnings; full PBR/animated rigs in Phase 3A/3B),
   `C-09` Build and Run (dedicated `rot-player` binary crate wired into editor
   Build and `scripts/install_local.py`; small-project Build `1.3 ms` folder /
-  `231.5 ms` `.tar.gz` and empty player startup `< 1 s`),
+  `231.5 ms` `.tar.gz`; windowed empty-scene five-frame run
+  `533 ms` median exec-to-exit),
   `C-05a`–`d`, `C-09a`, `C-13`–`C-61` authoring slices, and Phase 4 Game HUD
   labels.
 - **Open to exit Phase 2** (new `C-62+` convenience slices are frozen per
@@ -51,8 +52,8 @@ and edit transforms, lighting, cameras, colliders and opaque materials. Import
 OBJ, PNG, WAV, GLB and glTF assets. Attach Lua files, set per-object
 number, Boolean and Vector3 properties, and test gameplay in Play. Build
 packages supported scenes as a runnable Linux folder or `.tar.gz` archive.
-Approved AI apps work alongside the editor through MCP and share Undo. Legacy
-v1–v22 scenes upgrade automatically to v23 on open.
+Approved AI apps work alongside the editor through MCP and share Undo. Supported
+v1–v22 scenes upgrade in place to v23 on open.
 See the [historical inventory](PARITY-PLAN.md#2-where-we-are) and
 [backlog](BACKLOG.md).
 
