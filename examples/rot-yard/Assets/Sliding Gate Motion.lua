@@ -1,13 +1,20 @@
 -- The panel and beacon share a parent, so both positions use the same local axes.
-local updates, panel, beacon = 0, nil, nil
+local panel, beacon, light
 return {
     on_start = function(transform, props, host)
         panel = host.find("Sliding Gate Panel")
         beacon = host.find("Gate Beacon")
+        if beacon then
+            light = beacon:component("Light", "gate-beacon-light")
+        end
     end,
     on_update = function(transform, props, dt, host)
-        updates = updates + 1
-        if panel and beacon and host.button("slide_gate").held and updates > 1 then
+        local held = host.button("slide_gate").held
+        local was_lit = not light or light.intensity == 6
+        if light then
+            light:set_intensity(held and 6 or 0.25)
+        end
+        if panel and beacon and held and was_lit then
             local pose = panel.transform
             local endpoint = beacon.transform.translation[1]
             local x = pose.translation[1]

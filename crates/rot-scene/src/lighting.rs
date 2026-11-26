@@ -187,6 +187,15 @@ impl Light {
         self.name.as_deref().unwrap_or(id)
     }
 
+    pub fn validate_intensity(intensity: f64) -> Result<(), SceneError> {
+        if !(0.0..=16.0).contains(&intensity) {
+            return Err(SceneError::Invalid(
+                "light intensity must be finite in 0..=16".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), SceneError> {
         validate_name(self.name.as_deref())?;
         self.transform.validate()?;
@@ -194,11 +203,7 @@ impl Light {
             return Err(SceneError::Invalid("light scale must be exactly 1".into()));
         }
         validate_rgb(&self.color)?;
-        if !self.intensity.is_finite() || !(0.0..=16.0).contains(&self.intensity) {
-            return Err(SceneError::Invalid(
-                "light intensity must be finite in 0..=16".into(),
-            ));
-        }
+        Self::validate_intensity(f64::from(self.intensity))?;
         match self.kind {
             LightKind::Directional { shadow } => shadow.validate()?,
             LightKind::Point { range } => {

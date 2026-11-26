@@ -12,7 +12,9 @@ use rot_scene::component_scene::{
 use rot_scene::input::{ActionFrame, ActionValue, ValidatedActionFrame};
 use rot_scene::{Authoring, BehaviorSource, BindingTarget, Clip, ComponentDrawPlan, Transform};
 
-use super::lua_component::{self, CurrentCallback, Module, ModuleProbe, Modules, ObjectLookup};
+use super::lua_component::{
+    self, CurrentCallback, LightIntensities, Module, ModuleProbe, Modules, ObjectLookup,
+};
 use super::spatial::{world_collider_transform, ComponentColliderSlot};
 use super::spatial_host::{kinematic_owner_component, ComponentQueryInput};
 use super::{
@@ -45,6 +47,7 @@ pub(crate) struct ComponentWorld {
     pub(crate) hierarchy: Arc<ObjectHierarchy>,
     pub(crate) object_indices: Arc<HashMap<String, usize>>,
     pub(crate) local_transforms: Arc<Vec<Transform>>,
+    pub(crate) light_intensities: Arc<LightIntensities>,
     pub(crate) world_matrices: Vec<DMat4>,
     pub(crate) world_rotations: Vec<DQuat>,
     pub(crate) scripts: Vec<ComponentScriptSlot>,
@@ -63,19 +66,13 @@ impl ComponentWorld {
     fn resolve_staged_transforms(
         &self,
         local: &[Transform],
+        staged_lights: &LightIntensities,
     ) -> Result<(Vec<DMat4>, Vec<DQuat>, rot_scene::SceneDrawFrame), Diagnostic> {
         let mut world = Vec::with_capacity(local.len());
         let mut rotations = Vec::with_capacity(local.len());
-        let invalid = |error: rot_scene::SceneError| {
-            diag(
-                DiagnosticCode::InvalidOutput,
-                Phase::Commit,
-                &error.to_string(),
-            )
-        };
         self.scene
             .resolve_world_matrices_into(&self.hierarchy, local, &mut world)
-            .map_err(invalid)?;
+            .map_err(invalid_commit)?;
         self.scene
             .resolve_world_rotations_into(&self.hierarchy, local, &mut rotations);
         validate_component_colliders(
@@ -89,8 +86,13 @@ impl ComponentWorld {
         )?;
         let draw = self
             .draw_plan
-            .build_frame(&self.scene, &world, &rotations)
-            .map_err(invalid)?;
+            .build_frame_with_light_intensities(&self.scene, &world, &rotations, |id| {
+                staged_lights
+                    .get(id)
+                    .or_else(|| self.light_intensities.get(id))
+                    .copied()
+            })
+            .map_err(invalid_commit)?;
         Ok((world, rotations, draw))
     }
 }
@@ -99,10 +101,19 @@ fn diag(code: DiagnosticCode, phase: Phase, message: &str) -> Diagnostic {
     Diagnostic::plain(code, phase, message)
 }
 
-fn stage_file_transforms(
+fn invalid_commit(error: rot_scene::SceneError) -> Diagnostic {
+    diag(
+        DiagnosticCode::InvalidOutput,
+        Phase::Commit,
+        &error.to_string(),
+    )
+}
+
+fn stage_file_writes(
     callback: &CurrentCallback,
     committed: &[Transform],
     staged: &mut Option<Vec<Transform>>,
+    staged_lights: &mut LightIntensities,
     owner_index: usize,
     implicit: Option<Transform>,
 ) {
@@ -111,9 +122,7 @@ fn stage_file_transforms(
             staged.get_or_insert_with(|| committed.to_vec())[index] = pose;
         }
     };
-    for (index, pose) in callback.take_writes() {
-        stage(index, pose);
-    }
+    callback.stage_writes(&mut stage, staged_lights);
     if let Some(pose) = implicit {
         if !same_transform(&committed[owner_index], &pose) {
             stage(owner_index, pose);
@@ -240,10 +249,16 @@ impl Engine {
             runtime.commit_revision,
             true,
         );
-        let callback =
-            CurrentCallback::new(&self.lua, &input, &modules.lookup, &world.local_transforms);
+        let callback = CurrentCallback::new(
+            &self.lua,
+            &input,
+            &modules.lookup,
+            &world.local_transforms,
+            &world.light_intensities,
+        );
         let mut replacements = Vec::new();
         let mut staged_transforms = None;
+        let mut staged_lights = LightIntensities::new();
         for index in affected {
             let slot = &world.scripts[index];
             let binding = &runtime.authoring.bindings[&slot.component_id];
@@ -271,10 +286,11 @@ impl Engine {
                     &world.local_transforms[slot.owner_index],
                     &binding.properties,
                 )?;
-                stage_file_transforms(
+                stage_file_writes(
                     &callback,
                     &world.local_transforms,
                     &mut staged_transforms,
+                    &mut staged_lights,
                     slot.owner_index,
                     implicit,
                 );
@@ -296,7 +312,7 @@ impl Engine {
             replacements.push((index, module));
         }
         if let Some(trial) = staged_transforms {
-            world.resolve_staged_transforms(&trial)?;
+            world.resolve_staged_transforms(&trial, &staged_lights)?;
         }
         self.check_cancelled()?;
         modules.instances.extend(replacements);
@@ -567,6 +583,7 @@ impl Engine {
 
         let mut modules = BTreeMap::new();
         let mut lookup = None;
+        let mut start_lights = LightIntensities::new();
         if !scripts.is_empty() {
             let input = ValidatedActionFrame::neutral(&authoring.actions).map_err(|error| {
                 diag(
@@ -655,9 +672,16 @@ impl Engine {
                         protected,
                     ))
                 });
-            let callback = lookup
-                .as_ref()
-                .map(|lookup| CurrentCallback::new(&self.lua, &input, lookup, &local_transforms));
+            let authored_lights = Arc::default();
+            let callback = lookup.as_ref().map(|lookup| {
+                CurrentCallback::new(
+                    &self.lua,
+                    &input,
+                    lookup,
+                    &local_transforms,
+                    &authored_lights,
+                )
+            });
             for (index, slot) in scripts.iter().enumerate() {
                 let mut module = None;
                 let output = self.evaluate_component_binding(
@@ -675,10 +699,11 @@ impl Engine {
                 )?;
                 if let Some(module) = module {
                     modules.insert(index, module);
-                    stage_file_transforms(
+                    stage_file_writes(
                         callback.as_ref().expect("file callback snapshot"),
                         &local_transforms,
                         &mut start_transforms,
+                        &mut start_lights,
                         slot.owner_index,
                         output.transform,
                     );
@@ -759,14 +784,17 @@ impl Engine {
                     Phase::Commit,
                 )?;
                 draw_frame = draw_plan
-                    .build_frame(scene, &world_matrices, &world_rotations)
-                    .map_err(|error| {
-                        diag(
-                            DiagnosticCode::InvalidOutput,
-                            Phase::Commit,
-                            &error.to_string(),
-                        )
-                    })?;
+                    .build_frame_with_light_intensities(
+                        scene,
+                        &world_matrices,
+                        &world_rotations,
+                        |id| start_lights.get(id).copied(),
+                    )
+                    .map_err(invalid_commit)?;
+            } else if !start_lights.is_empty() {
+                draw_frame = draw_frame
+                    .with_light_intensities(&start_lights)
+                    .map_err(invalid_commit)?;
             }
         }
 
@@ -803,6 +831,7 @@ impl Engine {
                 hierarchy,
                 object_indices,
                 local_transforms,
+                light_intensities: Arc::new(start_lights),
                 world_matrices,
                 world_rotations,
                 scripts,
@@ -896,6 +925,7 @@ impl Engine {
             runtime.kinematic_owner.as_ref(),
         )?;
         let mut staged_transforms: Option<Vec<Transform>> = None;
+        let mut staged_lights = LightIntensities::new();
         let mut staged_state = runtime.state.clone();
         let mut pressed = Vec::new();
         for (index, animation) in world.animations.iter().enumerate() {
@@ -938,6 +968,7 @@ impl Engine {
                 &validated,
                 &modules.lookup,
                 &world.local_transforms,
+                &world.light_intensities,
             )
         });
         for (index, slot) in world.scripts.iter().enumerate() {
@@ -973,10 +1004,11 @@ impl Engine {
                         runtime.authoring.sources.get(&binding.source_id),
                     )
                 })?;
-                stage_file_transforms(
+                stage_file_writes(
                     callback.as_ref().expect("file callback snapshot"),
                     &world.local_transforms,
                     &mut staged_transforms,
+                    &mut staged_lights,
                     slot.owner_index,
                     implicit,
                 );
@@ -1021,8 +1053,12 @@ impl Engine {
 
         let staged_frames = staged_transforms
             .as_ref()
-            .map(|local| world.resolve_staged_transforms(local))
+            .map(|local| world.resolve_staged_transforms(local, &staged_lights))
             .transpose()?;
+        let staged_light_frame = (staged_frames.is_none() && !staged_lights.is_empty())
+            .then(|| runtime.draw_frame.with_light_intensities(&staged_lights))
+            .transpose()
+            .map_err(invalid_commit)?;
 
         staged_state.validate_total()?;
         let transform_camera = staged_frames
@@ -1044,17 +1080,33 @@ impl Engine {
             commit_revision,
             cues,
         });
+        let world_mut = runtime
+            .component_world
+            .as_mut()
+            .expect("component world checked above");
         if let (Some(next_local), Some((next_world, next_rot, next_draw))) =
             (staged_transforms, staged_frames)
         {
             runtime.draw_frame = next_draw;
-            let world_mut = runtime
-                .component_world
-                .as_mut()
-                .expect("component world checked above");
             world_mut.local_transforms = Arc::new(next_local);
             world_mut.world_matrices = next_world;
             world_mut.world_rotations = next_rot;
+        } else if let Some(frame) = staged_light_frame {
+            runtime.draw_frame = frame;
+        }
+        if !staged_lights.is_empty() {
+            let lookup = &modules
+                .as_ref()
+                .expect("light writes require Lua modules")
+                .lookup;
+            let committed = Arc::make_mut(&mut world_mut.light_intensities);
+            for (id, intensity) in staged_lights {
+                if intensity == lookup.authored_light_intensity(&id) {
+                    committed.remove(&id);
+                } else {
+                    committed.insert(id, intensity);
+                }
+            }
         }
         for index in pressed {
             runtime.animation_starts[index] = Some(next);
@@ -1527,6 +1579,258 @@ mod tests {
             transform: Transform::default(),
             components,
         });
+    }
+
+    fn test_light(id: &str, kind: LightKind) -> ComponentInstance {
+        ComponentInstance {
+            id: id.into(),
+            enabled: true,
+            kind: Component::Light {
+                color: [1.0; 3],
+                intensity: 0.25,
+                kind,
+            },
+        }
+    }
+
+    fn rendered_intensity(runtime: &Runtime, id: &str) -> f32 {
+        runtime
+            .draw_frame()
+            .hierarchy()
+            .unwrap()
+            .lighting()
+            .light(id)
+            .unwrap()
+            .intensity
+    }
+
+    #[test]
+    fn light_only_commits_share_geometry_and_survive_transform_rebuilds() {
+        let mut scene = shared_module_scene(
+            r#"
+            local lamp, point, ticks
+            return {
+                on_start = function(transform, props, host)
+                    lamp = host.find("lamp")
+                    point = lamp:component("Light")
+                    ticks = 0
+                    point:set_intensity(2)
+                    lamp:component("Light", "a-spot"):set_intensity(3)
+                    lamp:component("Light", "sun"):set_intensity(4)
+                    if host.find("left"):component("Light", "point") ~= nil
+                        or lamp:component("Light", "missing") ~= nil
+                        or lamp:component("light", "point") ~= nil then
+                        transform.translation[3] = 99
+                    end
+                end,
+                on_update = function()
+                    ticks = ticks + 1
+                    if ticks <= 2 then
+                        point:set_intensity(6)
+                    else
+                        local pose = lamp.transform
+                        pose.translation[1] = ticks
+                        lamp:set_transform(pose)
+                        if ticks == 4 then point:set_intensity(8) end
+                    end
+                end,
+            }
+            "#,
+        );
+        scene.objects.truncate(1);
+        add_test_object(
+            &mut scene,
+            "lamp",
+            None,
+            vec![
+                test_light("point", LightKind::Point { range: 8.0 }),
+                test_light(
+                    "a-spot",
+                    LightKind::Spot {
+                        range: 8.0,
+                        inner_degrees: 15.0,
+                        outer_degrees: 30.0,
+                    },
+                ),
+                test_light(
+                    "sun",
+                    LightKind::Directional {
+                        shadow: Default::default(),
+                    },
+                ),
+                ComponentInstance {
+                    id: "lamp-mesh".into(),
+                    enabled: true,
+                    kind: Component::MeshRenderer {
+                        geometry: Geometry::Cube,
+                        tint: [1.0; 4],
+                        material: None,
+                    },
+                },
+            ],
+        );
+        add_test_object(
+            &mut scene,
+            "camera",
+            None,
+            vec![ComponentInstance {
+                id: "camera-view".into(),
+                enabled: true,
+                kind: Component::Camera {
+                    view: CameraView::transform_perspective(50.0),
+                },
+            }],
+        );
+        scene.gameplay_camera = Some("camera-view".into());
+        let mut engine = Engine::new(Limits::default()).unwrap();
+        let mut runtime = engine.reset_component(&scene, 0).unwrap();
+        assert_eq!(runtime.object_translation("left"), Some([0.0; 3]));
+        assert_eq!(rendered_intensity(&runtime, "point"), 2.0);
+        assert_eq!(rendered_intensity(&runtime, "a-spot"), 3.0);
+        assert_eq!(rendered_intensity(&runtime, "sun"), 4.0);
+        let initial_frame = runtime.draw_frame().clone();
+        let world_buffer = runtime.world_matrices().unwrap().as_ptr();
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(rendered_intensity(&runtime, "point"), 6.0);
+        assert_eq!(
+            initial_frame
+                .hierarchy()
+                .unwrap()
+                .lighting()
+                .light("point")
+                .unwrap()
+                .intensity,
+            2.0
+        );
+        let lit = runtime.draw_frame().clone();
+        assert!(Arc::ptr_eq(&initial_frame.snapshot(), &lit.snapshot()));
+        assert_eq!(
+            initial_frame.hierarchy().unwrap().matrices().as_ptr(),
+            lit.hierarchy().unwrap().matrices().as_ptr()
+        );
+        assert_eq!(world_buffer, runtime.world_matrices().unwrap().as_ptr());
+        assert!(lit.transform_camera().is_some());
+        assert_eq!(initial_frame.transform_camera(), lit.transform_camera());
+        engine.step(&mut runtime).unwrap();
+        assert!(Arc::ptr_eq(
+            lit.hierarchy().unwrap(),
+            runtime.draw_frame().hierarchy().unwrap()
+        ));
+
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.object_translation("lamp"), Some([3.0, 0.0, 0.0]));
+        assert_eq!(rendered_intensity(&runtime, "point"), 6.0);
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.object_translation("lamp"), Some([4.0, 0.0, 0.0]));
+        assert_eq!(rendered_intensity(&runtime, "point"), 8.0);
+        let updated = runtime.updated_component_scene().unwrap();
+        let mut bytes = Vec::new();
+        updated.write_json(&mut bytes).unwrap();
+        let wire: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            wire["scene"]["objects"][1]["components"][0]["intensity"],
+            8.0
+        );
+
+        let replacement = file_script(
+            r#"
+            local light
+            return {
+                on_start = function(transform, props, host)
+                    light = host.find("lamp"):component("Light")
+                    light:set_intensity(12)
+                end,
+                on_update = function() light:set_intensity(0.25) end,
+            }
+        "#,
+        );
+        assert!(engine
+            .reload_component_file(&mut runtime, GATE_FILE_ID, replacement)
+            .unwrap());
+        assert_eq!(rendered_intensity(&runtime, "point"), 8.0);
+        assert_eq!(runtime.tick(), 4);
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(rendered_intensity(&runtime, "point"), 0.25);
+        assert!(!runtime
+            .component_world
+            .as_ref()
+            .unwrap()
+            .light_intensities
+            .contains_key("point"));
+    }
+
+    #[test]
+    fn light_writes_follow_callback_order_and_roll_back_with_transforms() {
+        let mut scene = shared_module_scene(
+            r#"
+            local lamp, light, ticks
+            return {
+                on_start = function(transform, props, host)
+                    lamp = host.find("lamp")
+                    light = lamp:component("Light", "point")
+                    ticks = 0
+                    if props.speed == 1 then
+                        light:set_intensity(2)
+                    else
+                        transform.translation[3] = light.intensity
+                        light:set_intensity(3)
+                    end
+                end,
+                on_update = function(transform, props)
+                    ticks = ticks + 1
+                    if props.speed == 1 then
+                        light:set_intensity(5)
+                        if ticks == 3 then
+                            local pose = lamp.transform
+                            pose.translation[1] = 4
+                            lamp:set_transform(pose)
+                        end
+                    else
+                        transform.translation[2] = light.intensity
+                        if ticks == 1 then
+                            light:set_intensity(light.intensity)
+                        elseif ticks == 2 then
+                            light:set_intensity(6)
+                        else
+                            light:set_intensity(16.00000001)
+                        end
+                    end
+                end,
+            }
+            "#,
+        );
+        scene.objects.swap(0, 1);
+        add_test_object(
+            &mut scene,
+            "lamp",
+            None,
+            vec![test_light("point", LightKind::Point { range: 8.0 })],
+        );
+        let mut engine = Engine::new(Limits::default()).unwrap();
+        let mut runtime = engine.reset_component(&scene, 0).unwrap();
+        assert_eq!(rendered_intensity(&runtime, "point"), 3.0);
+        assert_eq!(runtime.object_translation("right"), Some([0.0, 0.0, 0.25]));
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(rendered_intensity(&runtime, "point"), 3.0);
+        assert_eq!(runtime.object_translation("right"), Some([0.0, 3.0, 0.25]));
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(rendered_intensity(&runtime, "point"), 6.0);
+
+        let last_frame = runtime.draw_frame().clone();
+        let error = engine.step(&mut runtime).unwrap_err();
+        assert_eq!(error.binding_id.as_deref(), Some("right-script"));
+        assert!(error.line.is_some());
+        assert!(error
+            .message
+            .contains("light intensity must be finite in 0..=16"));
+        assert_eq!(runtime.tick(), 2);
+        assert_eq!(runtime.object_translation("lamp"), Some([0.0; 3]));
+        assert_eq!(runtime.object_translation("right"), Some([0.0, 3.0, 0.25]));
+        assert_eq!(rendered_intensity(&runtime, "point"), 6.0);
+        assert!(Arc::ptr_eq(
+            last_frame.hierarchy().unwrap(),
+            runtime.draw_frame().hierarchy().unwrap()
+        ));
     }
 
     #[test]

@@ -534,6 +534,13 @@ Rot Yard’s gate controller uses this to move its panel to the beacon’s
 local X position. Move the beacon in the Inspector, then start Play and
 hold **Space**.
 
+Use `object:component("Light", "component-id")` to get a Light on that
+object. Omit the ID to use its first Light, or supply the ID to select
+one when the object has several. Missing components return `nil`. Read
+`light.intensity` and call `light:set_intensity(value)` with a number from
+0 to 16. The write commits with the rest of the tick. Rot Yard’s beacon
+brightens while **Space** is held and returns to its idle level on release.
+
 ## Bind keyboard actions to Lua in v23
 
 Open **Edit → Project Settings… → Input Actions**, or find **Input Actions…**

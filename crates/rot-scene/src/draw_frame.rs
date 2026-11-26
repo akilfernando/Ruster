@@ -72,6 +72,44 @@ impl SceneDrawFrame {
         self.transform_camera
     }
 
+    /// Replace visible component light intensities while retaining resolved geometry and camera.
+    pub fn with_light_intensities(
+        &self,
+        intensities: &BTreeMap<String, f32>,
+    ) -> Result<Self, SceneError> {
+        let hierarchy = self
+            .hierarchy
+            .as_ref()
+            .filter(|_| self.component_backed)
+            .ok_or_else(|| {
+                SceneError::Invalid("light overrides require a component draw frame".into())
+            })?;
+        let mut lighting = None;
+        for (id, &intensity) in intensities {
+            Light::validate_intensity(f64::from(intensity))?;
+            if hierarchy
+                .lighting
+                .light(id)
+                .is_some_and(|light| light.intensity != intensity)
+            {
+                let Lighting::Authored { lights, .. } =
+                    lighting.get_or_insert_with(|| (*hierarchy.lighting).clone())
+                else {
+                    unreachable!("resolved component lights are authored")
+                };
+                lights.get_mut(id).expect("resolved light").intensity = intensity;
+            }
+        }
+        let mut next = self.clone();
+        if let Some(lighting) = lighting {
+            next.hierarchy = Some(Arc::new(HierarchyDraw {
+                lighting: Arc::new(lighting),
+                ..(**hierarchy).clone()
+            }));
+        }
+        Ok(next)
+    }
+
     /// Unrestricted mutation invalidates prepared matrices before any write.
     pub fn scene_mut(&mut self) -> &mut Scene {
         self.hierarchy = None;
@@ -82,7 +120,7 @@ impl SceneDrawFrame {
 
 #[derive(Clone, Debug)]
 pub struct HierarchyDraw {
-    matrices: Vec<Mat4>,
+    matrices: Arc<Vec<Mat4>>,
     lighting: Arc<Lighting>,
     player_view: Option<ResolvedPlayerView>,
     has_attached_lights: bool,
@@ -107,7 +145,7 @@ impl HierarchyDraw {
             }
         }
         Self {
-            matrices,
+            matrices: Arc::new(matrices),
             lighting: Arc::new(lighting),
             player_view,
             has_attached_lights: false,
@@ -137,7 +175,7 @@ impl HierarchyDraw {
         player_view: Option<ResolvedPlayerView>,
     ) -> Self {
         Self {
-            matrices,
+            matrices: Arc::new(matrices),
             lighting,
             player_view,
             has_attached_lights: true,
@@ -151,8 +189,12 @@ impl HierarchyDraw {
         attached: impl IntoIterator<Item = (&'a str, Transform)>,
         player_view: Option<ResolvedPlayerView>,
     ) {
-        for (index, matrix) in leaves {
-            self.matrices[index] = matrix;
+        let mut leaves = leaves.into_iter().peekable();
+        if leaves.peek().is_some() {
+            let matrices = Arc::make_mut(&mut self.matrices);
+            for (index, matrix) in leaves {
+                matrices[index] = matrix;
+            }
         }
         let mut attached = attached.into_iter().peekable();
         if attached.peek().is_some() {
@@ -388,6 +430,17 @@ impl ComponentDrawPlan {
         world: &[DMat4],
         rotations: &[DQuat],
     ) -> Result<SceneDrawFrame, SceneError> {
+        self.build_frame_with_light_intensities(scene, world, rotations, |_| None)
+    }
+
+    /// Apply runtime intensity overrides when rebuilding from component poses.
+    pub fn build_frame_with_light_intensities(
+        &self,
+        scene: &ComponentScene,
+        world: &[DMat4],
+        rotations: &[DQuat],
+        intensity_for: impl Fn(&str) -> Option<f32>,
+    ) -> Result<SceneDrawFrame, SceneError> {
         let mut matrices = Vec::with_capacity(self.draw_owners.len());
         for &owner in &self.draw_owners {
             matrices.push(component_draw_matrix(
@@ -407,7 +460,11 @@ impl ComponentDrawPlan {
                     &scene.objects[entry.owner_index].id,
                     entry.is_spot.then_some(rotations[entry.owner_index]),
                 )?;
-                lights.get_mut(&entry.id).expect("planned light").transform = pose;
+                let light = lights.get_mut(&entry.id).expect("planned light");
+                light.transform = pose;
+                if let Some(intensity) = intensity_for(&entry.id) {
+                    light.intensity = intensity;
+                }
             }
             lighting.validate()?;
         }

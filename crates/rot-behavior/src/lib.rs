@@ -342,6 +342,21 @@ impl Runtime {
         for (object, transform) in scene.objects.iter_mut().zip(world.local_transforms.iter()) {
             object.transform = transform.clone();
         }
+        if !world.light_intensities.is_empty() {
+            for component in scene
+                .objects
+                .iter_mut()
+                .flat_map(|object| &mut object.components)
+            {
+                if let rot_scene::component_scene::Component::Light { intensity, .. } =
+                    &mut component.kind
+                {
+                    if let Some(&value) = world.light_intensities.get(&component.id) {
+                        *intensity = value;
+                    }
+                }
+            }
+        }
         Some(scene)
     }
     pub fn materialized_scene(&self) -> Scene {

@@ -5,9 +5,9 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use mlua::{Function, Lua, Table, UserData, UserDataFields, UserDataMethods, Value};
-use rot_scene::component_scene::ObjectNode;
+use rot_scene::component_scene::{Component, ObjectNode};
 use rot_scene::input::ValidatedActionFrame;
-use rot_scene::{BehaviorSource, PropertyValue, Transform};
+use rot_scene::{BehaviorSource, Light, PropertyValue, Transform};
 
 use super::{
     action_axis, action_button, base_environment, property_value, read_transform, same_transform,
@@ -84,6 +84,16 @@ pub(super) struct ObjectLookup {
     ids: Arc<HashMap<String, usize>>,
     names: HashMap<String, usize>,
     protected: HashMap<usize, String>,
+    lights: Vec<LightSlot>,
+    light_indices: HashMap<String, usize>,
+    first_light_indices: HashMap<usize, usize>,
+}
+
+#[derive(Debug)]
+struct LightSlot {
+    id: String,
+    owner: usize,
+    authored_intensity: f32,
 }
 
 impl ObjectLookup {
@@ -93,8 +103,22 @@ impl ObjectLookup {
         protections: HashMap<usize, &'static str>,
     ) -> Self {
         let mut names = HashMap::with_capacity(objects.len());
+        let mut lights = Vec::new();
+        let mut light_indices = HashMap::new();
+        let mut first_light_indices = HashMap::new();
         for (index, object) in objects.iter().enumerate() {
             names.entry(object.name.clone()).or_insert(index);
+            for component in &object.components {
+                if let Component::Light { intensity, .. } = &component.kind {
+                    first_light_indices.entry(index).or_insert(lights.len());
+                    light_indices.insert(component.id.clone(), lights.len());
+                    lights.push(LightSlot {
+                        id: component.id.clone(),
+                        owner: index,
+                        authored_intensity: *intensity,
+                    });
+                }
+            }
         }
         let protected = protections
             .into_iter()
@@ -107,7 +131,14 @@ impl ObjectLookup {
             ids,
             names,
             protected,
+            lights,
+            light_indices,
+            first_light_indices,
         }
+    }
+
+    pub(super) fn authored_light_intensity(&self, id: &str) -> f32 {
+        self.lights[self.light_indices[id]].authored_intensity
     }
 }
 
@@ -115,11 +146,36 @@ impl ObjectLookup {
 /// guard shares its flat transform array without retaining it in the VM.
 pub(super) struct CurrentCallback(Lua);
 
+pub(super) type LightIntensities = BTreeMap<String, f32>;
+
+#[derive(Default)]
+struct CallbackWrites {
+    transforms: BTreeMap<usize, Transform>,
+    // None is an explicit restoration of the committed intensity.
+    light_intensities: BTreeMap<usize, Option<f32>>,
+}
+
 struct CallbackSnapshot {
     input: ValidatedActionFrame,
     lookup: Rc<ObjectLookup>,
     transforms: Arc<Vec<Transform>>,
-    writes: RefCell<BTreeMap<usize, Transform>>,
+    light_intensities: Arc<LightIntensities>,
+    writes: RefCell<CallbackWrites>,
+}
+
+impl CallbackSnapshot {
+    fn owns(&self, lookup: &Weak<ObjectLookup>) -> bool {
+        lookup
+            .upgrade()
+            .is_some_and(|owner| Rc::ptr_eq(&owner, &self.lookup))
+    }
+
+    fn intensity(&self, light: &LightSlot) -> f32 {
+        self.light_intensities
+            .get(&light.id)
+            .copied()
+            .unwrap_or(light.authored_intensity)
+    }
 }
 
 impl CurrentCallback {
@@ -128,23 +184,40 @@ impl CurrentCallback {
         input: &ValidatedActionFrame,
         lookup: &Rc<ObjectLookup>,
         transforms: &Arc<Vec<Transform>>,
+        light_intensities: &Arc<LightIntensities>,
     ) -> Self {
         let previous = lua.set_app_data(CallbackSnapshot {
             input: input.clone(),
             lookup: Rc::clone(lookup),
             transforms: Arc::clone(transforms),
+            light_intensities: Arc::clone(light_intensities),
             writes: RefCell::default(),
         });
         debug_assert!(previous.is_none());
         Self(lua.clone())
     }
 
-    pub(super) fn take_writes(&self) -> BTreeMap<usize, Transform> {
-        self.0
+    pub(super) fn stage_writes(
+        &self,
+        mut stage_transform: impl FnMut(usize, Transform),
+        lights: &mut LightIntensities,
+    ) {
+        let snapshot = self
+            .0
             .app_data_ref::<CallbackSnapshot>()
-            .expect("live callback snapshot")
-            .writes
-            .take()
+            .expect("live callback snapshot");
+        let writes = snapshot.writes.take();
+        for (index, pose) in writes.transforms {
+            stage_transform(index, pose);
+        }
+        for (index, intensity) in writes.light_intensities {
+            let id = &snapshot.lookup.lights[index].id;
+            if let Some(intensity) = intensity {
+                lights.insert(id.clone(), intensity);
+            } else {
+                lights.remove(id);
+            }
+        }
     }
 }
 
@@ -166,8 +239,7 @@ struct ObjectHandle {
 
 impl ObjectHandle {
     fn index_in(&self, snapshot: &CallbackSnapshot) -> Option<usize> {
-        let owner = self.lookup.upgrade()?;
-        Rc::ptr_eq(&owner, &snapshot.lookup).then_some(self.index)
+        snapshot.owns(&self.lookup).then_some(self.index)
     }
 }
 
@@ -199,7 +271,91 @@ impl UserData for ObjectHandle {
                 }
                 return Err(mlua::Error::runtime(reason.as_str()));
             }
-            snapshot.writes.borrow_mut().insert(index, transform);
+            snapshot
+                .writes
+                .borrow_mut()
+                .transforms
+                .insert(index, transform);
+            Ok(())
+        });
+        methods.add_method(
+            "component",
+            |lua, object, (kind, id): (mlua::LuaString, Option<mlua::LuaString>)| {
+                let snapshot = current_callback(lua)?;
+                let Some(owner) = object.index_in(&snapshot) else {
+                    return Ok(None);
+                };
+                if kind.as_bytes().as_ref() != b"Light" {
+                    return Ok(None);
+                }
+                let index = if let Some(id) = id {
+                    if id.as_bytes().len() > 128 {
+                        return Ok(None);
+                    }
+                    let Ok(id) = id.to_str() else {
+                        return Ok(None);
+                    };
+                    snapshot.lookup.light_indices.get(id.as_ref())
+                } else {
+                    snapshot.lookup.first_light_indices.get(&owner)
+                };
+                index
+                    .filter(|&&index| snapshot.lookup.lights[index].owner == owner)
+                    .map(|&index| {
+                        lua.create_userdata(LightHandle {
+                            lookup: Rc::downgrade(&snapshot.lookup),
+                            index,
+                        })
+                    })
+                    .transpose()
+            },
+        );
+    }
+}
+
+struct LightHandle {
+    lookup: Weak<ObjectLookup>,
+    index: usize,
+}
+
+impl LightHandle {
+    fn slot<'a>(&self, snapshot: &'a CallbackSnapshot) -> Option<&'a LightSlot> {
+        snapshot
+            .owns(&self.lookup)
+            .then(|| &snapshot.lookup.lights[self.index])
+    }
+}
+
+impl UserData for LightHandle {
+    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("intensity", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            Ok(handle
+                .slot(&snapshot)
+                .map(|light| snapshot.intensity(light)))
+        });
+    }
+
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("set_intensity", |lua, handle, value: Value| {
+            let snapshot = current_callback(lua)?;
+            let light = handle.slot(&snapshot).ok_or_else(|| {
+                mlua::Error::runtime("set_intensity requires a Light from the current Play session")
+            })?;
+            let intensity = match value {
+                Value::Number(value) => value,
+                Value::Integer(value) => value as f64,
+                _ => return Err(mlua::Error::runtime("light intensity requires a number")),
+            };
+            Light::validate_intensity(intensity)
+                .map_err(|error| mlua::Error::runtime(error.to_string()))?;
+            let intensity = intensity as f32;
+            let change = (intensity != snapshot.intensity(light)).then_some(intensity);
+            snapshot
+                .writes
+                .borrow_mut()
+                .light_intensities
+                .insert(handle.index, change);
             Ok(())
         });
     }
