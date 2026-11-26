@@ -19,6 +19,13 @@ when the project opens.
   The scene has 5,000 objects, including 714 linked instances of
   `Assets/Riverside.prefab`. The shared subdivided roof mesh and the cottage
   details make up about one million triangles. Play uses the overview camera.
+- **Gallery (Phase 3B Reference Interior).** Open `gallery.scene.json` to
+  inspect a multi-light interior using Surface HDR, 4-cascade CSM sun shadows
+  through the clerestory, spot/point shadow atlas casters, 15 clustered local
+  lights, exponential-squared height fog, SSAO, bloom, ACES Fitted tonemapping,
+  and `4× MSAA`. Switch viewport shading modes (`Lit`, `Wireframe`, `Normals`,
+  `Roughness`, `Metallic`, `Albedo`, `AO`, `Depth`, `Clusters`, `Cascades`)
+  from the viewport toolbar or `Alt+2..5`.
 - **Standalone.** From the title scene, choose **File → Build…** and select
   a Linux output folder. Run `application` from that folder and click
   **Start**. Click the Game view, then hold **Space** to slide the

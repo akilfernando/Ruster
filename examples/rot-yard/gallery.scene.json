@@ -1,0 +1,2802 @@
+{
+  "format": "rot-scene",
+  "format_version": 23,
+  "scene": {
+    "id": "rot-gallery",
+    "objects": [
+      {
+        "id": "gallery-camera",
+        "name": "Gallery Camera",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            2.5,
+            6.8
+          ],
+          "rotation": [
+            -0.07,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "gallery-main-camera",
+            "enabled": true,
+            "type": "camera",
+            "view": {
+              "type": "transform_perspective",
+              "vertical_fov_degrees": 54.0,
+              "aspect_ratio": 1.7777778,
+              "clip": {
+                "near": 0.2,
+                "far": 80.0
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "gallery-sun",
+        "name": "Clerestory Sun",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            8.0,
+            0.0
+          ],
+          "rotation": [
+            -0.6,
+            -1.1,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "gallery-sun-light",
+            "enabled": true,
+            "type": "light",
+            "color": [
+              1.0,
+              0.94,
+              0.84
+            ],
+            "intensity": 3.2,
+            "kind": {
+              "type": "directional",
+              "shadow": {
+                "enabled": true,
+                "quality": "high",
+                "depth_bias_texels": 1.5,
+                "normal_bias_texels": 2.0
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "hero-spot",
+        "name": "Hero Spot Light",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            5.6,
+            -0.2
+          ],
+          "rotation": [
+            -1.15,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "hero-spot-light",
+            "enabled": true,
+            "type": "light",
+            "color": [
+              1.0,
+              0.95,
+              0.86
+            ],
+            "intensity": 14.0,
+            "kind": {
+              "type": "spot",
+              "range": 14.0,
+              "inner_degrees": 16.0,
+              "outer_degrees": 34.0,
+              "shadow": {
+                "enabled": true,
+                "depth_bias_texels": 1.2,
+                "normal_bias_texels": 1.5
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "alcove-spot",
+        "name": "Alcove Spot Light",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            5.6,
+            -11.5
+          ],
+          "rotation": [
+            -1.1,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "alcove-spot-light",
+            "enabled": true,
+            "type": "light",
+            "color": [
+              1.0,
+              0.74,
+              0.38
+            ],
+            "intensity": 14.0,
+            "kind": {
+              "type": "spot",
+              "range": 12.0,
+              "inner_degrees": 14.0,
+              "outer_degrees": 32.0,
+              "shadow": {
+                "enabled": true,
+                "depth_bias_texels": 1.2,
+                "normal_bias_texels": 1.5
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "center-point",
+        "name": "Central Hall Shadow Point",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            4.3,
+            -5.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "center-point-light",
+            "enabled": true,
+            "type": "light",
+            "color": [
+              0.95,
+              0.96,
+              1.0
+            ],
+            "intensity": 7.5,
+            "kind": {
+              "type": "point",
+              "range": 14.0,
+              "shadow": {
+                "enabled": true,
+                "depth_bias_texels": 1.6,
+                "normal_bias_texels": 2.0
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "floor",
+        "name": "Floor",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            -0.25,
+            -4.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            14.0,
+            0.5,
+            26.0
+          ]
+        },
+        "components": [
+          {
+            "id": "floor-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "slate_floor"
+          }
+        ]
+      },
+      {
+        "id": "ceiling",
+        "name": "Ceiling",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            6.45,
+            -4.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            14.0,
+            0.5,
+            26.0
+          ]
+        },
+        "components": [
+          {
+            "id": "ceiling-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "stone_wall"
+          }
+        ]
+      },
+      {
+        "id": "back-wall",
+        "name": "Back Wall",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            3.1,
+            -17.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            14.0,
+            6.4,
+            0.5
+          ]
+        },
+        "components": [
+          {
+            "id": "back-wall-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "stone_wall"
+          }
+        ]
+      },
+      {
+        "id": "front-wall",
+        "name": "Front Wall",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            3.1,
+            9.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            14.0,
+            6.4,
+            0.5
+          ]
+        },
+        "components": [
+          {
+            "id": "front-wall-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "stone_wall"
+          }
+        ]
+      },
+      {
+        "id": "right-wall",
+        "name": "Right Wall",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            6.75,
+            3.1,
+            -4.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.5,
+            6.4,
+            26.0
+          ]
+        },
+        "components": [
+          {
+            "id": "right-wall-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "stone_wall"
+          }
+        ]
+      },
+      {
+        "id": "left-wall-lower",
+        "name": "Left Wall Lower",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -6.75,
+            1.8,
+            -4.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.5,
+            3.6,
+            26.0
+          ]
+        },
+        "components": [
+          {
+            "id": "left-wall-lower-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "stone_wall"
+          }
+        ]
+      },
+      {
+        "id": "left-wall-lintel",
+        "name": "Left Wall Lintel",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -6.75,
+            5.9,
+            -4.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.5,
+            1.0,
+            26.0
+          ]
+        },
+        "components": [
+          {
+            "id": "left-wall-lintel-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "stone_wall"
+          }
+        ]
+      },
+      {
+        "id": "mullion-0",
+        "name": "Clerestory Mullion 1",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -6.75,
+            4.5,
+            2.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.45,
+            1.8,
+            0.5
+          ]
+        },
+        "components": [
+          {
+            "id": "mullion-0-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "beam-0",
+        "name": "Ceiling Beam 1",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            5.95,
+            2.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            13.0,
+            0.5,
+            0.45
+          ]
+        },
+        "components": [
+          {
+            "id": "beam-0-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "mullion-1",
+        "name": "Clerestory Mullion 2",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -6.75,
+            4.5,
+            -2.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.45,
+            1.8,
+            0.5
+          ]
+        },
+        "components": [
+          {
+            "id": "mullion-1-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "beam-1",
+        "name": "Ceiling Beam 2",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            5.95,
+            -2.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            13.0,
+            0.5,
+            0.45
+          ]
+        },
+        "components": [
+          {
+            "id": "beam-1-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "mullion-2",
+        "name": "Clerestory Mullion 3",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -6.75,
+            4.5,
+            -6.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.45,
+            1.8,
+            0.5
+          ]
+        },
+        "components": [
+          {
+            "id": "mullion-2-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "beam-2",
+        "name": "Ceiling Beam 3",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            5.95,
+            -6.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            13.0,
+            0.5,
+            0.45
+          ]
+        },
+        "components": [
+          {
+            "id": "beam-2-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "mullion-3",
+        "name": "Clerestory Mullion 4",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -6.75,
+            4.5,
+            -10.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.45,
+            1.8,
+            0.5
+          ]
+        },
+        "components": [
+          {
+            "id": "mullion-3-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "beam-3",
+        "name": "Ceiling Beam 4",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            5.95,
+            -10.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            13.0,
+            0.5,
+            0.45
+          ]
+        },
+        "components": [
+          {
+            "id": "beam-3-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "mullion-4",
+        "name": "Clerestory Mullion 5",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -6.75,
+            4.5,
+            -14.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.45,
+            1.8,
+            0.5
+          ]
+        },
+        "components": [
+          {
+            "id": "mullion-4-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "beam-4",
+        "name": "Ceiling Beam 5",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            5.95,
+            -14.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            13.0,
+            0.5,
+            0.45
+          ]
+        },
+        "components": [
+          {
+            "id": "beam-4-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "pillar-base-left-0",
+        "name": "Pillar Base Left 1",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -4.2,
+            0.2,
+            1.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.25,
+            0.4,
+            1.25
+          ]
+        },
+        "components": [
+          {
+            "id": "pillar-base-left-0-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "pillar-left-0",
+        "name": "Pillar Left 1",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -4.2,
+            3.2,
+            1.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.75,
+            5.6,
+            0.75
+          ]
+        },
+        "components": [
+          {
+            "id": "pillar-left-0-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "primitive",
+              "shape": "cylinder"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "stone_wall"
+          }
+        ]
+      },
+      {
+        "id": "pillar-base-right-0",
+        "name": "Pillar Base Right 1",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            4.2,
+            0.2,
+            1.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.25,
+            0.4,
+            1.25
+          ]
+        },
+        "components": [
+          {
+            "id": "pillar-base-right-0-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "pillar-right-0",
+        "name": "Pillar Right 1",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            4.2,
+            3.2,
+            1.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.75,
+            5.6,
+            0.75
+          ]
+        },
+        "components": [
+          {
+            "id": "pillar-right-0-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "primitive",
+              "shape": "cylinder"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "stone_wall"
+          }
+        ]
+      },
+      {
+        "id": "pillar-base-left-1",
+        "name": "Pillar Base Left 2",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -4.2,
+            0.2,
+            -4.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.25,
+            0.4,
+            1.25
+          ]
+        },
+        "components": [
+          {
+            "id": "pillar-base-left-1-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "pillar-left-1",
+        "name": "Pillar Left 2",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -4.2,
+            3.2,
+            -4.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.75,
+            5.6,
+            0.75
+          ]
+        },
+        "components": [
+          {
+            "id": "pillar-left-1-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "primitive",
+              "shape": "cylinder"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "stone_wall"
+          }
+        ]
+      },
+      {
+        "id": "pillar-base-right-1",
+        "name": "Pillar Base Right 2",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            4.2,
+            0.2,
+            -4.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.25,
+            0.4,
+            1.25
+          ]
+        },
+        "components": [
+          {
+            "id": "pillar-base-right-1-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "pillar-right-1",
+        "name": "Pillar Right 2",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            4.2,
+            3.2,
+            -4.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.75,
+            5.6,
+            0.75
+          ]
+        },
+        "components": [
+          {
+            "id": "pillar-right-1-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "primitive",
+              "shape": "cylinder"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "stone_wall"
+          }
+        ]
+      },
+      {
+        "id": "pillar-base-left-2",
+        "name": "Pillar Base Left 3",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -4.2,
+            0.2,
+            -10.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.25,
+            0.4,
+            1.25
+          ]
+        },
+        "components": [
+          {
+            "id": "pillar-base-left-2-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "pillar-left-2",
+        "name": "Pillar Left 3",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -4.2,
+            3.2,
+            -10.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.75,
+            5.6,
+            0.75
+          ]
+        },
+        "components": [
+          {
+            "id": "pillar-left-2-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "primitive",
+              "shape": "cylinder"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "stone_wall"
+          }
+        ]
+      },
+      {
+        "id": "pillar-base-right-2",
+        "name": "Pillar Base Right 3",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            4.2,
+            0.2,
+            -10.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.25,
+            0.4,
+            1.25
+          ]
+        },
+        "components": [
+          {
+            "id": "pillar-base-right-2-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "pillar-right-2",
+        "name": "Pillar Right 3",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            4.2,
+            3.2,
+            -10.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.75,
+            5.6,
+            0.75
+          ]
+        },
+        "components": [
+          {
+            "id": "pillar-right-2-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "primitive",
+              "shape": "cylinder"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "stone_wall"
+          }
+        ]
+      },
+      {
+        "id": "hero-plinth",
+        "name": "Hero Plinth",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            0.55,
+            -1.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.8,
+            1.1,
+            1.8
+          ]
+        },
+        "components": [
+          {
+            "id": "hero-plinth-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "hero-sphere",
+        "name": "Gold Sphere",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            1.88,
+            -1.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.5,
+            1.5,
+            1.5
+          ]
+        },
+        "components": [
+          {
+            "id": "hero-sphere-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "primitive",
+              "shape": "sphere"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "gold_metal"
+          }
+        ]
+      },
+      {
+        "id": "left-plinth",
+        "name": "Left Plinth",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -2.4,
+            0.45,
+            -5.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.2,
+            0.9,
+            1.2
+          ]
+        },
+        "components": [
+          {
+            "id": "left-plinth-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "left-prism",
+        "name": "Terracotta Prism",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -2.4,
+            1.45,
+            -5.5
+          ],
+          "rotation": [
+            0.0,
+            0.4,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.1,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "left-prism-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "primitive",
+              "shape": "triangular_prism"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "terracotta"
+          }
+        ]
+      },
+      {
+        "id": "right-plinth",
+        "name": "Right Plinth",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            2.4,
+            0.45,
+            -5.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.2,
+            0.9,
+            1.2
+          ]
+        },
+        "components": [
+          {
+            "id": "right-plinth-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "right-cylinder",
+        "name": "Brushed Silver Cylinder",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            2.4,
+            1.55,
+            -5.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.9,
+            1.3,
+            0.9
+          ]
+        },
+        "components": [
+          {
+            "id": "right-cylinder-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "primitive",
+              "shape": "cylinder"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "brushed_silver"
+          }
+        ]
+      },
+      {
+        "id": "glass-divider",
+        "name": "Frosted Glass Screen",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            1.75,
+            -9.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            5.0,
+            3.5,
+            0.12
+          ]
+        },
+        "components": [
+          {
+            "id": "glass-divider-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "frosted_glass"
+          }
+        ]
+      },
+      {
+        "id": "alcove-plinth",
+        "name": "Alcove Plinth",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            0.4,
+            -13.8
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.6,
+            0.8,
+            1.6
+          ]
+        },
+        "components": [
+          {
+            "id": "alcove-plinth-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "dark_bronze"
+          }
+        ]
+      },
+      {
+        "id": "alcove-jade",
+        "name": "Jade Monolith",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            1.85,
+            -13.8
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.1,
+            1.4,
+            1.1
+          ]
+        },
+        "components": [
+          {
+            "id": "alcove-jade-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "primitive",
+              "shape": "capsule"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "jade_stone"
+          }
+        ]
+      },
+      {
+        "id": "sconce-l-0",
+        "name": "Warm Sconce 1",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -6.2,
+            2.7,
+            2.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.35,
+            0.35,
+            0.35
+          ]
+        },
+        "components": [
+          {
+            "id": "sconce-l-0-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "primitive",
+              "shape": "sphere"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "warm_emissive"
+          }
+        ]
+      },
+      {
+        "id": "light-warm-0",
+        "name": "Warm Bay Light 1",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -4.9,
+            2.7,
+            2.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "light-warm-0-c",
+            "enabled": true,
+            "type": "light",
+            "color": [
+              1.0,
+              0.56,
+              0.22
+            ],
+            "intensity": 5.5,
+            "kind": {
+              "type": "point",
+              "range": 7.5
+            }
+          }
+        ]
+      },
+      {
+        "id": "sconce-r-0",
+        "name": "Cool Sconce 1",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            6.2,
+            2.7,
+            2.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.35,
+            0.35,
+            0.35
+          ]
+        },
+        "components": [
+          {
+            "id": "sconce-r-0-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "primitive",
+              "shape": "sphere"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "cool_emissive"
+          }
+        ]
+      },
+      {
+        "id": "light-cool-0",
+        "name": "Cool Bay Light 1",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            4.9,
+            2.7,
+            2.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "light-cool-0-c",
+            "enabled": true,
+            "type": "light",
+            "color": [
+              0.22,
+              0.78,
+              1.0
+            ],
+            "intensity": 5.5,
+            "kind": {
+              "type": "point",
+              "range": 7.5
+            }
+          }
+        ]
+      },
+      {
+        "id": "sconce-l-1",
+        "name": "Warm Sconce 2",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -6.2,
+            2.7,
+            -2.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.35,
+            0.35,
+            0.35
+          ]
+        },
+        "components": [
+          {
+            "id": "sconce-l-1-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "primitive",
+              "shape": "sphere"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "warm_emissive"
+          }
+        ]
+      },
+      {
+        "id": "light-warm-1",
+        "name": "Warm Bay Light 2",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -4.9,
+            2.7,
+            -2.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "light-warm-1-c",
+            "enabled": true,
+            "type": "light",
+            "color": [
+              1.0,
+              0.56,
+              0.22
+            ],
+            "intensity": 5.5,
+            "kind": {
+              "type": "point",
+              "range": 7.5
+            }
+          }
+        ]
+      },
+      {
+        "id": "sconce-r-1",
+        "name": "Cool Sconce 2",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            6.2,
+            2.7,
+            -2.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.35,
+            0.35,
+            0.35
+          ]
+        },
+        "components": [
+          {
+            "id": "sconce-r-1-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "primitive",
+              "shape": "sphere"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "cool_emissive"
+          }
+        ]
+      },
+      {
+        "id": "light-cool-1",
+        "name": "Cool Bay Light 2",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            4.9,
+            2.7,
+            -2.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "light-cool-1-c",
+            "enabled": true,
+            "type": "light",
+            "color": [
+              0.22,
+              0.78,
+              1.0
+            ],
+            "intensity": 5.5,
+            "kind": {
+              "type": "point",
+              "range": 7.5
+            }
+          }
+        ]
+      },
+      {
+        "id": "sconce-l-2",
+        "name": "Warm Sconce 3",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -6.2,
+            2.7,
+            -6.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.35,
+            0.35,
+            0.35
+          ]
+        },
+        "components": [
+          {
+            "id": "sconce-l-2-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "primitive",
+              "shape": "sphere"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "warm_emissive"
+          }
+        ]
+      },
+      {
+        "id": "light-warm-2",
+        "name": "Warm Bay Light 3",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -4.9,
+            2.7,
+            -6.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "light-warm-2-c",
+            "enabled": true,
+            "type": "light",
+            "color": [
+              1.0,
+              0.56,
+              0.22
+            ],
+            "intensity": 5.5,
+            "kind": {
+              "type": "point",
+              "range": 7.5
+            }
+          }
+        ]
+      },
+      {
+        "id": "sconce-r-2",
+        "name": "Cool Sconce 3",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            6.2,
+            2.7,
+            -6.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.35,
+            0.35,
+            0.35
+          ]
+        },
+        "components": [
+          {
+            "id": "sconce-r-2-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "primitive",
+              "shape": "sphere"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "cool_emissive"
+          }
+        ]
+      },
+      {
+        "id": "light-cool-2",
+        "name": "Cool Bay Light 3",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            4.9,
+            2.7,
+            -6.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "light-cool-2-c",
+            "enabled": true,
+            "type": "light",
+            "color": [
+              0.22,
+              0.78,
+              1.0
+            ],
+            "intensity": 5.5,
+            "kind": {
+              "type": "point",
+              "range": 7.5
+            }
+          }
+        ]
+      },
+      {
+        "id": "sconce-l-3",
+        "name": "Warm Sconce 4",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -6.2,
+            2.7,
+            -10.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.35,
+            0.35,
+            0.35
+          ]
+        },
+        "components": [
+          {
+            "id": "sconce-l-3-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "primitive",
+              "shape": "sphere"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "warm_emissive"
+          }
+        ]
+      },
+      {
+        "id": "light-warm-3",
+        "name": "Warm Bay Light 4",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -4.9,
+            2.7,
+            -10.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "light-warm-3-c",
+            "enabled": true,
+            "type": "light",
+            "color": [
+              1.0,
+              0.56,
+              0.22
+            ],
+            "intensity": 5.5,
+            "kind": {
+              "type": "point",
+              "range": 7.5
+            }
+          }
+        ]
+      },
+      {
+        "id": "sconce-r-3",
+        "name": "Cool Sconce 4",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            6.2,
+            2.7,
+            -10.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            0.35,
+            0.35,
+            0.35
+          ]
+        },
+        "components": [
+          {
+            "id": "sconce-r-3-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "primitive",
+              "shape": "sphere"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "cool_emissive"
+          }
+        ]
+      },
+      {
+        "id": "light-cool-3",
+        "name": "Cool Bay Light 4",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            4.9,
+            2.7,
+            -10.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "light-cool-3-c",
+            "enabled": true,
+            "type": "light",
+            "color": [
+              0.22,
+              0.78,
+              1.0
+            ],
+            "intensity": 5.5,
+            "kind": {
+              "type": "point",
+              "range": 7.5
+            }
+          }
+        ]
+      },
+      {
+        "id": "plinth-accent-l",
+        "name": "Terracotta Uplight",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -2.4,
+            2.4,
+            -4.8
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "plinth-accent-l-c",
+            "enabled": true,
+            "type": "light",
+            "color": [
+              1.0,
+              0.65,
+              0.45
+            ],
+            "intensity": 4.2,
+            "kind": {
+              "type": "point",
+              "range": 6.8
+            }
+          }
+        ]
+      },
+      {
+        "id": "plinth-accent-r",
+        "name": "Silver Uplight",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            2.4,
+            2.4,
+            -4.8
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "plinth-accent-r-c",
+            "enabled": true,
+            "type": "light",
+            "color": [
+              0.55,
+              0.85,
+              1.0
+            ],
+            "intensity": 4.2,
+            "kind": {
+              "type": "point",
+              "range": 6.8
+            }
+          }
+        ]
+      },
+      {
+        "id": "alcove-accent-l",
+        "name": "Alcove Rim Left",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            -3.2,
+            2.2,
+            -14.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "alcove-accent-l-c",
+            "enabled": true,
+            "type": "light",
+            "color": [
+              1.0,
+              0.38,
+              0.28
+            ],
+            "intensity": 4.2,
+            "kind": {
+              "type": "point",
+              "range": 6.8
+            }
+          }
+        ]
+      },
+      {
+        "id": "alcove-accent-r",
+        "name": "Alcove Rim Right",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            3.2,
+            2.2,
+            -14.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "alcove-accent-r-c",
+            "enabled": true,
+            "type": "light",
+            "color": [
+              0.35,
+              0.72,
+              1.0
+            ],
+            "intensity": 4.2,
+            "kind": {
+              "type": "point",
+              "range": 6.8
+            }
+          }
+        ]
+      }
+    ],
+    "materials": {
+      "slate_floor": {
+        "name": "Slate Floor",
+        "tint": [
+          0.16,
+          0.17,
+          0.2
+        ],
+        "metallic": 0.08,
+        "response": {
+          "type": "dielectric",
+          "roughness": 0.24
+        },
+        "filter": "linear",
+        "address": "repeat"
+      },
+      "stone_wall": {
+        "name": "Limestone Wall",
+        "tint": [
+          0.72,
+          0.69,
+          0.64
+        ],
+        "response": {
+          "type": "dielectric",
+          "roughness": 0.88
+        },
+        "filter": "linear",
+        "address": "repeat"
+      },
+      "dark_bronze": {
+        "name": "Dark Bronze",
+        "tint": [
+          0.18,
+          0.16,
+          0.15
+        ],
+        "metallic": 0.65,
+        "response": {
+          "type": "dielectric",
+          "roughness": 0.36
+        },
+        "filter": "linear",
+        "address": "repeat"
+      },
+      "gold_metal": {
+        "name": "Burnished Gold",
+        "tint": [
+          0.96,
+          0.78,
+          0.34
+        ],
+        "metallic": 0.96,
+        "response": {
+          "type": "dielectric",
+          "roughness": 0.14
+        },
+        "filter": "linear",
+        "address": "repeat"
+      },
+      "brushed_silver": {
+        "name": "Brushed Silver",
+        "tint": [
+          0.85,
+          0.87,
+          0.9
+        ],
+        "metallic": 0.9,
+        "response": {
+          "type": "dielectric",
+          "roughness": 0.24
+        },
+        "filter": "linear",
+        "address": "repeat"
+      },
+      "terracotta": {
+        "name": "Terracotta",
+        "tint": [
+          0.76,
+          0.34,
+          0.22
+        ],
+        "response": {
+          "type": "dielectric",
+          "roughness": 0.85
+        },
+        "filter": "linear",
+        "address": "repeat"
+      },
+      "jade_stone": {
+        "name": "Polished Jade",
+        "tint": [
+          0.22,
+          0.64,
+          0.5
+        ],
+        "response": {
+          "type": "dielectric",
+          "roughness": 0.32
+        },
+        "filter": "linear",
+        "address": "repeat"
+      },
+      "frosted_glass": {
+        "name": "Frosted Glass",
+        "tint": [
+          0.7,
+          0.84,
+          0.92
+        ],
+        "alpha_mode": "blend",
+        "opacity": 0.34,
+        "double_sided": true,
+        "response": {
+          "type": "dielectric",
+          "roughness": 0.2
+        },
+        "filter": "linear",
+        "address": "repeat"
+      },
+      "warm_emissive": {
+        "name": "Warm Amber Sconce",
+        "tint": [
+          1.0,
+          0.85,
+          0.6
+        ],
+        "emission_color": [
+          1.0,
+          0.56,
+          0.18
+        ],
+        "response": {
+          "type": "dielectric",
+          "roughness": 0.25
+        },
+        "filter": "linear",
+        "address": "repeat"
+      },
+      "cool_emissive": {
+        "name": "Cool Cyan Sconce",
+        "tint": [
+          0.65,
+          0.92,
+          1.0
+        ],
+        "emission_color": [
+          0.18,
+          0.78,
+          1.0
+        ],
+        "response": {
+          "type": "dielectric",
+          "roughness": 0.25
+        },
+        "filter": "linear",
+        "address": "repeat"
+      }
+    },
+    "display": {
+      "type": "surface_hdr",
+      "exposure_stops": 0.0
+    },
+    "background": [
+      0.02,
+      0.025,
+      0.035
+    ],
+    "sky": {
+      "zenith": [
+        0.16,
+        0.24,
+        0.42
+      ],
+      "horizon": [
+        0.55,
+        0.46,
+        0.38
+      ],
+      "ground": [
+        0.1,
+        0.1,
+        0.12
+      ],
+      "intensity": 0.75,
+      "show_backdrop": true
+    },
+    "fog": {
+      "mode": "exponential_squared",
+      "color": [
+        0.14,
+        0.18,
+        0.24
+      ],
+      "density": 0.016,
+      "height": 0.2,
+      "height_falloff": 0.28,
+      "max_opacity": 0.42,
+      "sky_affect": 0.35
+    },
+    "post_process": {
+      "ssao": {
+        "enabled": true,
+        "radius": 0.7,
+        "intensity": 1.2,
+        "bias": 0.03
+      },
+      "bloom": {
+        "enabled": true,
+        "threshold": 0.78,
+        "intensity": 0.36,
+        "soft_knee": 0.5
+      },
+      "grading": {
+        "tonemapper": "aces_fitted",
+        "saturation": 1.05,
+        "contrast": 1.04,
+        "temperature": 0.0,
+        "tint": 0.0,
+        "vignette": 0.16
+      },
+      "anti_aliasing": "msaa4x"
+    },
+    "ambient": {
+      "color": [
+        0.65,
+        0.7,
+        0.8
+      ],
+      "intensity": 0.06
+    },
+    "gameplay_camera": "gallery-main-camera"
+  }
+}

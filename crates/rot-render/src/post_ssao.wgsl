@@ -40,27 +40,28 @@ fn interleaved_gradient_noise(pixel: vec2<f32>) -> f32 {
 
 @fragment fn fs_ssao(v: Output) -> @location(0) vec4<f32> {
     let dims = vec2<i32>(max(i32(u.sizes.z), 1), max(i32(u.sizes.w), 1));
+    let inv_full = vec2<f32>(1.0) / vec2<f32>(dims);
     let coord = clamp(vec2<i32>(v.uv * vec2<f32>(dims)), vec2<i32>(0), dims - vec2<i32>(1));
+    let center_uv = (vec2<f32>(coord) + vec2<f32>(0.5)) * inv_full;
     let d_center = load_depth(coord, dims);
     if d_center >= 0.9999 {
         return vec4<f32>(1.0, 1000.0, 0.0, 1.0);
     }
-    let center = view_pos_from_depth(v.uv, d_center);
+    let center = view_pos_from_depth(center_uv, d_center);
 
-    let inv_full = vec2<f32>(1.0) / vec2<f32>(dims);
     let d_l = load_depth(coord + vec2<i32>(-1, 0), dims);
     let d_r = load_depth(coord + vec2<i32>(1, 0), dims);
     let d_u = load_depth(coord + vec2<i32>(0, -1), dims);
     let d_d = load_depth(coord + vec2<i32>(0, 1), dims);
 
     let dx = select(
-        center - view_pos_from_depth(v.uv - vec2<f32>(inv_full.x, 0.0), d_l),
-        view_pos_from_depth(v.uv + vec2<f32>(inv_full.x, 0.0), d_r) - center,
+        center - view_pos_from_depth(center_uv - vec2<f32>(inv_full.x, 0.0), d_l),
+        view_pos_from_depth(center_uv + vec2<f32>(inv_full.x, 0.0), d_r) - center,
         abs(d_r - d_center) < abs(d_center - d_l),
     );
     let dy = select(
-        center - view_pos_from_depth(v.uv - vec2<f32>(0.0, inv_full.y), d_u),
-        view_pos_from_depth(v.uv + vec2<f32>(0.0, inv_full.y), d_d) - center,
+        center - view_pos_from_depth(center_uv - vec2<f32>(0.0, inv_full.y), d_u),
+        view_pos_from_depth(center_uv + vec2<f32>(0.0, inv_full.y), d_d) - center,
         abs(d_d - d_center) < abs(d_center - d_u),
     );
     var normal = cross(dy, dx);
@@ -100,13 +101,20 @@ fn interleaved_gradient_noise(pixel: vec2<f32>) -> f32 {
             continue;
         }
         let s_coord = clamp(vec2<i32>(s_uv * vec2<f32>(dims)), vec2<i32>(0), dims - vec2<i32>(1));
+        let s_texel_uv = (vec2<f32>(s_coord) + vec2<f32>(0.5)) * inv_full;
         let d_sample = load_depth(s_coord, dims);
         if d_sample >= 0.9999 {
             continue;
         }
-        let geom_view = view_pos_from_depth(s_uv, d_sample);
-        let range_check = smoothstep(0.0, 1.0, radius / max(abs(center.z - geom_view.z), 1e-4));
-        if geom_view.z >= sample_view.z + bias {
+        let geom_view = view_pos_from_depth(s_texel_uv, d_sample);
+        let delta = geom_view - center;
+        let dist = length(delta);
+        if dist < 1e-4 {
+            continue;
+        }
+        let eff_bias = bias + max(-center.z, 0.0) * 0.0025;
+        let range_check = smoothstep(0.0, 1.0, radius / max(dist, 1e-4));
+        if dot(delta, normal) > eff_bias && geom_view.z >= sample_view.z + eff_bias {
             occlusion += range_check;
         }
     }

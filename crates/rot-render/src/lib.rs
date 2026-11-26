@@ -21,6 +21,8 @@ pub use primitives::{builtin_cube, builtin_mesh};
 #[cfg(test)]
 mod material_probe;
 #[cfg(test)]
+mod phase3b_exit_probe;
+#[cfg(test)]
 mod selection_probe;
 mod shadow_gpu;
 mod shadow_math;
