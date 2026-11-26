@@ -33,21 +33,20 @@ One line each. Anyone may add; the user or a planning pass orders them.
 
 ## Now — Phase 3A: Look (PBR & Scene Scale)
 
-`C-EXIT` and `P-03` passed on `2026-11-26`. Start Phase 3A with `L-01` below.
+`L-01` shipped on `2026-11-26` (`71aacda`). Continue Phase 3A with `L-02` below.
 
 | Package | Outcome | Status & remaining gap |
 | --- | --- | --- |
-| `L-01` Material asset files (`Assets/*.material.json`) | Move materials from scene-embedded JSON into first-class file-backed `Assets/` assets (Size M, *brief needed*). | `open` · Design and implement `.material.json` asset import/save/reload/Inspector binding without breaking v23 compatibility. |
+| `L-02` `rot-render` refactor for PBR & scale | GPU storage-buffer instances, vertex tangents, decoupled selection outline pass, and lifted caps per `A12` (Size M, *brief needed*). | `open` · Replace fixed uniform/object/vertex/triangle caps and hardcoded outline/instance paths without regressing frame times. |
 
 ## Later
 
 One line each until their phase is active. See [phases](PARITY-PLAN.md#3-phases).
 
-- **Phase 3A — Look: PBR & Scene Scale.** Start with `L-01` (`.material.json`
-  asset files in `Assets/`); refactor `rot-render` (GPU storage-buffer instances,
-  vertex tangents, decoupled selection outline pass, lifted caps); full
-  metallic-roughness PBR with normal, emissive and occlusion maps; sky and IBL;
-  alpha transparency; frustum culling and dirty-range instancing.
+- **Phase 3A — Look: PBR & Scene Scale.** After `L-02` (`rot-render` refactor),
+  implement full metallic-roughness PBR with normal, emissive and occlusion
+  maps; sky and IBL; alpha transparency; frustum culling and dirty-range
+  instancing.
 - **Phase 3B — Look: Lighting & Post.** Verify `wgpu-hal` SPIR-V/compute readiness
   and implement clustered forward many-lights; cascaded directional plus spot
   and point shadow atlas; fog; bloom, color grading, ambient occlusion and AA
@@ -79,6 +78,11 @@ completed packages:
   IPC, `inotify` watcher, `rfd` features, file manager open, and OS dirs into
   `rot_support::platform::{dirs,ipc}`, `rot_editor::platform::{shell,dialogs,watcher}`,
   and `rot-mcp` child detachment; added `windows-latest` `cargo check --workspace --locked` CI job).
+- **Phase 3A — Look:** `L-01` (`2026-11-26`, `71aacda`: versioned `rot-material`
+  JSON format, `.material.json` + `.rotmeta` assets in `rot-assets`, watcher live
+  reload with last-good fallback, Assets/Inspector create/drag-drop/modal edit/
+  `Save as Asset…`, double-extension Rename/Duplicate safety, and MCP
+  `asset_inspect`/`material_inspect`/`scene_material_assign` alignment).
 - **Phase 2 — Core completed packages:** `C-00a` (retired legacy logistics
   crates, Rhai mode, editor logistics UI, and superseded MCP
   enrollment/registry plumbing; promoted `crates/rot-support`), `C-01` (v23

@@ -13,7 +13,7 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
-## Current phase — Phase 3A: Look (Next: `L-01`)
+## Current phase — Phase 3A: Look (Next: `L-02`)
 
 - **Done:** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`, `A-01`–`A-07`,
   `P-01`–`P-02`), `C-00a` (retired legacy logistics crates, Rhai mode, editor
@@ -47,8 +47,11 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   events and visual review, and refreshed release install), and `P-03` Platform
   seams & Windows CI (`rot_support::platform::{dirs,ipc}`,
   `rot_editor::platform::{shell,dialogs,watcher}`, `rot-mcp` child detachment,
-  target-scoped `rustix`/`rfd`, and `windows-latest` `cargo check` CI job).
-- **Next:** `L-01` Material asset files (`Assets/*.material.json`, Phase 3A).
+  target-scoped `rustix`/`rfd`, and `windows-latest` `cargo check` CI job), and
+  `L-01` Material asset files (`71aacda`: versioned `.material.json` + `.rotmeta`
+  assets, live reload, Inspector/Assets authoring, and MCP alignment).
+- **Next:** `L-02` `rot-render` refactor (GPU storage-buffer instances, vertex
+  tangents, decoupled selection outline pass, lifted caps, Phase 3A).
 
 ## What a creator can do today
 
