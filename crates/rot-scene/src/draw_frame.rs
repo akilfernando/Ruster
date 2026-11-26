@@ -1,7 +1,7 @@
 //! Immutable runtime scene data shared by simulation and viewport consumers.
 use crate::component_scene::{
     CameraView, Component, ComponentScene, Geometry, ObjectHierarchy, TransformCameraPose,
-    TransformLens,
+    TransformLens, TransformProjection,
 };
 use crate::{
     Light, LightKind, Lighting, Object, PlayerView, ResolvedPlayerView, ResolvedPoses, Scene,
@@ -10,6 +10,38 @@ use crate::{
 use glam::{DMat4, DQuat, EulerRot, Mat3, Mat4, Quat, Vec3};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LightRuntimeOverride {
+    pub intensity: Option<f32>,
+    pub color: Option<[f32; 3]>,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MeshRuntimeOverride {
+    pub tint: Option<[f32; 4]>,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RuntimeVisualOverrides {
+    pub lights: BTreeMap<String, LightRuntimeOverride>,
+    pub meshes: BTreeMap<String, MeshRuntimeOverride>,
+    pub object_enabled: BTreeMap<usize, bool>,
+    pub camera_fov: Option<f32>,
+    pub camera_enabled: Option<bool>,
+}
+
+impl RuntimeVisualOverrides {
+    pub fn is_empty(&self) -> bool {
+        self.lights.is_empty()
+            && self.meshes.is_empty()
+            && self.object_enabled.is_empty()
+            && self.camera_fov.is_none()
+            && self.camera_enabled.is_none()
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct SceneDrawFrame {
@@ -70,6 +102,102 @@ impl SceneDrawFrame {
 
     pub fn transform_camera(&self) -> Option<TransformCameraPose> {
         self.transform_camera
+    }
+
+    /// Replace visible component light properties while retaining resolved geometry, matrices, and camera.
+    pub fn with_lighting_overrides(
+        &self,
+        base_lighting: Option<&Lighting>,
+        overrides: &RuntimeVisualOverrides,
+    ) -> Result<Self, SceneError> {
+        let hierarchy = self
+            .hierarchy
+            .as_ref()
+            .filter(|_| self.component_backed)
+            .ok_or_else(|| {
+                SceneError::Invalid("lighting overrides require a component draw frame".into())
+            })?;
+        let mut lighting = None;
+        if let Lighting::Authored {
+            lights: current_lights,
+            ..
+        } = hierarchy.lighting.as_ref()
+        {
+            let base_lights = base_lighting.and_then(|base| match base {
+                Lighting::Authored { lights, .. } => Some(lights),
+                Lighting::Legacy => None,
+            });
+            for (id, existing) in current_lights {
+                let ov = overrides.lights.get(id);
+                if let Some(ov) = ov {
+                    if let Some(intensity) = ov.intensity {
+                        Light::validate_intensity(f64::from(intensity))?;
+                    }
+                    if let Some(color) = ov.color {
+                        if !color
+                            .iter()
+                            .all(|v| v.is_finite() && (0.0..=1.0).contains(v))
+                        {
+                            return Err(SceneError::Invalid(format!(
+                                "invalid runtime color on light {id}"
+                            )));
+                        }
+                    }
+                }
+                let base_light = base_lights.and_then(|m| m.get(id));
+                let target_intensity = ov
+                    .and_then(|o| o.intensity)
+                    .or_else(|| base_light.map(|l| l.intensity))
+                    .unwrap_or(existing.intensity);
+                let target_color = ov
+                    .and_then(|o| o.color)
+                    .or_else(|| base_light.map(|l| l.color))
+                    .unwrap_or(existing.color);
+                if existing.intensity != target_intensity || existing.color != target_color {
+                    let Lighting::Authored { lights, .. } =
+                        lighting.get_or_insert_with(|| (*hierarchy.lighting).clone())
+                    else {
+                        unreachable!("resolved component lights are authored")
+                    };
+                    let target = lights.get_mut(id).expect("resolved light");
+                    target.intensity = target_intensity;
+                    target.color = target_color;
+                }
+            }
+        }
+        let mut next = self.clone();
+        if let Some(lighting) = lighting {
+            next.hierarchy = Some(Arc::new(HierarchyDraw {
+                lighting: Arc::new(lighting),
+                ..(**hierarchy).clone()
+            }));
+        }
+        if let Some(fov) = overrides.camera_fov {
+            if !fov.is_finite() || !(10.0..=120.0).contains(&fov) {
+                return Err(SceneError::Invalid(
+                    "Camera FOV must be finite and between 10 and 120 degrees.".into(),
+                ));
+            }
+            let Some(mut cam) = next.transform_camera else {
+                return Err(SceneError::Invalid(
+                    "set_fov requires a Transform Perspective Camera component".into(),
+                ));
+            };
+            match &mut cam.projection {
+                TransformProjection::Perspective {
+                    vertical_fov_degrees,
+                } => {
+                    *vertical_fov_degrees = fov;
+                }
+                TransformProjection::Orthographic { .. } => {
+                    return Err(SceneError::Invalid(
+                        "set_fov requires a perspective Camera component".into(),
+                    ));
+                }
+            }
+            next.transform_camera = Some(cam);
+        }
+        Ok(next)
     }
 
     /// Replace visible component light intensities while retaining resolved geometry and camera.
@@ -256,6 +384,7 @@ struct LightOwner {
 pub struct ComponentDrawPlan {
     base_scene: Arc<Scene>,
     draw_owners: Vec<usize>,
+    draw_component_ids: Vec<String>,
     light_owners: Vec<LightOwner>,
     camera: RuntimeCamera,
     light_budget_exceeded: bool,
@@ -294,6 +423,7 @@ impl ComponentDrawPlan {
             None => RuntimeCamera::None,
         };
         let mut draw_owners = Vec::new();
+        let mut draw_component_ids = Vec::new();
         let mut light_owners = Vec::new();
         let mut lights = BTreeMap::new();
         let mut point_lights = 0;
@@ -326,6 +456,7 @@ impl ComponentDrawPlan {
                         }
                         base.objects.push(draw);
                         draw_owners.push(index);
+                        draw_component_ids.push(component.id.clone());
                     }
                     Component::Light {
                         color,
@@ -380,6 +511,7 @@ impl ComponentDrawPlan {
         Ok(Self {
             base_scene: Arc::new(base),
             draw_owners,
+            draw_component_ids,
             light_owners,
             camera,
             light_budget_exceeded,
@@ -434,6 +566,187 @@ impl ComponentDrawPlan {
         rotations: &[DQuat],
     ) -> Result<SceneDrawFrame, SceneError> {
         self.build_frame_with_light_intensities(scene, world, rotations, |_| None)
+    }
+
+    /// Apply runtime visual component overrides when rebuilding from component poses.
+    pub fn build_frame_with_overrides(
+        &self,
+        scene: &ComponentScene,
+        hierarchy: &ObjectHierarchy,
+        world: &[DMat4],
+        rotations: &[DQuat],
+        overrides: &RuntimeVisualOverrides,
+    ) -> Result<SceneDrawFrame, SceneError> {
+        if overrides.is_empty() {
+            return self.build_frame(scene, world, rotations);
+        }
+        let custom_enabled = (!overrides.object_enabled.is_empty()).then(|| {
+            let mut effective = vec![false; scene.objects.len()];
+            for &index in &hierarchy.order {
+                let parent_enabled =
+                    hierarchy.parents[index].is_none_or(|parent| effective[parent]);
+                let local_enabled = overrides
+                    .object_enabled
+                    .get(&index)
+                    .copied()
+                    .unwrap_or(scene.objects[index].enabled);
+                effective[index] = parent_enabled && local_enabled;
+            }
+            effective
+        });
+        let effective = custom_enabled
+            .as_deref()
+            .unwrap_or(&hierarchy.effectively_enabled);
+
+        let needs_mesh_scene = !overrides.meshes.is_empty() || custom_enabled.is_some();
+        let (draw_scene, matrices) = if needs_mesh_scene {
+            let mut custom_scene = (*self.base_scene).clone();
+            let mut kept_objects = Vec::with_capacity(self.draw_owners.len());
+            let mut matrices = Vec::with_capacity(self.draw_owners.len());
+            for (slot, (&owner, comp_id)) in self
+                .draw_owners
+                .iter()
+                .zip(self.draw_component_ids.iter())
+                .enumerate()
+            {
+                let mesh_ov = overrides.meshes.get(comp_id);
+                let mesh_enabled =
+                    effective[owner] && mesh_ov.and_then(|ov| ov.enabled).unwrap_or(true);
+                if !mesh_enabled {
+                    continue;
+                }
+                let mut obj = custom_scene.objects[slot].clone();
+                if let Some(tint) = mesh_ov.and_then(|ov| ov.tint) {
+                    if !tint
+                        .iter()
+                        .all(|v| v.is_finite() && (0.0..=1.0).contains(v))
+                    {
+                        return Err(SceneError::Invalid(format!(
+                            "invalid runtime tint on component {comp_id}"
+                        )));
+                    }
+                    obj.color = tint;
+                }
+                kept_objects.push(obj);
+                matrices.push(component_draw_matrix(
+                    world[owner],
+                    &scene.objects[owner].id,
+                )?);
+            }
+            custom_scene.objects = kept_objects;
+            (Arc::new(custom_scene), matrices)
+        } else {
+            let mut matrices = Vec::with_capacity(self.draw_owners.len());
+            for &owner in &self.draw_owners {
+                matrices.push(component_draw_matrix(
+                    world[owner],
+                    &scene.objects[owner].id,
+                )?);
+            }
+            (Arc::clone(&self.base_scene), matrices)
+        };
+
+        let mut lighting = self.base_scene.lighting.clone();
+        if !self.light_owners.is_empty() {
+            let Lighting::Authored { lights, .. } = &mut lighting else {
+                unreachable!("light_owners require Authored lighting");
+            };
+            for entry in &self.light_owners {
+                let pose = component_light_transform(
+                    world[entry.owner_index],
+                    entry.is_directional,
+                    &scene.objects[entry.owner_index].id,
+                    entry.is_spot.then_some(rotations[entry.owner_index]),
+                )?;
+                let light = lights.get_mut(&entry.id).expect("planned light");
+                light.transform = pose;
+                if !effective[entry.owner_index] {
+                    light.enabled = false;
+                }
+                if let Some(ov) = overrides.lights.get(&entry.id) {
+                    if let Some(intensity) = ov.intensity {
+                        Light::validate_intensity(f64::from(intensity))?;
+                        light.intensity = intensity;
+                    }
+                    if let Some(color) = ov.color {
+                        if !color
+                            .iter()
+                            .all(|v| v.is_finite() && (0.0..=1.0).contains(v))
+                        {
+                            return Err(SceneError::Invalid(format!(
+                                "invalid runtime color on light {}",
+                                entry.id
+                            )));
+                        }
+                        light.color = color;
+                    }
+                    if let Some(enabled) = ov.enabled {
+                        light.enabled = enabled && effective[entry.owner_index];
+                    }
+                }
+            }
+            lighting.validate_clustered()?;
+        }
+
+        let (player_view, transform_camera) = match &self.camera {
+            RuntimeCamera::None => (None, None),
+            RuntimeCamera::Transform { owner_index, lens } => {
+                let cam_enabled =
+                    overrides.camera_enabled.unwrap_or(true) && effective[*owner_index];
+                if !cam_enabled {
+                    (None, None)
+                } else if let Some(fov) = overrides.camera_fov {
+                    if !fov.is_finite() || !(10.0..=120.0).contains(&fov) {
+                        return Err(SceneError::Invalid(
+                            "Camera FOV must be finite and between 10 and 120 degrees.".into(),
+                        ));
+                    }
+                    let mut adjusted = lens.clone();
+                    match &mut adjusted {
+                        TransformLens::Perspective(perspective) => {
+                            perspective.vertical_fov_degrees = fov;
+                        }
+                        TransformLens::Orthographic(_) => {
+                            return Err(SceneError::Invalid(
+                                "set_fov requires a perspective Camera component".into(),
+                            ));
+                        }
+                    }
+                    (
+                        None,
+                        Some(adjusted.resolve_pose(world[*owner_index], rotations[*owner_index])?),
+                    )
+                } else {
+                    (
+                        None,
+                        Some(lens.resolve_pose(world[*owner_index], rotations[*owner_index])?),
+                    )
+                }
+            }
+            RuntimeCamera::Orbit { view, follow_index } => {
+                if overrides.camera_fov.is_some() {
+                    return Err(SceneError::Invalid(
+                        "set_fov requires a Transform Perspective Camera component".into(),
+                    ));
+                }
+                if overrides.camera_enabled == Some(false) {
+                    (None, None)
+                } else {
+                    let pos = follow_index.map(|i| world[i].w_axis.truncate().to_array());
+                    (Some(view.resolve_world_anchor(pos)?), None)
+                }
+            }
+        };
+
+        Ok(SceneDrawFrame::component_frame(
+            draw_scene,
+            Arc::new(HierarchyDraw::from_component_frame(
+                matrices,
+                Arc::new(lighting),
+                player_view,
+            )),
+            transform_camera,
+        ))
     }
 
     /// Apply runtime intensity overrides when rebuilding from component poses.

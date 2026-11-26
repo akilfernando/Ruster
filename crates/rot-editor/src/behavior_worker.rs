@@ -53,6 +53,7 @@ pub(super) struct Frame {
     pub state: Arc<rot_behavior::RuntimeState>,
     pub input: Option<Arc<LastConsumedInput>>,
     pub query_observations: Option<Arc<[rot_behavior::QueryObservation]>>,
+    pub script_logs: Arc<[rot_behavior::ScriptLog]>,
 }
 impl Frame {
     pub fn transform_camera(&self) -> Option<rot_scene::component_scene::TransformCameraPose> {
@@ -1220,6 +1221,7 @@ fn frame(shared: &Shared, execution: &mut Execution, repaint: &Option<Repaint>, 
             resolved_transform_camera: runtime.transform_camera(),
             input: execution.last_input.clone(),
             query_observations,
+            script_logs: Arc::from(runtime.script_logs()),
         },
         repaint,
     );

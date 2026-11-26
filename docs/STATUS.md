@@ -13,7 +13,7 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
-## Current phase — Phase 3B Complete (Next: Phase 4 — Play)
+## Current phase — Phase 4: Play (`P4-01` Done, Next: `P4-02`)
 
 - **Done (earlier phases):** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`,
   `A-01`–`A-07`, `P-01`–`P-02`), `P-03` platform seams & Windows CI, Phase 2 Core
@@ -22,17 +22,17 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   [UI checklist](UX-STANDARDS.md#10-ui-review-checklist) and refreshed release
   install), Phase 3A Look (`L-01` `71aacda`, `L-02` `611a640`, `L-03` `93d7390`,
   `L-04` `16a3859`, `L-05` `4f8e16d`, `L-06` `3264a4e`, `L-EXIT` Khronos PBR
-  gate `7283208`), and Phase 3B Look — Lighting & Post (`L-07` clustered forward
-  many-lights `bbd7075`, `L-08` 4-cascade CSM + `2048×2048` shadow atlas
-  `9801f4c`, `L-09` atmospheric distance/height fog `eb31118`, `L-10` SSAO /
-  bloom / grading / tonemappers / AA `5b163b4`, `L-11` 11 viewport shading &
-  debug view modes `34dc485`, `L-3B-EXIT` interior reference scene & RTX 4060
-  gate `35ae05c`: [gallery.scene.json](../examples/rot-yard/gallery.scene.json)
+  gate `7283208`), and Phase 3B Look — Lighting & Post (`L-07`–`L-11`,
+  `L-3B-EXIT` `35ae05c`: [gallery.scene.json](../examples/rot-yard/gallery.scene.json)
   `1080p` `4× MSAA` p50 `3.095 ms` / p95 `3.794 ms`, 5k `1080p` p50 `1.445 ms` /
-  p95 `1.900 ms`, steady `0 B`). See [backlog](BACKLOG.md) for details.
-- **Next:** **Phase 4 — Play** (strict order: persistent-VM Lua events/coroutines
-  & live Play editing, Rapier3D physics replacing `parry3d`, skeletal skinning
-  & animation, spatial audio/runtime UI/rebinding/multiple cameras/particles/save).
+  p95 `1.900 ms`, steady `0 B`).
+- **Done in Phase 4:** `P4-01` (2026-11-26: unified persistent Lua events,
+  coroutines + `wait`/`wait_frames`, live `Light`/`MeshRenderer`/`Camera`/hierarchy/`enabled`
+  handles, editor `Console` panel + `host.log`/`warn`, batched 10k runner + vendored
+  `mlua` pose batch accessors; release 10k bench logic p50 `1.636 ms`, transform-write p50 `1.913 ms`).
+- **Next:** `P4-02` live editing during Play, then Rapier3D physics (`P4-03`–`P4-04`),
+  skeletal skinning & animation (`P4-05`–`P4-06`), audio/input/UI/cameras/particles/save
+  (`P4-07`–`P4-EXIT`). See [backlog](BACKLOG.md).
 
 ## What a creator can do today
 

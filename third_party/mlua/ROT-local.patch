@@ -40,3 +40,221 @@ index b80be4b..2a38b6a 100644
 +        }
 +    }
 +
+diff --git a/src/table.rs b/src/table.rs
+index 2200e1d..0cc27dd 100644
+--- a/src/table.rs
++++ b/src/table.rs
+@@ -1150,0 +1151,213 @@ impl Table {
++    #[cfg(feature = "lua54")]
++    #[inline(always)]
++    unsafe fn read_raw_vec3(
++        state: *mut ffi::lua_State,
++        tr_idx: c_int,
++        vec_idx: c_int,
++        key_idx: c_int,
++    ) -> std::result::Result<[f32; 3], &'static str> {
++        ffi::lua_pushvalue(state, key_idx);
++        if ffi::lua_rawget(state, tr_idx) != ffi::LUA_TTABLE {
++            return Err("transform component must be a table");
++        }
++        let mut out = [0.0f32; 3];
++        for (i, slot) in out.iter_mut().enumerate() {
++            let kind = ffi::lua_rawgeti(state, vec_idx, (i + 1) as ffi::lua_Integer);
++            if kind != ffi::LUA_TNUMBER {
++                return Err(if kind == ffi::LUA_TNIL {
++                    "transform vector requires exactly3 components"
++                } else {
++                    "transform vector requires numbers"
++                });
++            }
++            let n = ffi::lua_tonumberx(state, -1, std::ptr::null_mut());
++            *slot = n as f32;
++        }
++        ffi::lua_pushinteger(state, 3);
++        if ffi::lua_next(state, vec_idx) != 0 {
++            return Err("transform vector requires only indices1..3");
++        }
++        Ok(out)
++    }
++
++    #[cfg(feature = "lua54")]
++    #[inline]
++    unsafe fn vec3_has_only_indices_1_to_3(state: *mut ffi::lua_State, vec_idx: c_int) -> bool {
++        ffi::lua_pushnil(state);
++        while ffi::lua_next(state, vec_idx) != 0 {
++            let valid = ffi::lua_isinteger(state, -2) != 0
++                && matches!(ffi::lua_tointeger(state, -2), 1..=3);
++            ffi::lua_pop(state, 1);
++            if !valid {
++                ffi::lua_pop(state, 1);
++                return false;
++            }
++        }
++        true
++    }
++
++    #[cfg(feature = "lua54")]
++    #[inline]
++    unsafe fn write_raw_vec3(
++        state: *mut ffi::lua_State,
++        tr_idx: c_int,
++        key_idx: c_int,
++        vals: [f32; 3],
++    ) {
++        ffi::lua_pushvalue(state, key_idx);
++        let kind = ffi::lua_rawget(state, tr_idx);
++        let reuse = kind == ffi::LUA_TTABLE
++            && ffi::lua_rawlen(state, -1) == 3
++            && Self::vec3_has_only_indices_1_to_3(state, ffi::lua_absindex(state, -1));
++        if reuse {
++            let vec_idx = ffi::lua_absindex(state, -1);
++            for (i, v) in vals.into_iter().enumerate() {
++                ffi::lua_pushnumber(state, ffi::lua_Number::from(v));
++                ffi::lua_rawseti(state, vec_idx, (i + 1) as ffi::lua_Integer);
++            }
++            ffi::lua_pop(state, 1);
++        } else {
++            ffi::lua_pop(state, 1);
++            ffi::lua_createtable(state, 3, 0);
++            let vec_idx = ffi::lua_absindex(state, -1);
++            for (i, v) in vals.into_iter().enumerate() {
++                ffi::lua_pushnumber(state, ffi::lua_Number::from(v));
++                ffi::lua_rawseti(state, vec_idx, (i + 1) as ffi::lua_Integer);
++            }
++            ffi::lua_pushvalue(state, key_idx);
++            ffi::lua_pushvalue(state, vec_idx);
++            ffi::lua_rawset(state, tr_idx);
++            ffi::lua_pop(state, 1);
++        }
++    }
++
++    /// Reads `1..=count` raw `{ translation, rotation, scale }` transform tables directly
++    /// from Lua without intermediate `Table`/`Value` allocations.
++    #[cfg(feature = "lua54")]
++    pub fn read_pose_batch(
++        &self,
++        k_tr: &crate::LuaString,
++        k_rot: &crate::LuaString,
++        k_sc: &crate::LuaString,
++        count: usize,
++        mut on_pose: impl FnMut(usize, [f32; 9]),
++    ) -> std::result::Result<(), (usize, Error)> {
++        if self.0.lua != k_tr.0.lua || self.0.lua != k_rot.0.lua || self.0.lua != k_sc.0.lua {
++            return Err((0, Error::MismatchedRegistryKey));
++        }
++        let Ok(count_i) = ffi::lua_Integer::try_from(count) else {
++            return Err((0, Error::runtime("batch pose count overflow")));
++        };
++        if count > c_int::MAX as usize {
++            return Err((0, Error::runtime("batch pose count overflow")));
++        }
++
++        let lua = self.0.lua.lock();
++        let state = lua.state();
++        unsafe {
++            let _sg = StackGuard::new(state);
++            check_stack(state, 20).map_err(|e| (0, e))?;
++
++            lua.push_ref(&self.0);
++            let trs_idx = ffi::lua_absindex(state, -1);
++            lua.push_ref(&k_tr.0);
++            let kt_idx = ffi::lua_absindex(state, -1);
++            lua.push_ref(&k_rot.0);
++            let kr_idx = ffi::lua_absindex(state, -1);
++            lua.push_ref(&k_sc.0);
++            let ks_idx = ffi::lua_absindex(state, -1);
++            let tr_idx = ks_idx + 1;
++
++            for k in 1..=count_i {
++                let k_usize = k as usize;
++                if ffi::lua_rawgeti(state, trs_idx, k) != ffi::LUA_TTABLE {
++                    ffi::lua_settop(state, ks_idx);
++                    return Err((k_usize, Error::runtime("transform must be a table")));
++                }
++                let tr = match Self::read_raw_vec3(state, tr_idx, tr_idx + 1, kt_idx) {
++                    Ok(v) => v,
++                    Err(msg) => {
++                        ffi::lua_settop(state, ks_idx);
++                        return Err((k_usize, Error::runtime(msg)));
++                    }
++                };
++                let rot = match Self::read_raw_vec3(state, tr_idx, tr_idx + 5, kr_idx) {
++                    Ok(v) => v,
++                    Err(msg) => {
++                        ffi::lua_settop(state, ks_idx);
++                        return Err((k_usize, Error::runtime(msg)));
++                    }
++                };
++                let sc = match Self::read_raw_vec3(state, tr_idx, tr_idx + 9, ks_idx) {
++                    Ok(v) => v,
++                    Err(msg) => {
++                        ffi::lua_settop(state, ks_idx);
++                        return Err((k_usize, Error::runtime(msg)));
++                    }
++                };
++                ffi::lua_settop(state, ks_idx);
++                on_pose(
++                    k_usize,
++                    [
++                        tr[0], tr[1], tr[2], rot[0], rot[1], rot[2], sc[0], sc[1], sc[2],
++                    ],
++                );
++            }
++        }
++        Ok(())
++    }
++
++    /// Writes `1..=poses.len()` raw `{ translation, rotation, scale }` transform tables directly
++    /// in Lua, updating existing clean 3-element tables in-place or replacing corrupted ones.
++    #[cfg(feature = "lua54")]
++    pub fn write_pose_batch(
++        &self,
++        k_tr: &crate::LuaString,
++        k_rot: &crate::LuaString,
++        k_sc: &crate::LuaString,
++        mut poses: impl ExactSizeIterator<Item = [f32; 9]>,
++    ) -> Result<()> {
++        if self.0.lua != k_tr.0.lua || self.0.lua != k_rot.0.lua || self.0.lua != k_sc.0.lua {
++            return Err(Error::MismatchedRegistryKey);
++        }
++        let len = poses.len();
++        if len > c_int::MAX as usize || ffi::lua_Integer::try_from(len).is_err() {
++            return Err(Error::runtime("batch pose count overflow"));
++        }
++
++        let lua = self.0.lua.lock();
++        let state = lua.state();
++        let poses_ref = &mut poses;
++        unsafe {
++            let _sg = StackGuard::new(state);
++            check_stack(state, 12)?;
++
++            lua.push_ref(&self.0);
++            lua.push_ref(&k_tr.0);
++            lua.push_ref(&k_rot.0);
++            lua.push_ref(&k_sc.0);
++
++            protect_lua!(state, 4, 0, |state| {
++                let trs_idx = ffi::lua_absindex(state, -4);
++                let kt_idx = ffi::lua_absindex(state, -3);
++                let kr_idx = ffi::lua_absindex(state, -2);
++                let ks_idx = ffi::lua_absindex(state, -1);
++
++                for (k0, pose) in poses_ref.enumerate() {
++                    let k = (k0 + 1) as ffi::lua_Integer;
++                    if ffi::lua_rawgeti(state, trs_idx, k) != ffi::LUA_TTABLE {
++                        ffi::lua_pop(state, 1);
++                        ffi::lua_createtable(state, 0, 3);
++                        ffi::lua_pushvalue(state, -1);
++                        ffi::lua_rawseti(state, trs_idx, k);
++                    }
++                    let tr_idx = ffi::lua_absindex(state, -1);
++                    Self::write_raw_vec3(state, tr_idx, kt_idx, [pose[0], pose[1], pose[2]]);
++                    Self::write_raw_vec3(state, tr_idx, kr_idx, [pose[3], pose[4], pose[5]]);
++                    Self::write_raw_vec3(state, tr_idx, ks_idx, [pose[6], pose[7], pose[8]]);
++                    ffi::lua_pop(state, 1);
++                }
++            })
++        }
++    }
++

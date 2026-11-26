@@ -4,13 +4,9 @@
 //! diagnostics (with file and line), import and build results, and engine
 //! warnings from the `log` crate. The status bar shows the latest one; the
 //! Console lists them all; toasts confirm what the creator just did.
-#[cfg(test)]
 use crate::strings::Text;
-#[cfg(test)]
 use crate::ui_kit::tokens::*;
-#[cfg(test)]
 use eframe::egui::{self, RichText};
-#[cfg(test)]
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
@@ -18,13 +14,11 @@ const CAPACITY: usize = 2000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Level {
-    #[cfg_attr(not(test), allow(dead_code))]
     Info,
     Warning,
     Error,
 }
 
-#[cfg(test)]
 impl Level {
     fn index(self) -> usize {
         self as usize
@@ -46,7 +40,6 @@ impl Level {
     }
 }
 
-#[cfg(test)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
     pub level: Level,
@@ -59,7 +52,6 @@ pub struct Entry {
     pub repeats: u32,
 }
 
-#[cfg(test)]
 impl Entry {
     pub fn summary(&self) -> &str {
         self.text
@@ -87,7 +79,6 @@ pub fn engine_log(level: log::Level, text: String) {
     }
 }
 
-#[cfg(test)]
 #[derive(Default)]
 pub struct Console {
     entries: VecDeque<Entry>,
@@ -101,13 +92,12 @@ pub struct Console {
 }
 
 /// What the creator asked for from the Console this frame.
-#[cfg(test)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub enum Request {
     /// Open a script in the configured code editor at this line.
     OpenSource(String, u32),
 }
 
-#[cfg(test)]
 impl Console {
     pub fn push(&mut self, level: Level, source: &'static str, text: impl Into<String>) {
         self.push_entry(Entry {
@@ -141,6 +131,7 @@ impl Console {
 
     /// Log `text` from `source` when it differs from what that slot showed
     /// last frame. Returns true when a new message was logged.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn observe(
         &mut self,
         slot: &'static str,
@@ -177,6 +168,7 @@ impl Console {
         }
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn latest(&self) -> Option<&Entry> {
         self.entries.back()
     }
@@ -185,6 +177,7 @@ impl Console {
         self.counts[level.index()]
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn entries(&self) -> impl Iterator<Item = &Entry> {
         self.entries.iter()
     }

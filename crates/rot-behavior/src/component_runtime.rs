@@ -10,11 +10,15 @@ use rot_scene::component_scene::{
     AnimatorStart, Component, ComponentScene, ObjectHierarchy, ScriptFile, ScriptMovement,
 };
 use rot_scene::input::{ActionFrame, ActionValue, ValidatedActionFrame};
-use rot_scene::{Authoring, BehaviorSource, BindingTarget, Clip, ComponentDrawPlan, Transform};
+use rot_scene::{
+    Authoring, BehaviorSource, BindingTarget, Clip, ComponentDrawPlan, RuntimeVisualOverrides,
+    Transform,
+};
 
 use super::component_topology::{ObjectSession, Population, TopologyEdits};
 use super::lua_component::{
-    self, CurrentCallback, LightIntensities, Module, ModuleProbe, Modules, ObjectLookup,
+    self, CallbackContext, CallbackWrites, CoroutineScheduler, CurrentCallback, EventBus, Module,
+    ModuleProbe, Modules, ObjectLookup, SlotMeta,
 };
 use super::spatial::{world_collider_transform, ComponentColliderSlot};
 use super::spatial_host::{kinematic_owner_component, ComponentQueryInput};
@@ -30,7 +34,7 @@ pub(super) struct ComponentScriptSlot {
     pub(super) owner_index: usize,
     pub(super) owner_id: String,
     pub(super) has_object_input: bool,
-    movement: ScriptMovement,
+    pub(super) movement: ScriptMovement,
 }
 
 #[derive(Clone, Debug)]
@@ -42,22 +46,65 @@ pub(super) struct ResolvedComponentAnimation {
     pub(super) speed: f64,
 }
 
+#[derive(Debug)]
+struct ScratchPool<T>(RefCell<Vec<T>>);
+
+impl<T> Default for ScratchPool<T> {
+    fn default() -> Self {
+        Self(RefCell::new(Vec::new()))
+    }
+}
+
+impl<T> Clone for ScratchPool<T> {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl<T> ScratchPool<T> {
+    fn take(&self) -> Vec<T> {
+        std::mem::take(&mut *self.0.borrow_mut())
+    }
+
+    fn put(&self, vec: Vec<T>) {
+        *self.0.borrow_mut() = vec;
+    }
+
+    fn clone_from(&self, slice: &[T]) -> Vec<T>
+    where
+        T: Clone,
+    {
+        let mut vec = self.take();
+        if vec.len() == slice.len() {
+            vec.clone_from_slice(slice);
+        } else {
+            vec.clear();
+            vec.extend_from_slice(slice);
+        }
+        vec
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct ComponentWorld {
     pub(crate) scene: Arc<ComponentScene>,
     pub(crate) hierarchy: Arc<ObjectHierarchy>,
     pub(crate) object_indices: Arc<HashMap<String, usize>>,
     pub(crate) local_transforms: Arc<Vec<Transform>>,
-    pub(crate) light_intensities: Arc<LightIntensities>,
+    pub(crate) visual_overrides: Arc<RuntimeVisualOverrides>,
     pub(crate) world_matrices: Arc<Vec<DMat4>>,
     pub(crate) world_rotations: Arc<Vec<DQuat>>,
     pub(crate) scripts: Vec<ComponentScriptSlot>,
+    pub(crate) has_state_scripts: bool,
     modules: Option<Rc<RefCell<Modules>>>,
     pub(crate) animations: Vec<ResolvedComponentAnimation>,
     pub(crate) colliders: Arc<Vec<ComponentColliderSlot>>,
     pub(crate) draw_plan: Arc<ComponentDrawPlan>,
     pub(crate) audio_emitters: Option<Arc<BTreeMap<String, usize>>>,
     audio_requests: Option<audio::CueRequests>,
+    spare_local: ScratchPool<Transform>,
+    spare_world: ScratchPool<DMat4>,
+    spare_rotations: ScratchPool<DQuat>,
 }
 
 struct RebuiltPopulation {
@@ -71,7 +118,7 @@ struct RebuiltPopulation {
     draw_plan: Arc<ComponentDrawPlan>,
     draw: rot_scene::SceneDrawFrame,
     lookup: Rc<ObjectLookup>,
-    light_intensities: Arc<LightIntensities>,
+    visual_overrides: Arc<RuntimeVisualOverrides>,
 }
 
 impl RebuiltPopulation {
@@ -88,7 +135,10 @@ impl RebuiltPopulation {
         world.world_rotations = Arc::new(self.rotations);
         world.colliders = Arc::new(self.colliders);
         world.draw_plan = self.draw_plan;
-        world.light_intensities = self.light_intensities;
+        world.visual_overrides = self.visual_overrides;
+        if let Some(batch) = &modules.batch {
+            batch.resync_poses.set(true);
+        }
         modules.lookup = self.lookup;
         self.draw
     }
@@ -111,60 +161,81 @@ impl ComponentWorld {
 
     fn resolve_staged_transforms(
         &self,
+        scene: &ComponentScene,
+        hierarchy: &ObjectHierarchy,
+        colliders: &[ComponentColliderSlot],
+        draw_plan: &ComponentDrawPlan,
         local: &[Transform],
-        staged_lights: &LightIntensities,
+        overrides: &RuntimeVisualOverrides,
     ) -> Result<(Vec<DMat4>, Vec<DQuat>, rot_scene::SceneDrawFrame), Diagnostic> {
-        let mut world = Vec::with_capacity(local.len());
-        let mut rotations = Vec::with_capacity(local.len());
-        self.scene
-            .resolve_world_matrices_into(&self.hierarchy, local, &mut world)
+        let mut world = self.spare_world.take();
+        world.reserve(local.len().saturating_sub(world.len()));
+        let mut rotations = self.spare_rotations.take();
+        rotations.reserve(local.len().saturating_sub(rotations.len()));
+        scene
+            .resolve_world_matrices_and_rotations_into(hierarchy, local, &mut world, &mut rotations)
             .map_err(invalid_commit)?;
-        self.scene
-            .resolve_world_rotations_into(&self.hierarchy, local, &mut rotations);
         validate_component_colliders(
-            &self.scene,
-            &self.colliders,
+            scene,
+            colliders,
             local,
             &world,
             &rotations,
-            &self.hierarchy.parents,
+            &hierarchy.parents,
             Phase::Commit,
         )?;
-        let draw = self
-            .draw_plan
-            .build_frame_with_light_intensities(&self.scene, &world, &rotations, |id| {
-                staged_lights
-                    .get(id)
-                    .or_else(|| self.light_intensities.get(id))
-                    .copied()
-            })
+        let draw = draw_plan
+            .build_frame_with_overrides(scene, hierarchy, &world, &rotations, overrides)
             .map_err(invalid_commit)?;
         Ok((world, rotations, draw))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn rebuild_population(
         &self,
         edits: TopologyEdits,
+        scene_with_enabled: Option<ComponentScene>,
         local: &[Transform],
-        staged_lights: &LightIntensities,
+        overrides: &RuntimeVisualOverrides,
         authoring: &Authoring,
         session: &Rc<ObjectSession>,
+        slots: &Arc<Vec<SlotMeta>>,
         revision: u64,
     ) -> Result<Option<RebuiltPopulation>, Diagnostic> {
-        let Some(Population {
-            scene,
-            local,
-            origins,
-        }) = edits
-            .materialize(
-                &self.scene,
-                &self.hierarchy,
-                &self.object_indices,
-                local,
-                session.authored_count(),
+        let base_scene = scene_with_enabled.as_ref().unwrap_or(&self.scene);
+        let base_hierarchy = if scene_with_enabled.is_some() {
+            Arc::new(
+                base_scene
+                    .validate()
+                    .map_err(|error| topology_diagnostic(authoring, "", &error.to_string()))?,
             )
-            .map_err(|(binding, message)| topology_diagnostic(authoring, &binding, &message))?
-        else {
+        } else {
+            Arc::clone(&self.hierarchy)
+        };
+        let (scene, local, origins) = if !edits.is_empty() {
+            let Some(Population {
+                scene,
+                local,
+                origins,
+            }) = edits
+                .materialize(
+                    base_scene,
+                    &base_hierarchy,
+                    &self.object_indices,
+                    local,
+                    session.authored_count(),
+                )
+                .map_err(|(binding, message)| topology_diagnostic(authoring, &binding, &message))?
+            else {
+                if scene_with_enabled.is_none() {
+                    return Ok(None);
+                }
+                unreachable!("branch handled below")
+            };
+            (scene, local, origins)
+        } else if let Some(scene) = scene_with_enabled {
+            (scene, local.to_vec(), Vec::new())
+        } else {
             return Ok(None);
         };
         let origin = origins.last().map_or("", |(_, binding)| binding.as_str());
@@ -248,16 +319,13 @@ impl ComponentWorld {
         let lookup = Rc::new(ObjectLookup::new(
             Rc::clone(session),
             Arc::clone(&scene),
+            &hierarchy,
             Arc::clone(&object_indices),
             protections,
+            Arc::clone(slots),
         ));
-        let mut light_intensities = self.light_intensities.as_ref().clone();
-        light_intensities.retain(|id, _| lookup.contains_light(id));
-        commit_light_intensities(
-            &mut light_intensities,
-            staged_lights.iter().map(|(id, &value)| (id.clone(), value)),
-            &lookup,
-        );
+        let mut visual_overrides = overrides.clone();
+        prune_visual_overrides(&mut visual_overrides, &lookup);
 
         let mut world = Vec::new();
         let mut rotations = Vec::new();
@@ -280,9 +348,7 @@ impl ComponentWorld {
                 .map_err(invalid)?,
         );
         let draw = draw_plan
-            .build_frame_with_light_intensities(&scene, &world, &rotations, |id| {
-                light_intensities.get(id).copied()
-            })
+            .build_frame_with_overrides(&scene, &hierarchy, &world, &rotations, &visual_overrides)
             .map_err(invalid)?;
         Ok(Some(RebuiltPopulation {
             scene,
@@ -295,7 +361,7 @@ impl ComponentWorld {
             draw_plan,
             draw,
             lookup,
-            light_intensities: Arc::new(light_intensities),
+            visual_overrides: Arc::new(visual_overrides),
         }))
     }
 }
@@ -338,21 +404,136 @@ fn topology_diagnostic(authoring: &Authoring, binding_id: &str, reason: &str) ->
     }
 }
 
-fn commit_light_intensities(
-    committed: &mut LightIntensities,
-    staged: impl IntoIterator<Item = (String, f32)>,
-    lookup: &ObjectLookup,
-) {
-    for (id, intensity) in staged {
-        if !lookup.contains_light(&id) {
-            continue;
+fn prune_visual_overrides(overrides: &mut RuntimeVisualOverrides, lookup: &ObjectLookup) {
+    overrides.lights.retain(|id, ov| {
+        if !lookup.contains_light(id) {
+            return false;
         }
-        if intensity == lookup.authored_light_intensity(&id) {
-            committed.remove(&id);
-        } else {
-            committed.insert(id, intensity);
+        let (_, authored_intensity, authored_color, _) = lookup.authored_light(id);
+        if ov.intensity == Some(authored_intensity) {
+            ov.intensity = None;
+        }
+        if ov.color == Some(authored_color) {
+            ov.color = None;
+        }
+        ov.intensity.is_some() || ov.color.is_some() || ov.enabled.is_some()
+    });
+    overrides.meshes.retain(|id, ov| {
+        if !lookup.contains_mesh(id) {
+            return false;
+        }
+        let (authored_tint, _) = lookup.authored_mesh(id);
+        if ov.tint == Some(authored_tint) {
+            ov.tint = None;
+        }
+        ov.tint.is_some() || ov.enabled.is_some()
+    });
+    overrides.object_enabled.clear();
+    overrides.camera_enabled = None;
+}
+
+fn build_trial_overrides(
+    base: &RuntimeVisualOverrides,
+    writes: Option<&CallbackWrites>,
+    lookup: &ObjectLookup,
+) -> (RuntimeVisualOverrides, bool) {
+    let mut next = base.clone();
+    let mut visual_changed = false;
+    if let Some(writes) = writes {
+        for (id, ov) in &writes.lights {
+            if !lookup.contains_light(id) {
+                continue;
+            }
+            if ov.intensity.is_some() || ov.color.is_some() {
+                let entry = next.lights.entry(id.clone()).or_default();
+                if let Some(v) = ov.intensity {
+                    entry.intensity = Some(v);
+                    visual_changed = true;
+                }
+                if let Some(c) = ov.color {
+                    entry.color = Some(c);
+                    visual_changed = true;
+                }
+            }
+        }
+        for (id, ov) in &writes.meshes {
+            if !lookup.contains_mesh(id) {
+                continue;
+            }
+            if let Some(tint) = ov.tint {
+                next.meshes.entry(id.clone()).or_default().tint = Some(tint);
+                visual_changed = true;
+            }
+        }
+        if let Some(fov) = writes.camera_fov {
+            next.camera_fov = Some(fov);
+            visual_changed = true;
         }
     }
+    prune_visual_overrides(&mut next, lookup);
+    (next, visual_changed)
+}
+
+fn scene_with_write_toggles(
+    base_scene: &ComponentScene,
+    writes: Option<&CallbackWrites>,
+) -> Option<ComponentScene> {
+    let writes = writes?;
+    let has_light_en = writes.lights.values().any(|o| o.enabled.is_some());
+    let has_mesh_en = writes.meshes.values().any(|o| o.enabled.is_some());
+    let has_scene_edits = !writes.object_enabled.is_empty()
+        || has_light_en
+        || has_mesh_en
+        || writes.camera_enabled.is_some()
+        || !writes.secondary_camera_enabled.is_empty()
+        || !writes.secondary_camera_fovs.is_empty();
+    if !has_scene_edits {
+        return None;
+    }
+    let mut scene = base_scene.clone();
+    let gameplay_cam = scene.gameplay_camera.as_deref().map(str::to_owned);
+    for (index, &enabled) in &writes.object_enabled {
+        if let Some(obj) = scene.objects.get_mut(*index) {
+            obj.enabled = enabled;
+        }
+    }
+    for obj in &mut scene.objects {
+        for comp in &mut obj.components {
+            match &mut comp.kind {
+                Component::Light { .. } => {
+                    if let Some(Some(enabled)) = writes.lights.get(&comp.id).map(|o| o.enabled) {
+                        comp.enabled = enabled;
+                    }
+                }
+                Component::MeshRenderer { .. } => {
+                    if let Some(Some(enabled)) = writes.meshes.get(&comp.id).map(|o| o.enabled) {
+                        comp.enabled = enabled;
+                    }
+                }
+                Component::Camera { view } => {
+                    if gameplay_cam.as_deref() == Some(comp.id.as_str()) {
+                        if let Some(enabled) = writes.camera_enabled {
+                            comp.enabled = enabled;
+                        }
+                    } else {
+                        if let Some(&enabled) = writes.secondary_camera_enabled.get(&comp.id) {
+                            comp.enabled = enabled;
+                        }
+                        if let Some(&fov) = writes.secondary_camera_fovs.get(&comp.id) {
+                            if let rot_scene::component_scene::CameraView::Transform(
+                                rot_scene::component_scene::TransformLens::Perspective(lens),
+                            ) = view
+                            {
+                                lens.vertical_fov_degrees = fov;
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    Some(scene)
 }
 
 fn diag(code: DiagnosticCode, phase: Phase, message: &str) -> Diagnostic {
@@ -367,24 +548,41 @@ fn invalid_commit(error: rot_scene::SceneError) -> Diagnostic {
     )
 }
 
-fn stage_file_writes(
-    callback: &CurrentCallback,
+fn stage_transform_write(
     committed: &[Transform],
     staged: &mut Option<Vec<Transform>>,
-    staged_lights: &mut LightIntensities,
-    owner_index: usize,
-    implicit: Option<Transform>,
-    binding: &str,
+    owner_idx: usize,
+    pose: Transform,
 ) {
-    let mut stage = |index, pose| {
-        if !same_transform(&staged.as_deref().unwrap_or(committed)[index], &pose) {
-            staged.get_or_insert_with(|| committed.to_vec())[index] = pose;
-        }
+    let current = staged.as_deref().unwrap_or(committed);
+    if !same_transform(&current[owner_idx], &pose) {
+        staged.get_or_insert_with(|| committed.to_vec())[owner_idx] = pose;
+    }
+}
+
+fn mark_batch_slots_attempted(
+    modules: &mut Option<std::cell::RefMut<'_, lua_component::Modules>>,
+    upto: usize,
+    extra_slot: Option<usize>,
+    attempted_tick: u64,
+) {
+    let Some(mods) = modules.as_deref_mut() else {
+        return;
     };
-    callback.stage_writes(&mut stage, staged_lights, binding);
-    if let Some(pose) = implicit {
-        if !same_transform(&committed[owner_index], &pose) {
-            stage(owner_index, pose);
+    mods.max_attempt = mods.max_attempt.max(attempted_tick);
+    let slots: Vec<usize> = mods
+        .batch
+        .as_ref()
+        .map(|b| b.slot_index_vec[..upto.min(b.slot_index_vec.len())].to_vec())
+        .unwrap_or_default();
+    for slot_idx in slots {
+        if let Some(module) = mods.instances[slot_idx].as_mut() {
+            module.last_attempt = attempted_tick;
+        }
+    }
+    if let Some(slot_idx) = extra_slot {
+        if let Some(Some(module)) = mods.instances.get_mut(slot_idx) {
+            module.last_attempt = attempted_tick;
         }
     }
 }
@@ -485,21 +683,28 @@ impl Engine {
         };
         let mut modules = modules.borrow_mut();
         modules.validate(self, runtime.tick)?;
-        let affected = modules.instances.keys().copied().filter(|&index| {
-            let slot = &world.scripts[index];
-            runtime.authoring.bindings[&slot.component_id].source_id == source_id
-        });
-        let mut affected = affected.peekable();
-        if affected.peek().is_none() {
+        let affected_indices: Vec<usize> = modules
+            .instances
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, slot_opt)| slot_opt.as_ref().map(|_| idx))
+            .filter(|&index| {
+                let slot = &world.scripts[index];
+                runtime.authoring.bindings[&slot.component_id].source_id == source_id
+            })
+            .collect();
+        if affected_indices.is_empty() {
             return Ok(false);
         }
-        let input = ValidatedActionFrame::neutral(&runtime.authoring.actions).map_err(|error| {
-            diag(
-                DiagnosticCode::InvalidInput,
-                Phase::Setup,
-                &error.to_string(),
-            )
-        })?;
+        let input = Rc::new(
+            ValidatedActionFrame::neutral(&runtime.authoring.actions).map_err(|error| {
+                diag(
+                    DiagnosticCode::InvalidInput,
+                    Phase::Setup,
+                    &error.to_string(),
+                )
+            })?,
+        );
         self.begin()?;
         self.begin_debug(
             runtime.tick,
@@ -519,20 +724,35 @@ impl Engine {
             )?
             .expect("component reload can run persistent queries");
         let audio_cues = world.audio_requests.as_ref().map(audio::CueRequests::trial);
+        let trial_events = Rc::new(RefCell::new(EventBus::new_trial(
+            modules.events.borrow().next_id(),
+        )));
+        let trial_coroutines = Rc::new(RefCell::new(CoroutineScheduler::new_trial(
+            world.scripts.len(),
+            modules.coroutines.borrow().next_id(),
+        )));
         let callback = CurrentCallback::new(
             &self.lua,
-            &input,
-            &modules.lookup,
-            &world.local_transforms,
-            &world.light_intensities,
-            &queries,
-            audio_cues
-                .as_ref()
-                .map(|trial| trial.context(&runtime.authoring)),
+            CallbackContext {
+                input,
+                lookup: &modules.lookup,
+                transforms: &world.local_transforms,
+                world_matrices: &world.world_matrices,
+                world_rotations: &world.world_rotations,
+                visual_overrides: &world.visual_overrides,
+                queries: &queries,
+                audio: audio_cues
+                    .as_ref()
+                    .map(|trial| trial.context(&runtime.authoring)),
+                events: Some(Rc::clone(&trial_events)),
+                coroutines: Some(Rc::clone(&trial_coroutines)),
+                host_per_slot: Some(Rc::clone(&modules.host_per_slot)),
+                batch_state: None,
+                batch_slots: None,
+            },
         );
         let mut replacements = Vec::new();
         let mut staged_transforms = None;
-        let mut staged_lights = LightIntensities::new();
         let describe_reload_error = |mut error: Diagnostic| {
             if let Some(path) = file_path.or(source.label.as_deref()) {
                 let location = error
@@ -542,9 +762,10 @@ impl Engine {
             }
             error
         };
-        for index in affected {
+        for &index in &affected_indices {
             let slot = &world.scripts[index];
             let binding = &runtime.authoring.bindings[&slot.component_id];
+            callback.set_active_slot(index);
             let stage = (|| {
                 source.validate().map_err(|error| {
                     diag(
@@ -567,12 +788,13 @@ impl Engine {
                 let mut module = self.load_replacement_module(
                     source_id,
                     &source.text,
+                    index,
                     &slot.component_id,
                     &binding.properties,
                     kinematic,
                 )?;
                 let original = &world.local_transforms[slot.owner_index];
-                let implicit = module.start(self, original, &binding.properties)?;
+                let implicit = module.start(self, original)?;
                 if kinematic {
                     if let Some(output) = &implicit {
                         queries
@@ -582,14 +804,11 @@ impl Engine {
                             })?;
                     }
                 }
-                stage_file_writes(
-                    &callback,
+                callback.flush_transform_writes(
                     &world.local_transforms,
                     &mut staged_transforms,
-                    &mut staged_lights,
                     slot.owner_index,
                     implicit,
-                    &slot.component_id,
                 );
                 module.source_hash.clone_from(&self.cache[source_id].hash);
                 module.last_attempt = runtime.tick;
@@ -600,20 +819,24 @@ impl Engine {
             })?;
             replacements.push((index, module));
         }
+        let writes = callback.finish_writes(&world.local_transforms, &mut staged_transforms);
         let edits = callback.take_topology();
         drop(callback);
-        let rebuilt = if edits.is_empty() {
-            None
-        } else {
+        let (trial_overrides, _) =
+            build_trial_overrides(&world.visual_overrides, writes.as_ref(), &modules.lookup);
+        let scene_with_enabled = scene_with_write_toggles(&world.scene, writes.as_ref());
+        let rebuilt = if !edits.is_empty() || scene_with_enabled.is_some() {
             world
                 .rebuild_population(
                     edits,
+                    scene_with_enabled,
                     staged_transforms
                         .as_deref()
                         .unwrap_or(&world.local_transforms),
-                    &staged_lights,
+                    &trial_overrides,
                     &runtime.authoring,
                     &modules.lookup.session,
+                    &modules.lookup.slots,
                     runtime.draw_frame.scene().revision,
                 )
                 .map_err(|mut error| {
@@ -622,14 +845,54 @@ impl Engine {
                     }
                     describe_reload_error(error)
                 })?
+        } else {
+            None
         };
         if rebuilt.is_none() {
             if let Some(trial) = staged_transforms {
-                world.resolve_staged_transforms(&trial, &staged_lights)?;
+                world.resolve_staged_transforms(
+                    &world.scene,
+                    &world.hierarchy,
+                    &world.colliders,
+                    &world.draw_plan,
+                    &trial,
+                    &trial_overrides,
+                )?;
             }
         }
         self.check_cancelled()?;
-        modules.instances.extend(replacements);
+        let merged_events = Rc::try_unwrap(trial_events)
+            .expect("callback dropped")
+            .into_inner();
+        let merged_coroutines = Rc::try_unwrap(trial_coroutines)
+            .expect("callback dropped")
+            .into_inner();
+        {
+            let mut events = modules.events.borrow_mut();
+            let mut coroutines = modules.coroutines.borrow_mut();
+            for &index in &affected_indices {
+                events.prune_module(index);
+                coroutines.prune_module(index);
+            }
+            events.merge_from(merged_events);
+            coroutines.merge_from(merged_coroutines);
+        }
+        let modules_ref = &mut *modules;
+        let hosts = Rc::make_mut(&mut modules_ref.host_per_slot);
+        for (index, module) in replacements {
+            hosts[index] = Some(module.host.clone());
+            modules_ref.instances[index] = Some(module);
+        }
+        modules_ref.max_attempt = modules_ref
+            .instances
+            .iter()
+            .flatten()
+            .map(|module| module.last_attempt)
+            .max()
+            .unwrap_or(0);
+        modules_ref.batch =
+            lua_component::BatchState::try_build(self, &modules_ref.instances, &world.scripts)
+                .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
         Arc::make_mut(&mut runtime.authoring)
             .sources
             .insert(source_id.to_owned(), source);
@@ -751,6 +1014,7 @@ impl Engine {
 
         let mut scripts = Vec::new();
         let mut colliders = Vec::new();
+        let mut has_state_scripts = false;
         for (owner_index, object) in scene.objects.iter().enumerate() {
             if !hierarchy.effectively_enabled[owner_index] {
                 continue;
@@ -779,6 +1043,16 @@ impl Engine {
                             }
                             BindingTarget::Application => false,
                         };
+                        let is_state_script = !binding.state_defaults.is_empty()
+                            || scene.sources.get(&binding.source_id).is_some_and(|s| {
+                                matches!(
+                                    s.host_api_version,
+                                    STATE_HOST_API_VERSION
+                                        | LIFECYCLE_HOST_API_VERSION
+                                        | KINEMATIC_HOST_API_VERSION
+                                )
+                            });
+                        has_state_scripts |= is_state_script;
                         scripts.push(ComponentScriptSlot {
                             component_id: component.id.clone(),
                             owner_index,
@@ -838,7 +1112,7 @@ impl Engine {
             &hierarchy.parents,
             Phase::Setup,
         )?;
-        let mut draw_frame = draw_plan
+        let draw_frame = draw_plan
             .build_frame(scene, &world_matrices, &world_rotations)
             .map_err(|error| {
                 diag(
@@ -881,19 +1155,27 @@ impl Engine {
         let defaults = RuntimeState::defaults(&authoring)?;
         let mut state = defaults.clone();
 
-        let mut modules = BTreeMap::new();
+        let mut modules: Vec<Option<Module>> = std::iter::repeat_with(|| None)
+            .take(scripts.len())
+            .collect();
         let mut lookup = None;
         let mut scene_arc = None;
         let mut topology = TopologyEdits::default();
-        let mut start_lights = LightIntensities::new();
+        let mut events_bus = None;
+        let mut coroutines_sched = None;
+        let mut host_per_slot = None;
+        let mut reset_writes = None;
+        let mut reset_logs = Vec::new();
         if !scripts.is_empty() {
-            let input = ValidatedActionFrame::neutral(&authoring.actions).map_err(|error| {
-                diag(
-                    DiagnosticCode::InvalidInput,
-                    Phase::Setup,
-                    &error.to_string(),
-                )
-            })?;
+            let input = Rc::new(ValidatedActionFrame::neutral(&authoring.actions).map_err(
+                |error| {
+                    diag(
+                        DiagnosticCode::InvalidInput,
+                        Phase::Setup,
+                        &error.to_string(),
+                    )
+                },
+            )?);
             self.begin()?;
             self.begin_debug(0, 0, 0, 0, true);
             for slot in &scripts {
@@ -926,47 +1208,77 @@ impl Engine {
             let audio_cues = audio_requests.as_ref().map(audio::CueRequests::trial);
             let mut trial_transforms: Option<Vec<Transform>> = None;
             let mut start_transforms = None;
-            lookup = scripts
-                .iter()
-                .any(|slot| {
-                    let binding = &authoring.bindings[&slot.component_id];
-                    if scene.script_files.contains_key(&binding.source_id) {
-                        return true;
-                    }
-                    authoring
-                        .sources
-                        .get(&binding.source_id)
-                        .is_some_and(|source| {
-                            lua_component::legacy_file_source(&binding.source_id, source)
-                        })
-                })
-                .then(|| {
-                    let mut protected =
-                        kinematic_owner.as_ref().map_or_else(HashMap::new, |owner| {
-                            owner.protected_component_transforms(
-                                &authoring,
-                                &object_indices,
-                                &hierarchy,
-                                &colliders,
-                            )
-                        });
-                    protected.extend(
-                        animated_objects
-                            .iter()
-                            .map(|&index| (index, "an Animator controls this Transform")),
-                    );
-                    let shared = scene_arc.get_or_insert_with(|| Arc::new(scene.clone()));
-                    let session = Rc::new(ObjectSession::new(
-                        Arc::clone(shared),
-                        Arc::clone(&hierarchy),
-                    ));
-                    Rc::new(ObjectLookup::new(
-                        session,
-                        Arc::clone(shared),
-                        Arc::clone(&object_indices),
-                        protected,
-                    ))
+            let is_file_based = scripts.iter().any(|slot| {
+                let binding = &authoring.bindings[&slot.component_id];
+                if scene.script_files.contains_key(&binding.source_id) {
+                    return true;
+                }
+                authoring
+                    .sources
+                    .get(&binding.source_id)
+                    .is_some_and(|source| {
+                        lua_component::legacy_file_source(&binding.source_id, source)
+                    })
+            });
+            lookup = is_file_based.then(|| {
+                let mut protected = kinematic_owner.as_ref().map_or_else(HashMap::new, |owner| {
+                    owner.protected_component_transforms(
+                        &authoring,
+                        &object_indices,
+                        &hierarchy,
+                        &colliders,
+                    )
                 });
+                protected.extend(
+                    animated_objects
+                        .iter()
+                        .map(|&index| (index, "an Animator controls this Transform")),
+                );
+                let slots_meta: Arc<Vec<SlotMeta>> = Arc::new(
+                    scripts
+                        .iter()
+                        .map(|slot| {
+                            let binding = &authoring.bindings[&slot.component_id];
+                            SlotMeta {
+                                component_id: slot.component_id.clone(),
+                                owner_id: slot.owner_id.clone(),
+                                properties: Arc::new(binding.properties.clone()),
+                            }
+                        })
+                        .collect(),
+                );
+                let shared = scene_arc.get_or_insert_with(|| Arc::new(scene.clone()));
+                let session = Rc::new(ObjectSession::new(
+                    Arc::clone(shared),
+                    Arc::clone(&hierarchy),
+                ));
+                Rc::new(ObjectLookup::new(
+                    session,
+                    Arc::clone(shared),
+                    &hierarchy,
+                    Arc::clone(&object_indices),
+                    protected,
+                    slots_meta,
+                ))
+            });
+            if lookup.is_some() {
+                events_bus = Some(Rc::new(RefCell::new(EventBus::default())));
+                coroutines_sched = Some(Rc::new(RefCell::new(CoroutineScheduler::new(
+                    scripts.len(),
+                ))));
+                host_per_slot = Some(Rc::new(
+                    scripts
+                        .iter()
+                        .map(|slot| {
+                            let binding = &authoring.bindings[&slot.component_id];
+                            let kinematic = slot.movement == ScriptMovement::KinematicSphere;
+                            let has_sound = audio::has_sound_cue(&binding.properties);
+                            // Provide host table up-front so on_start emit reaches any module.
+                            Some(self.lua_host_table(kinematic, has_sound).clone())
+                        })
+                        .collect(),
+                ));
+            }
             let queries = self.query_invocation_component(
                 || ComponentQueryInput {
                     colliders: Arc::clone(&colliders),
@@ -981,23 +1293,36 @@ impl Engine {
                 revision,
                 kinematic_owner.as_ref(),
             )?;
-            let authored_lights = Arc::default();
+            let initial_overrides = Arc::default();
             let callback = lookup.as_ref().map(|lookup| {
                 CurrentCallback::new(
                     &self.lua,
-                    &input,
-                    lookup,
-                    &local_transforms,
-                    &authored_lights,
-                    queries
-                        .as_ref()
-                        .expect("component callbacks can run queries"),
-                    audio_cues.as_ref().map(|trial| trial.context(&authoring)),
+                    CallbackContext {
+                        input: Rc::clone(&input),
+                        lookup,
+                        transforms: &local_transforms,
+                        world_matrices: &world_matrices,
+                        world_rotations: &world_rotations,
+                        visual_overrides: &initial_overrides,
+                        queries: queries
+                            .as_ref()
+                            .expect("component callbacks can run queries"),
+                        audio: audio_cues.as_ref().map(|trial| trial.context(&authoring)),
+                        events: events_bus.as_ref().map(Rc::clone),
+                        coroutines: coroutines_sched.as_ref().map(Rc::clone),
+                        host_per_slot: host_per_slot.as_ref().map(Rc::clone),
+                        batch_state: None,
+                        batch_slots: None,
+                    },
                 )
             });
             for (index, slot) in scripts.iter().enumerate() {
+                if let Some(callback) = &callback {
+                    callback.set_active_slot(index);
+                }
                 let mut module = None;
                 let output = self.evaluate_component_binding(
+                    index,
                     slot,
                     &authoring,
                     &scene.script_files,
@@ -1011,16 +1336,16 @@ impl Engine {
                     Some(&mut module),
                 )?;
                 if let Some(module) = module {
-                    modules.insert(index, module);
-                    stage_file_writes(
-                        callback.as_ref().expect("file callback snapshot"),
-                        &local_transforms,
-                        &mut start_transforms,
-                        &mut start_lights,
-                        slot.owner_index,
-                        output.transform,
-                        &slot.component_id,
-                    );
+                    callback
+                        .as_ref()
+                        .expect("file callback snapshot")
+                        .flush_transform_writes(
+                            &local_transforms,
+                            &mut start_transforms,
+                            slot.owner_index,
+                            output.transform,
+                        );
+                    modules[index] = Some(module);
                 } else if let Some(transform) = output.transform {
                     if !same_transform(&local_transforms[slot.owner_index], &transform) {
                         trial_transforms.get_or_insert_with(|| local_transforms.as_ref().clone())
@@ -1039,7 +1364,9 @@ impl Engine {
                 )?;
             }
             if let Some(callback) = callback {
+                reset_writes = callback.finish_writes(&local_transforms, &mut start_transforms);
                 topology = callback.take_topology();
+                reset_logs = callback.take_logs();
             }
             drop(queries);
             if let Some(trial) = trial_transforms {
@@ -1104,20 +1431,19 @@ impl Engine {
                     &hierarchy.parents,
                     Phase::Commit,
                 )?;
-                draw_frame = draw_plan
-                    .build_frame_with_light_intensities(
-                        scene,
-                        &world_matrices,
-                        &world_rotations,
-                        |id| start_lights.get(id).copied(),
-                    )
-                    .map_err(invalid_commit)?;
-            } else if !start_lights.is_empty() {
-                draw_frame = draw_frame
-                    .with_light_intensities(&start_lights)
-                    .map_err(invalid_commit)?;
             }
         }
+
+        let (visual_overrides, _) = if let Some(lookup) = &lookup {
+            build_trial_overrides(
+                &RuntimeVisualOverrides::default(),
+                reset_writes.as_ref(),
+                lookup,
+            )
+        } else {
+            (RuntimeVisualOverrides::default(), false)
+        };
+        let scene_with_enabled = scene_with_write_toggles(scene, reset_writes.as_ref());
 
         self.check_cancelled()?;
         let animation_starts = if animations
@@ -1128,6 +1454,18 @@ impl Engine {
         } else {
             Vec::new()
         };
+        let visual_overrides = Arc::new(visual_overrides);
+        let built_modules = lookup.and_then(|lookup| {
+            Modules::new(
+                self,
+                modules,
+                host_per_slot.unwrap_or_default(),
+                &scripts,
+                lookup,
+                events_bus.unwrap_or_default(),
+                coroutines_sched.unwrap_or_default(),
+            )
+        });
         let mut runtime = Runtime {
             draw_frame,
             authoring,
@@ -1146,44 +1484,65 @@ impl Engine {
             animations: Arc::default(),
             animation_starts,
             state,
+            script_logs: reset_logs,
             component_world: Some(ComponentWorld {
                 scene: scene_arc.unwrap_or_else(|| Arc::new(scene.clone())),
                 hierarchy,
                 object_indices,
                 local_transforms,
-                light_intensities: Arc::new(start_lights),
+                visual_overrides,
                 world_matrices,
                 world_rotations,
                 scripts,
-                modules: lookup.and_then(|lookup| Modules::new(self, modules, lookup)),
+                has_state_scripts,
+                modules: built_modules,
                 animations,
                 colliders,
                 draw_plan,
                 audio_emitters,
                 audio_requests,
+                spare_local: ScratchPool::default(),
+                spare_world: ScratchPool::default(),
+                spare_rotations: ScratchPool::default(),
             }),
         };
-        if !topology.is_empty() {
+        {
             let world = runtime
                 .component_world
                 .as_mut()
                 .expect("Reset constructed component world");
-            let module_set = world
-                .modules
-                .as_ref()
-                .expect("topology requires Lua modules")
-                .clone();
-            let mut modules = module_set.borrow_mut();
-            if let Some(rebuilt) = world.rebuild_population(
-                topology,
-                &world.local_transforms,
-                &LightIntensities::new(),
-                &runtime.authoring,
-                &modules.lookup.session,
-                revision,
-            )? {
-                self.check_cancelled()?;
-                runtime.draw_frame = rebuilt.install(world, &mut modules);
+            if !topology.is_empty() || scene_with_enabled.is_some() {
+                let module_set = world
+                    .modules
+                    .as_ref()
+                    .expect("topology requires Lua modules")
+                    .clone();
+                let mut modules = module_set.borrow_mut();
+                if let Some(rebuilt) = world.rebuild_population(
+                    topology,
+                    scene_with_enabled,
+                    &world.local_transforms,
+                    &world.visual_overrides,
+                    &runtime.authoring,
+                    &modules.lookup.session,
+                    &modules.lookup.slots,
+                    revision,
+                )? {
+                    self.check_cancelled()?;
+                    runtime.draw_frame = rebuilt.install(world, &mut modules);
+                }
+            } else {
+                // Ensure draw_frame reflects start_transforms or visual_overrides if modified during on_start.
+                runtime.draw_frame = world
+                    .draw_plan
+                    .build_frame_with_overrides(
+                        &world.scene,
+                        &world.hierarchy,
+                        &world.world_matrices,
+                        &world.world_rotations,
+                        &world.visual_overrides,
+                    )
+                    .map_err(invalid_commit)?;
             }
         }
         Ok(runtime)
@@ -1198,15 +1557,15 @@ impl Engine {
             .component_world
             .as_ref()
             .expect("component world checked by caller");
-        let validated = input
-            .validate_against(&runtime.authoring.actions)
-            .map_err(|error| {
+        let validated = Rc::new(input.validate_against(&runtime.authoring.actions).map_err(
+            |error| {
                 diag(
                     DiagnosticCode::InvalidInput,
                     Phase::Setup,
                     &error.to_string(),
                 )
-            })?;
+            },
+        )?);
         let next = runtime.tick.checked_add(1).ok_or_else(|| {
             diag(
                 DiagnosticCode::TickExhausted,
@@ -1224,6 +1583,7 @@ impl Engine {
         if world.is_static() {
             runtime.audio_batch = None;
             runtime.query_observations.clear();
+            runtime.script_logs.clear();
             runtime.tick = next;
             runtime.commit_revision = commit_revision;
             runtime.last_step_commit_revision = Some(commit_revision);
@@ -1234,18 +1594,29 @@ impl Engine {
         let mut modules = module_set.as_ref().map(|modules| modules.borrow_mut());
         if let Some(modules) = &modules {
             modules.validate(self, runtime.tick)?;
-            if let Some((&index, _)) = modules
-                .instances
-                .iter()
-                .find(|(_, module)| module.last_attempt > runtime.tick)
-            {
+            if modules.max_attempt > runtime.tick {
+                let index = modules
+                    .instances
+                    .iter()
+                    .position(|opt| {
+                        opt.as_ref()
+                            .is_some_and(|module| module.last_attempt > runtime.tick)
+                    })
+                    .unwrap_or(0);
                 let slot = &world.scripts[index];
                 let binding = &runtime.authoring.bindings[&slot.component_id];
                 return Err(diag(
-                    DiagnosticCode::Runtime, Phase::Setup,
+                    DiagnosticCode::Runtime,
+                    Phase::Setup,
                     "A previous tick was discarded after Lua ran. Restart Play or replace the affected script before continuing.",
-                ).context(&slot.component_id, binding, runtime.authoring.sources.get(&binding.source_id)));
+                )
+                .context(
+                    &slot.component_id,
+                    binding,
+                    runtime.authoring.sources.get(&binding.source_id),
+                ));
             }
+            modules.events.borrow_mut().begin_tick();
         }
 
         self.begin()?;
@@ -1265,8 +1636,11 @@ impl Engine {
             runtime.kinematic_owner.as_ref(),
         )?;
         let mut staged_transforms: Option<Vec<Transform>> = None;
-        let mut staged_lights = LightIntensities::new();
-        let mut staged_state = runtime.state.clone();
+        let mut staged_state = if world.has_state_scripts {
+            Some(runtime.state.clone())
+        } else {
+            None
+        };
         let mut pressed = Vec::new();
         for (index, animation) in world.animations.iter().enumerate() {
             let ticks = if let Some(action) = &animation.button {
@@ -1301,171 +1675,430 @@ impl Engine {
                 })?;
         }
 
+        let had_animation_writes = staged_transforms.is_some();
         let audio_cues = world.audio_requests.as_ref().map(audio::CueRequests::trial);
-        let callback = modules.as_ref().map(|modules| {
-            CurrentCallback::new(
-                &self.lua,
-                &validated,
-                &modules.lookup,
-                &world.local_transforms,
-                &world.light_intensities,
-                queries
-                    .as_ref()
-                    .expect("component callbacks can run queries"),
-                audio_cues
-                    .as_ref()
-                    .map(|trial| trial.context(&runtime.authoring)),
-            )
-        });
-        for (index, slot) in world.scripts.iter().enumerate() {
-            let output = if let Some(module) = modules
-                .as_mut()
-                .and_then(|modules| modules.instances.get_mut(&index))
-            {
-                let binding = &runtime.authoring.bindings[&slot.component_id];
-                self.binding_count.set(0);
-                if let Some(session) = self.debugger.borrow_mut().as_mut() {
-                    session.context(super::debug::Context {
-                        source_id: binding.source_id.clone(),
-                        source_hash: module.source_hash.clone(),
-                        binding_id: slot.component_id.clone(),
-                        object_id: Some(slot.owner_id.clone()),
-                        phase: Phase::Update,
-                    });
-                }
-                let original = &world.local_transforms[slot.owner_index];
-                let result = module.update(
-                    self,
-                    original,
-                    &binding.properties,
-                    self.limits.fixed_dt,
-                    next,
-                );
-                if let Some(session) = self.debugger.borrow_mut().as_mut() {
-                    session.clear();
-                }
-                let implicit = result.map_err(|error| {
-                    error.context(
-                        &slot.component_id,
-                        binding,
-                        runtime.authoring.sources.get(&binding.source_id),
-                    )
-                })?;
-                if slot.movement == ScriptMovement::KinematicSphere {
-                    if let Some(output) = &implicit {
-                        queries
-                            .as_ref()
-                            .expect("kinematic snapshot")
-                            .validate_kinematic_output(&slot.component_id, original, output)
-                            .map_err(|message| {
-                                diag(DiagnosticCode::InvalidOutput, Phase::Output, &message)
-                                    .context(
-                                        &slot.component_id,
-                                        binding,
-                                        runtime.authoring.sources.get(&binding.source_id),
-                                    )
-                            })?;
-                    }
-                }
-                stage_file_writes(
-                    callback.as_ref().expect("file callback snapshot"),
-                    &world.local_transforms,
-                    &mut staged_transforms,
-                    &mut staged_lights,
-                    slot.owner_index,
-                    implicit,
-                    &slot.component_id,
-                );
-                BindingOutput {
-                    transform: None,
-                    state: rot_scene::StateFields::new(),
-                }
-            } else {
-                self.evaluate_component_binding(
-                    slot,
-                    &runtime.authoring,
-                    &world.scene.script_files,
-                    &world.local_transforms,
-                    &world.object_indices,
-                    self.limits.fixed_dt,
-                    &validated,
-                    queries.as_deref(),
-                    audio_cues.as_ref().map(audio::CueTrial::requests),
-                    &runtime.state,
-                    None,
-                )?
-            };
-            if let Some(transform) = output.transform {
-                if !same_transform(&world.local_transforms[slot.owner_index], &transform) {
-                    staged_transforms
-                        .get_or_insert_with(|| world.local_transforms.as_ref().clone())
-                        [slot.owner_index] = transform;
-                }
-            }
-            RuntimeState::apply(&mut staged_state, &slot.component_id, output.state).map_err(
-                |error| {
-                    let binding = &runtime.authoring.bindings[&slot.component_id];
-                    error.context(
-                        &slot.component_id,
-                        binding,
-                        runtime.authoring.sources.get(&binding.source_id),
-                    )
-                },
-            )?;
-        }
-        let topology =
-            callback.map_or_else(TopologyEdits::default, |callback| callback.take_topology());
-        let rebuilt = if topology.is_empty() {
-            None
-        } else {
-            let lookup = &modules
+        let debugger_armed = self.debugger_armed.get();
+        let use_batch = !debugger_armed
+            && modules
                 .as_ref()
-                .expect("topology requires Lua modules")
-                .lookup;
-            world.rebuild_population(
-                topology,
+                .is_some_and(|modules| modules.batch.is_some());
+        if use_batch {
+            let batch = modules
+                .as_ref()
+                .and_then(|modules| modules.batch.as_ref())
+                .expect("checked batch");
+            if had_animation_writes {
+                batch.resync_poses.set(true);
+            }
+            batch.sync_poses(
+                self,
                 staged_transforms
                     .as_deref()
                     .unwrap_or(&world.local_transforms),
-                &staged_lights,
-                &runtime.authoring,
-                &lookup.session,
-                runtime.draw_frame.scene().revision,
-            )?
-        };
-
-        let staged_frames = staged_transforms
-            .as_ref()
-            .filter(|_| rebuilt.is_none())
-            .map(|local| world.resolve_staged_transforms(local, &staged_lights))
-            .transpose()?;
-        let staged_light_frame =
-            (rebuilt.is_none() && staged_frames.is_none() && !staged_lights.is_empty())
-                .then(|| runtime.draw_frame.with_light_intensities(&staged_lights))
-                .transpose()
-                .map_err(invalid_commit)?;
-
-        staged_state.validate_total()?;
-        let transform_camera = rebuilt
-            .as_ref()
-            .map(|population| population.draw.transform_camera())
-            .or_else(|| {
-                staged_frames
-                    .as_ref()
-                    .map(|(_, _, draw)| draw.transform_camera())
-            })
-            .unwrap_or_else(|| runtime.transform_camera());
-        let mut cues = audio_cues.map_or_else(Vec::new, audio::CueTrial::take);
-        if let Some(emitters) = &world.audio_emitters {
-            let active_world = rebuilt
-                .as_ref()
-                .map(|population| population.world.as_slice())
-                .or_else(|| staged_frames.as_ref().map(|(world, _, _)| world.as_slice()))
-                .unwrap_or(&world.world_matrices);
-            audio::resolve_cues_component(&mut cues, emitters, transform_camera, active_world);
+            )?;
         }
-        self.check_cancelled()?;
-        let observations = queries.map_or_else(Vec::new, |queries| queries.observations.take());
+        let mut callback = modules.as_ref().map(|modules| {
+            CurrentCallback::new(
+                &self.lua,
+                CallbackContext {
+                    input: Rc::clone(&validated),
+                    lookup: &modules.lookup,
+                    transforms: &world.local_transforms,
+                    world_matrices: &world.world_matrices,
+                    world_rotations: &world.world_rotations,
+                    visual_overrides: &world.visual_overrides,
+                    queries: queries
+                        .as_ref()
+                        .expect("component callbacks can run queries"),
+                    audio: audio_cues
+                        .as_ref()
+                        .map(|trial| trial.context(&runtime.authoring)),
+                    events: Some(Rc::clone(&modules.events)),
+                    coroutines: Some(Rc::clone(&modules.coroutines)),
+                    host_per_slot: Some(Rc::clone(&modules.host_per_slot)),
+                    batch_state: use_batch
+                        .then(|| modules.batch.as_ref().expect("checked batch").state.clone()),
+                    batch_slots: use_batch.then(|| {
+                        Arc::clone(
+                            &modules
+                                .batch
+                                .as_ref()
+                                .expect("checked batch")
+                                .slot_index_vec,
+                        )
+                    }),
+                },
+            )
+        });
+        let mut force_resync = had_animation_writes;
+        let mut batch_ran_upto: usize = 0;
+        if use_batch {
+            let mods_ref = modules.as_deref().expect("checked modules");
+            let batch = mods_ref.batch.as_ref().expect("checked batch");
+            self.binding_count.set(0);
+            let packed_res = {
+                let _batch_guard = self.enter_batch(&batch.state);
+                batch.run(self, self.limits.fixed_dt)
+            };
+            let failure_code = self.failure.get();
+            if packed_res.is_err() || failure_code.is_some() {
+                let cursor = batch.state.raw_get::<usize>(1i64).unwrap_or(0);
+                let ran = cursor.clamp(1, batch.slot_index_vec.len());
+                let failing_slot = cursor
+                    .checked_sub(1)
+                    .and_then(|idx| batch.slot_index_vec.get(idx).copied())
+                    .unwrap_or(0);
+                batch.resync_poses.set(true);
+                let err = match packed_res {
+                    Err(e) => self.error(e, Phase::Update, DiagnosticCode::Runtime),
+                    Ok(_) => Diagnostic::plain(
+                        failure_code.expect("checked failure_code"),
+                        Phase::Update,
+                        "behavior instruction budget or cancellation triggered",
+                    ),
+                };
+                drop(callback.take());
+                mark_batch_slots_attempted(&mut modules, ran, Some(failing_slot), next);
+                let slot = &world.scripts[failing_slot];
+                let binding = &runtime.authoring.bindings[&slot.component_id];
+                return Err(err.context(
+                    &slot.component_id,
+                    binding,
+                    runtime.authoring.sources.get(&binding.source_id),
+                ));
+            }
+            batch_ran_upto = batch.slot_index_vec.len();
+            // Keep resync enabled until the entire tick commits without subsequent writes.
+            batch.resync_poses.set(true);
+            let () = packed_res.expect("checked Ok");
+            let explicit_log = callback
+                .as_ref()
+                .expect("file callback snapshot")
+                .take_explicit_transform_log();
+            if explicit_log.is_empty() {
+                if let Err((failing_slot, err)) = batch.collect_dirty_direct(
+                    self,
+                    &world.local_transforms,
+                    &mut staged_transforms,
+                    |committed| world.spare_local.clone_from(committed),
+                ) {
+                    drop(callback.take());
+                    mark_batch_slots_attempted(
+                        &mut modules,
+                        batch_ran_upto,
+                        Some(failing_slot),
+                        next,
+                    );
+                    let slot = &world.scripts[failing_slot];
+                    let binding = &runtime.authoring.bindings[&slot.component_id];
+                    return Err(err.context(
+                        &slot.component_id,
+                        binding,
+                        runtime.authoring.sources.get(&binding.source_id),
+                    ));
+                }
+            } else {
+                force_resync = true;
+                let mut dirty_implicit = Vec::new();
+                let collect_res = {
+                    let base_transforms = staged_transforms
+                        .as_deref()
+                        .unwrap_or(&world.local_transforms);
+                    batch.collect_dirty(self, base_transforms, &mut dirty_implicit)
+                };
+                if let Err((failing_slot, err)) = collect_res {
+                    drop(callback.take());
+                    mark_batch_slots_attempted(
+                        &mut modules,
+                        batch_ran_upto,
+                        Some(failing_slot),
+                        next,
+                    );
+                    let slot = &world.scripts[failing_slot];
+                    let binding = &runtime.authoring.bindings[&slot.component_id];
+                    return Err(err.context(
+                        &slot.component_id,
+                        binding,
+                        runtime.authoring.sources.get(&binding.source_id),
+                    ));
+                }
+                if dirty_implicit.is_empty() {
+                    for (_, owner_idx, pose) in explicit_log {
+                        stage_transform_write(
+                            &world.local_transforms,
+                            &mut staged_transforms,
+                            owner_idx,
+                            pose,
+                        );
+                    }
+                } else {
+                    let mut merged: Vec<(usize, u8, usize, usize, Transform)> =
+                        Vec::with_capacity(explicit_log.len() + dirty_implicit.len());
+                    for (seq, (cursor, owner_idx, pose)) in explicit_log.into_iter().enumerate() {
+                        merged.push((cursor, 0, seq, owner_idx, pose));
+                    }
+                    for (cursor, owner_idx, pose) in dirty_implicit {
+                        merged.push((cursor, 1, 0, owner_idx, pose));
+                    }
+                    merged.sort_by_key(|entry| (entry.0, entry.1, entry.2));
+                    for (_, _, _, owner_idx, pose) in merged {
+                        stage_transform_write(
+                            &world.local_transforms,
+                            &mut staged_transforms,
+                            owner_idx,
+                            pose,
+                        );
+                    }
+                }
+            }
+        } else {
+            for (index, slot) in world.scripts.iter().enumerate() {
+                if modules
+                    .as_ref()
+                    .and_then(|modules| modules.instances[index].as_ref())
+                    .is_some()
+                {
+                    let cb = callback.as_ref().expect("file callback snapshot");
+                    cb.set_active_slot(index);
+                    self.binding_count.set(0);
+                    let source_hash = modules
+                        .as_ref()
+                        .and_then(|m| m.instances[index].as_ref())
+                        .map(|m| m.source_hash.clone())
+                        .unwrap_or_default();
+                    if debugger_armed {
+                        if let Some(session) = self.debugger.borrow_mut().as_mut() {
+                            let binding = &runtime.authoring.bindings[&slot.component_id];
+                            session.context(super::debug::Context {
+                                source_id: binding.source_id.clone(),
+                                source_hash,
+                                binding_id: slot.component_id.clone(),
+                                object_id: Some(slot.owner_id.clone()),
+                                phase: Phase::Update,
+                            });
+                        }
+                    }
+                    let original = &world.local_transforms[slot.owner_index];
+                    let result = {
+                        let mods_mut = modules.as_deref_mut().expect("checked modules");
+                        mods_mut.max_attempt = mods_mut.max_attempt.max(next);
+                        mods_mut.instances[index]
+                            .as_mut()
+                            .expect("checked instance")
+                            .update_fast(self, original, self.limits.fixed_dt, next)
+                    };
+                    if debugger_armed {
+                        if let Some(session) = self.debugger.borrow_mut().as_mut() {
+                            session.clear();
+                        }
+                    }
+                    let implicit = match result {
+                        Ok(implicit) => implicit,
+                        Err(error) => {
+                            let binding = &runtime.authoring.bindings[&slot.component_id];
+                            return Err(error.context(
+                                &slot.component_id,
+                                binding,
+                                runtime.authoring.sources.get(&binding.source_id),
+                            ));
+                        }
+                    };
+                    if slot.movement == ScriptMovement::KinematicSphere {
+                        if let Some(output) = &implicit {
+                            queries
+                                .as_ref()
+                                .expect("kinematic snapshot")
+                                .validate_kinematic_output(&slot.component_id, original, output)
+                                .map_err(|message| {
+                                    let binding = &runtime.authoring.bindings[&slot.component_id];
+                                    diag(DiagnosticCode::InvalidOutput, Phase::Output, &message)
+                                        .context(
+                                            &slot.component_id,
+                                            binding,
+                                            runtime.authoring.sources.get(&binding.source_id),
+                                        )
+                                })?;
+                        }
+                    }
+                    cb.flush_transform_writes(
+                        &world.local_transforms,
+                        &mut staged_transforms,
+                        slot.owner_index,
+                        implicit,
+                    );
+                } else {
+                    let output = self.evaluate_component_binding(
+                        index,
+                        slot,
+                        &runtime.authoring,
+                        &world.scene.script_files,
+                        &world.local_transforms,
+                        &world.object_indices,
+                        self.limits.fixed_dt,
+                        &validated,
+                        queries.as_deref(),
+                        audio_cues.as_ref().map(audio::CueTrial::requests),
+                        &runtime.state,
+                        None,
+                    )?;
+                    if let Some(transform) = output.transform {
+                        if !same_transform(&world.local_transforms[slot.owner_index], &transform) {
+                            staged_transforms
+                                .get_or_insert_with(|| world.local_transforms.as_ref().clone())
+                                [slot.owner_index] = transform;
+                        }
+                    }
+                    if !output.state.is_empty() {
+                        let state_mut = staged_state.get_or_insert_with(|| runtime.state.clone());
+                        RuntimeState::apply(state_mut, &slot.component_id, output.state).map_err(
+                            |error| {
+                                let binding = &runtime.authoring.bindings[&slot.component_id];
+                                error.context(
+                                    &slot.component_id,
+                                    binding,
+                                    runtime.authoring.sources.get(&binding.source_id),
+                                )
+                            },
+                        )?;
+                    }
+                }
+            }
+        }
+        if let (Some(modules_ref), Some(cb)) = (modules.as_ref(), callback.as_ref()) {
+            let snapshot = cb.snapshot();
+            if let Err(err) = CoroutineScheduler::step(
+                &modules_ref.coroutines,
+                self,
+                self.limits.fixed_dt,
+                &snapshot,
+                &modules_ref.lookup.slots,
+                &runtime.authoring,
+            ) {
+                drop(snapshot);
+                drop(callback.take());
+                if use_batch {
+                    mark_batch_slots_attempted(&mut modules, batch_ran_upto, None, next);
+                }
+                return Err(err);
+            }
+        }
+        let (writes, topology, script_logs, has_external_xform) = if let Some(cb) = callback {
+            let has_external_xform = cb.has_pending_transforms();
+            let writes = cb.finish_writes(&world.local_transforms, &mut staged_transforms);
+            let topology = cb.take_topology();
+            let logs = cb.take_logs();
+            (writes, topology, logs, has_external_xform)
+        } else {
+            (None, TopologyEdits::default(), Vec::new(), false)
+        };
+        if has_external_xform {
+            force_resync = true;
+        }
+        let (mut trial_overrides_owned, visual_changed) =
+            if let (Some(modules), Some(writes)) = (&modules, writes.as_ref()) {
+                let (next_overrides, changed) =
+                    build_trial_overrides(&world.visual_overrides, Some(writes), &modules.lookup);
+                (Some(next_overrides), changed)
+            } else {
+                (None, false)
+            };
+        let scene_with_enabled = scene_with_write_toggles(&world.scene, writes.as_ref());
+        let pre_commit: Result<_, Diagnostic> = (|| {
+            let trial_overrides = trial_overrides_owned
+                .as_ref()
+                .unwrap_or(&world.visual_overrides);
+            let rebuilt = if !topology.is_empty() || scene_with_enabled.is_some() {
+                let lookup = &modules
+                    .as_ref()
+                    .expect("topology requires Lua modules")
+                    .lookup;
+                world.rebuild_population(
+                    topology,
+                    scene_with_enabled,
+                    staged_transforms
+                        .as_deref()
+                        .unwrap_or(&world.local_transforms),
+                    trial_overrides,
+                    &runtime.authoring,
+                    &lookup.session,
+                    &lookup.slots,
+                    runtime.draw_frame.scene().revision,
+                )?
+            } else {
+                None
+            };
+
+            let mesh_tint_changed = trial_overrides_owned
+                .as_ref()
+                .is_some_and(|next| next.meshes != world.visual_overrides.meshes);
+            let staged_frames =
+                if rebuilt.is_none() && (staged_transforms.is_some() || mesh_tint_changed) {
+                    Some(
+                        world.resolve_staged_transforms(
+                            &world.scene,
+                            &world.hierarchy,
+                            &world.colliders,
+                            &world.draw_plan,
+                            staged_transforms
+                                .as_deref()
+                                .unwrap_or(&world.local_transforms),
+                            trial_overrides,
+                        )?,
+                    )
+                } else {
+                    None
+                };
+            let staged_light_frame =
+                (rebuilt.is_none() && staged_frames.is_none() && visual_changed)
+                    .then(|| {
+                        runtime.draw_frame.with_lighting_overrides(
+                            Some(&world.draw_plan.base_scene().lighting),
+                            trial_overrides,
+                        )
+                    })
+                    .transpose()
+                    .map_err(invalid_commit)?;
+
+            if let Some(state) = &staged_state {
+                state.validate_total()?;
+            }
+            let transform_camera = rebuilt
+                .as_ref()
+                .map(|population| population.draw.transform_camera())
+                .or_else(|| {
+                    staged_frames
+                        .as_ref()
+                        .map(|(_, _, draw)| draw.transform_camera())
+                })
+                .unwrap_or_else(|| runtime.transform_camera());
+            let mut cues = audio_cues.map_or_else(Vec::new, audio::CueTrial::take);
+            if let Some(emitters) = &world.audio_emitters {
+                let active_world = rebuilt
+                    .as_ref()
+                    .map(|population| population.world.as_slice())
+                    .or_else(|| staged_frames.as_ref().map(|(world, _, _)| world.as_slice()))
+                    .unwrap_or(&world.world_matrices);
+                audio::resolve_cues_component(&mut cues, emitters, transform_camera, active_world);
+            }
+            self.check_cancelled()?;
+            let observations = queries.map_or_else(Vec::new, |queries| queries.observations.take());
+            Ok((
+                rebuilt,
+                staged_frames,
+                staged_light_frame,
+                cues,
+                observations,
+            ))
+        })();
+        let (rebuilt, staged_frames, staged_light_frame, cues, observations) = match pre_commit {
+            Ok(ok) => ok,
+            Err(err) => {
+                if use_batch {
+                    mark_batch_slots_attempted(&mut modules, batch_ran_upto, None, next);
+                }
+                return Err(err);
+            }
+        };
         runtime.audio_batch = (!cues.is_empty()).then_some(super::AudioBatch {
             tick: next,
             commit_revision,
@@ -1481,23 +2114,30 @@ impl Engine {
                 world_mut,
                 modules.as_mut().expect("topology requires Lua modules"),
             );
-        } else if let (Some(next_local), Some((next_world, next_rot, next_draw))) =
-            (staged_transforms, staged_frames)
-        {
+        } else if let Some((next_world, next_rot, next_draw)) = staged_frames {
             runtime.draw_frame = next_draw;
-            world_mut.local_transforms = Arc::new(next_local);
-            world_mut.world_matrices = Arc::new(next_world);
-            world_mut.world_rotations = Arc::new(next_rot);
+            if let Some(next_local) = staged_transforms {
+                let prev_local =
+                    std::mem::replace(&mut world_mut.local_transforms, Arc::new(next_local));
+                if let Ok(vec) = Arc::try_unwrap(prev_local) {
+                    world_mut.spare_local.put(vec);
+                }
+            }
+            let prev_world = std::mem::replace(&mut world_mut.world_matrices, Arc::new(next_world));
+            if let Ok(vec) = Arc::try_unwrap(prev_world) {
+                world_mut.spare_world.put(vec);
+            }
+            let prev_rot = std::mem::replace(&mut world_mut.world_rotations, Arc::new(next_rot));
+            if let Ok(vec) = Arc::try_unwrap(prev_rot) {
+                world_mut.spare_rotations.put(vec);
+            }
         } else if let Some(frame) = staged_light_frame {
             runtime.draw_frame = frame;
         }
-        if !topology_changed && !staged_lights.is_empty() {
-            let lookup = &modules
-                .as_ref()
-                .expect("light writes require Lua modules")
-                .lookup;
-            let committed = Arc::make_mut(&mut world_mut.light_intensities);
-            commit_light_intensities(committed, staged_lights, lookup);
+        if !topology_changed && visual_changed {
+            if let Some(next_overrides) = trial_overrides_owned.take() {
+                world_mut.visual_overrides = Arc::new(next_overrides);
+            }
         }
         for index in pressed {
             runtime.animation_starts[index] = Some(next);
@@ -1506,8 +2146,16 @@ impl Engine {
         runtime.commit_revision = commit_revision;
         runtime.last_step_commit_revision = Some(commit_revision);
         runtime.query_observations = observations;
-        runtime.state = staged_state;
+        if let Some(next_state) = staged_state {
+            runtime.state = next_state;
+        }
+        runtime.script_logs = script_logs;
         if let Some(modules) = &mut modules {
+            if use_batch && !force_resync && !topology_changed {
+                if let Some(batch) = &modules.batch {
+                    batch.resync_poses.set(false);
+                }
+            }
             modules.tick = next;
         }
         Ok(())
@@ -1516,6 +2164,7 @@ impl Engine {
     #[allow(clippy::too_many_arguments)]
     fn evaluate_component_binding(
         &mut self,
+        slot_index: usize,
         slot: &ComponentScriptSlot,
         authoring: &Authoring,
         files: &BTreeMap<String, ScriptFile>,
@@ -1623,6 +2272,7 @@ impl Engine {
                         && lua_component::legacy_file_source(&binding.source_id, source)))
                 .then(|| ModuleProbe {
                     target: &mut detected,
+                    slot_index,
                     kinematic: slot.movement == ScriptMovement::KinematicSphere,
                 })
             });
@@ -2561,7 +3211,8 @@ mod tests {
             .component_world
             .as_ref()
             .unwrap()
-            .light_intensities
+            .visual_overrides
+            .lights
             .contains_key("rot-spawn-2-o0-c0"));
         engine.step(&mut runtime).unwrap();
         assert_eq!(
@@ -2837,7 +3488,8 @@ mod tests {
             .component_world
             .as_ref()
             .unwrap()
-            .light_intensities
+            .visual_overrides
+            .lights
             .contains_key("point"));
     }
 

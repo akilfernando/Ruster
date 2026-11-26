@@ -31,31 +31,28 @@ One line each. Anyone may add; the user or a planning pass orders them.
 - Idle repaints: an open scene repaints ~3 frames per 10 s (0.2% CPU); track under
   Phase 3A/5A polish.
 
-## Now — Phase 3B: Look (Lighting & Post)
+## Now — Phase 4: Play
 
-Phase 3A (`L-01`–`L-EXIT`) and Phase 3B (`L-07`–`L-3B-EXIT`) shipped on `2026-11-26`. Phase 3B closed clustered lighting, multi-light/cascaded shadows, fog, post-processing, and viewport debug views; next up under **Later** is **Phase 4 — Play**.
+Phase 3A (`L-01`–`L-EXIT`) and Phase 3B (`L-07`–`L-3B-EXIT`) shipped on `2026-11-26`. Next up in strict [parity plan](PARITY-PLAN.md#3-phases) order: **Phase 4 — Play**.
 
 | Package | Outcome | Status & remaining gap |
 | --- | --- | --- |
-| `L-07` Clustered forward many-lights | Verify `wgpu-hal` compute/SPIR-V 1.3 readiness; GPU compute `16×9×24` cluster culling up to `1024` local lights (`Surface` PBR, perspective & ortho) (Size M, *ready*). | `done — 2026-11-26, bbd7075` · 64-light RTX 4060 probe p50 `0.361 ms` / p95 `0.530 ms`; 5k 1080p frame p50 `1.062 ms` / p95 `1.771 ms`. |
-| `L-08` CSM & shadow atlas | 4-cascade directional Sun shadows + spot/point shadow atlas integrated into clustered shading (Size M, *ready*). | `done — 2026-11-26, 9801f4c` · RTX 4060 CSM+Spot+Point+Mask probe p50 `0.264 ms` / p95 `0.534 ms`; 5k 1080p frame p50 `0.788 ms` / p95 `0.886 ms`. |
-| `L-09` Atmospheric fog | Linear/exponential/height fog in scene data, shaders, Scene Display UI, MCP, and player (Size S, *ready*). | `done — 2026-11-26, eb31118` · RTX 4060 fog probe passed (Linear, height fog, sky horizon); 5k 1080p frame p50 `0.838 ms` / p95 `0.974 ms`. |
-| `L-10` Post-processing stack | SSAO, bloom, color grading/tonemappers, and AA options (`MSAA 4x/2x`, `FXAA`, `Off`) (Size M, *ready*). | `done — 2026-11-26, 5b163b4` · RTX 4060 Cinematic `1280×720` probe p50 `1.670 ms` / p95 `2.387 ms`; 5k 1080p frame p50 `1.075 ms` / p95 `1.527 ms`. |
-| `L-11` Viewport shading & debug views | Editor/runtime shading & debug modes (`Lit`, `Unlit`, `Wireframe`, `Normals`, `Roughness`, `Metallic`, `Albedo`, `AO`, `Depth`, `Clusters`, `Cascades`) (Size M, *ready*). | `done — 2026-11-26, 34dc485` · All 11 modes verified on RTX 4060 (`shading_debug_views_gpu_probe` + 7 probes); 5k 1080p frame p50 `1.264 ms` / p95 `1.567 ms` (`0 B` steady upload). |
-| `L-3B-EXIT` Phase 3B exit gate | Lit multi-light interior reference scene in `examples/rot-yard/`, visual & RTX 4060 budget verification (Size S, *ready*). | `done — 2026-11-26, 35ae05c` · Gallery `4× MSAA` `720p` p50 `1.953 ms` / p95 `2.554 ms`, `1080p` p50 `3.095 ms` / p95 `3.794 ms` (`0 B`); 5k 1080p frame p50 `1.445 ms` / p95 `1.900 ms`. |
+| `P4-01` Unified Lua API (events, coroutines, component access & 10k scale) | Persistent-VM `coroutine` + `host.start_coroutine`/`wait`/`wait_frames`, `host.on`/`off`/`emit`, `host.self`/`log`/`warn`, live `Light`/`MeshRenderer`/`Camera`/`enabled` access, `≤ 2 ms` for 10k scripts/frame (Size M, *ready*). | `done — 2026-11-26` (events/coroutines/handles/`Console` logging; release 10k bench: logic p50 `1.636 ms` / p95 `1.705 ms`, transform-write p50 `1.913 ms` / p95 `2.233 ms`) |
+| `P4-02` Live editing during Play | Deferred from `C-05`: edit scene transforms & component values live while Play runs without forced Stop/Restart (Size M, *ready*). | `open` |
+| `P4-03` Rapier3D physics core & `RigidBody` | Replace `parry3d` in one cut; Rapier3D `PhysicsWorld`, `RigidBody` (Dynamic/Kinematic/Static, mass, damping, constraints), `Collider` sync, Inspector/MCP (Size M, *brief needed*). | `open` |
+| `P4-04` Physics queries, events, joints & character controller | Collision/trigger events into Lua, raycasts/shapecasts, joints, and kinematic `CharacterController` (Size M, *brief needed*). | `open` |
+| `P4-05` glTF skeletal skinning & GPU skinning | Import glTF `skins`/joints/IBM & vertex weights/indices; GPU joint-palette skinning in `rot-render` (Size M, *brief needed*). | `open` |
+| `P4-06` Animation state machine & blending | `Animator` states, parameter transitions, cross-fade blending, Lua triggers (Size M, *brief needed*). | `open` |
+| `P4-07` Spatial/streamed audio & mixer | Cross-platform `AudioSource` / `AudioListener`, spatial attenuation, buses/mixer, streamed clips (Size M, *brief needed*). | `open` |
+| `P4-08` Mouse, gamepad & action rebinding | Mouse look/buttons, gamepad sticks/triggers (`gilrs`), runtime/editor action rebinding (Size M, *brief needed*). | `open` |
+| `P4-09` Runtime UI layout & multi-camera | Flexible runtime UI widgets/anchors/layout and multiple switchable cameras with priority/Lua switching (Size M, *brief needed*). | `open` |
+| `P4-10` Runtime scene loading, particles & save data | Async/Lua scene loading, GPU billboard particle emitter component, safe versioned save slots (Size M, *brief needed*). | `open` |
+| `P4-EXIT` Phase 4 exit gate | Third-person platformer sample in `examples/` (skinned character, enemies, pickups, menus, sound, gamepad), budget verification & release install (Size M, *brief needed*). | `open` |
 
 ## Later
 
 One line each until their phase is active. See [phases](PARITY-PLAN.md#3-phases).
 
-- **Phase 4 — Play.** Strict order: (1) unified persistent-VM Lua API with
-  events/coroutines + native component runtime (if not already closed in Phase 2)
-  + live editing during Play (deferred from `C-05`);
-  (2) Rapier3D rigid bodies, colliders, triggers, raycasts, joints and character
-  controller (retiring `parry3d` in one cut; no further `parry3d` kinematic additions);
-  (3) skeletal skinning and animation state machine; (4) spatial/streamed audio
-  and mixer, expanded runtime UI, mouse and gamepad rebinding, multiple cameras,
-  scene loading, particles and save data.
 - **Phase 5A — Ship and scale.** Windows editor and builds, profiler and script
   debugger polish, cooked binary runtime/cache assets for large scenes, LOD and
   occlusion culling, and 50,000-object scenes at 60 fps.

@@ -718,6 +718,7 @@ mod tests {
                     tick: 1,
                     scene: Arc::new(snapshot),
                     input: None,
+                    script_logs: Arc::from([]),
                     query_observations: Some(Arc::from([
                         QueryObservation {
                             binding_id: "motion".into(),

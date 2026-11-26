@@ -4662,6 +4662,7 @@ mod tests {
                 tick: 7,
                 scene: old_scene.clone(),
                 input: None,
+                script_logs: Arc::from([]),
             }),
             visible: true,
             ready: true,
@@ -4695,6 +4696,7 @@ mod tests {
             tick: 0,
             scene: Arc::new(rot_scene::Scene::empty("obsolete-assets")),
             input: None,
+            script_logs: Arc::from([]),
         });
         assert!(runtime.reset_succeeded.is_none());
         assert!(Arc::ptr_eq(
@@ -4720,6 +4722,7 @@ mod tests {
             tick: 0,
             scene: Arc::new(rot_scene::Scene::empty("new-assets")),
             input: None,
+            script_logs: Arc::from([]),
         });
         assert_eq!(runtime.reset_succeeded, Some(second));
         assert_eq!(runtime.frame.as_ref().unwrap().key, second);

@@ -82,9 +82,9 @@ impl Default for Limits {
         Self {
             fixed_dt: 1.0 / 60.0,
             binding_instructions: 20_000,
-            tick_instructions: 1_000_000,
-            hook_interval: 100,
-            memory_bytes: 16 * 1024 * 1024,
+            tick_instructions: 10_000_000,
+            hook_interval: 1_000,
+            memory_bytes: 32 * 1024 * 1024,
             cached_sources: 256,
         }
     }
@@ -97,17 +97,17 @@ impl Limits {
             || self.binding_instructions == 0
             || self.binding_instructions > 10_000_000
             || self.tick_instructions == 0
-            || self.tick_instructions > 100_000_000
+            || self.tick_instructions > 1_000_000_000
             || self.hook_interval == 0
             || u64::from(self.hook_interval) > self.binding_instructions.min(self.tick_instructions)
-            || !(64 * 1024..=64 * 1024 * 1024).contains(&self.memory_bytes)
+            || !(64 * 1024..=256 * 1024 * 1024).contains(&self.memory_bytes)
             || self.cached_sources == 0
             || self.cached_sources > 256
         {
             return Err(Diagnostic::plain(
                 DiagnosticCode::InvalidLimits,
                 Phase::Setup,
-                "require finite dt in(0,1], positive bounded instruction/cache limits, hook interval within budgets, and VM64KiB..64MiB",
+                "require finite dt in(0,1], positive bounded instruction/cache limits, hook interval within budgets, and VM64KiB..256MiB",
             ));
         }
         Ok(())
@@ -237,6 +237,21 @@ pub fn decode_clips<'a>(
         .collect()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScriptLogLevel {
+    Info,
+    Warning,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ScriptLog {
+    pub binding_id: String,
+    pub object_id: String,
+    pub level: ScriptLogLevel,
+    pub message: String,
+}
+
 /// Committed scene and state snapshot. Live Lua module instances stay on their owning thread.
 #[derive(Clone, Debug)]
 pub struct Runtime {
@@ -258,6 +273,7 @@ pub struct Runtime {
     animations: Arc<Vec<ResolvedAnimation>>,
     animation_starts: Vec<Option<u64>>,
     state: Arc<RuntimeState>,
+    script_logs: Vec<ScriptLog>,
     component_world: Option<component_runtime::ComponentWorld>,
 }
 impl Runtime {
@@ -360,22 +376,66 @@ impl Runtime {
         for (object, transform) in scene.objects.iter_mut().zip(world.local_transforms.iter()) {
             object.transform = transform.clone();
         }
-        if !world.light_intensities.is_empty() {
-            for component in scene
-                .objects
-                .iter_mut()
-                .flat_map(|object| &mut object.components)
-            {
-                if let rot_scene::component_scene::Component::Light { intensity, .. } =
-                    &mut component.kind
-                {
-                    if let Some(&value) = world.light_intensities.get(&component.id) {
-                        *intensity = value;
+        let overrides = &world.visual_overrides;
+        if !overrides.is_empty() {
+            let gameplay_camera = scene.gameplay_camera.as_deref().map(str::to_owned);
+            for (index, object) in scene.objects.iter_mut().enumerate() {
+                if let Some(&enabled) = overrides.object_enabled.get(&index) {
+                    object.enabled = enabled;
+                }
+                for component in &mut object.components {
+                    match &mut component.kind {
+                        rot_scene::component_scene::Component::Light {
+                            color, intensity, ..
+                        } => {
+                            if let Some(ov) = overrides.lights.get(&component.id) {
+                                if let Some(value) = ov.intensity {
+                                    *intensity = value;
+                                }
+                                if let Some(rgb) = ov.color {
+                                    *color = rgb;
+                                }
+                                if let Some(enabled) = ov.enabled {
+                                    component.enabled = enabled;
+                                }
+                            }
+                        }
+                        rot_scene::component_scene::Component::MeshRenderer { tint, .. } => {
+                            if let Some(ov) = overrides.meshes.get(&component.id) {
+                                if let Some(rgba) = ov.tint {
+                                    *tint = rgba;
+                                }
+                                if let Some(enabled) = ov.enabled {
+                                    component.enabled = enabled;
+                                }
+                            }
+                        }
+                        rot_scene::component_scene::Component::Camera { view }
+                            if gameplay_camera.as_deref() == Some(component.id.as_str()) =>
+                        {
+                            if let Some(fov) = overrides.camera_fov {
+                                if let rot_scene::component_scene::CameraView::Transform(
+                                    rot_scene::component_scene::TransformLens::Perspective(
+                                        perspective,
+                                    ),
+                                ) = view
+                                {
+                                    perspective.vertical_fov_degrees = fov;
+                                }
+                            }
+                            if let Some(enabled) = overrides.camera_enabled {
+                                component.enabled = enabled;
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
         }
         Some(scene)
+    }
+    pub fn script_logs(&self) -> &[ScriptLog] {
+        &self.script_logs
     }
     pub fn materialized_scene(&self) -> Scene {
         let mut scene = self.draw_frame.scene().clone();
@@ -445,8 +505,13 @@ pub struct Engine {
     binding_count: Rc<Cell<u64>>,
     tick_count: Rc<Cell<u64>>,
     failure: Rc<Cell<Option<DiagnosticCode>>>,
+    debugger_armed: Rc<Cell<bool>>,
     debugger: Rc<RefCell<Option<debug::DebugSession>>>,
+    batch_state: Rc<RefCell<Option<Table>>>,
+    batch_active: Rc<Cell<bool>>,
+    batch_last_cursor: Rc<Cell<usize>>,
     clips: Clips,
+    component_cache: lua_component::ComponentEngineCache,
 }
 #[derive(Debug)]
 struct ResolvedAnimation {
@@ -537,15 +602,24 @@ impl Engine {
     /// An initially set token remains set; construction never revives cancelled work.
     pub fn with_cancellation(limits: Limits, cancel: Arc<AtomicBool>) -> Result<Self, Diagnostic> {
         limits.validate()?;
-        let lua = Lua::new_with(StdLib::MATH, LuaOptions::default()).map_err(|e| {
-            Diagnostic::plain(DiagnosticCode::Runtime, Phase::Setup, &e.to_string())
-        })?;
+        let lua = Lua::new_with(
+            StdLib::MATH | StdLib::COROUTINE | StdLib::TABLE | StdLib::STRING,
+            LuaOptions::default(),
+        )
+        .map_err(|e| Diagnostic::plain(DiagnosticCode::Runtime, Phase::Setup, &e.to_string()))?;
         lua.set_memory_limit(limits.memory_bytes).map_err(|e| {
             Diagnostic::plain(DiagnosticCode::MemoryLimit, Phase::Setup, &e.to_string())
+        })?;
+        let component_cache = lua_component::ComponentEngineCache::new(&lua).map_err(|e| {
+            Diagnostic::plain(DiagnosticCode::Runtime, Phase::Setup, &e.to_string())
         })?;
         let binding_count = Rc::new(Cell::new(0u64));
         let tick_count = Rc::new(Cell::new(0u64));
         let failure = Rc::new(Cell::new(None));
+        let debugger_armed = Rc::new(Cell::new(false));
+        let batch_state = Rc::new(RefCell::new(None));
+        let batch_active = Rc::new(Cell::new(false));
+        let batch_last_cursor = Rc::new(Cell::new(0));
         let engine = Self {
             lua,
             limits,
@@ -556,7 +630,12 @@ impl Engine {
             tick_count,
             clips: BTreeMap::new(),
             failure,
+            debugger_armed,
             debugger: Rc::new(RefCell::new(None)),
+            batch_state,
+            batch_active,
+            batch_last_cursor,
+            component_cache,
         };
         engine.install_hook(false)?;
         Ok(engine)
@@ -575,28 +654,36 @@ impl Engine {
             ));
         }
         self.install_hook(session.is_some())?;
+        self.debugger_armed.set(session.is_some());
         *self.debugger.borrow_mut() = session;
         Ok(())
     }
     /// Next reaching its root return asks the scheduler to pause after atomic commit.
     pub fn take_debug_pause_requested(&self) -> bool {
-        self.debugger
-            .borrow_mut()
-            .as_mut()
-            .is_some_and(debug::DebugSession::take_pause_requested)
+        self.debugger_armed.get()
+            && self
+                .debugger
+                .borrow_mut()
+                .as_mut()
+                .is_some_and(debug::DebugSession::take_pause_requested)
     }
     fn install_hook(&self, armed: bool) -> Result<(), Diagnostic> {
         // mlua builds the hook wrapper through protected Lua calls. Retire an old
         // cancelled hook before those calls, or its callback can reject the switch.
         // If allocation fails, begin() refuses unbudgeted execution until repaired.
         self.hook_ready.set(false);
+        self.lua.remove_global_hook();
         self.lua.remove_hook();
-        let (c, b, t, f, debugger) = (
+        let (c, b, t, f, debugger, armed_flag, batch_active, batch_state, batch_last) = (
             self.cancel.clone(),
             self.binding_count.clone(),
             self.tick_count.clone(),
             self.failure.clone(),
             self.debugger.clone(),
+            self.debugger_armed.clone(),
+            self.batch_active.clone(),
+            self.batch_state.clone(),
+            self.batch_last_cursor.clone(),
         );
         let (interval, binding_limit, tick_limit) = (
             self.limits.hook_interval,
@@ -608,18 +695,29 @@ impl Engine {
             triggers = triggers.every_line().on_calls().on_returns();
         }
         self.lua
-            .set_hook(triggers, move |lua, event| {
+            .set_global_hook(triggers, move |lua, event| {
                 if c.load(Ordering::Relaxed)
-                    || debugger
-                        .borrow()
-                        .as_ref()
-                        .is_some_and(debug::DebugSession::cancelled)
+                    || (armed_flag.get()
+                        && debugger
+                            .borrow()
+                            .as_ref()
+                            .is_some_and(debug::DebugSession::cancelled))
                 {
                     f.set(Some(DiagnosticCode::Cancelled));
                     return Err(mlua::Error::runtime("behavior cancelled"));
                 }
                 // Line/call/return events must not consume instruction budget.
                 if event.event() == DebugEvent::Count {
+                    if batch_active.get() {
+                        if let Some(tbl) = batch_state.borrow().as_ref() {
+                            if let Ok(cur) = tbl.raw_get::<usize>(1i64) {
+                                if cur != batch_last.get() {
+                                    b.set(0);
+                                    batch_last.set(cur);
+                                }
+                            }
+                        }
+                    }
                     b.set(b.get().saturating_add(u64::from(interval)));
                     t.set(t.get().saturating_add(u64::from(interval)));
                     if b.get() > binding_limit || t.get() > tick_limit {
@@ -629,12 +727,14 @@ impl Engine {
                         ));
                     }
                 }
-                if let Some(session) = debugger.borrow_mut().as_mut() {
-                    if let Err(error) = session.hook(lua, event) {
-                        if session.cancelled() {
-                            f.set(Some(DiagnosticCode::Cancelled));
+                if armed_flag.get() {
+                    if let Some(session) = debugger.borrow_mut().as_mut() {
+                        if let Err(error) = session.hook(lua, event) {
+                            if session.cancelled() {
+                                f.set(Some(DiagnosticCode::Cancelled));
+                            }
+                            return Err(error);
                         }
-                        return Err(error);
                     }
                 }
                 Ok(VmState::Continue)
@@ -653,6 +753,9 @@ impl Engine {
         attempted_commit_revision: u64,
         suppressed: bool,
     ) {
+        if !self.debugger_armed.get() {
+            return;
+        }
         if let Some(session) = self.debugger.borrow_mut().as_mut() {
             session.begin(
                 tick,
@@ -664,6 +767,9 @@ impl Engine {
         }
     }
     fn debug_phase(&self, phase: Phase) {
+        if !self.debugger_armed.get() {
+            return;
+        }
         if let Some(session) = self.debugger.borrow_mut().as_mut() {
             session.phase(phase);
         }
@@ -990,6 +1096,7 @@ impl Engine {
             },
             animations,
             state,
+            script_logs: Vec::new(),
             component_world: None,
         })
     }
@@ -1189,6 +1296,7 @@ impl Engine {
         runtime.last_step_commit_revision = Some(commit_revision);
         runtime.query_observations = observations;
         runtime.state = staged_state;
+        runtime.script_logs.clear();
         Ok(())
     }
     fn evaluate_binding(
@@ -1393,6 +1501,48 @@ impl Engine {
         host_input: HostInput<'_>,
         probe: Option<lua_component::ModuleProbe<'_>>,
     ) -> Result<BindingOutput, Diagnostic> {
+        if let Some(probe) = probe {
+            let environment = self
+                .component_cache
+                .new_environment(&self.lua)
+                .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
+            main.set_environment(environment)
+                .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
+            self.debug_phase(Phase::Module);
+            let module: Table = main
+                .call(())
+                .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
+            if let Some(module) = self.component_module(
+                &module,
+                probe.slot_index,
+                host_input.binding_id,
+                properties,
+                probe.kinematic,
+            )? {
+                let original = input.expect("Object input");
+                let transform = module.start(self, original)?;
+                if probe.kinematic {
+                    if let Some(output) = &transform {
+                        host_input
+                            .spatial
+                            .expect("kinematic snapshot")
+                            .validate_kinematic_output(host_input.binding_id, original, output)
+                            .map_err(|message| {
+                                Diagnostic::plain(
+                                    DiagnosticCode::InvalidOutput,
+                                    Phase::Output,
+                                    &message,
+                                )
+                            })?;
+                    }
+                }
+                *probe.target = Some(module);
+                return Ok(BindingOutput {
+                    transform,
+                    state: StateFields::new(),
+                });
+            }
+        }
         // Scope expires host callbacks and drops their Rust captures synchronously,
         // even if authored Lua leaves unreachable cycles awaiting a later VM GC.
         self.lua
@@ -1417,41 +1567,6 @@ impl Engine {
                     let module: Table = main
                         .call(())
                         .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
-                    if let Some(probe) = probe {
-                        if let Some(module) = self.component_module(
-                            &module,
-                            host_input.binding_id,
-                            properties,
-                            probe.kinematic,
-                        )? {
-                            let original = input.expect("Object input");
-                            let transform = module.start(self, original, properties)?;
-                            if probe.kinematic {
-                                if let Some(output) = &transform {
-                                    host_input
-                                        .spatial
-                                        .expect("kinematic snapshot")
-                                        .validate_kinematic_output(
-                                            host_input.binding_id,
-                                            original,
-                                            output,
-                                        )
-                                        .map_err(|message| {
-                                            Diagnostic::plain(
-                                                DiagnosticCode::InvalidOutput,
-                                                Phase::Output,
-                                                &message,
-                                            )
-                                        })?;
-                                }
-                            }
-                            *probe.target = Some(module);
-                            return Ok(BindingOutput {
-                                transform,
-                                state: StateFields::new(),
-                            });
-                        }
-                    }
                     let update: Function = module
                         .raw_get("update")
                         .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
@@ -1890,6 +2005,8 @@ fn read_transform(table: &Table) -> mlua::Result<Transform> {
 mod group_rotation_tests;
 #[cfg(test)]
 mod kinematic_tests;
+#[cfg(test)]
+mod lua_component_tests;
 #[cfg(test)]
 mod spatial_tests;
 #[cfg(test)]

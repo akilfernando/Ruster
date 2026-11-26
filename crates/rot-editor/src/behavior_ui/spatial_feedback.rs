@@ -344,6 +344,7 @@ mod tests {
                 tick: 1,
                 scene: Arc::new(scene),
                 input: None,
+                script_logs: Arc::from([]),
                 query_observations: Some(Arc::from([observation])),
             }),
             ..Default::default()

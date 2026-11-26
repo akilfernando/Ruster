@@ -960,6 +960,53 @@ impl ComponentScene {
         }
     }
 
+    /// Resolve composed world matrices and rotations in a single pass, skipping trig on unrotated objects.
+    pub fn resolve_world_matrices_and_rotations_into(
+        &self,
+        hierarchy: &ObjectHierarchy,
+        local: &[Transform],
+        out_world: &mut Vec<DMat4>,
+        out_rotations: &mut Vec<DQuat>,
+    ) -> Result<(), SceneError> {
+        out_world.resize(local.len(), DMat4::IDENTITY);
+        out_rotations.resize(local.len(), DQuat::IDENTITY);
+        for &index in &hierarchy.order {
+            let pose = &local[index];
+            let local_rot = if pose.rotation == [0.0; 3] {
+                DQuat::IDENTITY
+            } else {
+                let [x, y, z] = pose.rotation.map(f64::from);
+                DQuat::from_euler(EulerRot::ZYX, z, y, x)
+            };
+            let translation = glam::DVec3::from(pose.translation.map(f64::from));
+            let affine = if pose.rotation == [0.0; 3] && pose.scale == [1.0; 3] {
+                DMat4::from_translation(translation)
+            } else {
+                DMat4::from_scale_rotation_translation(
+                    glam::DVec3::from(pose.scale.map(f64::from)),
+                    local_rot,
+                    translation,
+                )
+            };
+            let (matrix, world_rot) = match hierarchy.parents[index] {
+                None => (affine, local_rot),
+                Some(parent) => (
+                    out_world[parent] * affine,
+                    out_rotations[parent] * local_rot,
+                ),
+            };
+            if !matrix.is_finite() {
+                return Err(SceneError::Invalid(format!(
+                    "world transform overflow on {}",
+                    self.objects[index].id
+                )));
+            }
+            out_world[index] = matrix;
+            out_rotations[index] = world_rot;
+        }
+        Ok(())
+    }
+
     /// Snapshot both stored sources and the runtime compatibility view of baked files.
     pub fn script_sources_snapshot(&self) -> BTreeMap<String, BehaviorSource> {
         let mut sources = self.sources.clone();

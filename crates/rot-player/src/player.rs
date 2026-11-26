@@ -551,6 +551,19 @@ impl PlayerApp {
     }
 }
 
+fn emit_script_logs(runtime: &Runtime) {
+    for entry in runtime.script_logs() {
+        match entry.level {
+            rot_behavior::ScriptLogLevel::Info => {
+                println!("[Script][{}] {}", entry.object_id, entry.message);
+            }
+            rot_behavior::ScriptLogLevel::Warning => {
+                eprintln!("[Script][{}] {}", entry.object_id, entry.message);
+            }
+        }
+    }
+}
+
 /// Explicit supplied-frame execution with outer-clock authority.
 pub fn step_with_input(
     runtime: &mut rot_app::Runtime<PlayerApp>,
@@ -599,6 +612,7 @@ impl Application for PlayerApp {
         engine.set_clips(self.clips.clone());
         let result = engine.reset_component(&self.scene, 0);
         let candidate = self.report(result)?;
+        emit_script_logs(&candidate);
         self.content.set_behavior_draw_frame(candidate.draw_frame());
         self.hud_cache.clear();
         self.runtime = Some(candidate);
@@ -772,6 +786,7 @@ impl Application for PlayerApp {
         self.report(result)?;
         self.last_input = Some((local_tick, input, origin));
         let runtime = self.runtime.as_ref().expect("active runtime");
+        emit_script_logs(runtime);
         self.content.set_behavior_draw_frame(runtime.draw_frame());
         self.diagnostic = None;
         Ok(())

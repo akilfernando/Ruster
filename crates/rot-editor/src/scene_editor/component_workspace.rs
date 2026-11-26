@@ -405,6 +405,9 @@ pub(super) struct ComponentWorkspace {
     component_picker: component_inspector::ComponentPicker,
     inspector_error: Option<String>,
     error: Option<String>,
+    console: crate::console::Console,
+    console_open: bool,
+    last_script_log_commit: Option<(crate::behavior_worker::RunKey, u64)>,
     open_path: Option<String>,
     new_scene: Option<component_new_scene::NewScene>,
     open_focused: bool,
@@ -616,6 +619,9 @@ impl ComponentWorkspace {
             component_picker: Default::default(),
             inspector_error: None,
             error: None,
+            console: crate::console::Console::default(),
+            console_open: false,
+            last_script_log_commit: None,
             open_path: None,
             new_scene: None,
             open_focused: false,
@@ -2097,6 +2103,10 @@ impl ComponentWorkspace {
                 self.asset_browser.open = !self.asset_browser.open;
                 return;
             }
+            Action::ToggleConsole => {
+                self.console_open = !self.console_open;
+                return;
+            }
             Action::FindContent => {
                 self.asset_browser.open = true;
                 self.asset_browser.focus_search = true;
@@ -3314,6 +3324,7 @@ impl ComponentWorkspace {
                 });
                 editor_theme::text_menu(ui, "Window", |ui| {
                     self.menu_action(ui, Action::ToggleAssets);
+                    self.menu_action(ui, Action::ToggleConsole);
                     self.menu_action(ui, Action::PlayChecks);
                     if ui
                         .add_enabled(
@@ -3393,6 +3404,33 @@ impl ComponentWorkspace {
         } else {
             build_status
         };
+        self.console.drain_engine_log();
+        let next_log_commit = self
+            .runtime
+            .displayed_frame()
+            .filter(|frame| !frame.script_logs.is_empty())
+            .map(|frame| {
+                (
+                    (frame.key, frame.commit_revision),
+                    frame.script_logs.clone(),
+                )
+            });
+        if let Some((commit_id, logs)) = next_log_commit {
+            if self.last_script_log_commit != Some(commit_id) {
+                self.last_script_log_commit = Some(commit_id);
+                for log in logs.iter() {
+                    let level = match log.level {
+                        rot_behavior::ScriptLogLevel::Info => crate::console::Level::Info,
+                        rot_behavior::ScriptLogLevel::Warning => crate::console::Level::Warning,
+                    };
+                    self.console.push(
+                        level,
+                        "Script",
+                        format!("[{}] {}", log.object_id, log.message),
+                    );
+                }
+            }
+        }
         let has_import_issues = !self.asset_browser.issues.is_empty();
         let light_budget_exceeded = self.light_budget_exceeded();
         #[cfg(target_os = "linux")]
@@ -3433,6 +3471,14 @@ impl ComponentWorkspace {
                     self.prefab_details_open = false;
                 }
             });
+        }
+        if self.console_open {
+            egui::Panel::bottom("component_console")
+                .resizable(true)
+                .default_size(180.0)
+                .show(ui, |ui| {
+                    let _ = self.console.ui(ui);
+                });
         }
         #[cfg(target_os = "linux")]
         if let Some(error) = reveal_error {
@@ -3476,6 +3522,7 @@ impl ComponentWorkspace {
                             | Action::FindObjects
                             | Action::FindContent
                             | Action::ToggleAssets
+                            | Action::ToggleConsole
                             | Action::Preferences
                             | Action::KeyboardShortcuts
                             | Action::ProjectSettings
@@ -6553,5 +6600,68 @@ mod tests {
         );
         editor.command(Action::ShadingCycle);
         assert_eq!(editor.navigation.shading_mode, rot_render::ShadingMode::Lit);
+    }
+
+    #[test]
+    fn script_logs_and_console_toggle_appear_in_editor_console() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let owner_id = scene.objects[0].id.clone();
+        scene.script_files.insert(
+            "logger".into(),
+            rot_scene::component_scene::ScriptFile {
+                asset_id: "asset-logger".into(),
+                path: "Scripts/logger.lua".into(),
+                text: r#"
+                return {
+                    on_start = function(t, p, host)
+                        host.log("hello console")
+                        host.warn("careful now")
+                    end,
+                }
+                "#
+                .into(),
+            },
+        );
+        scene.objects[0].components.push(ComponentInstance {
+            id: "logger-comp".into(),
+            enabled: true,
+            kind: Component::Script {
+                binding: rot_scene::BehaviorBinding {
+                    target: rot_scene::BindingTarget::Object(owner_id.clone()),
+                    source_id: "logger".into(),
+                    enabled: true,
+                    properties: BTreeMap::new(),
+                    state_defaults: BTreeMap::new(),
+                    commands: BTreeMap::new(),
+                },
+                source_kind: None,
+                movement: Default::default(),
+            },
+        });
+        let mut editor = ComponentWorkspace::new(path, ComponentSession::new(scene).unwrap());
+        let ctx = egui::Context::default();
+        crate::editor_theme::configure(&ctx);
+        let mut time = 0.0;
+        run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+        editor.command(Action::Play);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while editor.console.count(crate::console::Level::Info) == 0
+            && std::time::Instant::now() < deadline
+        {
+            run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(editor.console.count(crate::console::Level::Info), 1);
+        assert_eq!(editor.console.count(crate::console::Level::Warning), 1);
+        let entries: Vec<_> = editor.console.entries().collect();
+        assert_eq!(entries[0].source, "Script");
+        assert_eq!(entries[0].text, format!("[{owner_id}] hello console"));
+        assert_eq!(entries[1].text, format!("[{owner_id}] careful now"));
+        assert!(!editor.console_open);
+        editor.command(Action::ToggleConsole);
+        assert!(editor.console_open);
+        run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
     }
 }
