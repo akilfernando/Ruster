@@ -186,19 +186,12 @@ fn hidden_behavior_mesh_keeps_the_owner_pose_and_enabled_sibling() {
         ComponentScene::from_legacy(&rot_scene::Session::new(original).unwrap()).unwrap();
     authored.objects[0].components[0].enabled = false;
 
-    let runtime = rot_scene::Session::from_component_runtime(&authored).unwrap();
-    let scene = runtime.scene();
-    assert_eq!(scene.objects[0].id, "parent");
-    assert!(scene.objects[0].collider.unwrap().enabled);
-    let poses = scene.resolve_poses().unwrap();
-    assert_eq!(poses.transforms["parent"].translation, [4., 1., -3.]);
-    let mut resolved = scene.clone();
-    for object in &mut resolved.objects {
-        object.transform = poses.transforms[&object.id].clone();
-    }
+    let frame = rot_scene::ComponentDrawPlan::build_initial_frame(&authored, 0).unwrap();
+    let prepared = frame.hierarchy().unwrap();
     let draw = DrawScene {
-        hidden_mesh_renderers: runtime.hidden_mesh_renderers().map(Arc::as_ref),
-        ..DrawScene::from(&resolved)
+        prepared: Some(prepared.as_ref()),
+        matrices: Some(prepared.matrices()),
+        ..DrawScene::from(frame.scene())
     };
     let mut instances = draw.objects();
     let (child, matrix) = instances.next().unwrap();

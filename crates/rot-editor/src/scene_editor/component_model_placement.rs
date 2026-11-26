@@ -404,8 +404,7 @@ mod tests {
             }
         );
         assert_eq!(
-            rot_app::creation::static_component_preview(&placed)
-                .unwrap()
+            rot_render::component_preview::project(&placed)
                 .unwrap()
                 .scene()
                 .lighting

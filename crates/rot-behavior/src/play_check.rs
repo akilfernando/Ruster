@@ -389,34 +389,6 @@ pub fn run_with_identity(
     )
 }
 
-/// Check a behavior session projected from an authored v23 scene, including
-/// any hierarchy admitted by the same runtime projection as ordinary Play.
-pub fn run_projected(
-    session: &Session,
-    case: &PlayCheck,
-    identity: CheckIdentity,
-    clips: &crate::Clips,
-    cancel: Arc<AtomicBool>,
-) -> Report {
-    run_with_source(
-        CheckSource::Projected(session, clips),
-        case,
-        Ok(identity),
-        cancel,
-    )
-}
-
-/// Check the immutable scene used by ordinary v23 static Play. Static Steps
-/// advance only the tick and do not initialize or run a Lua VM.
-pub fn run_static(
-    scene: &rot_scene::Scene,
-    case: &PlayCheck,
-    identity: CheckIdentity,
-    cancel: Arc<AtomicBool>,
-) -> Report {
-    run_with_source(CheckSource::Static(scene), case, Ok(identity), cancel)
-}
-
 /// Run a Play Check directly against an authored/baked v23 `ComponentScene` using `ComponentRuntime`.
 pub fn run_component(
     scene: &rot_scene::component_scene::ComponentScene,
@@ -435,8 +407,6 @@ pub fn run_component(
 
 enum CheckSource<'a> {
     Behavior(&'a Session, &'a crate::Clips),
-    Projected(&'a Session, &'a crate::Clips),
-    Static(&'a rot_scene::Scene),
     Component(
         &'a rot_scene::component_scene::ComponentScene,
         &'a crate::Clips,
@@ -490,13 +460,9 @@ fn run_with_source(
             "Play checks currently require a flat scene.",
         );
     }
-    let empty_actions = rot_scene::input::ActionMap::new();
     let actions = match &source {
-        CheckSource::Behavior(session, _) | CheckSource::Projected(session, _) => {
-            &session.authoring().actions
-        }
+        CheckSource::Behavior(session, _) => &session.authoring().actions,
         CheckSource::Component(scene, _) => &scene.actions,
-        CheckSource::Static(_) => &empty_actions,
     };
     for (index, frame) in case.frames.iter().enumerate() {
         if let Err(error) = frame.validate_only_against(actions) {
@@ -522,10 +488,6 @@ fn run_with_source(
         return report.finish(status, message);
     }
     let (scene, runtime) = match source {
-        CheckSource::Static(scene) => {
-            report.completed_tick = case.frames.len() as u64;
-            (Some(scene), None)
-        }
         CheckSource::Component(component_scene, clips) => {
             let limits = Limits {
                 fixed_dt: Duration::from_nanos(current.tick_nanos).as_secs_f64(),
@@ -551,7 +513,7 @@ fn run_with_source(
             }
             (None, Some(runtime))
         }
-        CheckSource::Behavior(session, clips) | CheckSource::Projected(session, clips) => {
+        CheckSource::Behavior(session, clips) => {
             let limits = Limits {
                 fixed_dt: Duration::from_nanos(current.tick_nanos).as_secs_f64(),
                 ..Limits::default()
@@ -561,12 +523,7 @@ fn run_with_source(
                 Err(failure) => return report.script_error(failure),
             };
             engine.set_clips(clips.clone());
-            let mut runtime = match engine.reset_projected(
-                session.scene(),
-                session.authoring(),
-                session.transform_camera_binding().cloned(),
-                session.runtime_projection(),
-            ) {
+            let mut runtime = match engine.reset(session.scene(), session.authoring()) {
                 Ok(runtime) => runtime,
                 Err(failure) => return report.script_error(failure),
             };

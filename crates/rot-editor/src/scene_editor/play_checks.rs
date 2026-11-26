@@ -433,18 +433,19 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
                 });
             }
             let runtime = component_check_runtime(snapshot.saved, script_sources)?;
-            let report = match runtime {
-                RuntimeScene::StaticHierarchy { preview, .. } => {
-                    check::run_static(preview.scene(), &case, identity, cancel)
-                }
-                RuntimeScene::Behavior(session) => {
-                    let clips = match snapshot.assets.expect("verified resources") {
-                        Some(assets) => rot_behavior::decode_clips(assets.clips())?,
-                        None => Default::default(),
-                    };
-                    check::run_projected(&session, &case, identity, &clips, cancel)
+            let clips = if runtime
+                .active_animation_clip_ids()
+                .map_err(|error| error.to_string())?
+                .is_empty()
+            {
+                Default::default()
+            } else {
+                match snapshot.assets.expect("verified resources") {
+                    Some(assets) => rot_behavior::decode_clips(assets.clips())?,
+                    None => Default::default(),
                 }
             };
+            let report = check::run_component(runtime.scene(), &case, identity, &clips, cancel);
             Ok(Completion::Ran(report))
         }
         Work::Save(case, baseline) => {

@@ -2,11 +2,81 @@ use std::{fs, process::Command, time::Duration};
 
 use rot_app::{Application, MeshMap, Runtime, Step};
 use rot_behavior::DiagnosticCode;
-use rot_motion_lab::generic::{read_session, GenericMotionLab, DEMO, FIXED_DT};
+use rot_motion_lab::generic::{read_session, GenericMotionLab, FIXED_DT};
 use rot_scene::{PropertyValue, Session};
 
 fn demo() -> Session {
-    Session::from_runtime_snapshot(DEMO).unwrap()
+    use rot_scene::{BehaviorBinding, BehaviorSource, BindingTarget, Object, Scene};
+
+    let mut scene = Scene::empty("motion-comparison");
+    let mut slow = Object::cube("sample-slow", Some("Slow sample".into()));
+    slow.transform.translation = [-2.0, -1.0, 0.0];
+    slow.color = [0.12, 0.58, 0.85, 1.0];
+    let mut fast = Object::cube("sample-fast", Some("Fast sample".into()));
+    fast.transform.translation = [-2.0, 1.0, 0.0];
+    fast.color = [0.9, 0.4, 0.16, 1.0];
+    let mut target = Object::cube("target", Some("Reference target".into()));
+    target.transform.translation = [2.0, 0.0, 0.0];
+    target.color = [0.3, 0.75, 0.45, 1.0];
+    scene.objects = vec![slow, fast, target];
+    let mut session = Session::new(scene).unwrap();
+    let revision = session.scene().revision;
+    let source = BehaviorSource {
+        label: Some("Compare linear motion".into()),
+        language_id: "lua54".into(),
+        host_api_version: rot_behavior::HOST_API_VERSION,
+        text: "return {\n    update = function(transform, props, dt, host)\n        if not props.enabled then return transform end\n        local target = host.resolve(props.target)\n        if not target then return transform end\n        local distance = target.translation[1] - transform.translation[1]\n        local step = math.max(0, props.speed) * dt\n        transform.translation[1] = transform.translation[1]\n            + math.min(step, math.max(-step, distance))\n        return transform\n    end\n}\n".into(),
+    };
+    session
+        .create_behavior(
+            revision,
+            "follower",
+            source,
+            "motion-slow",
+            BehaviorBinding {
+                target: BindingTarget::Object("sample-slow".into()),
+                source_id: "follower".into(),
+                enabled: true,
+                properties: std::collections::BTreeMap::from([
+                    ("enabled".into(), PropertyValue::Bool(true)),
+                    ("speed".into(), PropertyValue::Number(1.0)),
+                    (
+                        "target".into(),
+                        PropertyValue::ObjectRef(Some("target".into())),
+                    ),
+                ]),
+                state_defaults: Default::default(),
+                commands: Default::default(),
+            },
+        )
+        .unwrap();
+    let revision = session.scene().revision;
+    session
+        .set_binding(
+            revision,
+            "motion-fast",
+            Some(BehaviorBinding {
+                target: BindingTarget::Object("sample-fast".into()),
+                source_id: "follower".into(),
+                enabled: true,
+                properties: std::collections::BTreeMap::from([
+                    ("enabled".into(), PropertyValue::Bool(true)),
+                    ("speed".into(), PropertyValue::Number(2.0)),
+                    (
+                        "target".into(),
+                        PropertyValue::ObjectRef(Some("target".into())),
+                    ),
+                ]),
+                state_defaults: Default::default(),
+                commands: Default::default(),
+            }),
+        )
+        .unwrap();
+    let mut doc: serde_json::Value =
+        serde_json::from_slice(&session.snapshot_bytes().unwrap()).unwrap();
+    doc["scene"]["revision"] = serde_json::json!(0);
+    doc["undo"] = serde_json::json!([]);
+    Session::from_snapshot_bytes(&serde_json::to_vec(&doc).unwrap()).unwrap()
 }
 fn runtime(session: Session) -> Runtime<GenericMotionLab> {
     Runtime::new(

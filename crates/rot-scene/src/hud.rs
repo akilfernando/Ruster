@@ -492,19 +492,6 @@ impl Hud {
         })
     }
 
-    pub(crate) fn is_static_or_action_buttons(&self) -> bool {
-        self.panels.iter().all(|panel| {
-            panel.visible_when.is_none()
-                && panel.elements.iter().all(|row| {
-                    row.enabled_when.is_none()
-                        && matches!(
-                            row.source,
-                            HudSource::Static { .. } | HudSource::ActionButton { .. }
-                        )
-                })
-        })
-    }
-
     pub fn elements(&self) -> impl Iterator<Item = &HudLabel> {
         self.panels.iter().flat_map(|panel| &panel.elements)
     }

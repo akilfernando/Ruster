@@ -343,20 +343,11 @@ impl ComponentWorkspace {
             };
             let mut model = json!({"mode":"authored","resolved":rot_scene::hud::resolve_hud(hud, &authored, |_, _| None)});
             if let Some(frame) = self.runtime.displayed_frame() {
-                let resolved = frame
-                    .static_preview
-                    .as_ref()
-                    .and_then(|preview| preview.static_hud())
-                    .map_or_else(
-                        || {
-                            rot_scene::hud::resolve_hud(
-                                &frame.authoring.hud,
-                                &frame.authoring,
-                                |binding, field| frame.state.binding(binding)?.get(field),
-                            )
-                        },
-                        |(_, resolved)| resolved.clone(),
-                    );
+                let resolved = rot_scene::hud::resolve_hud(
+                    &frame.authoring.hud,
+                    &frame.authoring,
+                    |binding, field| frame.state.binding(binding)?.get(field),
+                );
                 model =
                     json!({"mode":"committed","tick":frame.tick.to_string(),"resolved":resolved});
             }

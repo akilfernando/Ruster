@@ -22,7 +22,7 @@ mod shadow_lifecycle_probe;
 mod shadow_probe;
 use lighting_gpu::{LightingGpu, LightingPacket, LIGHTING_BYTES};
 use material_gpu::{BindingKey, MaterialGpu};
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Instant;
@@ -1069,7 +1069,6 @@ struct DrawScene<'a> {
     prepared: Option<&'a rot_scene::HierarchyDraw>,
     matrices: Option<&'a [Mat4]>,
     unpickable: Option<&'a BTreeSet<String>>,
-    hidden_mesh_renderers: Option<&'a HashSet<String>>,
     transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
 }
 
@@ -1080,7 +1079,6 @@ impl<'a> From<&'a Scene> for DrawScene<'a> {
             prepared: None,
             matrices: None,
             unpickable: None,
-            hidden_mesh_renderers: None,
             transform_camera: None,
         }
     }
@@ -1097,10 +1095,6 @@ impl<'a> DrawScene<'a> {
             .objects
             .iter()
             .enumerate()
-            .filter(move |(_, object)| {
-                self.hidden_mesh_renderers
-                    .is_none_or(|ids| !ids.contains(&object.id))
-            })
             .map(move |(index, object)| {
                 let matrix = self
                     .matrices
@@ -1253,7 +1247,6 @@ pub struct ViewportSurface {
     pub response: egui::Response,
     pub input_owned: bool,
     transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
-    hidden_mesh_renderers: Option<rot_scene::HiddenMeshRenderers>,
     camera_id: egui::Id,
     error_id: egui::Id,
     camera: Camera,
@@ -1491,7 +1484,6 @@ pub fn allocate_viewport(
         response,
         input_owned: false,
         transform_camera: None,
-        hidden_mesh_renderers: None,
         camera_id,
         error_id,
         camera,
@@ -1773,10 +1765,6 @@ impl ViewportSurface {
     ) {
         self.transform_camera = camera;
     }
-
-    pub fn set_hidden_mesh_renderers(&mut self, hidden: Option<rot_scene::HiddenMeshRenderers>) {
-        self.hidden_mesh_renderers = hidden;
-    }
 }
 
 /// Finish an allocated viewport after the host has registered overlay ownership.
@@ -1787,13 +1775,11 @@ pub fn render_viewport_with_materials(
     meshes: &BTreeMap<String, Arc<rot_assets::Mesh>>,
     textures: &BTreeMap<String, Arc<rot_assets::Texture>>,
     navigation: &mut NavigationOptions,
-    mut surface: ViewportSurface,
+    surface: ViewportSurface,
 ) -> ViewportInteraction {
-    let hidden = surface.hidden_mesh_renderers.take();
     render_draw_scene(
         ui,
         DrawScene {
-            hidden_mesh_renderers: hidden.as_deref(),
             transform_camera: surface.transform_camera,
             ..scene.into()
         },
@@ -1813,16 +1799,14 @@ pub fn render_viewport_draw_frame(
     meshes: &BTreeMap<String, Arc<rot_assets::Mesh>>,
     textures: &BTreeMap<String, Arc<rot_assets::Texture>>,
     navigation: &mut NavigationOptions,
-    mut surface: ViewportSurface,
+    surface: ViewportSurface,
 ) -> ViewportInteraction {
-    let hidden = surface.hidden_mesh_renderers.take();
     let prepared = frame.hierarchy().map(Arc::as_ref);
     render_draw_scene(
         ui,
         DrawScene {
             prepared,
             matrices: prepared.map(rot_scene::HierarchyDraw::matrices),
-            hidden_mesh_renderers: hidden.as_deref(),
             transform_camera: surface.transform_camera.or(frame.transform_camera()),
             ..frame.scene().into()
         },

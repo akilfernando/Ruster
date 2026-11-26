@@ -262,7 +262,6 @@ fn transform_camera_pose_commits_with_animated_parent_owner_and_rejected_step() 
                 },
             },
         });
-    let projected = authored.behavior_projection().unwrap();
     let mut engine = Engine::new(Limits {
         fixed_dt: 0.25,
         ..Limits::default()
@@ -274,13 +273,7 @@ fn transform_camera_pose_commits_with_animated_parent_owner_and_rejected_step() 
           {"node":"Dolly","property":"translation","interpolation":"linear","times":[0.0,0.5],"values":[[3.0,0.0,0.0],[7.0,0.0,0.0]]},
           {"node":"Camera","property":"rotation","interpolation":"linear","times":[0.0,0.5],"values":[[0.0,0.0,0.0,1.0],[0.0,0.0,1.0,0.0]]}]}"#).unwrap()),
     )]));
-    let mut runtime = engine
-        .reset_with_transform_camera(
-            &projected.scene,
-            &projected.authoring,
-            projected.transform_camera,
-        )
-        .unwrap();
+    let mut runtime = engine.reset_component(&authored, 0).unwrap();
     let first = runtime.transform_camera().unwrap();
     assert_eq!(
         first.eye,
@@ -301,18 +294,21 @@ fn transform_camera_pose_commits_with_animated_parent_owner_and_rejected_step() 
     assert_eq!(committed.eye, [7., 0., 0.]);
     assert!(committed.up[0] < -0.999_99);
     assert_eq!(committed.forward, [0., 0., -1.]);
-    let last_scene = runtime.scene().clone();
+    let last_transforms = runtime.component_transforms().unwrap().to_vec();
     let commit = runtime.commit_revision();
     assert!(engine.step(&mut runtime).is_err());
     assert_eq!((runtime.tick(), runtime.commit_revision()), (1, commit));
-    assert_eq!(runtime.scene(), &last_scene);
-    assert_eq!(runtime.transform_camera(), Some(committed));
     assert_eq!(
-        projected.scene.hierarchy.groups["dolly"]
-            .transform
-            .translation,
-        [0.; 3]
+        runtime.component_transforms().unwrap(),
+        last_transforms.as_slice()
     );
+    assert_eq!(runtime.transform_camera(), Some(committed));
+    let dolly_index = authored
+        .objects
+        .iter()
+        .position(|object| object.id == "dolly")
+        .unwrap();
+    assert_eq!(authored.objects[dolly_index].transform.translation, [0.; 3]);
 }
 
 #[test]
@@ -367,25 +363,15 @@ fn button_animators_use_independent_playback_speeds_and_source_clip_endpoints() 
             }
         }
     }
-    let input = authored.behavior_projection().unwrap();
-    let mut runtime = engine
-        .reset_projected(
-            &input.scene,
-            &input.authoring,
-            input.transform_camera,
-            input.projection,
-        )
-        .unwrap();
+    let mut runtime = engine.reset_component(&authored, 0).unwrap();
     let values = |runtime: &Runtime| {
         let x = |id| {
-            runtime
-                .scene()
+            let index = authored
                 .objects
                 .iter()
-                .find(|object| object.id == id)
-                .unwrap()
-                .transform
-                .translation[0]
+                .position(|object| object.id == id)
+                .unwrap();
+            runtime.component_transforms().unwrap()[index].translation[0]
         };
         [x("arm"), x("fast-arm")]
     };
@@ -483,29 +469,22 @@ fn button_animators_wait_restart_per_placement_and_keep_the_clock_on_rejection()
     }
     let mut unavailable = authored.clone();
     unavailable.actions.remove("close");
-    let Err(error) = unavailable.behavior_projection() else {
+    let Err(error) = engine.reset_component(&unavailable, 0) else {
         panic!("missing action must be diagnosed");
     };
-    assert!(error.to_string().contains("other-root") && error.to_string().contains("close"));
+    assert!(
+        error.to_string().contains("other-root") && error.to_string().contains("close"),
+        "{error}"
+    );
 
-    let projection = authored.behavior_projection().unwrap();
-    let mut runtime = engine
-        .reset_projected(
-            &projection.scene,
-            &projection.authoring,
-            projection.transform_camera.clone(),
-            projection.projection.clone(),
-        )
-        .unwrap();
+    let mut runtime = engine.reset_component(&authored, 0).unwrap();
     let position = |runtime: &Runtime, object: &str| {
-        runtime
-            .scene()
+        let index = authored
             .objects
             .iter()
-            .find(|entry| entry.id == object)
-            .unwrap()
-            .transform
-            .translation[0]
+            .position(|entry| entry.id == object)
+            .unwrap();
+        runtime.component_transforms().unwrap()[index].translation[0]
     };
     let input = |values: &[(&str, bool)]| {
         ActionFrame(
@@ -559,25 +538,32 @@ fn button_animators_wait_restart_per_placement_and_keep_the_clock_on_rejection()
     assert_eq!(position(&runtime, "other-arm"), 7.);
 
     // An unrelated world-invalid animation runs after the staged press.
-    let mut rejected = projection.scene.clone();
-    rejected.animations.get_mut("root").unwrap().clip = "fault".into();
-    rejected
-        .hierarchy
-        .groups
-        .get_mut("root")
-        .unwrap()
-        .transform
-        .scale = [2.; 3];
+    let mut rejected = authored.clone();
+    for object in &mut rejected.objects {
+        if object.id == "root" {
+            object.transform.scale = [2.; 3];
+            for component in &mut object.components {
+                if let Component::Animator { binding, .. } = &mut component.kind {
+                    binding.clip = "fault".into();
+                }
+            }
+        } else if object.id == "arm" {
+            object
+                .components
+                .push(rot_scene::component_scene::ComponentInstance {
+                    id: "arm-light".into(),
+                    enabled: true,
+                    kind: Component::Light {
+                        color: [1.; 3],
+                        intensity: 1.,
+                        kind: rot_scene::Light::point(None).kind,
+                    },
+                });
+        }
+    }
     engine.clips.insert("fault".into(), Arc::new(Clip::decode(br#"{"format":"rot-clip","version":1,"duration":0.25,"tracks":[
         {"node":"Rig/Arm","property":"translation","interpolation":"linear","times":[0.0,0.25],"values":[[1.0,0.0,0.0],[8000.0,0.0,0.0]]}]}"#).unwrap()));
-    let mut rollback = engine
-        .reset_projected(
-            &rejected,
-            &projection.authoring,
-            projection.transform_camera,
-            projection.projection,
-        )
-        .unwrap();
+    let mut rollback = engine.reset_component(&rejected, 0).unwrap();
     engine
         .step_with_input(&mut rollback, &input(&[("open", true)]))
         .unwrap();

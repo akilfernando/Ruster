@@ -3,7 +3,6 @@ use super::*;
 use crate::behavior_worker::{
     DebugRequestError, InputError, InputMapIdentity, InputOrigin, InputReceipt,
 };
-use crate::strings::Text;
 use rot_behavior::debug::{Breakpoint, Resume, StopSnapshot, ValueNode};
 use rot_scene::input::ActionFrame;
 use serde_json::{json, Value};
@@ -183,7 +182,7 @@ impl RuntimeUi {
             VmEvent::HudActivation { .. } => return,
             VmEvent::Reset { .. } => Operation::Reset,
             VmEvent::Command { .. } => Operation::Command,
-            VmEvent::Step { .. } | VmEvent::StaticStep { .. } => Operation::Step,
+            VmEvent::Step { .. } => Operation::Step,
             VmEvent::State { state, .. } => match state {
                 State::Playing => Operation::Play,
                 State::Paused => Operation::Pause,
@@ -512,30 +511,44 @@ impl RuntimeUi {
                 .and_then(|frame| frame.query_observations.as_deref())
                 .unwrap_or(&[]);
             let query_page: Vec<_> = queries.iter().skip(offset).take(16).collect();
-            let preview = self
-                .frame
-                .as_ref()
-                .and_then(|frame| frame.static_preview.as_deref());
-            let objects: Vec<_> = self
-                .frame
-                .iter()
-                .flat_map(|frame| frame.scene.objects.iter())
-                .enumerate()
-                .skip(offset)
-                .take(16)
-                .map(|(index, object)| {
-                    let mut value = json!({"id":object.id,"transform":object.transform});
-                    if let Some(preview) = preview {
-                        value["world_matrix"] =
-                            json!(preview.draw_matrices()[index].to_cols_array_2d());
-                    }
-                    value
-                })
-                .collect();
-            let total = self
-                .frame
-                .as_ref()
-                .map_or(0, |frame| frame.scene.objects.len());
+            let component = self.frame.as_ref().and_then(|frame| {
+                Some((
+                    frame.component_scene.as_deref()?,
+                    frame.component_transforms.as_deref()?,
+                    frame.component_world_matrices.as_deref()?,
+                ))
+            });
+            let (objects, total) = if let Some((scene, transforms, world_matrices)) = component {
+                let objects: Vec<_> = scene
+                    .objects
+                    .iter()
+                    .enumerate()
+                    .skip(offset)
+                    .take(16)
+                    .map(|(index, object)| {
+                        json!({
+                            "id": object.id,
+                            "transform": transforms.get(index).unwrap_or(&object.transform),
+                            "world_matrix": world_matrices[index].as_mat4().to_cols_array_2d(),
+                        })
+                    })
+                    .collect();
+                (objects, scene.objects.len())
+            } else {
+                let objects: Vec<_> = self
+                    .frame
+                    .iter()
+                    .flat_map(|frame| frame.scene.objects.iter())
+                    .skip(offset)
+                    .take(16)
+                    .map(|object| json!({"id":object.id,"transform":object.transform}))
+                    .collect();
+                let total = self
+                    .frame
+                    .as_ref()
+                    .map_or(0, |frame| frame.scene.objects.len());
+                (objects, total)
+            };
             let groups: Vec<_> = self
                 .frame
                 .iter()
@@ -588,15 +601,9 @@ impl RuntimeUi {
                     report["player_camera"] = super::transform_camera_observation(camera);
                 }
             }
-            if let Some(preview) = preview {
+            if component.is_some() {
                 report["object_transform_space"] = json!("local");
                 report["world_matrix_layout"] = json!("column-major");
-                if offset == 0 {
-                    report["lighting"] = json!(preview.scene().lighting);
-                    if preview.light_budget_exceeded() {
-                        report["lighting_warning"] = json!(Text::ViewportLightLimitDetail.plain());
-                    }
-                }
             }
             if let Some(audio) = self
                 .worker

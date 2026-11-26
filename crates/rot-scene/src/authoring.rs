@@ -466,35 +466,8 @@ impl Authoring {
     }
 
     pub fn validate(&self, scene: &Scene) -> Result<(), SceneError> {
-        self.validate_for_runtime(scene, &Default::default())
-    }
-
-    pub(crate) fn validate_for_runtime(
-        &self,
-        scene: &Scene,
-        projection: &crate::component_scene::RuntimeProjection,
-    ) -> Result<(), SceneError> {
-        if !scene.hierarchy.is_empty() {
-            if projection.allows_local_leaf_scripts() {
-                if !self.hud.is_static_or_action_buttons()
-                    || self.sources.values().any(|source| {
-                        !matches!(
-                            source.host_api_version,
-                            1 | 2 | GROUP_ROTATION_HOST_API_VERSION
-                        )
-                    })
-                    || self
-                        .bindings
-                        .values()
-                        .any(|binding| binding.target == BindingTarget::Application)
-                {
-                    return Err(SceneError::Invalid(
-                        "v23 behavior hierarchies support Object Lua API1/2, Group Lua API6, keyboard actions and HUD labels or Action Buttons. Application scripts, other script APIs, HUD command buttons, state or visibility conditions require a flat scene.".into(),
-                    ));
-                }
-            } else if self.group_creation_blockers(scene).next().is_some() {
-                return Err(SceneError::HierarchyAuthoringConflict);
-            }
+        if !scene.hierarchy.is_empty() && self.group_creation_blockers(scene).next().is_some() {
+            return Err(SceneError::HierarchyAuthoringConflict);
         }
         crate::input::validate_action_map(&self.actions)?;
         self.hud.validate()?;
@@ -513,18 +486,17 @@ impl Authoring {
         for (id, binding) in &self.bindings {
             validate_id(id)?;
             let bytes = binding.validate_and_state_bytes()?;
-            if !projection.allows_named_sensors()
-                && binding
-                    .properties
-                    .values()
-                    .any(|property| matches!(property, PropertyValue::SensorRef(_)))
+            if binding
+                .properties
+                .values()
+                .any(|property| matches!(property, PropertyValue::SensorRef(_)))
             {
                 return Err(SceneError::Invalid(format!(
                     "Binding {id}: named sensors require a v23 component scene."
                 )));
             }
 
-            if !projection.allows_positional_audio() && binding.properties.values().any(|value| {
+            if binding.properties.values().any(|value| {
                 matches!(value, PropertyValue::SoundRef(sound) if sound.playback.range().is_some())
             }) {
                 return Err(SceneError::Invalid(format!("Binding {id}: positional sound cues require a v23 component scene.")));

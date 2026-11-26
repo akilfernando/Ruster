@@ -391,13 +391,12 @@ mod tests {
             editor.preview.as_ref().unwrap().scene().background,
             Some(hex)
         );
+        let mut engine = rot_behavior::Engine::new(Default::default()).unwrap();
         assert_eq!(
-            editor
-                .session
-                .scene()
-                .behavior_projection()
+            engine
+                .reset_component(editor.session.scene(), 0)
                 .unwrap()
-                .scene
+                .scene()
                 .background,
             Some(hex)
         );

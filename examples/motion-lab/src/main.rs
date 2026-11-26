@@ -3,8 +3,8 @@ use std::{
     time::Duration,
 };
 
-use rot_app::creation::{CreationManifest, RuntimeScene, DESCRIPTOR_NAME};
-use rot_app::{Application, Content, HostOptions, MeshMap, ResourceRoot, Runtime, Step};
+use rot_app::creation::{CreationManifest, DESCRIPTOR_NAME};
+use rot_app::{Application, Content, HostOptions, MeshMap, ResourceRoot, Runtime, TextureMap};
 use rot_motion_lab::generic::{self, GenericMotionLab};
 use rot_scene::input::{ActionFrame, ActionMap};
 use rot_support::strict_json;
@@ -360,7 +360,7 @@ fn headless_runtime(
     let frames = if app.has_start_transition() {
         read_action_frames(path, ticks)?
     } else {
-        read_input_frames(path, ticks, &app.session().authoring().actions)?
+        read_input_frames(path, ticks, app.authored_actions())?
     };
     let commands = read_commands(commands_path)?;
     let mut hud_activations = read_hud_activations(hud_activations_path, ticks)?
@@ -479,14 +479,12 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
     let transition = rot_app::creation::StartupTransition::load(&root, &scene)?;
     let meshes = manifest.load_meshes(&root)?;
     let textures = manifest.load_textures(&root)?;
-    let session = match scene {
-        RuntimeScene::Behavior(session) => session,
-        RuntimeScene::StaticHierarchy { scene, preview } => {
-            let content = Content::with_component_preview(preview, meshes, textures)?;
-            return execute_static_hierarchy(options, manifest, &scene, content);
-        }
-    };
-    let mut app = GenericMotionLab::with_textures(*session, meshes, textures, tick_duration)?;
+    let mut app = GenericMotionLab::from_component_scene(
+        scene.into_scene(),
+        meshes,
+        textures,
+        tick_duration,
+    )?;
     app.set_sounds(manifest.load_sounds(&root)?);
     app.set_clips(rot_behavior::decode_clips(
         &manifest.load_animations(&root)?,
@@ -497,6 +495,13 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
         app.set_start_transition(root, route);
     }
     if options.headless {
+        if app.is_static_component()
+            && (options.input_frames.is_some()
+                || options.commands.is_some()
+                || options.hud_activations.is_some())
+        {
+            return Err("Static component hierarchies do not execute behavior input".into());
+        }
         let HeadlessRun {
             runtime,
             input,
@@ -514,31 +519,29 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
         let mut output = serde_json::json!({
             "mode": "creation",
             "title": manifest.title,
-            "scene_id": app.content().scene().id,
-            "authored_revision": app.content().scene().revision.to_string(),
+            "scene_id": app.scene_id(),
+            "authored_revision": app.authored_revision().to_string(),
             "tick": app.runtime_tick().unwrap_or(0).to_string(),
             "fixed_dt": tick_duration.as_secs_f64(),
             "runtime_speed_override": null,
-            "authored_scene": app.session().scene(),
-            "authored_actions": app.session().authoring().actions,
+            "authored_scene": app.authored_scene_json()?,
+            "authored_actions": app.authored_actions(),
             "hud": app.hud_snapshot(),
             "hud_presentation": "committed",
             "runtime_state": app.runtime_state_report(),
-                "initialized": true,
-                "commit_revision": app.runtime_commit_revision().map(|n| n.to_string()),
-                "last_step_commit_revision": app.last_step_commit_revision().map(|n| n.to_string()),
-                "captured_commands": app.command_report(),
-                "command_receipt": app.command_receipt_report(),
-                "command_receipts": command_receipts,
-                "hud_activation_receipts": hud_activation_receipts,
+            "initialized": true,
+            "commit_revision": app.runtime_commit_revision().map(|n| n.to_string()),
+            "last_step_commit_revision": app.last_step_commit_revision().map(|n| n.to_string()),
+            "captured_commands": app.command_report(),
+            "command_receipt": app.command_receipt_report(),
+            "command_receipts": command_receipts,
+            "hud_activation_receipts": hud_activation_receipts,
             "query_observations": app.query_observations(),
-            "runtime_scene": app.content().scene(),
+            "runtime_scene": app.runtime_scene_json()?,
             "input": input,
         });
-        if let Some(scene) = app.static_destination() {
-            let scene = serde_json::to_value(scene).map_err(|error| error.to_string())?;
-            output["authored_scene"] = scene.clone();
-            output["runtime_scene"] = scene;
+        if let Some(world_matrices) = app.world_matrices_json() {
+            output["world_matrices"] = world_matrices;
         }
         if routed {
             output["transition_phase"] = serde_json::json!(if app.switched_scene() {
@@ -551,13 +554,13 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
         if let Some(batch) = app.audio_batch() {
             output["audio_batch"] = serde_json::to_value(batch).map_err(|e| e.to_string())?;
         }
-        if !app.session().authoring().hud.is_default() {
-            output["authored_hud"] = serde_json::to_value(&app.session().authoring().hud)
-                .map_err(|error| error.to_string())?;
+        if !app.authored_hud().is_default() {
+            output["authored_hud"] =
+                serde_json::to_value(app.authored_hud()).map_err(|error| error.to_string())?;
         }
         if let Some(camera) = app.content().transform_camera() {
             output["player_view"] = transform_camera_report(camera)?;
-        } else if let Some(camera) = player_view_report(app.content().scene())? {
+        } else if let Some(camera) = player_view_report(app.content())? {
             output["player_view"] = camera;
         }
         if let Some(camera) = manifest.initial_camera {
@@ -602,27 +605,20 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
     }
 }
 
-struct StaticHierarchyApp(Content);
-
-impl Application for StaticHierarchyApp {
-    fn content(&self) -> &Content {
-        &self.0
-    }
-
-    fn tick(&mut self, _step: Step) -> Result<(), String> {
-        Ok(())
-    }
-
-    fn reset(&mut self) -> Result<(), String> {
-        Ok(())
-    }
-}
-
-fn player_view_report(scene: &rot_scene::Scene) -> Result<Option<serde_json::Value>, String> {
-    let Some(view) = scene
-        .resolve_player_view()
-        .map_err(|error| error.to_string())?
-    else {
+fn player_view_report(content: &Content) -> Result<Option<serde_json::Value>, String> {
+    let view = if let Some(view) = content
+        .draw_frame()
+        .hierarchy()
+        .and_then(|hierarchy| hierarchy.player_view())
+    {
+        Some(view)
+    } else {
+        content
+            .scene()
+            .resolve_player_view()
+            .map_err(|error| error.to_string())?
+    };
+    let Some(view) = view else {
         return Ok(None);
     };
     let mut matrices = Vec::new();
@@ -641,95 +637,18 @@ fn player_view_report(scene: &rot_scene::Scene) -> Result<Option<serde_json::Val
     })))
 }
 
-fn execute_static_hierarchy(
-    options: Options,
-    manifest: CreationManifest,
-    scene: &rot_scene::component_scene::ComponentScene,
-    content: Content,
-) -> Result<(), String> {
-    let tick_duration = manifest.tick_duration();
-    let app = StaticHierarchyApp(content);
-    if options.headless {
-        if options.input_frames.is_some()
-            || options.commands.is_some()
-            || options.hud_activations.is_some()
-        {
-            return Err("Static component hierarchies do not execute behavior input".into());
-        }
-        let mut runtime = Runtime::new(app, tick_duration)?;
-        runtime.reset()?;
-        for _ in 0..options.ticks.unwrap_or(10) {
-            runtime.step()?;
-        }
-        let matrices = scene.world_matrices().map_err(|error| error.to_string())?;
-        let world_matrices = scene
-            .objects
-            .iter()
-            .zip(matrices)
-            .map(|(object, matrix)| (&object.id, matrix.to_cols_array_2d()))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        let mut output = serde_json::json!({
-            "mode": "creation",
-            "title": manifest.title,
-            "scene_id": scene.id,
-            "tick": runtime.tick().to_string(),
-            "fixed_dt": tick_duration.as_secs_f64(),
-            "authored_scene": scene,
-            "runtime_scene": scene,
-            "world_matrices": world_matrices,
-        });
-        let content = runtime.app().content();
-        if let Some((hud, resolved)) = content.static_hud() {
-            output["authored_hud"] =
-                serde_json::to_value(hud).map_err(|error| error.to_string())?;
-            output["hud"] = serde_json::to_value(resolved).map_err(|error| error.to_string())?;
-        }
-        if let Some(camera) = content.transform_camera() {
-            output["player_view"] = transform_camera_report(camera)?;
-        } else if let Some(camera) = player_view_report(content.scene())? {
-            output["player_view"] = camera;
-        }
-        if !manifest.player.is_default() {
-            output["player_window"] = serde_json::json!({
-                "title":manifest.player.effective_title(&manifest.title),
-                "initial_size":manifest.player.effective_size(),
-                "mode":manifest.player.effective_mode(),
-                "mode_source":if manifest.player.mode.is_some() { "project_settings" } else { "default" },
-            });
-        }
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&output).map_err(|error| error.to_string())?
-        );
-        Ok(())
-    } else {
-        rot_app::run(
-            app,
-            HostOptions {
-                title: manifest.title,
-                player_window: manifest.player,
-                player_window_controls: true,
-                app_id: "rot-creation".into(),
-                tick_duration,
-                max_frames: options.frames,
-                start_running: true,
-                initial_camera: manifest
-                    .initial_camera
-                    .map(|camera| camera.camera_state())
-                    .transpose()?,
-            },
-        )
-    }
-}
-
 fn execute_generic(options: Options) -> Result<(), String> {
-    let session = match &options.scene {
-        Some(path) => generic::read_session(path)?,
-        None => {
-            rot_scene::Session::from_runtime_snapshot(generic::DEMO).map_err(|e| e.to_string())?
-        }
+    let loaded = match &options.scene {
+        Some(path) => generic::read_scene(path)?,
+        None => generic::LoadedScene::Component(Box::new(
+            rot_scene::component_scene::ComponentScene::read_json(generic::DEMO)
+                .map_err(|e| e.to_string())?,
+        )),
     };
-    let tick_duration = generic::session_tick_duration(&session);
+    let tick_duration = match &loaded {
+        generic::LoadedScene::Legacy(session) => generic::session_tick_duration(session),
+        generic::LoadedScene::Component(_) => rot_behavior::DEFAULT_FIXED_TICK,
+    };
     let mut meshes = MeshMap::new();
     if let Some(root) = options.resources {
         let root = ResourceRoot::new(root)?;
@@ -737,7 +656,14 @@ fn execute_generic(options: Options) -> Result<(), String> {
             meshes.insert(id, root.mesh(path)?);
         }
     }
-    let mut app = GenericMotionLab::new(session, meshes, tick_duration)?;
+    let mut app = match loaded {
+        generic::LoadedScene::Legacy(session) => {
+            GenericMotionLab::new(*session, meshes, tick_duration)?
+        }
+        generic::LoadedScene::Component(scene) => {
+            GenericMotionLab::from_component_scene(scene, meshes, TextureMap::new(), tick_duration)?
+        }
+    };
     app.set_speed_override(options.speed)?;
     if options.headless {
         let HeadlessRun {
@@ -756,13 +682,13 @@ fn execute_generic(options: Options) -> Result<(), String> {
         let app = runtime.app();
         let mut output = serde_json::json!({
             "mode": "generic_motion_comparison",
-            "scene_id": app.session().scene().id,
-            "authored_revision": app.session().scene().revision.to_string(),
+            "scene_id": app.scene_id(),
+            "authored_revision": app.authored_revision().to_string(),
             "tick": runtime.tick().to_string(),
             "fixed_dt": tick_duration.as_secs_f64(),
             "runtime_speed_override": options.speed,
-            "authored_scene": app.session().scene(),
-            "authored_actions": app.session().authoring().actions,
+            "authored_scene": app.authored_scene_json()?,
+            "authored_actions": app.authored_actions(),
             "hud": app.hud_snapshot(),
             "hud_presentation": "committed",
             "runtime_state": app.runtime_state_report(),
@@ -772,14 +698,14 @@ fn execute_generic(options: Options) -> Result<(), String> {
             "captured_commands": app.command_report(),
             "command_receipt": app.command_receipt_report(),
             "command_receipts": command_receipts,
-                "hud_activation_receipts": hud_activation_receipts,
+            "hud_activation_receipts": hud_activation_receipts,
             "query_observations": app.query_observations(),
-            "runtime_scene": app.content().scene(),
+            "runtime_scene": app.runtime_scene_json()?,
             "input": input,
         });
-        if !app.session().authoring().hud.is_default() {
-            output["authored_hud"] = serde_json::to_value(&app.session().authoring().hud)
-                .map_err(|error| error.to_string())?;
+        if !app.authored_hud().is_default() {
+            output["authored_hud"] =
+                serde_json::to_value(app.authored_hud()).map_err(|error| error.to_string())?;
         }
         println!(
             "{}",

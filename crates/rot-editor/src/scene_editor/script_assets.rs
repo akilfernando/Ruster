@@ -248,13 +248,12 @@ mod tests {
             rot_behavior::source_hash(store.script("shared").unwrap())
         );
         assert!(track.observe(Some(&store)).status == SourceStatus::Ready);
-        let session = Session::from_component_runtime(&baked).unwrap();
         assert_eq!(
-            session.sound_asset_references().assets,
+            baked.sound_asset_references().assets,
             ["far".into(), "near".into()].into()
         );
         let mut engine = rot_behavior::Engine::new(Default::default()).unwrap();
-        let mut runtime = engine.reset(session.scene(), session.authoring()).unwrap();
+        let mut runtime = engine.reset_component(&baked, 0).unwrap();
         assert!(runtime.audio_batch().is_none());
         engine
             .step_with_input(
@@ -345,15 +344,9 @@ mod tests {
                 },
             ],
         });
-        let projected = resolved(&scene, Some(&assets), true)
-            .unwrap()
-            .unwrap()
-            .behavior_projection()
-            .unwrap();
+        let resolved = resolved(&scene, Some(&assets), true).unwrap().unwrap();
         let mut engine = rot_behavior::Engine::new(rot_behavior::Limits::default()).unwrap();
-        let mut runtime = engine
-            .reset(&projected.scene, &projected.authoring)
-            .unwrap();
+        let mut runtime = engine.reset_component(&resolved, 0).unwrap();
         for (value, pressed) in [(1, true), (-1, false), (1, false)] {
             let frame = ActionFrame(
                 [
@@ -371,7 +364,7 @@ mod tests {
             );
             engine.step_with_input(&mut runtime, &frame).unwrap();
         }
-        let pose = &runtime.scene().objects[0].transform;
+        let pose = &runtime.component_transforms().unwrap()[0];
         assert!((pose.translation[0] - 0.1).abs() < 0.000001);
         assert!((pose.rotation[1] - std::f32::consts::FRAC_PI_6).abs() < 0.000001);
         assert!(scene.sources.is_empty());

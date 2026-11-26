@@ -2038,19 +2038,19 @@ use runtime_commands::InvocationDraft;
 use std::sync::Arc;
 #[derive(Clone)]
 enum Request {
+    #[cfg(test)]
     Reset {
         key: RunKey,
         scene: Arc<rot_scene::Scene>,
         authoring: Arc<rot_scene::Authoring>,
-        hidden_mesh_renderers: Option<rot_scene::HiddenMeshRenderers>,
-        projection: rot_scene::component_scene::RuntimeProjection,
-        transform_camera: Option<Arc<rot_scene::component_scene::TransformCameraBinding>>,
         sounds: BTreeMap<String, Arc<rot_assets::AudioClip>>,
         clips: Arc<rot_behavior::Clips>,
     },
-    ResetStatic {
+    ResetComponent {
         key: RunKey,
-        preview: Arc<rot_render::component_preview::ComponentPreview>,
+        scene: Arc<rot_scene::component_scene::ComponentScene>,
+        sounds: BTreeMap<String, Arc<rot_assets::AudioClip>>,
+        clips: Arc<rot_behavior::Clips>,
     },
     Play(RunKey),
     Pause(RunKey),
@@ -2075,28 +2075,30 @@ enum Request {
 impl Request {
     fn command(&self) -> VmCommand {
         match self {
+            #[cfg(test)]
             Self::Reset {
                 key,
                 scene,
                 authoring,
-                hidden_mesh_renderers,
-                projection,
-                transform_camera,
                 sounds,
                 clips,
             } => VmCommand::Reset {
                 key: *key,
                 scene: scene.clone(),
                 authoring: authoring.clone(),
-                hidden_mesh_renderers: hidden_mesh_renderers.clone(),
-                projection: projection.clone(),
-                transform_camera: transform_camera.clone(),
                 sounds: sounds.clone(),
                 clips: clips.clone(),
             },
-            Self::ResetStatic { key, preview } => VmCommand::ResetStatic {
+            Self::ResetComponent {
+                key,
+                scene,
+                sounds,
+                clips,
+            } => VmCommand::ResetComponent {
                 key: *key,
-                preview: Arc::clone(preview),
+                scene: Arc::clone(scene),
+                sounds: sounds.clone(),
+                clips: clips.clone(),
             },
             Self::Play(key) => VmCommand::Play { key: *key },
             Self::Pause(key) => VmCommand::Pause { key: *key },
@@ -2275,7 +2277,11 @@ fn prepare_start_target(
     } else {
         Default::default()
     };
-    let clips = if runtime.draw_scene().animations.is_empty() {
+    let clips = if runtime
+        .active_animation_clip_ids()
+        .map_err(|error| error.to_string())?
+        .is_empty()
+    {
         Default::default()
     } else {
         let accepted = assets
@@ -2522,110 +2528,96 @@ impl RuntimeUi {
         generation: u64,
         assets: Option<&rot_assets::AssetStore>,
     ) -> Result<RunKey, String> {
-        let (
-            mut scene,
-            authoring,
-            hidden_mesh_renderers,
-            projection,
-            transform_camera,
-            project_sources,
-        ) = match source {
-            #[cfg(test)]
-            RuntimeSource::Legacy(session) => (
-                session.scene().clone(),
-                session.authoring().clone(),
-                session.hidden_mesh_renderers().cloned(),
-                session.runtime_projection(),
-                session.transform_camera_binding().cloned(),
-                Default::default(),
-            ),
-            RuntimeSource::Components(session, _) => {
-                if let Some(preview) = rot_app::creation::static_component_preview(session.scene())
-                    .map_err(|error| error.to_string())?
-                {
-                    let key = self.new_run(ctx, generation, source.revision())?;
-                    self.captured = None;
-                    self.project_sources.clear();
-                    self.transition_project_sources.clear();
-                    self.transition_source = None;
-                    self.pending = Some(Request::ResetStatic { key, preview });
-                    self.finish_reset_submission(key);
-                    return Ok(key);
-                }
-                let scene = session.scene();
-                let (resolved, sources) =
-                    crate::scene_editor::script_assets::resolved_for_play(scene, assets)?;
-                let input = resolved
-                    .as_ref()
-                    .unwrap_or(scene)
-                    .behavior_projection()
-                    .map_err(|error| error.to_string())?;
-                (
-                    input.scene,
-                    input.authoring,
-                    input.hidden_mesh_renderers,
-                    input.projection,
-                    input.transform_camera,
-                    sources,
-                )
-            }
-        };
-        scene.revision = source.revision();
         let sounds = assets
             .map(rot_assets::AssetStore::sound_snapshots)
             .unwrap_or_default();
-        let clips = match assets {
-            Some(store) if !scene.animations.is_empty() => {
-                let accepted = store.clip_snapshots();
-                Arc::new(rot_behavior::decode_clips(&accepted)?)
+        let decode_clips = |has_animations: bool| -> Result<Arc<rot_behavior::Clips>, String> {
+            match assets {
+                Some(store) if has_animations => {
+                    let accepted = store.clip_snapshots();
+                    Ok(Arc::new(rot_behavior::decode_clips(&accepted)?))
+                }
+                _ => Ok(Arc::default()),
             }
-            _ => Arc::default(),
         };
-        let key = self.new_run(ctx, generation, source.revision())?;
-        self.project_sources = project_sources;
-        self.transition_project_sources.clear();
-        let route = match source {
-            RuntimeSource::Components(session, Some((project, path))) => {
-                project.observe().ok().and_then(|observation| {
-                    let (action_id, destination_file, target) =
-                        observation.active_transition(path, session.scene())?;
-                    Some(crate::behavior_worker::StartTransition {
-                        action_id,
-                        destination_file,
-                        target: target.and_then(|target| {
-                            prepare_start_target(target.session.scene(), assets).map(
-                                |(target, sources)| {
-                                    self.transition_project_sources = sources;
-                                    target
-                                },
-                            )
-                        }),
-                        observation: Some(observation),
+        let revision = source.revision();
+        match source {
+            #[cfg(test)]
+            RuntimeSource::Legacy(session) => {
+                let mut scene = session.scene().clone();
+                scene.revision = revision;
+                let clips = decode_clips(!scene.animations.is_empty())?;
+                let key = self.new_run(ctx, generation, revision)?;
+                self.project_sources.clear();
+                self.transition_project_sources.clear();
+                self.transition_source = None;
+                let worker = self.worker.as_mut().unwrap();
+                worker.set_start_transition(key, None);
+                worker
+                    .set_breakpoints(key, self.debug.points.clone())
+                    .map_err(|e| e.to_string())?;
+                let authoring = Arc::new(session.authoring().clone());
+                self.captured = Some(authoring.clone());
+                self.pending = Some(Request::Reset {
+                    key,
+                    scene: Arc::new(scene),
+                    authoring,
+                    sounds,
+                    clips,
+                });
+                self.finish_reset_submission(key);
+                Ok(key)
+            }
+            RuntimeSource::Components(session, project_route) => {
+                let scene = session.scene();
+                let (resolved, project_sources) =
+                    crate::scene_editor::script_assets::resolved_for_play(scene, assets)?;
+                let component_scene = Arc::new(resolved.unwrap_or_else(|| scene.clone()));
+                let clips = decode_clips(!component_scene.all_animation_clip_ids().is_empty())?;
+                let key = self.new_run(ctx, generation, revision)?;
+                self.project_sources = project_sources;
+                self.transition_project_sources.clear();
+                let route = project_route.and_then(|(project, path)| {
+                    project.observe().ok().and_then(|observation| {
+                        let (action_id, destination_file, target) =
+                            observation.active_transition(path, session.scene())?;
+                        Some(crate::behavior_worker::StartTransition {
+                            action_id,
+                            destination_file,
+                            target: target.and_then(|target| {
+                                prepare_start_target(target.session.scene(), assets).map(
+                                    |(target, sources)| {
+                                        self.transition_project_sources = sources;
+                                        target
+                                    },
+                                )
+                            }),
+                            observation: Some(observation),
+                        })
                     })
-                })
+                });
+                self.transition_source = route.as_ref().map(|_| component_scene.id.clone());
+                let worker = self.worker.as_mut().unwrap();
+                worker.set_start_transition(key, route);
+                worker
+                    .set_breakpoints(key, self.debug.points.clone())
+                    .map_err(|e| e.to_string())?;
+                self.captured = Some(Arc::new(rot_scene::Authoring {
+                    sources: component_scene.sources.clone(),
+                    actions: component_scene.actions.clone(),
+                    hud: component_scene.hud.clone(),
+                    ..Default::default()
+                }));
+                self.pending = Some(Request::ResetComponent {
+                    key,
+                    scene: component_scene,
+                    sounds,
+                    clips,
+                });
+                self.finish_reset_submission(key);
+                Ok(key)
             }
-            _ => None,
-        };
-        self.transition_source = route.as_ref().map(|_| scene.id.clone());
-        let worker = self.worker.as_mut().unwrap();
-        worker.set_start_transition(key, route);
-        worker
-            .set_breakpoints(key, self.debug.points.clone())
-            .map_err(|e| e.to_string())?;
-        let authoring = Arc::new(authoring);
-        self.captured = Some(authoring.clone());
-        self.pending = Some(Request::Reset {
-            key,
-            scene: Arc::new(scene),
-            authoring,
-            hidden_mesh_renderers,
-            projection,
-            transform_camera,
-            sounds,
-            clips,
-        });
-        self.finish_reset_submission(key);
-        Ok(key)
+        }
     }
 
     fn new_run(
@@ -2738,7 +2730,9 @@ impl RuntimeUi {
                 self.awaiting = Some((
                     key,
                     match request {
-                        Request::Reset { .. } | Request::ResetStatic { .. } => Operation::Reset,
+                        #[cfg(test)]
+                        Request::Reset { .. } => Operation::Reset,
+                        Request::ResetComponent { .. } => Operation::Reset,
                         Request::Play(_) => Operation::Play,
                         Request::Pause(_) => Operation::Pause,
                         Request::Step(_) | Request::ProgramStep { .. } => Operation::Step,
@@ -2786,7 +2780,7 @@ impl RuntimeUi {
                             self.status =
                                 format!("Ran {} at tick {}.", receipt.command_id, receipt.tick);
                         }
-                        VmEvent::Step { run, .. } | VmEvent::StaticStep { run, .. } => {
+                        VmEvent::Step { run, .. } => {
                             self.playing = false;
                             self.status = format!("Advanced to tick {}.", run.tick)
                         }
@@ -4535,9 +4529,10 @@ mod tests {
                 last_step_commit_revision: None,
                 commit_revision_required: false,
                 draw_frame: None,
-                static_preview: None,
+                component_scene: None,
+                component_transforms: None,
+                component_world_matrices: None,
                 resolved_transform_camera: None,
-                hidden_mesh_renderers: None,
                 command_schema_hash: None,
                 authoring: Arc::new(Default::default()),
                 state: std::sync::Arc::new(rot_behavior::RuntimeState::default()),
@@ -4567,9 +4562,10 @@ mod tests {
             last_step_commit_revision: None,
             commit_revision_required: false,
             draw_frame: None,
-            static_preview: None,
+            component_scene: None,
+            component_transforms: None,
+            component_world_matrices: None,
             resolved_transform_camera: None,
-            hidden_mesh_renderers: None,
             command_schema_hash: None,
             authoring: Arc::new(Default::default()),
             state: std::sync::Arc::new(rot_behavior::RuntimeState::default()),
@@ -4591,9 +4587,10 @@ mod tests {
             last_step_commit_revision: None,
             commit_revision_required: false,
             draw_frame: None,
-            static_preview: None,
+            component_scene: None,
+            component_transforms: None,
+            component_world_matrices: None,
             resolved_transform_camera: None,
-            hidden_mesh_renderers: None,
             command_schema_hash: None,
             authoring: Arc::new(Default::default()),
             state: std::sync::Arc::new(rot_behavior::RuntimeState::default()),

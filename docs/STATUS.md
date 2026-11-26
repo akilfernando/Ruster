@@ -20,7 +20,9 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   logistics UI, and MCP enrollment/registry plumbing; promoted `rot-support`),
   `C-01` design, `C-02` v23-only editor cutover (automatic v1–v22 → v23
   upgrade on open, tracked `examples/` scenes migrated to v23, and legacy
-  pre-v23 editor paths removed), `C-04` files-first `Assets/`, `C-06`
+  pre-v23 editor paths removed), `C-03` native flat-array `ComponentRuntime` &
+  `ComponentDrawPlan` (retired `component_behavior.rs` / `behavior_projection()`),
+  `C-04` files-first `Assets/`, `C-06`
   MCP v23 trim (35 retired tools removed, `14,352`-byte catalog < 15 KB, shared
   rename/delete/history command helpers), `C-07` linked prefabs, `C-11`
   multi-scene projects & `C-11a` crash recovery, `C-12` 5k/50k benchmarks,
@@ -32,8 +34,6 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   labels.
 - **Open to exit Phase 2** (new `C-62+` convenience slices are frozen per
   2026-11-25 user approval until `C-EXIT` passes):
-  - `C-03`: retire `behavior_projection()` for native flat-array component
-    execution across dynamic hierarchies.
   - `C-09`: extract a dedicated `rot-player` binary crate out of
     `examples/motion-lab`.
   - `C-10`: replace `host API1`–`7` with one persistent-VM Lua component API

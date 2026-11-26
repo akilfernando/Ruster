@@ -529,18 +529,17 @@ impl<A: Application> Host<A> {
                     let app = self.runtime.app();
                     let content = app.content();
                     let selected = app.selected();
-                    surface.set_hidden_mesh_renderers(content.hidden_mesh_renderers.clone());
                     surface.set_transform_camera(content.transform_camera());
-                    match &content.scene {
-                        crate::ContentScene::Behavior(scene) => rot_render::render_viewport_draw_frame(
-                            ui, scene, selected.as_slice(), content.meshes(),
-                            content.textures(), &mut self.navigation, surface,
-                        ),
-                        crate::ContentScene::StaticHierarchy(preview) => preview.render(
-                            ui, selected.as_slice(), content.meshes(), content.textures(),
-                            &mut self.navigation, surface,
-                        ),
-                    }
+                    let crate::ContentScene::Behavior(scene) = &content.scene;
+                    rot_render::render_viewport_draw_frame(
+                        ui,
+                        scene,
+                        selected.as_slice(),
+                        content.meshes(),
+                        content.textures(),
+                        &mut self.navigation,
+                        surface,
+                    )
                 };
                 if self.runtime.app().keyboard_actions().is_some() {
                     self.action_surface = Some(viewport.response.id);
@@ -575,10 +574,6 @@ impl<A: Application> Host<A> {
                     }
                 }
                 let painter = ui.painter().with_clip_rect(viewport.rect);
-                if let Some((hud, resolved)) = self.runtime.app().content().static_hud() {
-                    crate::hud::paint_hud(&painter, viewport.rect, hud, resolved,
-                        crate::hud::HudPresentationMode::Committed);
-                }
                 let overlay = self.runtime.app_mut().viewport_overlay(&painter, viewport.rect);
                 self.report(overlay);
                 if let Some(id) = viewport.picked {

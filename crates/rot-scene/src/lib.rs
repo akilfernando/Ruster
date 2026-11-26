@@ -9,7 +9,6 @@ use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -1596,14 +1595,11 @@ impl Document {
         {
             hud.validate_legacy_anchors()?;
         }
-        self.validate_for_runtime(&Default::default())
+        self.validate_for_runtime()
     }
-    fn validate_for_runtime(
-        &self,
-        projection: &component_scene::RuntimeProjection,
-    ) -> Result<(), SceneError> {
+    fn validate_for_runtime(&self) -> Result<(), SceneError> {
         self.scene.validate()?;
-        projection.validate_authoring(&self.scene, &self.authoring)?;
+        self.authoring.validate(&self.scene)?;
         if self.undo.len() + self.redo.len() > HISTORY_LIMIT {
             return Err(SceneError::Invalid(format!(
                 "history exceeds {HISTORY_LIMIT} changes"
@@ -2417,15 +2413,9 @@ pub struct SoundAssetReferences {
     pub assets: BTreeSet<String>,
 }
 
-/// Owners whose Mesh Renderer is disabled in a projected behavior run.
-pub type HiddenMeshRenderers = Arc<HashSet<String>>;
-
 /// Authored state with bounded object, name, transform, color and mesh deltas. Runtime state belongs elsewhere.
 #[derive(Clone, Debug)]
 pub struct Session {
-    runtime_projection: component_scene::RuntimeProjection,
-    hidden_mesh_renderers: Option<HiddenMeshRenderers>,
-    transform_camera: Option<std::sync::Arc<component_scene::TransformCameraBinding>>,
     document: Document,
     path: Option<PathBuf>,
     saved: Option<Document>,
@@ -2443,9 +2433,6 @@ impl Session {
             saved: None,
             loaded_format_version: FORMAT_VERSION,
             history_evictions: 0,
-            hidden_mesh_renderers: None,
-            transform_camera: None,
-            runtime_projection: Default::default(),
         })
     }
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SceneError> {
@@ -2468,9 +2455,6 @@ impl Session {
         Self {
             loaded_format_version: document.format_version,
             history_evictions: 0,
-            hidden_mesh_renderers: None,
-            transform_camera: None,
-            runtime_projection: Default::default(),
             saved: Some(document.clone()),
             document,
             path: Some(path.to_path_buf()),
@@ -2478,7 +2462,6 @@ impl Session {
     }
     /// Complete admitted authored document without changing save authority or history.
     pub fn snapshot_bytes(&self) -> Result<Vec<u8>, SceneError> {
-        self.runtime_projection.require_legacy_export()?;
         self.document.encode()
     }
     /// Restore a validated snapshot as an unsaved copy, never bound to its origin.
@@ -2490,23 +2473,7 @@ impl Session {
             path: None,
             saved: None,
             history_evictions: 0,
-            hidden_mesh_renderers: None,
-            transform_camera: None,
-            runtime_projection: Default::default(),
         })
-    }
-    pub fn runtime_projection(&self) -> component_scene::RuntimeProjection {
-        self.runtime_projection.clone()
-    }
-
-    pub fn transform_camera_binding(
-        &self,
-    ) -> Option<&std::sync::Arc<component_scene::TransformCameraBinding>> {
-        self.transform_camera.as_ref()
-    }
-
-    pub fn hidden_mesh_renderers(&self) -> Option<&HiddenMeshRenderers> {
-        self.hidden_mesh_renderers.as_ref()
     }
 
     pub fn scene(&self) -> &Scene {
@@ -4087,7 +4054,6 @@ impl Session {
     /// Save to the opened file only if the full saved baseline still matches.
     /// New destinations must not exist. Failure preserves all in-memory state.
     pub fn save(&mut self, path: impl AsRef<Path>) -> Result<(), SceneError> {
-        self.runtime_projection.require_legacy_export()?;
         let lock = SceneLock::acquire(path.as_ref())?;
         let existing = self.path.as_ref() == Some(&lock.path);
         if existing && self.saved.as_ref() != Some(&Document::load(&lock.path)?) {

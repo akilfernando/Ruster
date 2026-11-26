@@ -19,7 +19,6 @@ pub use host::{run, HostOptions};
 pub use resources::ResourceRoot;
 
 use rot_assets::Mesh;
-use rot_render::component_preview::ComponentPreview;
 use rot_scene::Scene;
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
@@ -46,7 +45,6 @@ fn checked_texture_bytes(current: usize, additional: usize) -> Result<usize, Str
 pub struct Content {
     validation: std::sync::OnceLock<Result<(), String>>,
     transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
-    hidden_mesh_renderers: Option<rot_scene::HiddenMeshRenderers>,
     scene: ContentScene,
     meshes: MeshMap,
     textures: TextureMap,
@@ -55,7 +53,6 @@ pub struct Content {
 #[derive(Clone)]
 enum ContentScene {
     Behavior(rot_scene::SceneDrawFrame),
-    StaticHierarchy(Arc<ComponentPreview>),
 }
 
 impl Content {
@@ -77,12 +74,13 @@ impl Content {
         )
     }
 
-    pub fn with_component_preview(
-        preview: Arc<ComponentPreview>,
+    /// Construct application content from an already-validated component runtime draw frame.
+    pub fn from_component_frame(
+        frame: rot_scene::SceneDrawFrame,
         meshes: MeshMap,
         textures: TextureMap,
     ) -> Result<Self, String> {
-        Self::with_scene(ContentScene::StaticHierarchy(preview), meshes, textures)
+        Self::with_scene(ContentScene::Behavior(frame), meshes, textures)
     }
 
     fn with_scene(
@@ -109,62 +107,49 @@ impl Content {
         })?;
         let content = Self {
             validation: Default::default(),
-            hidden_mesh_renderers: None,
             transform_camera: None,
             scene,
             meshes,
             textures,
         };
         content.validate()?;
-        if matches!(&content.scene, ContentScene::StaticHierarchy(_)) {
-            content.validate_references()?;
-        }
         Ok(content)
     }
 
     pub fn scene(&self) -> &Scene {
-        match &self.scene {
-            ContentScene::Behavior(scene) => scene.scene(),
-            ContentScene::StaticHierarchy(preview) => preview.scene(),
-        }
+        let ContentScene::Behavior(scene) = &self.scene;
+        scene.scene()
     }
-    pub fn static_hud(&self) -> Option<(&rot_scene::hud::Hud, &rot_scene::hud::ResolvedHud)> {
-        match &self.scene {
-            ContentScene::StaticHierarchy(preview) => preview.static_hud(),
-            ContentScene::Behavior(_) => None,
-        }
+
+    pub fn draw_frame(&self) -> &rot_scene::SceneDrawFrame {
+        let ContentScene::Behavior(scene) = &self.scene;
+        scene
     }
 
     pub fn has_player_camera(&self) -> bool {
-        match &self.scene {
-            ContentScene::Behavior(scene) => {
-                self.transform_camera.is_some()
-                    || scene.transform_camera().is_some()
-                    || scene.scene().player_view.is_some()
-            }
-            ContentScene::StaticHierarchy(preview) => preview.has_player_camera(),
-        }
+        let ContentScene::Behavior(scene) = &self.scene;
+        self.transform_camera.is_some()
+            || scene.transform_camera().is_some()
+            || scene.scene().player_view.is_some()
+            || scene
+                .hierarchy()
+                .and_then(|hierarchy| hierarchy.player_view())
+                .is_some()
     }
 
     pub fn transform_camera(&self) -> Option<rot_scene::component_scene::TransformCameraPose> {
-        match &self.scene {
-            ContentScene::Behavior(scene) => self.transform_camera.or(scene.transform_camera()),
-            ContentScene::StaticHierarchy(preview) => preview.transform_camera(),
-        }
+        let ContentScene::Behavior(scene) = &self.scene;
+        self.transform_camera.or(scene.transform_camera())
     }
 
-    /// Edit legacy behavior scene data. Panics for immutable component content.
+    /// Edit legacy behavior scene data.
     pub fn scene_mut(&mut self) -> &mut Scene {
-        let ContentScene::Behavior(scene) = &mut self.scene else {
-            panic!("component preview content is immutable");
-        };
+        let ContentScene::Behavior(scene) = &mut self.scene;
         self.validation.take();
         scene.scene_mut()
     }
     pub fn set_behavior_draw_frame(&mut self, frame: &rot_scene::SceneDrawFrame) {
-        let ContentScene::Behavior(scene) = &mut self.scene else {
-            panic!("component preview content is immutable");
-        };
+        let ContentScene::Behavior(scene) = &mut self.scene;
         if !std::ptr::eq(scene.scene(), frame.scene()) {
             self.validation.take();
         }
@@ -178,10 +163,6 @@ impl Content {
         self.transform_camera = camera;
     }
 
-    pub fn set_hidden_mesh_renderers(&mut self, hidden: Option<rot_scene::HiddenMeshRenderers>) {
-        self.hidden_mesh_renderers = hidden;
-    }
-
     pub fn meshes(&self) -> &MeshMap {
         &self.meshes
     }
@@ -192,16 +173,21 @@ impl Content {
 
     /// Check runtime scene mutations without scanning the immutable mesh payload again.
     pub fn validate(&self) -> Result<(), String> {
-        let ContentScene::Behavior(scene) = &self.scene else {
-            // The component preview and its decoded resources stay immutable.
-            return Ok(());
-        };
+        let ContentScene::Behavior(scene) = &self.scene;
         self.validation
             .get_or_init(|| {
-                scene
-                    .scene()
-                    .validate()
-                    .map_err(|error| format!("application scene: {error}"))?;
+                if scene.is_component_frame() {
+                    scene
+                        .scene()
+                        .lighting
+                        .validate()
+                        .map_err(|error| format!("application scene: {error}"))?;
+                } else {
+                    scene
+                        .scene()
+                        .validate()
+                        .map_err(|error| format!("application scene: {error}"))?;
+                }
                 self.validate_references()
             })
             .clone()

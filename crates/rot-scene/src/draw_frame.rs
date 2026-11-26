@@ -1,7 +1,7 @@
 //! Immutable runtime scene data shared by simulation and viewport consumers.
 use crate::component_scene::{
-    AttachedLights, CameraView, Component, ComponentScene, Geometry, ObjectHierarchy,
-    TransformCameraPose, TransformLens,
+    CameraView, Component, ComponentScene, Geometry, ObjectHierarchy, TransformCameraPose,
+    TransformLens,
 };
 use crate::{
     Light, LightKind, Lighting, Object, PlayerView, ResolvedPlayerView, ResolvedPoses, Scene,
@@ -112,43 +112,6 @@ impl HierarchyDraw {
             player_view,
             has_attached_lights: false,
         }
-    }
-
-    pub fn with_attached_lights(
-        mut self,
-        scene: &Scene,
-        poses: &ResolvedPoses,
-        attached: &AttachedLights,
-    ) -> Result<Self, SceneError> {
-        let Lighting::Authored { lights, .. } = Arc::make_mut(&mut self.lighting) else {
-            return Err(SceneError::Invalid(
-                "Attached Lights require authored lighting".into(),
-            ));
-        };
-        for entry in attached.iter() {
-            if scene
-                .objects
-                .get(entry.owner_index)
-                .map(|owner| owner.id.as_str())
-                != Some(entry.owner_id.as_str())
-                || lights.contains_key(&entry.owner_id)
-            {
-                return Err(SceneError::Invalid(format!(
-                    "Attached Light owner {} changed",
-                    entry.owner_id
-                )));
-            }
-            let transform = poses
-                .transforms
-                .get(&entry.owner_id)
-                .ok_or_else(|| SceneError::ObjectNotFound(entry.owner_id.clone()))?;
-            let mut light = entry.light.clone();
-            light.transform = light_pose(transform);
-            lights.insert(entry.owner_id.clone(), light);
-        }
-        self.lighting.validate()?;
-        self.has_attached_lights = true;
-        Ok(self)
     }
 
     pub fn attached_lighting(&self) -> Option<&Lighting> {
@@ -347,7 +310,7 @@ impl ComponentDrawPlan {
                             component.id.clone(),
                             Light {
                                 name: Some(object.name.clone()),
-                                transform: object.transform.clone(),
+                                transform: light_pose(&object.transform),
                                 enabled: true,
                                 color: *color,
                                 intensity: *intensity,
@@ -388,6 +351,34 @@ impl ComponentDrawPlan {
 
     pub fn base_scene(&self) -> &Arc<Scene> {
         &self.base_scene
+    }
+
+    pub fn draw_owners(&self) -> &[usize] {
+        &self.draw_owners
+    }
+
+    /// Resolve an initial frame directly from a `ComponentScene` at its authored pose.
+    pub fn build_initial_frame(
+        scene: &ComponentScene,
+        revision: u64,
+    ) -> Result<SceneDrawFrame, SceneError> {
+        let hierarchy = ObjectHierarchy::build(&scene.objects)?;
+        let indices: HashMap<String, usize> = scene
+            .objects
+            .iter()
+            .enumerate()
+            .map(|(index, object)| (object.id.clone(), index))
+            .collect();
+        let local: Vec<Transform> = scene
+            .objects
+            .iter()
+            .map(|object| object.transform.clone())
+            .collect();
+        let mut world = Vec::new();
+        scene.resolve_world_matrices_into(&hierarchy, &local, &mut world)?;
+        let mut rotations = Vec::new();
+        scene.resolve_world_rotations_into(&hierarchy, &local, &mut rotations);
+        Self::new(scene, &hierarchy, &indices, revision)?.build_frame(scene, &world, &rotations)
     }
 
     /// Build an immutable draw frame from evaluated world transforms without mutating `base_scene`.

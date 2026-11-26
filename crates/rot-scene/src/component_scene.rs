@@ -18,9 +18,6 @@ use crate::{
     PropertyValue, SceneError, Session, SoundAssetReferences, Transform, MAX_SOURCES,
 };
 
-#[path = "component_behavior.rs"]
-mod behavior;
-pub use behavior::{AttachedLights, RuntimeProjection, TransformCameraBinding};
 #[path = "component_session.rs"]
 mod session;
 #[cfg(unix)]

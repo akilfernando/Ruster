@@ -2343,12 +2343,9 @@ impl ComponentWorkspace {
         let playing = frame.is_some() && self.runtime.is_playing();
         self.camera_authoring
             .begin_frame(frame.is_some(), &mut self.navigation);
-        self.navigation.player_view = frame.as_ref().is_some_and(|frame| {
-            frame.static_preview.as_ref().map_or(
-                frame.transform_camera().is_some() || scene.player_view.is_some(),
-                |preview| preview.has_player_camera(),
-            )
-        });
+        self.navigation.player_view = frame
+            .as_ref()
+            .is_some_and(|frame| frame.transform_camera().is_some() || scene.player_view.is_some());
         self.navigation.capture_camera_label =
             (!self.runtime.in_play_mode()).then_some(Text::SetGameCameraFromView.plain());
         self.navigation.focusable = playing && !self.session.scene().actions.is_empty();
@@ -2361,10 +2358,7 @@ impl ComponentWorkspace {
         self.viewport_aspect = rect.is_positive().then(|| rect.width() / rect.height());
         let mut hud_owns = false;
         let mut keep_game_keyboard = false;
-        if let Some(frame) = frame
-            .as_ref()
-            .filter(|frame| frame.static_preview.is_none())
-        {
+        if let Some(frame) = frame.as_ref() {
             let game_focus = self.runtime.game_keyboard_focus();
             let (hud_input, error) = hud_interaction::interact(
                 ui,
@@ -2391,16 +2385,11 @@ impl ComponentWorkspace {
             }
         }
         surface.input_owned = hud_owns || self.viewport_edit_active();
-        surface.set_hidden_mesh_renderers(
-            frame
-                .as_ref()
-                .and_then(|frame| frame.hidden_mesh_renderers.clone()),
-        );
         surface.set_transform_camera(frame.as_ref().and_then(|frame| frame.transform_camera()));
-        let preview = match &frame {
-            Some(frame) => frame.static_preview.as_deref(),
-            None => self
-                .transform_tool
+        let preview = if frame.is_some() {
+            None
+        } else {
+            self.transform_tool
                 .preview()
                 .or_else(|| self.inspector_scrub.as_ref().map(|scrub| scrub.preview()))
                 .or_else(|| {
@@ -2408,7 +2397,7 @@ impl ComponentWorkspace {
                         .as_ref()
                         .map(|preview| &preview.projection)
                 })
-                .or(self.preview.as_ref().ok()),
+                .or(self.preview.as_ref().ok())
         };
         let interaction = if let Some(preview) = preview {
             preview.render(
@@ -2526,13 +2515,7 @@ impl ComponentWorkspace {
             } else {
                 rot_app::hud::HudPresentationMode::Committed
             };
-            if let Some((hud, rows)) = frame
-                .static_preview
-                .as_ref()
-                .and_then(|preview| preview.static_hud())
-            {
-                rot_app::hud::paint_hud(ui.painter(), rect, hud, rows, mode);
-            } else if let Some(prepared) = self.hud_controls.prepared.take() {
+            if let Some(prepared) = self.hud_controls.prepared.take() {
                 rot_app::hud::paint_prepared_hud(ui.painter(), &prepared);
             } else if hud.enabled {
                 let rows = self
@@ -5245,10 +5228,7 @@ mod tests {
     fn static_component_play_preserves_world_draw_data_and_shares_mcp_controls() {
         use rot_scene::{Light, Lighting};
         use serde_json::{json, Value};
-        use std::{
-            sync::Arc,
-            time::{Duration, Instant},
-        };
+        use std::time::{Duration, Instant};
 
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("scene.json");
@@ -5333,22 +5313,22 @@ mod tests {
         );
         assert_eq!(tail["result"]["objects"].as_array().unwrap().len(), 8);
         assert!(tail["result"]["next_offset"].is_null());
-        let expected = rot_app::creation::static_component_preview(&authored)
-            .unwrap()
-            .unwrap();
-        let preview = editor
+        let mut expected_engine = rot_behavior::Engine::new(Default::default()).unwrap();
+        let expected_runtime = expected_engine.reset_component(&authored, 0).unwrap();
+        let expected_draw = expected_runtime.draw_frame();
+        let draw = editor
             .runtime
             .displayed_frame()
             .unwrap()
-            .static_preview
+            .draw_frame
             .clone()
             .unwrap();
-        assert_eq!(preview.draw_matrices(), expected.draw_matrices());
-        assert_eq!(preview.scene().lighting, expected.scene().lighting);
-        assert!(matches!(
-            preview.scene().lighting,
-            Lighting::Authored { .. }
-        ));
+        assert_eq!(
+            draw.hierarchy().unwrap().matrices(),
+            expected_draw.hierarchy().unwrap().matrices()
+        );
+        assert_eq!(draw.scene().lighting, expected_draw.scene().lighting);
+        assert!(matches!(draw.scene().lighting, Lighting::Authored { .. }));
 
         assert_eq!(
             control(&mut editor, "behavior_runtime_pause", "1:0:0")["error"]["code"],
@@ -5367,23 +5347,29 @@ mod tests {
             report["tick"] == advanced && report["busy"] == false
         });
         assert_eq!(stepped["playing"], false);
-        assert!(Arc::ptr_eq(
-            &preview,
+        assert_eq!(
             editor
                 .runtime
                 .displayed_frame()
                 .unwrap()
-                .static_preview
+                .draw_frame
                 .as_ref()
                 .unwrap()
-        ));
+                .hierarchy()
+                .unwrap()
+                .matrices(),
+            draw.hierarchy().unwrap().matrices()
+        );
         let receipt = editor.ai_command(
             "scene",
             "behavior_runtime_inspect",
             &json!({"operation_id":step["result"]["operation_id"]}),
         );
         assert_eq!(receipt["result"]["operation"]["state"], "completed");
-        assert!(receipt["result"]["operation"]["committed_input"].is_null());
+        assert_eq!(
+            receipt["result"]["operation"]["committed_input"]["origin"],
+            "neutral"
+        );
 
         let stop = control(&mut editor, "behavior_runtime_stop", run);
         assert_eq!(stop["ok"], true, "{stop}");
@@ -5437,16 +5423,20 @@ mod tests {
                 .filter(|frame| frame.tick == 1)
             {
                 assert_eq!(frame.key.authored_revision, revision);
-                assert_eq!(frame.scene.objects[0].id, owner);
-                assert!(frame
-                    .hidden_mesh_renderers
+                assert!(!frame
+                    .draw_frame
                     .as_ref()
                     .unwrap()
-                    .contains(&owner));
-                assert_ne!(frame.scene.objects[0].transform, initial_transform);
+                    .scene()
+                    .objects
+                    .iter()
+                    .any(|object| object.id == owner));
+                assert_eq!(frame.component_scene.as_ref().unwrap().objects[0].id, owner);
+                let live_transform = &frame.component_transforms.as_ref().unwrap()[0];
+                assert_ne!(*live_transform, initial_transform);
                 assert_eq!(
-                    component_live::transform_values(&frame.scene, &editor.selection).unwrap()[0],
-                    frame.scene.objects[0].transform.translation.map(Some),
+                    component_live::frame_transform_values(frame, &editor.selection).unwrap()[0],
+                    live_transform.translation.map(Some),
                 );
                 break;
             }
@@ -5516,8 +5506,12 @@ mod tests {
         let object = &reopened.scene().objects[0];
         assert_eq!(object.components[0].id, mesh_id);
         assert!(!object.components[1].enabled);
-        let (play_scene, _) = reopened.scene().behavior_input().unwrap();
-        assert!(!play_scene.objects[0].collider.unwrap().enabled);
+        let preview = rot_render::component_preview::project(reopened.scene()).unwrap();
+        assert!(matches!(
+            object.components[1].kind,
+            Component::Collider { .. }
+        ));
+        assert!(preview.scene().objects[0].collider.is_none());
     }
 
     #[test]

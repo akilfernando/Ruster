@@ -38,9 +38,7 @@ fn draw_frame_validation_uses_snapshot_identity_and_invalidates_on_mutable_acces
     assert_eq!(old.scene().revision, next.scene().revision);
     content.set_behavior_draw_frame(&next);
     assert!(content.validation.get().is_none());
-    let ContentScene::Behavior(frame) = &content.scene else {
-        unreachable!()
-    };
+    let ContentScene::Behavior(frame) = &content.scene;
     assert!(Arc::ptr_eq(
         frame.hierarchy().unwrap(),
         next.hierarchy().unwrap()
@@ -54,9 +52,7 @@ fn draw_frame_validation_uses_snapshot_identity_and_invalidates_on_mutable_acces
     assert!(content.validation.get().is_some());
 
     content.scene_mut().objects[0].transform.translation[0] = 20_000.0;
-    let ContentScene::Behavior(frame) = &content.scene else {
-        unreachable!()
-    };
+    let ContentScene::Behavior(frame) = &content.scene;
     assert!(frame.hierarchy().is_none());
     assert!(content.validate().is_err());
     assert_ne!(content.scene(), next.scene());

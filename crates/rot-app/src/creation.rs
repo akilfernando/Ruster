@@ -59,14 +59,13 @@ impl StartupTransition {
         let route: Self = serde_json::from_slice(&bytes)
             .map_err(|error| format!("Invalid {STARTUP_TRANSITION_NAME}: {error}"))?;
         route.validate()?;
-        let scene = source.draw_scene();
+        let scene = source.scene();
         if scene.id != route.source_scene_id {
             return Err("Start Transition source scene ID differs from the startup scene".into());
         }
-        if !matches!(source, RuntimeScene::Behavior(session)
-            if session.authoring().actions.get(&route.action_id).is_some_and(|action|
-                matches!(action.kind, rot_scene::input::ActionKind::Button { .. })))
-        {
+        if !scene.actions.get(&route.action_id).is_some_and(|action| {
+            matches!(action.kind, rot_scene::input::ActionKind::Button { .. })
+        }) {
             return Err(format!(
                 "Start Button {:?} is missing or is not a Button in the startup scene",
                 route.action_id
@@ -127,14 +126,10 @@ impl StartupTransition {
     }
 }
 
-/// Launch data for an application. Static hierarchies outside the behavior
-/// adapter's capabilities retain their component objects and draw matrices.
-pub enum RuntimeScene {
-    Behavior(Box<Session>),
-    StaticHierarchy {
-        scene: Box<ComponentScene>,
-        preview: Arc<rot_render::component_preview::ComponentPreview>,
-    },
+/// Launch data for an application unified natively on `ComponentScene`.
+pub struct RuntimeScene {
+    scene: Box<ComponentScene>,
+    loaded_legacy_version: Option<u32>,
 }
 
 enum SceneSnapshot {
@@ -320,7 +315,16 @@ impl RuntimeScene {
 
     fn from_document(snapshot: SceneSnapshot) -> Result<Self, String> {
         match snapshot {
-            SceneSnapshot::Legacy(session) => Ok(Self::Behavior(session)),
+            SceneSnapshot::Legacy(session) => {
+                let loaded_legacy_version = Some(session.loaded_format_version());
+                let scene = Box::new(
+                    ComponentScene::from_legacy(&session).map_err(|error| error.to_string())?,
+                );
+                Ok(Self {
+                    scene,
+                    loaded_legacy_version,
+                })
+            }
             SceneSnapshot::Components(scene) => Self::from_components(scene),
         }
     }
@@ -330,34 +334,43 @@ impl RuntimeScene {
     }
 
     pub fn from_components_checked(scene: Box<ComponentScene>) -> Result<Self, SceneError> {
-        let Some(preview) = static_component_preview(&scene)? else {
-            return Session::from_component_runtime(&scene)
-                .map(Box::new)
-                .map(Self::Behavior);
-        };
-        Ok(Self::StaticHierarchy { scene, preview })
+        scene.validate()?;
+        Ok(Self {
+            scene,
+            loaded_legacy_version: None,
+        })
     }
 
-    /// Current draw references, for dependency capture and package validation.
-    pub fn draw_scene(&self) -> &Scene {
-        match self {
-            Self::Behavior(session) => session.scene(),
-            Self::StaticHierarchy { preview, .. } => preview.scene(),
-        }
+    pub fn scene(&self) -> &ComponentScene {
+        &self.scene
+    }
+
+    pub fn into_scene(self) -> Box<ComponentScene> {
+        self.scene
     }
 
     pub fn draw_dependencies(&self) -> Result<DrawDependencies, String> {
-        match self {
-            Self::Behavior(session) => DrawDependencies::from_scene(session.scene()),
-            Self::StaticHierarchy { scene, .. } => DrawDependencies::from_components(scene),
-        }
+        DrawDependencies::from_components(&self.scene)
     }
 
     pub fn sound_asset_references(&self) -> SoundAssetReferences {
-        match self {
-            Self::Behavior(session) => session.sound_asset_references(),
-            Self::StaticHierarchy { .. } => SoundAssetReferences::default(),
-        }
+        self.scene.sound_asset_references()
+    }
+
+    pub fn active_animation_clip_ids(&self) -> Result<BTreeSet<String>, String> {
+        let hierarchy = self.scene.validate().map_err(|error| error.to_string())?;
+        Ok(self
+            .scene
+            .active_animation_clip_ids(&hierarchy)
+            .into_iter()
+            .map(str::to_owned)
+            .collect())
+    }
+
+    pub fn has_player_camera(&self) -> bool {
+        self.scene
+            .validate()
+            .is_ok_and(|hierarchy| self.scene.effective_camera(&hierarchy).is_some())
     }
 }
 
@@ -369,58 +382,6 @@ fn snapshot_error(error: SceneError) -> String {
         ),
         error => error.to_string(),
     }
-}
-
-/// Return the same authored rendering snapshot for Game view and a packaged player.
-pub fn static_component_preview(
-    scene: &ComponentScene,
-) -> Result<Option<Arc<rot_render::component_preview::ComponentPreview>>, SceneError> {
-    if !supports_static_preview(scene) {
-        return Ok(None);
-    }
-    if let Some((index, component, view)) = scene.designated_camera() {
-        if component.enabled
-            && view.followed_target().is_some()
-            && rot_scene::component_scene::ObjectHierarchy::build(&scene.objects)?
-                .effectively_enabled[index]
-        {
-            return Ok(None);
-        }
-    }
-    if scene.gameplay_camera.is_some()
-        || scene.objects.len() > rot_scene::MAX_OBJECTS
-        || scene.objects.iter().any(|object| {
-            !object.enabled
-                || object.parent.is_some()
-                || object
-                    .components
-                    .iter()
-                    .any(|component| match component.kind {
-                        Component::Light { .. } => true,
-                        Component::MeshRenderer { .. } => !component.enabled,
-                        _ => false,
-                    })
-        })
-    {
-        return rot_render::component_preview::project(scene)
-            .map(Arc::new)
-            .map(Some);
-    }
-    Ok(None)
-}
-
-fn supports_static_preview(scene: &ComponentScene) -> bool {
-    scene.sources.is_empty()
-        && scene.actions == Default::default()
-        && scene.hud.is_static()
-        && scene.objects.iter().all(|object| {
-            object.components.iter().all(|component| {
-                !matches!(
-                    component.kind,
-                    Component::Script { .. } | Component::Animator { .. }
-                )
-            })
-        })
 }
 
 /// Assets referenced by mesh renderers, including static meshes that start disabled.
@@ -944,44 +905,70 @@ impl CreationManifest {
 
     fn runtime_scene(&self, snapshot: SceneSnapshot) -> Result<RuntimeScene, String> {
         let scene = RuntimeScene::from_document(snapshot)?;
-        match &scene {
-            RuntimeScene::Behavior(session) => self.validate_behavior_scene(session)?,
-            RuntimeScene::StaticHierarchy { scene, preview } => {
-                if self.initial_camera.is_some() && preview.has_player_camera() {
+        if let Some(version) = scene.loaded_legacy_version {
+            self.validate_version_requirements(
+                version,
+                !scene.active_animation_clip_ids()?.is_empty(),
+            )?;
+        } else {
+            let clips = scene.active_animation_clip_ids()?;
+            if !clips.is_empty() && self.version < VERSION {
+                return Err("Scene22 imported_transform_animation requires descriptor version 7, and descriptor7 requires Scene22".into());
+            }
+            if let Some(animations) = &self.animations {
+                if !animations.keys().eq(clips.iter()) {
                     return Err(
-                        "Remove legacy initial camera framing when the scene owns a player view."
+                        "Application animation clips differ from the scene's animation bindings"
                             .into(),
                     );
                 }
-                if self.version != NO_AUDIO_VERSION {
-                    return Err("Static component hierarchies require descriptor version 5".into());
-                }
-                let dependencies = DrawDependencies::from_components(scene)?;
-                for id in dependencies.meshes {
-                    if !self.meshes.contains_key(&id) {
-                        return Err(format!("Application is missing the required mesh {id}."));
-                    }
-                }
-                let roles = self
-                    .texture_roles
-                    .as_ref()
-                    .expect("descriptor roles validated");
-                for (id, role) in dependencies.texture_roles {
-                    match roles.get(&id) {
-                        Some(actual) if *actual == role => {}
-                        Some(_) => {
-                            return Err(format!(
+            }
+        }
+        let dependencies = scene.draw_dependencies()?;
+        for id in dependencies.meshes {
+            if !self.meshes.contains_key(&id) {
+                return Err(format!("Application is missing the required mesh {id}."));
+            }
+        }
+        if let Some(roles) = &self.texture_roles {
+            for (id, role) in dependencies.texture_roles {
+                match roles.get(&id) {
+                    Some(actual) if *actual == role => {}
+                    Some(_) => {
+                        return Err(format!(
                             "Application texture {id} has the wrong role for its material slot."
                         ))
-                        }
-                        None => {
-                            return Err(format!(
-                                "Application is missing the required texture {id}."
-                            ))
-                        }
+                    }
+                    None => {
+                        return Err(format!("Application is missing the required texture {id}."))
                     }
                 }
             }
+        }
+        if let Some(animations) = &self.animations {
+            let clips = scene.active_animation_clip_ids()?;
+            if !animations.keys().eq(clips.iter()) {
+                return Err(
+                    "Application animation clips differ from the scene's animation bindings".into(),
+                );
+            }
+        }
+        let referenced = scene.sound_asset_references();
+        match &self.sounds {
+            Some(sounds) if referenced.uses_sound && sounds.keys().eq(referenced.assets.iter()) => {
+            }
+            None if !referenced.uses_sound => {}
+            _ => {
+                return Err(
+                    "Application sound mappings differ from the scene and its retained history"
+                        .into(),
+                )
+            }
+        }
+        if self.initial_camera.is_some() && scene.has_player_camera() {
+            return Err(
+                "Remove legacy initial camera framing when the scene owns a player view.".into(),
+            );
         }
         Ok(scene)
     }
@@ -990,21 +977,47 @@ impl CreationManifest {
         self.validate()?;
         let snapshot =
             SceneSnapshot::from_file(root.open_regular(&self.scene)?).map_err(snapshot_error)?;
-        let session = match snapshot {
-            SceneSnapshot::Legacy(session) => *session,
-            SceneSnapshot::Components(scene) => {
-                Session::from_component_runtime(&scene).map_err(|error| error.to_string())?
-            }
+        let SceneSnapshot::Legacy(session) = snapshot else {
+            return Err("Component scenes use load_runtime_scene.".into());
         };
         self.validate_behavior_scene(&session)?;
-        Ok(session)
+        Ok(*session)
+    }
+
+    fn validate_version_requirements(&self, version: u32, animated: bool) -> Result<(), String> {
+        if animated != (self.version >= VERSION) {
+            return Err("Scene22 imported_transform_animation requires descriptor version 7, and descriptor7 requires Scene22".into());
+        }
+        if version >= 17 && self.version < 5 {
+            return Err("Scene17 runtime_hud_panels requires descriptor version 5".into());
+        }
+        if version >= 16 && self.version < 5 {
+            return Err("Scene16 runtime_hud_controls requires descriptor version 5".into());
+        }
+        if version >= 15 && self.version < 5 {
+            return Err("Scene15 runtime_hud requires descriptor version 5".into());
+        }
+        if version >= 14 && self.version < 5 {
+            return Err("Scene14 lifecycle_commands requires descriptor version 5".into());
+        }
+        if version >= 13 && self.version < 5 {
+            return Err("Scene13 runtime_state requires descriptor version 5".into());
+        }
+        if version >= 12 && self.version < 5 {
+            return Err("Scene12 spatial_queries requires descriptor version 5".into());
+        }
+        if version >= 11 && self.version < 5 {
+            return Err("Scene11 input_actions requires descriptor version 5".into());
+        }
+        if version >= 10 && self.version < 4 {
+            return Err("Scene10 roughness_maps requires descriptor version 4".into());
+        }
+        Ok(())
     }
 
     fn validate_behavior_scene(&self, session: &Session) -> Result<(), String> {
         let animated = session.loaded_format_version() >= rot_scene::ANIMATION_FORMAT_VERSION;
-        if animated != (self.version >= VERSION) {
-            return Err("Scene22 imported_transform_animation requires descriptor version 7, and descriptor7 requires Scene22".into());
-        }
+        self.validate_version_requirements(session.loaded_format_version(), animated)?;
         if let Some(animations) = &self.animations {
             let clips: std::collections::BTreeSet<&str> = session
                 .scene()
@@ -1034,30 +1047,6 @@ impl CreationManifest {
             return Err(
                 "Remove legacy initial camera framing when the scene owns a player view".into(),
             );
-        }
-        if session.loaded_format_version() >= 17 && self.version < 5 {
-            return Err("Scene17 runtime_hud_panels requires descriptor version 5".into());
-        }
-        if session.loaded_format_version() >= 16 && self.version < 5 {
-            return Err("Scene16 runtime_hud_controls requires descriptor version 5".into());
-        }
-        if session.loaded_format_version() >= 15 && self.version < 5 {
-            return Err("Scene15 runtime_hud requires descriptor version 5".into());
-        }
-        if session.loaded_format_version() >= 14 && self.version < 5 {
-            return Err("Scene14 lifecycle_commands requires descriptor version 5".into());
-        }
-        if session.loaded_format_version() >= 13 && self.version < 5 {
-            return Err("Scene13 runtime_state requires descriptor version 5".into());
-        }
-        if session.loaded_format_version() >= 12 && self.version < 5 {
-            return Err("Scene12 spatial_queries requires descriptor version 5".into());
-        }
-        if session.loaded_format_version() >= 11 && self.version < 5 {
-            return Err("Scene11 input_actions requires descriptor version 5".into());
-        }
-        if session.loaded_format_version() >= 10 && self.version < 4 {
-            return Err("Scene10 roughness_maps requires descriptor version 4".into());
         }
         Ok(())
     }
@@ -1218,12 +1207,8 @@ mod tests {
             }],
             ..HudPanel::default()
         });
-        let RuntimeScene::Behavior(runtime) =
-            RuntimeScene::from_components(Box::new(scene.clone())).unwrap()
-        else {
-            panic!("the trolley must use scripted Play");
-        };
-        assert_eq!(runtime.authoring().hud, scene.hud);
+        let runtime = RuntimeScene::from_components(Box::new(scene.clone())).unwrap();
+        assert_eq!(runtime.scene().hud, scene.hud);
         scene.hud.panels[0].elements[0].source = HudSource::State {
             binding_id: "driver".into(),
             field: "speed".into(),
@@ -1232,12 +1217,12 @@ mod tests {
             suffix: String::new(),
             precision: 0,
         };
-        assert!(matches!(RuntimeScene::from_components(Box::new(scene)),
-            Err(error) if error.contains("require a flat scene")));
+        let state_runtime = RuntimeScene::from_components(Box::new(scene.clone())).unwrap();
+        assert_eq!(state_runtime.scene().hud, scene.hud);
     }
 
     #[test]
-    fn dense_static_label_hud_keeps_the_component_preview() {
+    fn dense_static_label_hud_keeps_every_component_object() {
         use rot_scene::component_scene::{ComponentInstance, Geometry, ObjectNode};
         use rot_scene::hud::{Hud, HudAnchor, HudLabel, HudPanel, HudSource};
 
@@ -1279,16 +1264,9 @@ mod tests {
                 ..HudPanel::default()
             }],
         };
-        let RuntimeScene::StaticHierarchy { preview, .. } =
-            RuntimeScene::from_components(Box::new(scene)).unwrap()
-        else {
-            panic!("static labels must not downgrade a dense scene to behavior projection");
-        };
-        assert_eq!(preview.scene().objects.len(), 4_999);
-        let (hud, resolved) = preview.static_hud().unwrap();
-        assert_eq!(hud.panels[0].anchor, HudAnchor::BottomRight);
-        assert_eq!(resolved.panels[0].labels[0].text, "Rail Service");
-        assert!(std::ptr::eq(resolved, preview.static_hud().unwrap().1));
+        let runtime = RuntimeScene::from_components(Box::new(scene)).unwrap();
+        assert_eq!(runtime.scene().objects.len(), 5_000);
+        assert_eq!(runtime.scene().hud.panels[0].anchor, HudAnchor::BottomRight);
     }
 
     #[test]
@@ -1341,31 +1319,17 @@ mod tests {
                 },
             }],
         });
-        assert!(matches!(
-            RuntimeScene::from_components(Box::new(scene.clone())).unwrap(),
-            RuntimeScene::Behavior(session) if !session.scene().hierarchy.groups.contains_key("detached-camera")
-        ));
+        assert!(!RuntimeScene::from_components(Box::new(scene.clone()))
+            .unwrap()
+            .has_player_camera());
         scene.gameplay_camera = Some("lens".into());
-        let RuntimeScene::Behavior(session) =
-            RuntimeScene::from_components(Box::new(scene.clone())).unwrap()
-        else {
-            panic!("expected behavior scene");
-        };
-        assert_eq!(
-            session
-                .transform_camera_binding()
-                .unwrap()
-                .resolve(session.scene())
-                .unwrap()
-                .eye,
-            [1., 2., 3.]
-        );
-        assert!(session.scene().hierarchy.is_empty());
+        assert!(RuntimeScene::from_components(Box::new(scene.clone()))
+            .unwrap()
+            .has_player_camera());
         scene.objects.last_mut().unwrap().components[0].enabled = false;
-        assert!(
-            matches!(RuntimeScene::from_components(Box::new(scene)).unwrap(),
-            RuntimeScene::Behavior(session) if session.transform_camera_binding().is_none() && session.scene().player_view.is_none())
-        );
+        assert!(!RuntimeScene::from_components(Box::new(scene))
+            .unwrap()
+            .has_player_camera());
     }
 
     #[test]
@@ -1395,10 +1359,7 @@ mod tests {
         };
         let envelope = format!(r#"{{"scene":{body},"format_version":23,"format":"rot-scene"}}"#);
         let loaded = test(envelope.clone(), limit + 1).unwrap();
-        let RuntimeScene::StaticHierarchy { scene, .. } = loaded else {
-            panic!("expected component projection");
-        };
-        assert_eq!(*scene, authored);
+        assert_eq!(loaded.scene(), &authored);
         let legacy_json = String::from_utf8(legacy.snapshot_bytes().unwrap()).unwrap();
         assert!(test(legacy_json.clone(), limit).is_ok());
         assert!(matches!(test(legacy_json, limit + 1), Err(error) if error.contains("1 MiB")));

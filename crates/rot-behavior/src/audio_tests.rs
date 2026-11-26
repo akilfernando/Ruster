@@ -233,29 +233,25 @@ fn positional_cue_uses_same_commit_grouped_emitter_and_moving_camera() {
         },
         components: Vec::new(),
     });
-    let err = authored
-        .behavior_projection()
-        .err()
-        .expect("no active Camera");
-    assert!(err.to_string().contains("Binding speaker, cue confirm"));
+    let mut engine = Engine::new(Limits::default()).unwrap();
+    let err = engine
+        .reset_component(&authored, 0)
+        .expect_err("no active Camera");
+    assert!(
+        err.binding_id.as_deref() == Some("speaker") && err.message.contains("Cue confirm"),
+        "{err:?}"
+    );
     authored.gameplay_camera = Some("camera".into());
     authored.objects[1].enabled = false;
-    let err = authored
-        .behavior_projection()
-        .err()
-        .expect("disabled listener owner");
-    assert!(err.to_string().contains("Binding speaker, cue confirm"));
+    let err = engine
+        .reset_component(&authored, 0)
+        .expect_err("disabled listener owner");
+    assert!(
+        err.binding_id.as_deref() == Some("speaker") && err.message.contains("Cue confirm"),
+        "{err:?}"
+    );
     authored.objects[1].enabled = true;
-    let projected = authored.behavior_projection().unwrap();
-    let mut engine = Engine::new(Limits::default()).unwrap();
-    let mut runtime = engine
-        .reset_projected(
-            &projected.scene,
-            &projected.authoring,
-            projected.transform_camera,
-            projected.projection,
-        )
-        .unwrap();
+    let mut runtime = engine.reset_component(&authored, 0).unwrap();
     assert!(runtime.audio_batch().is_none());
     engine.step(&mut runtime).unwrap();
     let batch = runtime.audio_batch().unwrap().clone();

@@ -54,41 +54,32 @@ fn run(args: &[String]) -> Result<Option<Value>, Failure> {
     })
     .map_err(Failure::Behavior)?;
     let file = Path::new(path);
-    let component_input;
-    let legacy_session;
-    let (scene, authoring, camera, projection) = match ComponentScene::open(file) {
-        Ok(components) => {
-            component_input = components
-                .behavior_projection()
-                .map_err(|e| input(&e.to_string()))?;
-            (
-                &component_input.scene,
-                &component_input.authoring,
-                component_input.transform_camera.clone(),
-                component_input.projection,
-            )
-        }
+    let mut runtime = match ComponentScene::open(file) {
+        Ok(components) => engine
+            .reset_component(&components, 0)
+            .map_err(Failure::Behavior)?,
         Err(SceneError::UnsupportedVersion(version))
             if version < u64::from(component_scene::FORMAT_VERSION) =>
         {
-            legacy_session = Session::open(file).map_err(|e| input(&e.to_string()))?;
-            (
-                legacy_session.scene(),
-                legacy_session.authoring(),
-                None,
-                Default::default(),
-            )
+            let legacy_session = Session::open(file).map_err(|e| input(&e.to_string()))?;
+            engine
+                .reset(legacy_session.scene(), legacy_session.authoring())
+                .map_err(Failure::Behavior)?
         }
         Err(error) => return Err(input(&error.to_string())),
     };
-    let mut runtime = engine
-        .reset_projected(scene, authoring, camera, projection)
-        .map_err(Failure::Behavior)?;
     for _ in 0..ticks {
         engine.step(&mut runtime).map_err(Failure::Behavior)?;
     }
+    let scene = runtime.materialized_scene();
+    let enabled_bindings = runtime
+        .authoring_snapshot()
+        .bindings
+        .values()
+        .filter(|binding| binding.enabled)
+        .count();
     Ok(Some(
-        json!({"scene_id":scene.id,"authored_revision":scene.revision.to_string(),"tick":runtime.tick().to_string(),"commit_revision":runtime.commit_revision().to_string(),"last_step_commit_revision":runtime.last_step_commit_revision().map(|value|value.to_string()),"fixed_dt":dt,"enabled_bindings":authoring.bindings.values().filter(|binding|binding.enabled).count(),"fingerprint":runtime.scene().fingerprint(),"scene":runtime.scene(),"runtime_state":runtime.state_report()}),
+        json!({"scene_id":scene.id,"authored_revision":scene.revision.to_string(),"tick":runtime.tick().to_string(),"commit_revision":runtime.commit_revision().to_string(),"last_step_commit_revision":runtime.last_step_commit_revision().map(|value|value.to_string()),"fixed_dt":dt,"enabled_bindings":enabled_bindings,"fingerprint":scene.fingerprint(),"scene":scene,"runtime_state":runtime.state_report()}),
     ))
 }
 fn main() {

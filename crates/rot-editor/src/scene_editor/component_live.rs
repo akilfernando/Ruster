@@ -51,6 +51,38 @@ pub(super) fn transform_values(
     (represented == selection.len()).then_some(values)
 }
 
+pub(super) fn frame_transform_values(
+    frame: &Frame,
+    selection: &HashSet<String>,
+) -> Option<[[Option<f32>; 3]; 3]> {
+    if let (Some(scene), Some(transforms)) = (
+        frame.component_scene.as_deref(),
+        frame.component_transforms.as_deref(),
+    ) {
+        let mut selected = scene
+            .objects
+            .iter()
+            .enumerate()
+            .filter(|(_, object)| selection.contains(&object.id))
+            .map(|(index, object)| transforms.get(index).unwrap_or(&object.transform));
+        let mut values = axes(selected.next()?).map(|vector| vector.map(Some));
+        let mut represented = 1;
+        for transform in selected {
+            represented += 1;
+            for (row, vector) in values.iter_mut().zip(axes(transform)) {
+                for (common, value) in row.iter_mut().zip(vector) {
+                    if *common != Some(value) {
+                        *common = None;
+                    }
+                }
+            }
+        }
+        (represented == selection.len()).then_some(values)
+    } else {
+        transform_values(&frame.scene, selection)
+    }
+}
+
 pub(super) fn show(
     ui: &mut egui::Ui,
     frame: Option<&Frame>,
@@ -79,12 +111,7 @@ pub(super) fn show(
         Text::ComponentPlayTick.plain(),
         frame.tick
     ));
-    let values = if let Some(object) = selected.filter(|_| frame.static_preview.is_some()) {
-        // Game and the selected authored object belong to the same revision.
-        Some(axes(&object.transform).map(|vector| vector.map(Some)))
-    } else {
-        transform_values(&frame.scene, selection)
-    };
+    let values = frame_transform_values(frame, selection);
     if let Some(values) = values {
         ui.separator();
         ui.heading(Text::ComponentTransform.plain());

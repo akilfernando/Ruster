@@ -492,13 +492,9 @@ impl Engine {
             audio_batch: None,
             has_sound_binding,
             positional_emitters: None,
-            leaf_parents: None,
-            attached_lights: None,
-            follow_parent: None,
             kinematic_owner,
             animations: Arc::default(),
             animation_starts,
-            transform_camera_binding: None,
             state,
             component_world: Some(ComponentWorld {
                 scene: scene_arc,

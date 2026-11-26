@@ -258,14 +258,15 @@ impl BuildRequest {
         let scene = RuntimeScene::from_components_checked(Box::new(runtime))
             .map_err(|error| BuildFailure::from(error.to_string()))?;
         if kinematic_file {
-            if let RuntimeScene::Behavior(session) = &scene {
-                rot_behavior::validate_kinematic_scene(session.scene(), session.authoring())
-                    .map_err(|error| BuildFailure::from(format!("Kinematic Sphere: {error}")))?;
-            }
+            rot_behavior::validate_kinematic_component_scene(scene.scene())
+                .map_err(|error| BuildFailure::from(format!("Kinematic Sphere: {error}")))?;
         }
         let dependencies = scene
             .draw_dependencies()
             .map_err(|error| BuildFailureKind::AssetUnavailable.detail(error))?;
+        let animations = scene
+            .active_animation_clip_ids()
+            .map_err(|error| BuildFailureKind::AssetUnavailable.detail(error.to_string()))?;
         let sounds = scene.sound_asset_references();
         let ids = dependencies
             .meshes
@@ -274,13 +275,7 @@ impl BuildRequest {
             .chain(&sounds.assets)
             .chain(&script_ids)
             .cloned()
-            .chain(
-                scene
-                    .draw_scene()
-                    .animations
-                    .values()
-                    .map(|animation| animation.clip.clone()),
-            )
+            .chain(animations)
             .collect::<std::collections::BTreeSet<_>>();
         let assets = if ids.is_empty() {
             None
@@ -487,12 +482,15 @@ impl BuildRequest {
         cancelled: impl Fn() -> Result<(), PublishError>,
     ) -> Result<(), PublishError> {
         let sound = self.scene.sound_asset_references();
-        let draw = self.scene.draw_scene();
         let DrawDependencies {
             meshes: mesh_ids,
             texture_roles: roles,
         } = self.dependencies;
-        let animated = !draw.animations.is_empty();
+        let animated = !self
+            .scene
+            .active_animation_clip_ids()
+            .map_err(|error| error.to_string())?
+            .is_empty();
         let mut manifest = CreationManifest {
             format: FORMAT.into(),
             version: if animated {
@@ -502,7 +500,7 @@ impl BuildRequest {
             } else {
                 NO_AUDIO_VERSION
             },
-            title: draw.id.clone(),
+            title: self.scene.scene().id.clone(),
             player: self.player,
             scene: "scene.json".into(),
             meshes: BTreeMap::new(),
@@ -598,17 +596,17 @@ impl BuildRequest {
         let asset_error = |error| BuildFailureKind::AssetUnavailable.detail(error);
         let meshes = manifest.load_meshes(&resources).map_err(asset_error)?;
         let textures = manifest.load_textures(&resources).map_err(asset_error)?;
-        match scene {
-            RuntimeScene::Behavior(session) => {
-                rot_app::Content::with_textures(session.scene().clone(), meshes, textures)
-            }
-            RuntimeScene::StaticHierarchy { preview, .. } => {
-                rot_app::Content::with_component_preview(preview, meshes, textures)
-            }
-        }
-        .map_err(asset_error)?;
         manifest.load_sounds(&resources).map_err(asset_error)?;
-        manifest.load_animations(&resources).map_err(asset_error)?;
+        let animations = manifest.load_animations(&resources).map_err(asset_error)?;
+        let clips = rot_behavior::decode_clips(&animations).map_err(asset_error)?;
+        let mut engine = rot_behavior::Engine::new(rot_behavior::Limits::default())
+            .map_err(|error| asset_error(error.to_string()))?;
+        engine.set_clips(clips);
+        let runtime = engine
+            .reset_component(scene.scene(), 0)
+            .map_err(|diagnostic| asset_error(diagnostic.message))?;
+        rot_app::Content::from_component_frame(runtime.draw_frame().clone(), meshes, textures)
+            .map_err(asset_error)?;
         let descriptor = serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
         if descriptor.len() > rot_app::creation::MAX_DESCRIPTOR_BYTES {
             return Err(BuildFailureKind::BuildFailed
@@ -1855,7 +1853,7 @@ mod tests {
             ["title-mesh"]
         );
         let (resources, target, scene) = route.load_destination(&package).unwrap();
-        assert_eq!(scene.draw_scene().id, "rail");
+        assert_eq!(scene.scene().id, "rail");
         assert!(target.player.is_default());
         assert_eq!(
             target
@@ -1991,7 +1989,7 @@ f 1 2 3
         let request = build
             .capture_project_request(&active, Some(&assets))
             .unwrap();
-        assert_eq!(request.scene.draw_scene().id, "title");
+        assert_eq!(request.scene.scene().id, "title");
         assert_eq!(request.bytes, title_bytes);
         assert_eq!(
             request.dependencies.meshes,
@@ -2124,32 +2122,19 @@ f 1 2 3
         assert!(baked.script_asset_ids().is_empty());
         assert_eq!(baked.sources.len(), 2);
         assert!(baked.sources.values().all(|source| source.text == changed));
-        let projected = baked.behavior_projection().unwrap();
+        let mut engine = rot_behavior::Engine::new(Default::default()).unwrap();
+        let mut runtime = engine.reset_component(&baked, 0).unwrap();
+        let authoring = runtime.authoring_snapshot().clone();
         for (owner, api) in [
             (&scene.objects[0], rot_behavior::INPUT_HOST_API_VERSION),
             (&scene.objects[1], rot_behavior::KINEMATIC_HOST_API_VERSION),
         ] {
-            let binding = &projected.authoring.bindings[&format!("{}-script", owner.id)];
-            assert_eq!(
-                projected.authoring.sources[&binding.source_id].host_api_version,
-                api
-            );
+            let binding = &authoring.bindings[&format!("{}-script", owner.id)];
+            assert_eq!(authoring.sources[&binding.source_id].host_api_version, api);
         }
-        let mut engine = rot_behavior::Engine::new(Default::default()).unwrap();
-        let mut runtime = engine
-            .reset_projected(
-                &projected.scene,
-                &projected.authoring,
-                projected.transform_camera,
-                projected.projection,
-            )
-            .unwrap();
         engine.step(&mut runtime).unwrap();
-        assert_ne!(
-            runtime.scene().objects[1].transform.translation,
-            scene.objects[1].transform.translation
-        );
-        let prior = runtime.scene().clone();
+        let moved = runtime.component_transforms().unwrap()[1].clone();
+        assert_ne!(moved.translation, scene.objects[1].transform.translation);
         let trigger = serde_json::from_value(serde_json::json!({
             "bad":{"type":"button","held":true,"pressed":true,"released":false}
         }))
@@ -2159,7 +2144,7 @@ f 1 2 3
             .to_string()
             .contains("exact move_and_slide translation"));
         assert_eq!(runtime.tick(), 1);
-        assert_eq!(runtime.scene(), &prior);
+        assert_eq!(runtime.component_transforms().unwrap()[1], moved);
         assert_eq!(ComponentScene::open(path).unwrap(), scene);
     }
 
@@ -2191,7 +2176,7 @@ f 1 2 3
         let resources = rot_app::ResourceRoot::new(&plain).unwrap();
         let manifest = CreationManifest::load(&resources).unwrap();
         let runtime = manifest.load_runtime_scene(&resources).unwrap();
-        assert_eq!(runtime.draw_scene().objects.len(), 5_000);
+        assert_eq!(runtime.scene().objects.len(), 5_000);
 
         // A same-length external change still fails the saved SHA guard.
         let changed = String::from_utf8(original.clone())
@@ -2320,37 +2305,38 @@ f 1 2 3
         fs::rename(root, folder.path().join("offline-source")).unwrap();
         let resources = rot_app::ResourceRoot::new(&relocated).unwrap();
         let manifest = CreationManifest::load(&resources).unwrap();
-        let RuntimeScene::StaticHierarchy {
-            scene: packaged,
-            preview,
-        } = manifest.load_runtime_scene(&resources).unwrap()
-        else {
-            panic!("expected static component runtime")
-        };
-        assert_eq!(*packaged, scene);
+        let packaged = manifest.load_runtime_scene(&resources).unwrap();
+        assert_eq!(packaged.scene(), &scene);
         let meshes = manifest.load_meshes(&resources).unwrap();
         let textures = manifest.load_textures(&resources).unwrap();
         assert!(meshes.contains_key("hidden-model"));
         assert_eq!(textures["hidden-color"].role, TextureRole::BaseColor);
         assert_eq!(textures["hidden-roughness"].role, TextureRole::Roughness);
-        assert_eq!(preview.scene().objects.len(), 1);
-        assert_eq!(preview.scene().objects[0].id, scene.objects[2].id);
+        let mut engine = rot_behavior::Engine::new(Default::default()).unwrap();
+        let runtime = engine.reset_component(packaged.scene(), 0).unwrap();
+        assert_eq!(runtime.scene().objects.len(), 1);
+        assert_eq!(runtime.scene().objects[0].id, scene.objects[2].id);
         let expected = scene.world_matrices().unwrap()[2].as_mat4();
-        assert_eq!(preview.draw_matrices(), [expected]);
-        assert!(preview
+        assert_eq!(
+            runtime.draw_frame().hierarchy().unwrap().matrices(),
+            [expected]
+        );
+        assert!(runtime
             .scene()
             .lighting
             .light("lamp-enabled-light")
             .is_some());
-        assert!(preview
+        assert!(runtime
             .scene()
             .lighting
             .light("hidden-child-light")
             .is_none());
+        let preview = rot_render::component_preview::project(packaged.scene()).unwrap();
         assert!(preview
             .framed_camera(&["lamp"].into(), &meshes, 1.0, None, None)
             .is_none());
-        rot_app::Content::with_component_preview(preview, meshes, textures).unwrap();
+        rot_app::Content::from_component_frame(runtime.draw_frame().clone(), meshes, textures)
+            .unwrap();
 
         let mut malformed = manifest.clone();
         malformed.meshes.remove("hidden-model");
@@ -2406,9 +2392,11 @@ f 1 2 3
             let manifest = CreationManifest::load(&resources).unwrap();
             manifest.load_runtime_scene(&resources).unwrap()
         };
+        let mut engine = rot_behavior::Engine::new(Default::default()).unwrap();
         let flat = build(&authored, "flat");
-        assert_eq!(flat.draw_scene().lighting.light_count(), 1);
-        assert_eq!(flat.draw_scene().objects.len(), authored.objects.len());
+        let flat_runtime = engine.reset_component(flat.scene(), 0).unwrap();
+        assert_eq!(flat_runtime.scene().lighting.light_count(), 1);
+        assert_eq!(flat_runtime.scene().objects.len(), authored.objects.len());
 
         let parent_translation = authored.objects[0].transform.translation;
         let parent = authored.objects[0].id.clone();
@@ -2425,20 +2413,18 @@ f 1 2 3
                 .map(|index| lamp(&format!("lamp-{index}")))
                 .collect(),
         });
-        let runtime = build(&authored, "parented");
-        let RuntimeScene::StaticHierarchy { scene, preview } = runtime else {
-            panic!("expected static component draw input")
-        };
-        assert_eq!(*scene, authored);
-        assert!(preview.light_budget_exceeded());
+        let runtime_scene = build(&authored, "parented");
+        assert_eq!(runtime_scene.scene(), &authored);
+        let runtime = engine.reset_component(runtime_scene.scene(), 0).unwrap();
+        assert!(runtime.light_budget_exceeded());
+        let materialized = runtime.materialized_scene();
         let editor_preview = rot_render::component_preview::project(&authored).unwrap();
-        assert_eq!(preview.scene(), editor_preview.scene());
+        assert_eq!(&materialized, editor_preview.scene());
         assert_eq!(
-            preview.scene().lighting.light_count(),
+            materialized.lighting.light_count(),
             rot_scene::MAX_POINT_LIGHTS
         );
-        let translation = preview
-            .scene()
+        let translation = materialized
             .lighting
             .light("lamp-0")
             .unwrap()
@@ -2452,7 +2438,7 @@ f 1 2 3
                 parent_translation[2]
             ]
         );
-        assert!(preview.scene().lighting.light("lamp-3").is_none());
+        assert!(materialized.lighting.light("lamp-3").is_none());
     }
 
     #[test]
@@ -2552,12 +2538,9 @@ f 1 2 3
         assert_eq!(fs::read(destination.join("scene.json")).unwrap(), original);
         let resources = rot_app::ResourceRoot::new(&destination).unwrap();
         let manifest = CreationManifest::load(&resources).unwrap();
-        let RuntimeScene::StaticHierarchy { scene, preview } =
-            manifest.load_runtime_scene(&resources).unwrap()
-        else {
-            panic!("expected a native component hierarchy");
-        };
-        assert_eq!(*scene, authored);
+        let runtime = manifest.load_runtime_scene(&resources).unwrap();
+        assert_eq!(runtime.scene(), &authored);
+        let preview = rot_render::component_preview::project(runtime.scene()).unwrap();
         assert_eq!(preview.scene().objects[0].mesh.as_deref(), Some("triangle"));
         let meshes = manifest.load_meshes(&resources).unwrap();
         assert_eq!(meshes.len(), 1);

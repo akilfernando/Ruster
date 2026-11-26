@@ -178,7 +178,6 @@ impl ComponentPreview {
             prepared: None,
             matrices: Some(&self.matrices),
             unpickable: (!self.unpickable.is_empty()).then_some(&self.unpickable),
-            hidden_mesh_renderers: None,
             transform_camera: self.transform_camera,
         }
     }
@@ -736,7 +735,6 @@ mod tests {
             prepared: None,
             matrices: Some(&preview.matrices),
             unpickable: None,
-            hidden_mesh_renderers: None,
             transform_camera: None,
         };
         let meshes = BTreeMap::new();
@@ -768,7 +766,6 @@ mod tests {
         let locked = ["left".into()].into_iter().collect();
         let draw = DrawScene {
             unpickable: Some(&locked),
-            hidden_mesh_renderers: None,
             transform_camera: None,
             ..draw
         };

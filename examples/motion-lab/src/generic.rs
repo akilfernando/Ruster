@@ -8,16 +8,17 @@ use std::{
 };
 
 use rot_app::audio::{Output as AudioOutput, OutputStatus};
-use rot_app::creation::{RuntimeScene, StartupTransition};
+use rot_app::creation::StartupTransition;
 use rot_app::hud::{paint_hud, HudPresentationMode};
 use rot_app::ResourceRoot;
 use rot_app::{egui, Application, Content, MeshMap, Step, TextureMap};
 use rot_behavior::{Diagnostic, Engine, Limits, Runtime};
+use rot_scene::component_scene::{Component, ComponentScene, ObjectHierarchy};
 use rot_scene::hud::{resolve_hud, HudCache, ResolvedHud};
 use rot_scene::input::{
     ActionFrame, ActionKind, ActionMap, ActionValue, InputKey, KeyEventAccumulator, PhysicalInput,
 };
-use rot_scene::{PropertyValue, Session};
+use rot_scene::{Authoring, ComponentDrawPlan, PropertyValue, Session};
 mod commands;
 mod hud_controls;
 use commands::CommandUi;
@@ -36,18 +37,130 @@ pub fn session_tick_duration(session: &Session) -> Duration {
     }
 }
 
+pub enum LoadedScene {
+    Legacy(Box<Session>),
+    Component(Box<ComponentScene>),
+}
+
 /// No lock, registry, cache or authored-file writes on this resource path.
 pub fn read_session(path: &Path) -> Result<Session, String> {
     let bytes = rot_assets::read_regular_file(path, rot_scene::MAX_FILE_BYTES as usize)
         .map_err(|e| format!("Scene resource {}: {e}", path.display()))?;
-    Session::from_runtime_snapshot(&bytes)
+    Session::from_snapshot_bytes(&bytes)
         .map_err(|e| format!("Scene resource {}: {e}", path.display()))
 }
 
+/// No lock, registry, cache or authored-file writes on this resource path.
+pub fn read_scene(path: &Path) -> Result<LoadedScene, String> {
+    let bytes = rot_assets::read_regular_file(path, 64 * 1024 * 1024)
+        .map_err(|e| format!("Scene resource {}: {e}", path.display()))?;
+    match Session::from_snapshot_bytes(&bytes) {
+        Ok(session) => Ok(LoadedScene::Legacy(Box::new(session))),
+        Err(rot_scene::SceneError::UnsupportedVersion(version))
+            if version == u64::from(rot_scene::component_scene::FORMAT_VERSION) =>
+        {
+            Ok(LoadedScene::Component(Box::new(
+                ComponentScene::read_json(bytes.as_slice())
+                    .map_err(|e| format!("Scene resource {}: {e}", path.display()))?,
+            )))
+        }
+        Err(error) => Err(format!("Scene resource {}: {error}", path.display())),
+    }
+}
+
+enum SceneSource {
+    Legacy(Box<Session>),
+    Component(Box<ComponentScene>),
+}
+
+impl SceneSource {
+    fn actions(&self) -> &ActionMap {
+        match self {
+            Self::Legacy(session) => &session.authoring().actions,
+            Self::Component(scene) => &scene.actions,
+        }
+    }
+
+    fn hud(&self) -> &rot_scene::hud::Hud {
+        match self {
+            Self::Legacy(session) => &session.authoring().hud,
+            Self::Component(scene) => &scene.hud,
+        }
+    }
+
+    fn scene_id(&self) -> &str {
+        match self {
+            Self::Legacy(session) => &session.scene().id,
+            Self::Component(scene) => &scene.id,
+        }
+    }
+
+    fn authored_revision(&self) -> u64 {
+        match self {
+            Self::Legacy(session) => session.scene().revision,
+            Self::Component(_) => 0,
+        }
+    }
+
+    fn first_object_id(&self) -> Option<String> {
+        match self {
+            Self::Legacy(session) => session.scene().objects.first().map(|o| o.id.clone()),
+            Self::Component(scene) => scene.objects.first().map(|o| o.id.clone()),
+        }
+    }
+
+    fn has_object(&self, id: &str) -> bool {
+        match self {
+            Self::Legacy(session) => session.scene().objects.iter().any(|o| o.id == id),
+            Self::Component(scene) => scene.objects.iter().any(|o| o.id == id),
+        }
+    }
+
+    fn authoring_snapshot(&self) -> Result<Authoring, String> {
+        match self {
+            Self::Legacy(session) => Ok(session.authoring().clone()),
+            Self::Component(scene) => {
+                let hierarchy =
+                    ObjectHierarchy::build(&scene.objects).map_err(|e| e.to_string())?;
+                Ok(scene.authoring_snapshot(&hierarchy))
+            }
+        }
+    }
+
+    fn is_static_component(&self) -> bool {
+        let Self::Component(scene) = self else {
+            return false;
+        };
+        let Ok(hierarchy) = ObjectHierarchy::build(&scene.objects) else {
+            return false;
+        };
+        let has_script = scene
+            .objects
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| hierarchy.effectively_enabled[*index])
+            .any(|(_, object)| {
+                object.components.iter().any(|component| {
+                    component.enabled && matches!(component.kind, Component::Script { .. })
+                })
+            });
+        let has_animation = !scene.active_animation_clip_ids(&hierarchy).is_empty();
+        !has_script && !has_animation
+    }
+
+    fn authored_scene_json(&self) -> Result<serde_json::Value, String> {
+        match self {
+            Self::Legacy(session) => {
+                serde_json::to_value(session.scene()).map_err(|e| e.to_string())
+            }
+            Self::Component(scene) => serde_json::to_value(scene).map_err(|e| e.to_string()),
+        }
+    }
+}
+
 struct StartTarget {
-    session: Session,
+    scene: Box<ComponentScene>,
     content: Content,
-    static_scene: Option<Box<rot_scene::component_scene::ComponentScene>>,
     sounds: rot_app::audio::Sounds,
     clips: rot_behavior::Clips,
     title: String,
@@ -55,7 +168,7 @@ struct StartTarget {
 
 impl StartTarget {
     fn load(root: &ResourceRoot, route: &StartupTransition, dt: Duration) -> Result<Self, String> {
-        let (resources, manifest, scene) = route.load_destination(root)?;
+        let (resources, manifest, runtime_scene) = route.load_destination(root)?;
         if manifest.tick_duration() != dt {
             return Err("Start Transition scenes require the same fixed tick duration.".into());
         }
@@ -63,22 +176,12 @@ impl StartTarget {
         let textures = manifest.load_textures(&resources)?;
         let sounds = manifest.load_sounds(&resources)?;
         let clips = rot_behavior::decode_clips(&manifest.load_animations(&resources)?)?;
-        let (session, content, static_scene) = match scene {
-            RuntimeScene::Behavior(session) => {
-                let content = Content::with_textures(session.scene().clone(), meshes, textures)?;
-                (*session, content, None)
-            }
-            RuntimeScene::StaticHierarchy { scene, preview } => {
-                let content = Content::with_component_preview(preview, meshes, textures)?;
-                let session = Session::new(rot_scene::Scene::empty(&scene.id))
-                    .map_err(|error| error.to_string())?;
-                (session, content, Some(scene))
-            }
-        };
+        let scene = runtime_scene.into_scene();
+        let frame = ComponentDrawPlan::build_initial_frame(&scene, 0).map_err(|e| e.to_string())?;
+        let content = Content::from_component_frame(frame, meshes, textures)?;
         Ok(Self {
-            session,
+            scene,
             content,
-            static_scene,
             sounds,
             clips,
             title: manifest.title,
@@ -87,7 +190,7 @@ impl StartTarget {
 }
 
 pub struct GenericMotionLab {
-    session: Session,
+    source: SceneSource,
     content: Content,
     fixed_dt: Duration,
     engine: Option<Engine>,
@@ -115,7 +218,6 @@ pub struct GenericMotionLab {
     host_tick_origin: u64,
     scene_switched: bool,
     scene_switch_pending_presentation: bool,
-    static_destination: Option<(Box<rot_scene::component_scene::ComponentScene>, u64)>,
 }
 
 impl GenericMotionLab {
@@ -132,23 +234,40 @@ impl GenericMotionLab {
         fixed_dt: Duration,
     ) -> Result<Self, String> {
         let content = Content::with_textures(session.scene().clone(), meshes, textures)?;
-        Self::with_content(session, content, fixed_dt)
+        Self::with_content(SceneSource::Legacy(Box::new(session)), content, fixed_dt)
+    }
+
+    pub fn session(&self) -> &Session {
+        match &self.source {
+            SceneSource::Legacy(session) => session,
+            SceneSource::Component(_) => panic!("component scenes do not own a legacy Session"),
+        }
+    }
+
+    pub fn from_component_scene(
+        scene: Box<ComponentScene>,
+        meshes: MeshMap,
+        textures: TextureMap,
+        fixed_dt: Duration,
+    ) -> Result<Self, String> {
+        let frame = ComponentDrawPlan::build_initial_frame(&scene, 0).map_err(|e| e.to_string())?;
+        let content = Content::from_component_frame(frame, meshes, textures)?;
+        Self::with_content(SceneSource::Component(scene), content, fixed_dt)
     }
 
     fn with_content(
-        session: Session,
-        mut content: Content,
+        source: SceneSource,
+        content: Content,
         fixed_dt: Duration,
     ) -> Result<Self, String> {
         if !(Duration::from_millis(1)..=Duration::from_secs(1)).contains(&fixed_dt) {
             return Err("Motion comparison tick duration must be 1 ms..=1 s".into());
         }
-        content.set_hidden_mesh_renderers(session.hidden_mesh_renderers().cloned());
-        let selected = session.scene().objects.first().map(|o| o.id.clone());
-        let action_keys = KeyEventAccumulator::new(session.authoring().actions.clone())
-            .map_err(|e| e.to_string())?;
+        let selected = source.first_object_id();
+        let action_keys =
+            KeyEventAccumulator::new(source.actions().clone()).map_err(|e| e.to_string())?;
         Ok(Self {
-            session,
+            source,
             content,
             fixed_dt,
             engine: None,
@@ -176,7 +295,6 @@ impl GenericMotionLab {
             host_tick_origin: 0,
             scene_switched: false,
             scene_switch_pending_presentation: false,
-            static_destination: None,
         })
     }
 
@@ -200,10 +318,63 @@ impl GenericMotionLab {
         self.scene_switched
     }
 
-    pub fn static_destination(&self) -> Option<&rot_scene::component_scene::ComponentScene> {
-        self.static_destination
-            .as_ref()
-            .map(|(scene, _)| scene.as_ref())
+    pub fn is_static_component(&self) -> bool {
+        self.runtime.as_ref().map_or_else(
+            || self.source.is_static_component(),
+            Runtime::is_static_component,
+        )
+    }
+
+    pub fn authored_actions(&self) -> &ActionMap {
+        self.source.actions()
+    }
+
+    pub fn authored_hud(&self) -> &rot_scene::hud::Hud {
+        self.source.hud()
+    }
+
+    pub fn scene_id(&self) -> &str {
+        self.source.scene_id()
+    }
+
+    pub fn authored_revision(&self) -> u64 {
+        self.source.authored_revision()
+    }
+
+    pub fn authored_scene_json(&self) -> Result<serde_json::Value, String> {
+        self.source.authored_scene_json()
+    }
+
+    pub fn runtime_scene_json(&self) -> Result<serde_json::Value, String> {
+        match &self.source {
+            SceneSource::Component(scene) => {
+                if let Some(updated) = self
+                    .runtime
+                    .as_ref()
+                    .and_then(Runtime::updated_component_scene)
+                {
+                    serde_json::to_value(updated).map_err(|e| e.to_string())
+                } else {
+                    serde_json::to_value(scene).map_err(|e| e.to_string())
+                }
+            }
+            SceneSource::Legacy(_) => {
+                serde_json::to_value(self.content.scene()).map_err(|e| e.to_string())
+            }
+        }
+    }
+
+    pub fn world_matrices_json(&self) -> Option<serde_json::Value> {
+        let runtime = self.runtime.as_ref()?;
+        let scene = runtime.component_scene()?;
+        let matrices = runtime.world_matrices()?;
+        let map = scene
+            .objects
+            .iter()
+            .zip(matrices)
+            .map(|(object, matrix)| (&object.id, matrix.to_cols_array_2d()))
+            .collect::<BTreeMap<_, _>>();
+        serde_json::to_value(map).ok()
     }
 
     fn start_error(reason: String) -> String {
@@ -262,18 +433,17 @@ impl GenericMotionLab {
             .run_epoch
             .checked_add(1)
             .ok_or("Runtime identity exhausted")?;
-        let mut candidate = Self::with_content(target.session, target.content, self.fixed_dt)?;
-        if let Some(scene) = target.static_scene {
-            candidate.static_destination = Some((scene, 0));
-            candidate.needs_reset = false;
-        } else {
-            candidate.set_sounds(target.sounds);
-            candidate.set_clips(target.clips);
-            candidate.reset()?;
-        }
+        let mut candidate = Self::with_content(
+            SceneSource::Component(target.scene),
+            target.content,
+            self.fixed_dt,
+        )?;
+        candidate.set_sounds(target.sounds);
+        candidate.set_clips(target.clips);
+        candidate.reset()?;
         candidate.content.validate()?;
         candidate.physical_input_owned = self.physical_input_owned;
-        let next_keys = KeyEventAccumulator::new(candidate.session.authoring().actions.clone())
+        let next_keys = KeyEventAccumulator::new(candidate.source.actions().clone())
             .expect("destination map validated");
         self.action_keys.switch_scene(next_keys);
         std::mem::swap(&mut candidate.action_keys, &mut self.action_keys);
@@ -286,17 +456,11 @@ impl GenericMotionLab {
         Ok(())
     }
 
-    pub fn session(&self) -> &Session {
-        &self.session
-    }
     pub fn diagnostic(&self) -> Option<&Diagnostic> {
         self.diagnostic.as_ref()
     }
     pub fn runtime_tick(&self) -> Option<u64> {
-        self.static_destination
-            .as_ref()
-            .map(|(_, tick)| *tick)
-            .or_else(|| self.runtime.as_ref().map(Runtime::tick))
+        self.runtime.as_ref().map(Runtime::tick)
     }
     pub fn runtime_state_report(
         &self,
@@ -357,11 +521,12 @@ impl GenericMotionLab {
             resolve_hud(&authoring.hud, authoring, |binding, field| {
                 runtime.state().binding(binding)?.get(field)
             })
-        } else {
-            let authoring = self.session.authoring();
-            resolve_hud(&authoring.hud, authoring, |binding, field| {
+        } else if let Ok(authoring) = self.source.authoring_snapshot() {
+            resolve_hud(&authoring.hud, &authoring, |binding, field| {
                 authoring.bindings.get(binding)?.state_defaults.get(field)
             })
+        } else {
+            ResolvedHud::default()
         }
     }
 
@@ -387,7 +552,7 @@ impl GenericMotionLab {
             return Err("Input control or a supplied frame already owns the next step".into());
         }
         let frame = frame
-            .validate_against(&self.session.authoring().actions)
+            .validate_against(self.source.actions())
             .map_err(|e| e.to_string())?
             .into_frame();
         self.action_keys.cancel();
@@ -417,7 +582,8 @@ impl GenericMotionLab {
     }
 
     fn action_help(&self, ui: &mut egui::Ui) {
-        if self.session.authoring().actions.is_empty() {
+        let actions = self.source.actions();
+        if actions.is_empty() {
             return;
         }
         ui.heading("Controls");
@@ -441,7 +607,7 @@ impl GenericMotionLab {
             .id_salt("authored-action-help")
             .max_height(240.0)
             .show(ui, |ui| {
-                for (id, definition) in &self.session.authoring().actions {
+                for (id, definition) in actions {
                     let hint = match &definition.kind {
                         ActionKind::Button {
                             keys: bound,
@@ -475,24 +641,24 @@ impl GenericMotionLab {
             ui.label(format!("Last committed input: tick {tick} · {origin}"));
         }
         ui.separator();
-        for binding in self
-            .session
-            .authoring()
-            .bindings
-            .values()
-            .filter(|binding| binding.enabled)
-            .take(16)
-        {
-            if let Some(object) = self
-                .content
-                .scene()
-                .objects
-                .iter()
-                .find(|object| Some(object.id.as_str()) == binding.object_id())
+        if let Ok(authoring) = self.source.authoring_snapshot() {
+            for binding in authoring
+                .bindings
+                .values()
+                .filter(|binding| binding.enabled)
+                .take(16)
             {
-                ui.strong(object.display_name());
-                ui.label(format!("Position {:.3?}", object.transform.translation));
-                ui.label(format!("Rotation {:.3?}", object.transform.rotation));
+                if let Some(object) = self
+                    .content
+                    .scene()
+                    .objects
+                    .iter()
+                    .find(|object| Some(object.id.as_str()) == binding.object_id())
+                {
+                    ui.strong(object.display_name());
+                    ui.label(format!("Position {:.3?}", object.transform.translation));
+                    ui.label(format!("Rotation {:.3?}", object.transform.rotation));
+                }
             }
         }
         ui.separator();
@@ -511,13 +677,18 @@ impl GenericMotionLab {
             return Err("Runtime speed override must be finite".into());
         }
         if speed.is_some()
-            && !self.session.authoring().bindings.values().any(|binding| {
-                binding.enabled
-                    && matches!(
-                        binding.properties.get("speed"),
-                        Some(PropertyValue::Number(_))
-                    )
-            })
+            && !self
+                .source
+                .authoring_snapshot()?
+                .bindings
+                .values()
+                .any(|binding| {
+                    binding.enabled
+                        && matches!(
+                            binding.properties.get("speed"),
+                            Some(PropertyValue::Number(_))
+                        )
+                })
         {
             return Err("No enabled binding exposes a numeric speed property".into());
         }
@@ -560,17 +731,15 @@ impl GenericMotionLab {
         self.command_receipt = None;
         self.hud_cache.clear();
         self.audio.stop();
-        self.session = session;
+        self.source = SceneSource::Legacy(Box::new(session));
         self.needs_reset = true;
         self.diagnostic = None;
         if !self
-            .session
-            .scene()
-            .objects
-            .iter()
-            .any(|o| Some(&o.id) == self.selected.as_ref())
+            .selected
+            .as_deref()
+            .is_some_and(|id| self.source.has_object(id))
         {
-            self.selected = self.session.scene().objects.first().map(|o| o.id.clone());
+            self.selected = self.source.first_object_id();
         }
         Ok(())
     }
@@ -610,10 +779,6 @@ impl Application for GenericMotionLab {
         self.host_tick_origin = 0;
         self.scene_switch_pending_presentation = false;
         self.pending_start = None;
-        if let Some((_, tick)) = &mut self.static_destination {
-            *tick = 0;
-            return Ok(());
-        }
         self.audio.stop();
         self.cancel_action_input();
         self.cancel_hud_input();
@@ -625,21 +790,8 @@ impl Application for GenericMotionLab {
             .run_epoch
             .checked_add(1)
             .ok_or("Runtime identity exhausted")?;
-        let keys = KeyEventAccumulator::new(self.session.authoring().actions.clone())
-            .map_err(|e| e.to_string())?;
-        let mut authoring = self.session.authoring().clone();
-        if let Some(speed) = self.speed_override {
-            let mut matched = false;
-            for binding in authoring.bindings.values_mut().filter(|b| b.enabled) {
-                if let Some(PropertyValue::Number(value)) = binding.properties.get_mut("speed") {
-                    *value = speed;
-                    matched = true;
-                }
-            }
-            if !matched {
-                return Err("No enabled binding exposes a numeric speed property; clear the runtime override".into());
-            }
-        }
+        let keys =
+            KeyEventAccumulator::new(self.source.actions().clone()).map_err(|e| e.to_string())?;
         if self.engine.is_none() {
             let result = Engine::new(Limits {
                 fixed_dt: self.fixed_dt.as_secs_f64(),
@@ -649,17 +801,55 @@ impl Application for GenericMotionLab {
         }
         let engine = self.engine.as_mut().expect("initialized engine");
         engine.set_clips(self.clips.clone());
-        let result = engine.reset_projected(
-            self.session.scene(),
-            &authoring,
-            self.session.transform_camera_binding().cloned(),
-            self.session.runtime_projection(),
-        );
+        let result = match &self.source {
+            SceneSource::Component(scene) => {
+                if let Some(speed) = self.speed_override {
+                    let mut overridden = (**scene).clone();
+                    let mut matched = false;
+                    for object in &mut overridden.objects {
+                        for component in &mut object.components {
+                            if let Component::Script { binding, .. } = &mut component.kind {
+                                if component.enabled && binding.enabled {
+                                    if let Some(PropertyValue::Number(value)) =
+                                        binding.properties.get_mut("speed")
+                                    {
+                                        *value = speed;
+                                        matched = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !matched {
+                        return Err("No enabled binding exposes a numeric speed property; clear the runtime override".into());
+                    }
+                    engine.reset_component(&overridden, 0)
+                } else {
+                    engine.reset_component(scene, 0)
+                }
+            }
+            SceneSource::Legacy(session) => {
+                let mut authoring = session.authoring().clone();
+                if let Some(speed) = self.speed_override {
+                    let mut matched = false;
+                    for binding in authoring.bindings.values_mut().filter(|b| b.enabled) {
+                        if let Some(PropertyValue::Number(value)) =
+                            binding.properties.get_mut("speed")
+                        {
+                            *value = speed;
+                            matched = true;
+                        }
+                    }
+                    if !matched {
+                        return Err("No enabled binding exposes a numeric speed property; clear the runtime override".into());
+                    }
+                }
+                engine.reset(session.scene(), &authoring)
+            }
+        };
         let candidate = self.report(result)?;
         // Engine validated transforms; meshes remain the same immutable Content resources.
         self.content.set_behavior_draw_frame(candidate.draw_frame());
-        self.content
-            .set_hidden_mesh_renderers(self.session.hidden_mesh_renderers().cloned());
         self.hud_cache.clear();
         self.runtime = Some(candidate);
         self.audio.reset(self.sounds.clone());
@@ -740,10 +930,10 @@ impl Application for GenericMotionLab {
                 });
             paint_hud(painter, rect, &authoring.hud, resolved, mode);
         } else {
-            let authoring = self.session.authoring();
+            let authoring = self.source.authoring_snapshot()?;
             let resolved = self
                 .hud_cache
-                .prepare(&authoring.hud, authoring, |binding, field| {
+                .prepare(&authoring.hud, &authoring, |binding, field| {
                     authoring.bindings.get(binding)?.state_defaults.get(field)
                 });
             paint_hud(painter, rect, &authoring.hud, resolved, mode);
@@ -752,7 +942,7 @@ impl Application for GenericMotionLab {
     }
 
     fn keyboard_actions(&self) -> Option<&ActionMap> {
-        (!self.session.authoring().actions.is_empty()).then_some(&self.session.authoring().actions)
+        (!self.source.actions().is_empty()).then_some(self.source.actions())
     }
     fn action_input(&mut self, owned: bool, events: &[(InputKey, bool)]) -> Result<(), String> {
         if !owned {
@@ -791,10 +981,6 @@ impl Application for GenericMotionLab {
             .ok_or("Invalid host tick")?;
         if self.runtime_tick().and_then(|tick| tick.checked_add(1)) != Some(local_tick) {
             return Err("Host and behavior tick differ; Reset through the host Runtime".into());
-        }
-        if let Some((_, tick)) = &mut self.static_destination {
-            *tick = local_tick;
-            return Ok(());
         }
         let origin = if supplied.is_some() {
             "programmatic"
@@ -835,8 +1021,7 @@ impl Application for GenericMotionLab {
         self.selected.as_deref()
     }
     fn select(&mut self, id: &str) {
-        if self.creation_title.is_none() && self.session.scene().objects.iter().any(|o| o.id == id)
-        {
+        if self.creation_title.is_none() && self.source.has_object(id) {
             self.selected = Some(id.into());
         }
     }
@@ -864,7 +1049,7 @@ impl Application for GenericMotionLab {
             return Ok(());
         }
         self.action_help(ui);
-        ui.heading(if self.session.authoring().actions.is_empty() {
+        ui.heading(if self.source.actions().is_empty() {
             "Motion comparison"
         } else {
             "Runtime preview"
@@ -885,7 +1070,10 @@ impl Application for GenericMotionLab {
             ui.strong("Snapshot requires Reset before Run or Step.");
         }
         ui.separator();
-        for authored in &self.session.scene().objects {
+        let SceneSource::Legacy(session) = &self.source else {
+            return Ok(());
+        };
+        for authored in &session.scene().objects {
             if ui
                 .selectable_label(
                     self.selected.as_deref() == Some(&authored.id),
@@ -913,13 +1101,7 @@ impl Application for GenericMotionLab {
                 "Runtime rotation (rad): {:.3?}",
                 object.transform.rotation
             ));
-            if let Some(authored) = self
-                .session
-                .scene()
-                .objects
-                .iter()
-                .find(|o| o.id == object.id)
-            {
+            if let Some(authored) = session.scene().objects.iter().find(|o| o.id == object.id) {
                 ui.label(format!(
                     "Authored position: {:.3?}",
                     authored.transform.translation
@@ -1001,8 +1183,13 @@ mod tests {
         .unwrap();
 
         let dt = rot_behavior::DEFAULT_FIXED_TICK;
-        let source_session = Session::from_component_runtime(&title).unwrap();
-        let mut app = GenericMotionLab::new(source_session, MeshMap::new(), dt).unwrap();
+        let mut app = GenericMotionLab::from_component_scene(
+            Box::new(title),
+            MeshMap::new(),
+            TextureMap::new(),
+            dt,
+        )
+        .unwrap();
         app.set_start_transition(root, route);
         app.prepare_start_on_worker();
         let mut runtime = rot_app::Runtime::new(app, dt).unwrap();

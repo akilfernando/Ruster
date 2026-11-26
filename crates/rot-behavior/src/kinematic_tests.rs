@@ -432,38 +432,24 @@ end}
     unused.id = "unused-gate".into();
     unused.components[0].id = "unused-collider".into();
     authored.objects.push(unused);
+    let mut engine = Engine::new(Limits::default()).unwrap();
     let mut stale = authored.clone();
     stale.objects.retain(|object| object.id != "gate");
-    let error = stale
-        .behavior_projection()
-        .err()
-        .expect("deleted sensor")
+    let error = engine
+        .reset_component(&stale, 0)
+        .expect_err("deleted sensor")
         .to_string();
     assert!(
         error.contains("controller-component") && error.contains("checkpoint"),
         "{error}"
     );
 
-    let projected = authored.behavior_projection().unwrap();
-    assert!(projected
-        .hidden_mesh_renderers
-        .as_ref()
-        .unwrap()
-        .contains("unused-gate"));
-    assert!(projected
-        .hidden_mesh_renderers
-        .as_ref()
-        .unwrap()
-        .contains("gate"));
-    let mut engine = Engine::new(Limits::default()).unwrap();
-    let mut runtime = engine
-        .reset_projected(
-            &projected.scene,
-            &projected.authoring,
-            projected.transform_camera.clone(),
-            projected.projection.clone(),
-        )
-        .unwrap();
+    let mut runtime = engine.reset_component(&authored, 0).unwrap();
+    assert!(!runtime
+        .scene()
+        .objects
+        .iter()
+        .any(|object| matches!(object.id.as_str(), "unused-gate" | "gate")));
     assert!(runtime.query_observations().is_empty());
     for (axis, x, expected_state, was, is) in [
         (1, 0.25, "entered", false, true), // Sphere tangent to the box.
@@ -472,7 +458,7 @@ end}
         (0, 0., "outside", false, false),
     ] {
         engine.step_with_input(&mut runtime, &input(axis)).unwrap();
-        assert_eq!(runtime.scene().objects[0].transform.translation[0], x);
+        assert_eq!(runtime.component_transforms().unwrap()[0].translation[0], x);
         let observations = runtime.query_observations();
         assert!(matches!(
             observations[1].query,
@@ -490,18 +476,14 @@ end}
     let audio = runtime.audio_batch().cloned();
     assert!(engine.step_with_input(&mut runtime, &input(1)).is_err());
     assert_eq!(runtime.tick(), 4);
-    assert_eq!(runtime.scene().objects[0].transform.translation, [0.; 3]);
+    assert_eq!(
+        runtime.component_transforms().unwrap()[0].translation,
+        [0.; 3]
+    );
     assert_eq!(runtime.query_observations(), committed);
     assert_eq!(runtime.audio_batch(), audio.as_ref());
 
-    let mut missing = projected.scene.clone();
-    missing.objects.retain(|object| object.id != "gate");
-    let Err(error) = engine.reset_projected(
-        &missing,
-        &projected.authoring,
-        projected.transform_camera,
-        projected.projection,
-    ) else {
+    let Err(error) = engine.reset_component(&stale, 0) else {
         panic!("stale sensor binding should fail Reset");
     };
     assert!(error.to_string().contains("checkpoint"));
