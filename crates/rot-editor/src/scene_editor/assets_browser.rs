@@ -52,6 +52,7 @@ pub(super) fn asset_glyph(kind: &str) -> &'static str {
         "Mesh" => "▲",
         "Sound" => "♪",
         "Texture" => "▦",
+        "Material" => "◉",
         _ => "◆",
     }
 }

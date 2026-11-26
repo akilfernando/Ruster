@@ -2,7 +2,10 @@
 use crate::behavior_files::LaunchSpec;
 use crate::platform::watcher::{wake_channel, AssetWatcher, WakeReceiver, WakeSender};
 use eframe::egui::Context;
-use rot_assets::{AssetKind, AssetStatus, AssetStore, PrefabFile, ProjectFileIssue};
+use rot_assets::{
+    AssetKind, AssetStatus, AssetStore, MaterialFile, PrefabFile, ProjectFileIssue,
+    MATERIAL_EXTENSION,
+};
 use rustix::fd::OwnedFd;
 use rustix::fs as at;
 use rustix::io::Errno;
@@ -25,6 +28,7 @@ pub(super) struct Snapshot {
     pub(super) warning: Option<String>,
     pub(super) folders: Vec<PathBuf>,
     pub(super) prefabs: Vec<PrefabFile>,
+    pub(super) materials: Vec<MaterialFile>,
 }
 
 type Update = Result<Snapshot, String>;
@@ -34,6 +38,7 @@ type Mailbox = Arc<Mutex<Option<Update>>>;
 pub(super) struct ImportResult {
     pub(super) errors: Vec<String>,
     pub(super) created_script: Option<(String, PathBuf)>,
+    pub(super) created_material: Option<(String, PathBuf)>,
 }
 
 struct ImportBatch {
@@ -86,6 +91,10 @@ pub(super) enum FileAction {
         name: String,
     },
     CreateScript {
+        parent: PathBuf,
+        name: String,
+    },
+    CreateMaterial {
         parent: PathBuf,
         name: String,
     },
@@ -255,6 +264,8 @@ fn run(
             let mut issues = store.reconcile_project_files(&paths, active);
             let (prefabs, prefab_issues) = store.read_project_prefabs();
             issues.extend(prefab_issues);
+            let (materials, material_issues) = store.read_project_materials();
+            issues.extend(material_issues);
             let warning = Some(format!("Couldn't watch Assets: {error}"));
             send(Ok(Snapshot {
                 store,
@@ -262,6 +273,7 @@ fn run(
                 warning,
                 folders: Vec::new(),
                 prefabs,
+                materials,
             }));
             return Ok(());
         }
@@ -290,6 +302,7 @@ fn run(
         let mut moved = None;
         let mut restored = None;
         let mut created_script = None;
+        let mut created_material = None;
         match queued.try_recv() {
             Ok(Job::ImportFiles(batch)) => {
                 let mut failures = Vec::new();
@@ -308,6 +321,7 @@ fn run(
             }
             Ok(Job::FileAction(job)) => {
                 let is_create_script = matches!(&job.action, FileAction::CreateScript { .. });
+                let is_create_material = matches!(&job.action, FileAction::CreateMaterial { .. });
                 let is_launch = matches!(&job.action, FileAction::OpenScript { .. });
                 let explicit_reimport = matches!(&job.action, FileAction::Reimport(_));
                 let move_source = match &job.action {
@@ -342,6 +356,9 @@ fn run(
                         }
                         if is_create_script {
                             created_script = Some(path.clone());
+                        }
+                        if is_create_material {
+                            created_material = Some(path.clone());
                         }
                         if !is_launch {
                             paths.insert(path);
@@ -378,7 +395,11 @@ fn run(
             paths = changed;
             continue;
         }
-        let (issues, prefabs): (Vec<ProjectFileIssue>, Vec<PrefabFile>) = if !paths.is_empty()
+        let (issues, prefabs, materials): (
+            Vec<ProjectFileIssue>,
+            Vec<PrefabFile>,
+            Vec<MaterialFile>,
+        ) = if !paths.is_empty()
             || delivered.is_none()
             || asset_write
                 .as_ref()
@@ -388,13 +409,20 @@ fn run(
                 store.reconcile_project_files_with_reimport(&paths, reimport.as_deref(), active);
             let (prefabs, prefab_issues) = store.read_project_prefabs();
             issues.extend(prefab_issues);
-            (issues, prefabs)
+            let (materials, material_issues) = store.read_project_materials();
+            issues.extend(material_issues);
+            (issues, prefabs, materials)
         } else {
             delivered.as_ref().map_or_else(
-                || (Vec::new(), Vec::new()),
-                |(_, issues, _, _, prefabs): &(_, Vec<ProjectFileIssue>, _, _, Vec<PrefabFile>)| {
-                    (issues.clone(), prefabs.clone())
-                },
+                || (Vec::new(), Vec::new(), Vec::new()),
+                |(_, issues, _, _, prefabs, materials): &(
+                    _,
+                    Vec<ProjectFileIssue>,
+                    _,
+                    _,
+                    Vec<PrefabFile>,
+                    Vec<MaterialFile>,
+                )| { (issues.clone(), prefabs.clone(), materials.clone()) },
             )
         };
         let write_warning = asset_write.as_ref().and_then(|(_, result)| {
@@ -410,12 +438,20 @@ fn run(
         let state = store.state_identity();
         let folders = watcher.folders();
         if delivered.as_ref().is_none_or(
-            |(previous, previous_issues, previous_warning, previous_folders, previous_prefabs)| {
+            |(
+                previous,
+                previous_issues,
+                previous_warning,
+                previous_folders,
+                previous_prefabs,
+                previous_materials,
+            )| {
                 previous != &state
                     || previous_issues != &issues
                     || previous_warning != &warning
                     || previous_folders != &folders
                     || previous_prefabs != &prefabs
+                    || previous_materials != &materials
             },
         ) {
             send(Ok(Snapshot {
@@ -424,8 +460,9 @@ fn run(
                 warning: warning.clone(),
                 folders: folders.clone(),
                 prefabs: prefabs.clone(),
+                materials: materials.clone(),
             }));
-            delivered = Some((state, issues, warning, folders, prefabs));
+            delivered = Some((state, issues, warning, folders, prefabs, materials.clone()));
         }
         if let Some((result, mut failures)) = import {
             if let Some((id, path, hash)) = moved {
@@ -466,9 +503,18 @@ fn run(
                     None
                 }
             });
+            let created_material = created_material.and_then(|path| {
+                if let Some(file) = materials.iter().find(|file| Path::new(&file.source) == path) {
+                    Some((file.id.clone(), path))
+                } else {
+                    failures.push(format!("Created {}, but Assets could not confirm the new material. Check its status.", path.display()));
+                    None
+                }
+            });
             let _ = result.try_send(ImportResult {
                 errors: failures,
                 created_script,
+                created_material,
             });
             context.request_repaint();
         }
@@ -590,10 +636,8 @@ fn file_action(
         FileAction::Rename { source, stem } => {
             validate_leaf(&stem)?;
             let (folder, leaf) = open_source_folder(held_root, &source)?;
-            let extension = source
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .ok_or("Asset has no file extension.")?;
+            let (_, extension) =
+                split_asset_filename(leaf).ok_or("Asset has no file extension.")?;
             let name = format!("{stem}.{extension}");
             let destination = source.with_file_name(&name);
             AssetStore::project_source_limit(destination.to_str().unwrap_or_default())
@@ -735,6 +779,9 @@ fn file_action(
         FileAction::CreateScript { parent, name } => {
             create_script(store, held_root, &parent, &name, active)
         }
+        FileAction::CreateMaterial { parent, name } => {
+            create_material(store, held_root, &parent, &name, active)
+        }
         FileAction::RestoreMissingSource { id } => {
             restore_missing_source(store, held_root, &id, active)
         }
@@ -806,6 +853,116 @@ return {
 }
 "#;
 
+pub(super) fn split_asset_filename(leaf: &str) -> Option<(&str, &str)> {
+    if let Some(stem) = leaf.strip_suffix(MATERIAL_EXTENSION) {
+        return (!stem.is_empty()).then_some((stem, &MATERIAL_EXTENSION[1..]));
+    }
+    leaf.rsplit_once('.')
+}
+
+pub(super) fn material_filename(input: &str) -> Result<String, String> {
+    let input = input.trim();
+    let stem = input.strip_suffix(MATERIAL_EXTENSION).unwrap_or(input);
+    validate_leaf(stem)?;
+    if stem.chars().any(char::is_control) || stem.len() > 120 {
+        return Err("Use a name up to 120 UTF-8 bytes without control characters.".into());
+    }
+    Ok(format!("{stem}{MATERIAL_EXTENSION}"))
+}
+
+fn create_material(
+    store: &AssetStore,
+    root: &fs::File,
+    folder: &Path,
+    name: &str,
+    active: impl Fn() -> bool,
+) -> Result<PathBuf, String> {
+    let file_name = material_filename(name)?;
+    let stem = file_name
+        .strip_suffix(MATERIAL_EXTENSION)
+        .expect("material extension");
+    let material = rot_scene::OpaqueMaterial {
+        name: Some(stem.to_owned()),
+        response: rot_scene::MaterialResponse::dielectric(),
+        ..Default::default()
+    };
+    let bytes = rot_scene::MaterialSource::new(material)
+        .and_then(|source| source.write_json())
+        .map_err(|error| error.to_string())?;
+    create_project_text_asset(store, root, folder, &file_name, &bytes, active)
+}
+
+fn create_project_text_asset(
+    store: &AssetStore,
+    root: &fs::File,
+    folder: &Path,
+    name: &str,
+    bytes: &[u8],
+    active: impl Fn() -> bool,
+) -> Result<PathBuf, String> {
+    if !folder.starts_with("Assets") {
+        return Err("Choose a folder inside Assets.".into());
+    }
+    let source = folder.join(name);
+    let relative = source.to_str().ok_or("Asset path must be Unicode.")?;
+    AssetStore::project_source_limit(relative).map_err(|error| error.to_string())?;
+    if !active() {
+        return Err("Project closed before the asset was created.".into());
+    }
+    ensure_assets(root, folder)?;
+    let destination = open_folder(root, folder).map_err(|error| error.to_string())?;
+    let identity = at::fstat(&destination).map_err(|error| error.to_string())?;
+    let directory = PathBuf::from(format!("/proc/self/fd/{}", destination.as_raw_fd()));
+    let mut scratch =
+        tempfile::NamedTempFile::new_in(&directory).map_err(|error| error.to_string())?;
+    scratch
+        .write_all(bytes)
+        .map_err(|error| error.to_string())?;
+    scratch
+        .as_file()
+        .sync_all()
+        .map_err(|error| error.to_string())?;
+    store
+        .with_current_catalog(|| {
+            let error = |message: String| {
+                rot_assets::AssetError(format!("Couldn't create {relative}: {message}"))
+            };
+            if !active()
+                || !open_folder(root, folder)
+                    .and_then(at::fstat)
+                    .is_ok_and(|now| now.st_ino == identity.st_ino && now.st_dev == identity.st_dev)
+            {
+                return Err(error("The project or folder changed. Try again.".into()));
+            }
+            match at::statat(&destination, name, at::AtFlags::SYMLINK_NOFOLLOW) {
+                Ok(_) => return Err(error("A file with that name already exists.".into())),
+                Err(Errno::NOENT) => {}
+                Err(reason) => return Err(error(reason.to_string())),
+            }
+            match at::statat(
+                &destination,
+                format!("{name}.rotmeta"),
+                at::AtFlags::SYMLINK_NOFOLLOW,
+            ) {
+                Ok(_) => return Err(error("That name already has an import sidecar.".into())),
+                Err(Errno::NOENT) => {}
+                Err(reason) => return Err(error(reason.to_string())),
+            }
+            scratch
+                .persist_noclobber(directory.join(name))
+                .map_err(|failure| {
+                    error(if failure.error.kind() == io::ErrorKind::AlreadyExists {
+                        "A file with that name already exists.".into()
+                    } else {
+                        failure.error.to_string()
+                    })
+                })?;
+            Ok(())
+        })
+        .map_err(|error| error.to_string())?;
+    Ok(source)
+}
+
 pub(super) fn script_filename(input: &str) -> Result<String, String> {
     let input = input.trim();
     let stem = input.strip_suffix(".lua").unwrap_or(input);
@@ -824,67 +981,14 @@ fn create_script(
     active: impl Fn() -> bool,
 ) -> Result<PathBuf, String> {
     let name = script_filename(name)?;
-    if !folder.starts_with("Assets") {
-        return Err("Choose a folder inside Assets.".into());
-    }
-    let source = folder.join(&name);
-    let relative = source.to_str().ok_or("Script path must be Unicode.")?;
-    AssetStore::project_source_limit(relative).map_err(|error| error.to_string())?;
-    if !active() {
-        return Err("Project closed before the script was created.".into());
-    }
-    ensure_assets(root, folder)?;
-    let destination = open_folder(root, folder).map_err(|error| error.to_string())?;
-    let identity = at::fstat(&destination).map_err(|error| error.to_string())?;
-    let directory = PathBuf::from(format!("/proc/self/fd/{}", destination.as_raw_fd()));
-    let mut scratch =
-        tempfile::NamedTempFile::new_in(&directory).map_err(|error| error.to_string())?;
-    scratch
-        .write_all(OBJECT_LUA_TEMPLATE.as_bytes())
-        .map_err(|error| error.to_string())?;
-    scratch
-        .as_file()
-        .sync_all()
-        .map_err(|error| error.to_string())?;
-    store
-        .with_current_catalog(|| {
-            let error = |message: String| {
-                rot_assets::AssetError(format!("Couldn't create {relative}: {message}"))
-            };
-            if !active()
-                || !open_folder(root, folder)
-                    .and_then(at::fstat)
-                    .is_ok_and(|now| now.st_ino == identity.st_ino && now.st_dev == identity.st_dev)
-            {
-                return Err(error("The project or folder changed. Try again.".into()));
-            }
-            match at::statat(&destination, name.as_str(), at::AtFlags::SYMLINK_NOFOLLOW) {
-                Ok(_) => return Err(error("A file with that name already exists.".into())),
-                Err(Errno::NOENT) => {}
-                Err(reason) => return Err(error(reason.to_string())),
-            }
-            match at::statat(
-                &destination,
-                format!("{name}.rotmeta"),
-                at::AtFlags::SYMLINK_NOFOLLOW,
-            ) {
-                Ok(_) => return Err(error("That name already has an import sidecar.".into())),
-                Err(Errno::NOENT) => {}
-                Err(reason) => return Err(error(reason.to_string())),
-            }
-            scratch
-                .persist_noclobber(directory.join(&name))
-                .map_err(|failure| {
-                    error(if failure.error.kind() == io::ErrorKind::AlreadyExists {
-                        "A file with that name already exists.".into()
-                    } else {
-                        failure.error.to_string()
-                    })
-                })?;
-            Ok(())
-        })
-        .map_err(|error| error.to_string())?;
-    Ok(source)
+    create_project_text_asset(
+        store,
+        root,
+        folder,
+        &name,
+        OBJECT_LUA_TEMPLATE.as_bytes(),
+        active,
+    )
 }
 
 // Read one bounded file under an already verified directory, retaining the
@@ -1260,7 +1364,7 @@ fn copy_source(
         .as_file()
         .sync_all()
         .map_err(|error| error.to_string())?;
-    let (stem, extension) = leaf.rsplit_once('.').ok_or_else(bad_file)?;
+    let (stem, extension) = split_asset_filename(leaf).ok_or_else(bad_file)?;
     for attempt in 1.. {
         let name = if attempt == 1 {
             leaf.to_owned()
@@ -1899,5 +2003,98 @@ mod tests {
             1
         );
         assert!(!external.path().join("Another 2.obj").exists());
+    }
+
+    #[test]
+    fn create_rename_and_duplicate_material_preserve_double_extension() {
+        assert_eq!(
+            split_asset_filename("Steel.material.json"),
+            Some(("Steel", "material.json"))
+        );
+        assert_eq!(
+            material_filename("Brushed Steel").unwrap(),
+            "Brushed Steel.material.json"
+        );
+        assert_eq!(
+            material_filename("Brushed Steel.material.json").unwrap(),
+            "Brushed Steel.material.json"
+        );
+
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        fs::create_dir(root.join("Assets")).unwrap();
+        let ctx = Context::default();
+        let worker = ProjectAssets::start(root.to_owned(), &ctx).unwrap();
+        let next = || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Some(update) = worker.take_update() {
+                    break update.unwrap();
+                }
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        let mut snapshot = next();
+        let created = worker
+            .file_action(
+                FileAction::CreateMaterial {
+                    parent: "Assets".into(),
+                    name: "Steel".into(),
+                },
+                snapshot.store.state_identity(),
+            )
+            .unwrap()
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        assert!(created.errors.is_empty(), "{:?}", created.errors);
+        let (id, relative) = created.created_material.unwrap();
+        assert_eq!(relative, Path::new("Assets/Steel.material.json"));
+        snapshot = next();
+        let steel = snapshot
+            .materials
+            .iter()
+            .find(|file| file.id == id)
+            .expect("created material in snapshot");
+        assert_eq!(steel.source, "Assets/Steel.material.json");
+        assert!(root.join("Assets/Steel.material.json.rotmeta").is_file());
+
+        let dup = worker
+            .file_action(
+                FileAction::Duplicate(PathBuf::from("Assets/Steel.material.json")),
+                snapshot.store.state_identity(),
+            )
+            .unwrap()
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        assert!(dup.errors.is_empty(), "{:?}", dup.errors);
+        snapshot = next();
+        assert!(root.join("Assets/Steel 2.material.json").is_file());
+        assert!(snapshot
+            .materials
+            .iter()
+            .any(|file| file.source == "Assets/Steel 2.material.json" && file.id != id));
+
+        let ren = worker
+            .file_action(
+                FileAction::Rename {
+                    source: PathBuf::from("Assets/Steel.material.json"),
+                    stem: "Brass".into(),
+                },
+                snapshot.store.state_identity(),
+            )
+            .unwrap()
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        assert!(ren.errors.is_empty(), "{:?}", ren.errors);
+        snapshot = next();
+        assert!(!root.join("Assets/Steel.material.json").exists());
+        assert!(!root.join("Assets/Steel.material.json.rotmeta").exists());
+        assert!(root.join("Assets/Brass.material.json").is_file());
+        assert!(root.join("Assets/Brass.material.json.rotmeta").is_file());
+        assert!(snapshot
+            .materials
+            .iter()
+            .any(|file| file.id == id && file.source == "Assets/Brass.material.json"));
     }
 }

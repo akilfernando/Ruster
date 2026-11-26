@@ -273,6 +273,7 @@ pub(super) fn components(
     meshes: &rot_app::MeshMap,
     assets: Option<&rot_assets::AssetStore>,
     materials: &BTreeMap<String, OpaqueMaterial>,
+    material_files: &BTreeMap<String, rot_assets::MaterialFile>,
     controls: ComponentControls<'_>,
 ) -> ComponentEdits {
     let ComponentControls {
@@ -347,7 +348,16 @@ pub(super) fn components(
                         tint,
                         material,
                     } => {
-                        if let Some(id) = mesh_fields(ui, geometry, material, meshes, assets, materials, allow_mesh_reveal) {
+                        if let Some(id) = mesh_fields(
+                            ui,
+                            geometry,
+                            material,
+                            meshes,
+                            assets,
+                            materials,
+                            material_files,
+                            allow_mesh_reveal,
+                        ) {
                             mesh_reveal = Some(id);
                         }
                         ui.horizontal_wrapped(|ui| {
@@ -967,6 +977,21 @@ pub(super) fn geometry_choices(meshes: &rot_app::MeshMap) -> impl Iterator<Item 
         )
 }
 
+pub(super) fn material_asset_display_name(file: &rot_assets::MaterialFile) -> String {
+    if let Ok(source) = rot_scene::MaterialSource::read_json(&file.bytes) {
+        if let Some(name) = &source.material().name {
+            return name.clone();
+        }
+    }
+    file.source
+        .rsplit('/')
+        .next()
+        .and_then(|leaf| leaf.strip_suffix(rot_assets::MATERIAL_EXTENSION))
+        .unwrap_or(&file.source)
+        .to_owned()
+}
+
+#[allow(clippy::too_many_arguments)]
 fn mesh_fields(
     ui: &mut egui::Ui,
     geometry: &mut Geometry,
@@ -974,6 +999,7 @@ fn mesh_fields(
     meshes: &rot_app::MeshMap,
     assets: Option<&rot_assets::AssetStore>,
     materials: &BTreeMap<String, OpaqueMaterial>,
+    material_files: &BTreeMap<String, rot_assets::MaterialFile>,
     allow_reveal: bool,
 ) -> Option<String> {
     ui_kit::property_row(ui, Text::ComponentGeometry.plain(), |ui| {
@@ -1009,29 +1035,58 @@ fn mesh_fields(
         None
     };
     ui_kit::property_row(ui, Text::ComponentMaterial.plain(), |ui| {
-        let selected = material
-            .as_deref()
-            .map_or(Text::ComponentNoMaterial.plain(), |id| {
-                materials
+        let selected: std::borrow::Cow<'_, str> = material.as_deref().map_or_else(
+            || Text::ComponentNoMaterial.plain().into(),
+            |id| {
+                if let Some(name) = materials
                     .get(id)
                     .and_then(|surface| surface.name.as_deref())
-                    .unwrap_or(id)
-            });
-        egui::ComboBox::from_id_salt("material")
+                {
+                    name.into()
+                } else if let Some(file) = material_files.get(id) {
+                    material_asset_display_name(file).into()
+                } else {
+                    id.into()
+                }
+            },
+        );
+        let field = egui::ComboBox::from_id_salt("material")
             .width(ui.available_width())
             .truncate()
-            .selected_text(selected)
+            .selected_text(selected.as_ref())
             .show_ui(ui, |ui| {
                 ui.selectable_value(material, None, Text::ComponentNoMaterial.plain());
                 for (id, surface) in materials {
+                    let hover = material_files
+                        .get(id)
+                        .map_or(id.as_str(), |file| file.source.as_str());
                     ui.selectable_value(
                         material,
                         Some(id.clone()),
                         surface.name.as_deref().unwrap_or(id),
                     )
-                    .on_hover_text(id);
+                    .on_hover_text(hover);
                 }
-            });
+                for (id, file) in material_files {
+                    if !materials.contains_key(id) {
+                        ui.selectable_value(
+                            material,
+                            Some(id.clone()),
+                            material_asset_display_name(file),
+                        )
+                        .on_hover_text(&file.source);
+                    }
+                }
+            })
+            .response;
+        use super::component_workspace::asset_panel::AssetDrag;
+        if let Some(choice) = field
+            .dnd_hover_payload::<AssetDrag>()
+            .and_then(|drag| drag.material(assets, material_files))
+            .filter(|_| AssetDrag::released(ui, &field).is_some())
+        {
+            *material = Some(choice);
+        }
     });
     reveal
 }

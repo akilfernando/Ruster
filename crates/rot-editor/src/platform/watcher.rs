@@ -201,6 +201,7 @@ mod imp {
                                 || source.ends_with(".wav")
                                 || source.ends_with(".lua")
                                 || source.ends_with(".prefab")
+                                || source.ends_with(rot_assets::MATERIAL_EXTENSION)
                             {
                                 changed.insert(directory.join(source));
                             }

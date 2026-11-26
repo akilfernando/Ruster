@@ -721,6 +721,25 @@ impl ComponentSession {
         self.commit([SceneChange::Display(display, background)])
     }
 
+    /// Sync one already-referenced material in the scene with an updated asset
+    /// without discarding scene Undo history.
+    pub fn refresh_material(
+        &mut self,
+        expected: u64,
+        id: &str,
+        value: OpaqueMaterial,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected)?;
+        value.validate()?;
+        if !self.scene.materials.contains_key(id) || self.scene.materials.get(id) == Some(&value) {
+            return Ok(self.revision);
+        }
+        self.commit([SceneChange::Material {
+            id: id.to_owned(),
+            value: Some(value),
+        }])
+    }
+
     /// Create or replace a scene-owned material, optionally assigning a new
     /// material to one exact Mesh Renderer as part of the same transaction.
     pub fn set_material(
@@ -2629,5 +2648,45 @@ mod tests {
         assert!(session.reparent(1, "left", Some("root")).is_err());
         assert_eq!(session.revision(), 1);
         assert_eq!(session.scene().objects[0].parent, None);
+    }
+
+    #[test]
+    fn refresh_material_updates_referenced_material_preserving_undo() {
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let initial = OpaqueMaterial {
+            name: Some("Steel".into()),
+            tint: [0.5, 0.5, 0.5],
+            ..OpaqueMaterial::default()
+        };
+        scene
+            .materials
+            .insert("material-steel".into(), initial.clone());
+        let mut session = ComponentSession::new(scene).unwrap();
+        assert_eq!(
+            session
+                .refresh_material(0, "unreferenced", initial.clone())
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            session
+                .refresh_material(0, "material-steel", initial.clone())
+                .unwrap(),
+            0
+        );
+        let updated = OpaqueMaterial {
+            tint: [0.8, 0.2, 0.2],
+            ..initial.clone()
+        };
+        assert_eq!(
+            session
+                .refresh_material(0, "material-steel", updated.clone())
+                .unwrap(),
+            1
+        );
+        assert_eq!(session.scene().materials["material-steel"], updated);
+        assert!(session.is_dirty());
+        assert_eq!(session.undo(1).unwrap(), 2);
+        assert_eq!(session.scene().materials["material-steel"], initial);
     }
 }

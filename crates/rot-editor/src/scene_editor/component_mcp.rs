@@ -1268,7 +1268,7 @@ impl ComponentWorkspace {
         if map.keys().any(|key| {
             !matches!(
                 key.as_str(),
-                "offset" | "model_offset" | "prefab_offset" | "issue_offset"
+                "offset" | "model_offset" | "prefab_offset" | "material_offset" | "issue_offset"
             )
         }) {
             return Err(invalid());
@@ -1314,6 +1314,25 @@ impl ComponentWorkspace {
         result["prefab_count"] = json!(self.prefab_files.len());
         result["prefab_next_offset"] = json!((prefab_offset + 16 < self.prefab_files.len())
             .then(|| (prefab_offset + 16).to_string()));
+        let material_offset = offset("material_offset")?;
+        if material_offset > self.material_files.len() {
+            return Err(invalid());
+        }
+        result["materials"] = json!(self
+            .material_files
+            .values()
+            .skip(material_offset)
+            .take(16)
+            .map(|file| {
+                let name = rot_scene::MaterialSource::read_json(&file.bytes)
+                    .ok()
+                    .and_then(|src| src.into_material().name);
+                json!({"id":file.id,"source":file.source,"hash":file.hash,"name":name})
+            })
+            .collect::<Vec<_>>());
+        result["material_count"] = json!(self.material_files.len());
+        result["material_next_offset"] = json!((material_offset + 16 < self.material_files.len())
+            .then(|| (material_offset + 16).to_string()));
         asset_inspection::append_import_issues(
             &mut result,
             &self.asset_browser.issues,

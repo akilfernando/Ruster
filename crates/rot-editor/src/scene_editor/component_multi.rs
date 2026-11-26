@@ -399,6 +399,7 @@ impl SharedComponent {
         meshes: &rot_app::MeshMap,
         assets: Option<&rot_assets::AssetStore>,
         materials: &BTreeMap<String, OpaqueMaterial>,
+        material_files: &BTreeMap<String, rot_assets::MaterialFile>,
     ) -> bool {
         let mut submit = false;
         let name = self.label.plain();
@@ -420,12 +421,30 @@ impl SharedComponent {
                             ui,
                             Text::ComponentMaterial,
                             |material| {
-                                material
-                                    .as_deref()
-                                    .unwrap_or(Text::ComponentNoMaterial.plain())
-                                    .to_owned()
+                                material.as_deref().map_or_else(
+                                    || Text::ComponentNoMaterial.plain().to_owned(),
+                                    |id| {
+                                        materials
+                                            .get(id)
+                                            .and_then(|surface| surface.name.clone())
+                                            .or_else(|| {
+                                                material_files.get(id).map(
+                                                    super::component_inspector::material_asset_display_name,
+                                                )
+                                            })
+                                            .unwrap_or_else(|| id.to_owned())
+                                    },
+                                )
                             },
-                            std::iter::once(None).chain(materials.keys().cloned().map(Some)),
+                            std::iter::once(None)
+                                .chain(materials.keys().cloned().map(Some))
+                                .chain(
+                                    material_files
+                                        .keys()
+                                        .filter(|id| !materials.contains_key(*id))
+                                        .cloned()
+                                        .map(Some),
+                                ),
                         );
                         ui_kit::property_row(ui, Text::ComponentTint.plain(), |ui| {
                             let mut tint = fields.tint.current().copied().unwrap_or([1.0; 4]);
@@ -679,10 +698,11 @@ impl MultiInspector {
         meshes: &rot_app::MeshMap,
         assets: Option<&rot_assets::AssetStore>,
         materials: &BTreeMap<String, OpaqueMaterial>,
+        material_files: &BTreeMap<String, rot_assets::MaterialFile>,
     ) -> bool {
         let mut submit = false;
         for component in &mut self.components {
-            submit |= component.show(ui, meshes, assets, materials);
+            submit |= component.show(ui, meshes, assets, materials, material_files);
         }
         submit
     }

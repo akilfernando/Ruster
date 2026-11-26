@@ -389,10 +389,17 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
         return exact_keys(
             args,
             &[],
-            &["offset", "model_offset", "prefab_offset", "issue_offset"],
+            &[
+                "offset",
+                "model_offset",
+                "prefab_offset",
+                "material_offset",
+                "issue_offset",
+            ],
         ) && args.get("offset").is_none_or(canonical_u64)
             && args.get("model_offset").is_none_or(canonical_u64)
             && args.get("prefab_offset").is_none_or(canonical_u64)
+            && args.get("material_offset").is_none_or(canonical_u64)
             && args.get("issue_offset").is_none_or(canonical_u64);
     }
     if name == "scene_prefab" {
@@ -601,7 +608,7 @@ fn tools() -> Value {
         json!({"name":"project_connect","description":"Choose which open editor to work with, by project name, project folder, scene file or ID from project_list. A folder or scene file that is not open is opened in Rot Engine. Only needed when several editors are open or none is. With a registry configured, connect the exact registered project and include the returned connection in later calls.","inputSchema":object_schema(json!({"project":{"type":"string","minLength":1,"maxLength":1024}}),vec!["project"])}),
     ];
     for (name, description) in [
-        ("asset_inspect", "Inspect pages of project assets and GLB models. Follow next_offset and model_next_offset. v23 also lists prefabs and import issues by path, including files with no ID. Follow prefab_next_offset and issue_next_offset using the matching offsets. Issues can change without a catalog revision."),
+        ("asset_inspect", "Inspect pages of project assets, GLB models, prefabs, materials, and import issues. Follow *_next_offset fields using the matching offsets."),
         ("asset_import", "Import one bounded project-relative OBJ mesh, bounded PCM16 WAV sound, supported PNG texture, bounded UTF-8 Lua script or self-contained static GLB model into the immediately persisted typed catalog. GLB rejects normal_policy/texture_role; supports bounded hierarchies with optional names, representable node matrices, Point, Spot and Directional lights, perspective and orthographic cameras, and opaque dielectric materials with Base Color PNG and green-channel packed Roughness. Unsupported semantics reject; place separately with scene_model_place. Optional normal_policy selects a distinct OBJ interpretation: flat or authored_when_complete; omitted preserves flat. PNG-only texture_role selects base_color_srgb or roughness_linear; omission preserves base color. The two options cannot be combined. Another interpretation needs a distinct asset ID; Refresh preserves the accepted interpretation. Requires scene/session/catalog revisions. Does not assign it or save the scene."),
         ("asset_refresh", "Reimport one registered mesh, texture or static GLB model, retaining last-good accepted content on failure. Model refresh accepts geometry/normal/UV/image changes only with the same named structure, transforms and material settings; it updates resources without rewriting placed scene copies. Catalog persists independently of scene history."),
         ("scene_model_place", "Place a registered static GLB model as ordinary editable scene hierarchy/material copies under a creator-owned root. Requires inspected session, scene and asset revisions plus clean human drafts. Optional name labels the root. One atomic unsaved Undo entry; does not reimport or save. Reimport updates shared resources, not local scene values."),
@@ -643,6 +650,7 @@ fn tools() -> Value {
         if name == "asset_inspect" {
             properties.insert("model_offset".into(), decimal.clone());
             properties.insert("prefab_offset".into(), decimal.clone());
+            properties.insert("material_offset".into(), decimal.clone());
             properties.insert("issue_offset".into(), decimal.clone());
             properties.insert("usage_asset_id".into(), json!({"type":"string","description":"Exact v23 texture or Lua script asset ID. Use offset for usage pages."}));
             properties.insert("expected_session_token".into(), json!({"type":"string"}));
@@ -1528,6 +1536,14 @@ mod tests {
     fn texture_uses_is_read_only_and_requires_exact_continuation_guards() {
         let first = json!({"usage_asset_id":"panel"});
         assert!(valid_arguments("asset_inspect", &first));
+        assert!(valid_arguments(
+            "asset_inspect",
+            &json!({"material_offset":"16"})
+        ));
+        assert!(!valid_arguments(
+            "asset_inspect",
+            &json!({"material_offset":16})
+        ));
         assert!(!valid_arguments(
             "asset_inspect",
             &json!({"usage_asset_id":"panel","offset":"16"})

@@ -14,8 +14,13 @@ use std::sync::Arc;
 const METADATA_EXTENSION: &str = ".rotmeta";
 pub const MAX_PROJECT_SIDECAR_BYTES: usize = 4096;
 
+#[path = "project_materials.rs"]
+mod materials;
 #[path = "project_prefabs.rs"]
 mod prefabs;
+pub use materials::{
+    publish_project_material, verify_project_material, MaterialFile, MATERIAL_EXTENSION,
+};
 pub use prefabs::{publish_project_prefab, verify_project_prefab, PrefabFile};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -109,11 +114,14 @@ impl AssetStore {
         if source.ends_with(".prefab") {
             return Ok(prefabs::MAX_PREFAB_BYTES);
         }
+        if source.ends_with(materials::MATERIAL_EXTENSION) {
+            return Ok(materials::MAX_MATERIAL_BYTES);
+        }
         match Importer::from_path(source) {
             Some(Importer::Asset(kind)) => Ok(kind.source_limit()),
             Some(Importer::Model) => Ok(super::MAX_GLB_SOURCE_BYTES),
             None => Err(error(
-                "Rot imports OBJ, PNG, WAV, GLB, glTF, and prefab files.",
+                "Rot imports OBJ, PNG, WAV, GLB, glTF, prefab, and material files.",
             )),
         }
     }
@@ -959,9 +967,11 @@ impl AssetStore {
                     dirs.push(other);
                 } else if kind.is_file()
                     && other != sidecar
-                    && name
-                        .strip_suffix(METADATA_EXTENSION)
-                        .is_some_and(|stem| Importer::from_path(stem).is_some())
+                    && name.strip_suffix(METADATA_EXTENSION).is_some_and(|stem| {
+                        Importer::from_path(stem).is_some()
+                            || stem.ends_with(".prefab")
+                            || stem.ends_with(materials::MATERIAL_EXTENSION)
+                    })
                 {
                     if let Ok(entries) = load_metadata(&other) {
                         for entry in entries {

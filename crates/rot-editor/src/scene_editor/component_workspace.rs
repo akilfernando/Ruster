@@ -320,6 +320,9 @@ pub(super) struct ComponentWorkspace {
     asset_browser: asset_panel::Browser,
     prefab_files: BTreeMap<String, rot_assets::PrefabFile>,
     prefab_refresh_pending: bool,
+    material_files: BTreeMap<String, rot_assets::MaterialFile>,
+    applied_material_hashes: BTreeMap<String, String>,
+    material_refresh_pending: bool,
     prefab_feedback: Option<prefabs::PrefabFeedback>,
     prefab_details_open: bool,
     unpack_prefab_draft: Option<prefabs::UnpackDraft>,
@@ -473,12 +476,21 @@ impl ComponentWorkspace {
             Ok((preview, world)) => (Ok(preview), world),
             Err(error) => (Err(error), Vec::new()),
         };
-        let (meshes, textures, mut asset_browser, prefab_files) = match prior.as_deref_mut() {
+        let (
+            meshes,
+            textures,
+            mut asset_browser,
+            prefab_files,
+            material_files,
+            applied_material_hashes,
+        ) = match prior.as_deref_mut() {
             Some(prior) => (
                 std::mem::take(&mut prior.meshes),
                 std::mem::take(&mut prior.textures),
                 std::mem::take(&mut prior.asset_browser),
                 std::mem::take(&mut prior.prefab_files),
+                std::mem::take(&mut prior.material_files),
+                std::mem::take(&mut prior.applied_material_hashes),
             ),
             None => (
                 assets
@@ -487,6 +499,8 @@ impl ComponentWorkspace {
                 assets
                     .as_ref()
                     .map_or_else(Default::default, rot_assets::AssetStore::texture_snapshots),
+                Default::default(),
+                Default::default(),
                 Default::default(),
                 Default::default(),
             ),
@@ -545,6 +559,9 @@ impl ComponentWorkspace {
             asset_browser,
             prefab_files,
             prefab_refresh_pending: false,
+            material_files,
+            applied_material_hashes,
+            material_refresh_pending: false,
             prefab_feedback: None,
             prefab_details_open: false,
             unpack_prefab_draft: None,
@@ -616,8 +633,21 @@ impl ComponentWorkspace {
             #[cfg(unix)]
             revoke_ai_connection: false,
         };
-        if let Some(assets) = &editor.assets {
-            editor.asset_browser.refresh(assets, Vec::new(), &[], &[]);
+        if let Some(assets) = editor.assets.take() {
+            let mut issues = Vec::new();
+            let prefabs: Vec<_> = editor.prefab_files.values().cloned().collect();
+            let materials = if editor.material_files.is_empty() {
+                let (mut mats, mat_issues) = assets.read_project_materials();
+                issues.extend(mat_issues);
+                editor.adopt_material_files(&mut mats, &mut issues);
+                mats
+            } else {
+                editor.material_files.values().cloned().collect()
+            };
+            editor
+                .asset_browser
+                .refresh(&assets, Vec::new(), &issues, &prefabs, &materials);
+            editor.assets = Some(assets);
         }
         editor.select(
             editor
@@ -673,6 +703,7 @@ impl ComponentWorkspace {
         self.play_checks.poll();
         #[cfg(target_os = "linux")]
         self.poll_assets(ctx);
+        self.reconcile_materials();
         self.update_sound_audition();
         self.observe_runtime();
         self.runtime.poll(ctx);
@@ -698,11 +729,13 @@ impl ComponentWorkspace {
             match update {
                 Ok(mut snapshot) => {
                     self.adopt_prefabs(&mut snapshot.prefabs, &mut snapshot.issues);
+                    self.adopt_material_files(&mut snapshot.materials, &mut snapshot.issues);
                     self.asset_browser.refresh(
                         &snapshot.store,
                         snapshot.folders,
                         &snapshot.issues,
                         &snapshot.prefabs,
+                        &snapshot.materials,
                     );
                     self.meshes = snapshot.store.mesh_snapshots();
                     self.textures = snapshot.store.texture_snapshots();
@@ -733,6 +766,7 @@ impl ComponentWorkspace {
                 Ok(super::project_assets::ImportResult {
                     errors,
                     created_script,
+                    created_material,
                 }) => {
                     self.asset_import = None;
                     let moved = self.asset_move.take();
@@ -747,6 +781,9 @@ impl ComponentWorkspace {
                         if let Some((id, destination)) = created_script {
                             self.poll_assets(ctx);
                             self.select_published_asset(id, &destination, true);
+                        } else if let Some((id, destination)) = created_material {
+                            self.poll_assets(ctx);
+                            self.select_created_material(id, &destination);
                         } else if let Some((id, destination)) = moved {
                             self.poll_assets(ctx);
                             self.select_published_asset(id, &destination, false);
@@ -1289,9 +1326,23 @@ impl ComponentWorkspace {
             self.inspector_error = None;
             return true;
         }
-        let result = self
-            .draft_objects()
-            .and_then(|objects| Self::put_draft(&mut self.session, objects));
+        let result = self.draft_objects().and_then(|objects| {
+            let imported = self.imported_material_assets_for(&objects)?;
+            let next = if imported.is_empty() {
+                Self::put_draft(&mut self.session, objects)?
+            } else {
+                let revision = self.session.revision();
+                self.session
+                    .put_objects_with_materials(revision, objects, imported.clone())?
+            };
+            for id in imported.keys() {
+                if let Some(file) = self.material_files.get(id) {
+                    self.applied_material_hashes
+                        .insert(id.clone(), file.hash.clone());
+                }
+            }
+            Ok(next)
+        });
         match result {
             Ok(_) => {
                 self.refresh();
@@ -1882,6 +1933,7 @@ impl ComponentWorkspace {
                 &self.meshes,
                 self.assets.as_ref(),
                 &self.session.scene().materials,
+                &self.material_files,
             );
         }
         if submit {
@@ -3202,6 +3254,11 @@ impl ComponentWorkspace {
                                         .open_new_script(self.asset_browser.import_folder());
                                     ui.close();
                                 }
+                                if ui.button(Text::AssetNewMaterial.plain()).clicked() {
+                                    self.asset_browser
+                                        .open_new_material(self.asset_browser.import_folder());
+                                    ui.close();
+                                }
                             });
                         },
                     );
@@ -4015,6 +4072,7 @@ impl ComponentWorkspace {
                                         &self.meshes,
                                         self.assets.as_ref(),
                                         &self.session.scene().materials,
+                                        &self.material_files,
                                         component_inspector::ComponentControls {
                                             actions: &self.session.scene().actions,
                                             allow_new_material: allow_new,
@@ -4628,7 +4686,7 @@ mod tests {
             let issues = store.reconcile_project_files(&BTreeSet::new(), || true);
             editor
                 .asset_browser
-                .refresh(&store, Vec::new(), &issues, &[]);
+                .refresh(&store, Vec::new(), &issues, &[], &[]);
             editor.meshes = store.mesh_snapshots();
             editor.textures = store.texture_snapshots();
             editor.assets = Some(store.project_snapshot());

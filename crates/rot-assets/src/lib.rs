@@ -43,7 +43,8 @@ pub use mutations::{
     PreparedAsset,
 };
 pub use project_files::{
-    publish_project_prefab, verify_project_prefab, PrefabFile, ProjectFileIssue,
+    publish_project_material, publish_project_prefab, verify_project_material,
+    verify_project_prefab, MaterialFile, PrefabFile, ProjectFileIssue, MATERIAL_EXTENSION,
     MAX_PROJECT_SIDECAR_BYTES,
 };
 pub use texture::{

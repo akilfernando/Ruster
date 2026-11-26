@@ -6,15 +6,17 @@ use crate::ui_kit::tokens::{SPACE_L, SPACE_XS};
 use crate::{editor_theme, strings::Text};
 use eframe::egui;
 use rot_assets::{
-    AssetKind, AssetStateIdentity, AssetStatus, MeshNormalPolicy, PrefabFile, ProjectFileIssue,
-    TextureRole,
+    AssetKind, AssetStateIdentity, AssetStatus, MaterialFile, MeshNormalPolicy, PrefabFile,
+    ProjectFileIssue, TextureRole,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[cfg(target_os = "linux")]
-use super::super::project_assets::{script_filename, FileAction, ScriptLocation};
+use super::super::project_assets::{
+    material_filename, script_filename, split_asset_filename, FileAction, ScriptLocation,
+};
 
 #[cfg(target_os = "linux")]
 enum ContextAction {
@@ -22,6 +24,7 @@ enum ContextAction {
     Reveal(PathBuf),
     CreateFolder(PathBuf),
     CreateScript(PathBuf),
+    CreateMaterial(PathBuf),
     OpenScript { id: String, source: PathBuf },
     Rename(PathBuf),
     Move { id: String, source: PathBuf },
@@ -31,6 +34,10 @@ enum ContextAction {
 #[cfg(target_os = "linux")]
 enum FileDialog {
     Script {
+        parent: PathBuf,
+        name: String,
+    },
+    Material {
         parent: PathBuf,
         name: String,
     },
@@ -51,9 +58,10 @@ enum FileDialog {
 }
 
 const SEARCH: &str = "v23_asset_search";
-const ASSET_TYPES: [Text; 7] = [
+const ASSET_TYPES: [Text; 8] = [
     Text::Mesh,
     Text::AssetTypeTexture,
+    Text::ComponentMaterial,
     Text::AssetTypeSound,
     Text::ComponentScript,
     Text::Model,
@@ -149,6 +157,7 @@ pub(in crate::scene_editor) struct AssetDrag {
     id: String,
     catalog: AssetStateIdentity,
     prefab: bool,
+    material: bool,
 }
 
 impl AssetDrag {
@@ -178,6 +187,17 @@ impl AssetDrag {
             asset: self.id.clone(),
         })
     }
+
+    pub(in crate::scene_editor) fn material(
+        &self,
+        assets: Option<&rot_assets::AssetStore>,
+        material_files: &BTreeMap<String, MaterialFile>,
+    ) -> Option<String> {
+        (self.material
+            && assets.is_some_and(|store| store.matches_identity(&self.catalog))
+            && material_files.contains_key(&self.id))
+        .then(|| self.id.clone())
+    }
 }
 
 pub(super) struct Browser {
@@ -185,6 +205,7 @@ pub(super) struct Browser {
     pub(super) focus_search: bool,
     pub(super) selected: Option<String>,
     reveal_focus: Option<String>,
+    edit_material: Option<String>,
     pub(super) issues: BTreeMap<String, ImportIssue>,
     size: f32,
     folder: PathBuf,
@@ -213,6 +234,7 @@ impl Default for Browser {
             focus_search: false,
             selected: None,
             reveal_focus: None,
+            edit_material: None,
             issues: BTreeMap::new(),
             size: 64.0,
             folder: "Assets".into(),
@@ -262,6 +284,19 @@ impl Browser {
             parent,
             name: String::new(),
         });
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn open_new_material(&mut self, parent: PathBuf) {
+        self.open = true;
+        self.start_file_dialog(FileDialog::Material {
+            parent,
+            name: String::new(),
+        });
+    }
+
+    pub(super) fn take_edit_material(&mut self) -> Option<String> {
+        self.edit_material.take()
     }
 
     #[cfg(target_os = "linux")]
@@ -378,13 +413,25 @@ impl Browser {
         egui::Modal::new(egui::Id::unique("asset_file_dialog"))
             .frame(editor_theme::dialog_frame(ctx))
             .show(ctx, |ui| {
-                let script_parent = match &dialog {
-                    FileDialog::Script { parent, .. } => Some(parent.clone()),
+                enum NameFormat {
+                    Script(PathBuf),
+                    Material(PathBuf),
+                }
+                let name_format = match &dialog {
+                    FileDialog::Script { parent, .. } => Some(NameFormat::Script(parent.clone())),
+                    FileDialog::Material { parent, .. } => {
+                        Some(NameFormat::Material(parent.clone()))
+                    }
                     _ => None,
                 };
                 let (heading, action, name) = match &mut dialog {
                     FileDialog::Script { name, .. } => (
                         Text::AssetCreateLuaScript.plain(),
+                        Text::ComponentCreate.plain(),
+                        Some(name),
+                    ),
+                    FileDialog::Material { name, .. } => (
+                        Text::AssetCreateMaterial.plain(),
                         Text::ComponentCreate.plain(),
                         Some(name),
                     ),
@@ -422,8 +469,8 @@ impl Browser {
                             state.store(ctx, text.id);
                         }
                     }
-                    let valid = if let Some(parent) = script_parent {
-                        match script_filename(name) {
+                    let valid = match name_format {
+                        Some(NameFormat::Script(parent)) => match script_filename(name) {
                             Ok(filename) => {
                                 ui.label(parent.join(filename).display().to_string());
                                 true
@@ -434,9 +481,20 @@ impl Browser {
                                 }
                                 false
                             }
-                        }
-                    } else {
-                        !name.trim().is_empty()
+                        },
+                        Some(NameFormat::Material(parent)) => match material_filename(name) {
+                            Ok(filename) => {
+                                ui.label(parent.join(filename).display().to_string());
+                                true
+                            }
+                            Err(error) => {
+                                if !name.trim().is_empty() {
+                                    ui.colored_label(ui.visuals().error_fg_color, error);
+                                }
+                                false
+                            }
+                        },
+                        None => !name.trim().is_empty(),
                     };
                     submit = valid
                         && text.lost_focus()
@@ -463,6 +521,10 @@ impl Browser {
         }
         let action = match dialog {
             FileDialog::Script { parent, name } => FileAction::CreateScript {
+                parent,
+                name: name.trim().to_owned(),
+            },
+            FileDialog::Material { parent, name } => FileAction::CreateMaterial {
                 parent,
                 name: name.trim().to_owned(),
             },
@@ -500,6 +562,7 @@ impl Browser {
         folders: Vec<PathBuf>,
         issues: &[ProjectFileIssue],
         prefabs: &[PrefabFile],
+        materials: &[MaterialFile],
     ) {
         let selected_index = self
             .selected
@@ -551,6 +614,14 @@ impl Browser {
                 AssetRow::new(&prefab.id, &prefab.source, "Prefab", AssetStatus::Ready)
             }),
         );
+        self.rows.extend(materials.iter().map(|material| {
+            AssetRow::new(
+                &material.id,
+                &material.source,
+                "Material",
+                AssetStatus::Ready,
+            )
+        }));
         self.issues.clear();
         for issue in issues {
             let entry = self
@@ -658,15 +729,19 @@ impl Browser {
                 if represented {
                     return None;
                 }
-                let kind = match Path::new(source).extension()?.to_str()? {
-                    "obj" => "Mesh",
-                    "png" => "Texture",
-                    "wav" => "Sound",
-                    "lua" => Text::ComponentScript.plain(),
-                    "glb" => "Model",
-                    "prefab" => "Prefab",
-                    "rotmeta" => Text::AssetImportSettings.plain(),
-                    _ => return None,
+                let kind = if source.ends_with(rot_assets::MATERIAL_EXTENSION) {
+                    "Material"
+                } else {
+                    match Path::new(source).extension()?.to_str()? {
+                        "obj" => "Mesh",
+                        "png" => "Texture",
+                        "wav" => "Sound",
+                        "lua" => Text::ComponentScript.plain(),
+                        "glb" => "Model",
+                        "prefab" => "Prefab",
+                        "rotmeta" => Text::AssetImportSettings.plain(),
+                        _ => return None,
+                    }
                 };
                 let mut row = AssetRow::new(source, source, kind, issue.status.clone());
                 row.registered = false;
@@ -957,6 +1032,17 @@ impl Browser {
                                             Some(ContextAction::CreateScript(folder.clone()));
                                         ui.close();
                                     }
+                                    if ui
+                                        .add_enabled(
+                                            folder.starts_with("Assets"),
+                                            egui::Button::new(Text::AssetNewMaterial.plain()),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.context_action =
+                                            Some(ContextAction::CreateMaterial(folder.clone()));
+                                        ui.close();
+                                    }
                                     if ui.button(Text::AssetShowInFileManager.plain()).clicked() {
                                         self.context_action =
                                             Some(ContextAction::Reveal(folder.clone()));
@@ -1048,14 +1134,18 @@ impl Browser {
                                     response.request_focus();
                                 }
                                 let placeable = can_place && row.can_place(meshes);
+                                let editable_material =
+                                    row.kind == "Material" && row.status == AssetStatus::Ready;
+                                let draggable = placeable || editable_material;
                                 let drag = || {
                                     self.catalog.clone().map(|catalog| AssetDrag {
                                         catalog,
                                         id: row.id.clone(),
                                         prefab: row.kind == "Prefab",
+                                        material: row.kind == "Material",
                                     })
                                 };
-                                if response.drag_started() && placeable {
+                                if response.drag_started() && draggable {
                                     if let Some(payload) = drag() {
                                         response.dnd_set_drag_payload(payload);
                                     }
@@ -1063,14 +1153,24 @@ impl Browser {
                                 if response.clicked() {
                                     selected = Some(row.id.clone());
                                 }
-                                if response.double_clicked() && placeable {
-                                    place = drag();
+                                if response.double_clicked() {
+                                    if placeable {
+                                        place = drag();
+                                    } else if editable_material {
+                                        self.edit_material = Some(row.id.clone());
+                                    }
                                 }
                                 response.context_menu(|ui| {
                                     if placeable
                                         && ui.button(Text::AssetPlaceInScene.plain()).clicked()
                                     {
                                         place = drag();
+                                        ui.close();
+                                    }
+                                    if editable_material
+                                        && ui.button(Text::MaterialEditAsset.plain()).clicked()
+                                    {
+                                        self.edit_material = Some(row.id.clone());
                                         ui.close();
                                     }
                                     #[cfg(target_os = "linux")]
@@ -1128,6 +1228,8 @@ impl Browser {
             };
             let message = if row.kind == "Prefab" && row.status == AssetStatus::Invalid {
                 Text::PrefabInvalid
+            } else if row.kind == "Material" && row.status == AssetStatus::Invalid {
+                Text::MaterialInvalid
             } else {
                 message
             };
@@ -1176,6 +1278,12 @@ impl Browser {
                 self.context_action = Some(action);
             }
         });
+        if row.kind == "Material"
+            && row.status == AssetStatus::Ready
+            && ui.button(Text::MaterialEditAsset.plain()).clicked()
+        {
+            self.edit_material = Some(row.id.clone());
+        }
         if (row.kind == "Mesh" || row.model || row.kind == "Prefab")
             && ui
                 .add_enabled(
@@ -1188,6 +1296,7 @@ impl Browser {
                 id: row.id.clone(),
                 catalog: self.catalog.clone()?,
                 prefab: row.kind == "Prefab",
+                material: false,
             });
         }
         let ready_detail = row
@@ -1453,6 +1562,9 @@ impl ComponentWorkspace {
         if let Some(place) = place {
             self.place_asset(&place, None);
         }
+        if let Some(id) = self.asset_browser.take_edit_material() {
+            self.begin_material_asset(&id);
+        }
     }
 
     #[cfg(target_os = "linux")]
@@ -1477,6 +1589,10 @@ impl ComponentWorkspace {
                 self.asset_browser.open_new_script(parent);
                 ctx.request_repaint();
             }
+            Some(ContextAction::CreateMaterial(parent)) => {
+                self.asset_browser.open_new_material(parent);
+                ctx.request_repaint();
+            }
             Some(ContextAction::OpenScript { id, source }) => {
                 if let Some(catalog) = self.asset_browser.catalog.clone() {
                     self.submit_asset_action(
@@ -1492,9 +1608,16 @@ impl ComponentWorkspace {
             }
             Some(ContextAction::Rename(source)) => {
                 let stem = source
-                    .file_stem()
-                    .map(|stem| stem.to_string_lossy().into_owned())
-                    .unwrap_or_default();
+                    .file_name()
+                    .and_then(|leaf| leaf.to_str())
+                    .and_then(split_asset_filename)
+                    .map(|(stem, _)| stem.to_owned())
+                    .unwrap_or_else(|| {
+                        source
+                            .file_stem()
+                            .map(|stem| stem.to_string_lossy().into_owned())
+                            .unwrap_or_default()
+                    });
                 self.asset_browser
                     .start_file_dialog(FileDialog::Rename { source, stem });
                 ctx.request_repaint();
@@ -1626,6 +1749,22 @@ impl ComponentWorkspace {
                 .plain()
                 .into(),
             );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn select_created_material(&mut self, id: String, destination: &Path) {
+        if self
+            .material_files
+            .get(&id)
+            .is_some_and(|file| Path::new(&file.source) == destination)
+        {
+            self.asset_browser.query.clear();
+            if let Some(parent) = destination.parent() {
+                self.asset_browser.folder = parent.to_owned();
+            }
+            self.asset_browser.selected = Some(id);
+            self.asset_browser.filter();
         }
     }
 
@@ -1764,7 +1903,7 @@ mod tests {
                 .map(|&index| browser.rows[index].id.clone())
                 .collect::<Vec<_>>()
         };
-        browser.refresh(&store, Vec::new(), &[], &[]);
+        browser.refresh(&store, Vec::new(), &[], &[], &[]);
         assert_eq!(visible(&browser), ["top-mesh"]);
         browser.selected = Some("top-mesh".into());
 
@@ -1816,7 +1955,7 @@ mod tests {
         assert_eq!(browser.type_filter, Some(Text::ComponentScript));
         assert!(visible(&browser).is_empty());
         assert_eq!(browser.selected.as_deref(), Some("nested-script"));
-        browser.refresh(&store, Vec::new(), &[], &[]);
+        browser.refresh(&store, Vec::new(), &[], &[], &[]);
         assert_eq!(browser.selected.as_deref(), Some("nested-script"));
 
         browser.folder = "Assets/Depot".into();
@@ -1826,7 +1965,7 @@ mod tests {
         assert_eq!(browser.selected.as_deref(), Some("nested-script"));
         fs::write(nested.join("Support.lua"), "return nil").unwrap();
         store.import("support", "Assets/Depot/Support.lua").unwrap();
-        browser.refresh(&store, Vec::new(), &[], &[]);
+        browser.refresh(&store, Vec::new(), &[], &[], &[]);
         assert_eq!(browser.type_filter, Some(Text::ComponentScript));
         assert_eq!(visible(&browser), ["nested-script", "support"]);
         assert_eq!(browser.selected.as_deref(), Some("nested-script"));
@@ -1873,7 +2012,7 @@ mod tests {
         editor.assets = Some(store);
         editor
             .asset_browser
-            .refresh(editor.assets.as_ref().unwrap(), Vec::new(), &[], &[]);
+            .refresh(editor.assets.as_ref().unwrap(), Vec::new(), &[], &[], &[]);
         let selection = editor.selection.clone();
         editor.asset_browser.selected = Some("rail-a".into());
         editor.asset_browser.query = "other".into();
@@ -1971,7 +2110,7 @@ mod tests {
             .id
             .clone();
         let mut browser = Browser::default();
-        browser.refresh(&store, Vec::new(), &issues, &[]);
+        browser.refresh(&store, Vec::new(), &issues, &[], &[]);
         let ready = &browser.rows[browser.by_id[&roughness]];
         assert_eq!(ready.status, AssetStatus::Ready);
         assert_eq!(ready.settings, Some(Text::RoughnessMapLinear.plain()));
@@ -1992,7 +2131,7 @@ mod tests {
             status: AssetStatus::Invalid,
             message: "Source refresh failed.".into(),
         };
-        browser.refresh(&store, Vec::new(), &[same_id_failure], &[]);
+        browser.refresh(&store, Vec::new(), &[same_id_failure], &[], &[]);
         assert!(browser.rows[browser.by_id[&roughness]].last_good_available);
         assert!(browser.issues[source].last_good_available);
     }
@@ -2020,7 +2159,7 @@ mod tests {
         let mut editor =
             ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
         let browser = &mut editor.asset_browser;
-        browser.refresh(&store, vec![PathBuf::from("Assets/Empty")], &[], &[]);
+        browser.refresh(&store, vec![PathBuf::from("Assets/Empty")], &[], &[], &[]);
         assert!(browser.folders.contains(&PathBuf::from("Assets/Empty")));
         assert!(browser.visible.is_empty());
         browser.folder = folder;
@@ -2035,6 +2174,7 @@ mod tests {
             id,
             catalog: store.state_identity(),
             prefab: false,
+            material: false,
         };
         editor.meshes = store.mesh_snapshots();
         editor.assets = Some(store.project_snapshot());
@@ -2063,7 +2203,7 @@ mod tests {
             store.reconcile_project_files(&BTreeSet::from([source, never_imported]), || true);
         editor
             .asset_browser
-            .refresh(&store, Vec::new(), &issues, &[]);
+            .refresh(&store, Vec::new(), &issues, &[], &[]);
         let new = &editor.asset_browser.rows[editor.asset_browser.by_id["Assets/New.obj"]];
         assert_eq!(new.status, AssetStatus::Invalid);
         assert!(new.diagnostic.is_some());

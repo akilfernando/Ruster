@@ -35,10 +35,12 @@ pub mod hud;
 pub mod input;
 mod lighting;
 mod lighting_authoring;
+mod material_asset;
 pub use animation::{
     AnimationBinding, Clip, ClipInterpolation, ClipProperty, ClipTrack, MAX_ANIMATIONS,
     MAX_ANIMATION_TARGETS, MAX_CLIP_BYTES,
 };
+pub use material_asset::MaterialSource;
 mod player_view;
 pub use player_view::{PlayerAnchor, PlayerView, ResolvedPlayerView};
 use rot_support::strict_json;

@@ -1,12 +1,15 @@
 //! Scene-owned material drafts and the shared native/AI commit path.
 
-use super::ComponentWorkspace;
+use super::{project_directory, ComponentWorkspace};
 use crate::{editor_theme, strings::Text, ui_kit};
 use eframe::egui;
-use rot_assets::{AssetKind, AssetStatus, AssetStore, TextureRole};
+use rot_assets::{AssetKind, AssetStatus, AssetStore, MaterialFile, ProjectFileIssue, TextureRole};
 use rot_scene::component_scene::{Component, ComponentScene, Geometry, ObjectNode};
-use rot_scene::{MaterialResponse, OpaqueMaterial, SceneError, TextureAddress};
+use rot_scene::{MaterialResponse, MaterialSource, OpaqueMaterial, SceneError, TextureAddress};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Default)]
 pub(super) struct Usage {
@@ -65,6 +68,7 @@ impl Usage {
 pub(in crate::scene_editor) enum Intent {
     Create,
     Edit(String),
+    EditAsset { id: String, source: String },
     MakeUnique(String),
 }
 
@@ -258,6 +262,106 @@ impl ComponentWorkspace {
         })
     }
 
+    pub(super) fn adopt_material_files(
+        &mut self,
+        files: &mut Vec<MaterialFile>,
+        issues: &mut Vec<ProjectFileIssue>,
+    ) {
+        files.retain(|file| {
+            if let Err(error) = MaterialSource::read_json(&file.bytes) {
+                issues.push(ProjectFileIssue {
+                    asset_id: None,
+                    texture_role: None,
+                    path: file.source.clone(),
+                    status: AssetStatus::Invalid,
+                    message: error.to_string(),
+                });
+                return false;
+            }
+            true
+        });
+        self.material_files = files
+            .iter()
+            .cloned()
+            .map(|file| (file.id.clone(), file))
+            .collect();
+        self.material_refresh_pending = true;
+    }
+
+    pub(super) fn reconcile_materials(&mut self) {
+        if !self.material_refresh_pending
+            || self.authored_edit_pending()
+            || self.runtime.in_play_mode()
+        {
+            return;
+        }
+        self.material_refresh_pending = false;
+        let pending: Vec<_> = self
+            .material_files
+            .iter()
+            .filter(|(id, file)| {
+                self.session.scene().materials.contains_key(*id)
+                    && self.applied_material_hashes.get(*id).map(String::as_str)
+                        != Some(file.hash.as_str())
+            })
+            .filter_map(|(id, file)| {
+                MaterialSource::read_json(&file.bytes)
+                    .ok()
+                    .map(|source| (id.clone(), file.hash.clone(), source.into_material()))
+            })
+            .collect();
+        let revision = self.session.revision();
+        for (id, hash, value) in pending {
+            if self
+                .session
+                .refresh_material(self.session.revision(), &id, value)
+                .is_ok()
+            {
+                self.applied_material_hashes.insert(id, hash);
+            }
+        }
+        if self.session.revision() != revision {
+            self.refresh();
+        }
+    }
+
+    fn resolve_material(&self, id: &str) -> Result<OpaqueMaterial, SceneError> {
+        if let Some(material) = self.session.scene().materials.get(id) {
+            return Ok(material.clone());
+        }
+        if let Some(file) = self.material_files.get(id) {
+            return MaterialSource::read_json(&file.bytes).map(MaterialSource::into_material);
+        }
+        Err(SceneError::Invalid(format!(
+            "Material {id} does not exist."
+        )))
+    }
+
+    pub(super) fn imported_material_assets_for(
+        &self,
+        objects: &[ObjectNode],
+    ) -> Result<BTreeMap<String, OpaqueMaterial>, SceneError> {
+        let mut imported = BTreeMap::new();
+        for object in objects {
+            for component in &object.components {
+                if let Component::MeshRenderer {
+                    material: Some(id), ..
+                } = &component.kind
+                {
+                    if !self.session.scene().materials.contains_key(id)
+                        && !imported.contains_key(id)
+                    {
+                        if let Some(file) = self.material_files.get(id) {
+                            let material = MaterialSource::read_json(&file.bytes)?.into_material();
+                            imported.insert(id.clone(), material);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(imported)
+    }
+
     /// Validate only bindings that change, so existing broken assets don't
     /// prevent unrelated edits or removal of the bad assignment.
     pub(super) fn validate_material_bindings(
@@ -266,13 +370,8 @@ impl ComponentWorkspace {
         next: &ObjectNode,
     ) -> Result<(), SceneError> {
         for (id, geometry, new_assignment) in changed_bindings(previous, next) {
-            let material = self
-                .session
-                .scene()
-                .materials
-                .get(id)
-                .ok_or_else(|| SceneError::Invalid(format!("Material {id} does not exist.")))?;
-            for (texture, role) in textures(material) {
+            let material = self.resolve_material(id)?;
+            for (texture, role) in textures(&material) {
                 if let Some(texture) = texture {
                     if new_assignment {
                         validate_texture(self.assets.as_ref(), texture, role)?;
@@ -310,15 +409,21 @@ impl ComponentWorkspace {
                     "Choose a new material ID to create and assign.".into(),
                 ));
             }
-            Some(bound_copy_source(scene, owner, component, source)?)
+            Some(bound_copy_source(scene, owner, component, source)?.clone())
+        } else if let Some(existing) = scene.materials.get(id) {
+            Some(existing.clone())
         } else {
-            scene.materials.get(id)
+            self.material_files
+                .get(id)
+                .and_then(|file| MaterialSource::read_json(&file.bytes).ok())
+                .map(MaterialSource::into_material)
         };
         let mut introduced = false;
-        for ((texture, role), old) in textures(&value)
-            .into_iter()
-            .zip(previous.map_or([None; 2], |m| textures(m).map(|(id, _)| id)))
-        {
+        for ((texture, role), old) in textures(&value).into_iter().zip(
+            previous
+                .as_ref()
+                .map_or([None; 2], |m| textures(m).map(|(id, _)| id)),
+        ) {
             if let Some(texture) = texture.filter(|_| texture != old) {
                 validate_texture(self.assets.as_ref(), texture, role)?;
                 introduced = true;
@@ -348,16 +453,248 @@ impl ComponentWorkspace {
                 }
             }
         }
-        let next = if let (Some((owner, component)), Some(_)) = (assign, inherited_from) {
-            self.session
-                .set_unique_material(revision, id, value, owner, component)?
+        let disk_backup = if inherited_from.is_none() {
+            if let Some(file) = self.material_files.get(id).cloned() {
+                let after = MaterialSource::new(value.clone())?.write_json()?;
+                let after_hash = format!("{:x}", Sha256::digest(&after));
+                if after_hash != file.hash {
+                    rot_assets::publish_project_material(
+                        project_directory(&self.path),
+                        &file.source,
+                        id,
+                        Some(&file.bytes),
+                        Some(&after),
+                    )
+                    .map_err(|error| SceneError::Invalid(error.to_string()))?;
+                    Some((file, after))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
         } else {
-            self.session.set_material(revision, id, value, assign)?
+            None
         };
-        if next != revision {
+        let is_material_asset = self.material_files.contains_key(id);
+        let scene_commit =
+            if assign.is_some() || scene.materials.contains_key(id) || !is_material_asset {
+                let result = if let (Some((owner, component)), Some(_)) = (assign, inherited_from) {
+                    self.session
+                        .set_unique_material(revision, id, value, owner, component)
+                } else {
+                    self.session.set_material(revision, id, value, assign)
+                };
+                if result.is_err() {
+                    if let Some((ref old_file, ref after)) = disk_backup {
+                        let _ = rot_assets::publish_project_material(
+                            project_directory(&self.path),
+                            &old_file.source,
+                            id,
+                            Some(after),
+                            Some(&old_file.bytes),
+                        );
+                    }
+                }
+                result?
+            } else {
+                revision
+            };
+        if let Some((old_file, after)) = disk_backup {
+            let updated = MaterialFile::from_bytes(id.to_owned(), old_file.source, after.into());
+            self.applied_material_hashes
+                .insert(id.to_owned(), updated.hash.clone());
+            self.material_files.insert(id.to_owned(), updated);
+        }
+        if scene_commit != revision {
             self.refresh();
         }
-        Ok(next)
+        Ok(scene_commit)
+    }
+
+    pub(super) fn begin_material_asset(&mut self, id: &str) {
+        if self.material_draft.is_some()
+            || self.viewport_edit_active()
+            || self.runtime.in_play_mode()
+            || self.authored_edit_pending()
+            || self.assets_loading()
+        {
+            return;
+        }
+        let (file_id, file_source, value) = {
+            let Some(file) = self.material_files.get(id) else {
+                return;
+            };
+            let Ok(source) = MaterialSource::read_json(&file.bytes) else {
+                self.error = Some(Text::MaterialInvalid.plain().into());
+                return;
+            };
+            (file.id.clone(), file.source.clone(), source.into_material())
+        };
+        self.ensure_material_usage();
+        self.material_draft = Some(Draft {
+            revision: self.session.revision(),
+            asset_revision: self.material_asset_revision(),
+            object: String::new(),
+            component: String::new(),
+            intent: Intent::EditAsset {
+                id: file_id,
+                source: file_source,
+            },
+            value,
+            affected: self.material_usage.users(id).len(),
+            copy_scope: None,
+            base_colors: ready_texture_choices(self.assets.as_ref(), TextureRole::BaseColor),
+            roughness_maps: ready_texture_choices(self.assets.as_ref(), TextureRole::Roughness),
+            opened_frame: None,
+            error: None,
+        });
+    }
+
+    fn promote_material_to_asset(
+        &mut self,
+        revision: u64,
+        old_id: &str,
+        value: OpaqueMaterial,
+    ) -> Result<(), SceneError> {
+        if self.session.revision() != revision || self.assets.is_none() || self.assets_loading() {
+            return Err(SceneError::Invalid(
+                Text::MaterialTargetChanged.plain().into(),
+            ));
+        }
+        self.ensure_material_prefabs();
+        self.ensure_material_usage();
+        if self.material_usage.prefab_materials.contains(old_id) {
+            return Err(SceneError::Invalid(
+                Text::ComponentPrefabMaterialSource.plain().into(),
+            ));
+        }
+        value.validate()?;
+        let scene = self.session.scene();
+        let previous = scene.materials.get(old_id);
+        for ((texture, role), old) in textures(&value)
+            .into_iter()
+            .zip(previous.map_or([None; 2], |m| textures(m).map(|(id, _)| id)))
+        {
+            if let Some(texture) = texture.filter(|_| texture != old) {
+                validate_texture(self.assets.as_ref(), texture, role)?;
+            }
+        }
+        for &index in self.material_usage.users(old_id) {
+            let object = &scene.objects[index];
+            for mesh in &object.components {
+                if let Component::MeshRenderer {
+                    material: Some(bound),
+                    geometry,
+                    ..
+                } = &mesh.kind
+                {
+                    if bound == old_id
+                        && textures(&value).into_iter().any(|(slot, _)| slot.is_some())
+                    {
+                        self.validate_user(object, geometry)?;
+                    }
+                }
+            }
+        }
+        let root = project_directory(&self.path);
+        let raw_name = value.name.as_deref().unwrap_or(old_id).trim();
+        let sanitized: String = raw_name
+            .chars()
+            .map(|ch| {
+                if ch.is_control() || "<>:\"/\\|?*".contains(ch) {
+                    '_'
+                } else {
+                    ch
+                }
+            })
+            .collect();
+        let base_stem = sanitized.trim_matches('.').trim();
+        let base_stem = if base_stem.is_empty() {
+            "Material"
+        } else {
+            base_stem
+        };
+        let source = (1..)
+            .map(|attempt| {
+                let name = if attempt == 1 {
+                    format!("{base_stem}{}", rot_assets::MATERIAL_EXTENSION)
+                } else {
+                    format!("{base_stem} {attempt}{}", rot_assets::MATERIAL_EXTENSION)
+                };
+                Path::new("Assets")
+                    .join(name)
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .find(|candidate| {
+                !root.join(candidate).exists()
+                    && !root.join(format!("{candidate}.rotmeta")).exists()
+                    && !self
+                        .material_files
+                        .values()
+                        .any(|file| &file.source == candidate)
+            })
+            .expect("finite project filenames");
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let asset_id = (0..)
+            .map(|nonce| {
+                let digest = Sha256::digest(format!("{stamp}/{nonce}/{source}").as_bytes());
+                format!("material-{digest:x}")
+            })
+            .find(|candidate| {
+                !self.material_files.contains_key(candidate)
+                    && !scene.materials.contains_key(candidate)
+                    && self
+                        .assets
+                        .as_ref()
+                        .is_none_or(|store| store.asset_info(candidate).is_none())
+            })
+            .expect("finite material ids");
+        let bytes = MaterialSource::new(value.clone())?.write_json()?;
+        std::fs::create_dir_all(root.join("Assets"))
+            .map_err(|error| SceneError::Invalid(error.to_string()))?;
+        rot_assets::publish_project_material(root, &source, &asset_id, None, Some(&bytes))
+            .map_err(|error| SceneError::Invalid(error.to_string()))?;
+
+        let mut edited_objects = Vec::new();
+        for &index in self.material_usage.users(old_id) {
+            let mut object = scene.objects[index].clone();
+            if self.material_usage.prefab_objects.contains(&object.id) {
+                continue;
+            }
+            let mut touched = false;
+            for component in &mut object.components {
+                if let Component::MeshRenderer { material, .. } = &mut component.kind {
+                    if material.as_deref() == Some(old_id) {
+                        *material = Some(asset_id.clone());
+                        touched = true;
+                    }
+                }
+            }
+            if touched {
+                edited_objects.push(object);
+            }
+        }
+        let next = self.session.put_objects_with_materials(
+            revision,
+            edited_objects,
+            BTreeMap::from([(asset_id.clone(), value)]),
+        );
+        if let Err(error) = next {
+            let _ =
+                rot_assets::publish_project_material(root, &source, &asset_id, Some(&bytes), None);
+            return Err(error);
+        }
+        let file = MaterialFile::from_bytes(asset_id.clone(), source, bytes.into());
+        self.applied_material_hashes
+            .insert(asset_id.clone(), file.hash.clone());
+        self.material_files.insert(asset_id, file);
+        self.refresh();
+        Ok(())
     }
 
     pub(super) fn begin_material(&mut self, request: Request) {
@@ -407,6 +744,17 @@ impl ComponentWorkspace {
                 let mut value = value.clone();
                 value.name = Some(copy_display_name(scene, source, value.name.as_deref()));
                 (1, value)
+            }
+            Intent::EditAsset { id, .. } => {
+                let Some(value) = self
+                    .material_files
+                    .get(id)
+                    .and_then(|file| MaterialSource::read_json(&file.bytes).ok())
+                    .map(MaterialSource::into_material)
+                else {
+                    return;
+                };
+                (self.material_usage.users(id).len(), value)
             }
             Intent::Edit(id) => {
                 if !matches!(&renderer.kind, Component::MeshRenderer { material: Some(bound), .. } if bound == id)
@@ -471,7 +819,7 @@ impl ComponentWorkspace {
                     .expect("bounded material count");
                 (id, Some((draft.object.as_str(), draft.component.as_str())))
             }
-            Intent::Edit(id) => (id.clone(), None),
+            Intent::Edit(id) | Intent::EditAsset { id, .. } => (id.clone(), None),
         };
         let inherited_from = match &draft.intent {
             Intent::MakeUnique(source) => Some(source.as_str()),
@@ -518,11 +866,20 @@ impl ComponentWorkspace {
                     360.
                 };
                 ui.set_width(ui.available_width().min(width));
-                ui.heading(match draft.intent {
+                ui.heading(match &draft.intent {
                     Intent::Create => Text::MaterialNew.plain(),
                     Intent::Edit(_) => Text::MaterialEdit.plain(),
+                    Intent::EditAsset { .. } => Text::MaterialEditAsset.plain(),
                     Intent::MakeUnique(_) => Text::MaterialMakeUnique.plain(),
                 });
+                let asset_source = match &draft.intent {
+                    Intent::Edit(id) => self.material_files.get(id).map(|file| file.source.as_str()),
+                    Intent::EditAsset { source, .. } => Some(source.as_str()),
+                    Intent::Create | Intent::MakeUnique(_) => None,
+                };
+                if let Some(source) = asset_source {
+                    ui.weak(Text::MaterialAssetBacked.plain().replace("{path}", source));
+                }
                 if let Some(scope) = &draft.copy_scope {
                     ui.add(egui::Label::new(scope).truncate())
                         .on_hover_text(scope);
@@ -664,21 +1021,44 @@ impl ComponentWorkspace {
                 if let Some(error) = &draft.error {
                     ui.colored_label(editor_theme::colors(ui).error, error);
                 }
+                let can_save_as_asset = matches!(&draft.intent, Intent::Edit(id) if !self.material_files.contains_key(id))
+                    && self.assets.is_some()
+                    && !self.assets_loading();
+                let show_save_as_asset =
+                    matches!(&draft.intent, Intent::Edit(id) if !self.material_files.contains_key(id));
                 ui.horizontal(|ui| {
-                    (
-                        editor_theme::primary_button(ui, Text::ComponentApply.plain()).clicked(),
-                        ui.button(Text::ComponentCancel.plain()).clicked(),
-                    )
+                    let apply =
+                        editor_theme::primary_button(ui, Text::ComponentApply.plain()).clicked();
+                    let save_asset = show_save_as_asset
+                        && ui
+                            .add_enabled(
+                                can_save_as_asset,
+                                egui::Button::new(Text::MaterialSaveAsAsset.plain()),
+                            )
+                            .clicked();
+                    let cancel = ui.button(Text::ComponentCancel.plain()).clicked();
+                    (apply, cancel, save_asset)
                 })
                 .inner
             });
-        let (apply, cancel) = response.inner;
+        let (apply, cancel, save_asset) = response.inner;
         let escape = response.is_top_modal
             && !response.any_popup_open
             && !egui::Popup::is_any_open(ctx)
             && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
         if cancel || escape {
             return;
+        }
+        if save_asset {
+            if let Intent::Edit(old_id) = &draft.intent {
+                match self.promote_material_to_asset(draft.revision, old_id, draft.value.clone()) {
+                    Ok(()) => {
+                        self.error = None;
+                        return;
+                    }
+                    Err(error) => draft.error = Some(error.to_string()),
+                }
+            }
         }
         let enter = enter && !uv_edit_focused && !popup_open && !egui::Popup::is_any_open(ctx);
         if apply || enter {
@@ -997,10 +1377,26 @@ impl ComponentWorkspace {
             }
             self.validate_material_bindings(object, &edited)
                 .map_err(domain_error)?;
-            let next = self
-                .session
-                .put_object(revision, edited)
+            let imported = self
+                .imported_material_assets_for(std::slice::from_ref(&edited))
                 .map_err(domain_error)?;
+            let next = if imported.is_empty() {
+                self.session
+                    .put_object(revision, edited)
+                    .map_err(domain_error)?
+            } else {
+                let next = self
+                    .session
+                    .put_objects_with_materials(revision, vec![edited], imported.clone())
+                    .map_err(domain_error)?;
+                for id in imported.keys() {
+                    if let Some(file) = self.material_files.get(id) {
+                        self.applied_material_hashes
+                            .insert(id.clone(), file.hash.clone());
+                    }
+                }
+                next
+            };
             if next != revision {
                 self.refresh();
             }
@@ -1071,7 +1467,7 @@ impl ComponentWorkspace {
                     }
                 }
             }
-            json!({
+            let mut row = json!({
                 "material_id":id, "assigned_count":users.len(), "users_truncated":users.len()>4,
                 "user_ids":users.iter().take(4).map(|&index| &scene.objects[index].id).collect::<Vec<_>>(),
                 "material":{
@@ -1082,7 +1478,11 @@ impl ComponentWorkspace {
                 "texture":value.base_color_texture.as_deref().map(|id|inspect_texture(id, TextureRole::BaseColor)),
                 "roughness_texture":value.roughness_texture.as_deref().map(|id|inspect_texture(id, TextureRole::Roughness)),
                 "uv":{"invalid_user_count":invalid,"object_ids":invalid_ids,"truncated":invalid>4},
-            })
+            });
+            if let Some(file) = self.material_files.get(id) {
+                row["asset_source"] = json!(file.source);
+            }
+            row
         }).collect();
         let count = scene.materials.len();
         let mut result = json!({
@@ -1095,9 +1495,10 @@ impl ComponentWorkspace {
             result["pending_display"] = json!(true);
         }
         if let Some(draft) = &self.material_draft {
-            let intent = match draft.intent {
+            let intent = match &draft.intent {
                 Intent::Create => "create",
                 Intent::Edit(_) => "edit_shared",
+                Intent::EditAsset { .. } => "edit_asset",
                 Intent::MakeUnique(_) => "make_unique",
             };
             let mut pending = json!({
@@ -1105,7 +1506,9 @@ impl ComponentWorkspace {
                 "affected_object_count":draft.affected,
             });
             match &draft.intent {
-                Intent::Edit(id) => pending["material_id"] = json!(id),
+                Intent::Edit(id) | Intent::EditAsset { id, .. } => {
+                    pending["material_id"] = json!(id)
+                }
                 Intent::MakeUnique(id) => pending["source_material_id"] = json!(id),
                 Intent::Create => {}
             }
@@ -1666,5 +2069,135 @@ mod tests {
         let created = assign(&mut editor, &generic);
         assert_eq!(created["ok"], true, "{created}");
         assert_eq!(editor.session.revision(), 4);
+    }
+
+    #[test]
+    fn material_asset_assigns_writes_back_reloads_and_retains_last_good() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("Assets/Materials")).unwrap();
+        let source_rel = "Assets/Materials/Copper.material.json";
+        let initial_mat = OpaqueMaterial {
+            name: Some("Copper".into()),
+            tint: [0.85, 0.45, 0.25],
+            response: MaterialResponse::Dielectric { roughness: 0.3 },
+            ..OpaqueMaterial::default()
+        };
+        let bytes = MaterialSource::new(initial_mat.clone())
+            .unwrap()
+            .write_json()
+            .unwrap();
+        std::fs::write(root.join(source_rel), &bytes).unwrap();
+
+        let store = AssetStore::open(root).unwrap();
+        let (mut mat_files, mut issues) = store.read_project_materials();
+        assert!(issues.is_empty(), "{issues:?}");
+        assert_eq!(mat_files.len(), 1);
+        let asset_id = mat_files[0].id.clone();
+
+        let mut scene = ComponentScene::from_legacy(
+            &rot_scene::Session::new(rot_scene::Scene::demo()).unwrap(),
+        )
+        .unwrap();
+        let target_id = scene.objects[0].id.clone();
+        let Component::MeshRenderer { .. } = &scene.objects[0].components[0].kind else {
+            unreachable!()
+        };
+        let component_id = scene.objects[0].components[0].id.clone();
+        scene.materials.clear();
+        let scene_path = root.join("studio.scene.json");
+        let mut editor =
+            ComponentWorkspace::new(scene_path.clone(), ComponentSession::new(scene).unwrap());
+        let asset_rev = store.revision().to_string();
+        editor.assets = Some(store);
+        editor.adopt_material_files(&mut mat_files, &mut issues);
+        assert!(issues.is_empty(), "{issues:?}");
+
+        // MCP asset_inspect exposes material assets page.
+        let inspected_assets = editor.ai_command("session", "asset_inspect", &json!({}));
+        assert_eq!(inspected_assets["ok"], true, "{inspected_assets}");
+        assert_eq!(inspected_assets["result"]["material_count"], 1);
+        assert_eq!(inspected_assets["result"]["materials"][0]["id"], asset_id);
+        assert_eq!(
+            inspected_assets["result"]["materials"][0]["source"],
+            source_rel
+        );
+        assert_eq!(inspected_assets["result"]["materials"][0]["name"], "Copper");
+
+        // Assigning an unimported .material.json registers + assigns in one Undo step.
+        let assigned = editor.ai_command(
+            "scene",
+            "scene_material_assign",
+            &json!({
+                "expected_session_token": "scene",
+                "expected_revision": "0",
+                "expected_asset_revision": asset_rev,
+                "object_id": target_id,
+                "component_id": component_id,
+                "material_id": asset_id,
+            }),
+        );
+        assert_eq!(assigned["ok"], true, "{assigned}");
+        assert_eq!(editor.session.scene().materials[&asset_id], initial_mat);
+        assert_eq!(editor.session.revision(), 1);
+
+        // Editing via commit_material / modal writes changes back to Assets/...material.json.
+        editor.begin_material_asset(&asset_id);
+        let mut draft = editor.material_draft.take().unwrap();
+        draft.value.tint = [0.6, 0.3, 0.2];
+        editor.apply_material(&draft).unwrap();
+        assert_eq!(
+            editor.session.scene().materials[&asset_id].tint,
+            [0.6, 0.3, 0.2]
+        );
+        let disk_source =
+            MaterialSource::read_json(&std::fs::read(root.join(source_rel)).unwrap()).unwrap();
+        assert_eq!(disk_source.material().tint, [0.6, 0.3, 0.2]);
+
+        // External edit on disk triggers live reload via reconcile_materials().
+        let external_mat = OpaqueMaterial {
+            name: Some("Oxidized Copper".into()),
+            tint: [0.3, 0.65, 0.55],
+            response: MaterialResponse::Dielectric { roughness: 0.7 },
+            ..OpaqueMaterial::default()
+        };
+        let ext_bytes = MaterialSource::new(external_mat.clone())
+            .unwrap()
+            .write_json()
+            .unwrap();
+        std::fs::write(root.join(source_rel), &ext_bytes).unwrap();
+        let (mut refreshed_files, mut refreshed_issues) =
+            editor.assets.as_ref().unwrap().read_project_materials();
+        assert!(refreshed_issues.is_empty(), "{refreshed_issues:?}");
+        editor.adopt_material_files(&mut refreshed_files, &mut refreshed_issues);
+        assert!(refreshed_issues.is_empty(), "{refreshed_issues:?}");
+        editor.reconcile_materials();
+        assert_eq!(editor.session.scene().materials[&asset_id], external_mat);
+
+        // Invalid disk edit reports a ProjectFileIssue while retaining the last-good scene material.
+        std::fs::write(
+            root.join(source_rel),
+            br#"{"format":"rot-material","format_version":99,"material":{}}"#,
+        )
+        .unwrap();
+        let (mut bad_files, mut bad_issues) =
+            editor.assets.as_ref().unwrap().read_project_materials();
+        editor.adopt_material_files(&mut bad_files, &mut bad_issues);
+        assert_eq!(bad_issues.len(), 1);
+        assert_eq!(bad_issues[0].path, source_rel);
+        editor.reconcile_materials();
+        assert_eq!(editor.session.scene().materials[&asset_id], external_mat);
+
+        // material_inspect reports asset_source when backed by a .material.json file.
+        editor.material_files.insert(
+            asset_id.clone(),
+            MaterialFile::from_bytes(asset_id.clone(), source_rel.into(), ext_bytes.into()),
+        );
+        let inspected_mat = editor.ai_command("scene", "material_inspect", &json!({}));
+        assert_eq!(inspected_mat["ok"], true, "{inspected_mat}");
+        assert_eq!(
+            inspected_mat["result"]["materials"][0]["asset_source"],
+            source_rel
+        );
     }
 }
