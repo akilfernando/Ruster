@@ -8,6 +8,8 @@ mod frustum;
 mod geometry_probe;
 mod ibl_gpu;
 mod instancing;
+#[cfg(test)]
+mod khronos_probe;
 mod lighting_gpu;
 mod material_gpu;
 mod primitives;
