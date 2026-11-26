@@ -2008,13 +2008,13 @@ mod tests {
         // both suffix variants and observe their actual read/decode sequence.
         let mut large_png = Vec::new();
         {
-            let mut encoder = png::Encoder::new(&mut large_png, 2048, 2048);
+            let mut encoder = png::Encoder::new(&mut large_png, 4096, 4096);
             encoder.set_color(png::ColorType::Rgb);
             encoder.set_depth(png::BitDepth::Eight);
             encoder
                 .write_header()
                 .unwrap()
-                .write_image_data(&vec![128; 2048 * 2048 * 3])
+                .write_image_data(&vec![128; 4096 * 4096 * 3])
                 .unwrap();
         }
         assert!(large_png.len() <= rot_assets::MAX_TEXTURE_SOURCE_BYTES);
@@ -2065,7 +2065,7 @@ mod tests {
             .collect();
         let mesh_error = over_meshes.load_meshes(&root).unwrap_err();
         assert!(
-            texture_error.contains("64 MiB")
+            texture_error.contains("256 MiB")
                 && texture_error.contains("t04")
                 && mesh_error.contains(&geometry_budget)
                 && mesh_error.contains(&format!("m{first_over_budget:02}")),

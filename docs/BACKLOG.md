@@ -40,7 +40,7 @@ cuts below in order.
 
 | Package | Outcome | Status & remaining gap |
 | --- | --- | --- |
-| `C-EXIT` Phase 2 reference project & gate | Prove Phase 2 end-to-end on a tracked reference level within budgets. | `in progress — Codex (Astra/Sol), 2026-11-26` · [Rot Yard](../examples/rot-yard/README.md) tracks the CC0 pack, Blender gate and 5,000-object prefab level. The 50 MB GLB import and 5,000-object desktop pan met their budgets. Lift the `2048` px texture cap per `A12`, address fresh-cache player RSS, run the full UI checklist, and refresh the local install. |
+| `C-EXIT` Phase 2 reference project & gate | Prove Phase 2 end-to-end on a tracked reference level within budgets. | `in progress — Codex (Astra/Sol), 2026-11-26` · [Rot Yard](../examples/rot-yard/README.md) tracks the CC0 pack, Blender gate and 5,000-object prefab level. The 50 MB GLB import and 5,000-object desktop pan met their budgets, and texture limits are lifted to `4096` px (`32 MiB` PNG / `96 MiB` chain / `256 MiB` aggregate). Address fresh-cache player RSS, run the full UI checklist, and refresh the local install. |
 | `P-03` Platform seams & Windows CI | Protect `A11` immediately after Phase 2 exit before Phase 3/4 work begins. | `open` · Extract `rustix`, Unix sockets, `inotify` watcher, `rfd` target features, `xdg-open`, and OS dirs into platform modules; add a `windows-latest` `cargo check --workspace` CI job. |
 
 ## Later

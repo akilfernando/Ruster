@@ -206,10 +206,10 @@ fn verify_role_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue, gpu: &mut
             mips,
         })
     };
-    let small = solid(2048, 1024, TextureRole::BaseColor);
-    let large_a = solid(2048, 2048, TextureRole::BaseColor);
-    let large_b = solid(2048, 2048, TextureRole::BaseColor);
-    let map = solid(2048, 2048, TextureRole::Roughness);
+    let small = solid(4096, 2048, TextureRole::BaseColor);
+    let large_a = solid(4096, 4096, TextureRole::BaseColor);
+    let large_b = solid(4096, 4096, TextureRole::BaseColor);
+    let map = solid(4096, 4096, TextureRole::Roughness);
     let keys = ["a", "b", "c"].map(|id| BindingKey {
         texture: Some(id.into()),
         roughness: Some("shared-map".into()),

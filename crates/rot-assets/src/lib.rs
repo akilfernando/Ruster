@@ -1024,7 +1024,7 @@ impl AssetStore {
                     + texture.payload_bytes();
                 if total > MAX_TEXTURE_RESOLVED_BYTES {
                     return Err(error(
-                        "resolved texture payload exceeds 64 MiB project limit",
+                        "resolved texture payload exceeds 256 MiB project limit",
                     ));
                 }
             }
@@ -2739,15 +2739,15 @@ mod tests {
         ));
 
         // The accepted aggregate counts actual bytes across all roles. Two
-        // RGBA8 plus four R8 2048-square chains fit exactly four bytes below64MiB.
+        // RGBA8 plus four R8 4096-square chains fit exactly four bytes below 256 MiB.
         // A tiny valid new data image crosses the cap and must publish nothing.
         let root = tempfile::tempdir().unwrap();
         let large = texture::tests::png(
-            2048,
-            2048,
+            4096,
+            4096,
             png::ColorType::Rgb,
             png::BitDepth::Eight,
-            &vec![128; 2048 * 2048 * 3],
+            &vec![128; 4096 * 4096 * 3],
         );
         let mut store = AssetStore::open(root.path()).unwrap();
         for i in 0..4 {
@@ -2783,7 +2783,7 @@ mod tests {
             .import_texture("overflow", "overflow.png", TextureRole::Roughness)
             .unwrap_err()
             .to_string()
-            .contains("64 MiB"));
+            .contains("256 MiB"));
         assert_eq!(store.revision(), revision);
         assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), before);
         assert!(Arc::ptr_eq(&accepted, &store.texture_snapshots()["data-0"]));

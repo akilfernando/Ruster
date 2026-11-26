@@ -4,12 +4,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::io::Cursor;
 
-pub const MAX_TEXTURE_SOURCE_BYTES: usize = 8 * 1024 * 1024;
-// Embedded JPEGs were bounded by the original 16 MiB GLB container limit.
-const MAX_EMBEDDED_JPEG_BYTES: usize = 16 * 1024 * 1024;
-pub const MAX_TEXTURE_EDGE: u32 = 2048;
-pub const MAX_TEXTURE_BYTES: usize = 24 * 1024 * 1024;
-pub const MAX_TEXTURE_RESOLVED_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_TEXTURE_SOURCE_BYTES: usize = 32 * 1024 * 1024;
+// Embedded JPEGs match the 64 MiB GLB container envelope.
+const MAX_EMBEDDED_JPEG_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_TEXTURE_EDGE: u32 = 4096;
+pub const MAX_TEXTURE_BYTES: usize = 96 * 1024 * 1024;
+pub const MAX_TEXTURE_RESOLVED_BYTES: usize = 256 * 1024 * 1024;
 pub(crate) const MAX_TEXTURE_CACHE_BYTES: usize = MAX_TEXTURE_BYTES + 1024;
 const CACHE_HEADER: usize = 120;
 const CACHE_HASH: usize = 88;
@@ -61,7 +61,7 @@ impl Texture {
 }
 fn image_bytes(width: u32, height: u32, role: TextureRole) -> Result<usize, AssetError> {
     if width == 0 || height == 0 || width > MAX_TEXTURE_EDGE || height > MAX_TEXTURE_EDGE {
-        return Err(error("texture dimensions must be 1..2048 on each edge"));
+        return Err(error("texture dimensions must be 1..4096 on each edge"));
     }
     (width as usize)
         .checked_mul(height as usize)
@@ -74,7 +74,7 @@ fn chain_bytes(mut width: u32, mut height: u32, role: TextureRole) -> Result<usi
         total = total
             .checked_add(image_bytes(width, height, role)?)
             .filter(|&n| n <= MAX_TEXTURE_BYTES)
-            .ok_or_else(|| error("texture mip payload exceeds 24 MiB"))?;
+            .ok_or_else(|| error("texture mip payload exceeds 96 MiB"))?;
         if width == 1 && height == 1 {
             return Ok(total);
         }
@@ -144,7 +144,7 @@ fn number(bytes: &[u8]) -> u32 {
 // bypassing the fixed input policy. The PNG decoder still validates structure.
 fn preflight(bytes: &[u8], role: TextureRole, packed_green: bool) -> Result<(), AssetError> {
     if bytes.len() > MAX_TEXTURE_SOURCE_BYTES {
-        return Err(error("PNG exceeds 8 MiB source limit"));
+        return Err(error("PNG exceeds 32 MiB source limit"));
     }
     if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Err(error("expected PNG signature"));
@@ -324,7 +324,7 @@ fn decode_png_channel(
     let mut decoder = png::Decoder::new_with_limits(
         Cursor::new(bytes),
         png::Limits {
-            bytes: 32 * 1024 * 1024,
+            bytes: MAX_TEXTURE_BYTES,
         },
     );
     decoder.set_ignore_text_chunk(true);
@@ -460,7 +460,7 @@ pub(crate) fn encode_rgb_source(texture: &Texture) -> Result<Vec<u8>, AssetError
 
 fn decode_jpeg_rgb(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), AssetError> {
     if bytes.len() > MAX_EMBEDDED_JPEG_BYTES {
-        return Err(error("embedded JPEG exceeds the 16 MiB source limit"));
+        return Err(error("embedded JPEG exceeds the 64 MiB source limit"));
     }
     use zune_jpeg::zune_core::{
         bytestream::ZCursor, colorspace::ColorSpace, options::DecoderOptions,
@@ -931,11 +931,11 @@ pub(crate) mod tests {
         ))
         .is_err());
         assert!(decode_png(&png(
-            2049,
+            4097,
             1,
             png::ColorType::Rgb,
             png::BitDepth::Eight,
-            &vec![0; 2049 * 3]
+            &vec![0; 4097 * 3]
         ))
         .is_err());
         assert!(decode_png(&vec![0; MAX_TEXTURE_SOURCE_BYTES + 1]).is_err());
@@ -1105,6 +1105,25 @@ pub(crate) mod tests {
             chain_bytes(2048, 2048, TextureRole::Roughness).unwrap(),
             5_592_405
         );
+        assert_eq!(
+            chain_bytes(4096, 4096, TextureRole::Roughness).unwrap(),
+            22_369_621
+        );
+        assert_eq!(
+            chain_bytes(4096, 4096, TextureRole::BaseColor).unwrap(),
+            89_478_484
+        );
+        let wide_png = png(
+            4096,
+            16,
+            png::ColorType::Rgb,
+            png::BitDepth::Eight,
+            &vec![128; 4096 * 16 * 3],
+        );
+        let wide = decode_png(&wide_png).unwrap();
+        let wide_hash = crate::digest(&wide_png);
+        let wide_cache = encode_cache(&wide_hash, &wide).unwrap();
+        assert_eq!(decode_cache(&wide_cache, &wide_hash).unwrap(), wide);
     }
 
     #[test]
@@ -1153,6 +1172,6 @@ pub(crate) mod tests {
         assert!(decode_glb_jpeg_roughness(&embedded)
             .unwrap_err()
             .0
-            .contains("16 MiB source limit"));
+            .contains("64 MiB source limit"));
     }
 }

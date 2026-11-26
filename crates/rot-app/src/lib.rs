@@ -41,7 +41,7 @@ fn checked_texture_bytes(current: usize, additional: usize) -> Result<usize, Str
     current
         .checked_add(additional)
         .filter(|bytes| *bytes <= rot_assets::MAX_TEXTURE_RESOLVED_BYTES)
-        .ok_or_else(|| "application textures exceed 64 MiB resolved payload".into())
+        .ok_or_else(|| "application textures exceed 256 MiB resolved payload".into())
 }
 
 /// Validated immutable mesh snapshots alongside application-owned scene state.

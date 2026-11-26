@@ -48,7 +48,8 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
     The Riverside scene exceeded 60 fps on the focused Wayland desktop.
     The 50.7 MB, 12-panel GLB met the 3 s import budget and retained
     1,801,824 triangles through Save, reopen, and a relocated build.
-    Larger textures, fresh-cache player memory, the UI checklist, and
+    Texture limits are lifted to `4096` px (`32 MiB` PNG / `96 MiB` chain /
+    `256 MiB` aggregate). Fresh-cache player memory, the UI checklist, and
     the local install refresh remain open.
 
 ## What a creator can do today

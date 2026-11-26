@@ -292,7 +292,7 @@ fn content_rejects_missing_references_and_invalid_mesh_before_rendering() {
         .contains("missing texture unavailable"));
 
     let mip_chain = |role: rot_assets::TextureRole| {
-        let mut edge = 2048;
+        let mut edge = 4096;
         let mut mips = Vec::new();
         loop {
             mips.push(rot_assets::TextureMip {
@@ -307,8 +307,8 @@ fn content_rejects_missing_references_and_invalid_mesh_before_rendering() {
         }
         Arc::new(rot_assets::Texture {
             role,
-            width: 2048,
-            height: 2048,
+            width: 4096,
+            height: 4096,
             mips,
         })
     };
@@ -335,7 +335,7 @@ fn content_rejects_missing_references_and_invalid_mesh_before_rendering() {
         Content::with_textures(plain_scene.clone(), MeshMap::new(), over.clone())
             .err()
             .unwrap()
-            .contains("64 MiB")
+            .contains("256 MiB")
     );
     let mixed: TextureMap = (0..2)
         .map(|index| (format!("color-{index}"), color_chain.clone()))
