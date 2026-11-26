@@ -39,7 +39,7 @@ Phase 3A (`L-01`–`L-EXIT`) shipped on `2026-11-26`. Phase 3B closes clustered 
 | --- | --- | --- |
 | `L-07` Clustered forward many-lights | Verify `wgpu-hal` compute/SPIR-V 1.3 readiness; GPU compute `16×9×24` cluster culling up to `1024` local lights (`Surface` PBR, perspective & ortho) (Size M, *ready*). | `done — 2026-11-26, bbd7075` · 64-light RTX 4060 probe p50 `0.361 ms` / p95 `0.530 ms`; 5k 1080p frame p50 `1.062 ms` / p95 `1.771 ms`. |
 | `L-08` CSM & shadow atlas | 4-cascade directional Sun shadows + spot/point shadow atlas integrated into clustered shading (Size M, *ready*). | `done — 2026-11-26, 9801f4c` · RTX 4060 CSM+Spot+Point+Mask probe p50 `0.264 ms` / p95 `0.534 ms`; 5k 1080p frame p50 `0.788 ms` / p95 `0.886 ms`. |
-| `L-09` Atmospheric fog | Linear/exponential/height fog in scene data, shaders, Scene Display UI, MCP, and player (Size S, *brief needed*). | `open` · After `L-08`. |
+| `L-09` Atmospheric fog | Linear/exponential/height fog in scene data, shaders, Scene Display UI, MCP, and player (Size S, *ready*). | `done — 2026-11-26, eb31118` · RTX 4060 fog probe passed (Linear, height fog, sky horizon); 5k 1080p frame p50 `0.838 ms` / p95 `0.974 ms`. |
 | `L-10` Post-processing stack | SSAO, bloom, color grading/tonemappers, and AA options (`MSAA 4x/2x`, `FXAA`, `Off`) (Size M, *brief needed*). | `open` · After `L-09`. |
 | `L-11` Viewport shading & debug views | Editor/runtime shading & debug modes (`Lit`, `Unlit`, `Wireframe`, `Normals`, `Roughness`, `Metallic`, `Albedo`, `AO`, `Depth`, `Clusters`, `Cascades`) (Size M, *brief needed*). | `open` · After `L-10`. |
 | `L-3B-EXIT` Phase 3B exit gate | Lit multi-light interior reference scene in `examples/rot-yard/`, visual & RTX 4060 budget verification (Size S, *brief needed*). | `open` · Closes Phase 3B. |
@@ -124,7 +124,13 @@ completed packages:
   and bias controls in `rot-scene`/Inspector/MCP, dynamic-offset per-cascade/tile
   frustum culling, RTX 4060 CSM+Spot+Point+Mask probe p50 `0.264 ms` / p95
   `0.534 ms`, 5k 1080p 4× MSAA CPU p50 `0.320 ms` / GPU p50 `0.290 ms` / frame
-  p50 `0.788 ms` / p95 `0.886 ms` / steady `0 B`).
+  p50 `0.788 ms` / p95 `0.886 ms` / steady `0 B`), and `L-09` (`2026-11-26`,
+  `eb31118`: `Fog`/`FogMode` linear/exponential/exp² & analytic height fog in
+  `rot-scene`/`ibl_gpu.rs`/`surface.wgsl`/`sky.wgsl`, Scene Display Fog UI &
+  presets, `scene_display_set`/`material_inspect` MCP support keeping
+  `tools/list` at `14,457` B, RTX 4060 `atmospheric_fog_gpu_probe` green, 5k
+  1080p 4× MSAA CPU p50 `0.316 ms` / GPU p50 `0.291 ms` / frame p50
+  `0.838 ms` / p95 `0.974 ms` / steady `0 B`).
 - **Phase 2 — Core completed packages:** `C-00a` (retired legacy logistics
   crates, Rhai mode, editor logistics UI, and superseded MCP
   enrollment/registry plumbing; promoted `crates/rot-support`), `C-01` (v23

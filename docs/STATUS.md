@@ -13,7 +13,7 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
-## Current phase — Phase 3B: Look — Lighting & Post (Next: `L-09`)
+## Current phase — Phase 3B: Look — Lighting & Post (Next: `L-10`)
 
 - **Done (earlier phases):** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`,
   `A-01`–`A-07`, `P-01`–`P-02`), `P-03` platform seams & Windows CI, Phase 2 Core
@@ -31,8 +31,10 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   spot/point shadow atlas (`9801f4c`: 4-cascade directional CSM + `2048×2048`
   spot/6-face point shadow atlas, `LocalShadow` Inspector/MCP controls, RTX 4060
   probe p50 `0.264 ms` / p95 `0.534 ms`, 5k 1080p frame p50 `0.788 ms` / p95
-  `0.886 ms`).
-- **Next:** `L-09` Atmospheric distance & height fog.
+  `0.886 ms`), `L-09` Atmospheric fog (`eb31118`: linear/exp/exp² + height fog
+  in `rot-scene`/`surface.wgsl`/`sky.wgsl`, Scene Display UI & MCP `14,457` B,
+  RTX 4060 probe green, 5k 1080p frame p50 `0.838 ms` / p95 `0.974 ms`).
+- **Next:** `L-10` Post-processing stack (SSAO, bloom, color grading, AA).
 
 ## What a creator can do today
 
