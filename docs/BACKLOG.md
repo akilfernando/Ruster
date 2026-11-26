@@ -33,11 +33,11 @@ One line each. Anyone may add; the user or a planning pass orders them.
 
 ## Now — Phase 3A: Look (PBR & Scene Scale)
 
-`L-01` shipped on `2026-11-26` (`71aacda`). Continue Phase 3A with `L-02` below.
+`L-01` (`71aacda`) and `L-02` (`611a640`) shipped on `2026-11-26`. Continue Phase 3A with `L-03` below.
 
 | Package | Outcome | Status & remaining gap |
 | --- | --- | --- |
-| `L-02` `rot-render` refactor for PBR & scale | GPU storage-buffer instances, vertex tangents, decoupled selection outline pass, and lifted caps per `A12` (Size M, *brief needed*). | `open` · Replace fixed uniform/object/vertex/triangle caps and hardcoded outline/instance paths without regressing frame times. |
+| `L-03` Full metallic-roughness PBR & surface maps | Metallic-roughness PBR with tangent-space normal, emissive, and occlusion maps; material asset/inspector/glTF parity (Size M, *brief needed*). | `open` · Wire metallic/normal/emissive/occlusion channels end-to-end across `rot-material`, `rot-assets`, `rot-scene`, `rot-editor`, `rot-mcp`, and `surface.wgsl`. |
 
 ## Later
 
@@ -82,7 +82,13 @@ completed packages:
   JSON format, `.material.json` + `.rotmeta` assets in `rot-assets`, watcher live
   reload with last-good fallback, Assets/Inspector create/drag-drop/modal edit/
   `Save as Asset…`, double-extension Rename/Duplicate safety, and MCP
-  `asset_inspect`/`material_inspect`/`scene_material_assign` alignment).
+  `asset_inspect`/`material_inspect`/`scene_material_assign` alignment), `L-02`
+  (`2026-11-26`, `611a640`: GPU storage-buffer instances via
+  `@builtin(instance_index)`, glTF/MikkTSpace-style vertex tangents & bit-30
+  cache across `rot-assets`/`rot-render`/`surface.wgsl`, decoupled `R8Unorm`
+  `selection_mask` pass + `composite.wgsl`, lifted `rot-assets`/512 MiB target
+  caps, RTX 4060 GPU probes passed, 5k benchmark GPU p50 `321.5 → 245.8 us`,
+  CPU p50 `648.7 → 627.8 us`).
 - **Phase 2 — Core completed packages:** `C-00a` (retired legacy logistics
   crates, Rhai mode, editor logistics UI, and superseded MCP
   enrollment/registry plumbing; promoted `crates/rot-support`), `C-01` (v23
