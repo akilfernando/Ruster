@@ -13,37 +13,26 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
-## Current phase — Phase 3B: Look — Lighting & Post (Next: `L-3B-EXIT`)
+## Current phase — Phase 3B Complete (Next: Phase 4 — Play)
 
 - **Done (earlier phases):** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`,
   `A-01`–`A-07`, `P-01`–`P-02`), `P-03` platform seams & Windows CI, Phase 2 Core
   (`C-00a`, `C-01`–`C-12`, `C-13`–`C-61`, Phase 4 HUD labels, `C-EXIT` gate
   against [Rot Yard](../examples/rot-yard/README.md) with workspace-2
   [UI checklist](UX-STANDARDS.md#10-ui-review-checklist) and refreshed release
-  install), and Phase 3A Look (`L-01` materials `71aacda`, `L-02` GPU instancing
-  `611a640`, `L-03` metallic-roughness PBR `93d7390`, `L-04` Sky/IBL `16a3859`,
-  `L-05` alpha transparency `4f8e16d`, `L-06` frustum culling `3264a4e`,
-  `L-EXIT` Khronos PBR gate `7283208`). See [backlog](BACKLOG.md) for details.
-- **Done (Phase 3B):** `L-07` Clustered forward many-lights (`bbd7075`:
-  `16×9×24` compute culling up to `1024` Point/Spot lights in
-  `cluster_cull.wgsl`/`surface.wgsl`, Persp+Ortho, 64-light RTX 4060 probe p50
-  `0.361 ms`, 5k 1080p frame p50 `1.062 ms` / p95 `1.771 ms`), `L-08` CSM &
-  spot/point shadow atlas (`9801f4c`: 4-cascade directional CSM + `2048×2048`
-  spot/6-face point shadow atlas, `LocalShadow` Inspector/MCP controls, RTX 4060
-  probe p50 `0.264 ms` / p95 `0.534 ms`, 5k 1080p frame p50 `0.788 ms` / p95
-  `0.886 ms`), `L-09` Atmospheric fog (`eb31118`: linear/exp/exp² + height fog
-  in `rot-scene`/`surface.wgsl`/`sky.wgsl`, Scene Display UI & MCP `14,457` B,
-  RTX 4060 probe green, 5k 1080p frame p50 `0.838 ms` / p95 `0.974 ms`),
-  `L-10` Post-processing stack (`5b163b4`: SSAO, 5-mip bloom, color grading,
-  PBR Neutral/ACES/Reinhard/None, `MSAA 4x/2x`/`FXAA`/`Off`, Scene Display UI
-  & MCP, all 7 RTX 4060 GPU probes green, Cinematic `1280×720` p50 `1.670 ms`,
-  5k 1080p frame p50 `1.075 ms` / p95 `1.527 ms`), `L-11` Viewport shading &
-  debug views (`34dc485`: `Lit`/`Unlit`/`Wireframe`/`Normals`/`Roughness`/
-  `Metallic`/`Albedo`/`AO`/`Depth`/`Clusters`/`Cascades`, viewport menu,
-  `Alt+2..5` shortcuts & Command Palette, all 8 RTX 4060 GPU probes green, 5k
-  1080p frame p50 `1.264 ms` / p95 `1.567 ms`).
-- **Next:** `L-3B-EXIT` Phase 3B exit gate (lit multi-light interior reference
-  scene in `examples/rot-yard/`, visual & RTX 4060 budget verification).
+  install), Phase 3A Look (`L-01` `71aacda`, `L-02` `611a640`, `L-03` `93d7390`,
+  `L-04` `16a3859`, `L-05` `4f8e16d`, `L-06` `3264a4e`, `L-EXIT` Khronos PBR
+  gate `7283208`), and Phase 3B Look — Lighting & Post (`L-07` clustered forward
+  many-lights `bbd7075`, `L-08` 4-cascade CSM + `2048×2048` shadow atlas
+  `9801f4c`, `L-09` atmospheric distance/height fog `eb31118`, `L-10` SSAO /
+  bloom / grading / tonemappers / AA `5b163b4`, `L-11` 11 viewport shading &
+  debug view modes `34dc485`, `L-3B-EXIT` interior reference scene & RTX 4060
+  gate `35ae05c`: [gallery.scene.json](../examples/rot-yard/gallery.scene.json)
+  `1080p` `4× MSAA` p50 `3.095 ms` / p95 `3.794 ms`, 5k `1080p` p50 `1.445 ms` /
+  p95 `1.900 ms`, steady `0 B`). See [backlog](BACKLOG.md) for details.
+- **Next:** **Phase 4 — Play** (strict order: persistent-VM Lua events/coroutines
+  & live Play editing, Rapier3D physics replacing `parry3d`, skeletal skinning
+  & animation, spatial audio/runtime UI/rebinding/multiple cameras/particles/save).
 
 ## What a creator can do today
 
@@ -60,7 +49,9 @@ See the [historical inventory](PARITY-PLAN.md#2-where-we-are) and
 ## Installed on this machine
 
 The **Rot Engine** launcher uses the 2026-11-26 release build (`rot-editor`,
-`rot-mcp`, and `rot-player` built with Phase 3A PBR, Sky/IBL, alpha
+`rot-mcp`, and `rot-player` built with Phase 3A/3B PBR, Sky/IBL, clustered
+many-lights, 4-cascade CSM & local shadow atlas, atmospheric fog,
+SSAO/bloom/ACES/AA post-processing, 11 viewport shading/debug modes, alpha
 transparency, frustum culling, instancing, `4096` px textures, and unified
 persistent Lua). Reinstall with `python3 scripts/install_local.py`; the
 previous build is in `~/.local/share/rot-engine/previous` for `--rollback`.
