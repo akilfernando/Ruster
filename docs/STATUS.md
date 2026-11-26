@@ -13,7 +13,7 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
-## Current phase — Phase 3B: Look — Lighting & Post (Next: `L-10`)
+## Current phase — Phase 3B: Look — Lighting & Post (Next: `L-11`)
 
 - **Done (earlier phases):** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`,
   `A-01`–`A-07`, `P-01`–`P-02`), `P-03` platform seams & Windows CI, Phase 2 Core
@@ -33,8 +33,14 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   probe p50 `0.264 ms` / p95 `0.534 ms`, 5k 1080p frame p50 `0.788 ms` / p95
   `0.886 ms`), `L-09` Atmospheric fog (`eb31118`: linear/exp/exp² + height fog
   in `rot-scene`/`surface.wgsl`/`sky.wgsl`, Scene Display UI & MCP `14,457` B,
-  RTX 4060 probe green, 5k 1080p frame p50 `0.838 ms` / p95 `0.974 ms`).
-- **Next:** `L-10` Post-processing stack (SSAO, bloom, color grading, AA).
+  RTX 4060 probe green, 5k 1080p frame p50 `0.838 ms` / p95 `0.974 ms`),
+  `L-10` Post-processing stack (`5b163b4`: SSAO, 5-mip bloom, color grading,
+  PBR Neutral/ACES/Reinhard/None, `MSAA 4x/2x`/`FXAA`/`Off`, Scene Display UI
+  & MCP, all 7 RTX 4060 GPU probes green, Cinematic `1280×720` p50 `1.670 ms`,
+  5k 1080p frame p50 `1.075 ms` / p95 `1.527 ms`).
+- **Next:** `L-11` Viewport shading & debug view modes (`Lit`, `Unlit`,
+  `Wireframe`, `Normals`, `Roughness`, `Metallic`, `Albedo`, `AO`, `Depth`,
+  `Clusters`, `Cascades`).
 
 ## What a creator can do today
 
