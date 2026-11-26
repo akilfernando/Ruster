@@ -4,11 +4,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
-use mlua::{Function, Lua, Table, UserData, UserDataFields, UserDataMethods, Value};
-use rot_scene::component_scene::{Component, ObjectNode};
+use mlua::{AnyUserData, Function, Lua, Table, UserData, UserDataFields, UserDataMethods, Value};
+use rot_scene::component_scene::{Component, ComponentScene};
 use rot_scene::input::ValidatedActionFrame;
 use rot_scene::{BehaviorSource, Light, PropertyValue, Transform};
 
+use super::component_topology::{ObjectSession, TopologyEdits};
 use super::{
     action_axis, action_button, base_environment, property_value, read_transform, same_transform,
     transform_table, Diagnostic, DiagnosticCode, Engine, Phase, INPUT_HOST_API_VERSION,
@@ -81,6 +82,8 @@ impl Modules {
 
 #[derive(Debug)]
 pub(super) struct ObjectLookup {
+    pub(super) session: Rc<ObjectSession>,
+    scene: Arc<ComponentScene>,
     ids: Arc<HashMap<String, usize>>,
     names: HashMap<String, usize>,
     protected: HashMap<usize, String>,
@@ -98,10 +101,12 @@ struct LightSlot {
 
 impl ObjectLookup {
     pub(super) fn new(
-        objects: &[ObjectNode],
+        session: Rc<ObjectSession>,
+        scene: Arc<ComponentScene>,
         ids: Arc<HashMap<String, usize>>,
         protections: HashMap<usize, &'static str>,
     ) -> Self {
+        let objects = &scene.objects;
         let mut names = HashMap::with_capacity(objects.len());
         let mut lights = Vec::new();
         let mut light_indices = HashMap::new();
@@ -128,6 +133,8 @@ impl ObjectLookup {
             })
             .collect();
         Self {
+            session,
+            scene,
             ids,
             names,
             protected,
@@ -139,6 +146,10 @@ impl ObjectLookup {
 
     pub(super) fn authored_light_intensity(&self, id: &str) -> f32 {
         self.lights[self.light_indices[id]].authored_intensity
+    }
+
+    pub(super) fn contains_light(&self, id: &str) -> bool {
+        self.light_indices.contains_key(id)
     }
 }
 
@@ -161,13 +172,14 @@ struct CallbackSnapshot {
     transforms: Arc<Vec<Transform>>,
     light_intensities: Arc<LightIntensities>,
     writes: RefCell<CallbackWrites>,
+    topology: RefCell<TopologyEdits>,
 }
 
 impl CallbackSnapshot {
-    fn owns(&self, lookup: &Weak<ObjectLookup>) -> bool {
-        lookup
+    fn owns(&self, session: &Weak<ObjectSession>) -> bool {
+        session
             .upgrade()
-            .is_some_and(|owner| Rc::ptr_eq(&owner, &self.lookup))
+            .is_some_and(|owner| Rc::ptr_eq(&owner, &self.lookup.session))
     }
 
     fn intensity(&self, light: &LightSlot) -> f32 {
@@ -192,6 +204,7 @@ impl CurrentCallback {
             transforms: Arc::clone(transforms),
             light_intensities: Arc::clone(light_intensities),
             writes: RefCell::default(),
+            topology: RefCell::default(),
         });
         debug_assert!(previous.is_none());
         Self(lua.clone())
@@ -201,12 +214,14 @@ impl CurrentCallback {
         &self,
         mut stage_transform: impl FnMut(usize, Transform),
         lights: &mut LightIntensities,
+        binding: &str,
     ) {
         let snapshot = self
             .0
             .app_data_ref::<CallbackSnapshot>()
             .expect("live callback snapshot");
         let writes = snapshot.writes.take();
+        snapshot.topology.borrow_mut().attribute(binding);
         for (index, pose) in writes.transforms {
             stage_transform(index, pose);
         }
@@ -218,6 +233,14 @@ impl CurrentCallback {
                 lights.remove(id);
             }
         }
+    }
+
+    pub(super) fn take_topology(&self) -> TopologyEdits {
+        self.0
+            .app_data_ref::<CallbackSnapshot>()
+            .expect("live callback snapshot")
+            .topology
+            .take()
     }
 }
 
@@ -233,13 +256,16 @@ fn current_callback(lua: &Lua) -> mlua::Result<mlua::AppDataRef<'_, CallbackSnap
 }
 
 struct ObjectHandle {
-    lookup: Weak<ObjectLookup>,
-    index: usize,
+    session: Weak<ObjectSession>,
+    id: String,
 }
 
 impl ObjectHandle {
     fn index_in(&self, snapshot: &CallbackSnapshot) -> Option<usize> {
-        snapshot.owns(&self.lookup).then_some(self.index)
+        if !snapshot.owns(&self.session) {
+            return None;
+        }
+        snapshot.lookup.ids.get(&self.id).copied()
     }
 }
 
@@ -303,8 +329,8 @@ impl UserData for ObjectHandle {
                     .filter(|&&index| snapshot.lookup.lights[index].owner == owner)
                     .map(|&index| {
                         lua.create_userdata(LightHandle {
-                            lookup: Rc::downgrade(&snapshot.lookup),
-                            index,
+                            session: Rc::downgrade(&snapshot.lookup.session),
+                            id: snapshot.lookup.lights[index].id.clone(),
                         })
                     })
                     .transpose()
@@ -314,15 +340,16 @@ impl UserData for ObjectHandle {
 }
 
 struct LightHandle {
-    lookup: Weak<ObjectLookup>,
-    index: usize,
+    session: Weak<ObjectSession>,
+    id: String,
 }
 
 impl LightHandle {
-    fn slot<'a>(&self, snapshot: &'a CallbackSnapshot) -> Option<&'a LightSlot> {
-        snapshot
-            .owns(&self.lookup)
-            .then(|| &snapshot.lookup.lights[self.index])
+    fn index_in(&self, snapshot: &CallbackSnapshot) -> Option<usize> {
+        if !snapshot.owns(&self.session) {
+            return None;
+        }
+        snapshot.lookup.light_indices.get(&self.id).copied()
     }
 }
 
@@ -331,15 +358,15 @@ impl UserData for LightHandle {
         fields.add_field_method_get("intensity", |lua, handle| {
             let snapshot = current_callback(lua)?;
             Ok(handle
-                .slot(&snapshot)
-                .map(|light| snapshot.intensity(light)))
+                .index_in(&snapshot)
+                .map(|index| snapshot.intensity(&snapshot.lookup.lights[index])))
         });
     }
 
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("set_intensity", |lua, handle, value: Value| {
             let snapshot = current_callback(lua)?;
-            let light = handle.slot(&snapshot).ok_or_else(|| {
+            let index = handle.index_in(&snapshot).ok_or_else(|| {
                 mlua::Error::runtime("set_intensity requires a Light from the current Play session")
             })?;
             let intensity = match value {
@@ -350,15 +377,77 @@ impl UserData for LightHandle {
             Light::validate_intensity(intensity)
                 .map_err(|error| mlua::Error::runtime(error.to_string()))?;
             let intensity = intensity as f32;
-            let change = (intensity != snapshot.intensity(light)).then_some(intensity);
+            let change = (intensity != snapshot.intensity(&snapshot.lookup.lights[index]))
+                .then_some(intensity);
             snapshot
                 .writes
                 .borrow_mut()
                 .light_intensities
-                .insert(handle.index, change);
+                .insert(index, change);
             Ok(())
         });
     }
+}
+
+fn spawn_object(
+    lua: &Lua,
+    (template, pose, parent): (AnyUserData, Table, Option<AnyUserData>),
+) -> mlua::Result<AnyUserData> {
+    let snapshot = current_callback(lua)?;
+    let template = template.borrow::<ObjectHandle>()?;
+    let session = &snapshot.lookup.session;
+    let index = template
+        .index_in(&snapshot)
+        .filter(|&index| index < session.authored_count())
+        .ok_or_else(|| {
+            mlua::Error::runtime(
+                "spawn requires an authored template from the current Play session",
+            )
+        })?;
+    let parent = parent
+        .as_ref()
+        .map(AnyUserData::borrow::<ObjectHandle>)
+        .transpose()?;
+    let mut topology = snapshot.topology.borrow_mut();
+    if parent.as_ref().is_some_and(|parent| {
+        !snapshot.owns(&parent.session)
+            || (!snapshot.lookup.ids.contains_key(&parent.id) && !topology.is_pending(&parent.id))
+    }) {
+        return Err(mlua::Error::runtime(
+            "spawn parent must be a live or pending object from the current Play session",
+        ));
+    }
+    let objects = session
+        .spawn(
+            index,
+            read_transform(&pose)?,
+            parent.as_ref().map(|parent| parent.id.as_str()),
+            topology.remaining_queue_rows(),
+        )
+        .map_err(mlua::Error::runtime)?;
+    let handle = lua.create_userdata(ObjectHandle {
+        session: Rc::downgrade(session),
+        id: objects[0].id.clone(),
+    })?;
+    topology.spawn(objects);
+    Ok(handle)
+}
+
+fn destroy_object(lua: &Lua, object: AnyUserData) -> mlua::Result<()> {
+    let snapshot = current_callback(lua)?;
+    let object = object.borrow::<ObjectHandle>()?;
+    let mut topology = snapshot.topology.borrow_mut();
+    let spawned = object
+        .index_in(&snapshot)
+        .is_some_and(|index| index >= snapshot.lookup.session.authored_count());
+    let pending = snapshot.owns(&object.session) && topology.is_pending(&object.id);
+    if !spawned && !pending {
+        return Err(mlua::Error::runtime(
+            "destroy requires a live or pending runtime-spawned object",
+        ));
+    }
+    topology.destroy(&object.id);
+    Ok(())
 }
 
 impl Engine {
@@ -403,13 +492,15 @@ impl Engine {
                         .or_else(|| snapshot.lookup.names.get(key))
                         .map(|&index| {
                             lua.create_userdata(ObjectHandle {
-                                lookup: Rc::downgrade(&snapshot.lookup),
-                                index,
+                                session: Rc::downgrade(&snapshot.lookup.session),
+                                id: snapshot.lookup.scene.objects[index].id.clone(),
                             })
                         })
                         .transpose()
                 })?,
             )?;
+            host.raw_set("spawn", self.lua.create_function(spawn_object)?)?;
+            host.raw_set("destroy", self.lua.create_function(destroy_object)?)?;
             Ok(Some(Module {
                 start,
                 update,

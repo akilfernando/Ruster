@@ -13,7 +13,9 @@ when the project opens.
   120 fixed ticks. While playing the lift scene, save an edit to
   `Assets/Sliding Gate Motion.lua` to try live Lua reload.
   Move **Gate Beacon** along local X before starting Play to change how far
-  the gate travels.
+  the gate travels. Press **Space** to create a warning marker from the
+  disabled template and release it to remove the marker. The saved check
+  replays two press-and-release cycles.
 - **Riverside.** Open `riverside.scene.json` with **File → Open Scene…**.
   The scene has 5,000 objects, including 714 linked instances of
   `Assets/Riverside.prefab`. The shared subdivided roof mesh and the cottage

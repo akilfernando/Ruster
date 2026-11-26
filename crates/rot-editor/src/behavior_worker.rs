@@ -47,8 +47,8 @@ pub(super) struct Frame {
     pub scene: Arc<Scene>,
     pub draw_frame: Option<rot_scene::SceneDrawFrame>,
     pub component_scene: Option<Arc<ComponentScene>>,
-    pub component_transforms: Option<Arc<[Transform]>>,
-    pub component_world_matrices: Option<Arc<[glam::DMat4]>>,
+    pub component_transforms: Option<Arc<Vec<Transform>>>,
+    pub component_world_matrices: Option<Arc<Vec<glam::DMat4>>>,
     pub resolved_transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
     pub state: Arc<rot_behavior::RuntimeState>,
     pub input: Option<Arc<LastConsumedInput>>,
@@ -1087,7 +1087,6 @@ impl Drop for Worker {
 struct Execution {
     engine: Option<Engine>,
     runtime: Option<Runtime>,
-    component_scene: Option<Arc<ComponentScene>>,
     key: Option<RunKey>,
     playing: bool,
     due: Option<Instant>,
@@ -1136,7 +1135,6 @@ impl Execution {
         self.playing = false;
         self.due = None;
         self.runtime = None;
-        self.component_scene = None;
         self.start_transition = None;
         self.key = None;
         self.last_input = None;
@@ -1216,9 +1214,9 @@ fn frame(shared: &Shared, execution: &mut Execution, repaint: &Option<Repaint>, 
             authoring: Arc::clone(execution.runtime.as_ref().unwrap().authoring_snapshot()),
             scene: runtime.draw_frame().snapshot(),
             draw_frame: Some(runtime.draw_frame().clone()),
-            component_scene: execution.component_scene.clone(),
-            component_transforms: runtime.component_transforms().map(Arc::from),
-            component_world_matrices: runtime.world_matrices().map(Arc::from),
+            component_scene: runtime.component_scene_snapshot(),
+            component_transforms: runtime.component_transform_snapshot(),
+            component_world_matrices: runtime.world_matrix_snapshot(),
             resolved_transform_camera: runtime.transform_camera(),
             input: execution.last_input.clone(),
             query_observations,
@@ -1344,7 +1342,6 @@ fn prepare_reset_engine(
 struct ResetCommit {
     key: RunKey,
     allow_audio: bool,
-    component_scene: Option<Arc<ComponentScene>>,
     sounds: Sounds,
 }
 
@@ -1358,7 +1355,6 @@ fn finish_reset(
     let ResetCommit {
         key,
         allow_audio,
-        component_scene,
         sounds,
     } = commit;
     match result {
@@ -1397,7 +1393,6 @@ fn finish_reset(
                 .filter(|(route_key, _)| *route_key == key)
                 .map(|(_, route)| route);
             execution.native_hud_action_epoch = None;
-            execution.component_scene = component_scene;
             execution.runtime = Some(runtime);
             execution.key = Some(key);
             execution.last_input = None;
@@ -1462,7 +1457,6 @@ fn process(
                 ResetCommit {
                     key,
                     allow_audio,
-                    component_scene: Some(scene),
                     sounds,
                 },
                 result,
@@ -1532,7 +1526,6 @@ fn process(
                 ResetCommit {
                     key,
                     allow_audio,
-                    component_scene: None,
                     sounds,
                 },
                 result,
@@ -1931,19 +1924,19 @@ fn transition_on_press(
                 Engine::with_cancellation(execution.limits.clone(), shared.cancel.clone())
                     .map_err(|error| format!("{error:?}"))?;
             engine.set_clips(target.clips);
-            let scene: Arc<ComponentScene> = Arc::from(target.runtime.into_scene());
+            let scene = target.runtime.into_scene();
             let runtime = engine
                 .reset_component(&scene, 0)
                 .map_err(|error| format!("{error:?}"))?;
             let keys = KeyEventAccumulator::new(scene.actions.clone())
                 .map_err(|error| error.to_string())?;
-            Ok((engine, runtime, scene, keys, target.sounds))
+            Ok((engine, runtime, keys, target.sounds))
         })
         .and_then(|target| verify().map(|()| target));
     if !active(shared, key) || shared.cancel.load(Ordering::SeqCst) {
         return None;
     }
-    let (engine, runtime, scene, keys, sounds) = match staged {
+    let (engine, runtime, keys, sounds) = match staged {
         Ok(value) => value,
         Err(error) => {
             let reason = if error == crate::scene_editor::project_startup::CHANGED {
@@ -1990,7 +1983,6 @@ fn transition_on_press(
     }
     execution.engine = Some(engine);
     execution.runtime = Some(runtime);
-    execution.component_scene = Some(scene);
     if !sounds.is_empty() {
         let weak = Arc::downgrade(shared);
         let guard = Arc::new(move || weak.upgrade().is_some_and(|state| active(&state, key)));
@@ -2158,7 +2150,6 @@ fn run(
     let mut execution = Execution {
         engine: None,
         runtime: None,
-        component_scene: None,
         key: None,
         playing: false,
         due: None,
@@ -2593,6 +2584,76 @@ mod tests {
             matches!(wait_event(worker,pulses),Event::Reset{key:accepted,run:RunInfo{tick:0,..}} if accepted==key)
         );
         key
+    }
+
+    #[test]
+    fn component_worker_publishes_spawned_objects_and_shares_quiet_frames() {
+        use rot_scene::component_scene::{Component, ComponentInstance, ScriptFile};
+
+        let (mut worker, pulses) = worker(Limits::default());
+        let mut base = Scene::empty("worker-spawn");
+        base.objects = ["controller", "template"]
+            .map(|id| Object::cube(id, None))
+            .into();
+        let mut scene =
+            ComponentScene::from_legacy(&rot_scene::Session::new(base).unwrap()).unwrap();
+        scene.objects[1].enabled = false;
+        scene.objects[0].components.push(ComponentInstance {
+            id: "spawn-controller".into(),
+            enabled: true,
+            kind: Component::Script {
+                binding: BehaviorBinding {
+                    target: rot_scene::BindingTarget::Object("controller".into()),
+                    commands: Default::default(),
+                    state_defaults: Default::default(),
+                    source_id: "spawn-script".into(),
+                    enabled: true,
+                    properties: Default::default(),
+                },
+                source_kind: None,
+                movement: Default::default(),
+            },
+        });
+        scene.script_files.insert("spawn-script".into(), ScriptFile {
+            asset_id: "spawn-script".into(),
+            path: "Assets/Spawn.lua".into(),
+            text: "local spawned; return {on_update=function(p, _, _, host) if not spawned then spawned=host.spawn(host.find('template'), p) end end}".into(),
+        });
+        let key = worker.advance(1, 0).unwrap();
+        worker
+            .try_request(Command::ResetComponent {
+                key,
+                scene: Arc::new(scene),
+                sounds: Sounds::new(),
+                clips: Default::default(),
+            })
+            .unwrap();
+        assert!(matches!(wait_event(&worker, &pulses), Event::Reset { .. }));
+        let authored = worker.last_good_frame().unwrap();
+        worker.try_request(Command::Step { key }).unwrap();
+        assert!(matches!(wait_event(&worker, &pulses), Event::Step { .. }));
+        let spawned = worker.last_good_frame().unwrap();
+        assert_eq!(authored.component_scene.unwrap().objects.len(), 2);
+        assert_eq!(spawned.component_scene.as_ref().unwrap().objects.len(), 3);
+        assert_eq!(spawned.component_transforms.as_ref().unwrap().len(), 3);
+        assert_eq!(spawned.component_world_matrices.as_ref().unwrap().len(), 3);
+        worker.try_request(Command::Step { key }).unwrap();
+        assert!(matches!(wait_event(&worker, &pulses), Event::Step { .. }));
+        let quiet = worker.last_good_frame().unwrap();
+        assert_eq!(quiet.tick, 2);
+        assert!(Arc::ptr_eq(
+            spawned.component_scene.as_ref().unwrap(),
+            quiet.component_scene.as_ref().unwrap()
+        ));
+        assert!(Arc::ptr_eq(
+            spawned.component_transforms.as_ref().unwrap(),
+            quiet.component_transforms.as_ref().unwrap()
+        ));
+        assert!(Arc::ptr_eq(
+            spawned.component_world_matrices.as_ref().unwrap(),
+            quiet.component_world_matrices.as_ref().unwrap()
+        ));
+        close(&mut worker);
     }
 
     // Observe the actual constructor/VM boundary, not only a duration constant:

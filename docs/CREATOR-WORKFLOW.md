@@ -541,6 +541,21 @@ one when the object has several. Missing components return `nil`. Read
 0 to 16. The write commits with the rest of the tick. Rot Yard’s beacon
 brightens while **Space** is held and returns to its idle level on release.
 
+## Spawn and remove objects from Lua
+
+Use `host.spawn(template, pose, parent)` to make a runtime copy of an
+authored subtree. The copy uses `pose` as its root's local Transform and
+keeps the template's mesh and material resources. Omit `parent` to place
+the root in world space. A disabled template can stay hidden in the editor
+while its copy is enabled in Play. Templates can contain Transform groups,
+Mesh Renderers, Lights, and Colliders.
+
+Keep the handle returned by `host.spawn` and pass it to `host.destroy` to
+remove the copy and its children. The copy becomes readable after the
+tick commits. Calling `host.destroy` before then cancels the pending copy.
+Spawns and removals are local to the Play session, including in a built
+game. Rot Yard's `Gate Warning Marker.lua` uses these calls on **Space**.
+
 ## Bind keyboard actions to Lua in v23
 
 Open **Edit → Project Settings… → Input Actions**, or find **Input Actions…**

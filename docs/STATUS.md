@@ -44,7 +44,9 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
     same tick transaction. New Builds bake file scripts without a numbered
     contract. Existing `update` scripts and packages still run. Lua can
     read and stage Light intensity in the same tick as a Transform write.
-    Spawn/destroy and remaining callback capabilities are open.
+    Lua can also spawn and remove static subtrees during Play. Editor Play
+    and the relocated Rot Yard build both replay two warning-marker
+    cycles. The remaining persistent callback capabilities are open.
   - `C-EXIT`: [Rot Yard](../examples/rot-yard/README.md) has a scripted Blender
     gate, a Kenney CC0 pack, and a 5,000-object linked-prefab level.
     The Riverside scene exceeded 60 fps on the focused Wayland desktop.

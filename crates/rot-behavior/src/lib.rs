@@ -43,6 +43,7 @@ use spatial_host::{
 };
 pub use spatial_host::{validate_kinematic_component_scene, QueryObservation, QueryResult};
 mod component_runtime;
+mod component_topology;
 mod lua_component;
 
 /// Exact current editor/Scene11 export quantum (~60Hz). The public Engine
@@ -265,15 +266,32 @@ impl Runtime {
             .as_ref()
             .map(|world| world.scene.as_ref())
     }
+    pub fn component_scene_snapshot(
+        &self,
+    ) -> Option<Arc<rot_scene::component_scene::ComponentScene>> {
+        self.component_world
+            .as_ref()
+            .map(|world| Arc::clone(&world.scene))
+    }
     pub fn component_transforms(&self) -> Option<&[Transform]> {
         self.component_world
             .as_ref()
             .map(|world| world.local_transforms.as_slice())
     }
+    pub fn component_transform_snapshot(&self) -> Option<Arc<Vec<Transform>>> {
+        self.component_world
+            .as_ref()
+            .map(|world| Arc::clone(&world.local_transforms))
+    }
     pub fn world_matrices(&self) -> Option<&[glam::DMat4]> {
         self.component_world
             .as_ref()
             .map(|world| world.world_matrices.as_slice())
+    }
+    pub fn world_matrix_snapshot(&self) -> Option<Arc<Vec<glam::DMat4>>> {
+        self.component_world
+            .as_ref()
+            .map(|world| Arc::clone(&world.world_matrices))
     }
     pub fn object_translation(&self, object_id: &str) -> Option<[f32; 3]> {
         if let Some(world) = &self.component_world {

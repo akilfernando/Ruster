@@ -77,6 +77,18 @@
               "enabled": true,
               "properties": {}
             }
+          },
+          {
+            "id": "gate-warning-script",
+            "enabled": true,
+            "type": "script",
+            "source_kind": "asset",
+            "binding": {
+              "object_id": "model-18eb37ac6676856a-0",
+              "source_id": "gate-warning-marker",
+              "enabled": true,
+              "properties": {}
+            }
           }
         ]
       },
@@ -154,6 +166,47 @@
               "type": "point",
               "range": 8.0
             }
+          }
+        ]
+      },
+      {
+        "id": "warning-marker-template",
+        "name": "Warning Marker Template",
+        "enabled": false,
+        "parent": "model-18eb37ac6676856a-0",
+        "transform": {
+          "translation": [-0.1, 2.55, 1.2],
+          "rotation": [0.0, 0.0, 0.0],
+          "scale": [0.42, 0.24, 0.26]
+        },
+        "components": [
+          {
+            "id": "warning-marker-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": { "type": "cube" },
+            "tint": [1.0, 0.31, 0.05, 1.0]
+          }
+        ]
+      },
+      {
+        "id": "warning-marker-sensor-template",
+        "name": "Warning Marker Sensor",
+        "enabled": true,
+        "parent": "warning-marker-template",
+        "transform": {
+          "translation": [0.0, 0.0, 0.0],
+          "rotation": [0.0, 0.0, 0.0],
+          "scale": [1.0, 1.0, 1.0]
+        },
+        "components": [
+          {
+            "id": "warning-marker-sensor",
+            "enabled": true,
+            "type": "collider",
+            "role": "sensor",
+            "offset": [0.0, 0.0, 0.0],
+            "shape": { "type": "box", "half_extents": [0.5, 0.5, 0.5] }
           }
         ]
       }
