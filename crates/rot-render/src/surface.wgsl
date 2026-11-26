@@ -47,11 +47,28 @@ struct IblUniform {
     sun_color: vec4<f32>,
     sh: array<vec4<f32>, 9>,
 };
+struct ClusterParams {
+    view: mat4x4<f32>,
+    inv_projection: mat4x4<f32>,
+    screen_z_params: vec4<f32>,
+    slice_params: vec4<f32>,
+    grid_counts: vec4<u32>,
+};
+struct LocalLight {
+    position_range: vec4<f32>,
+    color_inv_range_sq: vec4<f32>,
+    spot_axis_outer: vec4<f32>,
+    params: vec4<f32>,
+};
 @group(2) @binding(0) var<uniform> lighting: Lighting;
 @group(2) @binding(1) var ibl_specular: texture_cube<f32>;
 @group(2) @binding(2) var ibl_brdf_lut: texture_2d<f32>;
 @group(2) @binding(3) var ibl_sampler: sampler;
 @group(2) @binding(4) var<uniform> ibl: IblUniform;
+@group(2) @binding(5) var<uniform> cluster_params: ClusterParams;
+@group(2) @binding(6) var<storage, read> local_lights: array<LocalLight>;
+@group(2) @binding(7) var<storage, read> cluster_counts: array<u32>;
+@group(2) @binding(8) var<storage, read> cluster_indices: array<u32>;
 struct Vertex {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -217,23 +234,62 @@ fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
         if sun_shadow.parameters.x > 0.5 { direct *= sun_visibility(v.world_position, n); }
         result += direct;
     }
-    for (var i = 0u; i < min(lighting.mode_counts.y, 4u); i++) {
-        let point = lighting.points[i];
-        let delta = point.position_inverse_range_squared.xyz - v.world_position;
-        let d2 = dot(delta, delta);
-        let direction = delta / sqrt(max(d2, 1e-8));
-        let q = min(d2 * point.position_inverse_range_squared.w, 1.0);
-        let smooth_range = 1.0 - q * q;
-        var attenuation = smooth_range * smooth_range / (1.0 + d2);
-        if lighting.mode_counts.w != 0u && point.color_intensity.w > 0.0 {
-            let cone = lighting.spot_cones[i];
-            // Squared chord equals 2(1 - cos(theta)) for unit vectors.
-            // Normalize independently of the distance attenuation's near floor.
-            let chord = delta / sqrt(max(d2, 1e-30)) - cone.xyz;
-            let angular = clamp((cone.w - dot(chord, chord)) * point.color_intensity.w, 0.0, 1.0);
-            attenuation *= angular * angular;
+    if cluster_params.grid_counts.w > 0u {
+        let view_pos = (cluster_params.view * vec4<f32>(v.world_position, 1.0)).xyz;
+        let view_depth = clamp(
+            -view_pos.z,
+            cluster_params.screen_z_params.z,
+            cluster_params.screen_z_params.w,
+        );
+        let cx = min(
+            u32(max(v.position.x, 0.0) / max(cluster_params.screen_z_params.x, 1.0)
+                * f32(cluster_params.grid_counts.x)),
+            cluster_params.grid_counts.x - 1u,
+        );
+        let cy = min(
+            u32(max(v.position.y, 0.0) / max(cluster_params.screen_z_params.y, 1.0)
+                * f32(cluster_params.grid_counts.y)),
+            cluster_params.grid_counts.y - 1u,
+        );
+        var cz: u32;
+        if cluster_params.slice_params.z >= 0.5 {
+            cz = u32(clamp(
+                floor(view_depth * cluster_params.slice_params.x + cluster_params.slice_params.y),
+                0.0,
+                f32(cluster_params.grid_counts.z - 1u),
+            ));
+        } else {
+            cz = u32(clamp(
+                floor(log2(max(view_depth, 1e-5)) * cluster_params.slice_params.x + cluster_params.slice_params.y),
+                0.0,
+                f32(cluster_params.grid_counts.z - 1u),
+            ));
         }
-        result += point.color_intensity.rgb * direct_response(highlighted, n, view, direction, response, metallic) * attenuation;
+        let cluster_idx = cx
+            + cy * cluster_params.grid_counts.x
+            + cz * cluster_params.grid_counts.x * cluster_params.grid_counts.y;
+        let cluster_light_count = min(cluster_counts[cluster_idx], 64u);
+        let base_offset = cluster_idx * 64u;
+        for (var ci = 0u; ci < cluster_light_count; ci++) {
+            let light = local_lights[cluster_indices[base_offset + ci]];
+            let delta = light.position_range.xyz - v.world_position;
+            let d2 = dot(delta, delta);
+            let direction = delta / sqrt(max(d2, 1e-8));
+            let q = min(d2 * light.color_inv_range_sq.w, 1.0);
+            let smooth_range = 1.0 - q * q;
+            var attenuation = smooth_range * smooth_range / (1.0 + d2);
+            if light.params.x > 0.0 {
+                let cone = light.spot_axis_outer;
+                // Squared chord equals 2(1 - cos(theta)) for unit vectors.
+                // Normalize independently of the distance attenuation's near floor.
+                let chord = delta / sqrt(max(d2, 1e-30)) - cone.xyz;
+                let angular = clamp((cone.w - dot(chord, chord)) * light.params.x, 0.0, 1.0);
+                attenuation *= angular * angular;
+            }
+            result += light.color_inv_range_sq.rgb
+                * direct_response(highlighted, n, view, direction, response, metallic)
+                * attenuation;
+        }
     }
     return vec4<f32>(hdr_storage(result + emission).rgb, out_alpha);
 }

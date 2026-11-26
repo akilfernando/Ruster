@@ -185,7 +185,7 @@ impl Content {
                     scene
                         .scene()
                         .lighting
-                        .validate()
+                        .validate_clustered()
                         .map_err(|error| format!("application scene: {error}"))?;
                 } else {
                     scene

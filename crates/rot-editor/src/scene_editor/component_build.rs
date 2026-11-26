@@ -2443,7 +2443,7 @@ f 1 2 3
                 translation: [0.0, 2.0, 0.0],
                 ..Transform::default()
             },
-            components: (0..rot_scene::MAX_POINT_LIGHTS)
+            components: (0..rot_scene::MAX_CLUSTERED_LOCAL_LIGHTS)
                 .map(|index| lamp(&format!("lamp-{index}")))
                 .collect(),
         });
@@ -2456,7 +2456,7 @@ f 1 2 3
         assert_eq!(&materialized, editor_preview.scene());
         assert_eq!(
             materialized.lighting.light_count(),
-            rot_scene::MAX_POINT_LIGHTS
+            rot_scene::MAX_CLUSTERED_LOCAL_LIGHTS
         );
         let translation = materialized
             .lighting
@@ -2472,7 +2472,13 @@ f 1 2 3
                 parent_translation[2]
             ]
         );
-        assert!(materialized.lighting.light("lamp-3").is_none());
+        assert!(materialized
+            .lighting
+            .light(&format!(
+                "lamp-{}",
+                rot_scene::MAX_CLUSTERED_LOCAL_LIGHTS - 1
+            ))
+            .is_none());
     }
 
     #[test]

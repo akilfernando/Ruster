@@ -1,6 +1,7 @@
 //! Shared bounded 3D viewport. No application behavior or editor state lives here.
 mod asset_gpu;
 pub mod benchmark;
+mod cluster_gpu;
 pub mod component_preview;
 mod editor_grid;
 mod frustum;
@@ -25,7 +26,10 @@ pub use shadow_gpu::ShadowStatus;
 mod shadow_lifecycle_probe;
 #[cfg(test)]
 mod shadow_probe;
-use lighting_gpu::{LightingGpu, LightingPacket, LIGHTING_BYTES};
+use cluster_gpu::{ClusterCamera, ClusterGpu};
+#[cfg(test)]
+use lighting_gpu::LightingPacket;
+use lighting_gpu::{LightingGpu, PackedLighting, LIGHTING_BYTES};
 use material_gpu::{BindingKey, MaterialGpu, MaterialTextureInputs};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
@@ -2185,12 +2189,12 @@ fn render_draw_scene(
         None => data.remove::<egui::Pos2>(box_id),
     });
     let start = Instant::now();
-    let (lighting, invalid_lighting) = match LightingPacket::try_pack(
+    let (lighting, invalid_lighting) = match PackedLighting::try_pack(
         draw.prepared
             .map_or(&scene.lighting, rot_scene::HierarchyDraw::lighting),
     ) {
         Ok(packet) => (packet, false),
-        Err(_) => (LightingPacket::authored_dark(), true),
+        Err(_) => (PackedLighting::authored_dark(), true),
     };
     let shadow = if invalid_lighting {
         None
@@ -2243,6 +2247,7 @@ fn render_draw_scene(
                 groups,
                 camera: view_projection.to_cols_array(),
                 inv_camera,
+                cluster_camera: ClusterCamera::from_matrices(view, projection),
                 show_editor_grid,
                 camera_eye_mode,
                 display: scene.display,
@@ -3088,6 +3093,7 @@ struct Resources {
     materials: MaterialGpu,
     assets: asset_gpu::AssetGpu,
     ibl: ibl_gpu::IblGpu,
+    cluster: ClusterGpu,
     lighting: LightingGpu,
     shadows: shadow_gpu::ShadowGpu,
     builtin_appearance: bool,
@@ -3157,7 +3163,8 @@ impl Resources {
         });
         let materials = MaterialGpu::new(device, queue);
         let ibl = ibl_gpu::IblGpu::new(device, queue);
-        let lighting = LightingGpu::new(device, &ibl);
+        let cluster = ClusterGpu::new(device);
+        let lighting = LightingGpu::new(device, &ibl, &cluster);
         let shadows =
             shadow_gpu::ShadowGpu::new(device, queue, &instance_layout, &materials.layout);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -3288,6 +3295,7 @@ impl Resources {
             materials,
             assets: Default::default(),
             ibl,
+            cluster,
             lighting,
             shadows,
             builtin_appearance: true,
@@ -3995,12 +4003,13 @@ struct SceneCallback {
     groups: Vec<DrawGroup>,
     camera: [f32; 16],
     inv_camera: [f32; 16],
+    cluster_camera: ClusterCamera,
     show_editor_grid: bool,
     camera_eye_mode: [f32; 4],
     display: rot_scene::DisplayProfile,
     background: Option<rot_scene::BackgroundColor>,
     sky: Option<rot_scene::Sky>,
-    lighting: LightingPacket,
+    lighting: PackedLighting,
     size: egui::Vec2,
     cpu_us: f64,
     culled_objects: usize,
@@ -4165,12 +4174,19 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 });
         queue.write_buffer(&r.camera, 0, bytemuck::cast_slice(&self.camera));
         queue.write_buffer(&r.camera, 64, bytemuck::cast_slice(&self.camera_eye_mode));
-        let lighting_uploaded = r.lighting.prepare(queue, &self.lighting);
+        let lighting_uploaded = r.lighting.prepare(queue, &self.lighting.uniform);
         if r.ibl
-            .prepare(device, queue, encoder, self.sky, &self.lighting)
+            .prepare(device, queue, encoder, self.sky, &self.lighting.uniform)
         {
-            r.lighting.rebuild_bind(device, &r.ibl);
+            r.lighting.rebuild_bind(device, &r.ibl, &r.cluster);
         }
+        r.cluster.prepare(
+            queue,
+            encoder,
+            self.cluster_camera,
+            size,
+            &self.lighting.local_lights,
+        );
         let draw_sky = r.builtin_appearance && self.sky.is_some_and(|sky| sky.show_backdrop);
         if draw_sky {
             r.ibl.prepare_sky_draw(
@@ -4210,7 +4226,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             },
             shadow_gpu::Request {
                 settings: self.shadow,
-                direction: Vec3::from_slice(&self.lighting.direction_to_light[..3]),
+                direction: Vec3::from_slice(&self.lighting.uniform.direction_to_light[..3]),
                 builtin: r.builtin_appearance,
                 context: &self.context,
                 timestamps: timing.map(|t| wgpu::RenderPassTimestampWrites {
@@ -4941,6 +4957,11 @@ mod tests {
                 offset_of!(ibl_gpu::IblUniform, sh),
             ]
         );
+        assert_eq!(
+            size_of::<cluster_gpu::ClusterParams>(),
+            cluster_gpu::CLUSTER_PARAMS_BYTES as usize
+        );
+        assert_eq!(size_of::<lighting_gpu::LocalLightGpu>(), 64);
 
         // Additive camera/instance ABI protects old custom shaders and verifies
         // that opt-in fragment view data, storage instance layout, and tangents validate.

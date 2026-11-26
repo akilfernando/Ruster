@@ -9,6 +9,7 @@ use crate::{validate_id, validate_name, SceneError, Transform};
 pub const MAX_DIRECTIONAL_LIGHTS: usize = 1;
 pub const MAX_POINT_LIGHTS: usize = 4;
 pub const MAX_LIGHTS: usize = MAX_DIRECTIONAL_LIGHTS + MAX_POINT_LIGHTS;
+pub const MAX_CLUSTERED_LOCAL_LIGHTS: usize = 1024;
 
 /// Missing lighting in older scenes preserves the fixed legacy illumination.
 /// Authored zero ambient and zero lights deliberately produces no illumination.
@@ -64,13 +65,22 @@ impl Lighting {
     }
 
     pub fn validate(&self) -> Result<(), SceneError> {
+        self.validate_with_local_limit(MAX_POINT_LIGHTS)
+    }
+
+    pub fn validate_clustered(&self) -> Result<(), SceneError> {
+        self.validate_with_local_limit(MAX_CLUSTERED_LOCAL_LIGHTS)
+    }
+
+    pub fn validate_with_local_limit(&self, max_local: usize) -> Result<(), SceneError> {
         let Self::Authored { ambient, lights } = self else {
             return Ok(());
         };
         ambient.validate()?;
-        if lights.len() > MAX_LIGHTS {
+        let max_total = MAX_DIRECTIONAL_LIGHTS + max_local;
+        if lights.len() > max_total {
             return Err(SceneError::Invalid(format!(
-                "lighting exceeds {MAX_LIGHTS} lights (including disabled lights)"
+                "lighting exceeds {max_total} lights (including disabled lights)"
             )));
         }
         let mut directional_count = 0;
@@ -83,9 +93,9 @@ impl Lighting {
                 LightKind::Point { .. } | LightKind::Spot { .. } => point_count += 1,
             }
         }
-        if directional_count > MAX_DIRECTIONAL_LIGHTS || point_count > MAX_POINT_LIGHTS {
+        if directional_count > MAX_DIRECTIONAL_LIGHTS || point_count > max_local {
             return Err(SceneError::Invalid(format!(
-                "lighting permits at most {MAX_DIRECTIONAL_LIGHTS} directional and {MAX_POINT_LIGHTS} local lights (Point or Spot, including disabled lights)"
+                "lighting permits at most {MAX_DIRECTIONAL_LIGHTS} directional and {max_local} local lights (Point or Spot, including disabled lights)"
             )));
         }
         Ok(())
@@ -612,5 +622,37 @@ mod tests {
         }
         assert_eq!(sun.intensity, 0.72);
         assert_eq!(Ambient::default().intensity, 0.28);
+    }
+
+    #[test]
+    fn clustered_lighting_accepts_up_to_1024_local_lights_and_rejects_overflow() {
+        for count in [64, MAX_CLUSTERED_LOCAL_LIGHTS] {
+            let lights: BTreeMap<String, Light> = (0..count)
+                .map(|index| (format!("local-{index:04}"), Light::point(None)))
+                .collect();
+            let clustered = Lighting::Authored {
+                ambient: Ambient::default(),
+                lights,
+            };
+            clustered.validate_clustered().unwrap();
+            assert!(clustered.validate().is_err());
+        }
+        let mut overflow: BTreeMap<String, Light> = (0..=MAX_CLUSTERED_LOCAL_LIGHTS)
+            .map(|index| (format!("local-{index:04}"), Light::point(None)))
+            .collect();
+        let too_many = Lighting::Authored {
+            ambient: Ambient::default(),
+            lights: overflow.clone(),
+        };
+        assert!(too_many.validate_clustered().is_err());
+        // Total includes 1 directional + 1024 locals = 1025 total, still valid.
+        overflow.remove("local-0000");
+        overflow.insert("sun".into(), Light::directional(None));
+        Lighting::Authored {
+            ambient: Ambient::default(),
+            lights: overflow,
+        }
+        .validate_clustered()
+        .unwrap();
     }
 }

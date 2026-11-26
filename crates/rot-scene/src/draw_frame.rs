@@ -5,7 +5,7 @@ use crate::component_scene::{
 };
 use crate::{
     Light, LightKind, Lighting, Object, PlayerView, ResolvedPlayerView, ResolvedPoses, Scene,
-    SceneError, Transform, MAX_DIRECTIONAL_LIGHTS, MAX_POINT_LIGHTS,
+    SceneError, Transform, MAX_CLUSTERED_LOCAL_LIGHTS, MAX_DIRECTIONAL_LIGHTS,
 };
 use glam::{DMat4, DQuat, EulerRot, Mat3, Mat4, Quat, Vec3};
 use std::collections::{BTreeMap, HashMap};
@@ -332,7 +332,7 @@ impl ComponentDrawPlan {
                     } => {
                         let (count, limit) = match kind {
                             LightKind::Point { .. } | LightKind::Spot { .. } => {
-                                (&mut point_lights, MAX_POINT_LIGHTS)
+                                (&mut point_lights, MAX_CLUSTERED_LOCAL_LIGHTS)
                             }
                             LightKind::Directional { .. } => {
                                 (&mut directional_lights, MAX_DIRECTIONAL_LIGHTS)
@@ -374,7 +374,7 @@ impl ComponentDrawPlan {
                 lights,
             };
         }
-        base.lighting.validate()?;
+        base.lighting.validate_clustered()?;
         Ok(Self {
             base_scene: Arc::new(base),
             draw_owners,
@@ -467,7 +467,7 @@ impl ComponentDrawPlan {
                     light.intensity = intensity;
                 }
             }
-            lighting.validate()?;
+            lighting.validate_clustered()?;
         }
         let (player_view, transform_camera) = match &self.camera {
             RuntimeCamera::None => (None, None),

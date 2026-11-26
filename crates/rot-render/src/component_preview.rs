@@ -8,8 +8,8 @@ use eframe::egui;
 use glam::{DMat4, DVec3, EulerRot, Mat3, Mat4, Quat, Vec3};
 use rot_scene::component_scene::{self, Component, ComponentScene, Geometry};
 use rot_scene::{
-    Light, LightKind, Lighting, Object, Scene, SceneError, Transform, MAX_DIRECTIONAL_LIGHTS,
-    MAX_POINT_LIGHTS,
+    Light, LightKind, Lighting, Object, Scene, SceneError, Transform, MAX_CLUSTERED_LOCAL_LIGHTS,
+    MAX_DIRECTIONAL_LIGHTS,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -440,7 +440,7 @@ pub fn project_editor_with_world(
                 } => {
                     let (count, limit) = match kind {
                         LightKind::Point { .. } | LightKind::Spot { .. } => {
-                            (&mut point_lights, MAX_POINT_LIGHTS)
+                            (&mut point_lights, MAX_CLUSTERED_LOCAL_LIGHTS)
                         }
                         LightKind::Directional { .. } => {
                             (&mut directional_lights, MAX_DIRECTIONAL_LIGHTS)
@@ -479,7 +479,7 @@ pub fn project_editor_with_world(
             lights,
         };
     }
-    scene.lighting.validate()?;
+    scene.lighting.validate_clustered()?;
     Ok((
         ComponentPreview {
             static_hud: (component_scene.hud.enabled
@@ -628,7 +628,7 @@ mod tests {
 
     #[test]
     fn parented_spot_ignores_scale_and_shares_point_budget_in_scene_order() {
-        use crate::lighting_gpu::LightingPacket;
+        use crate::lighting_gpu::PackedLighting;
         use rot_scene::component_scene::{ComponentInstance, ObjectNode};
         use std::f32::consts::{FRAC_PI_2, FRAC_PI_6};
         let mut scene =
@@ -673,16 +673,57 @@ mod tests {
             });
         }
         let preview = project(&scene).unwrap();
-        assert!(preview.light_budget_exceeded());
+        assert!(!preview.light_budget_exceeded());
         let lighting = &preview.scene().lighting;
-        assert!(lighting.light("a").is_none());
+        assert!(lighting.light("a").is_some());
         assert_eq!(lighting.light("y").unwrap().kind, Light::spot(None).kind);
-        let packet = LightingPacket::try_pack(lighting).unwrap();
-        assert_eq!(packet.mode_counts, [1, 4, 0, 1]);
+        let packed = PackedLighting::try_pack(lighting).unwrap();
+        assert_eq!(packed.uniform.mode_counts, [1, 5, 0, 1]);
+        assert_eq!(packed.local_lights.len(), 5);
         let expected = Vec3::new(FRAC_PI_6.cos(), FRAC_PI_6.sin(), 0.0);
-        assert!(Vec3::from_slice(&packet.spot_cones[2][..3]).abs_diff_eq(expected, 1e-5));
-        assert!(packet.spot_cones[2][3].is_finite());
-        assert!((packet.points[2].position_inverse_range_squared[3] - 0.04).abs() < 1e-7);
+        // BTreeMap key order is ["a" (spot), "w" (point), "x" (point), "y" (spot), "z" (point)].
+        for slot in [0_usize, 3] {
+            assert!(
+                Vec3::from_slice(&packed.uniform.spot_cones[slot][..3]).abs_diff_eq(expected, 1e-5)
+            );
+            assert!(packed.uniform.spot_cones[slot][3].is_finite());
+            assert!(
+                (packed.uniform.points[slot].position_inverse_range_squared[3] - 0.04).abs() < 1e-7
+            );
+        }
+
+        let mut overflow =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("spots-overflow")).unwrap())
+                .unwrap();
+        for index in 0..=MAX_CLUSTERED_LOCAL_LIGHTS {
+            overflow.objects.push(ObjectNode {
+                id: format!("lamp-{index:04}"),
+                name: format!("Lamp {index}"),
+                parent: None,
+                enabled: true,
+                transform: Transform::default(),
+                components: vec![ComponentInstance {
+                    id: format!("l-{index:04}"),
+                    enabled: true,
+                    kind: Component::Light {
+                        color: [1.0; 3],
+                        intensity: 1.0,
+                        kind: Light::point(None).kind,
+                    },
+                }],
+            });
+        }
+        let overflow_preview = project(&overflow).unwrap();
+        assert!(overflow_preview.light_budget_exceeded());
+        assert_eq!(
+            overflow_preview.scene().lighting.light_count(),
+            MAX_CLUSTERED_LOCAL_LIGHTS
+        );
+        assert!(overflow_preview
+            .scene()
+            .lighting
+            .light(&format!("l-{MAX_CLUSTERED_LOCAL_LIGHTS:04}"))
+            .is_none());
     }
 
     #[test]

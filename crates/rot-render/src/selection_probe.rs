@@ -106,9 +106,10 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue) {
                 show_editor_grid: false,
                 groups,
                 camera: Mat4::IDENTITY.to_cols_array(),
+                cluster_camera: ClusterCamera::default(),
                 camera_eye_mode: [0., 0., 2., 0.],
                 display,
-                lighting: LightingPacket::legacy(),
+                lighting: PackedLighting::legacy(),
                 size: egui::vec2(256., 192.),
                 cpu_us: 0.,
                 culled_objects: 0,
@@ -194,11 +195,24 @@ pub(super) fn render(
     callback: &SceneCallback,
     output: wgpu::TextureFormat,
 ) -> Vec<u8> {
+    render_sized(device, queue, resources, callback, output, [256, 192])
+}
+
+pub(super) fn render_sized(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    resources: &mut egui_wgpu::CallbackResources,
+    callback: &SceneCallback,
+    output: wgpu::TextureFormat,
+    [width, height]: [u32; 2],
+) -> Vec<u8> {
+    let row_bytes = width * 4;
+    let bpr = row_bytes.next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
     let image = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("selection final display readback"),
         size: wgpu::Extent3d {
-            width: 256,
-            height: 192,
+            width,
+            height,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -211,7 +225,7 @@ pub(super) fn render(
     let view = image.create_view(&Default::default());
     let read = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("selection readback"),
-        size: 256 * 192 * 4,
+        size: u64::from(bpr) * u64::from(height),
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
@@ -220,7 +234,7 @@ pub(super) fn render(
         device,
         queue,
         &egui_wgpu::ScreenDescriptor {
-            size_in_pixels: [256, 192],
+            size_in_pixels: [width, height],
             pixels_per_point: 1.,
         },
         &mut encoder,
@@ -243,13 +257,14 @@ pub(super) fn render(
                 ..Default::default()
             })
             .forget_lifetime();
-        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(256., 192.));
+        let rect =
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width as f32, height as f32));
         callback.paint(
             egui::PaintCallbackInfo {
                 viewport: rect,
                 clip_rect: rect,
                 pixels_per_point: 1.,
-                screen_size_px: [256, 192],
+                screen_size_px: [width, height],
             },
             &mut pass,
             resources,
@@ -266,13 +281,13 @@ pub(super) fn render(
             buffer: &read,
             layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(1024),
-                rows_per_image: Some(192),
+                bytes_per_row: Some(bpr),
+                rows_per_image: Some(height),
             },
         },
         wgpu::Extent3d {
-            width: 256,
-            height: 192,
+            width,
+            height,
             depth_or_array_layers: 1,
         },
     );
@@ -283,7 +298,12 @@ pub(super) fn render(
     });
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     recv.recv().unwrap().unwrap();
-    let bytes = read.slice(..).get_mapped_range().unwrap().to_vec();
+    let mapped = read.slice(..).get_mapped_range().unwrap();
+    let mut bytes = Vec::with_capacity((row_bytes * height) as usize);
+    for row in mapped.chunks(bpr as usize).take(height as usize) {
+        bytes.extend_from_slice(&row[..row_bytes as usize]);
+    }
+    drop(mapped);
     read.unmap();
     bytes
 }
