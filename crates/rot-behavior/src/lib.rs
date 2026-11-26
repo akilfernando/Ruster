@@ -339,7 +339,7 @@ impl Runtime {
     pub fn updated_component_scene(&self) -> Option<rot_scene::component_scene::ComponentScene> {
         let world = self.component_world.as_ref()?;
         let mut scene = (*world.scene).clone();
-        for (object, transform) in scene.objects.iter_mut().zip(&world.local_transforms) {
+        for (object, transform) in scene.objects.iter_mut().zip(world.local_transforms.iter()) {
             object.transform = transform.clone();
         }
         Some(scene)

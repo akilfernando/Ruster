@@ -12,6 +12,8 @@ when the project opens.
   run **Sliding Gate Travel**, which checks the gate's local position after
   120 fixed ticks. While playing the lift scene, save an edit to
   `Assets/Sliding Gate Motion.lua` to try live Lua reload.
+  Move **Gate Beacon** along local X before starting Play to change how far
+  the gate travels.
 - **Riverside.** Open `riverside.scene.json` with **File → Open Scene…**.
   The scene has 5,000 objects, including 714 linked instances of
   `Assets/Riverside.prefab`. The shared subdivided roof mesh and the cottage

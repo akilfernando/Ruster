@@ -514,6 +514,19 @@ A linked prefab can reuse the same asset. Saving the scene records the
 asset reference. Linux Build verifies the accepted source and embeds it
 in the packaged scene so the standalone can run independently.
 
+## Look up a scene object from Lua
+
+Call `host.find("Gate Beacon")` from a file-backed `on_start` or
+`on_update` callback to get a scene object. Lookup matches an exact stable
+ID first, then an exact object name. Name matches are case-sensitive and
+the first match in scene order wins. A missing object returns `nil`.
+
+You can keep the object in a Lua local across callbacks. Reading
+`object.transform` returns a fresh copy of its last committed local
+Transform. Changing that copy leaves the other object in place. In Rot Yard,
+the sliding gate uses the beacon’s local X position as its travel endpoint.
+Move the beacon in the Inspector, then start Play and hold **Space**.
+
 ## Bind keyboard actions to Lua in v23
 
 Open **Edit → Project Settings… → Input Actions**, or find **Input Actions…**

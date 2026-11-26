@@ -119,6 +119,30 @@
             }
           }
         ]
+      },
+      {
+        "id": "gate-beacon",
+        "name": "Gate Beacon",
+        "enabled": true,
+        "parent": "model-18eb37ac6676856a-0",
+        "transform": {
+          "translation": [
+            3.0,
+            1.2,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": []
       }
     ],
     "materials": {

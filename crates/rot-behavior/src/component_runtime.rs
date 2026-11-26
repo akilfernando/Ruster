@@ -10,7 +10,7 @@ use rot_scene::component_scene::{AnimatorStart, Component, ComponentScene, Objec
 use rot_scene::input::{ActionFrame, ActionValue, ValidatedActionFrame};
 use rot_scene::{Authoring, BehaviorSource, BindingTarget, Clip, ComponentDrawPlan, Transform};
 
-use super::lua_component::{self, CurrentInput, Module, Modules};
+use super::lua_component::{self, CurrentCallback, Module, Modules, ObjectLookup};
 use super::spatial::{world_collider_transform, ComponentColliderSlot};
 use super::spatial_host::{kinematic_owner_component, ComponentQueryInput};
 use super::{
@@ -41,7 +41,7 @@ pub(crate) struct ComponentWorld {
     pub(crate) scene: Arc<ComponentScene>,
     pub(crate) hierarchy: Arc<ObjectHierarchy>,
     pub(crate) object_indices: Arc<HashMap<String, usize>>,
-    pub(crate) local_transforms: Vec<Transform>,
+    pub(crate) local_transforms: Arc<Vec<Transform>>,
     pub(crate) world_matrices: Vec<DMat4>,
     pub(crate) world_rotations: Vec<DQuat>,
     pub(crate) scripts: Vec<ComponentScriptSlot>,
@@ -140,7 +140,8 @@ impl Engine {
             runtime.commit_revision,
             true,
         );
-        let _input = CurrentInput::new(&self.lua, &input);
+        let _callback =
+            CurrentCallback::new(&self.lua, &input, &modules.lookup, &world.local_transforms);
         let mut replacements = Vec::new();
         for index in affected {
             let slot = &world.scripts[index];
@@ -384,6 +385,7 @@ impl Engine {
                     )
                 })?;
         }
+        let mut local_transforms = Arc::new(local_transforms);
         let mut world_matrices = Vec::with_capacity(local_transforms.len());
         let mut world_rotations = Vec::with_capacity(local_transforms.len());
         scene
@@ -447,6 +449,7 @@ impl Engine {
         let mut state = defaults.clone();
 
         let mut modules = BTreeMap::new();
+        let mut lookup = None;
         if !scripts.is_empty() {
             let input = ValidatedActionFrame::neutral(&authoring.actions).map_err(|error| {
                 diag(
@@ -500,7 +503,7 @@ impl Engine {
             let audio_cues = RefCell::new(Vec::new());
             let mut trial_transforms: Option<Vec<Transform>> = None;
             let mut start_transforms = Vec::new();
-            let _input = scripts
+            lookup = scripts
                 .iter()
                 .any(|slot| {
                     let binding = &authoring.bindings[&slot.component_id];
@@ -511,7 +514,15 @@ impl Engine {
                             lua_component::file_source(&binding.source_id, source)
                         })
                 })
-                .then(|| CurrentInput::new(&self.lua, &input));
+                .then(|| {
+                    Rc::new(ObjectLookup::new(
+                        &scene.objects,
+                        Arc::clone(&object_indices),
+                    ))
+                });
+            let callback = lookup
+                .as_ref()
+                .map(|lookup| CurrentCallback::new(&self.lua, &input, lookup, &local_transforms));
             for (index, slot) in scripts.iter().enumerate() {
                 let mut module = None;
                 let output = self.evaluate_component_binding(
@@ -535,7 +546,7 @@ impl Engine {
                     }
                 } else if let Some(transform) = output.transform {
                     if !same_transform(&local_transforms[slot.owner_index], &transform) {
-                        trial_transforms.get_or_insert_with(|| local_transforms.clone())
+                        trial_transforms.get_or_insert_with(|| local_transforms.as_ref().clone())
                             [slot.owner_index] = transform;
                     }
                 }
@@ -550,6 +561,7 @@ impl Engine {
                     },
                 )?;
             }
+            drop(callback);
             if let Some(trial) = trial_transforms {
                 let mut trial_world = Vec::with_capacity(trial.len());
                 let mut trial_rot = Vec::with_capacity(trial.len());
@@ -584,8 +596,9 @@ impl Engine {
             }
             trial_state.validate_total()?;
             if !start_transforms.is_empty() {
+                let local = Arc::make_mut(&mut local_transforms);
                 for (index, transform) in start_transforms {
-                    local_transforms[index] = transform;
+                    local[index] = transform;
                 }
                 scene
                     .resolve_world_matrices_into(&hierarchy, &local_transforms, &mut world_matrices)
@@ -658,7 +671,7 @@ impl Engine {
                 world_matrices,
                 world_rotations,
                 scripts,
-                modules: Modules::new(self, modules),
+                modules: lookup.and_then(|lookup| Modules::new(self, modules, lookup)),
                 animations,
                 colliders,
                 draw_plan,
@@ -765,7 +778,7 @@ impl Engine {
                 next
             };
             let transforms =
-                staged_transforms.get_or_insert_with(|| world.local_transforms.clone());
+                staged_transforms.get_or_insert_with(|| world.local_transforms.as_ref().clone());
             animation
                 .clip
                 .apply_indexed(
@@ -784,9 +797,14 @@ impl Engine {
         }
 
         let audio_cues = RefCell::new(Vec::new());
-        let _input = modules
-            .as_ref()
-            .map(|_| CurrentInput::new(&self.lua, &validated));
+        let callback = modules.as_ref().map(|modules| {
+            CurrentCallback::new(
+                &self.lua,
+                &validated,
+                &modules.lookup,
+                &world.local_transforms,
+            )
+        });
         for (index, slot) in world.scripts.iter().enumerate() {
             let output = if let Some(module) = modules
                 .as_mut()
@@ -839,7 +857,8 @@ impl Engine {
             };
             if let Some(transform) = output.transform {
                 if !same_transform(&world.local_transforms[slot.owner_index], &transform) {
-                    staged_transforms.get_or_insert_with(|| world.local_transforms.clone())
+                    staged_transforms
+                        .get_or_insert_with(|| world.local_transforms.as_ref().clone())
                         [slot.owner_index] = transform;
                 }
             }
@@ -854,6 +873,7 @@ impl Engine {
                 },
             )?;
         }
+        drop(callback);
 
         let staged_frames = if let Some(ref next_local) = staged_transforms {
             let mut next_world = Vec::with_capacity(next_local.len());
@@ -923,7 +943,7 @@ impl Engine {
                 .component_world
                 .as_mut()
                 .expect("component world checked above");
-            world_mut.local_transforms = next_local;
+            world_mut.local_transforms = Arc::new(next_local);
             world_mut.world_matrices = next_world;
             world_mut.world_rotations = next_rot;
         }
@@ -1226,6 +1246,94 @@ mod tests {
         engine.step_with_input(&mut runtime, &held).unwrap();
         assert_eq!(runtime.object_translation("left"), Some([3.0, 1.0, 0.0]));
         assert_eq!(runtime.object_translation("right"), Some([6.0, 1.0, 0.0]));
+    }
+
+    #[test]
+    fn retained_object_handles_read_committed_local_transforms_through_reload() {
+        let mut scene = shared_module_scene(
+            r#"
+            local beacon, find
+            return {
+                on_start = function(transform, props, host)
+                    find = host.find
+                    beacon = find("Beacon")
+                    if props.speed == 1 then
+                        transform.translation[1] = 4
+                    else
+                        transform.translation[1] = beacon.transform.translation[1]
+                        transform.translation[2] = find("left").transform.translation[1]
+                        if find("beacon") ~= nil or find("missing") ~= nil then
+                            transform.translation[3] = 99
+                        end
+                    end
+                end,
+                on_update = function(transform, props)
+                    if props.speed == 1 then
+                        transform.translation[1] = transform.translation[1] + 1
+                    else
+                        local copy = beacon.transform
+                        copy.translation[1] = 100
+                        transform.translation[1] = beacon.transform.translation[1]
+                        transform.translation[2] = find("duplicate").transform.translation[1]
+                    end
+                end,
+            }
+        "#,
+        );
+        let parent = "offset-parent";
+        scene.objects[0].name = "Beacon".into();
+        scene.objects[0].parent = Some(parent.into());
+        scene.objects[0].transform.translation[0] = 2.0;
+        scene.objects[1].name = "left".into();
+        for (id, name, x) in [
+            ("duplicate", "Beacon", 9.0),
+            (parent, "Offset Parent", 100.0),
+        ] {
+            scene.objects.push(ObjectNode {
+                id: id.into(),
+                name: name.into(),
+                enabled: true,
+                parent: None,
+                transform: Transform {
+                    translation: [x, 0.0, 0.0],
+                    ..Transform::default()
+                },
+                components: Vec::new(),
+            });
+        }
+        let mut engine = Engine::new(Limits::default()).unwrap();
+        let mut runtime = engine.reset_component(&scene, 0).unwrap();
+        assert_eq!(runtime.object_translation("left"), Some([4.0, 0.0, 0.0]));
+        assert_eq!(runtime.object_translation("right"), Some([2.0, 2.0, 0.0]));
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.object_translation("right"), Some([4.0, 9.0, 0.0]));
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.object_translation("left"), Some([6.0, 0.0, 0.0]));
+        assert_eq!(runtime.object_translation("right"), Some([5.0, 9.0, 0.0]));
+
+        let replacement = file_script(
+            r#"
+            local beacon, start
+            return {
+                on_start = function(transform, props, host)
+                    beacon = host.find("Beacon")
+                    start = beacon.transform.translation[1]
+                end,
+                on_update = function(transform, props)
+                    transform.translation[1] = beacon.transform.translation[1] + props.speed
+                    transform.translation[2] = start
+                end,
+            }
+        "#,
+        );
+        assert!(engine
+            .reload_component_source(&mut runtime, "asset-lua-1", replacement)
+            .unwrap());
+        assert_eq!(runtime.tick(), 2);
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.object_translation("right"), Some([8.0, 6.0, 0.0]));
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.object_translation("right"), Some([9.0, 6.0, 0.0]));
     }
 
     #[test]

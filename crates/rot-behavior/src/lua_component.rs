@@ -1,9 +1,11 @@
 //! Persistent file-backed Lua instances for authored Script components.
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::collections::{BTreeMap, HashMap};
+use std::rc::{Rc, Weak};
+use std::sync::Arc;
 
-use mlua::{Function, Lua, Table, Value};
+use mlua::{Function, Lua, Table, UserData, UserDataFields, Value};
+use rot_scene::component_scene::ObjectNode;
 use rot_scene::input::ValidatedActionFrame;
 use rot_scene::{BehaviorSource, PropertyValue, Transform};
 
@@ -40,18 +42,21 @@ pub(super) struct Modules {
     owner: Rc<Cell<u64>>,
     pub(super) tick: u64,
     pub(super) instances: BTreeMap<usize, Module>,
+    pub(super) lookup: Rc<ObjectLookup>,
 }
 
 impl Modules {
     pub(super) fn new(
         engine: &Engine,
         instances: BTreeMap<usize, Module>,
+        lookup: Rc<ObjectLookup>,
     ) -> Option<Rc<RefCell<Self>>> {
         (!instances.is_empty()).then(|| {
             Rc::new(RefCell::new(Self {
                 owner: engine.binding_count.clone(),
                 tick: 0,
                 instances,
+                lookup,
             }))
         })
     }
@@ -68,29 +73,82 @@ impl Modules {
     }
 }
 
-/// A stable input function always reads the current invocation. It holds no
-/// scoped host closure or borrowed scene, even when a script saves it locally.
-pub(super) struct CurrentInput(Lua);
+#[derive(Debug)]
+pub(super) struct ObjectLookup {
+    ids: Arc<HashMap<String, usize>>,
+    names: HashMap<String, usize>,
+}
 
-struct ComponentInput(ValidatedActionFrame);
+impl ObjectLookup {
+    pub(super) fn new(objects: &[ObjectNode], ids: Arc<HashMap<String, usize>>) -> Self {
+        let mut names = HashMap::with_capacity(objects.len());
+        for (index, object) in objects.iter().enumerate() {
+            names.entry(object.name.clone()).or_insert(index);
+        }
+        Self { ids, names }
+    }
+}
 
-impl CurrentInput {
-    pub(super) fn new(lua: &Lua, frame: &ValidatedActionFrame) -> Self {
-        let previous = lua.set_app_data(ComponentInput(frame.clone()));
+/// Retained host functions and object handles read the active snapshot. The
+/// guard shares its flat transform array without retaining it in the VM.
+pub(super) struct CurrentCallback(Lua);
+
+struct CallbackSnapshot {
+    input: ValidatedActionFrame,
+    lookup: Rc<ObjectLookup>,
+    transforms: Arc<Vec<Transform>>,
+}
+
+impl CurrentCallback {
+    pub(super) fn new(
+        lua: &Lua,
+        input: &ValidatedActionFrame,
+        lookup: &Rc<ObjectLookup>,
+        transforms: &Arc<Vec<Transform>>,
+    ) -> Self {
+        let previous = lua.set_app_data(CallbackSnapshot {
+            input: input.clone(),
+            lookup: Rc::clone(lookup),
+            transforms: Arc::clone(transforms),
+        });
         debug_assert!(previous.is_none());
         Self(lua.clone())
     }
 }
 
-impl Drop for CurrentInput {
+impl Drop for CurrentCallback {
     fn drop(&mut self) {
-        self.0.remove_app_data::<ComponentInput>();
+        self.0.remove_app_data::<CallbackSnapshot>();
     }
 }
 
-fn current_input(lua: &Lua) -> mlua::Result<mlua::AppDataRef<'_, ComponentInput>> {
-    lua.app_data_ref::<ComponentInput>()
-        .ok_or_else(|| mlua::Error::runtime("input requires an active Script callback"))
+fn current_callback(lua: &Lua) -> mlua::Result<mlua::AppDataRef<'_, CallbackSnapshot>> {
+    lua.app_data_ref::<CallbackSnapshot>()
+        .ok_or_else(|| mlua::Error::runtime("host access requires an active Script callback"))
+}
+
+struct ObjectHandle {
+    lookup: Weak<ObjectLookup>,
+    index: usize,
+}
+
+impl UserData for ObjectHandle {
+    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("transform", |lua, object| {
+            let snapshot = current_callback(lua)?;
+            let Some(owner) = object.lookup.upgrade() else {
+                return Ok(None);
+            };
+            if !Rc::ptr_eq(&owner, &snapshot.lookup) {
+                return Ok(None);
+            }
+            snapshot
+                .transforms
+                .get(object.index)
+                .map(|transform| transform_table(lua, transform))
+                .transpose()
+        });
+    }
 }
 
 impl Engine {
@@ -108,13 +166,38 @@ impl Engine {
             host.raw_set(
                 "button",
                 self.lua.create_function(|lua, id: mlua::LuaString| {
-                    action_button(lua, &current_input(lua)?.0, &id)
+                    action_button(lua, &current_callback(lua)?.input, &id)
                 })?,
             )?;
             host.raw_set(
                 "axis",
                 self.lua.create_function(|lua, id: mlua::LuaString| {
-                    action_axis(&current_input(lua)?.0, &id)
+                    action_axis(&current_callback(lua)?.input, &id)
+                })?,
+            )?;
+            host.raw_set(
+                "find",
+                self.lua.create_function(|lua, key: mlua::LuaString| {
+                    let snapshot = current_callback(lua)?;
+                    if key.as_bytes().len() > 128 {
+                        return Ok(None);
+                    }
+                    let Ok(key) = key.to_str() else {
+                        return Ok(None);
+                    };
+                    let key = key.as_ref();
+                    snapshot
+                        .lookup
+                        .ids
+                        .get(key)
+                        .or_else(|| snapshot.lookup.names.get(key))
+                        .map(|&index| {
+                            lua.create_userdata(ObjectHandle {
+                                lookup: Rc::downgrade(&snapshot.lookup),
+                                index,
+                            })
+                        })
+                        .transpose()
                 })?,
             )?;
             Ok(Some(Module {
