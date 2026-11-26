@@ -13,7 +13,7 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
-## Current phase — Phase 2: Core
+## Current phase — Phase 2: Core (Complete; Next: `P-03`)
 
 - **Done:** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`, `A-01`–`A-07`,
   `P-01`–`P-02`), `C-00a` (retired legacy logistics crates, Rhai mode, editor
@@ -39,18 +39,14 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   `transform`/`set_transform`, `Light` component access, `spawn`/`destroy`,
   `sweep`/`overlap`, `play_sound`, `move_and_slide`/`sensor_crossing`, and
   versionless baking with legacy `update` fallback),
-  `C-05a`–`d`, `C-09a`, `C-13`–`C-61` authoring slices, and Phase 4 Game HUD
-  labels.
-- **Open to exit Phase 2** (new `C-62+` convenience slices are frozen per
-  2026-11-25 user approval until `C-EXIT` passes):
-  - `C-EXIT`: [Rot Yard](../examples/rot-yard/README.md) has a scripted Blender
-    gate, a Kenney CC0 pack, and a 5,000-object linked-prefab level.
-    The Riverside scene exceeded 60 fps on the focused Wayland desktop.
-    The 50.7 MB, 12-panel GLB met the 3 s import budget and retained
-    1,801,824 triangles through Save, reopen, and a relocated build.
-    Texture limits are lifted to `4096` px (`32 MiB` PNG / `96 MiB` chain /
-    `256 MiB` aggregate). Fresh-cache player memory, the UI checklist, and
-    the local install refresh remain open.
+  `C-05a`–`d`, `C-09a`, `C-13`–`C-61` authoring slices, Phase 4 Game HUD labels,
+  and `C-EXIT` Phase 2 reference project & gate ([Rot Yard](../examples/rot-yard/README.md)
+  5,000-object Riverside desktop pan `190.2`/`217.7 fps`, 50.7 MB GLB import
+  `251–314 ms`, `4096` px texture limits, workspace-2
+  [UI checklist](UX-STANDARDS.md#10-ui-review-checklist) pass via injected
+  events and visual review, and refreshed release install).
+- **Next:** `P-03` Platform seams & `windows-latest` `cargo check --workspace` CI
+  job, then Phase 3A (`L-01` `.material.json` assets).
 
 ## What a creator can do today
 
@@ -66,17 +62,16 @@ See the [historical inventory](PARITY-PLAN.md#2-where-we-are) and
 
 ## Installed on this machine
 
-The **Rot Engine** launcher uses the 2026-11-19 build with GLB material
-warnings (`6e32b7f`). Reinstall with `python3 scripts/install_local.py`; the
-previous build is in `~/.local/share/rot-engine/previous` for `--rollback`.
+The **Rot Engine** launcher uses the 2026-11-26 release build (`rot-editor`,
+`rot-mcp`, and `rot-player` built with UI checklist fixes, `4096` px textures,
+and unified persistent Lua). Reinstall with `python3 scripts/install_local.py`;
+the previous build is in `~/.local/share/rot-engine/previous` for `--rollback`.
 
 ## Known problems & Not verified
 
 - An editor serves one AI adapter at a time; a second waits or fails.
 - External leftovers outside this repo still use pre-rename names: two MCP
   entries in `~/.codex/config.toml` and `~/Projects/Ruster-Creations`.
-- Unverified gates include the full [UI checklist](UX-STANDARDS.md#10-ui-review-checklist)
-  and physical pointer/gizmo display latency. The empty windowed
-  player reaches `127.0 MiB` median
-  peak RSS after warmup. Its fresh-cache launch used `163.6 MiB`, above
-  the `150 MB` target.
+- Unverified physical pointer/gizmo display latency. Note on empty-player memory:
+  warm windowed launch reaches `127.0 MiB` median peak RSS (< `150 MB` target),
+  while a cold empty Vulkan shader-cache launch reached `163.6 MiB`.

@@ -1355,6 +1355,11 @@ pub fn allocate_viewport(
     // top-right corner.
     let visible = egui::Rect::from_min_max(navigation.overlay_origin.unwrap_or(rect.min), rect.max)
         .intersect(rect);
+    let gizmo_shown = navigation.show_controls
+        && !navigation.player_view
+        && navigation_enabled
+        && visible.width() >= 240.0
+        && visible.height() >= 160.0;
     let mut gizmo = None;
     let mut stats_anchor = None;
     // View options float in the viewport's top-left corner (UX-STANDARDS §3).
@@ -1362,14 +1367,20 @@ pub fn allocate_viewport(
     if navigation.show_controls && !navigation.player_view {
         ui.ctx().set_sublayer(layer, overlay_layer);
         let origin = visible.min + egui::vec2(8.0, 8.0);
-        let area = egui::Rect::from_min_max(origin, rect.max).intersect(rect);
+        let overlay_right = if gizmo_shown {
+            (visible.right() - (2.0 * GIZMO_RADIUS + 36.0)).max(origin.x + 120.0)
+        } else {
+            rect.right() - 8.0
+        };
+        let area =
+            egui::Rect::from_min_max(origin, egui::pos2(overlay_right, rect.max.y)).intersect(rect);
         let layer = overlay_layer;
         let mut overlay = ui.new_child(
             egui::UiBuilder::new()
                 .id_salt("rot-viewport-overlay")
                 .layer_id(layer)
                 .max_rect(area)
-                .layout(egui::Layout::left_to_right(egui::Align::Min)),
+                .layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true)),
         );
         overlay.set_clip_rect(area);
         let ui = &mut overlay;
@@ -1453,12 +1464,7 @@ pub fn allocate_viewport(
     }
     // The orientation gizmo sits in the top-right corner. It lives on the
     // surface's own layer, so panels drawn over the surface also cover it.
-    if navigation.show_controls
-        && !navigation.player_view
-        && navigation_enabled
-        && visible.width() >= 240.0
-        && visible.height() >= 160.0
-    {
+    if gizmo_shown {
         let center = egui::pos2(
             visible.right() - 8.0 - GIZMO_RADIUS - 10.0,
             visible.top() + 8.0 + GIZMO_RADIUS + 10.0,
@@ -3999,6 +4005,50 @@ mod tests {
             .0
             .receipt
             .scene_callback_queued());
+    }
+
+    #[test]
+    fn narrow_viewport_overlay_wraps_clear_of_orientation_gizmo() {
+        use super::*;
+
+        let scene = Scene::empty("overlay-wrap");
+        let allocate_at = |width: f32, height: f32| {
+            let mut surface = None;
+            let mut output = egui::Context::default().run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(width, height),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    let mut navigation = NavigationOptions {
+                        show_controls: true,
+                        ..Default::default()
+                    };
+                    surface = Some(allocate_viewport(ui, &scene, &[], &mut navigation));
+                },
+            );
+            output.textures_delta.clear();
+            surface.unwrap()
+        };
+
+        let wide = allocate_at(900.0, 600.0);
+        assert!(wide.gizmo.is_some());
+        let wide_stats_y = wide.stats_anchor.unwrap().y;
+        assert!(
+            wide_stats_y < 40.0,
+            "expected single-row overlay at wide width, stats_anchor.y={wide_stats_y}"
+        );
+
+        let narrow = allocate_at(320.0, 240.0);
+        assert!(narrow.gizmo.is_some());
+        let narrow_stats_y = narrow.stats_anchor.unwrap().y;
+        assert!(
+            narrow_stats_y > wide_stats_y + 10.0,
+            "expected wrapped overlay row at 320px width, wide={wide_stats_y}, narrow={narrow_stats_y}"
+        );
     }
 
     #[test]

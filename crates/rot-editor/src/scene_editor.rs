@@ -164,6 +164,7 @@ pub struct SceneEditor {
         crate::editor_theme::Style,
         bool,
     )>,
+    scale_applied: Option<f32>,
     render: Option<eframe::egui_wgpu::RenderState>,
     metrics: Option<rot_render::MetricsHandle>,
     generation: u64,
@@ -201,6 +202,7 @@ impl SceneEditor {
             project_picker: None,
             workspace,
             theme_applied: None,
+            scale_applied: None,
             render: None,
             metrics: None,
             generation: GENERATION.fetch_add(1, Ordering::Relaxed),
@@ -275,17 +277,21 @@ impl SceneEditor {
                 .is_some_and(|component| component.ai_transition_pending())
     }
 
-    /// Applies a changed theme preference; the next frame paints it everywhere.
+    /// Applies changed theme or UI scale preferences; the next frame paints it everywhere.
     fn apply_theme(&mut self, ctx: &egui::Context) {
-        let style = self
-            .workspace
+        let workspace = self
+            .component
+            .as_deref()
+            .map(component_workspace::ComponentWorkspace::workspace)
+            .unwrap_or(&self.workspace);
+        let style = workspace
             .previewed_style()
-            .or(self.workspace.prefs.style)
+            .or(workspace.prefs.style)
             .unwrap_or_default();
         let theme = (
-            self.workspace.prefs.theme,
+            workspace.prefs.theme,
             style,
-            style == crate::editor_theme::Style::Rot && self.workspace.prefs.themed_wording,
+            style == crate::editor_theme::Style::Rot && workspace.prefs.themed_wording,
         );
         if self.theme_applied != Some(theme) {
             crate::editor_theme::apply(ctx, theme.0, theme.1);
@@ -294,6 +300,14 @@ impl SceneEditor {
                 ctx.request_repaint();
             }
             self.theme_applied = Some(theme);
+        }
+        let scale = workspace.prefs.scale;
+        if self.scale_applied != Some(scale) {
+            ctx.set_zoom_factor(scale);
+            if self.scale_applied.is_some() {
+                ctx.request_repaint();
+            }
+            self.scale_applied = Some(scale);
         }
     }
 
@@ -707,6 +721,7 @@ impl eframe::App for Host {
                 ui.ctx().request_repaint();
             } else {
                 self.editor.recovery_frame(ui.ctx());
+                self.editor.apply_theme(ui.ctx());
                 self.input.human_pending = false;
                 if !self.editor.recovery.open && !self.component_replacement_pending() {
                     self.service_bridge(ui.ctx());
@@ -801,7 +816,6 @@ fn run_host(component: Option<(PathBuf, Box<ComponentSession>)>) -> Result<(), S
             editor.render = cc.wgpu_render_state.clone();
             editor.ai_listen = true;
             editor.apply_theme(&cc.egui_ctx);
-            cc.egui_ctx.set_zoom_factor(editor.workspace.prefs.scale);
             if let Some((path, session)) = component {
                 let mut component =
                     Box::new(component_workspace::ComponentWorkspace::new(path, *session));
@@ -943,5 +957,46 @@ mod tests {
         std::fs::write(&corrupt_path, b"{").unwrap();
         assert!(OpenedScene::open(&corrupt_path).is_err());
         assert_eq!(std::fs::read(&corrupt_path).unwrap(), b"{");
+    }
+
+    #[test]
+    fn apply_theme_tracks_active_component_workspace_theme_and_scale() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Theme.scene.json");
+        let legacy = Session::new(Scene::authored_empty("theme")).unwrap();
+        ComponentScene::from_legacy(&legacy)
+            .unwrap()
+            .save_new(&path)
+            .unwrap();
+        let mut editor = SceneEditor::with_component_for_test(
+            path.clone(),
+            ComponentSession::open(&path).unwrap(),
+        );
+        let ctx = egui::Context::default();
+        crate::editor_theme::configure(&ctx);
+        editor.apply_theme(&ctx);
+        assert_eq!(
+            crate::editor_theme::style(&ctx),
+            crate::editor_theme::Style::Rot
+        );
+        assert_eq!(ctx.theme(), egui::Theme::Dark);
+        assert!((ctx.zoom_factor() - 1.0).abs() < 1e-6);
+
+        {
+            let prefs = &mut editor.component.as_mut().unwrap().ai_workspace().prefs;
+            prefs.style = Some(crate::editor_theme::Style::Plain);
+            prefs.theme = crate::editor_theme::ThemeChoice::Light;
+            prefs.themed_wording = false;
+            prefs.scale = 1.25;
+        }
+        editor.apply_theme(&ctx);
+        let mut out = ctx.run_ui(egui::RawInput::default(), |_| {});
+        out.textures_delta.clear();
+        assert_eq!(
+            crate::editor_theme::style(&ctx),
+            crate::editor_theme::Style::Plain
+        );
+        assert_eq!(ctx.theme(), egui::Theme::Light);
+        assert!((ctx.zoom_factor() - 1.25).abs() < 1e-6);
     }
 }

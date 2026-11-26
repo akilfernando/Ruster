@@ -828,6 +828,10 @@ impl ComponentWorkspace {
         )
     }
 
+    pub(super) fn workspace(&self) -> &Workspace {
+        &self.workspace
+    }
+
     #[cfg(unix)]
     pub(super) fn ai_workspace(&mut self) -> &mut Workspace {
         &mut self.workspace
@@ -2053,6 +2057,10 @@ impl ComponentWorkspace {
                 self.save();
                 return;
             }
+            Action::Preferences => {
+                self.workspace.open_settings(SettingsPage::General);
+                return;
+            }
             Action::KeyboardShortcuts => {
                 self.workspace.open_settings(SettingsPage::Shortcuts);
                 return;
@@ -3119,6 +3127,7 @@ impl ComponentWorkspace {
                     self.menu_action(ui, Action::Redo);
                     self.menu_action(ui, Action::FindObjects);
                     self.menu_action(ui, Action::ProjectSettings);
+                    self.menu_action(ui, Action::Preferences);
                     ui.separator();
                     if ui
                         .add_enabled(
@@ -3291,10 +3300,10 @@ impl ComponentWorkspace {
         {
             egui::Panel::bottom("component_status").show(ui, |ui| {
                 if let Some(error) = &self.inspector_error {
-                    ui.colored_label(editor_theme::colors(ui).error, error);
+                    crate::ui_kit::status_error(ui, error);
                 }
                 if let Some(error) = scene_error {
-                    ui.colored_label(editor_theme::colors(ui).error, error);
+                    crate::ui_kit::status_error(ui, error);
                 } else if let Some(status) = build_status {
                     ui.horizontal(|ui| {
                         ui.add(egui::Label::new(crate::strings::tr(ui.ctx(), status)).truncate());
@@ -3304,16 +3313,10 @@ impl ComponentWorkspace {
                         }
                     });
                 } else if light_budget_exceeded {
-                    ui.colored_label(
-                        editor_theme::colors(ui).warning,
-                        Text::ViewportLightLimit.plain(),
-                    )
-                    .on_hover_text(Text::ViewportLightLimitDetail.plain());
+                    crate::ui_kit::status_warning(ui, Text::ViewportLightLimit.plain())
+                        .on_hover_text(Text::ViewportLightLimitDetail.plain());
                 } else if has_import_issues {
-                    ui.colored_label(
-                        editor_theme::colors(ui).error,
-                        Text::AssetImportsNeedAttention.plain(),
-                    );
+                    crate::ui_kit::status_error(ui, Text::AssetImportsNeedAttention.plain());
                 }
                 if self
                     .prefab_feedback
@@ -3329,7 +3332,7 @@ impl ComponentWorkspace {
         if let Some(error) = reveal_error {
             self.error = Some(error);
         }
-        self.workspace.shortcuts_ui(&ctx);
+        self.workspace.settings_ui(&ctx);
         if let Some(mut palette) = self.palette.take() {
             let (action, keep_open) = palette.show(
                 &ctx,
@@ -3367,6 +3370,7 @@ impl ComponentWorkspace {
                             | Action::FindObjects
                             | Action::FindContent
                             | Action::ToggleAssets
+                            | Action::Preferences
                             | Action::KeyboardShortcuts
                             | Action::ProjectSettings
                             | Action::InputActions
@@ -4448,6 +4452,47 @@ mod tests {
             "6"
         );
         assert_eq!(editor.session.scene(), &scene);
+    }
+
+    #[test]
+    fn preferences_command_opens_general_page_and_closes_on_escape() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.scene.json");
+        let scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        editor.workspace.settings_open = false;
+
+        editor.command(Action::Preferences);
+        assert!(editor.workspace.settings_open);
+        assert_eq!(editor.workspace.settings_page, SettingsPage::General);
+
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            editor.show_workspace(ui, false);
+        });
+        output.textures_delta.clear();
+        assert!(editor.workspace.settings_open);
+
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                focused: true,
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| {
+                editor.show_workspace(ui, false);
+            },
+        );
+        output.textures_delta.clear();
+        assert!(!editor.workspace.settings_open);
     }
 
     #[test]

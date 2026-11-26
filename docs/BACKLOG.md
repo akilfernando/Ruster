@@ -28,19 +28,15 @@ One line each. Anyone may add; the user or a planning pass orders them.
   repeat the village workflow with a real client.
 - Flaky test under parallel load: `conflict_never_reads_back_and_mismatched_readback_fails_closed`
   (`connection/worker.rs`) failed once (likely `ETXTBSY` on a freshly written script).
-- Rot dark palette: error color is close to accent color (verify during UI checklist).
 - Idle repaints: an open scene repaints ~3 frames per 10 s (0.2% CPU); track under
   Phase 3A/5A polish.
 
-## Now — Phase 2: Core (Structural Closure)
+## Now — Pre-Phase 3 Gate
 
-**Freeze rule (user-approved 2026-11-25):** Do not start new `C-62+` convenience
-slices until `C-EXIT` passes. Focus strictly on closing the structural Phase 2
-cuts below in order.
+`C-EXIT` passed on `2026-11-26`. Land `P-03` before starting Phase 3A (`L-01`).
 
 | Package | Outcome | Status & remaining gap |
 | --- | --- | --- |
-| `C-EXIT` Phase 2 reference project & gate | Prove Phase 2 end-to-end on a tracked reference level within budgets. | `in progress — Codex (Astra/Sol), 2026-11-26` · [Rot Yard](../examples/rot-yard/README.md) tracks the CC0 pack, Blender gate and 5,000-object prefab level. The 50 MB GLB import and 5,000-object desktop pan met their budgets, and texture limits are lifted to `4096` px (`32 MiB` PNG / `96 MiB` chain / `256 MiB` aggregate). Address fresh-cache player RSS, run the full UI checklist, and refresh the local install. |
 | `P-03` Platform seams & Windows CI | Protect `A11` immediately after Phase 2 exit before Phase 3/4 work begins. | `open` · Extract `rustix`, Unix sockets, `inotify` watcher, `rfd` target features, `xdg-open`, and OS dirs into platform modules; add a `windows-latest` `cargo check --workspace` CI job. |
 
 ## Later
@@ -108,5 +104,10 @@ completed packages:
   `move_and_slide`/`sensor_crossing`, and versionless file script baking while
   preserving legacy `update` scripts), `C-11` &
   `C-11a` (multi-scene projects & crash recovery), `C-12` (5k/50k benchmark
-  scenes), `C-05a`–`d`, `C-09a`, and slices `C-13`–`C-61`.
+  scenes), `C-EXIT` (Phase 2 gate closed `2026-11-26`: [Rot Yard](../examples/rot-yard/README.md)
+  5,000-object desktop pan `190.2`/`217.7 fps`, 50.7 MB GLB import `251–314 ms`,
+  `4096` px texture caps, workspace-2 [UI checklist](UX-STANDARDS.md#10-ui-review-checklist)
+  pass with `Edit → Preferences…`, live theme/scale sync, 1.5× overlay wrap, and
+  status icons, warm `127.0 MiB` / cold `163.6 MiB` empty player RSS, and local
+  install refresh), `C-05a`–`d`, `C-09a`, and slices `C-13`–`C-61`.
 - **Phase 4 — Early slice:** Game HUD labels (`2026-11-23`, `607fc96`).

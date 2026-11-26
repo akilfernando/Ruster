@@ -1781,8 +1781,9 @@ impl Workspace {
         .on_hover_text(Text::NativeWhenOffThisEditor.plain());
         ui.weak(Text::WorkspaceTrustedAppsAndDiagnostics.plain());
     }
-    pub fn shortcuts_ui(&mut self, ctx: &egui::Context) {
-        let _ = self.settings_ui_with_footer(ctx, true);
+    /// Show the full Preferences window (all six pages).
+    pub fn settings_ui(&mut self, ctx: &egui::Context) {
+        let _ = self.settings_ui_with_footer(ctx, false);
     }
     /// The Preferences window: a page list on the left, the page on the
     /// right. Changes apply at once and are saved when it closes.

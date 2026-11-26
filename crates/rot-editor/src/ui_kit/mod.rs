@@ -332,6 +332,54 @@ pub fn empty_state(ui: &mut egui::Ui, line: &str, action: Option<&str>) -> Optio
     .inner
 }
 
+/// Error status line with a vector badge icon so state never relies on color alone.
+pub fn status_error(ui: &mut egui::Ui, message: &str) -> egui::Response {
+    status_with_icon(ui, true, colors(ui).error, message)
+}
+
+/// Warning status line with a vector badge icon so state never relies on color alone.
+pub fn status_warning(ui: &mut egui::Ui, message: &str) -> egui::Response {
+    status_with_icon(ui, false, colors(ui).warning, message)
+}
+
+fn status_with_icon(
+    ui: &mut egui::Ui,
+    is_error: bool,
+    color: Color32,
+    message: &str,
+) -> egui::Response {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = SPACE_XS;
+        let (icon_rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+        let p = ui.painter();
+        let c = icon_rect.center();
+        let fg = colors(ui).surface;
+        if is_error {
+            p.circle_filled(c, 6.5, color);
+        } else {
+            p.add(egui::Shape::convex_polygon(
+                vec![
+                    egui::pos2(c.x, icon_rect.top() + 1.0),
+                    egui::pos2(icon_rect.right() - 1.0, icon_rect.bottom() - 1.5),
+                    egui::pos2(icon_rect.left() + 1.0, icon_rect.bottom() - 1.5),
+                ],
+                color,
+                egui::Stroke::NONE,
+            ));
+        }
+        let stem_top = if is_error { c.y - 3.5 } else { c.y - 2.0 };
+        let stem_bottom = if is_error { c.y + 1.0 } else { c.y + 1.8 };
+        let dot_y = if is_error { c.y + 3.5 } else { c.y + 4.0 };
+        p.line_segment(
+            [egui::pos2(c.x, stem_top), egui::pos2(c.x, stem_bottom)],
+            egui::Stroke::new(1.5, fg),
+        );
+        p.circle_filled(egui::pos2(c.x, dot_y), 0.9, fg);
+        ui.add(egui::Label::new(RichText::new(message).color(color)).truncate())
+    })
+    .inner
+}
+
 /// Evaluate a number field: a plain number, simple math (`2*3`, `(1+2)/4`),
 /// or an operator assignment on the current value (`+=1`, `*=2`). Returns
 /// `None` for anything else.
