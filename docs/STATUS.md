@@ -47,7 +47,8 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
     Lua can also spawn and remove static subtrees during Play. Editor Play
     and the relocated Rot Yard build both replay two warning-marker
     cycles. Persistent callbacks use the committed collider snapshot for
-    sweep and overlap. The remaining persistent callback capabilities are open.
+    sweep and overlap and request positional sound from authored Sound Cues.
+    The remaining persistent callback capabilities are open.
   - `C-EXIT`: [Rot Yard](../examples/rot-yard/README.md) has a scripted Blender
     gate, a Kenney CC0 pack, and a 5,000-object linked-prefab level.
     The Riverside scene exceeded 60 fps on the focused Wayland desktop.

@@ -9,6 +9,7 @@ return {
         local button = host.button("slide_gate")
         if button.pressed and template and gate and not marker then
             marker = host.spawn(template, template.transform, gate)
+            host.play_sound("gate_latch")
         elseif not button.held and marker then
             host.destroy(marker)
             marker = nil

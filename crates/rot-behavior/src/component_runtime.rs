@@ -57,6 +57,7 @@ pub(crate) struct ComponentWorld {
     pub(crate) colliders: Arc<Vec<ComponentColliderSlot>>,
     pub(crate) draw_plan: Arc<ComponentDrawPlan>,
     pub(crate) audio_emitters: Option<Arc<BTreeMap<String, usize>>>,
+    audio_requests: Option<audio::CueRequests>,
 }
 
 struct RebuiltPopulation {
@@ -517,6 +518,7 @@ impl Engine {
                 runtime.kinematic_owner.as_ref(),
             )?
             .expect("component reload can run persistent queries");
+        let audio_cues = world.audio_requests.as_ref().map(audio::CueRequests::trial);
         let callback = CurrentCallback::new(
             &self.lua,
             &input,
@@ -524,6 +526,9 @@ impl Engine {
             &world.local_transforms,
             &world.light_intensities,
             &queries,
+            audio_cues
+                .as_ref()
+                .map(|trial| trial.context(&runtime.authoring)),
         );
         let mut replacements = Vec::new();
         let mut staged_transforms = None;
@@ -558,8 +563,12 @@ impl Engine {
                         "Replacement must be a file-backed Lua component",
                     ));
                 }
-                let mut module =
-                    self.load_replacement_module(source_id, &source.text, &slot.component_id)?;
+                let mut module = self.load_replacement_module(
+                    source_id,
+                    &source.text,
+                    &slot.component_id,
+                    &binding.properties,
+                )?;
                 let implicit = module.start(
                     self,
                     &world.local_transforms[slot.owner_index],
@@ -841,12 +850,10 @@ impl Engine {
                     diag(DiagnosticCode::InvalidAuthoring, Phase::Setup, &message)
                 })?;
 
-        let has_sound_binding = scripts.iter().any(|slot| {
-            authoring.bindings[&slot.component_id]
-                .properties
-                .values()
-                .any(|property| matches!(property, rot_scene::PropertyValue::SoundRef(_)))
-        });
+        let has_sound_binding = scripts
+            .iter()
+            .any(|slot| audio::has_sound_cue(&authoring.bindings[&slot.component_id].properties));
+        let audio_requests = has_sound_binding.then(audio::CueRequests::default);
         let audio_emitters = if has_sound_binding {
             let emitters =
                 audio::emitters_component(&scripts, &authoring, draw_plan.has_transform_camera())?;
@@ -908,7 +915,7 @@ impl Engine {
             }
             state.validate_total()?;
             let mut trial_state = state.clone();
-            let audio_cues = RefCell::new(Vec::new());
+            let audio_cues = audio_requests.as_ref().map(audio::CueRequests::trial);
             let mut trial_transforms: Option<Vec<Transform>> = None;
             let mut start_transforms = None;
             lookup = scripts
@@ -977,6 +984,7 @@ impl Engine {
                     queries
                         .as_ref()
                         .expect("component callbacks can run queries"),
+                    audio_cues.as_ref().map(|trial| trial.context(&authoring)),
                 )
             });
             for (index, slot) in scripts.iter().enumerate() {
@@ -990,7 +998,7 @@ impl Engine {
                     0.0,
                     &input,
                     queries.as_deref(),
-                    has_sound_binding.then_some(&audio_cues),
+                    audio_cues.as_ref().map(audio::CueTrial::requests),
                     &state,
                     Some(&mut module),
                 )?;
@@ -1144,6 +1152,7 @@ impl Engine {
                 colliders,
                 draw_plan,
                 audio_emitters,
+                audio_requests,
             }),
         };
         if !topology.is_empty() {
@@ -1284,7 +1293,7 @@ impl Engine {
                 })?;
         }
 
-        let audio_cues = RefCell::new(Vec::new());
+        let audio_cues = world.audio_requests.as_ref().map(audio::CueRequests::trial);
         let callback = modules.as_ref().map(|modules| {
             CurrentCallback::new(
                 &self.lua,
@@ -1295,6 +1304,9 @@ impl Engine {
                 queries
                     .as_ref()
                     .expect("component callbacks can run queries"),
+                audio_cues
+                    .as_ref()
+                    .map(|trial| trial.context(&runtime.authoring)),
             )
         });
         for (index, slot) in world.scripts.iter().enumerate() {
@@ -1353,7 +1365,7 @@ impl Engine {
                     self.limits.fixed_dt,
                     &validated,
                     queries.as_deref(),
-                    runtime.has_sound_binding.then_some(&audio_cues),
+                    audio_cues.as_ref().map(audio::CueTrial::requests),
                     &runtime.state,
                     None,
                 )?
@@ -1418,7 +1430,7 @@ impl Engine {
                     .map(|(_, _, draw)| draw.transform_camera())
             })
             .unwrap_or_else(|| runtime.transform_camera());
-        let mut cues = audio_cues.into_inner();
+        let mut cues = audio_cues.map_or_else(Vec::new, audio::CueTrial::take);
         if let Some(emitters) = &world.audio_emitters {
             let active_world = rebuilt
                 .as_ref()
@@ -1957,6 +1969,222 @@ mod tests {
                 shape,
             },
         }
+    }
+
+    #[test]
+    fn persistent_and_numbered_sound_share_authored_cues_and_the_commit_budget() {
+        use rot_scene::input::ButtonState;
+        use rot_scene::{PropertyValue, SoundRef};
+        let mut scene = shared_module_scene(
+            r#"
+            local play
+            return {
+                on_start = function(transform, props, host)
+                    play = host.play_sound
+                    for i = 1, 5 do play("confirm") end
+                end,
+                on_update = function(transform, props)
+                    props.confirm.asset_id = "forged"
+                    props.confirm.gain = 16
+                    for i = 1, 5 do play("confirm") end
+                    transform.translation[1] = transform.translation[1] + 1
+                end,
+            }
+        "#,
+        );
+        let cue = |asset: &str, gain| {
+            PropertyValue::SoundRef(SoundRef {
+                asset_id: Some(asset.into()),
+                gain,
+                playback: Default::default(),
+            })
+        };
+        for (object, (asset, gain)) in scene
+            .objects
+            .iter_mut()
+            .zip([("near", 0.25), ("far", 0.75)])
+        {
+            let Component::Script { binding, .. } = &mut object.components[0].kind else {
+                unreachable!()
+            };
+            binding
+                .properties
+                .insert("confirm".into(), cue(asset, gain));
+        }
+        let numbered_source = |trial_count| {
+            script_source(
+                &format!(
+                    r#"
+            return {{ update = function(transform, props, dt, host)
+                local button = host.button("slide")
+                if not button.released then
+                    local count = dt == 0 and {trial_count} or (button.held and 7 or 6)
+                    for i = 1, count do host.play_sound("confirm") end
+                end
+                return transform
+            end }}
+        "#
+                ),
+                super::super::INPUT_HOST_API_VERSION,
+            )
+        };
+        add_test_object(
+            &mut scene,
+            "numbered",
+            None,
+            vec![ComponentInstance {
+                id: "z-numbered".into(),
+                enabled: true,
+                kind: Component::Script {
+                    source_kind: None,
+                    movement: Default::default(),
+                    binding: BehaviorBinding {
+                        source_id: "numbered-cue".into(),
+                        target: BindingTarget::Object("numbered".into()),
+                        enabled: true,
+                        properties: BTreeMap::from([("confirm".into(), cue("other", 0.5))]),
+                        state_defaults: Default::default(),
+                        commands: Default::default(),
+                    },
+                },
+            }],
+        );
+        let mut engine = Engine::new(Limits::default()).unwrap();
+        scene
+            .sources
+            .insert("numbered-cue".into(), numbered_source(7));
+        let error = engine.reset_component(&scene, 0).unwrap_err();
+        assert_eq!(error.binding_id.as_deref(), Some("z-numbered"));
+        assert!(error.message.contains("exceeds16 sound cue requests"));
+        scene
+            .sources
+            .insert("numbered-cue".into(), numbered_source(6));
+        let mut runtime = engine.reset_component(&scene, 0).unwrap();
+        assert!(runtime.audio_batch().is_none());
+        engine.step(&mut runtime).unwrap();
+        let committed = runtime.audio_batch().unwrap().clone();
+        assert_eq!(committed.tick, 1);
+        assert_eq!(committed.cues.len(), 16);
+        for (range, binding, asset, gain) in [
+            (0..5, "left-script", "near", 0.25),
+            (5..10, "right-script", "far", 0.75),
+            (10..16, "z-numbered", "other", 0.5),
+        ] {
+            assert!(committed.cues[range]
+                .iter()
+                .all(|cue| cue.binding_id == binding
+                    && cue.property_name == "confirm"
+                    && cue.asset_id == asset
+                    && cue.gain == gain));
+        }
+        let input = |held, released| {
+            ActionFrame(BTreeMap::from([(
+                "slide".into(),
+                ActionValue::Button(ButtonState {
+                    held,
+                    pressed: false,
+                    released,
+                }),
+            )]))
+        };
+        let error = engine
+            .step_with_input(&mut runtime, &input(true, false))
+            .unwrap_err();
+        assert_eq!(error.binding_id.as_deref(), Some("z-numbered"));
+        assert!(error.message.contains("exceeds16 sound cue requests"));
+        assert_eq!(runtime.tick(), 1);
+        assert_eq!(runtime.object_translation("left"), Some([1.0, 0.0, 0.0]));
+        assert_eq!(runtime.audio_batch(), Some(&committed));
+
+        let replacement = |count| {
+            file_script(&format!(
+                r#"
+            return {{ on_start = function(transform, props, host)
+                for i = 1, {count} do host.play_sound("confirm") end
+            end }}
+        "#
+            ))
+        };
+        let error = engine
+            .reload_component_file(&mut runtime, GATE_FILE_ID, replacement(9))
+            .unwrap_err();
+        assert_eq!(error.binding_id.as_deref(), Some("right-script"));
+        assert!(error.message.contains("exceeds16 sound cue requests"));
+        assert_eq!(runtime.audio_batch(), Some(&committed));
+        assert!(engine
+            .reload_component_file(&mut runtime, GATE_FILE_ID, replacement(8))
+            .unwrap());
+        assert_eq!(runtime.audio_batch(), Some(&committed));
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.audio_batch().unwrap().cues.len(), 6);
+        engine
+            .step_with_input(&mut runtime, &input(false, true))
+            .unwrap();
+        assert!(runtime.audio_batch().is_none());
+    }
+
+    #[test]
+    fn persistent_positional_sound_uses_the_final_topology_frame() {
+        use rot_scene::{PropertyValue, SoundPlayback, SoundRef};
+        let mut scene = shared_module_scene(
+            r#"
+            return { on_update = function(transform, props, dt, host)
+                host.play_sound("confirm")
+                local stage = host.find("stage")
+                local pose = stage.transform
+                pose.translation[1] = 6
+                stage:set_transform(pose)
+                local camera = host.find("camera")
+                local pose = camera.transform
+                pose.translation[1] = 2
+                camera:set_transform(pose)
+                local template = host.find("template")
+                host.spawn(template, template.transform)
+            end }
+        "#,
+        );
+        scene.objects.truncate(1);
+        scene.objects[0].parent = Some("stage".into());
+        scene.objects[0].transform.translation[2] = -3.0;
+        let Component::Script { binding, .. } = &mut scene.objects[0].components[0].kind else {
+            unreachable!()
+        };
+        binding.properties.insert(
+            "confirm".into(),
+            PropertyValue::SoundRef(SoundRef {
+                asset_id: Some("beacon-cue".into()),
+                gain: 0.8,
+                playback: SoundPlayback::Positional { range: 10.0 },
+            }),
+        );
+        add_test_object(&mut scene, "stage", None, Vec::new());
+        scene.objects.last_mut().unwrap().transform.translation[0] = -4.0;
+        add_test_object(
+            &mut scene,
+            "camera",
+            None,
+            vec![ComponentInstance {
+                id: "game-view".into(),
+                enabled: true,
+                kind: Component::Camera {
+                    view: CameraView::transform_perspective(60.0),
+                },
+            }],
+        );
+        scene.gameplay_camera = Some("game-view".into());
+        add_test_object(&mut scene, "template", None, Vec::new());
+        scene.objects.last_mut().unwrap().enabled = false;
+        let mut engine = Engine::new(Limits::default()).unwrap();
+        let mut runtime = engine.reset_component(&scene, 0).unwrap();
+        assert!(runtime.audio_batch().is_none());
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.object_translation("rot-spawn-1-o0"), Some([0.0; 3]));
+        let batch = runtime.audio_batch().unwrap();
+        assert_eq!(batch.cues.len(), 1);
+        let cue = &batch.cues[0];
+        assert_eq!(cue.asset_id, "beacon-cue");
+        assert!((cue.gain - 0.4).abs() < 1e-6);
+        assert!((cue.pan.unwrap() - 0.8).abs() < 1e-6);
     }
 
     #[test]

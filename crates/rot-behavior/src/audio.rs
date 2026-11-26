@@ -1,5 +1,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::rc::Rc;
+use std::sync::Arc;
 
 use super::{Diagnostic, DiagnosticCode, Phase};
 use mlua::{Table, Value};
@@ -32,6 +34,63 @@ pub struct AudioBatch {
     #[serde(serialize_with = "crate::spatial_host::counter_string")]
     pub commit_revision: u64,
     pub cues: Vec<AudioCue>,
+}
+
+/// Shared by borrowed legacy hosts and stable component host functions.
+/// The allocation lives with the component runtime, while requests are trial-local.
+#[derive(Clone, Debug, Default)]
+pub(super) struct CueRequests {
+    requests: Rc<RefCell<Vec<AudioCue>>>,
+}
+
+pub(super) struct CueTrial<'a> {
+    requests: &'a Rc<RefCell<Vec<AudioCue>>>,
+}
+
+pub(super) struct CueContext {
+    requests: Rc<RefCell<Vec<AudioCue>>>,
+    authoring: Arc<Authoring>,
+}
+
+impl CueRequests {
+    pub(super) fn trial(&self) -> CueTrial<'_> {
+        debug_assert!(self.requests.borrow().is_empty());
+        CueTrial {
+            requests: &self.requests,
+        }
+    }
+}
+
+impl CueTrial<'_> {
+    pub(super) fn requests(&self) -> &RefCell<Vec<AudioCue>> {
+        self.requests.as_ref()
+    }
+
+    pub(super) fn context(&self, authoring: &Arc<Authoring>) -> CueContext {
+        CueContext {
+            requests: Rc::clone(self.requests),
+            authoring: Arc::clone(authoring),
+        }
+    }
+
+    pub(super) fn take(self) -> Vec<AudioCue> {
+        self.requests.take()
+    }
+}
+
+impl Drop for CueTrial<'_> {
+    fn drop(&mut self) {
+        self.requests.borrow_mut().clear();
+    }
+}
+
+impl CueContext {
+    pub(super) fn play_sound(&self, binding_id: &str, name: Value) -> mlua::Result<()> {
+        let binding = self.authoring.bindings.get(binding_id).ok_or_else(|| {
+            mlua::Error::runtime("sound cue binding is unavailable in the current Play session")
+        })?;
+        request_sound(binding_id, &binding.properties, &self.requests, name)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -192,47 +251,59 @@ pub(super) fn install_sound_host<'scope, 'env: 'scope>(
     properties: &'env BTreeMap<String, PropertyValue>,
     requests: &'env RefCell<Vec<AudioCue>>,
 ) -> mlua::Result<()> {
-    if !properties
-        .values()
-        .any(|value| matches!(value, PropertyValue::SoundRef(_)))
-    {
+    if !has_sound_cue(properties) {
         return Ok(());
     }
     host.raw_set(
         "play_sound",
         scope.create_function(move |_, name: Value| {
-            let Value::String(name) = name else {
-                return Err(mlua::Error::runtime("sound cue requires a property name"));
-            };
-            if name.as_bytes().len() > 128 {
-                return Err(mlua::Error::runtime("sound cue name exceeds128 bytes"));
-            }
-            let name = name.to_str()?;
-            let Some(PropertyValue::SoundRef(sound)) = properties.get(name.as_ref()) else {
-                return Err(mlua::Error::runtime(format!(
-                    "unknown sound cue '{name}' on this binding"
-                )));
-            };
-            let Some(asset_id) = &sound.asset_id else {
-                return Err(mlua::Error::runtime(format!(
-                    "sound cue '{name}' has no assigned audio asset"
-                )));
-            };
-            let mut requests = requests.borrow_mut();
-            if requests.len() >= MAX_AUDIO_REQUESTS_PER_STEP {
-                return Err(mlua::Error::runtime(
-                    "fixed Step exceeds16 sound cue requests",
-                ));
-            }
-            requests.push(AudioCue {
-                binding_id: binding_id.to_owned(),
-                property_name: name.as_ref().to_owned(),
-                asset_id: asset_id.clone(),
-                gain: sound.gain,
-                pan: None,
-                range: sound.playback.range(),
-            });
-            Ok(())
+            request_sound(binding_id, properties, requests, name)
         })?,
     )
+}
+
+pub(super) fn has_sound_cue(properties: &BTreeMap<String, PropertyValue>) -> bool {
+    properties
+        .values()
+        .any(|value| matches!(value, PropertyValue::SoundRef(_)))
+}
+
+fn request_sound(
+    binding_id: &str,
+    properties: &BTreeMap<String, PropertyValue>,
+    requests: &RefCell<Vec<AudioCue>>,
+    name: Value,
+) -> mlua::Result<()> {
+    let Value::String(name) = name else {
+        return Err(mlua::Error::runtime("sound cue requires a property name"));
+    };
+    if name.as_bytes().len() > 128 {
+        return Err(mlua::Error::runtime("sound cue name exceeds128 bytes"));
+    }
+    let name = name.to_str()?;
+    let Some(PropertyValue::SoundRef(sound)) = properties.get(name.as_ref()) else {
+        return Err(mlua::Error::runtime(format!(
+            "unknown sound cue '{name}' on this binding"
+        )));
+    };
+    let Some(asset_id) = &sound.asset_id else {
+        return Err(mlua::Error::runtime(format!(
+            "sound cue '{name}' has no assigned audio asset"
+        )));
+    };
+    let mut requests = requests.borrow_mut();
+    if requests.len() >= MAX_AUDIO_REQUESTS_PER_STEP {
+        return Err(mlua::Error::runtime(
+            "fixed Step exceeds16 sound cue requests",
+        ));
+    }
+    requests.push(AudioCue {
+        binding_id: binding_id.to_owned(),
+        property_name: name.as_ref().to_owned(),
+        asset_id: asset_id.clone(),
+        gain: sound.gain,
+        pan: None,
+        range: sound.playback.range(),
+    });
+    Ok(())
 }

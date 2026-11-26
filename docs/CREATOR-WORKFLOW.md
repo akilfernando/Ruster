@@ -707,9 +707,11 @@ leaves the previous result in place and does not play its cue.
 
 Import a WAV into **Assets**. On the file-backed **Script** component, choose
 **Add Sound Cue**. Name the cue, choose the WAV, set **Gain** from 0 to 1,
-and choose **Apply**. Use the `host.play_sound("cue-name")` call shown in the
-Inspector from the fourth `update` argument. For example, call the cue when
-`host.button("fire").pressed` is true to play it once per press.
+and choose **Apply**. Call `host.play_sound("cue-name")` from `on_update`
+using its fourth argument, `host`. The same call works in older `update`
+scripts. Check `host.button("fire").pressed` to request one cue per press.
+Requests from `on_start` are validated for Reset and live reload, then
+discarded.
 
 Use **Preview at Gain** to hear the selected WAV at its draft gain before
 applying the cue. The preview is centered 2D audio for either playback mode.

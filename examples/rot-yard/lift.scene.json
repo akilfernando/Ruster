@@ -87,7 +87,16 @@
               "object_id": "model-18eb37ac6676856a-0",
               "source_id": "gate-warning-marker",
               "enabled": true,
-              "properties": {}
+              "properties": {
+                "gate_latch": {
+                  "type": "sound_ref",
+                  "value": {
+                    "asset_id": "gate-latch",
+                    "gain": 0.6,
+                    "playback": { "type": "positional", "range": 30.0 }
+                  }
+                }
+              }
             }
           }
         ]

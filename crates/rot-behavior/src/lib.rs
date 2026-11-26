@@ -1418,7 +1418,7 @@ impl Engine {
                         .call(())
                         .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
                     if let Some(probe) = probe {
-                        if let Some(module) = self.component_module(&module, host_input.binding_id)? {
+                        if let Some(module) = self.component_module(&module, host_input.binding_id, properties)? {
                             let lua_component::ModuleProbe::Ordinary(probe) = probe else {
                                 return Err(Diagnostic::plain(
                                     DiagnosticCode::UnsupportedBackend,

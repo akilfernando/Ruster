@@ -9,6 +9,7 @@ use rot_scene::component_scene::{Component, ComponentScene};
 use rot_scene::input::ValidatedActionFrame;
 use rot_scene::{BehaviorSource, Light, PropertyValue, Transform};
 
+use super::audio::{has_sound_cue, CueContext};
 use super::component_topology::{ObjectSession, TopologyEdits};
 use super::spatial_host::QueryInvocation;
 use super::{
@@ -173,6 +174,7 @@ struct CallbackSnapshot {
     transforms: Arc<Vec<Transform>>,
     light_intensities: Arc<LightIntensities>,
     queries: Rc<QueryInvocation>,
+    audio: Option<CueContext>,
     writes: RefCell<CallbackWrites>,
     topology: RefCell<TopologyEdits>,
 }
@@ -200,6 +202,7 @@ impl CurrentCallback {
         transforms: &Arc<Vec<Transform>>,
         light_intensities: &Arc<LightIntensities>,
         queries: &Rc<QueryInvocation>,
+        audio: Option<CueContext>,
     ) -> Self {
         let previous = lua.set_app_data(CallbackSnapshot {
             input: input.clone(),
@@ -207,6 +210,7 @@ impl CurrentCallback {
             transforms: Arc::clone(transforms),
             light_intensities: Arc::clone(light_intensities),
             queries: Rc::clone(queries),
+            audio,
             writes: RefCell::default(),
             topology: RefCell::default(),
         });
@@ -469,6 +473,7 @@ impl Engine {
         &self,
         module: &Table,
         binding_id: &str,
+        properties: &BTreeMap<String, PropertyValue>,
     ) -> Result<Option<Module>, Diagnostic> {
         let parse = || -> mlua::Result<Option<Module>> {
             if !matches!(module.raw_get::<Value>("update")?, Value::Nil) {
@@ -520,6 +525,21 @@ impl Engine {
             host.raw_set("spawn", self.lua.create_function(spawn_object)?)?;
             host.raw_set("destroy", self.lua.create_function(destroy_object)?)?;
             let binding = Rc::<str>::from(binding_id);
+            if has_sound_cue(properties) {
+                let audio_binding = Rc::clone(&binding);
+                host.raw_set(
+                    "play_sound",
+                    self.lua.create_function(move |lua, name: Value| {
+                        let snapshot = current_callback(lua)?;
+                        let audio = snapshot.audio.as_ref().ok_or_else(|| {
+                            mlua::Error::runtime(
+                                "sound cue queue is unavailable in the current Play session",
+                            )
+                        })?;
+                        audio.play_sound(&audio_binding, name)
+                    })?,
+                )?;
+            }
             let sweep_binding = Rc::clone(&binding);
             host.raw_set(
                 "sweep",
@@ -568,6 +588,7 @@ impl Engine {
         id: &str,
         text: &str,
         binding_id: &str,
+        properties: &BTreeMap<String, PropertyValue>,
     ) -> Result<Module, Diagnostic> {
         self.binding_count.set(0);
         let main = self.compile_lua(id, text)?;
@@ -581,7 +602,7 @@ impl Engine {
         let result = main
             .call::<Table>(())
             .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))
-            .and_then(|module| self.component_module(&module, binding_id));
+            .and_then(|module| self.component_module(&module, binding_id, properties));
         let cleanup = self
             .lua
             .create_table()
