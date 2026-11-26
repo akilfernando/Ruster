@@ -1,0 +1,8 @@
+{
+  "imports": [
+    {
+      "id": "startup-title-card",
+      "texture_role": "base_color_srgb"
+    }
+  ]
+}

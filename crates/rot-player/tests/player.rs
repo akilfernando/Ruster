@@ -157,6 +157,20 @@ fn explicit_creation_supports_empty_scene_and_start_transition() {
             },
         },
     );
+    title.hud = rot_scene::hud::Hud {
+        enabled: true,
+        panels: vec![rot_scene::hud::HudPanel {
+            elements: vec![rot_scene::hud::HudLabel {
+                id: "start-game".into(),
+                enabled_when: None,
+                source: rot_scene::hud::HudSource::ActionButton {
+                    caption: "Start".into(),
+                    action_id: "start".into(),
+                },
+            }],
+            ..Default::default()
+        }],
+    };
     title.save_new(start_dir.join("scene.json")).unwrap();
     fs::write(
         start_dir.join("app.json"),
@@ -189,21 +203,33 @@ fn explicit_creation_supports_empty_scene_and_start_transition() {
     )
     .unwrap();
 
-    let transition_run = Command::new(env!("CARGO_BIN_EXE_rot-player"))
-        .arg("--creation")
-        .arg(start_dir.join("app.json"))
-        .args(["--headless", "--ticks", "4", "--input-frames"])
-        .arg(&input_path)
-        .output()
-        .unwrap();
-    assert!(
-        transition_run.status.success(),
-        "{}",
-        String::from_utf8_lossy(&transition_run.stderr)
-    );
-    let transition_json: Value = serde_json::from_slice(&transition_run.stdout).unwrap();
-    assert_eq!(transition_json["transition_phase"], "destination");
-    assert_eq!(transition_json["scene_id"], "level1");
+    let hud_path = directory.path().join("hud.json");
+    fs::write(
+        &hud_path,
+        br#"[{"after_tick":"0","button_id":"start-game"}]"#,
+    )
+    .unwrap();
+
+    for (flag, path) in [
+        ("--input-frames", &input_path),
+        ("--hud-activations", &hud_path),
+    ] {
+        let transition_run = Command::new(env!("CARGO_BIN_EXE_rot-player"))
+            .arg("--creation")
+            .arg(start_dir.join("app.json"))
+            .args(["--headless", "--ticks", "4", flag])
+            .arg(path)
+            .output()
+            .unwrap();
+        assert!(
+            transition_run.status.success(),
+            "{}",
+            String::from_utf8_lossy(&transition_run.stderr)
+        );
+        let transition_json: Value = serde_json::from_slice(&transition_run.stdout).unwrap();
+        assert_eq!(transition_json["transition_phase"], "destination");
+        assert_eq!(transition_json["scene_id"], "level1");
+    }
 }
 
 #[test]

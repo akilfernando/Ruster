@@ -1,0 +1,210 @@
+{
+  "format": "rot-scene",
+  "format_version": 23,
+  "scene": {
+    "id": "title-scene",
+    "objects": [
+      {
+        "id": "title-lamp",
+        "name": "Title Light",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0,
+            2.2,
+            4.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "title-lamp-component",
+            "enabled": true,
+            "type": "light",
+            "color": [
+              1.0,
+              0.96,
+              0.91
+            ],
+            "intensity": 12.0,
+            "kind": {
+              "type": "point",
+              "range": 11.0
+            }
+          }
+        ]
+      },
+      {
+        "id": "title-camera",
+        "name": "Title Game Camera",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "title-shot",
+            "enabled": true,
+            "type": "camera",
+            "view": {
+              "anchor": {
+                "type": "fixed",
+                "position": [
+                  0,
+                  1.55,
+                  0
+                ]
+              },
+              "yaw": 0,
+              "pitch": 0,
+              "distance": 9.0,
+              "vertical_fov_degrees": 39.0
+            }
+          }
+        ]
+      },
+      {
+        "id": "title-board",
+        "name": "Title Board",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            0,
+            1.55,
+            0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            6.2,
+            3.49,
+            0.14
+          ]
+        },
+        "components": [
+          {
+            "id": "board-surface",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "cube"
+            },
+            "tint": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "material": "title-print"
+          }
+        ]
+      }
+    ],
+    "display": {
+      "type": "surface_hdr",
+      "exposure_stops": -0.35
+    },
+    "ambient": {
+      "color": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "intensity": 0.32
+    },
+    "gameplay_camera": "title-shot",
+    "materials": {
+      "title-print": {
+        "name": "Title Print",
+        "tint": [
+          1,
+          1,
+          1
+        ],
+        "base_color_texture": "startup-title-card",
+        "filter": "linear",
+        "address": "clamp",
+        "response": {
+          "type": "dielectric",
+          "roughness": 0.83
+        }
+      }
+    },
+    "actions": {
+      "start": {
+        "label": "Start",
+        "kind": {
+          "type": "button",
+          "keys": [
+            "enter"
+          ]
+        }
+      }
+    },
+    "hud": {
+      "enabled": true,
+      "panels": [
+        {
+          "id": "title-controls",
+          "name": "Title Controls",
+          "anchor": "bottom_center",
+          "width": 160,
+          "margin": 24,
+          "spacing": 6,
+          "font_size": 16,
+          "text_color": [
+            1.0,
+            0.91,
+            0.75,
+            1.0
+          ],
+          "background": [
+            0.02,
+            0.041,
+            0.08,
+            0.3
+          ],
+          "elements": [
+            {
+              "id": "start-game",
+              "source": {
+                "kind": "action_button",
+                "caption": "Start",
+                "action_id": "start"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

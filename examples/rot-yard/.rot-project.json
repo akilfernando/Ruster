@@ -1,0 +1,13 @@
+{
+  "startup_scene": {
+    "file": "title.scene.json",
+    "scene_id": "title-scene"
+  },
+  "startup_transition": {
+    "action_id": "start",
+    "target_scene": {
+      "file": "lift.scene.json",
+      "scene_id": "lift-dock"
+    }
+  }
+}

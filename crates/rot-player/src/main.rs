@@ -394,9 +394,9 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
     }
     if options.headless {
         if app.is_static_component()
-            && ((!app.has_start_transition() && options.input_frames.is_some())
-                || options.commands.is_some()
-                || options.hud_activations.is_some())
+            && ((!app.has_start_transition()
+                && (options.input_frames.is_some() || options.hud_activations.is_some()))
+                || options.commands.is_some())
         {
             return Err("Static component hierarchies do not execute behavior input".into());
         }

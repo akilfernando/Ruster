@@ -1,0 +1,167 @@
+{
+  "format": "rot-scene",
+  "format_version": 23,
+  "scene": {
+    "id": "lift-dock",
+    "objects": [
+      {
+        "id": "camera",
+        "name": "Lift Dock Camera",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            5.0,
+            3.0,
+            14.0
+          ],
+          "rotation": [
+            -0.13,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "game-camera",
+            "enabled": true,
+            "type": "camera",
+            "view": {
+              "type": "transform_orthographic",
+              "vertical_size": 7.0,
+              "aspect_ratio": 1.3333334,
+              "clip": {
+                "near": 0.15,
+                "far": 60.0
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "model-18eb37ac6676856a-0",
+        "name": "Sliding Gate",
+        "enabled": true,
+        "parent": null,
+        "transform": {
+          "translation": [
+            5.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": []
+      },
+      {
+        "id": "model-18eb37ac6676856a-0-node-0",
+        "name": "Sliding Gate Panel",
+        "enabled": true,
+        "parent": "model-18eb37ac6676856a-0",
+        "transform": {
+          "translation": [
+            1.0,
+            1.2,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            -0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "components": [
+          {
+            "id": "model-18eb37ac6676856a-0-node-0-mesh",
+            "enabled": true,
+            "type": "mesh_renderer",
+            "geometry": {
+              "type": "imported",
+              "asset": "glb-mesh-964ad9b26525ffe7f696d9e890a2496df9b347bfea8c5346f93d6dc9584cadd2"
+            },
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "material": "model-18eb37ac6676856a-0-material-0"
+          },
+          {
+            "id": "gate-script",
+            "enabled": true,
+            "type": "script",
+            "source_kind": "asset",
+            "binding": {
+              "object_id": "model-18eb37ac6676856a-0-node-0",
+              "source_id": "sliding-gate-motion",
+              "enabled": true,
+              "properties": {}
+            }
+          }
+        ]
+      }
+    ],
+    "materials": {
+      "model-18eb37ac6676856a-0-material-0": {
+        "name": "Gate Red",
+        "tint": [
+          0.8,
+          0.8,
+          0.8
+        ],
+        "double_sided": true,
+        "filter": "linear",
+        "address": "repeat",
+        "response": {
+          "type": "dielectric",
+          "roughness": 0.5
+        }
+      }
+    },
+    "background": [
+      0.014,
+      0.028,
+      0.045
+    ],
+    "ambient": {
+      "color": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "intensity": 0.8
+    },
+    "actions": {
+      "slide_gate": {
+        "label": "Slide Gate",
+        "kind": {
+          "type": "button",
+          "keys": [
+            "space"
+          ]
+        }
+      }
+    },
+    "gameplay_camera": "game-camera"
+  }
+}

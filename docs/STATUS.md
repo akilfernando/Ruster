@@ -41,10 +41,11 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   - `C-10`: file-backed `on_start` and `on_update` retain per-component
     Lua state and reload on save in Play. Existing `update` scripts still
     run. Object lookup, spawn/destroy and the wider API cutover remain open.
-  - `C-EXIT`: add one tracked v23 reference project in `examples/`, measure
-    remaining [performance budgets](PARITY-PLAN.md#5-performance-budgets), pass
-    the desktop 60 fps and full UI checklist checks, and refresh the local
-    install.
+  - `C-EXIT`: [Rot Yard](../examples/rot-yard/README.md) has a scripted Blender
+    gate, a Kenney CC0 pack, and a 5,000-object linked-prefab level.
+    The Riverside scene exceeded 60 fps on the focused Wayland desktop.
+    Large-model import, windowed player memory, the full UI checklist and
+    local install refresh remain open.
 
 ## What a creator can do today
 
@@ -70,7 +71,7 @@ previous build is in `~/.local/share/rot-engine/previous` for `--rollback`.
 - External leftovers outside this repo still use pre-rename names: two MCP
   entries in `~/.codex/config.toml` and `~/Projects/Ruster-Creations`.
 - Unverified gates: full Phase 1 [UI checklist](UX-STANDARDS.md#10-ui-review-checklist),
-  physical pointer/gizmo display latency, desktop interactive 60 fps at 5,000
-  objects, and one blank Phase 2 budget (50 MB model import). Note: windowed
+  physical pointer/gizmo display latency, and the Phase 2 budget for importing
+  a 50 MB model. Note: windowed
   Vulkan empty `rot-player` peak memory (`247.3 MB` RSS / `170.2 MB` PSS)
   exceeds the `150 MB` Phase 2 target (`14.0 MB` headless RSS).
