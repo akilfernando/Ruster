@@ -482,7 +482,7 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
             app.prepare_start_on_worker();
         }
         app.reset()?;
-        rot_app::run(
+        rot_app::run_with_deferred_scene_renderer(
             app,
             HostOptions {
                 title: manifest.title,

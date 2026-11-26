@@ -1137,6 +1137,7 @@ pub fn viewport_with_assets(
 
 #[derive(Debug, Default)]
 struct FrameEvidence {
+    scene_callback_queued: bool,
     state: std::sync::atomic::AtomicU8,
     configuration: std::sync::atomic::AtomicU64,
 }
@@ -1146,6 +1147,19 @@ struct FrameEvidence {
 #[derive(Clone, Debug, Default)]
 pub struct FrameReceipt(Arc<FrameEvidence>);
 impl FrameReceipt {
+    fn scene_callback() -> Self {
+        Self(Arc::new(FrameEvidence {
+            scene_callback_queued: true,
+            ..Default::default()
+        }))
+    }
+
+    /// This viewport queued a scene callback. Its resources must be installed
+    /// before painting. This says nothing about whether the callback painted.
+    pub fn scene_callback_queued(&self) -> bool {
+        self.0.scene_callback_queued
+    }
+
     pub fn is_fresh_painted(&self) -> bool {
         self.0.state.load(std::sync::atomic::Ordering::Acquire) == 3
     }
@@ -1246,6 +1260,7 @@ pub struct ViewportSurface {
     pub rect: egui::Rect,
     pub response: egui::Response,
     pub input_owned: bool,
+    allow_solid_sdr: bool,
     transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
     camera_id: egui::Id,
     error_id: egui::Id,
@@ -1483,6 +1498,7 @@ pub fn allocate_viewport(
         rect,
         response,
         input_owned: false,
+        allow_solid_sdr: false,
         transform_camera: None,
         camera_id,
         error_id,
@@ -1758,6 +1774,12 @@ fn objects_in_rect(
 }
 
 impl ViewportSurface {
+    /// Permit an egui fill for a geometry-free SDR scene while its renderer is
+    /// deferred. The fill does not publish scene-callback capture evidence.
+    pub fn allow_solid_sdr(&mut self) {
+        self.allow_solid_sdr = true;
+    }
+
     /// Apply the authored renderer visibility of the exact behavior frame being drawn.
     pub fn set_transform_camera(
         &mut self,
@@ -1955,6 +1977,7 @@ fn render_draw_scene(
         rect,
         response,
         input_owned,
+        allow_solid_sdr,
         camera_id,
         error_id,
         mut camera,
@@ -2249,43 +2272,54 @@ fn render_draw_scene(
             group
         })
         .collect();
-    let receipt = FrameReceipt::default();
     let draw_rect = player_content.unwrap_or(rect);
     if paint_bars {
         ui.painter().rect_filled(rect, 0., egui::Color32::BLACK);
     }
-    ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-        draw_rect,
-        SceneCallback {
-            receipt: receipt.clone(),
-            groups,
-            camera: view_projection.to_cols_array(),
-            show_editor_grid: navigation.show_editor_grid && !navigation.player_view,
-            camera_eye_mode,
-            display: scene.display,
-            background: scene.background,
-            lighting,
-            size: draw_rect.size(),
-            cpu_us: start.elapsed().as_secs_f64() * 1.0e6,
-            shadow: if invalid_lighting {
-                None
-            } else {
-                scene
-                    .lighting
-                    .lights()
-                    .find_map(|(_, light)| match &light.kind {
-                        rot_scene::LightKind::Directional { shadow }
-                            if light.enabled && shadow.enabled =>
-                        {
-                            Some(*shadow)
-                        }
-                        _ => None,
-                    })
+    let show_editor_grid = navigation.show_editor_grid && !navigation.player_view;
+    let receipt = if allow_solid_sdr
+        && scene.objects.is_empty()
+        && scene.display.is_legacy()
+        && !show_editor_grid
+    {
+        paint_solid_sdr(ui, draw_rect, scene.background);
+        FrameReceipt::default()
+    } else {
+        let receipt = FrameReceipt::scene_callback();
+        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+            draw_rect,
+            SceneCallback {
+                receipt: receipt.clone(),
+                groups,
+                camera: view_projection.to_cols_array(),
+                show_editor_grid,
+                camera_eye_mode,
+                display: scene.display,
+                background: scene.background,
+                lighting,
+                size: draw_rect.size(),
+                cpu_us: start.elapsed().as_secs_f64() * 1.0e6,
+                shadow: if invalid_lighting {
+                    None
+                } else {
+                    scene
+                        .lighting
+                        .lights()
+                        .find_map(|(_, light)| match &light.kind {
+                            rot_scene::LightKind::Directional { shadow }
+                                if light.enabled && shadow.enabled =>
+                            {
+                                Some(*shadow)
+                            }
+                            _ => None,
+                        })
+                },
+                context: ui.ctx().clone(),
+                prepared: std::sync::atomic::AtomicBool::new(false),
             },
-            context: ui.ctx().clone(),
-            prepared: std::sync::atomic::AtomicBool::new(false),
-        },
-    ));
+        ));
+        receipt
+    };
     if invalid_lighting {
         ui.painter().text(
             rect.left_bottom() + egui::vec2(8.0, -8.0),
@@ -2700,35 +2734,56 @@ struct RetiringTarget {
     target: Target,
     completed: Arc<std::sync::atomic::AtomicBool>,
 }
+
+fn scene_clear_rgb(editor_grid: bool, background: Option<rot_scene::BackgroundColor>) -> [f64; 3] {
+    background.map_or_else(
+        || {
+            if editor_grid {
+                [0.016; 3]
+            } else {
+                [0.025, 0.035, 0.055]
+            }
+        },
+        |background| background.linear().map(f64::from),
+    )
+}
+
+fn paint_solid_sdr(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    background: Option<rot_scene::BackgroundColor>,
+) {
+    let [r, g, b] = scene_clear_rgb(false, background).map(|value| value as f32);
+    let pixels_per_point = ui.ctx().pixels_per_point();
+    let round = |pos: egui::Pos2| {
+        egui::pos2(
+            (pos.x * pixels_per_point).round() / pixels_per_point,
+            (pos.y * pixels_per_point).round() / pixels_per_point,
+        )
+    };
+    // Match the scene callback's physical-pixel bounds without feathering the
+    // edges into the letterbox. Egui applies its normal framebuffer color conversion.
+    let mut mesh = egui::Mesh::default();
+    mesh.add_colored_rect(
+        egui::Rect::from_min_max(round(rect.min), round(rect.max)),
+        egui::Rgba::from_rgb(r, g, b).into(),
+    );
+    ui.painter().add(egui::Shape::mesh(mesh));
+}
+
 impl Target {
     fn color_attachment(
         &self,
         editor_grid: bool,
         background: Option<rot_scene::BackgroundColor>,
     ) -> wgpu::RenderPassColorAttachment<'_> {
+        let [r, g, b] = scene_clear_rgb(editor_grid, background);
         wgpu::RenderPassColorAttachment {
             view: self.multisample.as_ref().unwrap_or(&self.color),
             resolve_target: self.multisample.as_ref().map(|_| &self.color),
             depth_slice: None,
             ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(if let Some(background) = background {
-                    let [r, g, b] = background.linear().map(f64::from);
-                    wgpu::Color { r, g, b, a: 1.0 }
-                } else if editor_grid {
-                    wgpu::Color {
-                        r: 0.016,
-                        g: 0.016,
-                        b: 0.016,
-                        a: 1.0,
-                    }
-                } else {
-                    wgpu::Color {
-                        r: 0.025,
-                        g: 0.035,
-                        b: 0.055,
-                        a: 1.0,
-                    }
-                }),
+                load: wgpu::LoadOp::Clear(wgpu::Color { r, g, b, a: 1.0 }),
                 // The resolved single-sample image is always stored by the resolve.
                 store: if self.multisample.is_some() {
                     wgpu::StoreOp::Discard
@@ -3848,6 +3903,101 @@ fn gpu_durations(values: &[u64], shadow: bool, period: f64) -> Option<(f64, f64,
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn deferred_sdr_view_preserves_letterbox_and_queues_real_draws() {
+        use super::*;
+        use rot_scene::component_scene::{TransformCameraPose, TransformProjection};
+
+        let render = |scene: Scene, allow_solid, show_grid| {
+            let frame = rot_scene::SceneDrawFrame::new(scene, None).with_transform_camera(Some(
+                TransformCameraPose {
+                    eye: [0., 1., 4.],
+                    forward: [0., 0., -1.],
+                    up: [0., 1., 0.],
+                    projection: TransformProjection::Perspective {
+                        vertical_fov_degrees: 45.,
+                    },
+                    aspect_ratio: Some(1.0),
+                    clip: None,
+                },
+            ));
+            let mut result = None;
+            let mut output = egui::Context::default().run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(640., 400.),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    let mut navigation = NavigationOptions {
+                        show_controls: false,
+                        show_editor_grid: show_grid,
+                        player_view: !show_grid,
+                        ..Default::default()
+                    };
+                    let mut surface = allocate_viewport(ui, frame.scene(), &[], &mut navigation);
+                    if allow_solid {
+                        surface.allow_solid_sdr();
+                    }
+                    result = Some(render_viewport_draw_frame(
+                        ui,
+                        &frame,
+                        &[],
+                        &BTreeMap::new(),
+                        &BTreeMap::new(),
+                        &mut navigation,
+                        surface,
+                    ));
+                },
+            );
+            output.textures_delta.clear();
+            (result.unwrap(), output)
+        };
+
+        let mut empty = Scene::empty("blank");
+        let (eager, _) = render(empty.clone(), false, false);
+        assert!(eager.receipt.scene_callback_queued());
+        for (background, srgb) in [
+            (None, [44, 53, 66]),
+            (Some([0.003, 0.18, 0.75]), [10, 118, 225]),
+        ] {
+            empty.background = background.map(|rgb| rot_scene::BackgroundColor::new(rgb).unwrap());
+            let (solid, output) = render(empty.clone(), true, false);
+            let content = solid.player_content.unwrap();
+            assert!(content.width() < solid.rect.width());
+            assert_eq!(solid.player_content, eager.player_content);
+            assert_eq!(solid.projection, eager.projection);
+            assert!(!solid.receipt.scene_callback_queued());
+            assert!(!solid.receipt.is_fresh_painted());
+            assert!(output.shapes.iter().any(|shape| {
+                matches!(&shape.shape, egui::Shape::Mesh(mesh)
+                    if mesh.calc_bounds() == content && mesh.vertices.iter().all(|vertex|
+                        vertex.color == egui::Color32::from_rgb(srgb[0], srgb[1], srgb[2])))
+            }));
+            assert!(output.shapes.iter().any(|shape| {
+                matches!(&shape.shape, egui::Shape::Rect(rect)
+                    if rect.rect == solid.rect && rect.fill == egui::Color32::BLACK)
+            }));
+        }
+
+        assert!(render(empty.clone(), true, true)
+            .0
+            .receipt
+            .scene_callback_queued());
+        empty.display = rot_scene::DisplayProfile::surface_hdr();
+        assert!(render(empty, true, false).0.receipt.scene_callback_queued());
+
+        // A built-in cube has neither a mesh asset nor a primitive override.
+        let mut drawable = Scene::demo();
+        drawable.objects.truncate(1);
+        assert!(render(drawable, true, false)
+            .0
+            .receipt
+            .scene_callback_queued());
+    }
+
     #[test]
     fn calibrated_camera_centers_physical_content_and_preserves_depth() {
         use super::*;

@@ -55,6 +55,23 @@ static DIAGNOSTICS: Diagnostics = Diagnostics;
 /// Launch a single shared scene viewport. No editor, MCP listener, cache writes or new GPU path.
 /// Existing caller loggers are preserved; otherwise warning/error diagnostics go to stderr.
 pub fn run<A: Application>(app: A, options: HostOptions) -> Result<(), String> {
+    run_host(app, options, false)
+}
+
+/// Launch with scene resources deferred while the view can use a solid SDR
+/// fill. The first frame that needs the full scene renderer installs it.
+pub fn run_with_deferred_scene_renderer<A: Application>(
+    app: A,
+    options: HostOptions,
+) -> Result<(), String> {
+    run_host(app, options, true)
+}
+
+fn run_host<A: Application>(
+    app: A,
+    options: HostOptions,
+    defer_scene_renderer: bool,
+) -> Result<(), String> {
     if options.title.trim().is_empty() || options.app_id.trim().is_empty() {
         return Err("application title and app_id must not be empty".into());
     }
@@ -103,7 +120,7 @@ pub fn run<A: Application>(app: A, options: HostOptions) -> Result<(), String> {
     let host_error = exit_error.clone();
     eframe::run_native(&title, native, Box::new(move |cc| {
         let render = cc.wgpu_render_state.as_ref().ok_or("Vulkan renderer unavailable")?;
-        let metrics = rot_render::install(render);
+        let metrics = (!defer_scene_renderer).then(|| rot_render::install(render));
         Ok(Box::new(Host {
             window_mode: options.player_window_controls.then(|| WindowMode::new(cc, &options.player_window)),
             action_surface: None,
@@ -135,7 +152,7 @@ struct Host<A: Application> {
     options: HostOptions,
     window_mode: Option<WindowMode>,
     last_frame: Instant,
-    metrics: rot_render::MetricsHandle,
+    metrics: Option<rot_render::MetricsHandle>,
     render: Option<eframe::egui_wgpu::RenderState>,
     error: Option<String>,
     ui_frames: u64,
@@ -408,7 +425,7 @@ impl<A: Application> Host<A> {
                 if let Some(mode) = &self.window_mode {
                     mode.show(ui);
                 }
-                if let Some(message) = self.metrics.lock().ok().and_then(|metrics| {
+                if let Some(message) = self.metrics.as_ref().and_then(|metrics| metrics.lock().ok()).and_then(|metrics| {
                     (metrics.frames > 0)
                         .then(|| metrics.display_status.warning())
                         .flatten()
@@ -530,6 +547,9 @@ impl<A: Application> Host<A> {
                     let content = app.content();
                     let selected = app.selected();
                     surface.set_transform_camera(content.transform_camera());
+                    if self.metrics.is_none() {
+                        surface.allow_solid_sdr();
+                    }
                     let crate::ContentScene::Behavior(scene) = &content.scene;
                     rot_render::render_viewport_draw_frame(
                         ui,
@@ -541,6 +561,11 @@ impl<A: Application> Host<A> {
                         surface,
                     )
                 };
+                if self.metrics.is_none() && viewport.receipt.scene_callback_queued() {
+                    // Eframe prepares queued callbacks after this UI pass. Use
+                    // the current committed scene, including start transitions.
+                    self.metrics = self.render.as_ref().map(rot_render::install);
+                }
                 if self.runtime.app().keyboard_actions().is_some() {
                     self.action_surface = Some(viewport.response.id);
                     self.action_surface_rect = Some(viewport.rect);
@@ -654,10 +679,13 @@ impl<A: Application> eframe::App for Host<A> {
 
 impl<A: Application> Drop for Host<A> {
     fn drop(&mut self) {
-        let metrics = self
-            .metrics
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let metrics = self.metrics.as_ref().map(|metrics| {
+            metrics
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        });
+        let empty_metrics = rot_render::Metrics::default();
+        let metrics = metrics.as_deref().unwrap_or(&empty_metrics);
         *self
             .exit_error
             .lock()
@@ -769,7 +797,7 @@ mod tests {
                 runtime: Runtime::new(app, options.tick_duration).unwrap(),
                 options,
                 last_frame: Instant::now(),
-                metrics: Arc::new(Mutex::new(rot_render::Metrics::default())),
+                metrics: Some(Arc::new(Mutex::new(rot_render::Metrics::default()))),
                 render: None,
                 error: None,
                 ui_frames: 0,
@@ -982,7 +1010,7 @@ mod tests {
             runtime: Runtime::new(app, options.tick_duration).unwrap(),
             options,
             last_frame: Instant::now(),
-            metrics: Arc::new(Mutex::new(rot_render::Metrics::default())),
+            metrics: Some(Arc::new(Mutex::new(rot_render::Metrics::default()))),
             render: None,
             error: None,
             ui_frames: 0,
@@ -1338,7 +1366,7 @@ mod tests {
             runtime: Runtime::new(app, options.tick_duration).unwrap(),
             options,
             last_frame: Instant::now(),
-            metrics: Arc::new(Mutex::new(rot_render::Metrics::default())),
+            metrics: Some(Arc::new(Mutex::new(rot_render::Metrics::default()))),
             render: None,
             error: None,
             ui_frames: 0,
@@ -1469,7 +1497,7 @@ mod tests {
             rot_render::DisplayStatus::PendingUnavailable,
         ] {
             {
-                let mut metrics = host.metrics.lock().unwrap();
+                let mut metrics = host.metrics.as_ref().unwrap().lock().unwrap();
                 metrics.frames = 1;
                 metrics.display_status = status;
             }
@@ -1480,7 +1508,12 @@ mod tests {
                     "resource waiting warning must share the ordinary header footprint"
                 );
             }
-            host.metrics.lock().unwrap().display_status = rot_render::DisplayStatus::LegacySdr;
+            host.metrics
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .display_status = rot_render::DisplayStatus::LegacySdr;
             for _ in 0..3 {
                 assert_eq!(
                     layout(&mut host),

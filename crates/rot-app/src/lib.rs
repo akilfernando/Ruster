@@ -15,7 +15,7 @@ mod resources;
 mod tests;
 
 pub use eframe::egui;
-pub use host::{run, HostOptions};
+pub use host::{run, run_with_deferred_scene_renderer, HostOptions};
 pub use resources::ResourceRoot;
 
 use rot_assets::Mesh;
