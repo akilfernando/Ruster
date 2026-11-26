@@ -202,10 +202,11 @@ impl ModelResource {
             return Ok(bytes);
         }
         match self.payload {
+            Payload::Mesh(mesh) => encode_packaged_mesh(&mesh),
             Payload::Texture(texture) if texture.role == TextureRole::Roughness => {
                 texture::encode_roughness_source(&texture)
             }
-            _ => unreachable!("only packed roughness derives its package source"),
+            _ => unreachable!("model resource has no package source"),
         }
     }
 }
@@ -1299,13 +1300,14 @@ impl Decoder<'_> {
         shape: &str,
         components: usize,
         component_type: u32,
+        max_count: usize,
     ) -> Result<impl ExactSizeIterator<Item = &[u8]>, AssetError> {
         let accessor = at(&self.doc.accessors, index, "accessor")?;
         if accessor.shape != shape
             || accessor.component_type != component_type
             || accessor.normalized
             || accessor.count == 0
-            || accessor.count > MAX_VERTICES
+            || accessor.count > max_count
         {
             return Err(error(format!(
                 "unsupported GLB {shape} accessor layout or count"
@@ -1333,9 +1335,10 @@ impl Decoder<'_> {
         {
             return Err(error("invalid GLB accessor alignment, target or stride"));
         }
-        let end = accessor
-            .byte_offset
-            .checked_add((accessor.count - 1) * stride + width)
+        let end = (accessor.count - 1)
+            .checked_mul(stride)
+            .and_then(|length| length.checked_add(width))
+            .and_then(|length| accessor.byte_offset.checked_add(length))
             .ok_or_else(|| error("GLB accessor range overflow"))?;
         let range = bytes
             .get(accessor.byte_offset..end)
@@ -1348,7 +1351,7 @@ impl Decoder<'_> {
         index: usize,
         shape: &str,
     ) -> Result<Vec<[f32; N]>, AssetError> {
-        self.rows(index, shape, N, 5126)?
+        self.rows(index, shape, N, 5126, MAX_VERTICES)?
             .map(|bytes| {
                 let values = std::array::from_fn(|i| f32::from_bits(u32_at(bytes, i * 4)));
                 if !values
@@ -1383,7 +1386,7 @@ impl Decoder<'_> {
         }
         let positions = self.vectors::<3>(primitive.attributes.positions, "VEC3")?;
         if let Some(tangents) = primitive.attributes.tangents {
-            if self.rows(tangents, "VEC4", 4, 5126)?.len() != positions.len() {
+            if self.rows(tangents, "VEC4", 4, 5126, MAX_VERTICES)?.len() != positions.len() {
                 return Err(error("GLB tangent count must match positions"));
             }
         }
@@ -1415,6 +1418,12 @@ impl Decoder<'_> {
                     let inv = 1.0 / len_sq.sqrt();
                     *vector = [vector[0] * inv, vector[1] * inv, vector[2] * inv];
                 }
+                let length = vector
+                    .iter()
+                    .map(|v| f64::from(*v).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                *vector = vector.map(|v| (f64::from(v) / length) as f32);
             }
             if !valid {
                 normal = None;
@@ -1427,6 +1436,15 @@ impl Decoder<'_> {
         if textured && uv.is_none() {
             uv = Some(vec![[0.0, 0.0]; positions.len()]);
             self.generated_default_uvs = true;
+        }
+        if let Some(uvs) = &mut uv {
+            for [_, v] in uvs {
+                // GLB uses a top-origin V. Mesh UVs follow the OBJ convention.
+                *v = 1.0 - *v;
+                if v.abs() > 1_000_000.0 {
+                    return Err(error("GLB mesh texture coordinates exceed renderer bounds"));
+                }
+            }
         }
         let mut index_limit = positions.len();
         let indices: Vec<u32> = if let Some(i) = primitive.indices {
@@ -1444,7 +1462,7 @@ impl Decoder<'_> {
                     _ => u32::MAX as usize,
                 });
             }
-            self.rows(i, "SCALAR", 1, component)?
+            self.rows(i, "SCALAR", 1, component, MAX_MESH_TRIANGLES * 3)?
                 .map(|row| match component {
                     5121 => u32::from(row[0]),
                     5123 => u32::from(u16::from_le_bytes(row.try_into().unwrap())),
@@ -1459,72 +1477,99 @@ impl Decoder<'_> {
             SurfaceTopology::Triangles => 0,
             SurfaceTopology::Strip | SurfaceTopology::Fan => indices.len().saturating_sub(2),
         };
-        if !(1..=MAX_TRIANGLES).contains(&triangles)
+        if !(1..=MAX_MESH_TRIANGLES).contains(&triangles)
             || indices.iter().any(|i| *i as usize >= index_limit)
         {
             return Err(error("GLB triangle index count or range is invalid"));
         }
-        // The runtime already loads bounded OBJ with this normal/UV convention.
-        // Use the same encoded closure and decoder for editor and standalone.
-        let mut bytes = Vec::new();
-        for p in &positions {
-            writeln!(bytes, "v {} {} {}", p[0], p[1], p[2])?;
-        }
-        let has_uv = uv.is_some();
-        if let Some(uv) = uv {
-            for t in uv {
-                writeln!(bytes, "vt {} {}", t[0], 1.0 - t[1])?;
-            }
-        }
-        let has_normals = normal.is_some();
-        if let Some(normal) = normal {
-            for n in normal {
-                writeln!(bytes, "vn {} {} {}", n[0], n[1], n[2])?;
-            }
-        }
-        let mut write_triangle = |triangle: [u32; 3]| -> Result<(), std::io::Error> {
-            if triangle_normal(triangle.map(|index| positions[index as usize])).is_none() {
+        let corners = triangles
+            .checked_mul(3)
+            .ok_or_else(|| error("GLB triangle corner count overflow"))?;
+        let vertices = if normal.is_some() {
+            corners.min(positions.len())
+        } else {
+            corners
+        };
+        binary_mesh_length(vertices, corners, uv.is_some())?;
+        let mut mesh = Mesh {
+            vertices: Vec::with_capacity(vertices),
+            indices: Vec::with_capacity(corners),
+            texcoords: uv.as_ref().map(|_| Vec::with_capacity(vertices)),
+        };
+        const UNUSED: u32 = u32::MAX;
+        let mut remap = normal.as_ref().map(|_| vec![UNUSED; positions.len()]);
+        let mut push_triangle = |triangle: [u32; 3]| {
+            let points = triangle.map(|index| positions[index as usize]);
+            let Some(face_normal) = triangle_normal(points) else {
                 self.skipped_triangles += 1;
-                return Ok(());
-            }
-            write!(bytes, "f")?;
-            for i in triangle.iter().map(|i| i + 1) {
-                match (has_uv, has_normals) {
-                    (true, true) => write!(bytes, " {i}/{i}/{i}")?,
-                    (true, false) => write!(bytes, " {i}/{i}")?,
-                    (false, true) => write!(bytes, " {i}//{i}")?,
-                    (false, false) => write!(bytes, " {i}")?,
+                return;
+            };
+            if let Some(remap) = &mut remap {
+                for index in triangle {
+                    remap[index as usize] = index;
+                }
+                mesh.indices.extend(triangle);
+            } else {
+                for (index, position) in triangle.into_iter().zip(points) {
+                    mesh.indices.push(mesh.vertices.len() as u32);
+                    mesh.vertices.push(Vertex {
+                        position,
+                        normal: face_normal,
+                    });
+                    if let (Some(source), Some(target)) = (&uv, &mut mesh.texcoords) {
+                        target.push(source[index as usize]);
+                    }
                 }
             }
-            writeln!(bytes)
         };
         match topology {
             SurfaceTopology::Triangles => {
                 for &triangle in indices.as_chunks::<3>().0 {
-                    write_triangle(triangle)?;
+                    push_triangle(triangle);
                 }
             }
             SurfaceTopology::Strip => {
                 // Use the original window number even when a connector is degenerate.
                 for (window, &[a, b, c]) in indices.array_windows::<3>().enumerate() {
-                    write_triangle(if window.is_multiple_of(2) {
+                    push_triangle(if window.is_multiple_of(2) {
                         [a, b, c]
                     } else {
                         [a, c, b]
-                    })?;
+                    });
                 }
             }
             SurfaceTopology::Fan => {
                 let anchor = indices[0];
                 for &[a, b] in indices[1..].array_windows::<2>() {
-                    write_triangle([a, b, anchor])?;
+                    push_triangle([a, b, anchor]);
                 }
             }
         }
-        let mesh = parse_obj_with_normal_policy(&bytes, MeshNormalPolicy::AuthoredWhenComplete)
-            .map_err(|e| error(format!("GLB generated triangle payload: {e}")))?;
+        if mesh.indices.is_empty() {
+            return Err(error(
+                "GLB generated triangle payload has no nondegenerate faces",
+            ));
+        }
+        if let (Some(normals), Some(mut remap)) = (normal, remap) {
+            // Keep source order and indexing when every vertex is used. Only
+            // vertices in surviving triangles contribute to framing bounds.
+            for (index, (position, normal)) in positions.into_iter().zip(normals).enumerate() {
+                if remap[index] == UNUSED {
+                    continue;
+                }
+                remap[index] = mesh.vertices.len() as u32;
+                mesh.vertices.push(Vertex { position, normal });
+                if let (Some(source), Some(target)) = (&uv, &mut mesh.texcoords) {
+                    target.push(source[index]);
+                }
+            }
+            for index in &mut mesh.indices {
+                *index = remap[*index as usize];
+            }
+        }
+        validate_mesh(&mesh)?;
         Ok(ModelResource {
-            bytes: Some(bytes),
+            bytes: None,
             payload: Payload::Mesh(mesh),
         })
     }
@@ -2030,7 +2075,7 @@ impl Decoder<'_> {
             "linear"
         };
         let times: Vec<f32> = self
-            .rows(sampler.input, "SCALAR", 1, 5126)?
+            .rows(sampler.input, "SCALAR", 1, 5126, MAX_VERTICES)?
             .map(|row| f32::from_bits(u32_at(row, 0)))
             .collect();
         if times.len() > MAX_TRACK_KEYS
@@ -2584,15 +2629,92 @@ mod tests {
         crate::fixtures::pack_glb(&doc, &bin)
     }
 
-    fn generated_obj(model: &DecodedModel) -> &[u8] {
-        model
-            .resources
-            .values()
-            .next()
-            .unwrap()
-            .bytes
-            .as_deref()
-            .unwrap()
+    fn model_mesh(model: &DecodedModel) -> &Mesh {
+        let Payload::Mesh(mesh) = &model.resources.values().next().unwrap().payload else {
+            panic!("fixture must decode to a mesh");
+        };
+        mesh
+    }
+
+    #[test]
+    fn glb_shared_vertices_keep_authored_attributes_and_flat_fallback() {
+        let vertices = [
+            ([0.0_f32, 0., 0.], [0., 0.25]),
+            ([10_000., 10_000., 10_000.], [0., 0.]),
+            ([1., 0., 0.], [1., 0.25]),
+            ([0., 1., 0.], [0., 0.75]),
+            ([1., 1., 1.], [1., 0.75]),
+        ];
+        let make_source = |invalid: bool| {
+            let mut bin: Vec<u8> = vertices
+                .into_iter()
+                .enumerate()
+                .flat_map(|(index, (position, uv))| {
+                    let normal = if invalid && index == 4 {
+                        [0., 0., 0.]
+                    } else {
+                        [0., 2., 0.]
+                    };
+                    position
+                        .into_iter()
+                        .chain(normal)
+                        .chain(uv)
+                        .flat_map(f32::to_le_bytes)
+                })
+                .collect();
+            let indices = [0u32, 2, 3, 2, 4, 3, 1, 1, 0];
+            let index_offset = bin.len();
+            bin.extend(indices.into_iter().flat_map(u32::to_le_bytes));
+            let doc = json!({
+                "asset":{"version":"2.0"},"scenes":[{"nodes":[0]}],
+                "nodes":[{"name":"Surface","mesh":0}],
+                "meshes":[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2},"indices":3}]}],
+                "buffers":[{"byteLength":bin.len()}],
+                "bufferViews":[{"buffer":0,"byteLength":index_offset,"byteStride":32},
+                    {"buffer":0,"byteOffset":index_offset,"byteLength":bin.len()-index_offset}],
+                "accessors":[
+                    {"bufferView":0,"componentType":5126,"count":5,"type":"VEC3"},
+                    {"bufferView":0,"byteOffset":12,"componentType":5126,"count":5,"type":"VEC3"},
+                    {"bufferView":0,"byteOffset":24,"componentType":5126,"count":5,"type":"VEC2"},
+                    {"bufferView":1,"componentType":5125,"count":indices.len(),"type":"SCALAR"},
+                ],
+            });
+            crate::fixtures::pack_glb(&doc, &bin)
+        };
+        let authored = decode("surface", "surface.glb", &make_source(false)).unwrap();
+        let mesh = model_mesh(&authored);
+        assert_eq!(mesh.indices, [0, 1, 2, 1, 3, 2]);
+        assert_eq!(mesh.vertices.len(), 4);
+        for (actual, (position, _)) in
+            mesh.vertices
+                .iter()
+                .zip([vertices[0], vertices[2], vertices[3], vertices[4]])
+        {
+            assert_eq!(
+                actual,
+                &Vertex {
+                    position,
+                    normal: [0., 1., 0.]
+                }
+            );
+        }
+        assert_eq!(
+            mesh.texcoords.as_deref().unwrap(),
+            &[[0., 0.75], [1., 0.75], [0., 0.25], [1., 0.25]]
+        );
+
+        let fallback = decode("surface", "surface.glb", &make_source(true)).unwrap();
+        assert!(fallback
+            .info
+            .warnings
+            .iter()
+            .any(|warning| warning == "Recomputed invalid vertex normals."));
+        let mesh = model_mesh(&fallback);
+        assert_eq!(mesh.indices, [0, 1, 2, 3, 4, 5]);
+        assert_eq!(mesh.vertices[1].position, mesh.vertices[3].position);
+        assert_ne!(mesh.vertices[1].normal, mesh.vertices[3].normal);
+        let uvs = mesh.texcoords.as_ref().unwrap();
+        assert_eq!(uvs[1], uvs[3]);
     }
 
     #[test]
@@ -2609,7 +2731,7 @@ mod tests {
         let triangles = surface_glb(None, &positions, Some(&[0, 1, 2, 2, 3, 4, 3, 5, 4]));
         let strip = decode("surface", "surface.glb", &strip).unwrap();
         let triangles = decode("surface", "surface.glb", &triangles).unwrap();
-        assert_eq!(generated_obj(&strip), generated_obj(&triangles));
+        assert_eq!(model_mesh(&strip), model_mesh(&triangles));
         assert!(strip
             .info
             .warnings
@@ -2637,12 +2759,11 @@ mod tests {
         let triangles = decode("surface", "surface.glb", &triangles).unwrap();
         for source in [fan, indexed] {
             let fan = decode("surface", "surface.glb", &source).unwrap();
-            assert_eq!(generated_obj(&fan), generated_obj(&triangles));
+            assert_eq!(model_mesh(&fan), model_mesh(&triangles));
         }
         let open = surface_glb(Some(6), &positions[..5], None);
         let open = decode("surface", "surface.glb", &open).unwrap();
-        let obj = std::str::from_utf8(generated_obj(&open)).unwrap();
-        assert_eq!(obj.lines().filter(|line| line.starts_with("f ")).count(), 3);
+        assert_eq!(model_mesh(&open).indices.len(), 9);
     }
 
     #[test]
@@ -2650,10 +2771,15 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("surface.glb");
         let positions = [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]];
-        std::fs::write(&path, surface_glb(Some(5), &positions, None)).unwrap();
+        // Exercise both the index accessor and flat corner expansion past the
+        // OBJ limit while using only three source vertices.
+        let valid = [0, 1, 2].repeat(MAX_TRIANGLES + 1);
+        std::fs::write(&path, surface_glb(None, &positions, Some(&valid))).unwrap();
         let mut store = AssetStore::open(root.path()).unwrap();
         let accepted = store.import_glb_at(0, "surface", "surface.glb").unwrap();
-        let too_many = vec![0; MAX_TRIANGLES + 3];
+        let mesh_id = accepted.nodes["Surface"].mesh_id.as_ref().unwrap();
+        assert_eq!(store.mesh(mesh_id).unwrap().indices.len(), valid.len());
+        let too_many = vec![0; MAX_MESH_TRIANGLES + 3];
         for (mode, indices, expected) in [
             (1, &[0, 1, 2][..], "requires a reachable mesh"),
             (7, &[0, 1, 2][..], "primitive mode must be"),

@@ -564,13 +564,12 @@ fn execute_play_check(options: &Options) -> Result<bool, String> {
 
     let mut pins = BTreeMap::new();
     for (id, path) in &manifest.meshes {
-        let bytes = root.read(path, rot_assets::MAX_SOURCE_BYTES)?;
         let policy = manifest
             .mesh_normal_policies
             .get(id)
             .copied()
             .unwrap_or(MeshNormalPolicy::Flat);
-        pins.insert(id.clone(), ResourcePin::mesh(&bytes, policy));
+        pins.insert(id.clone(), root.mesh_pin(path, policy)?);
     }
     for (id, path) in &manifest.textures {
         let bytes = root.read(path, rot_assets::MAX_TEXTURE_SOURCE_BYTES)?;

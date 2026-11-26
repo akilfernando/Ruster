@@ -529,11 +529,14 @@ impl BuildRequest {
                     return Ok(());
                 }
                 let (extension, map) = if mesh_ids.contains(id) {
-                    let policy = assets.mesh_normal_policy(id).ok_or_else(|| {
-                        rot_assets::AssetError(format!("Mesh {id} needs a valid import."))
-                    })?;
+                    let (policy, extension) = assets
+                        .mesh_normal_policy(id)
+                        .zip(assets.mesh_package_extension(id))
+                        .ok_or_else(|| {
+                            rot_assets::AssetError(format!("Mesh {id} needs a valid import."))
+                        })?;
                     manifest.mesh_normal_policies.insert(id.into(), policy);
-                    ("obj", &mut manifest.meshes)
+                    (extension, &mut manifest.meshes)
                 } else if let Some(role) = roles.get(id) {
                     if assets.texture_role(id) != Some(*role) {
                         return Err(rot_assets::AssetError(format!(
@@ -2456,6 +2459,78 @@ f 1 2 3
             ]
         );
         assert!(materialized.lighting.light("lamp-3").is_none());
+    }
+
+    #[test]
+    fn build_loads_model_geometry_and_pins_it_like_the_project() {
+        use rot_assets::MeshNormalPolicy;
+
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let path = root.join("project.json");
+        let player = root.join(PLAYER);
+        fs::write(&player, b"test player bytes").unwrap();
+        fs::set_permissions(&player, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(
+            root.join("rig.glb"),
+            rot_assets::fixtures::animated_glb(Default::default()),
+        )
+        .unwrap();
+        let mut assets = AssetStore::open(root).unwrap();
+        let model = assets.import_glb_at(0, "rig", "rig.glb").unwrap();
+        let mut scene = Scene::demo();
+        for (object, mesh) in scene
+            .objects
+            .iter_mut()
+            .zip(model.nodes.values().filter_map(|node| node.mesh_id.clone()))
+        {
+            object.mesh = Some(mesh);
+        }
+        ComponentScene::from_legacy(&Session::new(scene).unwrap())
+            .unwrap()
+            .save_new(&path)
+            .unwrap();
+        drop(assets);
+
+        let session = ComponentSession::open(&path).unwrap();
+        let assets = AssetStore::open(root).unwrap();
+        let destination = root.join("package");
+        BuildRequest::capture(&session, Some(&assets))
+            .unwrap()
+            .publish(&destination, &player, &AtomicBool::new(false))
+            .unwrap();
+        let resources = rot_app::ResourceRoot::new(&destination).unwrap();
+        let manifest = CreationManifest::load(&resources).unwrap();
+        let meshes = manifest.load_meshes(&resources).unwrap();
+        assert_eq!(meshes.len(), 2);
+        let mut pins = BTreeMap::new();
+        for (id, path) in &manifest.meshes {
+            assert!(path.ends_with(".rotmesh"));
+            assert_eq!(meshes[id].as_ref(), assets.mesh(id).unwrap());
+            pins.insert(
+                id.clone(),
+                resources
+                    .mesh_pin(path, manifest.mesh_normal_policies[id])
+                    .unwrap(),
+            );
+        }
+        let export = assets
+            .export_snapshot(&manifest.meshes.keys().cloned().collect())
+            .unwrap();
+        assert_eq!(
+            rot_assets::resource_identity(&pins),
+            export.resource_identity().unwrap()
+        );
+
+        let obj = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+        fs::write(destination.join("legacy.obj"), obj).unwrap();
+        assert_eq!(resources.mesh("legacy.obj").unwrap().indices.len(), 3);
+        fs::write(destination.join("corrupt.rotmesh"), obj).unwrap();
+        let policy = MeshNormalPolicy::AuthoredWhenComplete;
+        assert!(resources
+            .mesh_with_normal_policy("corrupt.rotmesh", policy)
+            .is_err());
+        assert!(resources.mesh_pin("corrupt.rotmesh", policy).is_err());
     }
 
     #[test]

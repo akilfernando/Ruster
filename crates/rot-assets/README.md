@@ -173,6 +173,16 @@ opaque, double-sided materials as single-sided, or metallic materials as
 dielectric. It clamps roughness to a minimum of 0.08 and warns when it omits
 normal, emissive, occlusion, and metallic-roughness maps, a nonzero emissive
 factor, or an unsupported UV transform, and skips degenerate triangles with a
-warning. Derived OBJ preserves the order of retained triangles and the existing
-renderer's normal and UV convention. The export snapshot passes only the
-verified generated OBJ/PNG closure to the existing standalone resource loader.
+warning. Imported meshes keep shared vertices with authored normals. Surfaces
+that need flat normals store one vertex per face corner. Both paths convert V
+coordinates to the renderer's OBJ convention.
+
+Build writes imported model meshes as `.rotmesh` files with the same indexed
+geometry used in the editor. The format uses the mesh cache's little-endian
+layout, `ROTMESH` magic followed by a zero byte, the normal policy version,
+and a reserved source-hash field containing 64 ASCII zeroes. The verified GLB
+generation supplies the source at Build time. The packaged player checks the
+header, checksum, size and geometry when reading the standalone resource.
+Existing `.obj` resources use their recorded normal policy. To update a Play
+Check that pins GLB meshes, choose **Capture Current Identity** and **Save Check**
+after upgrading.

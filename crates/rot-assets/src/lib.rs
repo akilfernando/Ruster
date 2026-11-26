@@ -14,8 +14,11 @@ use std::{
 pub const MAX_SOURCE_BYTES: usize = 1024 * 1024;
 pub const MAX_LUA_SOURCE_BYTES: usize = 16 * 1024;
 const MAX_LUA_RESOLVED_BYTES: usize = 16 * 1024 * 1024;
+/// Wavefront OBJ admission limits.
 pub const MAX_TRIANGLES: usize = 32_768;
 pub const MAX_VERTICES: usize = MAX_TRIANGLES * 3;
+const MAX_MESH_TRIANGLES: usize = 192 * 1024;
+const MAX_MESH_VERTICES: usize = MAX_MESH_TRIANGLES * 3;
 const MAX_MODEL_ITEMS: usize = 64;
 pub const MAX_RESOLVED_BYTES: usize = 48 * 1024 * 1024;
 mod audio;
@@ -48,9 +51,16 @@ pub use texture::{
     MAX_TEXTURE_BYTES, MAX_TEXTURE_EDGE, MAX_TEXTURE_RESOLVED_BYTES, MAX_TEXTURE_SOURCE_BYTES,
 };
 const MAX_CACHE_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_PACKAGED_MESH_BYTES: usize = MAX_CACHE_BYTES;
+pub const PACKAGED_MESH_EXTENSION: &str = "rotmesh";
 const MAX_REGISTRY_BYTES: usize = 8 * 1024 * 1024;
 const REGISTRY: &str = ".rot-assets.json";
 const CACHE_MAGIC: &[u8; 8] = b"RUSTMESH";
+const PACKAGE_MESH_MAGIC: &[u8; 8] = b"ROTMESH\0";
+// Standalone resources have no source file to match. The checksum covers the
+// header and the complete geometry, and Build verifies the GLB generation.
+const PACKAGE_SOURCE_HASH: &str =
+    "0000000000000000000000000000000000000000000000000000000000000000";
 // magic, version, vertex/index counts, ASCII source SHA-256, binary SHA-256.
 const CACHE_SEMANTIC_BYTES: usize = 8 + 4 + 4 + 4 + 64;
 const CACHE_HEADER_BYTES: usize = CACHE_SEMANTIC_BYTES + 32;
@@ -67,7 +77,7 @@ pub struct Vertex {
 pub struct Mesh {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
-    /// Complete raw OBJ UVs, one per expanded vertex. No V flip is applied here.
+    /// Complete UVs in the OBJ convention, one per vertex.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub texcoords: Option<Vec<[f32; 2]>>,
 }
@@ -540,6 +550,18 @@ impl ExportSnapshot {
         self.sources
             .get(id)
             .and_then(|source| source.mesh_normal_policy)
+    }
+
+    /// Packaged model meshes contain resolved indexed geometry. Source OBJ
+    /// meshes keep their original bytes and import interpretation in Build.
+    pub fn mesh_package_extension(&self, id: &str) -> Option<&'static str> {
+        let source = self.sources.get(id)?;
+        source.mesh_normal_policy?;
+        Some(if source.model_id.is_some() {
+            PACKAGED_MESH_EXTENSION
+        } else {
+            "obj"
+        })
     }
 
     /// Frozen interpretation of an accepted texture; meshes/unknown IDs return None.
@@ -1226,21 +1248,21 @@ fn cache_checksum(bytes: &[u8]) -> [u8; 32] {
     hasher.update(&bytes[CACHE_HEADER_BYTES..]);
     hasher.finalize().into()
 }
-fn cache_length(vertices: usize, indices: usize, uvs: bool) -> Result<usize, AssetError> {
+fn binary_mesh_length(vertices: usize, indices: usize, uvs: bool) -> Result<usize, AssetError> {
     if vertices == 0
-        || vertices > MAX_VERTICES
+        || vertices > MAX_MESH_VERTICES
         || indices == 0
-        || indices > MAX_TRIANGLES * 3
+        || indices > MAX_MESH_TRIANGLES * 3
         || !indices.is_multiple_of(3)
     {
-        return Err(error("invalid mesh cache counts"));
+        return Err(error("invalid binary mesh counts"));
     }
     vertices
         .checked_mul(if uvs { 8 * 4 } else { 6 * 4 })
         .and_then(|bytes| indices.checked_mul(4).and_then(|n| bytes.checked_add(n)))
         .and_then(|bytes| bytes.checked_add(CACHE_HEADER_BYTES))
         .filter(|&bytes| bytes <= MAX_CACHE_BYTES)
-        .ok_or_else(|| error("derived mesh exceeds cache byte limit"))
+        .ok_or_else(|| error("binary mesh exceeds 16 MiB byte limit"))
 }
 #[cfg(test)]
 fn encode_cache(hash: &str, mesh: &Mesh) -> Result<Vec<u8>, AssetError> {
@@ -1251,18 +1273,34 @@ fn encode_mesh_cache(
     mesh: &Mesh,
     policy: MeshNormalPolicy,
 ) -> Result<Vec<u8>, AssetError> {
+    encode_binary_mesh(CACHE_MAGIC, hash, policy.cache_version(), mesh)
+}
+fn encode_packaged_mesh(mesh: &Mesh) -> Result<Vec<u8>, AssetError> {
+    encode_binary_mesh(
+        PACKAGE_MESH_MAGIC,
+        PACKAGE_SOURCE_HASH,
+        MeshNormalPolicy::AuthoredWhenComplete.cache_version(),
+        mesh,
+    )
+}
+fn encode_binary_mesh(
+    magic: &[u8; 8],
+    hash: &str,
+    version: u32,
+    mesh: &Mesh,
+) -> Result<Vec<u8>, AssetError> {
     if hash.len() != 64 {
         return Err(error("invalid source SHA-256 for mesh cache"));
     }
     validate_mesh(mesh)?;
-    let length = cache_length(
+    let length = binary_mesh_length(
         mesh.vertices.len(),
         mesh.indices.len(),
         mesh.texcoords.is_some(),
     )?;
     let mut bytes = Vec::with_capacity(length);
-    bytes.extend_from_slice(CACHE_MAGIC);
-    bytes.extend_from_slice(&policy.cache_version().to_le_bytes());
+    bytes.extend_from_slice(magic);
+    bytes.extend_from_slice(&version.to_le_bytes());
     bytes.extend_from_slice(
         &((mesh.vertices.len() as u32) | if mesh.texcoords.is_some() { 1 << 31 } else { 0 })
             .to_le_bytes(),
@@ -1290,12 +1328,31 @@ fn encode_mesh_cache(
     Ok(bytes)
 }
 fn decode_cache(bytes: &[u8], hash: &str, version: u32) -> Result<Mesh, AssetError> {
+    decode_binary_mesh(bytes, CACHE_MAGIC, hash, version)
+}
+
+/// Decodes resolved portable mesh geometry and verifies the recorded import policy.
+pub fn decode_packaged_mesh(bytes: &[u8], policy: MeshNormalPolicy) -> Result<Mesh, AssetError> {
+    decode_binary_mesh(
+        bytes,
+        PACKAGE_MESH_MAGIC,
+        PACKAGE_SOURCE_HASH,
+        policy.cache_version(),
+    )
+}
+
+fn decode_binary_mesh(
+    bytes: &[u8],
+    magic: &[u8; 8],
+    hash: &str,
+    version: u32,
+) -> Result<Mesh, AssetError> {
     if bytes.len() < CACHE_HEADER_BYTES
-        || &bytes[..8] != CACHE_MAGIC
+        || &bytes[..8] != magic
         || bytes[8..12] != version.to_le_bytes()
         || &bytes[20..CACHE_SEMANTIC_BYTES] != hash.as_bytes()
     {
-        return Err(error("invalid mesh cache identity/version"));
+        return Err(error("invalid binary mesh identity/version/normal policy"));
     }
     let number = |field: &[u8]| u32::from_le_bytes(field.try_into().expect("four byte field"));
     let raw_count = number(&bytes[12..16]);
@@ -1306,12 +1363,12 @@ fn decode_cache(bytes: &[u8], hash: &str, version: u32) -> Result<Mesh, AssetErr
         raw_count
     }) as usize;
     let index_count = number(&bytes[16..20]) as usize;
-    let length = cache_length(vertex_count, index_count, uvs)?;
+    let length = binary_mesh_length(vertex_count, index_count, uvs)?;
     // Reject count overflows, truncation and trailing bytes before mesh allocation.
     if bytes.len() != length
         || cache_checksum(bytes).as_ref() != &bytes[CACHE_SEMANTIC_BYTES..CACHE_HEADER_BYTES]
     {
-        return Err(error("invalid mesh cache length/checksum"));
+        return Err(error("invalid binary mesh length/checksum"));
     }
     let vertex_end = CACHE_HEADER_BYTES + vertex_count * 24;
     let vertices = bytes[CACHE_HEADER_BYTES..vertex_end]
@@ -1628,9 +1685,9 @@ fn validate_registry(registry: &Registry) -> Result<(), AssetError> {
 /// Shared by cached imports and application-provided immutable mesh snapshots.
 pub fn validate_mesh(mesh: &Mesh) -> Result<(), AssetError> {
     if mesh.vertices.is_empty()
-        || mesh.vertices.len() > MAX_VERTICES
+        || mesh.vertices.len() > MAX_MESH_VERTICES
         || mesh.indices.is_empty()
-        || mesh.indices.len() > MAX_TRIANGLES * 3
+        || mesh.indices.len() > MAX_MESH_TRIANGLES * 3
         || !mesh.indices.len().is_multiple_of(3)
         || mesh
             .indices
@@ -1995,6 +2052,37 @@ mod tests {
             .to_string()
             .contains("reopen"));
         assert_eq!(files(root.path()), before_conflict);
+    }
+
+    #[test]
+    fn packaged_mesh_checks_encoding_policy_and_geometry() {
+        use super::*;
+        let mesh = parse_obj(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap();
+        let policy = MeshNormalPolicy::AuthoredWhenComplete;
+        let mut packed = encode_packaged_mesh(&mesh).unwrap();
+        assert_eq!(decode_packaged_mesh(&packed, policy).unwrap(), mesh);
+        assert!(decode_packaged_mesh(&packed, MeshNormalPolicy::Flat).is_err());
+        assert!(decode_cache(&packed, PACKAGE_SOURCE_HASH, policy.cache_version()).is_err());
+        assert!(decode_packaged_mesh(&packed[..packed.len() - 1], policy).is_err());
+
+        let last_index = packed.len() - 4;
+        packed[last_index..].copy_from_slice(&3u32.to_le_bytes());
+        assert!(decode_packaged_mesh(&packed, policy)
+            .unwrap_err()
+            .0
+            .contains("checksum"));
+        let checksum = cache_checksum(&packed);
+        packed[CACHE_SEMANTIC_BYTES..CACHE_HEADER_BYTES].copy_from_slice(&checksum);
+        assert!(decode_packaged_mesh(&packed, policy)
+            .unwrap_err()
+            .0
+            .contains("geometry"));
+
+        packed[12..16].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(decode_packaged_mesh(&packed, policy)
+            .unwrap_err()
+            .0
+            .contains("counts"));
     }
 
     // Supported old derived/catalog bytes remain usable, but cannot conceal UVs

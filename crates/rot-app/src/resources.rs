@@ -74,12 +74,41 @@ impl ResourceRoot {
         relative: impl AsRef<Path>,
         policy: rot_assets::MeshNormalPolicy,
     ) -> Result<Arc<rot_assets::Mesh>, String> {
-        let path = self.resolve(relative)?;
-        let bytes = rot_assets::read_regular_file(&path, rot_assets::MAX_SOURCE_BYTES)
-            .map_err(|e| format!("mesh resource {}: {e}", path.display()))?;
-        rot_assets::parse_obj_with_normal_policy(&bytes, policy)
-            .map(Arc::new)
-            .map_err(|e| format!("mesh resource {}: {e}", path.display()))
+        let relative = relative.as_ref();
+        let (bytes, packed) = self.read_mesh_source(relative)?;
+        let mesh = if packed {
+            rot_assets::decode_packaged_mesh(&bytes, policy)
+        } else {
+            rot_assets::parse_obj_with_normal_policy(&bytes, policy)
+        };
+        mesh.map(Arc::new)
+            .map_err(|e| format!("mesh resource {}: {e}", relative.display()))
+    }
+
+    /// Hash the same resource and normal policy used when loading the creation.
+    pub fn mesh_pin(
+        &self,
+        relative: impl AsRef<Path>,
+        policy: rot_assets::MeshNormalPolicy,
+    ) -> Result<rot_assets::ResourcePin, String> {
+        let relative = relative.as_ref();
+        let (bytes, packed) = self.read_mesh_source(relative)?;
+        if packed {
+            rot_assets::decode_packaged_mesh(&bytes, policy)
+                .map_err(|e| format!("mesh resource {}: {e}", relative.display()))?;
+        }
+        Ok(rot_assets::ResourcePin::mesh(&bytes, policy))
+    }
+
+    fn read_mesh_source(&self, relative: &Path) -> Result<(Vec<u8>, bool), String> {
+        let packed = relative.extension().and_then(|ext| ext.to_str())
+            == Some(rot_assets::PACKAGED_MESH_EXTENSION);
+        let limit = if packed {
+            rot_assets::MAX_PACKAGED_MESH_BYTES
+        } else {
+            rot_assets::MAX_SOURCE_BYTES
+        };
+        self.read(relative, limit).map(|bytes| (bytes, packed))
     }
 
     pub fn texture(&self, relative: impl AsRef<Path>) -> Result<Arc<rot_assets::Texture>, String> {

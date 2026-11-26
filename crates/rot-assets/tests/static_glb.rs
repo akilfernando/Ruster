@@ -1,4 +1,4 @@
-use rot_assets::{parse_obj_with_normal_policy, AssetStore, MeshNormalPolicy, TextureRole};
+use rot_assets::{decode_packaged_mesh, AssetStore, MeshNormalPolicy, TextureRole};
 use std::{collections::BTreeSet, fs, path::PathBuf, sync::Arc};
 
 #[test]
@@ -55,8 +55,7 @@ fn real_glb_catalog_refresh_and_reopen() {
     );
     let sources = export.read_sources().unwrap();
     assert_eq!(
-        parse_obj_with_normal_policy(&sources[mesh_id], MeshNormalPolicy::AuthoredWhenComplete)
-            .unwrap(),
+        decode_packaged_mesh(&sources[mesh_id], MeshNormalPolicy::AuthoredWhenComplete).unwrap(),
         *second_mesh
     );
     assert_eq!(

@@ -50,8 +50,9 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   - `C-EXIT`: [Rot Yard](../examples/rot-yard/README.md) has a scripted Blender
     gate, a Kenney CC0 pack, and a 5,000-object linked-prefab level.
     The Riverside scene exceeded 60 fps on the focused Wayland desktop.
-    Large-model import, fresh-cache player memory, the full UI checklist
-    and local install refresh remain open.
+    A 150,152-triangle GLB panel now imports, reopens and renders in a
+    relocated build with indexed geometry. The 50 MB model, larger textures,
+    fresh-cache player memory, UI checklist, and local install remain open.
 
 ## What a creator can do today
 
