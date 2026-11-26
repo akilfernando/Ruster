@@ -192,9 +192,10 @@ line.
 
 **Play controls.** Play starts the game from the current scene immediately.
 Stop returns to editing. While playing, the Play button is filled and the
-views carry a thin accent border. There is no separate Reset step. Until the
-running game can be edited live (Phase 2), an edit made during Play applies
-to the scene and restarts Play.
+views carry a thin accent border. There is no separate Reset step. Transform
+and component edits made during Play apply live (as ephemeral Play Values
+with optional Apply to Scene, or directly in Scene Values with shared Undo)
+without restarting Play; structural edits restart Play cleanly.
 
 ## 7. Keyboard and focus
 

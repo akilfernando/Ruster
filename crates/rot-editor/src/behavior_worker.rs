@@ -49,6 +49,7 @@ pub(super) struct Frame {
     pub component_scene: Option<Arc<ComponentScene>>,
     pub component_transforms: Option<Arc<Vec<Transform>>>,
     pub component_world_matrices: Option<Arc<Vec<glam::DMat4>>>,
+    pub component_visual_overrides: Option<Arc<rot_scene::RuntimeVisualOverrides>>,
     pub resolved_transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
     pub state: Arc<rot_behavior::RuntimeState>,
     pub input: Option<Arc<LastConsumedInput>>,
@@ -416,6 +417,7 @@ struct Shared {
     input_enabled: AtomicBool,
     input: Mutex<Option<InputSlot>>,
     latest: Mutex<Option<Frame>>,
+    live_patch: Mutex<Option<(RunKey, rot_behavior::LiveComponentPatch)>>,
     start_transition: Mutex<Option<(RunKey, StartTransition)>>,
     audio_report: Mutex<Option<(RunKey, AudioReport)>>,
     debugger: Mutex<Option<(RunKey, DebugHandle)>>,
@@ -511,6 +513,7 @@ impl Worker {
             input_enabled: AtomicBool::new(false),
             input: Mutex::new(None),
             latest: Mutex::new(None),
+            live_patch: Mutex::new(None),
             start_transition: Mutex::new(None),
             audio_report: Mutex::new(None),
             debugger: Mutex::new(None),
@@ -997,6 +1000,28 @@ impl Worker {
         }
         result
     }
+    pub fn submit_live_patch(&self, key: RunKey, patch: rot_behavior::LiveComponentPatch) -> bool {
+        if patch.is_empty() || !self.accepts(key) || self.shared.shutdown.load(Ordering::SeqCst) {
+            return false;
+        }
+        {
+            let mut slot = self
+                .shared
+                .live_patch
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            match slot.as_mut() {
+                Some((existing_key, existing_patch)) if *existing_key == key => {
+                    existing_patch.merge(patch);
+                }
+                _ => {
+                    *slot = Some((key, patch));
+                }
+            }
+        }
+        self.wake();
+        true
+    }
     /// Immediate cancellation is independent of queue capacity; Busy means the
     /// priority Stop acknowledgement/cleanup must be retried with current_key().
     pub fn stop_immediate(
@@ -1146,6 +1171,7 @@ impl Execution {
         }
         *shared.debugger.lock().unwrap_or_else(|p| p.into_inner()) = None;
         *shared.latest.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        *shared.live_patch.lock().unwrap_or_else(|p| p.into_inner()) = None;
     }
 }
 fn active(shared: &Shared, key: RunKey) -> bool {
@@ -1218,6 +1244,7 @@ fn frame(shared: &Shared, execution: &mut Execution, repaint: &Option<Repaint>, 
             component_scene: runtime.component_scene_snapshot(),
             component_transforms: runtime.component_transform_snapshot(),
             component_world_matrices: runtime.world_matrix_snapshot(),
+            component_visual_overrides: runtime.visual_overrides_snapshot(),
             resolved_transform_camera: runtime.transform_camera(),
             input: execution.last_input.clone(),
             query_observations,
@@ -1398,6 +1425,7 @@ fn finish_reset(
             execution.runtime = Some(runtime);
             execution.key = Some(key);
             execution.last_input = None;
+            *shared.live_patch.lock().unwrap_or_else(|p| p.into_inner()) = None;
             if audio_enabled {
                 let weak = Arc::downgrade(shared);
                 let guard = Arc::new(move || {
@@ -1668,6 +1696,7 @@ fn process(
             execution.playing = false;
             execution.due = None;
             execution.stop_audio(shared);
+            *shared.live_patch.lock().unwrap_or_else(|p| p.into_inner()) = None;
             Some(Event::State {
                 key,
                 state: State::Invalidated,
@@ -1977,6 +2006,7 @@ fn transition_on_press(
     execution.last_input = None;
     execution.published_queries = None;
     *shared.debugger.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    *shared.live_patch.lock().unwrap_or_else(|p| p.into_inner()) = None;
     {
         let mut input = shared.input.lock().unwrap_or_else(|p| p.into_inner());
         let slot = input.as_mut().expect("source action was admitted");
@@ -2128,6 +2158,57 @@ fn step_with_admitted(
         }
     }
 }
+fn apply_pending_live_patch(
+    execution: &mut Execution,
+    shared: &Arc<Shared>,
+    repaint: &Option<Repaint>,
+) -> Option<Event> {
+    let key = execution.key?;
+    if !active(shared, key) || shared.cancel.load(Ordering::SeqCst) {
+        return None;
+    }
+    let debug_stopped = shared
+        .debugger
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .as_ref()
+        .is_some_and(|(run, handle)| *run == key && handle.stop().is_some());
+    if debug_stopped {
+        return None;
+    }
+    let patch = {
+        let mut slot = shared.live_patch.lock().unwrap_or_else(|p| p.into_inner());
+        match slot.take() {
+            Some((patch_key, patch)) if patch_key == key => patch,
+            Some(_) => return None,
+            None => return None,
+        }
+    };
+    let runtime = execution.runtime.as_mut()?;
+    let engine = execution.engine.as_mut()?;
+    match engine.apply_live_patch(runtime, &patch) {
+        Ok(true) => {
+            if active(shared, key) && !shared.cancel.load(Ordering::SeqCst) {
+                frame(shared, execution, repaint, false);
+            }
+            None
+        }
+        Ok(false) => None,
+        Err(diagnostic) => {
+            let _ = shared.revoke_input(true);
+            execution.playing = false;
+            execution.due = None;
+            execution.stop_audio(shared);
+            Some(Event::Error {
+                key,
+                operation: Operation::Command,
+                diagnostic,
+                last_good: execution.info(),
+            })
+        }
+    }
+}
+
 fn next_due(scheduled: Instant, finished: Instant, dt: Duration) -> Instant {
     let next = scheduled + dt;
     if next > finished {
@@ -2214,6 +2295,10 @@ fn run(
                 }
                 Err(TryRecvError::Disconnected) => break,
                 Err(TryRecvError::Empty) => {}
+            }
+            if let Some(event) = apply_pending_live_patch(&mut execution, &shared, &repaint) {
+                pending = Some(event);
+                continue;
             }
             if execution.playing && execution.due.is_some_and(|due| due <= Instant::now()) {
                 let scheduled = execution.due.expect("due tick checked above");
@@ -2625,7 +2710,7 @@ mod tests {
         worker
             .try_request(Command::ResetComponent {
                 key,
-                scene: Arc::new(scene),
+                scene: Arc::new(scene.clone()),
                 sounds: Sounds::new(),
                 clips: Default::default(),
             })
@@ -3750,5 +3835,201 @@ mod tests {
             next_due(base, base + Duration::from_secs(10), dt),
             base + Duration::from_secs(10) + dt
         );
+    }
+
+    #[test]
+    fn live_patch_coalesces_and_updates_paused_and_playing_component_run() {
+        use rot_scene::component_scene::{
+            Component, ComponentInstance, ComponentScene, Geometry, ObjectNode,
+        };
+        use rot_scene::{BehaviorBinding, BindingTarget, Light, PropertyValue};
+
+        let (mut worker, pulses) = worker(Limits {
+            fixed_dt: 0.01,
+            ..Limits::default()
+        });
+        let mut scene = ComponentScene {
+            id: "live-worker".into(),
+            objects: vec![ObjectNode {
+                id: "box".into(),
+                name: "Box".into(),
+                enabled: true,
+                parent: None,
+                transform: Transform::default(),
+                components: vec![ComponentInstance {
+                    id: "mesh".into(),
+                    enabled: true,
+                    kind: Component::MeshRenderer {
+                        geometry: Geometry::Cube,
+                        tint: [1.0; 4],
+                        material: None,
+                    },
+                }],
+            }],
+            prefabs: BTreeMap::new(),
+            materials: BTreeMap::new(),
+            display: Default::default(),
+            background: None,
+            sky: None,
+            fog: None,
+            post_process: None,
+            ambient: None,
+            sources: BTreeMap::from([(
+                "asset-lua-src".into(),
+                rot_scene::BehaviorSource {
+                    label: Some("Scripts/box.lua".into()),
+                    language_id: LANGUAGE_ID.into(),
+                    host_api_version: rot_behavior::INPUT_HOST_API_VERSION,
+                    text: "return { on_update = function(t, p) t.translation[1] = t.translation[1] + p.step end }".into(),
+                },
+            )]),
+            script_files: BTreeMap::new(),
+            actions: BTreeMap::new(),
+            hud: Default::default(),
+            gameplay_camera: None,
+        };
+        let mut light_obj = ObjectNode {
+            id: "lamp".into(),
+            name: "Lamp".into(),
+            enabled: true,
+            parent: None,
+            transform: Transform::default(),
+            components: vec![ComponentInstance {
+                id: "lamp-light".into(),
+                enabled: true,
+                kind: Component::Light {
+                    color: [1.0, 1.0, 1.0],
+                    intensity: 1.0,
+                    kind: Light::point(None).kind,
+                },
+            }],
+        };
+        scene.objects.push(light_obj.clone());
+        let mut box_node = scene.objects[0].clone();
+        box_node.components.push(ComponentInstance {
+            id: "script".into(),
+            enabled: true,
+            kind: Component::Script {
+                binding: BehaviorBinding {
+                    target: BindingTarget::Object("box".into()),
+                    source_id: "asset-lua-src".into(),
+                    enabled: true,
+                    properties: BTreeMap::from([("step".into(), PropertyValue::Number(1.0))]),
+                    state_defaults: BTreeMap::new(),
+                    commands: BTreeMap::new(),
+                },
+                source_kind: None,
+                movement: rot_scene::component_scene::ScriptMovement::Ordinary,
+            },
+        });
+        scene.objects[0] = box_node;
+
+        let key = worker.advance(1, 0).unwrap();
+        worker
+            .try_request(Command::ResetComponent {
+                key,
+                scene: Arc::new(scene.clone()),
+                sounds: Default::default(),
+                clips: Arc::default(),
+            })
+            .unwrap();
+        assert!(matches!(wait_event(&worker, &pulses), Event::Reset { .. }));
+        let _initial = worker.take_latest().unwrap();
+
+        // Coalesced live patch while paused: move `lamp` twice and update `lamp-light` intensity.
+        let mut p1 = rot_behavior::LiveComponentPatch::default();
+        p1.transforms.insert(
+            "lamp".into(),
+            Transform {
+                translation: [1.0, 0.0, 0.0],
+                ..Transform::default()
+            },
+        );
+        let mut p2 = rot_behavior::LiveComponentPatch::default();
+        p2.transforms.insert(
+            "lamp".into(),
+            Transform {
+                translation: [7.0, 2.0, 0.0],
+                ..Transform::default()
+            },
+        );
+        if let Component::Light { intensity, .. } = &mut light_obj.components[0].kind {
+            *intensity = 12.0;
+        }
+        p2.components
+            .push(("lamp".into(), light_obj.components[0].clone()));
+        assert!(worker.submit_live_patch(key, p1));
+        assert!(worker.submit_live_patch(key, p2));
+
+        let until = Instant::now() + Duration::from_secs(5);
+        let paused_frame = loop {
+            if let Some(f) = worker.take_latest() {
+                if f.component_transforms.as_ref().unwrap()[1].translation == [7.0, 2.0, 0.0] {
+                    break f;
+                }
+            }
+            assert!(Instant::now() < until);
+            pulses
+                .recv_timeout(until.saturating_duration_since(Instant::now()))
+                .unwrap();
+        };
+        assert_eq!(paused_frame.tick, 0);
+        assert_eq!(paused_frame.commit_revision, 1);
+        assert_eq!(
+            paused_frame
+                .draw_frame
+                .as_ref()
+                .unwrap()
+                .hierarchy()
+                .unwrap()
+                .lighting()
+                .light("lamp-light")
+                .unwrap()
+                .intensity,
+            12.0
+        );
+
+        // Resume Play and verify ticks continue running while a live script-property patch arrives.
+        worker.try_request(Command::Play { key }).unwrap();
+        assert!(matches!(
+            wait_event(&worker, &pulses),
+            Event::State {
+                state: State::Playing,
+                ..
+            }
+        ));
+        let mut p3 = rot_behavior::LiveComponentPatch::default();
+        if let Component::Script { binding, .. } = &mut scene.objects[0].components[1].kind {
+            binding
+                .properties
+                .insert("step".into(), PropertyValue::Number(10.0));
+        }
+        p3.components
+            .push(("box".into(), scene.objects[0].components[1].clone()));
+        assert!(worker.submit_live_patch(key, p3));
+        let until = Instant::now() + Duration::from_secs(5);
+        let running = loop {
+            if let Some(f) = worker.last_good_frame() {
+                if f.tick >= 3 && f.component_transforms.as_ref().unwrap()[0].translation[0] > 10.0
+                {
+                    break f;
+                }
+            }
+            assert!(Instant::now() < until);
+            pulses
+                .recv_timeout(until.saturating_duration_since(Instant::now()))
+                .unwrap();
+        };
+        assert_eq!(
+            running.component_transforms.as_ref().unwrap()[1].translation,
+            [7.0, 2.0, 0.0]
+        );
+
+        worker.request_shutdown().unwrap();
+        let until = Instant::now() + Duration::from_secs(5);
+        while !worker.finished() {
+            assert!(Instant::now() < until);
+            thread::park_timeout(Duration::from_millis(1));
+        }
     }
 }

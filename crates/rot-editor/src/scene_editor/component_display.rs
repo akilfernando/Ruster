@@ -642,7 +642,7 @@ pub(super) struct Draft {
 
 impl ComponentWorkspace {
     pub(super) fn begin_display(&mut self) {
-        if self.authored_edit_pending() || self.runtime.in_play_mode() {
+        if self.authored_edit_pending() {
             return;
         }
         self.display_draft = Some(Draft {
@@ -679,6 +679,7 @@ impl ComponentWorkspace {
             }
             #[cfg(unix)]
             self.invalidate_display_capture();
+            self.observe_runtime();
         }
         Ok(next)
     }
@@ -871,9 +872,6 @@ impl ComponentWorkspace {
                 "drafts_pending",
                 "Finish the pending editor change first.",
             ));
-        }
-        if self.runtime.in_play_mode() {
-            return Err(fail("play_active", "Stop Play to change Scene Display."));
         }
         let scene = self.session.scene();
         let candidate = args

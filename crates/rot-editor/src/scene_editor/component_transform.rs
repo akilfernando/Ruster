@@ -54,7 +54,7 @@ impl Default for TransformTool {
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
-pub(super) enum PointerRelease {
+pub(in crate::scene_editor) enum PointerRelease {
     #[default]
     Idle,
     Pending,
@@ -62,7 +62,7 @@ pub(super) enum PointerRelease {
 }
 
 impl PointerRelease {
-    pub(super) fn suppress(
+    pub(in crate::scene_editor) fn suppress(
         &mut self,
         frame: u64,
         down: bool,

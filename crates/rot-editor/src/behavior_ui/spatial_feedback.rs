@@ -336,6 +336,7 @@ mod tests {
                 component_scene: None,
                 component_transforms: None,
                 component_world_matrices: None,
+                component_visual_overrides: None,
                 resolved_transform_camera: None,
                 command_schema_hash: None,
                 authoring: std::sync::Arc::new(Default::default()),

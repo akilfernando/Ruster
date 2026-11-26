@@ -635,7 +635,7 @@ pub(super) struct Module {
     start: Option<Function>,
     update: Option<Function>,
     pub(super) host: Table,
-    props: Table,
+    pub(super) props: Table,
     pub(super) last_attempt: u64,
     pub(super) source_hash: String,
 }
@@ -762,6 +762,17 @@ impl BatchState {
             &self.trs,
             dt,
         ))
+    }
+
+    pub(super) fn update_slot_props(&self, slot_index: usize, props: &Table) -> mlua::Result<()> {
+        if let Some(pos) = self
+            .slot_index_vec
+            .iter()
+            .position(|&idx| idx == slot_index)
+        {
+            self.props.raw_set((pos + 1) as i64, props.clone())?;
+        }
+        Ok(())
     }
 
     fn visit_dirty(
@@ -1489,6 +1500,7 @@ pub(super) struct ObjectLookup {
     names: HashMap<String, usize>,
     parents: Vec<Option<usize>>,
     children: Vec<Vec<usize>>,
+    raw_protections: HashMap<usize, &'static str>,
     protected: HashMap<usize, String>,
     lights: Vec<LightSlot>,
     light_indices: HashMap<String, usize>,
@@ -1602,8 +1614,8 @@ impl ObjectLookup {
             }
         }
         let protected = protections
-            .into_iter()
-            .map(|(index, reason)| {
+            .iter()
+            .map(|(&index, reason)| {
                 let id = &objects[index].id;
                 (index, format!("cannot set Transform of {id:?}: {reason}"))
             })
@@ -1615,6 +1627,7 @@ impl ObjectLookup {
             names,
             parents: hierarchy.parents.clone(),
             children,
+            raw_protections: protections,
             protected,
             lights,
             light_indices,
@@ -1627,6 +1640,10 @@ impl ObjectLookup {
             first_camera_indices,
             slots,
         }
+    }
+
+    pub(super) fn raw_protections(&self) -> HashMap<usize, &'static str> {
+        self.raw_protections.clone()
     }
 
     pub(super) fn contains_light(&self, id: &str) -> bool {
@@ -2537,6 +2554,22 @@ fn destroy_object(lua: &Lua, object: AnyUserData) -> mlua::Result<()> {
     Ok(())
 }
 
+pub(super) fn build_props_table(
+    lua: &Lua,
+    cache: &ComponentEngineCache,
+    properties: &BTreeMap<String, PropertyValue>,
+) -> mlua::Result<Table> {
+    if properties.is_empty() {
+        Ok(cache.empty_props.clone())
+    } else {
+        let tbl = lua.create_table_with_capacity(0, properties.len())?;
+        for (name, value) in properties {
+            tbl.raw_set(name.as_str(), property_value(lua, value)?)?;
+        }
+        Ok(tbl)
+    }
+}
+
 impl Engine {
     pub(super) fn component_module(
         &self,
@@ -2560,15 +2593,7 @@ impl Engine {
                 .component_cache
                 .host_table(kinematic, has_sound)
                 .clone();
-            let props = if properties.is_empty() {
-                self.component_cache.empty_props.clone()
-            } else {
-                let tbl = self.lua.create_table_with_capacity(0, properties.len())?;
-                for (name, value) in properties {
-                    tbl.raw_set(name.as_str(), property_value(&self.lua, value)?)?;
-                }
-                tbl
-            };
+            let props = build_props_table(&self.lua, &self.component_cache, properties)?;
             let _ = (binding_id, slot_index);
             Ok(Some(Module {
                 start,

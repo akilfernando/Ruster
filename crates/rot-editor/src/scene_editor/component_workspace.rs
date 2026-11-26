@@ -79,7 +79,7 @@ mod component_transform_copy;
 mod component_ground;
 
 #[path = "component_transform.rs"]
-mod viewport_transform;
+pub(super) mod viewport_transform;
 use glam::DMat4;
 use viewport_transform::TransformTool;
 
@@ -402,6 +402,7 @@ pub(super) struct ComponentWorkspace {
     asset_uses_dialog: Option<component_asset_uses::Dialog>,
     asset_use_reveal: Option<(usize, String)>,
     edit_scene_during_play: bool,
+    live_inspector: component_live::LiveInspectorState,
     component_picker: component_inspector::ComponentPicker,
     inspector_error: Option<String>,
     error: Option<String>,
@@ -616,6 +617,7 @@ impl ComponentWorkspace {
             asset_uses_dialog: None,
             asset_use_reveal: None,
             edit_scene_during_play: false,
+            live_inspector: Default::default(),
             component_picker: Default::default(),
             inspector_error: None,
             error: None,
@@ -671,12 +673,12 @@ impl ComponentWorkspace {
     }
 
     fn observe_runtime(&mut self) {
-        self.runtime.observe(
+        self.runtime.observe_component(
             RUNTIME_GENERATION,
             self.session.revision(),
             self.runtime_asset_revision
                 .or_else(|| self.assets.as_ref().map(rot_assets::AssetStore::revision)),
-            0,
+            self.session.scene(),
         );
     }
 
@@ -1233,6 +1235,7 @@ impl ComponentWorkspace {
         self.hierarchy_rename = None;
         self.refresh_disclosure();
         self.refresh_view();
+        self.observe_runtime();
     }
 
     fn refresh_view(&mut self) {
@@ -1894,11 +1897,17 @@ impl ComponentWorkspace {
                     .as_ref()
                     .is_some_and(|scrub| scrub.revision() != self.session.revision()))
         {
-            self.inspector_scrub = None;
+            let originals = self
+                .inspector_scrub
+                .take()
+                .map(|scrub| scrub.originals().to_vec());
             self.inspector_scrub_release = viewport_transform::PointerRelease::Pending;
             if let Some(draft) = &mut self.multi_draft {
                 let objects = &self.session.scene().objects;
                 draft.reset_transforms(selected_indices.iter().map(|&index| &objects[index]));
+            }
+            if let Some(originals) = originals {
+                self.submit_live_transforms(originals);
             }
             if escape_pressed {
                 ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
@@ -1908,7 +1917,9 @@ impl ComponentWorkspace {
             if self.inspector_scrub.is_none() {
                 self.inspector_scrub = self.begin_inspector_scrub(selected_indices);
             }
-            if let (Some(scrub), Some(draft)) = (&mut self.inspector_scrub, &self.multi_draft) {
+            let staged = if let (Some(scrub), Some(draft)) =
+                (&mut self.inspector_scrub, &self.multi_draft)
+            {
                 let objects = &self.session.scene().objects;
                 if let Ok(candidates) = scrub
                     .originals()
@@ -1916,10 +1927,28 @@ impl ComponentWorkspace {
                     .map(|&(index, _)| draft.preview_transform(&objects[index]))
                     .collect::<Result<Vec<_>, _>>()
                 {
-                    scrub.stage(&candidates);
+                    if scrub.stage(&candidates) {
+                        Some(
+                            scrub
+                                .originals()
+                                .iter()
+                                .map(|&(index, _)| index)
+                                .zip(candidates)
+                                .collect::<Vec<_>>(),
+                        )
+                    } else {
+                        None
+                    }
+                } else {
+                    None
                 }
-                ui.ctx().request_repaint();
+            } else {
+                None
+            };
+            if let Some(pairs) = staged {
+                self.submit_live_transforms(pairs);
             }
+            ui.ctx().request_repaint();
         } else if edit.released {
             self.inspector_scrub = None;
             if self.draft_dirty() {
@@ -1950,8 +1979,23 @@ impl ComponentWorkspace {
 
     fn live_inspector_frame(&self) -> Option<&crate::behavior_worker::Frame> {
         self.runtime.displayed_frame().filter(|frame| {
-            !self.runtime.stale && frame.key.authored_revision == self.session.revision()
+            self.runtime
+                .frame_is_current(frame, self.session.revision())
         })
+    }
+
+    fn submit_live_transforms(&mut self, pairs: impl IntoIterator<Item = (usize, Transform)>) {
+        if !self.runtime.in_play_mode() {
+            return;
+        }
+        let objects = &self.session.scene().objects;
+        let mut patch = rot_behavior::LiveComponentPatch::default();
+        for (index, transform) in pairs {
+            if let Some(object) = objects.get(index) {
+                patch.transforms.insert(object.id.clone(), transform);
+            }
+        }
+        self.runtime.submit_live_patch(patch);
     }
 
     fn light_budget_exceeded(&self) -> bool {
@@ -3242,9 +3286,7 @@ impl ComponentWorkspace {
                     ui.separator();
                     if ui
                         .add_enabled(
-                            !blocked
-                                && !self.authored_edit_pending()
-                                && !self.runtime.in_play_mode(),
+                            !blocked && !self.authored_edit_pending(),
                             egui::Button::new(Text::SceneDisplay.plain()),
                         )
                         .clicked()
@@ -4009,23 +4051,44 @@ impl ComponentWorkspace {
                         );
                     });
                     if !self.edit_scene_during_play {
-                        egui::ScrollArea::both()
+                        let frame = self.live_inspector_frame().cloned();
+                        let selected_index = self.selected_index;
+                        let authored = selected_index
+                            .and_then(|index| self.session.scene().objects.get(index));
+                        let outcome = egui::ScrollArea::both()
                             .id_salt("play_values")
                             .show(ui, |ui| {
-                                let selected = self
-                                    .selected_index
-                                    .map(|index| &self.session.scene().objects[index]);
                                 component_live::show(
                                     ui,
-                                    self.live_inspector_frame(),
+                                    frame.as_ref(),
                                     &self.selection,
-                                    selected,
-                                );
-                            });
+                                    selected_index,
+                                    authored,
+                                    &mut self.live_inspector,
+                                )
+                            })
+                            .inner;
+                        if let Some(patch) = outcome.patch {
+                            if self.runtime.submit_live_patch(patch) {
+                                ui.ctx().request_repaint();
+                            }
+                        }
+                        if let Some(updated_object) = outcome.apply_to_scene {
+                            let revision = self.session.revision();
+                            match self.session.put_object(revision, updated_object) {
+                                Ok(next) if next != revision => {
+                                    self.refresh();
+                                    ui.ctx().request_repaint();
+                                }
+                                Ok(_) => {}
+                                Err(error) => self.error = Some(error.to_string()),
+                            }
+                        }
                         return;
                     }
                 } else {
                     self.edit_scene_during_play = false;
+                    self.live_inspector.reset();
                 }
                 if self.multi_draft.is_some() {
                     let (focused, down, pressed, released) = ui.input(|input| {
@@ -4121,12 +4184,17 @@ impl ComponentWorkspace {
                                         scrub.revision() != self.session.revision()
                                     }))
                             {
+                                let mut restored = None;
                                 if let (Some(scrub), Some(draft)) =
                                     (self.inspector_scrub.take(), &mut self.draft)
                                 {
-                                    if let Some((_, original)) = scrub.originals().first() {
+                                    if let Some(&(idx, ref original)) = scrub.originals().first() {
                                         draft.transform = original.clone();
+                                        restored = Some((idx, original.clone()));
                                     }
+                                }
+                                if let Some((idx, original)) = restored {
+                                    self.submit_live_transforms([(idx, original)]);
                                 }
                                 self.inspector_scrub_release =
                                     viewport_transform::PointerRelease::Pending;
@@ -4143,11 +4211,19 @@ impl ComponentWorkspace {
                                             self.begin_inspector_scrub(vec![index]);
                                     }
                                 }
+                                let mut staged = None;
                                 if let (Some(scrub), Some(draft)) =
                                     (&mut self.inspector_scrub, &self.draft)
                                 {
-                                    scrub.stage(std::slice::from_ref(&draft.transform));
+                                    if scrub.stage(std::slice::from_ref(&draft.transform)) {
+                                        if let Some(idx) = self.selected_index {
+                                            staged = Some((idx, draft.transform.clone()));
+                                        }
+                                    }
                                     ui.ctx().request_repaint();
+                                }
+                                if let Some((idx, transform)) = staged {
+                                    self.submit_live_transforms([(idx, transform)]);
                                 }
                             } else if transform_edit.released {
                                 self.inspector_scrub = None;
@@ -4185,6 +4261,7 @@ impl ComponentWorkspace {
                                             allow_new_material: allow_new,
                                             allow_light_aim: allow_inspector_actions,
                                             allow_sound_cues: allow_inspector_actions,
+                                            allow_script_properties: allow_mesh_reveal && !blocked,
                                             diagnostic: self.runtime.diagnostic.as_ref(),
                                             collider_edit: &collider_edit,
                                             allow_collider_fit: allow_inspector_actions && !blocked,
@@ -6663,5 +6740,410 @@ mod tests {
         editor.command(Action::ToggleConsole);
         assert!(editor.console_open);
         run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+    }
+
+    #[test]
+    fn live_scene_values_mcp_and_undo_edit_during_play_without_restart() {
+        use serde_json::json;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let mover_id = scene.objects[0].id.clone();
+        scene.objects.push(ObjectNode {
+            id: "prop".into(),
+            name: "Prop".into(),
+            enabled: true,
+            parent: None,
+            transform: Transform::default(),
+            components: vec![
+                ComponentInstance {
+                    id: "prop-mesh".into(),
+                    enabled: true,
+                    kind: Component::MeshRenderer {
+                        geometry: Geometry::Cube,
+                        tint: [1.0; 4],
+                        material: Some("m1".into()),
+                    },
+                },
+                ComponentInstance {
+                    id: "prop-light".into(),
+                    enabled: true,
+                    kind: Component::Light {
+                        color: [1.0, 1.0, 1.0],
+                        intensity: 2.0,
+                        kind: rot_scene::Light::point(None).kind,
+                    },
+                },
+            ],
+        });
+        scene
+            .materials
+            .insert("m1".into(), rot_scene::OpaqueMaterial::default());
+        scene.script_files.insert(
+            "mover-src".into(),
+            rot_scene::component_scene::ScriptFile {
+                asset_id: "asset-mover".into(),
+                path: "Scripts/mover.lua".into(),
+                text: r#"
+                local starts = 0
+                local counter = 0
+                return {
+                    on_start = function()
+                        starts = starts + 1
+                    end,
+                    on_update = function(t, props, dt, host)
+                        counter = counter + 1
+                        t.translation[1] = t.translation[1] + props.speed
+                        host.log(tostring(starts) .. ":" .. tostring(counter))
+                    end,
+                }
+                "#
+                .into(),
+            },
+        );
+        scene.objects[0].components.push(ComponentInstance {
+            id: "mover-script".into(),
+            enabled: true,
+            kind: Component::Script {
+                binding: rot_scene::BehaviorBinding {
+                    target: rot_scene::BindingTarget::Object(mover_id.clone()),
+                    source_id: "mover-src".into(),
+                    enabled: true,
+                    properties: BTreeMap::from([(
+                        "speed".into(),
+                        rot_scene::PropertyValue::Number(1.0),
+                    )]),
+                    state_defaults: BTreeMap::new(),
+                    commands: BTreeMap::new(),
+                },
+                source_kind: None,
+                movement: Default::default(),
+            },
+        });
+        scene.save_new(&path).unwrap();
+
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let ctx = egui::Context::default();
+        crate::editor_theme::configure(&ctx);
+        let mut time = 0.0;
+        let step_ui = |editor: &mut ComponentWorkspace, time: &mut f64| {
+            run_workspace_frame(&ctx, editor, time, vec![]);
+            editor.ai_command("scene", "behavior_runtime_inspect", &json!({}))["result"].clone()
+        };
+        let wait_until = |editor: &mut ComponentWorkspace,
+                          time: &mut f64,
+                          pred: &dyn Fn(&serde_json::Value) -> bool| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                let report = step_ui(editor, time);
+                if pred(&report) {
+                    return report;
+                }
+                assert!(std::time::Instant::now() < deadline, "timeout: {report}");
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        };
+
+        step_ui(&mut editor, &mut time);
+        editor.command(Action::Play);
+        let initial = wait_until(&mut editor, &mut time, &|r| {
+            r["playing"] == true
+                && r["tick"]
+                    .as_str()
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(0)
+                    >= 2
+        });
+        let run_id = initial["run_id"].as_str().unwrap().to_owned();
+
+        // 1) Scene Values Inspector edit on `prop` without stopping/restarting Play.
+        editor.edit_scene_during_play = true;
+        editor.select(Some("prop".into()));
+        editor.draft.as_mut().unwrap().transform.translation = [3.0, 4.0, 5.0];
+        assert!(editor.apply());
+
+        // 2) MCP transform + display + material edits during Play (shared Undo, no restart).
+        let rev = editor.session.revision().to_string();
+        let res = editor.ai_command(
+            "scene",
+            "scene_display_set",
+            &json!({
+                "expected_session_token": "scene",
+                "expected_revision": rev,
+                "display": {"type": "surface_hdr", "exposure_stops": 1.0}
+            }),
+        );
+        assert_eq!(res["ok"], true, "{res}");
+
+        let rev = editor.session.revision().to_string();
+        let res = editor.ai_command(
+            "scene",
+            "scene_material_set",
+            &json!({
+                "expected_session_token": "scene",
+                "expected_revision": rev,
+                "expected_asset_revision": editor.material_asset_revision().to_string(),
+                "material_id": "m1",
+                "material": {
+                    "name": "M1",
+                    "tint": [0.2, 0.4, 0.6],
+                    "base_color_texture": null,
+                    "filter": "linear",
+                    "address": "repeat",
+                    "metallic": 0.5
+                }
+            }),
+        );
+        assert_eq!(res["ok"], true, "{res}");
+
+        // 3) Edit `prop` Light intensity via scene_components_edit while running.
+        let rev = editor.session.revision().to_string();
+        let updated_light = ComponentInstance {
+            id: "prop-light".into(),
+            enabled: true,
+            kind: Component::Light {
+                color: [1.0, 0.5, 0.25],
+                intensity: 8.0,
+                kind: rot_scene::Light::point(None).kind,
+            },
+        };
+        let res = editor.ai_command(
+            "scene",
+            "scene_components_edit",
+            &json!({
+                "expected_session_token": "scene",
+                "expected_revision": rev,
+                "edits": [{
+                    "operation": "replace",
+                    "object_id": "prop",
+                    "component": updated_light
+                }]
+            }),
+        );
+        assert_eq!(res["ok"], true, "{res}");
+
+        let after = wait_until(&mut editor, &mut time, &|r| {
+            r["lighting"]["lights"]["prop-light"]["intensity"] == 8.0
+        });
+        assert_eq!(after["run_id"], run_id, "live edits must not restart Play");
+        assert!(
+            after["tick"].as_str().unwrap().parse::<u64>().unwrap() >= 2,
+            "tick must keep advancing without reset"
+        );
+        let prop_tr = &after["objects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["id"] == "prop")
+            .unwrap()["transform"]["translation"];
+        assert_eq!(prop_tr, &json!([3.0, 4.0, 5.0]));
+
+        // 4) Undo the Light intensity edit while Play continues running.
+        editor.command(Action::Undo);
+        let after_undo = wait_until(&mut editor, &mut time, &|r| {
+            r["lighting"]["lights"]["prop-light"]["intensity"] == 2.0
+        });
+        assert_eq!(
+            after_undo["run_id"], run_id,
+            "Undo must stay live without restart"
+        );
+        assert!(
+            editor
+                .console
+                .entries()
+                .all(|e| !e.text.contains("] 2:") || e.text.starts_with('[')),
+            "starts count stays 1 (no on_start rerun): {:?}",
+            editor
+                .console
+                .entries()
+                .map(|e| &e.text)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            editor
+                .console
+                .entries()
+                .filter(|e| e.source == "Script")
+                .all(|e| e.text.contains("] 1:")),
+            "on_start never re-ran across live edits or Undo"
+        );
+    }
+
+    #[test]
+    fn ephemeral_play_values_live_edit_apply_to_scene_and_stop_revert() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let obj_id = scene.objects[0].id.clone();
+        let initial_translation = scene.objects[0].transform.translation;
+        scene.objects[0].components.push(ComponentInstance {
+            id: "lamp".into(),
+            enabled: true,
+            kind: Component::Light {
+                color: [1.0, 1.0, 1.0],
+                intensity: 1.5,
+                kind: rot_scene::Light::point(None).kind,
+            },
+        });
+        scene.save_new(&path).unwrap();
+
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let ctx = egui::Context::default();
+        crate::editor_theme::configure(&ctx);
+        let mut time = 0.0;
+        run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+
+        // Enter Play (Step to tick 1, paused).
+        editor.command(Action::Step);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while editor.live_inspector_frame().is_none_or(|f| f.tick < 1) {
+            assert!(std::time::Instant::now() < deadline);
+            run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let initial_run = editor.live_inspector_frame().unwrap().key;
+        assert!(!editor.session.is_dirty());
+
+        // Ephemeral live patch via Play Values pathway: scene remains clean (`!is_dirty`).
+        let mut light_comp = scene.objects[0].components[1].clone();
+        let Component::Light { intensity, .. } = &mut light_comp.kind else {
+            panic!("light");
+        };
+        *intensity = 9.5;
+        let mut patch = rot_behavior::LiveComponentPatch::default();
+        patch.transforms.insert(
+            obj_id.clone(),
+            Transform {
+                translation: [6.0, 7.0, 8.0],
+                ..Transform::default()
+            },
+        );
+        patch.components.push((obj_id.clone(), light_comp));
+        assert!(editor.runtime.submit_live_patch(patch));
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while editor.live_inspector_frame().is_none_or(|f| {
+            f.component_transforms.as_ref().unwrap()[0].translation != [6.0, 7.0, 8.0]
+        }) {
+            assert!(std::time::Instant::now() < deadline);
+            run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(
+            !editor.session.is_dirty(),
+            "Play Values edit must remain ephemeral until Apply to Scene"
+        );
+
+        // Stop Play reverts back to authored Scene values.
+        editor
+            .runtime
+            .stop(RUNTIME_GENERATION, editor.session.revision());
+        run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+        assert_eq!(
+            editor.session.scene().objects[0].transform.translation,
+            initial_translation
+        );
+
+        // Now Step again, tweak ephemerally, and test `merge_live_into_authored` (`Apply to Scene`).
+        editor.command(Action::Step);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while editor.live_inspector_frame().is_none_or(|f| f.tick < 1) {
+            assert!(std::time::Instant::now() < deadline);
+            run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let run2 = editor.live_inspector_frame().unwrap().key;
+        assert_ne!(run2, initial_run);
+        let mut patch = rot_behavior::LiveComponentPatch::default();
+        patch.transforms.insert(
+            obj_id.clone(),
+            Transform {
+                translation: [2.0, 3.0, 4.0],
+                ..Transform::default()
+            },
+        );
+        assert!(editor.runtime.submit_live_patch(patch));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let live_obj = loop {
+            run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+            if let Some(frame) = editor.live_inspector_frame() {
+                if let Some(obj) = component_live::effective_live_object(frame, 0) {
+                    if obj.transform.translation == [2.0, 3.0, 4.0] {
+                        break obj;
+                    }
+                }
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        };
+        let merged =
+            component_live::merge_live_into_authored(&editor.session.scene().objects[0], &live_obj);
+        let rev = editor.session.revision();
+        editor.session.put_object(rev, merged).unwrap();
+        editor.refresh();
+        run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+        assert_eq!(
+            editor.live_inspector_frame().unwrap().key,
+            run2,
+            "Apply to Scene must commit to Undo history without restarting Play"
+        );
+        assert_eq!(
+            editor.session.scene().objects[0].transform.translation,
+            [2.0, 3.0, 4.0]
+        );
+        editor.command(Action::Undo);
+        assert_eq!(
+            editor.session.scene().objects[0].transform.translation,
+            initial_translation
+        );
+    }
+
+    #[test]
+    fn structural_edit_during_play_cleanly_restarts_play() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        let scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.save_new(&path).unwrap();
+
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let ctx = egui::Context::default();
+        crate::editor_theme::configure(&ctx);
+        let mut time = 0.0;
+        run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+
+        editor.command(Action::Play);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while editor
+            .live_inspector_frame()
+            .is_none_or(|f| !editor.runtime.is_playing() || f.tick < 1)
+        {
+            assert!(std::time::Instant::now() < deadline);
+            run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let first_key = editor.live_inspector_frame().unwrap().key;
+        let first_count = editor.session.scene().objects.len();
+
+        // Adding a new object is a structural edit, so Play restarts cleanly with it.
+        editor.command(Action::CreateCube);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            run_workspace_frame(&ctx, &mut editor, &mut time, vec![]);
+            if let Some(frame) = editor.live_inspector_frame() {
+                if frame.key != first_key && editor.runtime.is_playing() {
+                    assert_eq!(
+                        frame.component_scene.as_ref().unwrap().objects.len(),
+                        first_count + 1
+                    );
+                    break;
+                }
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
     }
 }

@@ -118,10 +118,7 @@ pub(super) fn edit(
 
 impl ComponentWorkspace {
     pub(super) fn begin_script_property(&mut self, request: Request) {
-        if self.authored_edit_pending()
-            || self.runtime.in_play_mode()
-            || self.ai_transition_pending()
-        {
+        if self.authored_edit_pending() || self.ai_transition_pending() {
             return;
         }
         let Some(object) = self
@@ -262,10 +259,7 @@ impl ComponentWorkspace {
     }
 
     fn commit_script_property(&mut self, draft: &Draft, remove: bool) -> Result<(), String> {
-        if draft.revision != self.session.revision()
-            || self.runtime.in_play_mode()
-            || self.ai_transition_pending()
-        {
+        if draft.revision != self.session.revision() || self.ai_transition_pending() {
             return Err(Text::ScriptPropertyStale.plain().into());
         }
         let mut object = self

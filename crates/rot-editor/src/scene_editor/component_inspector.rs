@@ -133,7 +133,7 @@ pub(super) fn transform(ui: &mut egui::Ui, draft: &mut ObjectNode) -> TransformE
     edit
 }
 
-fn enter_commits(ui: &egui::Ui, response: &egui::Response) -> bool {
+pub(super) fn enter_commits(ui: &egui::Ui, response: &egui::Response) -> bool {
     response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))
 }
 
@@ -246,6 +246,7 @@ pub(super) struct ComponentControls<'a> {
     pub(super) allow_new_material: bool,
     pub(super) allow_light_aim: bool,
     pub(super) allow_sound_cues: bool,
+    pub(super) allow_script_properties: bool,
     pub(super) diagnostic: Option<&'a rot_behavior::Diagnostic>,
     pub(super) allow_collider_fit: bool,
     pub(super) allow_mesh_reveal: bool,
@@ -281,6 +282,7 @@ pub(super) fn components(
         allow_new_material,
         allow_light_aim,
         allow_sound_cues,
+        allow_script_properties,
         diagnostic,
         collider_edit,
         allow_collider_fit,
@@ -691,7 +693,7 @@ pub(super) fn components(
                                         ui.monospace(format!("properties[{name:?}] = {value}"));
                                         if ui
                                             .add_enabled(
-                                                allow_sound_cues,
+                                                allow_script_properties,
                                                 egui::Button::new(kind.action(true).plain()),
                                             )
                                             .clicked()
@@ -706,7 +708,7 @@ pub(super) fn components(
                                 }
                                 if ui
                                     .add_enabled(
-                                        allow_sound_cues
+                                        allow_script_properties
                                             && binding.properties.len() < rot_scene::MAX_PROPERTIES,
                                         egui::Button::new(kind.action(false).plain()),
                                     )
@@ -1091,7 +1093,7 @@ fn mesh_fields(
     reveal
 }
 
-fn light_fields(
+pub(super) fn light_fields(
     ui: &mut egui::Ui,
     color: &mut [f32; 3],
     intensity: &mut f32,
@@ -1240,7 +1242,7 @@ fn local_shadow_fields(ui: &mut egui::Ui, shadow: &mut LocalShadow) -> bool {
     toggle || advanced
 }
 
-fn transform_camera_fields(ui: &mut egui::Ui, view: &mut CameraView) -> bool {
+pub(super) fn transform_camera_fields(ui: &mut egui::Ui, view: &mut CameraView) -> bool {
     let CameraView::Transform(lens) = view else {
         unreachable!()
     };

@@ -193,12 +193,13 @@ impl RuntimeUi {
         let (Some(frame), Some(captured)) = (&self.frame, &self.captured) else {
             return false;
         };
+        let revision = source.revision();
         self.ready
             && !self.stale
             && !self.shutdown
             && self.current_run() == Some(frame.key)
             && frame.key.generation == generation
-            && frame.key.authored_revision == source.revision()
+            && (frame.key.authored_revision == revision || self.synced_revision == Some(revision))
             && (self
                 .transition_source
                 .as_ref()
@@ -710,6 +711,7 @@ mod tests {
                     component_scene: None,
                     component_transforms: None,
                     component_world_matrices: None,
+                    component_visual_overrides: None,
                     resolved_transform_camera: None,
                     command_schema_hash: None,
                     authoring: std::sync::Arc::new(Default::default()),

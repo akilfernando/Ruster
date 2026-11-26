@@ -304,10 +304,7 @@ impl ComponentWorkspace {
     }
 
     pub(super) fn reconcile_materials(&mut self) {
-        if !self.material_refresh_pending
-            || self.authored_edit_pending()
-            || self.runtime.in_play_mode()
-        {
+        if !self.material_refresh_pending || self.authored_edit_pending() {
             return;
         }
         self.material_refresh_pending = false;
@@ -530,7 +527,6 @@ impl ComponentWorkspace {
     pub(super) fn begin_material_asset(&mut self, id: &str) {
         if self.material_draft.is_some()
             || self.viewport_edit_active()
-            || self.runtime.in_play_mode()
             || self.authored_edit_pending()
             || self.assets_loading()
         {
@@ -717,10 +713,7 @@ impl ComponentWorkspace {
     }
 
     pub(super) fn begin_material(&mut self, request: Request) {
-        if self.material_draft.is_some()
-            || self.viewport_edit_active()
-            || self.runtime.in_play_mode()
-        {
+        if self.material_draft.is_some() || self.viewport_edit_active() {
             return;
         }
         if self.draft_dirty() {
@@ -1401,9 +1394,6 @@ impl ComponentWorkspace {
                 "drafts_pending",
                 "Finish the pending editor change first.",
             ));
-        }
-        if self.runtime.in_play_mode() {
-            return Err(fail("play_active", "Stop Play to edit materials."));
         }
         if self.assets_loading() {
             return Err(fail(

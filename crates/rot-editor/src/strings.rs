@@ -399,6 +399,8 @@ editor_text! {
     ComponentParentLocked => "Picking Locked by Parent",
     ComponentPlayValues => "Play Values",
     ComponentSceneValues => "Scene Values",
+    ComponentApplyToScene => "Apply to Scene",
+    ComponentApplyToSceneHint => "Copy current Play values into the scene.",
     ComponentPlayTick => "Tick",
     ComponentWaitingForPlayFrame => "Waiting for the first frame…",
     ComponentNoPlayTransform => "Transform unavailable in this run.",

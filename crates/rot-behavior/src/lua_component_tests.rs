@@ -10,7 +10,7 @@ use rot_scene::{
     BehaviorBinding, BindingTarget, DisplayProfile, LightKind, PropertyValue, Transform,
 };
 
-use crate::{DiagnosticCode, Engine, Limits, ScriptLogLevel};
+use crate::{DiagnosticCode, Engine, Limits, LiveComponentPatch, ScriptLogLevel};
 
 fn empty_component_scene(id: &str) -> ComponentScene {
     ComponentScene {
@@ -739,4 +739,197 @@ fn bench_10k_script_updates_per_frame() {
         xform_p50 <= 2.0,
         "10k transform scripts exceeded 2.0 ms p50 budget: {xform_p50:.3} ms"
     );
+}
+
+#[test]
+fn live_component_patch_updates_transforms_props_visuals_and_keeps_state() {
+    use rot_scene::{DisplayProfile, Light, OpaqueMaterial, PropertyValue};
+
+    let mut scene = empty_component_scene("live-patch");
+    let mut runner = simple_object("runner", None);
+    runner.components.push(ComponentInstance {
+        id: "runner-mesh".into(),
+        enabled: true,
+        kind: Component::MeshRenderer {
+            geometry: Geometry::Cube,
+            tint: [1.0, 1.0, 1.0, 1.0],
+            material: None,
+        },
+    });
+    let mut prop = simple_object("prop", None);
+    let sun = Light::directional(None);
+    prop.components.push(ComponentInstance {
+        id: "sun".into(),
+        enabled: true,
+        kind: Component::Light {
+            color: sun.color,
+            intensity: 2.0,
+            kind: sun.kind,
+        },
+    });
+    scene.objects.push(runner);
+    scene.objects.push(prop);
+    attach_file_script(
+        &mut scene,
+        "runner",
+        "s-runner",
+        "runner-src",
+        "Scripts/runner.lua",
+        r#"
+        local starts = 0
+        local counter = 0
+        local saved_light = nil
+        return {
+            on_start = function(t, props, host)
+                starts = starts + 1
+                saved_light = host.find("prop"):component("Light")
+                saved_light:set_intensity(9.0)
+                host.start_coroutine(function()
+                    host.wait_frames(2)
+                    host.log("co:" .. tostring(counter))
+                end)
+            end,
+            on_update = function(t, props, dt, host)
+                counter = counter + 1
+                t.translation[1] = t.translation[1] + props.step_size
+                host.log("tick:" .. tostring(counter) .. ":" .. tostring(starts) .. ":" .. tostring(saved_light.intensity))
+            end,
+        }
+        "#,
+        BTreeMap::from([("step_size".into(), PropertyValue::Number(1.0))]),
+    );
+
+    let mut engine = Engine::new(Limits::default()).unwrap();
+    let mut runtime = engine.reset_component(&scene, 0).unwrap();
+    engine.step(&mut runtime).unwrap();
+    assert_eq!(runtime.tick(), 1);
+    assert_eq!(runtime.object_translation("runner"), Some([1.0, 0.0, 0.0]));
+    assert_eq!(
+        runtime
+            .draw_frame()
+            .hierarchy()
+            .unwrap()
+            .lighting()
+            .light("sun")
+            .unwrap()
+            .intensity,
+        9.0
+    );
+
+    // Live patch: move `prop`, update `runner`'s `step_size` to 3.0, update sun intensity to 5.0,
+    // toggle mesh tint, and change display background without restarting Play.
+    let mut patched = scene.clone();
+    patched.objects[1].transform.translation = [4.0, 5.0, 6.0];
+    let Component::Script { binding, .. } = &mut patched.objects[0].components[1].kind else {
+        panic!("script component");
+    };
+    binding
+        .properties
+        .insert("step_size".into(), PropertyValue::Number(3.0));
+    let Component::MeshRenderer { tint, .. } = &mut patched.objects[0].components[0].kind else {
+        panic!("mesh component");
+    };
+    *tint = [0.25, 0.5, 0.75, 1.0];
+    let Component::Light { intensity, .. } = &mut patched.objects[1].components[0].kind else {
+        panic!("light component");
+    };
+    *intensity = 5.0;
+    patched.materials.insert(
+        "mat".into(),
+        OpaqueMaterial {
+            tint: [0.1, 0.2, 0.3],
+            ..OpaqueMaterial::default()
+        },
+    );
+    patched.display = DisplayProfile::surface_hdr();
+
+    let patch = LiveComponentPatch::from_scene_diff(&scene, &patched)
+        .expect("value edits produce live patch");
+    assert!(engine.apply_live_patch(&mut runtime, &patch).unwrap());
+    assert_eq!(runtime.tick(), 1, "tick must not reset on live patch");
+    assert!(runtime.script_logs().is_empty(), "logs must not replay");
+    assert_eq!(
+        runtime.object_translation("runner"),
+        Some([1.0, 0.0, 0.0]),
+        "unchanged object keeps live script pose"
+    );
+    assert_eq!(runtime.object_translation("prop"), Some([4.0, 5.0, 6.0]));
+    assert_eq!(
+        runtime
+            .draw_frame()
+            .hierarchy()
+            .unwrap()
+            .lighting()
+            .light("sun")
+            .unwrap()
+            .intensity,
+        5.0,
+        "live light edit supersedes prior Lua override"
+    );
+    assert_eq!(
+        runtime.scene().objects[0].color,
+        [0.25, 0.5, 0.75, 1.0],
+        "mesh tint updates immediately"
+    );
+    assert_eq!(runtime.scene().display, DisplayProfile::surface_hdr());
+    assert!(runtime.scene().materials.contains_key("mat"));
+
+    // Next tick: script uses new `step_size` = 3.0, retains locals (`starts == 1`, `counter == 2`),
+    // retains saved LightHandle seeing 5.0, and resumes coroutine started during `on_start`!
+    engine.step(&mut runtime).unwrap();
+    assert_eq!(runtime.tick(), 2);
+    assert_eq!(runtime.object_translation("runner"), Some([4.0, 0.0, 0.0]));
+    assert!(runtime
+        .script_logs()
+        .iter()
+        .any(|log| log.message == "tick:2:1:5.0"));
+    assert!(runtime
+        .script_logs()
+        .iter()
+        .any(|log| log.message == "co:2"));
+}
+
+#[test]
+fn live_component_patch_diff_returns_none_for_structural_or_sound_edits() {
+    use rot_scene::{PropertyValue, SoundPlayback, SoundRef};
+
+    let mut base = empty_component_scene("diff");
+    base.objects.push(simple_object("a", None));
+    attach_file_script(
+        &mut base,
+        "a",
+        "sa",
+        "src",
+        "Scripts/a.lua",
+        "return { on_update = function() end }",
+        BTreeMap::from([("x".into(), PropertyValue::Number(1.0))]),
+    );
+
+    let mut added = base.clone();
+    added.objects.push(simple_object("b", None));
+    assert!(LiveComponentPatch::from_scene_diff(&base, &added).is_none());
+
+    let mut script_toggled = base.clone();
+    script_toggled.objects[0].components[0].enabled = false;
+    assert!(LiveComponentPatch::from_scene_diff(&base, &script_toggled).is_none());
+
+    let mut added_sound = base.clone();
+    let Component::Script { binding, .. } = &mut added_sound.objects[0].components[0].kind else {
+        panic!("script");
+    };
+    binding.properties.insert(
+        "sfx".into(),
+        PropertyValue::SoundRef(SoundRef {
+            asset_id: Some("boom".into()),
+            gain: 1.0,
+            playback: SoundPlayback::TwoD,
+        }),
+    );
+    assert!(LiveComponentPatch::from_scene_diff(&base, &added_sound).is_none());
+
+    // Value edit produces non-empty live patch.
+    let mut tweaked = base.clone();
+    tweaked.objects[0].transform.translation[1] = 2.5;
+    let patch = LiveComponentPatch::from_scene_diff(&base, &tweaked).unwrap();
+    assert!(!patch.is_empty());
 }

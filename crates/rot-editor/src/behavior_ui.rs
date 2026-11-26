@@ -2183,6 +2183,9 @@ pub(super) struct RuntimeUi {
     after_reset: Option<(RunKey, Operation)>,
     /// The scene changed during Play: Play restarts from the new scene.
     restart_play: bool,
+    /// Last component scene snapshot synced to the active Play session for live edits.
+    synced_scene: Option<Arc<rot_scene::component_scene::ComponentScene>>,
+    synced_revision: Option<u64>,
     /// A Play, Pause or Step shortcut waiting for the next toolbar frame.
     shortcut: Option<PlayShortcut>,
 }
@@ -2529,6 +2532,8 @@ impl RuntimeUi {
             return;
         }
         let previous = self.identity.replace(next);
+        self.synced_scene = None;
+        self.synced_revision = None;
         self.supersede_hud_activation("Authored scene/content changed");
         self.invocation = InvocationDraft::default();
         self.supersede_operation();
@@ -2565,6 +2570,75 @@ impl RuntimeUi {
             self.transition_project_sources.clear();
         }
     }
+    /// Sync component-scene edits live into an active Play session when non-structural,
+    /// falling back to a clean Play restart when structural or script-source changes occur.
+    pub fn observe_component(
+        &mut self,
+        generation: u64,
+        revision: u64,
+        asset_revision: Option<u64>,
+        scene: &rot_scene::component_scene::ComponentScene,
+    ) {
+        let next = (generation, revision, asset_revision, 0);
+        if self.identity == Some(next) {
+            return;
+        }
+        let same_assets_and_gen = self.identity.is_some_and(|(old_gen, _, old_assets, _)| {
+            old_gen == generation && old_assets == asset_revision
+        });
+        let live_eligible = same_assets_and_gen
+            && self.in_play_mode()
+            && self.ready
+            && !self.stale
+            && self.pending.is_none()
+            && self.awaiting.is_none()
+            && !self.shutdown
+            && self.debug_snapshot().is_none()
+            && self
+                .frame
+                .as_ref()
+                .is_some_and(|frame| frame.scene.id == scene.id);
+        if live_eligible {
+            if let (Some(prev_scene), Some(worker)) = (&self.synced_scene, &self.worker) {
+                if let Some(patch) =
+                    rot_behavior::LiveComponentPatch::from_scene_diff(prev_scene, scene)
+                {
+                    let key = worker.current_key();
+                    if patch.is_empty() || worker.submit_live_patch(key, patch) {
+                        self.identity = Some(next);
+                        self.synced_scene = Some(Arc::new(scene.clone()));
+                        self.synced_revision = Some(revision);
+                        return;
+                    }
+                }
+            }
+        }
+        self.observe(generation, revision, asset_revision, 0);
+    }
+
+    pub fn submit_live_patch(&mut self, patch: rot_behavior::LiveComponentPatch) -> bool {
+        if patch.is_empty()
+            || !self.in_play_mode()
+            || !self.ready
+            || self.stale
+            || self.shutdown
+            || self.debug_snapshot().is_some()
+        {
+            return false;
+        }
+        self.worker
+            .as_ref()
+            .is_some_and(|worker| worker.submit_live_patch(worker.current_key(), patch))
+    }
+
+    pub(super) fn frame_is_current(&self, frame: &Frame, authored_revision: u64) -> bool {
+        !self.stale
+            && self.ready
+            && self.current_run() == Some(frame.key)
+            && (frame.key.authored_revision == authored_revision
+                || self.synced_revision == Some(authored_revision))
+    }
+
     fn ensure_worker(&mut self, ctx: &egui::Context) -> Result<(), String> {
         if self.worker.is_none() {
             let ctx = ctx.clone();
@@ -2641,6 +2715,8 @@ impl RuntimeUi {
                 let key = self.new_run(ctx, generation, revision)?;
                 self.project_sources = project_sources;
                 self.transition_project_sources.clear();
+                self.synced_scene = Some(Arc::new(scene.clone()));
+                self.synced_revision = Some(revision);
                 let route = project_route.and_then(|(project, path)| {
                     project.observe().ok().and_then(|observation| {
                         let (action_id, destination_file, target) =
@@ -2750,6 +2826,8 @@ impl RuntimeUi {
                     self.project_sources = std::mem::take(&mut self.transition_project_sources);
                     self.clear_script_reload();
                     self.diagnostic = None;
+                    self.synced_scene = None;
+                    self.synced_revision = None;
                 }
                 self.captured = Some(frame.authoring.clone());
             }
@@ -3063,6 +3141,8 @@ impl RuntimeUi {
         self.ready = false;
         self.playing = false;
         self.stale = self.frame.is_some();
+        self.synced_scene = None;
+        self.synced_revision = None;
         self.flush();
     }
     #[cfg(test)]
@@ -4653,6 +4733,7 @@ mod tests {
                 component_scene: None,
                 component_transforms: None,
                 component_world_matrices: None,
+                component_visual_overrides: None,
                 resolved_transform_camera: None,
                 command_schema_hash: None,
                 authoring: Arc::new(Default::default()),
@@ -4687,6 +4768,7 @@ mod tests {
             component_scene: None,
             component_transforms: None,
             component_world_matrices: None,
+            component_visual_overrides: None,
             resolved_transform_camera: None,
             command_schema_hash: None,
             authoring: Arc::new(Default::default()),
@@ -4713,6 +4795,7 @@ mod tests {
             component_scene: None,
             component_transforms: None,
             component_world_matrices: None,
+            component_visual_overrides: None,
             resolved_transform_camera: None,
             command_schema_hash: None,
             authoring: Arc::new(Default::default()),

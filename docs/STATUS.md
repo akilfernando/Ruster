@@ -13,7 +13,7 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
-## Current phase — Phase 4: Play (`P4-01` Done, Next: `P4-02`)
+## Current phase — Phase 4: Play (`P4-02` Done, Next: `P4-03`)
 
 - **Done (earlier phases):** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`,
   `A-01`–`A-07`, `P-01`–`P-02`), `P-03` platform seams & Windows CI, Phase 2 Core
@@ -29,10 +29,13 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Done in Phase 4:** `P4-01` (2026-11-26: unified persistent Lua events,
   coroutines + `wait`/`wait_frames`, live `Light`/`MeshRenderer`/`Camera`/hierarchy/`enabled`
   handles, editor `Console` panel + `host.log`/`warn`, batched 10k runner + vendored
-  `mlua` pose batch accessors; release 10k bench logic p50 `1.636 ms`, transform-write p50 `1.913 ms`).
-- **Next:** `P4-02` live editing during Play, then Rapier3D physics (`P4-03`–`P4-04`),
-  skeletal skinning & animation (`P4-05`–`P4-06`), audio/input/UI/cameras/particles/save
-  (`P4-07`–`P4-EXIT`). See [backlog](BACKLOG.md).
+  `mlua` pose batch accessors; release 10k bench logic p50 `1.636 ms`, transform-write p50 `1.913 ms`),
+  `P4-02` (2026-11-27: live editing during Play without restart via coalesced
+  `LiveComponentPatch`, live editable `Play Values` Inspector + `Apply to Scene`,
+  live `Scene Values` scrub/Undo, unlocked live Material/Display/Script Property & MCP edits).
+- **Next:** `P4-03` Rapier3D physics core & `RigidBody`, then physics queries/joints
+  (`P4-04`), skeletal skinning & animation (`P4-05`–`P4-06`), and
+  audio/input/UI/cameras/particles/save (`P4-07`–`P4-EXIT`). See [backlog](BACKLOG.md).
 
 ## What a creator can do today
 

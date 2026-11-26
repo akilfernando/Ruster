@@ -1,5 +1,5 @@
 //! Runtime-only population changes for persistent Lua callbacks.
-use std::cell::{Cell, OnceCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::Arc;
@@ -14,7 +14,8 @@ const MAX_RUNTIME_ROWS: usize = 100_000;
 
 #[derive(Debug)]
 pub(super) struct ObjectSession {
-    authored: Arc<ComponentScene>,
+    authored: RefCell<Arc<ComponentScene>>,
+    authored_count: usize,
     hierarchy: Arc<ObjectHierarchy>,
     next_id: Cell<u64>,
     children: OnceCell<Vec<Vec<usize>>>,
@@ -23,8 +24,10 @@ pub(super) struct ObjectSession {
 
 impl ObjectSession {
     pub(super) fn new(authored: Arc<ComponentScene>, hierarchy: Arc<ObjectHierarchy>) -> Self {
+        let authored_count = authored.objects.len();
         Self {
-            authored,
+            authored: RefCell::new(authored),
+            authored_count,
             hierarchy,
             next_id: Cell::new(1),
             children: OnceCell::new(),
@@ -32,14 +35,20 @@ impl ObjectSession {
         }
     }
 
+    pub(super) fn set_authored(&self, scene: Arc<ComponentScene>) {
+        debug_assert!(scene.objects.len() >= self.authored_count);
+        *self.authored.borrow_mut() = scene;
+    }
+
     pub(super) fn authored_count(&self) -> usize {
-        self.authored.objects.len()
+        self.authored_count
     }
 
     fn reserve_ids(&self) -> &HashSet<String> {
         self.reserved.get_or_init(|| {
+            let authored = self.authored.borrow();
             let mut ids = HashSet::new();
-            for object in &self.authored.objects {
+            for object in &authored.objects {
                 ids.insert(object.id.clone());
                 for component in &object.components {
                     ids.insert(component.id.clone());
@@ -65,8 +74,9 @@ impl ObjectSession {
         parent: Option<&str>,
         remaining: usize,
     ) -> Result<Vec<ObjectNode>, String> {
+        let authored = self.authored.borrow();
         let children = self.children.get_or_init(|| {
-            let mut children = vec![Vec::new(); self.authored_count()];
+            let mut children = vec![Vec::new(); self.authored_count];
             for (index, &parent) in self.hierarchy.parents.iter().enumerate() {
                 if let Some(parent) = parent {
                     children[parent].push(index);
@@ -78,7 +88,7 @@ impl ObjectSession {
         let mut current = 0;
         let mut rows = 0;
         while let Some(&index) = indices.get(current) {
-            let object = &self.authored.objects[index];
+            let object = &authored.objects[index];
             rows += 1 + object.components.len();
             if rows > remaining || indices.len() + children[index].len() > remaining {
                 return Err(format!("runtime spawn queue permits at most {MAX_RUNTIME_ROWS} objects and components combined per tick"));
@@ -109,7 +119,7 @@ impl ObjectSession {
             let collision = indices.iter().enumerate().any(|(row, &index)| {
                 let object_id = format!("rot-spawn-{nonce}-o{row}");
                 reserved.contains(&object_id)
-                    || (0..self.authored.objects[index].components.len())
+                    || (0..authored.objects[index].components.len())
                         .any(|column| reserved.contains(&format!("{object_id}-c{column}")))
             });
             if !collision {
@@ -119,7 +129,7 @@ impl ObjectSession {
         let mut assigned = HashMap::<usize, String>::with_capacity(indices.len());
         let mut objects = Vec::with_capacity(indices.len());
         for (row, index) in indices.into_iter().enumerate() {
-            let mut object = self.authored.objects[index].clone();
+            let mut object = authored.objects[index].clone();
             object.id = format!("rot-spawn-{nonce}-o{row}");
             for (column, component) in object.components.iter_mut().enumerate() {
                 component.id = format!("{}-c{column}", object.id);

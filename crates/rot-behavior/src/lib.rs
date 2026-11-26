@@ -43,6 +43,7 @@ use spatial_host::{
 };
 pub use spatial_host::{validate_kinematic_component_scene, QueryObservation, QueryResult};
 mod component_runtime;
+pub use component_runtime::{LiveComponentPatch, LiveDisplayPatch};
 mod component_topology;
 mod lua_component;
 
@@ -436,6 +437,11 @@ impl Runtime {
     }
     pub fn script_logs(&self) -> &[ScriptLog] {
         &self.script_logs
+    }
+    pub fn visual_overrides_snapshot(&self) -> Option<Arc<rot_scene::RuntimeVisualOverrides>> {
+        self.component_world
+            .as_ref()
+            .map(|world| Arc::clone(&world.visual_overrides))
     }
     pub fn materialized_scene(&self) -> Scene {
         let mut scene = self.draw_frame.scene().clone();

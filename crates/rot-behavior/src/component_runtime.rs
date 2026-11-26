@@ -7,11 +7,13 @@ use std::sync::Arc;
 
 use glam::{DMat4, DQuat};
 use rot_scene::component_scene::{
-    AnimatorStart, Component, ComponentScene, ObjectHierarchy, ScriptFile, ScriptMovement,
+    AnimatorStart, Component, ComponentInstance, ComponentScene, ObjectHierarchy, ScriptFile,
+    ScriptMovement,
 };
 use rot_scene::input::{ActionFrame, ActionValue, ValidatedActionFrame};
 use rot_scene::{
-    Authoring, BehaviorSource, BindingTarget, Clip, ComponentDrawPlan, RuntimeVisualOverrides,
+    Ambient, Authoring, BackgroundColor, BehaviorSource, BindingTarget, Clip, ComponentDrawPlan,
+    DisplayProfile, Fog, OpaqueMaterial, PostProcess, PropertyValue, RuntimeVisualOverrides, Sky,
     Transform,
 };
 
@@ -39,6 +41,7 @@ pub(super) struct ComponentScriptSlot {
 
 #[derive(Clone, Debug)]
 pub(super) struct ResolvedComponentAnimation {
+    pub(super) component_id: String,
     pub(super) clip: Arc<Clip>,
     pub(super) resolved_tracks: Vec<(usize, usize)>,
     pub(super) looping: bool,
@@ -624,7 +627,635 @@ fn validate_component_colliders(
     Ok(())
 }
 
+/// Live scene display/post/atmosphere settings applied without restarting Play.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LiveDisplayPatch {
+    pub display: DisplayProfile,
+    pub background: Option<BackgroundColor>,
+    pub sky: Option<Sky>,
+    pub fog: Option<Fog>,
+    pub post_process: Option<PostProcess>,
+    pub ambient: Option<Ambient>,
+}
+
+/// Non-structural scene edits applied transactionally to a running or paused Play session.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LiveComponentPatch {
+    pub transforms: BTreeMap<String, Transform>,
+    pub object_enabled: BTreeMap<String, bool>,
+    pub object_names: BTreeMap<String, String>,
+    pub components: Vec<(String, ComponentInstance)>,
+    pub materials: Option<BTreeMap<String, OpaqueMaterial>>,
+    pub display: Option<LiveDisplayPatch>,
+    pub gameplay_camera: Option<Option<String>>,
+}
+
+impl LiveComponentPatch {
+    pub fn is_empty(&self) -> bool {
+        self.transforms.is_empty()
+            && self.object_enabled.is_empty()
+            && self.object_names.is_empty()
+            && self.components.is_empty()
+            && self.materials.is_none()
+            && self.display.is_none()
+            && self.gameplay_camera.is_none()
+    }
+
+    pub fn merge(&mut self, newer: Self) {
+        self.transforms.extend(newer.transforms);
+        self.object_enabled.extend(newer.object_enabled);
+        self.object_names.extend(newer.object_names);
+        for (object_id, component) in newer.components {
+            if let Some((_, existing)) = self
+                .components
+                .iter_mut()
+                .find(|(oid, existing)| oid == &object_id && existing.id == component.id)
+            {
+                *existing = component;
+            } else {
+                self.components.push((object_id, component));
+            }
+        }
+        if let Some(materials) = newer.materials {
+            self.materials = Some(materials);
+        }
+        if let Some(display) = newer.display {
+            self.display = Some(display);
+        }
+        if let Some(gameplay_camera) = newer.gameplay_camera {
+            self.gameplay_camera = Some(gameplay_camera);
+        }
+    }
+
+    /// Computes a live-applicable patch between two scenes, returning `None` if a
+    /// structural change requires restarting Play.
+    pub fn from_scene_diff(before: &ComponentScene, after: &ComponentScene) -> Option<Self> {
+        if before.id != after.id
+            || before.actions != after.actions
+            || before.hud != after.hud
+            || before.sources != after.sources
+            || before.script_files != after.script_files
+            || before.objects.len() != after.objects.len()
+        {
+            return None;
+        }
+        let mut patch = Self::default();
+        if before.materials != after.materials {
+            patch.materials = Some(after.materials.clone());
+        }
+        if before.display != after.display
+            || before.background != after.background
+            || before.sky != after.sky
+            || before.fog != after.fog
+            || before.post_process != after.post_process
+            || before.ambient != after.ambient
+        {
+            patch.display = Some(LiveDisplayPatch {
+                display: after.display,
+                background: after.background,
+                sky: after.sky,
+                fog: after.fog,
+                post_process: after.post_process,
+                ambient: after.ambient.clone(),
+            });
+        }
+        if before.gameplay_camera != after.gameplay_camera {
+            patch.gameplay_camera = Some(after.gameplay_camera.clone());
+        }
+        for (prev, next) in before.objects.iter().zip(after.objects.iter()) {
+            if prev.id != next.id
+                || prev.parent != next.parent
+                || prev.components.len() != next.components.len()
+            {
+                return None;
+            }
+            if prev.transform != next.transform {
+                patch
+                    .transforms
+                    .insert(next.id.clone(), next.transform.clone());
+            }
+            if prev.enabled != next.enabled {
+                patch.object_enabled.insert(next.id.clone(), next.enabled);
+            }
+            if prev.name != next.name {
+                patch
+                    .object_names
+                    .insert(next.id.clone(), next.name.clone());
+            }
+            for (c_prev, c_next) in prev.components.iter().zip(next.components.iter()) {
+                if c_prev.id != c_next.id
+                    || std::mem::discriminant(&c_prev.kind) != std::mem::discriminant(&c_next.kind)
+                {
+                    return None;
+                }
+                match (&c_prev.kind, &c_next.kind) {
+                    (
+                        Component::Script {
+                            binding: b_prev,
+                            source_kind: sk_prev,
+                            movement: mv_prev,
+                        },
+                        Component::Script {
+                            binding: b_next,
+                            source_kind: sk_next,
+                            movement: mv_next,
+                        },
+                    ) => {
+                        if c_prev.enabled != c_next.enabled
+                            || b_prev.enabled != b_next.enabled
+                            || b_prev.source_id != b_next.source_id
+                            || b_prev.target != b_next.target
+                            || b_prev.state_defaults != b_next.state_defaults
+                            || b_prev.commands != b_next.commands
+                            || sk_prev != sk_next
+                            || mv_prev != mv_next
+                            || sound_assets_differ(&b_prev.properties, &b_next.properties)
+                        {
+                            return None;
+                        }
+                        if b_prev.properties != b_next.properties {
+                            patch.components.push((next.id.clone(), c_next.clone()));
+                        }
+                    }
+                    (
+                        Component::Animator {
+                            binding: a_prev,
+                            start_playback: s_prev,
+                            playback_speed: sp_prev,
+                        },
+                        Component::Animator {
+                            binding: a_next,
+                            start_playback: s_next,
+                            playback_speed: sp_next,
+                        },
+                    ) => {
+                        if c_prev.enabled != c_next.enabled
+                            || a_prev.clip != a_next.clip
+                            || s_prev != s_next
+                        {
+                            return None;
+                        }
+                        if a_prev.looping != a_next.looping || sp_prev != sp_next {
+                            patch.components.push((next.id.clone(), c_next.clone()));
+                        }
+                    }
+                    _ => {
+                        if c_prev != c_next {
+                            patch.components.push((next.id.clone(), c_next.clone()));
+                        }
+                    }
+                }
+            }
+        }
+        Some(patch)
+    }
+}
+
+fn sound_assets(props: &BTreeMap<String, PropertyValue>) -> Vec<(&str, Option<&str>)> {
+    props
+        .iter()
+        .filter_map(|(k, v)| match v {
+            PropertyValue::SoundRef(sound) => Some((k.as_str(), sound.asset_id.as_deref())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn sound_assets_differ(
+    before: &BTreeMap<String, PropertyValue>,
+    after: &BTreeMap<String, PropertyValue>,
+) -> bool {
+    sound_assets(before) != sound_assets(after)
+}
+
 impl Engine {
+    /// Apply live transform, component, material, and display edits to a running
+    /// or paused Play session without resetting scripts, tick, or local state.
+    pub fn apply_live_patch(
+        &mut self,
+        runtime: &mut Runtime,
+        patch: &LiveComponentPatch,
+    ) -> Result<bool, Diagnostic> {
+        if patch.is_empty() {
+            return Ok(false);
+        }
+        let Some(world) = &runtime.component_world else {
+            return Ok(false);
+        };
+        let module_set = world.modules.clone();
+        let modules = module_set.as_ref().map(|modules| modules.borrow_mut());
+        if let Some(modules) = &modules {
+            modules.validate(self, runtime.tick)?;
+            if modules.max_attempt > runtime.tick {
+                let index = modules
+                    .instances
+                    .iter()
+                    .position(|opt| {
+                        opt.as_ref()
+                            .is_some_and(|module| module.last_attempt > runtime.tick)
+                    })
+                    .unwrap_or(0);
+                let slot = &world.scripts[index];
+                let binding = &runtime.authoring.bindings[&slot.component_id];
+                return Err(diag(
+                    DiagnosticCode::Runtime,
+                    Phase::Setup,
+                    "A previous tick was discarded after Lua ran. Restart Play or replace the affected script before continuing.",
+                )
+                .context(
+                    &slot.component_id,
+                    binding,
+                    runtime.authoring.sources.get(&binding.source_id),
+                ));
+            }
+        }
+
+        let mut staged_local: Option<Vec<Transform>> = None;
+        for (object_id, pose) in &patch.transforms {
+            let Some(&index) = world.object_indices.get(object_id) else {
+                continue;
+            };
+            pose.validate().map_err(|error| {
+                diag(
+                    DiagnosticCode::InvalidOutput,
+                    Phase::Commit,
+                    &format!("invalid live transform on {object_id}: {error}"),
+                )
+            })?;
+            let current = staged_local.as_deref().unwrap_or(&world.local_transforms);
+            if !same_transform(&current[index], pose) {
+                let target = staged_local
+                    .get_or_insert_with(|| world.spare_local.clone_from(&world.local_transforms));
+                target[index] = pose.clone();
+            }
+        }
+
+        let needs_scene = !patch.object_enabled.is_empty()
+            || !patch.object_names.is_empty()
+            || !patch.components.is_empty()
+            || patch.materials.is_some()
+            || patch.display.is_some()
+            || patch.gameplay_camera.is_some();
+
+        struct ScriptPropUpdate {
+            component_id: String,
+            slot_index: Option<usize>,
+            properties: BTreeMap<String, PropertyValue>,
+            table: Option<mlua::Table>,
+        }
+
+        let mut staged_scene: Option<ComponentScene> = None;
+        let mut staged_hierarchy: Option<Arc<ObjectHierarchy>> = None;
+        let mut staged_colliders: Option<Vec<ComponentColliderSlot>> = None;
+        let mut staged_draw_plan: Option<Arc<ComponentDrawPlan>> = None;
+        let mut staged_overrides: Option<RuntimeVisualOverrides> = None;
+        let mut script_prop_updates: Vec<ScriptPropUpdate> = Vec::new();
+        let mut animator_updates: Vec<(String, bool, f64)> = Vec::new();
+
+        if needs_scene {
+            let mut next_scene = (*world.scene).clone();
+            let mut next_overrides = (*world.visual_overrides).clone();
+            let mut overrides_changed = false;
+            let mut colliders_dirty = false;
+
+            for (object_id, &enabled) in &patch.object_enabled {
+                let Some(&index) = world.object_indices.get(object_id) else {
+                    continue;
+                };
+                if next_scene.objects[index].enabled != enabled {
+                    next_scene.objects[index].enabled = enabled;
+                    colliders_dirty = true;
+                }
+                if next_overrides.object_enabled.remove(&index).is_some() {
+                    overrides_changed = true;
+                }
+            }
+            for (object_id, name) in &patch.object_names {
+                if let Some(&index) = world.object_indices.get(object_id) {
+                    next_scene.objects[index].name.clone_from(name);
+                }
+            }
+            if let Some(materials) = &patch.materials {
+                next_scene.materials.clone_from(materials);
+            }
+            if let Some(display) = &patch.display {
+                next_scene.display = display.display;
+                next_scene.background = display.background;
+                next_scene.sky = display.sky;
+                next_scene.fog = display.fog;
+                next_scene.post_process = display.post_process;
+                next_scene.ambient.clone_from(&display.ambient);
+            }
+            if let Some(gameplay_camera) = &patch.gameplay_camera {
+                next_scene.gameplay_camera.clone_from(gameplay_camera);
+                if next_overrides.camera_fov.take().is_some()
+                    || next_overrides.camera_enabled.take().is_some()
+                {
+                    overrides_changed = true;
+                }
+            }
+
+            for (object_id, updated) in &patch.components {
+                let Some(&index) = world.object_indices.get(object_id) else {
+                    continue;
+                };
+                let existing = next_scene.objects[index]
+                    .components
+                    .iter_mut()
+                    .find(|comp| comp.id == updated.id)
+                    .ok_or_else(|| {
+                        diag(
+                            DiagnosticCode::InvalidAuthoring,
+                            Phase::Commit,
+                            &format!("unknown component {} on {object_id}", updated.id),
+                        )
+                    })?;
+                if std::mem::discriminant(&existing.kind) != std::mem::discriminant(&updated.kind) {
+                    return Err(diag(
+                        DiagnosticCode::InvalidAuthoring,
+                        Phase::Commit,
+                        &format!("component kind mismatch for {} on {object_id}", updated.id),
+                    ));
+                }
+                match &updated.kind {
+                    Component::Collider { .. } => {
+                        colliders_dirty = true;
+                    }
+                    Component::Light { .. } => {
+                        if next_overrides.lights.remove(&updated.id).is_some() {
+                            overrides_changed = true;
+                        }
+                    }
+                    Component::MeshRenderer { .. } => {
+                        if next_overrides.meshes.remove(&updated.id).is_some() {
+                            overrides_changed = true;
+                        }
+                    }
+                    Component::Camera { .. } => {
+                        if next_overrides.camera_fov.take().is_some()
+                            || next_overrides.camera_enabled.take().is_some()
+                        {
+                            overrides_changed = true;
+                        }
+                    }
+                    Component::Animator {
+                        binding,
+                        playback_speed,
+                        ..
+                    } => {
+                        animator_updates.push((
+                            updated.id.clone(),
+                            binding.looping,
+                            f64::from(*playback_speed),
+                        ));
+                    }
+                    Component::Script { binding, .. } => {
+                        for value in binding.properties.values() {
+                            value.validate().map_err(|error| {
+                                diag(
+                                    DiagnosticCode::InvalidAuthoring,
+                                    Phase::Commit,
+                                    &error.to_string(),
+                                )
+                            })?;
+                        }
+                        let slot_index = world
+                            .scripts
+                            .iter()
+                            .position(|slot| slot.component_id == updated.id);
+                        let table = if let (Some(slot_idx), Some(mods)) = (slot_index, &modules) {
+                            mods.instances[slot_idx]
+                                .as_ref()
+                                .map(|_| {
+                                    lua_component::build_props_table(
+                                        &self.lua,
+                                        &self.component_cache,
+                                        &binding.properties,
+                                    )
+                                    .map_err(|error| {
+                                        self.error(error, Phase::Commit, DiagnosticCode::Runtime)
+                                    })
+                                })
+                                .transpose()?
+                        } else {
+                            None
+                        };
+                        script_prop_updates.push(ScriptPropUpdate {
+                            component_id: updated.id.clone(),
+                            slot_index,
+                            properties: binding.properties.clone(),
+                            table,
+                        });
+                    }
+                }
+                *existing = updated.clone();
+            }
+
+            let next_hierarchy = Arc::new(next_scene.validate().map_err(invalid_commit)?);
+            if colliders_dirty {
+                let mut rebuilt_colliders = Vec::new();
+                for (owner, object) in next_scene.objects.iter().enumerate() {
+                    if next_hierarchy.effectively_enabled[owner] {
+                        rebuilt_colliders.extend(
+                            object.components.iter().filter_map(|component| {
+                                collider_slot(owner, &object.id, component)
+                            }),
+                        );
+                    }
+                }
+                if runtime.kinematic_owner.is_some() {
+                    let animated_objects: HashSet<_> = world
+                        .animations
+                        .iter()
+                        .flat_map(|animation| {
+                            animation.resolved_tracks.iter().map(|&(_, index)| index)
+                        })
+                        .collect();
+                    kinematic_owner_component(
+                        &next_scene,
+                        &next_hierarchy,
+                        &world.object_indices,
+                        &animated_objects,
+                    )
+                    .map_err(|error| diag(DiagnosticCode::InvalidOutput, Phase::Commit, &error))?;
+                }
+                staged_colliders = Some(rebuilt_colliders);
+            }
+            let next_draw_plan = Arc::new(
+                ComponentDrawPlan::new(
+                    &next_scene,
+                    &next_hierarchy,
+                    &world.object_indices,
+                    runtime.draw_frame.scene().revision,
+                )
+                .map_err(invalid_commit)?,
+            );
+            staged_scene = Some(next_scene);
+            staged_hierarchy = Some(next_hierarchy);
+            staged_draw_plan = Some(next_draw_plan);
+            if overrides_changed || next_overrides != *world.visual_overrides {
+                staged_overrides = Some(next_overrides);
+            }
+        }
+
+        if staged_local.is_none() && staged_scene.is_none() {
+            return Ok(false);
+        }
+
+        let eff_scene = staged_scene.as_ref().unwrap_or(&world.scene);
+        let eff_hierarchy = staged_hierarchy.as_ref().unwrap_or(&world.hierarchy);
+        let eff_colliders = staged_colliders.as_deref().unwrap_or(&world.colliders);
+        let eff_draw_plan = staged_draw_plan.as_ref().unwrap_or(&world.draw_plan);
+        let eff_local = staged_local.as_deref().unwrap_or(&world.local_transforms);
+        let eff_overrides = staged_overrides.as_ref().unwrap_or(&world.visual_overrides);
+
+        let (next_world, next_rot, next_draw) = world.resolve_staged_transforms(
+            eff_scene,
+            eff_hierarchy,
+            eff_colliders,
+            eff_draw_plan,
+            eff_local,
+            eff_overrides,
+        )?;
+        let next_commit = runtime.commit_revision.checked_add(1).ok_or_else(|| {
+            diag(
+                DiagnosticCode::CommitExhausted,
+                Phase::Commit,
+                "commit revision exhausted; Reset before continuing",
+            )
+        })?;
+        self.check_cancelled()?;
+
+        let world_mut = runtime
+            .component_world
+            .as_mut()
+            .expect("component world checked above");
+        runtime.draw_frame = next_draw;
+        let colliders_changed = staged_colliders.is_some();
+        if let Some(next_scene) = staged_scene {
+            world_mut.scene = Arc::new(next_scene);
+        }
+        if let Some(next_hierarchy) = staged_hierarchy {
+            world_mut.hierarchy = next_hierarchy;
+        }
+        if let Some(next_colliders) = staged_colliders {
+            world_mut.colliders = Arc::new(next_colliders);
+        }
+        if let Some(next_draw_plan) = staged_draw_plan {
+            world_mut.draw_plan = next_draw_plan;
+        }
+        if let Some(next_overrides) = staged_overrides {
+            world_mut.visual_overrides = Arc::new(next_overrides);
+        }
+        let local_changed = staged_local.is_some();
+        if let Some(next_local) = staged_local {
+            let prev_local =
+                std::mem::replace(&mut world_mut.local_transforms, Arc::new(next_local));
+            if let Ok(vec) = Arc::try_unwrap(prev_local) {
+                world_mut.spare_local.put(vec);
+            }
+        }
+        let prev_world = std::mem::replace(&mut world_mut.world_matrices, Arc::new(next_world));
+        if let Ok(vec) = Arc::try_unwrap(prev_world) {
+            world_mut.spare_world.put(vec);
+        }
+        let prev_rot = std::mem::replace(&mut world_mut.world_rotations, Arc::new(next_rot));
+        if let Ok(vec) = Arc::try_unwrap(prev_rot) {
+            world_mut.spare_rotations.put(vec);
+        }
+        for (component_id, looping, speed) in animator_updates {
+            if let Some(animation) = world_mut
+                .animations
+                .iter_mut()
+                .find(|anim| anim.component_id == component_id)
+            {
+                animation.looping = looping;
+                animation.speed = speed;
+            }
+        }
+        if !script_prop_updates.is_empty() {
+            let authoring_mut = Arc::make_mut(&mut runtime.authoring);
+            for update in &script_prop_updates {
+                if let Some(binding) = authoring_mut.bindings.get_mut(&update.component_id) {
+                    binding.properties.clone_from(&update.properties);
+                }
+            }
+        }
+        if let Some(mut mods) = modules {
+            if local_changed {
+                if let Some(batch) = &mods.batch {
+                    batch.resync_poses.set(true);
+                }
+            }
+            for update in &script_prop_updates {
+                if let (Some(slot_idx), Some(table)) = (update.slot_index, &update.table) {
+                    if let Some(module) = mods.instances[slot_idx].as_mut() {
+                        module.props = table.clone();
+                    }
+                    if let Some(batch) = &mods.batch {
+                        batch.update_slot_props(slot_idx, table).map_err(|error| {
+                            self.error(error, Phase::Commit, DiagnosticCode::Runtime)
+                        })?;
+                    }
+                }
+            }
+            if !script_prop_updates.is_empty()
+                || !patch.object_enabled.is_empty()
+                || !patch.object_names.is_empty()
+                || !patch.components.is_empty()
+                || patch.gameplay_camera.is_some()
+            {
+                mods.lookup
+                    .session
+                    .set_authored(Arc::clone(&world_mut.scene));
+                let updated_slots: Arc<Vec<SlotMeta>> = if script_prop_updates.is_empty() {
+                    Arc::clone(&mods.lookup.slots)
+                } else {
+                    let mut slots = (*mods.lookup.slots).clone();
+                    for update in &script_prop_updates {
+                        if let Some(slot_idx) = update.slot_index {
+                            slots[slot_idx].properties = Arc::new(update.properties.clone());
+                        }
+                    }
+                    Arc::new(slots)
+                };
+                let protections = if colliders_changed {
+                    let mut p =
+                        runtime
+                            .kinematic_owner
+                            .as_ref()
+                            .map_or_else(HashMap::new, |owner| {
+                                owner.protected_component_transforms(
+                                    &runtime.authoring,
+                                    &world_mut.object_indices,
+                                    &world_mut.hierarchy,
+                                    &world_mut.colliders,
+                                )
+                            });
+                    for animation in &world_mut.animations {
+                        for &(_, idx) in &animation.resolved_tracks {
+                            p.insert(idx, "an Animator controls this Transform");
+                        }
+                    }
+                    p
+                } else {
+                    mods.lookup.raw_protections()
+                };
+                mods.lookup = Rc::new(ObjectLookup::new(
+                    Rc::clone(&mods.lookup.session),
+                    Arc::clone(&world_mut.scene),
+                    &world_mut.hierarchy,
+                    Arc::clone(&world_mut.object_indices),
+                    protections,
+                    updated_slots,
+                ));
+            }
+        }
+        runtime.script_logs.clear();
+        runtime.commit_revision = next_commit;
+        Ok(true)
+    }
+
     /// Replace all live instances of one baked file as a unit. Their module
     /// locals restart, while the committed tick and owner transforms are retained.
     /// Legacy file scripts keep their Reset-only admission.
@@ -1003,6 +1634,7 @@ impl Engine {
                     AnimatorStart::OnButtonPress { action_id } => Some(action_id.clone()),
                 };
                 animations.push(ResolvedComponentAnimation {
+                    component_id: component.id.clone(),
                     clip: Arc::clone(clip),
                     resolved_tracks,
                     looping: binding.looping,
