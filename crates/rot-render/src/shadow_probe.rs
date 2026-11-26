@@ -842,9 +842,14 @@ fn verify_alpha_shadows(device: &wgpu::Device, queue: &wgpu::Queue) {
                 }),
                 direction,
                 builtin: true,
+                applied_hdr: false,
+                camera_view: Mat4::IDENTITY,
+                camera_projection: Mat4::IDENTITY,
+                local_casters: &[],
                 context: &context,
                 timestamps: None,
             },
+            &mut [],
         );
         let image = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("alpha shadow probe image"),

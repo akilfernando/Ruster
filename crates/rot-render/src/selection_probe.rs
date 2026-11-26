@@ -107,6 +107,8 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue) {
                 groups,
                 camera: Mat4::IDENTITY.to_cols_array(),
                 cluster_camera: ClusterCamera::default(),
+                camera_view: Mat4::IDENTITY.to_cols_array(),
+                camera_projection: Mat4::IDENTITY.to_cols_array(),
                 camera_eye_mode: [0., 0., 2., 0.],
                 display,
                 lighting: PackedLighting::legacy(),

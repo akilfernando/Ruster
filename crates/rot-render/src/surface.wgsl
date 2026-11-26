@@ -69,6 +69,128 @@ struct LocalLight {
 @group(2) @binding(6) var<storage, read> local_lights: array<LocalLight>;
 @group(2) @binding(7) var<storage, read> cluster_counts: array<u32>;
 @group(2) @binding(8) var<storage, read> cluster_indices: array<u32>;
+struct CsmShadowUniform {
+    matrices: array<mat4x4<f32>, 4>,
+    split_depths: vec4<f32>,
+    bias_params: array<vec4<f32>, 4>,
+    csm_flags: vec4<f32>,
+    atlas_info: vec4<f32>,
+};
+struct LocalShadowEntry {
+    view_projection: mat4x4<f32>,
+    atlas_rect: vec4<f32>,
+    bias_params: vec4<f32>,
+};
+@group(3) @binding(3) var<uniform> csm_shadow: CsmShadowUniform;
+@group(3) @binding(4) var csm_depth: texture_depth_2d_array;
+@group(3) @binding(5) var local_shadow_atlas: texture_depth_2d;
+@group(3) @binding(6) var<storage, read> local_shadows: array<LocalShadowEntry>;
+
+fn sample_csm_cascade(cascade_idx: u32, world: vec3<f32>, normal: vec3<f32>) -> f32 {
+    let bp = csm_shadow.bias_params[cascade_idx];
+    let light_clip = csm_shadow.matrices[cascade_idx] * vec4<f32>(world + normal * bp.z, 1.0);
+    let ndc = light_clip.xyz / light_clip.w;
+    if abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0 || ndc.z < 0.0 || ndc.z > 1.0 {
+        return 1.0;
+    }
+    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    let texel = floor(uv / bp.x);
+    let reference = max(ndc.z - bp.y, 0.0);
+    var visibility = 0.0;
+    for (var y = -1; y <= 1; y = y + 1) {
+        for (var x = -1; x <= 1; x = x + 1) {
+            let sample_uv = (texel + vec2<f32>(f32(x), f32(y)) + vec2<f32>(0.5)) * bp.x;
+            visibility += textureSampleCompareLevel(
+                csm_depth,
+                sun_compare,
+                sample_uv,
+                i32(cascade_idx),
+                reference,
+            );
+        }
+    }
+    return visibility / 9.0;
+}
+
+fn csm_sun_visibility(world: vec3<f32>, normal: vec3<f32>, view_depth: f32) -> f32 {
+    let count = u32(max(csm_shadow.csm_flags.y, 1.0));
+    if count > 1u && view_depth > csm_shadow.csm_flags.z {
+        return 1.0;
+    }
+    var cascade = count - 1u;
+    for (var i = 0u; i < 3u; i = i + 1u) {
+        if i + 1u < count && view_depth <= csm_shadow.split_depths[i] {
+            cascade = i;
+            break;
+        }
+    }
+    let vis = sample_csm_cascade(cascade, world, normal);
+    if cascade + 1u < count {
+        let split_far = csm_shadow.split_depths[cascade];
+        let split_prev = select(0.0, csm_shadow.split_depths[cascade - 1u], cascade > 0u);
+        let span = max(split_far - split_prev, 1e-3);
+        let blend_start = split_far - span * max(csm_shadow.csm_flags.w, 0.01);
+        if view_depth > blend_start {
+            let t = clamp((view_depth - blend_start) / max(split_far - blend_start, 1e-4), 0.0, 1.0);
+            let next_vis = sample_csm_cascade(cascade + 1u, world, normal);
+            return mix(vis, next_vis, t);
+        }
+    }
+    return vis;
+}
+
+fn point_face_index(offset_from_light: vec3<f32>) -> u32 {
+    let a = abs(offset_from_light);
+    if a.x >= a.y && a.x >= a.z {
+        return select(1u, 0u, offset_from_light.x >= 0.0);
+    }
+    if a.y >= a.x && a.y >= a.z {
+        return select(3u, 2u, offset_from_light.y >= 0.0);
+    }
+    return select(5u, 4u, offset_from_light.z >= 0.0);
+}
+
+fn local_shadow_visibility(light: LocalLight, world: vec3<f32>, normal: vec3<f32>) -> f32 {
+    if csm_shadow.atlas_info.x < 0.5 || light.params.y < -0.5 {
+        return 1.0;
+    }
+    let base_tile = u32(light.params.y);
+    let tile_offset = select(
+        point_face_index(world - light.position_range.xyz),
+        0u,
+        light.params.x > 0.0,
+    );
+    let entry = local_shadows[base_tile + tile_offset];
+    let world_biased = world + normal * entry.bias_params.y;
+    let clip = entry.view_projection * vec4<f32>(world_biased, 1.0);
+    if clip.w <= 1e-5 {
+        return 1.0;
+    }
+    let ndc = clip.xyz / clip.w;
+    if abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0 || ndc.z < 0.0 || ndc.z > 1.0 {
+        return 1.0;
+    }
+    let local_uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    let atlas_uv = entry.atlas_rect.xy + local_uv * entry.atlas_rect.zw;
+    let inv = entry.bias_params.z;
+    let pad = inv * 1.5;
+    let uv_min = entry.atlas_rect.xy + vec2<f32>(pad);
+    let uv_max = entry.atlas_rect.xy + entry.atlas_rect.zw - vec2<f32>(pad);
+    let reference = max(ndc.z - entry.bias_params.x, 0.0);
+    var visibility = 0.0;
+    for (var y = -1; y <= 1; y = y + 1) {
+        for (var x = -1; x <= 1; x = x + 1) {
+            let sample_uv = clamp(atlas_uv + vec2<f32>(f32(x), f32(y)) * inv, uv_min, uv_max);
+            visibility += textureSampleCompareLevel(
+                local_shadow_atlas,
+                sun_compare,
+                sample_uv,
+                reference,
+            );
+        }
+    }
+    return visibility / 9.0;
+}
 struct Vertex {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -228,14 +350,20 @@ fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
         return vec4<f32>(stored.rgb, out_alpha);
     }
     var result = ambient_albedo * lighting.ambient.rgb * ao + ibl_total;
+    let view_pos_all = (cluster_params.view * vec4<f32>(v.world_position, 1.0)).xyz;
+    let sun_view_depth = max(-view_pos_all.z, 0.0);
     if lighting.mode_counts.z != 0u {
         var direct = lighting.directional_color_intensity.rgb * direct_response(highlighted, n, view, lighting.direction_to_light.xyz, response, metallic);
         // Shadow attenuates the entire Sun contribution, including specular.
-        if sun_shadow.parameters.x > 0.5 { direct *= sun_visibility(v.world_position, n); }
+        if csm_shadow.csm_flags.x > 0.5 {
+            direct *= csm_sun_visibility(v.world_position, n, sun_view_depth);
+        } else if sun_shadow.parameters.x > 0.5 {
+            direct *= sun_visibility(v.world_position, n);
+        }
         result += direct;
     }
     if cluster_params.grid_counts.w > 0u {
-        let view_pos = (cluster_params.view * vec4<f32>(v.world_position, 1.0)).xyz;
+        let view_pos = view_pos_all;
         let view_depth = clamp(
             -view_pos.z,
             cluster_params.screen_z_params.z,
@@ -286,9 +414,11 @@ fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
                 let angular = clamp((cone.w - dot(chord, chord)) * light.params.x, 0.0, 1.0);
                 attenuation *= angular * angular;
             }
+            let shadow_vis = local_shadow_visibility(light, v.world_position, n);
             result += light.color_inv_range_sq.rgb
                 * direct_response(highlighted, n, view, direction, response, metallic)
-                * attenuation;
+                * attenuation
+                * shadow_vis;
         }
     }
     return vec4<f32>(hdr_storage(result + emission).rgb, out_alpha);

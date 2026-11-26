@@ -5009,7 +5009,10 @@ mod tests {
             kind: Component::Light {
                 color: [1.; 3],
                 intensity: 0.,
-                kind: rot_scene::LightKind::Point { range },
+                kind: rot_scene::LightKind::Point {
+                    range,
+                    shadow: Default::default(),
+                },
             },
         };
         scene.objects = vec![
@@ -5110,7 +5113,10 @@ mod tests {
         let Component::Light { kind, .. } = &mut far.components[0].kind else {
             unreachable!()
         };
-        *kind = rot_scene::LightKind::Point { range: 0.5 };
+        *kind = rot_scene::LightKind::Point {
+            range: 0.5,
+            shadow: Default::default(),
+        };
         editor.session.put_object(0, far).unwrap();
         editor.refresh();
         assert_eq!(editor.frame_objects(Some("rig"), None), Ok(rig));
@@ -5746,7 +5752,10 @@ mod tests {
         replacement.kind = Component::Light {
             color: [0.15, 0.4, 0.9],
             intensity: 3.5,
-            kind: LightKind::Point { range: 7.0 },
+            kind: LightKind::Point {
+                range: 7.0,
+                shadow: Default::default(),
+            },
         };
         let result = editor.ai_command("scene", "scene_components_edit", &json!({
             "expected_session_token":"scene", "expected_revision":editor.session.revision().to_string(),

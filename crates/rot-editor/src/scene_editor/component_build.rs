@@ -2300,7 +2300,10 @@ f 1 2 3
             kind: Component::Light {
                 color: [1.0; 3],
                 intensity: 2.0,
-                kind: LightKind::Point { range: 6.0 },
+                kind: LightKind::Point {
+                    range: 6.0,
+                    shadow: Default::default(),
+                },
             },
         };
         scene.objects[0].enabled = false;
@@ -2408,7 +2411,10 @@ f 1 2 3
             kind: Component::Light {
                 color: [0.4, 0.8, 0.3],
                 intensity: 2.5,
-                kind: LightKind::Point { range: 8.0 },
+                kind: LightKind::Point {
+                    range: 8.0,
+                    shadow: Default::default(),
+                },
             },
         };
         authored.objects[0].components.push(lamp("accent"));

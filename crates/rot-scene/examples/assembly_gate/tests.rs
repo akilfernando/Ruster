@@ -275,6 +275,12 @@ fn flat_roots_are_bit_exact_and_uniform_parent_scale_remains_experimental() {
         .1;
     assert_eq!(bulb.transform.translation, [5.0, 5.0, 0.0]);
     assert_eq!(bulb.transform.scale, [1.0; 3]);
-    assert_eq!(bulb.kind, rot_scene::LightKind::Point { range: 5.0 });
+    assert_eq!(
+        bulb.kind,
+        rot_scene::LightKind::Point {
+            range: 5.0,
+            shadow: Default::default(),
+        }
+    );
     assert_eq!(bulb.intensity, 1.0);
 }

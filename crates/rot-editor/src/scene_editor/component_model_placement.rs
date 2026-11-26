@@ -173,7 +173,14 @@ impl ComponentWorkspace {
                         color,
                         intensity,
                         range,
-                    } => (color, intensity, LightKind::Point { range }),
+                    } => (
+                        color,
+                        intensity,
+                        LightKind::Point {
+                            range,
+                            shadow: Default::default(),
+                        },
+                    ),
                     ModelLight::Spot {
                         color,
                         intensity,
@@ -187,6 +194,7 @@ impl ComponentWorkspace {
                             range,
                             inner_degrees,
                             outer_degrees,
+                            shadow: Default::default(),
                         },
                     ),
                     ModelLight::Directional { color, intensity } => (
@@ -403,7 +411,8 @@ mod tests {
                 kind: LightKind::Spot {
                     range: 5.,
                     inner_degrees: 0.,
-                    outer_degrees: 45.
+                    outer_degrees: 45.,
+                    shadow: Default::default(),
                 }
             }
         );
@@ -456,7 +465,8 @@ mod tests {
                 kind: LightKind::Spot {
                     range: 5.,
                     inner_degrees: 0.,
-                    outer_degrees: 45.
+                    outer_degrees: 45.,
+                    shadow: Default::default(),
                 }
             }
         );

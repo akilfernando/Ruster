@@ -435,9 +435,13 @@ mod tests {
                     range: 2.6,
                     inner_degrees: 5.0,
                     outer_degrees: 22.0,
+                    shadow: Default::default(),
                 }
             } else {
-                LightKind::Point { range: 2.3 }
+                LightKind::Point {
+                    range: 2.3,
+                    shadow: Default::default(),
+                }
             };
             lights.insert(format!("l-{idx:02}"), light);
         }
@@ -521,6 +525,8 @@ mod tests {
                 camera: (proj * view).to_cols_array(),
                 inv_camera: (proj * view).inverse().to_cols_array(),
                 cluster_camera: ClusterCamera::from_matrices(view, proj),
+                camera_view: view.to_cols_array(),
+                camera_projection: proj.to_cols_array(),
                 show_editor_grid: false,
                 camera_eye_mode: eye_mode,
                 display: DisplayProfile::SurfaceHdr { exposure_stops: 0. },

@@ -1038,6 +1038,7 @@ editor_text! {
     LightingUiHigherQualityShowsFiner => "Higher quality shows finer shadow detail and uses more GPU memory.",
     LightingUiSmoothInfluenceDistanceFrom => "Smooth influence distance, from 0.1 to 10000 scene units.",
     LightingUiTheSunCastsShadows => "The Sun casts shadows from opaque objects.",
+    LightingUiLocalLightCastsShadows => "This light casts shadows from opaque objects.",
     MeasuredInShadowMapPixels => "Measured in shadow map pixels.",
     Quality => "Quality",
     Range => "Range",

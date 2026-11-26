@@ -2498,7 +2498,13 @@ mod tests {
             "template",
             None,
             vec![
-                test_light("template-light", LightKind::Point { range: 8.0 }),
+                test_light(
+                    "template-light",
+                    LightKind::Point {
+                        range: 8.0,
+                        shadow: Default::default(),
+                    },
+                ),
                 ComponentInstance {
                     id: "template-collider".into(),
                     enabled: true,
@@ -2710,13 +2716,20 @@ mod tests {
             "lamp",
             None,
             vec![
-                test_light("point", LightKind::Point { range: 8.0 }),
+                test_light(
+                    "point",
+                    LightKind::Point {
+                        range: 8.0,
+                        shadow: Default::default(),
+                    },
+                ),
                 test_light(
                     "a-spot",
                     LightKind::Spot {
                         range: 8.0,
                         inner_degrees: 15.0,
                         outer_degrees: 30.0,
+                        shadow: Default::default(),
                     },
                 ),
                 test_light(
@@ -2871,7 +2884,13 @@ mod tests {
             &mut scene,
             "lamp",
             None,
-            vec![test_light("point", LightKind::Point { range: 8.0 })],
+            vec![test_light(
+                "point",
+                LightKind::Point {
+                    range: 8.0,
+                    shadow: Default::default(),
+                },
+            )],
         );
         let mut engine = Engine::new(Limits::default()).unwrap();
         let mut runtime = engine.reset_component(&scene, 0).unwrap();
@@ -3354,6 +3373,7 @@ mod tests {
                             range: 10.0,
                             inner_degrees: 15.0,
                             outer_degrees: 30.0,
+                            shadow: Default::default(),
                         },
                     },
                 },
@@ -3548,7 +3568,10 @@ mod tests {
                     kind: Component::Light {
                         color: [1.; 3],
                         intensity: 0.5,
-                        kind: LightKind::Point { range: 5.0 },
+                        kind: LightKind::Point {
+                            range: 5.0,
+                            shadow: Default::default(),
+                        },
                     },
                 },
                 ComponentInstance {
@@ -3557,7 +3580,10 @@ mod tests {
                     kind: Component::Light {
                         color: [1., 0.5, 0.],
                         intensity: 0.5,
-                        kind: LightKind::Point { range: 5.0 },
+                        kind: LightKind::Point {
+                            range: 5.0,
+                            shadow: Default::default(),
+                        },
                     },
                 },
                 ComponentInstance {

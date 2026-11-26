@@ -182,6 +182,8 @@ fn verify_case(
         groups,
         camera: Mat4::IDENTITY.to_cols_array(),
         cluster_camera: ClusterCamera::default(),
+        camera_view: Mat4::IDENTITY.to_cols_array(),
+        camera_projection: Mat4::IDENTITY.to_cols_array(),
         camera_eye_mode: [0., 0., 2., 1.],
         display: rot_scene::DisplayProfile::LegacySdr,
         lighting: PackedLighting::legacy(),

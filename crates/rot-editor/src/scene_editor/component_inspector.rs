@@ -8,8 +8,8 @@ use rot_scene::component_scene::{
     OrthographicClip, ScriptMovement, ScriptSourceKind, TransformLens, TransformOrthographic,
 };
 use rot_scene::{
-    BehaviorBinding, BindingTarget, ColliderRole, ColliderShape, Light, LightKind, OpaqueMaterial,
-    Primitive, ShadowQuality, SunShadow,
+    BehaviorBinding, BindingTarget, ColliderRole, ColliderShape, Light, LightKind, LocalShadow,
+    OpaqueMaterial, Primitive, ShadowQuality, SunShadow,
 };
 use std::{collections::BTreeMap, ops::RangeInclusive};
 
@@ -1118,11 +1118,14 @@ fn light_fields(
     );
     submit
         | match kind {
-            LightKind::Point { range } => light_range(ui, range),
+            LightKind::Point { range, shadow } => {
+                light_range(ui, range) | local_shadow_fields(ui, shadow)
+            }
             LightKind::Spot {
                 range,
                 inner_degrees,
                 outer_degrees,
+                shadow,
             } => {
                 light_range(ui, range)
                     | number_field(
@@ -1141,6 +1144,7 @@ fn light_fields(
                         0.0..=90.0,
                         Text::SpotConeHint,
                     )
+                    | local_shadow_fields(ui, shadow)
             }
             LightKind::Directional { shadow } => shadow_fields(ui, shadow),
         }
@@ -1203,6 +1207,37 @@ fn shadow_fields(ui: &mut egui::Ui, shadow: &mut SunShadow) -> bool {
         })
         .body_returned
         .unwrap_or(false)
+}
+
+fn local_shadow_fields(ui: &mut egui::Ui, shadow: &mut LocalShadow) -> bool {
+    let toggle = ui
+        .checkbox(&mut shadow.enabled, Text::Shadows.plain())
+        .on_hover_text(Text::LightingUiLocalLightCastsShadows.plain())
+        .changed();
+    let advanced = egui::CollapsingHeader::new(Text::ComponentAdvancedShadows.plain())
+        .id_salt("local_advanced_shadows")
+        .show(ui, |ui| {
+            let depth = number_field(
+                ui,
+                Text::ComponentShadowDepthBias,
+                &mut shadow.depth_bias_texels,
+                0.01,
+                0.0..=4.0,
+                Text::ComponentShadowTexels,
+            );
+            let normal = number_field(
+                ui,
+                Text::ComponentShadowNormalOffset,
+                &mut shadow.normal_bias_texels,
+                0.01,
+                0.0..=4.0,
+                Text::ComponentShadowTexels,
+            );
+            depth || normal
+        })
+        .body_returned
+        .unwrap_or(false);
+    toggle || advanced
 }
 
 fn transform_camera_fields(ui: &mut egui::Ui, view: &mut CameraView) -> bool {
@@ -1688,7 +1723,10 @@ mod tests {
         let original = [0.13, 0.24, 0.35];
         let mut color = original;
         let mut intensity = 1.0;
-        let mut kind = LightKind::Point { range: 5.0 };
+        let mut kind = LightKind::Point {
+            range: 5.0,
+            shadow: LocalShadow::default(),
+        };
         let mut submissions = 0;
         let mut frame = |events| {
             let mut output = ctx.run_ui(
@@ -1723,7 +1761,53 @@ mod tests {
         frame(vec![]);
         assert_eq!(submissions, 1);
         assert_eq!(intensity, 2.5);
-        assert_eq!(kind, LightKind::Point { range: 7.5 });
+        assert_eq!(
+            kind,
+            LightKind::Point {
+                range: 7.5,
+                shadow: LocalShadow::default(),
+            }
+        );
         assert_eq!(color, original);
+    }
+
+    #[test]
+    fn spot_and_point_local_shadow_toggle_submits_change() {
+        let ctx = egui::Context::default();
+        let mut color = [1.0; 3];
+        let mut intensity = 1.0;
+        let mut kind = LightKind::Spot {
+            range: 8.0,
+            inner_degrees: 10.0,
+            outer_degrees: 35.0,
+            shadow: LocalShadow::default(),
+        };
+        let mut changed = false;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            changed = light_fields(ui, &mut color, &mut intensity, &mut kind);
+        });
+        output.textures_delta.clear();
+        assert!(!changed);
+        if let LightKind::Spot { shadow, .. } = &mut kind {
+            shadow.enabled = true;
+            shadow.depth_bias_texels = 0.25;
+        }
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            light_fields(ui, &mut color, &mut intensity, &mut kind);
+        });
+        output.textures_delta.clear();
+        assert_eq!(
+            kind,
+            LightKind::Spot {
+                range: 8.0,
+                inner_degrees: 10.0,
+                outer_degrees: 35.0,
+                shadow: LocalShadow {
+                    enabled: true,
+                    depth_bias_texels: 0.25,
+                    normal_bias_texels: 0.0,
+                },
+            }
+        );
     }
 }

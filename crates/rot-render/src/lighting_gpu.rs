@@ -37,10 +37,23 @@ pub(super) struct LightingPacket {
     pub spot_cones: [[f32; 4]; LOCAL_LIGHTS],
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct LocalShadowCaster {
+    pub light_index: usize,
+    pub is_spot: bool,
+    pub position: Vec3,
+    pub incoming_axis: Vec3,
+    pub range: f32,
+    pub outer_degrees: f32,
+    pub depth_bias_texels: f32,
+    pub normal_bias_texels: f32,
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct PackedLighting {
     pub uniform: LightingPacket,
     pub local_lights: Vec<LocalLightGpu>,
+    pub local_shadow_casters: Vec<LocalShadowCaster>,
 }
 
 fn pack_spot_cone(rotation: [f32; 3], inner_degrees: f32, outer_degrees: f32) -> (Vec3, f32, f32) {
@@ -57,33 +70,51 @@ fn pack_spot_cone(rotation: [f32; 3], inner_degrees: f32, outer_degrees: f32) ->
     (axis, outer, inverse_width)
 }
 
-fn pack_local_light(light: &Light) -> (LocalLightGpu, Option<[f32; 4]>, f32, f32) {
+struct PackedLocalLight {
+    gpu: LocalLightGpu,
+    spot_cone: Option<[f32; 4]>,
+    inv_range_sq: f32,
+    inv_width: f32,
+    shadow_caster: Option<(bool, f32, rot_scene::LocalShadow)>,
+}
+
+fn pack_local_light(light: &Light) -> PackedLocalLight {
     let color = (Vec3::from(light.color) * light.intensity).to_array();
-    let (range, spot) = match light.kind {
-        LightKind::Point { range } => (range, None),
+    let (range, spot, shadow) = match light.kind {
+        LightKind::Point { range, shadow } => (range, None, shadow),
         LightKind::Spot {
             range,
             inner_degrees,
             outer_degrees,
+            shadow,
         } => {
             let (axis, outer_chord_sq, inverse_width) =
                 pack_spot_cone(light.transform.rotation, inner_degrees, outer_degrees);
             let outer_cos = outer_degrees.to_radians().cos();
             (
                 range,
-                Some((axis, outer_chord_sq, inverse_width, outer_cos)),
+                Some((
+                    axis,
+                    outer_chord_sq,
+                    inverse_width,
+                    outer_cos,
+                    outer_degrees,
+                )),
+                shadow,
             )
         }
         LightKind::Directional { .. } => unreachable!("caller checks local light kind"),
     };
     let inv_range_sq = range.recip().powi(2);
-    let (spot_axis_outer, spot_inv_width, outer_cos) = match spot {
-        Some((axis, outer_chord_sq, inverse_width, outer_cos)) => (
+    let (spot_axis_outer, spot_inv_width, outer_cos, is_spot, outer_degrees) = match spot {
+        Some((axis, outer_chord_sq, inverse_width, outer_cos, outer_deg)) => (
             axis.extend(outer_chord_sq).to_array(),
             inverse_width,
             outer_cos,
+            true,
+            outer_deg,
         ),
-        None => ([0.0; 4], 0.0, 0.0),
+        None => ([0.0; 4], 0.0, 0.0, false, 0.0),
     };
     let [px, py, pz] = light.transform.translation;
     let gpu = LocalLightGpu {
@@ -92,12 +123,13 @@ fn pack_local_light(light: &Light) -> (LocalLightGpu, Option<[f32; 4]>, f32, f32
         spot_axis_outer,
         params: [spot_inv_width, -1.0, outer_cos, 0.0],
     };
-    (
+    PackedLocalLight {
         gpu,
-        spot.map(|_| spot_axis_outer),
+        spot_cone: spot.map(|_| spot_axis_outer),
         inv_range_sq,
-        spot_inv_width,
-    )
+        inv_width: spot_inv_width,
+        shadow_caster: shadow.enabled.then_some((is_spot, outer_degrees, shadow)),
+    }
 }
 
 impl LightingPacket {
@@ -134,16 +166,16 @@ impl LightingPacket {
                 }
                 LightKind::Point { .. } | LightKind::Spot { .. } => {
                     let index = packet.mode_counts[1] as usize;
-                    let (local, spot_cone, inv_range_sq, inv_width) = pack_local_light(light);
+                    let packed = pack_local_light(light);
                     let point = &mut packet.points[index];
                     point.position_inverse_range_squared = [
-                        local.position_range[0],
-                        local.position_range[1],
-                        local.position_range[2],
-                        inv_range_sq,
+                        packed.gpu.position_range[0],
+                        packed.gpu.position_range[1],
+                        packed.gpu.position_range[2],
+                        packed.inv_range_sq,
                     ];
-                    point.color_intensity = [color[0], color[1], color[2], inv_width];
-                    if let Some(cone) = spot_cone {
+                    point.color_intensity = [color[0], color[1], color[2], packed.inv_width];
+                    if let Some(cone) = packed.spot_cone {
                         packet.spot_cones[index] = cone;
                         packet.mode_counts[3] = 1;
                     }
@@ -160,6 +192,7 @@ impl PackedLighting {
         Self {
             uniform: LightingPacket::legacy(),
             local_lights: Vec::new(),
+            local_shadow_casters: Vec::new(),
         }
     }
 
@@ -167,6 +200,7 @@ impl PackedLighting {
         Self {
             uniform: LightingPacket::authored_dark(),
             local_lights: Vec::new(),
+            local_shadow_casters: Vec::new(),
         }
     }
 
@@ -214,6 +248,7 @@ impl PackedLighting {
         Self {
             uniform: packet,
             local_lights,
+            local_shadow_casters: Vec::new(),
         }
     }
 
@@ -226,6 +261,7 @@ impl PackedLighting {
         uniform.ambient[..3]
             .copy_from_slice(&(Vec3::from(ambient.color) * ambient.intensity).to_array());
         let mut local_lights = Vec::new();
+        let mut local_shadow_casters = Vec::new();
         for light in lights.values().filter(|light| light.enabled) {
             match light.kind {
                 LightKind::Directional { .. } => {
@@ -236,7 +272,12 @@ impl PackedLighting {
                     uniform.mode_counts[2] = 1;
                 }
                 LightKind::Point { .. } | LightKind::Spot { .. } => {
-                    let (local, spot_cone, inv_range_sq, inv_width) = pack_local_light(light);
+                    let packed = pack_local_light(light);
+                    let local = packed.gpu;
+                    let spot_cone = packed.spot_cone;
+                    let inv_range_sq = packed.inv_range_sq;
+                    let inv_width = packed.inv_width;
+                    let caster = packed.shadow_caster;
                     let index = local_lights.len();
                     if index < LOCAL_LIGHTS {
                         uniform.points[index] = PointPacket {
@@ -258,8 +299,28 @@ impl PackedLighting {
                             uniform.mode_counts[3] = 1;
                         }
                     }
-                    if local_lights.len() < rot_scene::MAX_CLUSTERED_LOCAL_LIGHTS {
+                    if index < rot_scene::MAX_CLUSTERED_LOCAL_LIGHTS {
                         local_lights.push(local);
+                        if let Some((is_spot, outer_degrees, shadow)) = caster {
+                            local_shadow_casters.push(LocalShadowCaster {
+                                light_index: index,
+                                is_spot,
+                                position: Vec3::from_array(light.transform.translation),
+                                incoming_axis: if is_spot {
+                                    Vec3::new(
+                                        spot_cone.unwrap()[0],
+                                        spot_cone.unwrap()[1],
+                                        spot_cone.unwrap()[2],
+                                    )
+                                } else {
+                                    Vec3::Y
+                                },
+                                range: local.position_range[3],
+                                outer_degrees,
+                                depth_bias_texels: shadow.depth_bias_texels,
+                                normal_bias_texels: shadow.normal_bias_texels,
+                            });
+                        }
                     }
                 }
             }
@@ -268,6 +329,7 @@ impl PackedLighting {
         Ok(Self {
             uniform,
             local_lights,
+            local_shadow_casters,
         })
     }
 }

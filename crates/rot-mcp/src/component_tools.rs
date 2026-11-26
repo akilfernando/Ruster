@@ -218,4 +218,57 @@ mod tests {
         request["edits"][0].as_object_mut().unwrap().remove("value");
         assert!(!check(&request));
     }
+
+    #[test]
+    fn local_light_shadow_payload_validates() {
+        let local_shadow = json!({
+            "expected_session_token": "s:1",
+            "expected_revision": "1",
+            "edits": [
+                {
+                    "operation": "replace",
+                    "object_id": "lamp",
+                    "component": {
+                        "id": "spot",
+                        "enabled": true,
+                        "type": "light",
+                        "color": [1.0, 0.9, 0.8],
+                        "intensity": 4.0,
+                        "kind": {
+                            "type": "spot",
+                            "range": 12.0,
+                            "inner_degrees": 12.0,
+                            "outer_degrees": 35.0,
+                            "shadow": {
+                                "enabled": true,
+                                "depth_bias_texels": 0.25,
+                                "normal_bias_texels": 0.1
+                            }
+                        }
+                    }
+                },
+                {
+                    "operation": "replace",
+                    "object_id": "bulb",
+                    "component": {
+                        "id": "point",
+                        "enabled": true,
+                        "type": "light",
+                        "color": [1.0, 1.0, 1.0],
+                        "intensity": 2.0,
+                        "kind": {
+                            "type": "point",
+                            "range": 8.0,
+                            "shadow": {
+                                "enabled": true,
+                                "depth_bias_texels": 0.2,
+                                "normal_bias_texels": 0.0
+                            }
+                        }
+                    }
+                }
+            ]
+        });
+        assert!(valid("scene_components_edit", &local_shadow));
+    }
 }

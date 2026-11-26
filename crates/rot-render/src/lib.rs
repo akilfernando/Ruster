@@ -2218,7 +2218,7 @@ fn render_draw_scene(
         navigation.selection_feedback,
         view_projection,
         camera_eye_mode,
-        shadow.is_some(),
+        shadow.is_some() || !lighting.local_shadow_casters.is_empty(),
     );
     let draw_rect = player_content.unwrap_or(rect);
     if paint_bars {
@@ -2248,6 +2248,8 @@ fn render_draw_scene(
                 camera: view_projection.to_cols_array(),
                 inv_camera,
                 cluster_camera: ClusterCamera::from_matrices(view, projection),
+                camera_view: view.to_cols_array(),
+                camera_projection: projection.to_cols_array(),
                 show_editor_grid,
                 camera_eye_mode,
                 display: scene.display,
@@ -4004,6 +4006,8 @@ struct SceneCallback {
     camera: [f32; 16],
     inv_camera: [f32; 16],
     cluster_camera: ClusterCamera,
+    camera_view: [f32; 16],
+    camera_projection: [f32; 16],
     show_editor_grid: bool,
     camera_eye_mode: [f32; 4],
     display: rot_scene::DisplayProfile,
@@ -4180,13 +4184,6 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         {
             r.lighting.rebuild_bind(device, &r.ibl, &r.cluster);
         }
-        r.cluster.prepare(
-            queue,
-            encoder,
-            self.cluster_camera,
-            size,
-            &self.lighting.local_lights,
-        );
         let draw_sky = r.builtin_appearance && self.sky.is_some_and(|sky| sky.show_backdrop);
         if draw_sky {
             r.ibl.prepare_sky_draw(
@@ -4207,11 +4204,15 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 editor_grid::pipeline(device, &r.camera_layout, format, samples)
             })
         });
-        let target = r.target.as_ref().expect("target just resized");
         let timing = r
             .timestamps
             .as_ref()
             .filter(|t| !*t.pending.lock().expect("timestamp lock"));
+        let mut updated_local_lights = if self.lighting.local_shadow_casters.is_empty() {
+            Vec::new()
+        } else {
+            self.lighting.local_lights.clone()
+        };
         let shadow = r.shadows.prepare(
             device,
             queue,
@@ -4228,13 +4229,27 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 settings: self.shadow,
                 direction: Vec3::from_slice(&self.lighting.uniform.direction_to_light[..3]),
                 builtin: r.builtin_appearance,
+                applied_hdr,
+                camera_view: Mat4::from_cols_array(&self.camera_view),
+                camera_projection: Mat4::from_cols_array(&self.camera_projection),
+                local_casters: &self.lighting.local_shadow_casters,
                 context: &self.context,
-                timestamps: timing.map(|t| wgpu::RenderPassTimestampWrites {
-                    query_set: &t.queries,
-                    beginning_of_pass_write_index: Some(0),
-                    end_of_pass_write_index: Some(1),
-                }),
+                timestamps: timing.map(|t| &t.queries),
             },
+            &mut updated_local_lights,
+        );
+        let local_lights_slice = if updated_local_lights.is_empty() {
+            &self.lighting.local_lights
+        } else {
+            &updated_local_lights
+        };
+        let target = r.target.as_ref().expect("target just resized");
+        r.cluster.prepare(
+            queue,
+            encoder,
+            self.cluster_camera,
+            target.size,
+            local_lights_slice,
         );
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -4962,6 +4977,16 @@ mod tests {
             cluster_gpu::CLUSTER_PARAMS_BYTES as usize
         );
         assert_eq!(size_of::<lighting_gpu::LocalLightGpu>(), 64);
+        assert_eq!(
+            size_of::<shadow_gpu::CsmShadowUniform>(),
+            shadow_gpu::CSM_UNIFORM_BYTES as usize
+        );
+        assert_eq!(size_of::<shadow_gpu::CsmShadowUniform>(), 368);
+        assert_eq!(
+            size_of::<shadow_gpu::LocalShadowEntry>(),
+            shadow_gpu::LOCAL_SHADOW_ENTRY_BYTES as usize
+        );
+        assert_eq!(size_of::<shadow_gpu::LocalShadowEntry>(), 96);
 
         // Additive camera/instance ABI protects old custom shaders and verifies
         // that opt-in fragment view data, storage instance layout, and tangents validate.
@@ -5130,6 +5155,7 @@ mod tests {
             point.intensity = 16.;
             point.kind = LightKind::Point {
                 range: if i % 2 == 0 { 0.1 } else { 10000. },
+                shadow: Default::default(),
             };
             lights.insert(format!("point{i}"), point);
         }

@@ -1566,6 +1566,7 @@ impl ComponentWorkspace {
                         range,
                         inner_degrees,
                         outer_degrees,
+                        ..
                     },
                 ..
             } = component.kind

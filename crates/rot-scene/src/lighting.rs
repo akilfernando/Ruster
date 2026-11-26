@@ -178,7 +178,10 @@ impl Light {
             enabled: true,
             color: [1.0; 3],
             intensity: 1.0,
-            kind: LightKind::Point { range: 5.0 },
+            kind: LightKind::Point {
+                range: 5.0,
+                shadow: LocalShadow::default(),
+            },
         }
     }
 
@@ -188,6 +191,7 @@ impl Light {
                 range: 5.0,
                 inner_degrees: 0.0,
                 outer_degrees: 45.0,
+                shadow: LocalShadow::default(),
             },
             ..Self::point(name)
         }
@@ -216,13 +220,15 @@ impl Light {
         Self::validate_intensity(f64::from(self.intensity))?;
         match self.kind {
             LightKind::Directional { shadow } => shadow.validate()?,
-            LightKind::Point { range } => {
+            LightKind::Point { range, shadow } => {
                 validate_range(range, "point")?;
+                shadow.validate()?;
             }
             LightKind::Spot {
                 range,
                 inner_degrees,
                 outer_degrees,
+                shadow,
             } => {
                 validate_range(range, "spot")?;
                 if !(0.0 <= inner_degrees && inner_degrees < outer_degrees && outer_degrees <= 90.0)
@@ -231,6 +237,7 @@ impl Light {
                         "spot light half-angles require 0 <= inner < outer <= 90 degrees".into(),
                     ));
                 }
+                shadow.validate()?;
             }
         }
         Ok(())
@@ -255,12 +262,63 @@ pub enum LightKind {
     },
     Point {
         range: f32,
+        #[serde(default, skip_serializing_if = "LocalShadow::is_default")]
+        shadow: LocalShadow,
     },
     Spot {
         range: f32,
         inner_degrees: f32,
         outer_degrees: f32,
+        #[serde(default, skip_serializing_if = "LocalShadow::is_default")]
+        shadow: LocalShadow,
     },
+}
+
+fn default_local_depth_bias() -> f32 {
+    0.15
+}
+
+/// Authored Spot or Point shadow settings, retained when disabled.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalShadow {
+    pub enabled: bool,
+    #[serde(
+        default = "default_local_depth_bias",
+        deserialize_with = "deserialize_shadow_bias"
+    )]
+    pub depth_bias_texels: f32,
+    #[serde(default, deserialize_with = "deserialize_shadow_bias")]
+    pub normal_bias_texels: f32,
+}
+
+impl Default for LocalShadow {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            depth_bias_texels: default_local_depth_bias(),
+            normal_bias_texels: 0.0,
+        }
+    }
+}
+
+impl LocalShadow {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn validate(&self) -> Result<(), SceneError> {
+        if [self.depth_bias_texels, self.normal_bias_texels]
+            .into_iter()
+            .all(|bias| bias.is_finite() && (0.0..=4.0).contains(&bias))
+        {
+            Ok(())
+        } else {
+            Err(SceneError::Invalid(
+                "Local shadow depth/normal bias must be finite in 0..=4 shadow texels".into(),
+            ))
+        }
+    }
 }
 
 /// Bounded single-map Sun quality. These feasibility defaults remain subject to
@@ -512,14 +570,23 @@ mod tests {
         }
         light.intensity = 1.0;
         for range in [0.1, 10_000.0] {
-            light.kind = LightKind::Point { range };
+            light.kind = LightKind::Point {
+                range,
+                shadow: LocalShadow::default(),
+            };
             light.validate().unwrap();
         }
         for range in [f32::NAN, f32::INFINITY, 0.09, 10_001.0] {
-            light.kind = LightKind::Point { range };
+            light.kind = LightKind::Point {
+                range,
+                shadow: LocalShadow::default(),
+            };
             assert!(light.validate().is_err());
         }
-        light.kind = LightKind::Point { range: 5.0 };
+        light.kind = LightKind::Point {
+            range: 5.0,
+            shadow: LocalShadow::default(),
+        };
         for color in [[f32::NAN, 1.0, 1.0], [0.0, -0.1, 1.0], [0.0, 1.0, 1.1]] {
             light.color = color;
             assert!(light.validate().is_err());
@@ -654,5 +721,51 @@ mod tests {
         }
         .validate_clustered()
         .unwrap();
+    }
+
+    #[test]
+    fn local_shadow_schema_defaults_and_rejects_invalid_payloads() {
+        let point = Light::point(None).kind;
+        assert_eq!(
+            serde_json::to_value(&point).unwrap(),
+            json!({"type":"point","range":5.0})
+        );
+        assert_eq!(
+            serde_json::from_value::<LightKind>(json!({"type":"point","range":5.0})).unwrap(),
+            point
+        );
+        let spot_enabled = serde_json::from_value::<LightKind>(json!({
+            "type": "spot",
+            "range": 8.0,
+            "inner_degrees": 10.0,
+            "outer_degrees": 35.0,
+            "shadow": {"enabled": true}
+        }))
+        .unwrap();
+        assert_eq!(
+            spot_enabled,
+            LightKind::Spot {
+                range: 8.0,
+                inner_degrees: 10.0,
+                outer_degrees: 35.0,
+                shadow: LocalShadow {
+                    enabled: true,
+                    depth_bias_texels: 0.15,
+                    normal_bias_texels: 0.0,
+                },
+            }
+        );
+        for bad in [
+            json!({"type":"point","range":5,"shadow":null}),
+            json!({"type":"point","range":5,"shadow":{}}),
+            json!({"type":"point","range":5,"shadow":{"enabled":true,"extra":1}}),
+            json!({"type":"point","range":5,"shadow":{"enabled":true,"depth_bias_texels":-0.1}}),
+            json!({"type":"spot","range":5,"inner_degrees":0,"outer_degrees":45,"shadow":{"enabled":true,"normal_bias_texels":4.1}}),
+        ] {
+            assert!(
+                serde_json::from_value::<LightKind>(bad.clone()).is_err(),
+                "{bad}"
+            );
+        }
     }
 }

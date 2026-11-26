@@ -508,6 +508,7 @@ mod tests {
                     range: 12.,
                     inner_degrees: 12.,
                     outer_degrees: 90.,
+                    shadow: rot_scene::LocalShadow::default(),
                 },
             },
         }];

@@ -649,7 +649,10 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
     let point = |position, range, intensity, color| {
         let mut light = Light::point(None);
         light.transform.translation = position;
-        light.kind = LightKind::Point { range };
+        light.kind = LightKind::Point {
+            range,
+            shadow: Default::default(),
+        };
         light.intensity = intensity;
         light.color = color;
         light
@@ -675,6 +678,7 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
             range: 4.,
             inner_degrees,
             outer_degrees,
+            shadow: Default::default(),
         };
         light
     };
@@ -888,6 +892,8 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
             }],
             camera: Mat4::IDENTITY.to_cols_array(),
             cluster_camera: ClusterCamera::default(),
+            camera_view: Mat4::IDENTITY.to_cols_array(),
+            camera_projection: Mat4::IDENTITY.to_cols_array(),
             camera_eye_mode: [0., 0., 2., 1.],
             display: rot_scene::DisplayProfile::LegacySdr,
             lighting: PackedLighting::from_packet(packet),
@@ -1087,7 +1093,7 @@ fn reference_lighting(
                     LightKind::Directional { .. } => normal
                         .dot(rotate(glam::DVec3::Z, light.transform.rotation).normalize())
                         .max(0.),
-                    LightKind::Point { range } | LightKind::Spot { range, .. } => {
+                    LightKind::Point { range, .. } | LightKind::Spot { range, .. } => {
                         let delta =
                             glam::DVec3::from_array(light.transform.translation.map(f64::from))
                                 - world;
@@ -1385,6 +1391,8 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
                     .collect(),
                 camera: Mat4::IDENTITY.to_cols_array(),
                 cluster_camera: ClusterCamera::default(),
+                camera_view: Mat4::IDENTITY.to_cols_array(),
+                camera_projection: Mat4::IDENTITY.to_cols_array(),
                 camera_eye_mode: if name == "grazing-storage-limit" {
                     [1., 0., 0.00001, 0.]
                 } else if perspective {
@@ -1812,6 +1820,8 @@ fn verify_pbr_maps(device: &wgpu::Device, queue: &wgpu::Queue) {
             groups: vec![group],
             camera: Mat4::IDENTITY.to_cols_array(),
             cluster_camera: ClusterCamera::default(),
+            camera_view: Mat4::IDENTITY.to_cols_array(),
+            camera_projection: Mat4::IDENTITY.to_cols_array(),
             camera_eye_mode: [0., 0., 2., 1.],
             display: DisplayProfile::SurfaceHdr { exposure_stops: 0. },
             lighting: PackedLighting::try_pack(light).unwrap(),
@@ -2094,6 +2104,8 @@ fn verify_sky_and_ibl(device: &wgpu::Device, queue: &wgpu::Queue) {
                     Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y),
                     proj,
                 ),
+                camera_view: view.to_cols_array(),
+                camera_projection: proj.to_cols_array(),
                 camera_eye_mode: eye.extend(1.).to_array(),
                 display: DisplayProfile::SurfaceHdr { exposure_stops: 0. },
                 lighting: PackedLighting::try_pack(light).unwrap(),
@@ -2506,6 +2518,8 @@ pub(super) fn verify_cube_material(device: &wgpu::Device, queue: &wgpu::Queue) {
             }],
             camera: (projection * view).to_cols_array(),
             cluster_camera: ClusterCamera::from_matrices(view, projection),
+            camera_view: view.to_cols_array(),
+            camera_projection: projection.to_cols_array(),
             camera_eye_mode: camera.eye_mode(),
             display,
             lighting: PackedLighting::try_pack(light).unwrap(),
@@ -2663,6 +2677,8 @@ fn verify_alpha_transparency(device: &wgpu::Device, queue: &wgpu::Queue) {
             groups,
             camera: (projection * view).to_cols_array(),
             cluster_camera: ClusterCamera::from_matrices(view, projection),
+            camera_view: view.to_cols_array(),
+            camera_projection: projection.to_cols_array(),
             camera_eye_mode: camera.eye_mode(),
             display,
             lighting: PackedLighting::try_pack(&lighting).unwrap(),
@@ -2938,6 +2954,8 @@ fn verify_frustum_and_dirty_instancing(device: &wgpu::Device, queue: &wgpu::Queu
             groups,
             camera: vp.to_cols_array(),
             cluster_camera: ClusterCamera::default(),
+            camera_view: Mat4::IDENTITY.to_cols_array(),
+            camera_projection: Mat4::IDENTITY.to_cols_array(),
             camera_eye_mode: eye,
             display: DisplayProfile::LegacySdr,
             lighting: PackedLighting::try_pack(lighting).unwrap(),

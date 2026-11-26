@@ -106,6 +106,7 @@ pub(super) fn spot_guide(ui: &egui::Ui, viewport: &rot_render::ViewportInteracti
         range,
         inner_degrees,
         outer_degrees,
+        ..
     } = light.kind
     else {
         return;
@@ -396,7 +397,10 @@ mod tests {
         if let rot_scene::Lighting::Authored { lights, .. } = &mut scene.lighting {
             let mut point = Light::point(None);
             point.transform.translation = [20.0, 4.0, 0.0];
-            point.kind = LightKind::Point { range: 10_000.0 };
+            point.kind = LightKind::Point {
+                range: 10_000.0,
+                shadow: Default::default(),
+            };
             lights.insert("large-range-point".into(), point);
         }
         let point = frame_selection(

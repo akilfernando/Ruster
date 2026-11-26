@@ -1154,7 +1154,10 @@ mod tests {
             kind: Component::Light {
                 color: [1.; 3],
                 intensity: 1.,
-                kind: LightKind::Point { range: 5. },
+                kind: LightKind::Point {
+                    range: 5.,
+                    shadow: Default::default(),
+                },
             },
         });
         scene.objects.push(ObjectNode {

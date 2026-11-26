@@ -136,9 +136,14 @@ impl Probe {
                         settings,
                         direction,
                         builtin: true,
+                        applied_hdr: false,
+                        camera_view: Mat4::IDENTITY,
+                        camera_projection: Mat4::IDENTITY,
+                        local_casters: &[],
                         context,
                         timestamps: None,
                     },
+                    &mut [],
                 ));
                 // This is the actual production binding choice, including the
                 // neutral fallback while an occupied slot retains a live map.
@@ -540,6 +545,8 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
         }],
         camera: Mat4::IDENTITY.to_cols_array(),
         cluster_camera: ClusterCamera::default(),
+        camera_view: Mat4::IDENTITY.to_cols_array(),
+        camera_projection: Mat4::IDENTITY.to_cols_array(),
         camera_eye_mode: [0., 0., 2., 1.],
         display: rot_scene::DisplayProfile::LegacySdr,
         lighting: PackedLighting::try_pack(&rot_scene::Lighting::authored_default("sun")).unwrap(),
@@ -562,6 +569,8 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
         groups: Vec::new(),
         camera: Mat4::from_scale(Vec3::splat(0.5)).to_cols_array(),
         cluster_camera: ClusterCamera::default(),
+        camera_view: Mat4::IDENTITY.to_cols_array(),
+        camera_projection: Mat4::IDENTITY.to_cols_array(),
         camera_eye_mode: [0., 0., 2., 1.],
         display: rot_scene::DisplayProfile::LegacySdr,
         lighting: PackedLighting::authored_dark(),
@@ -1003,6 +1012,8 @@ fn verify_asset_submission_backpressure(
             }],
             camera: Mat4::IDENTITY.to_cols_array(),
             cluster_camera: ClusterCamera::default(),
+            camera_view: Mat4::IDENTITY.to_cols_array(),
+            camera_projection: Mat4::IDENTITY.to_cols_array(),
             camera_eye_mode: [0., 0., 2., 1.],
             display: rot_scene::DisplayProfile::LegacySdr,
             lighting: PackedLighting::try_pack(&rot_scene::Lighting::authored_default("sun"))
