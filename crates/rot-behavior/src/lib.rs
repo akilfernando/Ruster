@@ -43,6 +43,7 @@ use spatial_host::{
 };
 pub use spatial_host::{validate_kinematic_component_scene, QueryObservation, QueryResult};
 mod component_runtime;
+mod lua_component;
 
 /// Exact current editor/Scene11 export quantum (~60Hz). The public Engine
 /// Limits default retains its original numerical dt for API1 callers.
@@ -235,7 +236,7 @@ pub fn decode_clips<'a>(
         .collect()
 }
 
-/// No VM handles escape. Authored source/properties stay fixed until explicit Reset.
+/// Committed scene and state snapshot. Live Lua module instances stay on their owning thread.
 #[derive(Clone, Debug)]
 pub struct Runtime {
     draw_frame: rot_scene::SceneDrawFrame,
@@ -1325,6 +1326,20 @@ impl Engine {
         dt: f64,
         host_input: HostInput<'_>,
     ) -> Result<BindingOutput, Diagnostic> {
+        self.evaluate_with_module_probe(main, input, properties, snapshot, dt, host_input, None)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_with_module_probe(
+        &self,
+        main: &Function,
+        input: Option<&Transform>,
+        properties: &BTreeMap<String, PropertyValue>,
+        snapshot: ResolveSnapshot<'_>,
+        dt: f64,
+        host_input: HostInput<'_>,
+        probe: Option<&mut Option<lua_component::Module>>,
+    ) -> Result<BindingOutput, Diagnostic> {
         // Scope expires host callbacks and drops their Rust captures synchronously,
         // even if authored Lua leaves unreachable cycles awaiting a later VM GC.
         self.lua
@@ -1349,6 +1364,13 @@ impl Engine {
                     let module: Table = main
                         .call(())
                         .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
+                    if let Some(probe) = probe {
+                        if let Some(module) = self.component_module(&module)? {
+                            let transform = module.start(self, input.expect("Object input"), properties)?;
+                            *probe = Some(module);
+                            return Ok(BindingOutput { transform, state: StateFields::new() });
+                        }
+                    }
                     let update: Function = module
                         .raw_get("update")
                         .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
@@ -1647,40 +1669,12 @@ fn environment<'scope, 'env: 'scope>(
         host.raw_set(
             "button",
             scope.create_function(move |lua, id: mlua::LuaString| {
-                if id.as_bytes().len() > 128 {
-                    return Err(mlua::Error::runtime("action reference exceeds128 bytes"));
-                }
-                let id = id.to_str()?;
-                match input.frame.get(id.as_ref()) {
-                    Some(ActionValue::Button(state)) => {
-                        let copied = lua.create_table()?;
-                        copied.raw_set("held", state.held)?;
-                        copied.raw_set("pressed", state.pressed)?;
-                        copied.raw_set("released", state.released)?;
-                        Ok(copied)
-                    }
-                    Some(ActionValue::Axis1d { .. }) => Err(mlua::Error::runtime(format!(
-                        "action '{id}' is an axis1d, not a button"
-                    ))),
-                    None => Err(mlua::Error::runtime(format!("unknown input action '{id}'"))),
-                }
+                action_button(lua, input.frame, &id)
             })?,
         )?;
         host.raw_set(
             "axis",
-            scope.create_function(move |_, id: mlua::LuaString| {
-                if id.as_bytes().len() > 128 {
-                    return Err(mlua::Error::runtime("action reference exceeds128 bytes"));
-                }
-                let id = id.to_str()?;
-                match input.frame.get(id.as_ref()) {
-                    Some(ActionValue::Axis1d { value }) => Ok(i64::from(*value)),
-                    Some(ActionValue::Button(_)) => Err(mlua::Error::runtime(format!(
-                        "action '{id}' is a button, not an axis1d"
-                    ))),
-                    None => Err(mlua::Error::runtime(format!("unknown input action '{id}'"))),
-                }
-            })?,
+            scope.create_function(move |_, id: mlua::LuaString| action_axis(input.frame, &id))?,
         )?;
     }
     if matches!(
@@ -1701,6 +1695,43 @@ fn environment<'scope, 'env: 'scope>(
     }
 
     Ok((environment, host))
+}
+fn action_button(
+    lua: &Lua,
+    frame: &ValidatedActionFrame,
+    id: &mlua::LuaString,
+) -> mlua::Result<Table> {
+    if id.as_bytes().len() > 128 {
+        return Err(mlua::Error::runtime("action reference exceeds128 bytes"));
+    }
+    let id = id.to_str()?;
+    match frame.get(id.as_ref()) {
+        Some(ActionValue::Button(state)) => {
+            let copied = lua.create_table()?;
+            copied.raw_set("held", state.held)?;
+            copied.raw_set("pressed", state.pressed)?;
+            copied.raw_set("released", state.released)?;
+            Ok(copied)
+        }
+        Some(ActionValue::Axis1d { .. }) => Err(mlua::Error::runtime(format!(
+            "action '{id}' is an axis1d, not a button"
+        ))),
+        None => Err(mlua::Error::runtime(format!("unknown input action '{id}'"))),
+    }
+}
+
+fn action_axis(frame: &ValidatedActionFrame, id: &mlua::LuaString) -> mlua::Result<i64> {
+    if id.as_bytes().len() > 128 {
+        return Err(mlua::Error::runtime("action reference exceeds128 bytes"));
+    }
+    let id = id.to_str()?;
+    match frame.get(id.as_ref()) {
+        Some(ActionValue::Axis1d { value }) => Ok(i64::from(*value)),
+        Some(ActionValue::Button(_)) => Err(mlua::Error::runtime(format!(
+            "action '{id}' is a button, not an axis1d"
+        ))),
+        None => Err(mlua::Error::runtime(format!("unknown input action '{id}'"))),
+    }
 }
 fn transform_table(lua: &Lua, transform: &Transform) -> mlua::Result<Table> {
     let table = lua.create_table()?;

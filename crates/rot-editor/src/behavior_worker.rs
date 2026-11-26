@@ -176,6 +176,13 @@ pub(super) enum Command {
         sounds: Sounds,
         clips: Arc<rot_behavior::Clips>,
     },
+    ReloadScript {
+        key: RunKey,
+        scene_id: String,
+        source_id: String,
+        provenance: crate::scene_editor::script_assets::ProjectSource,
+        source: rot_scene::BehaviorSource,
+    },
     Play {
         key: RunKey,
     },
@@ -218,6 +225,7 @@ impl Command {
             #[cfg(test)]
             Self::Reset { key, .. } => *key,
             Self::ResetComponent { key, .. }
+            | Self::ReloadScript { key, .. }
             | Self::Play { key }
             | Self::Pause { key }
             | Self::Step { key }
@@ -236,7 +244,9 @@ impl Command {
             Self::Play { .. } => Operation::Play,
             Self::Pause { .. } => Operation::Pause,
             Self::Step { .. } | Self::ProgramStep { .. } => Operation::Step,
-            Self::Dispatch { .. } | Self::ActivateHud { .. } => Operation::Command,
+            Self::Dispatch { .. } | Self::ActivateHud { .. } | Self::ReloadScript { .. } => {
+                Operation::Command
+            }
             Self::Invalidate { .. } => Operation::Invalidate,
             Self::Stop { .. } => Operation::Stop,
         }
@@ -247,6 +257,13 @@ impl Command {
 }
 #[derive(Debug)]
 pub(super) enum Event {
+    ScriptReload {
+        key: RunKey,
+        scene_id: String,
+        source_id: String,
+        provenance: crate::scene_editor::script_assets::ProjectSource,
+        result: Result<bool, Diagnostic>,
+    },
     HudActivation {
         key: RunKey,
         activation_id: u64,
@@ -288,6 +305,7 @@ impl Event {
     pub fn key(&self) -> RunKey {
         match self {
             Self::Reset { key, .. }
+            | Self::ScriptReload { key, .. }
             | Self::Command { key, .. }
             | Self::HudActivation { key, .. }
             | Self::Step { key, .. }
@@ -1449,6 +1467,35 @@ fn process(
                 },
                 result,
             )
+        }
+        Command::ReloadScript {
+            scene_id,
+            source_id,
+            provenance,
+            source,
+            ..
+        } => {
+            if execution.key != Some(key) || shared.cancel.load(Ordering::SeqCst) {
+                return None;
+            }
+            let runtime = execution.runtime.as_mut()?;
+            if runtime
+                .component_scene()
+                .is_none_or(|scene| scene.id != scene_id)
+            {
+                return None;
+            }
+            let result = execution
+                .engine
+                .as_mut()?
+                .reload_component_source(runtime, &source_id, source);
+            Some(Event::ScriptReload {
+                key,
+                scene_id,
+                source_id,
+                provenance,
+                result,
+            })
         }
         #[cfg(test)]
         Command::Reset {

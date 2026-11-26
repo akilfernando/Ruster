@@ -483,9 +483,8 @@ example, this file rotates its owner at 1.2 radians per second.
 
 ```lua
 return {
-    update = function(object, properties, dt)
-        object.rotation[2] = object.rotation[2] + 1.2 * dt
-        return object
+    on_update = function(transform, properties, dt)
+        transform.rotation[2] = transform.rotation[2] + 1.2 * dt
     end
 }
 ```
@@ -495,10 +494,20 @@ under **Choose Script** and select it. Enter selects the matching item and
 Escape closes the picker. The Inspector shows the source filename. One Undo
 removes the attachment. The source file remains in Assets.
 
-Use **Play** or **Step** to run the file with Rot's Lua transform API.
-An open run uses the source it started with. Stop and start Play after
-saving edits to the file. If Play reports a missing or invalid source,
-repair that file in Assets and try again. A Lua file can be up to 16 KiB.
+Use **Play** or **Step** to run the script. The optional
+`on_start(transform, properties, host)` runs when the component instance
+starts. `on_update(transform, properties, dt, host)` runs each simulation
+tick. Edit the supplied local Transform table in place. Each attached
+component has its own Lua locals for the run, even when several use the
+same file. A Lua file can be up to 16 KiB.
+
+Save edits during Play to replace the component's Lua instance. The
+replacement's `on_start` can read the current pose and initialize its
+Lua locals. The next `on_update` continues from the published pose.
+If loading or initialization fails, Rot reports the error and continues
+with the last working script. An error during a tick pauses Play at the
+previous committed frame. Existing `update` scripts pick up source edits
+on the next Play.
 
 Use **Rename…** on the file in Assets to keep its ID and attachments.
 A linked prefab can reuse the same asset. Saving the scene records the
@@ -521,45 +530,41 @@ then choose a key from the picker or use **Capture**, and select **Apply
 Action**. Approved MCP action reads and writes also report this conflict.
 
 In a file attached through the Script component, read the stable IDs using
-the fourth `update` argument. Button state includes `held`, `pressed`, and
-`released`. An axis returns −1, 0, or +1. Opposite sides held together cancel
-out. Return the updated object transform as before.
+the fourth `on_update` argument. Button state includes `held`, `pressed`,
+and `released`. An axis returns −1, 0, or +1. Opposite sides held together
+cancel out.
 
 ```lua
 return {
-    update = function(object, properties, dt, host)
-        object.translation[1] = object.translation[1] + 6 * host.axis("move") * dt
+    on_update = function(transform, properties, dt, host)
+        transform.translation[1] = transform.translation[1] + 6 * host.axis("move") * dt
         if host.button("fire").pressed then
-            object.rotation[2] = object.rotation[2] + 0.5235987756
+            transform.rotation[2] = transform.rotation[2] + 0.5235987756
         end
-        return object
     end
 }
 ```
 
 Choose **Control runtime** in the Game view to give it keyboard input.
-Stop before editing the bindings. Each Play run uses its starting action
-map and accepted Lua source. Save the scene before building. The Linux
-player uses the saved bindings and compiled runtime package. This workflow
-works in supported flat scenes and under transform-only groups with positive
-uniform scale. A script attached to a mesh under a group reads and returns that
-object’s local transform. The parent determines how a local movement appears
-in the world. If a step would move a child outside the world limits, Play
-keeps the previous committed frame and reports the error.
+Stop before editing the bindings. Play uses the action map from the start
+of the run. Save the scene before building. The Linux player uses the Lua
+source and action bindings from the build. A script attached to a child
+edits its local transform. The parent determines how a local movement
+appears in the world. If a step would move a child outside the world limits,
+Play keeps the previous committed frame and reports the error.
 
 ### Create and edit a project script on Linux
 
 Select a folder in **Assets** and choose **Assets → Create → Lua Script…**.
 Enter a name and press Enter. Rot creates the `.lua` file in that folder
-and selects it when it is ready. The starter script returns the object's
-transform unchanged. Attach it with **Add Component → Script**.
+and selects it when it is ready. Attach it with **Add Component → Script**.
 
 Select the script and choose **Asset Actions → Open in Code Editor** to
 open the exact project file. In **Preferences → External Editor**, set your
 editor executable and include `{file}` or `{file}:{line}` as one argument.
 The optional `{workspace}` points to the project directory. Save the file in
-your code editor. An active Play keeps its starting code. Stop and Play
-again to use the saved changes, or build to package them.
+your code editor. Play reloads changes to `on_start` and `on_update`. Build
+again to package the saved changes for the standalone player.
 
 After a project Lua compile or runtime error, expand **Error Details** in
 the Game toolbar's **…** menu. **Open Error Line** opens the verified project

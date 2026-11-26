@@ -814,12 +814,13 @@ fn file_action(
     }
 }
 
-const OBJECT_LUA_TEMPLATE: &str = r#"-- Attach this script to an object with a Mesh Renderer.
--- update runs each simulation step. Return the object's transform.
+const OBJECT_LUA_TEMPLATE: &str = r#"-- Attach this file to an object's Script component.
 return {
-    update = function(object, properties, dt, host)
-        -- Change object.translation, object.rotation or object.scale here.
-        return object
+    on_start = function(transform, properties, host)
+        -- Initialize this instance when it starts.
+    end,
+    on_update = function(transform, properties, dt, host)
+        -- Edit transform.translation, transform.rotation or transform.scale here.
     end,
 }
 "#;

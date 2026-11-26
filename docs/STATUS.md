@@ -38,8 +38,9 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   labels.
 - **Open to exit Phase 2** (new `C-62+` convenience slices are frozen per
   2026-11-25 user approval until `C-EXIT` passes):
-  - `C-10`: replace `host API1`–`7` with one persistent-VM Lua component API
-    and live reload on save.
+  - `C-10`: file-backed `on_start` and `on_update` retain per-component
+    Lua state and reload on save in Play. Existing `update` scripts still
+    run. Object lookup, spawn/destroy and the wider API cutover remain open.
   - `C-EXIT`: add one tracked v23 reference project in `examples/`, measure
     remaining [performance budgets](PARITY-PLAN.md#5-performance-budgets), pass
     the desktop 60 fps and full UI checklist checks, and refresh the local

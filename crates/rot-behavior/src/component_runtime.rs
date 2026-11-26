@@ -1,14 +1,16 @@
 //! Native flat-array runtime for `ComponentScene`, retiring projection caps.
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use glam::{DMat4, DQuat};
 use rot_scene::component_scene::{AnimatorStart, Component, ComponentScene, ObjectHierarchy};
 use rot_scene::input::{ActionFrame, ActionValue, ValidatedActionFrame};
-use rot_scene::{Authoring, BindingTarget, Clip, ComponentDrawPlan, Transform};
+use rot_scene::{Authoring, BehaviorSource, BindingTarget, Clip, ComponentDrawPlan, Transform};
 
+use super::lua_component::{self, CurrentInput, Module, Modules};
 use super::spatial::{world_collider_transform, ComponentColliderSlot};
 use super::spatial_host::{kinematic_owner_component, ComponentQueryInput};
 use super::{
@@ -43,6 +45,7 @@ pub(crate) struct ComponentWorld {
     pub(crate) world_matrices: Vec<DMat4>,
     pub(crate) world_rotations: Vec<DQuat>,
     pub(crate) scripts: Vec<ComponentScriptSlot>,
+    modules: Option<Rc<RefCell<Modules>>>,
     pub(crate) animations: Vec<ResolvedComponentAnimation>,
     pub(crate) colliders: Vec<ComponentColliderSlot>,
     pub(crate) draw_plan: Arc<ComponentDrawPlan>,
@@ -97,6 +100,97 @@ fn validate_component_colliders(
 }
 
 impl Engine {
+    /// Replace all live instances of one baked file as a unit. Their module
+    /// locals restart, while the committed tick and owner transforms are retained.
+    /// Legacy file scripts keep their Reset-only admission.
+    pub fn reload_component_source(
+        &mut self,
+        runtime: &mut Runtime,
+        source_id: &str,
+        source: BehaviorSource,
+    ) -> Result<bool, Diagnostic> {
+        let Some(world) = &runtime.component_world else {
+            return Ok(false);
+        };
+        let Some(modules) = &world.modules else {
+            return Ok(false);
+        };
+        let mut modules = modules.borrow_mut();
+        modules.validate(self, runtime.tick)?;
+        let affected = modules.instances.keys().copied().filter(|&index| {
+            let slot = &world.scripts[index];
+            runtime.authoring.bindings[&slot.component_id].source_id == source_id
+        });
+        let mut affected = affected.peekable();
+        if affected.peek().is_none() {
+            return Ok(false);
+        }
+        let input = ValidatedActionFrame::neutral(&runtime.authoring.actions).map_err(|error| {
+            diag(
+                DiagnosticCode::InvalidInput,
+                Phase::Setup,
+                &error.to_string(),
+            )
+        })?;
+        self.begin()?;
+        self.begin_debug(
+            runtime.tick,
+            runtime.tick,
+            runtime.commit_revision,
+            runtime.commit_revision,
+            true,
+        );
+        let _input = CurrentInput::new(&self.lua, &input);
+        let mut replacements = Vec::new();
+        for index in affected {
+            let slot = &world.scripts[index];
+            let binding = &runtime.authoring.bindings[&slot.component_id];
+            let stage = (|| {
+                source.validate().map_err(|error| {
+                    diag(
+                        DiagnosticCode::InvalidAuthoring,
+                        Phase::Setup,
+                        &error.to_string(),
+                    )
+                })?;
+                if !lua_component::file_source(source_id, &source) {
+                    return Err(diag(
+                        DiagnosticCode::UnsupportedBackend,
+                        Phase::Compile,
+                        "Replacement must be a file-backed Lua component",
+                    ));
+                }
+                let mut module = self.load_replacement_module(source_id, &source)?;
+                module.start(
+                    self,
+                    &world.local_transforms[slot.owner_index],
+                    &binding.properties,
+                )?;
+                module.source_hash.clone_from(&self.cache[source_id].hash);
+                module.last_attempt = runtime.tick;
+                Ok(module)
+            })();
+            let module = stage.map_err(|error| {
+                let mut error = error.context(&slot.component_id, binding, Some(&source));
+                if let Some(path) = &source.label {
+                    let location = error
+                        .line
+                        .map_or_else(|| path.clone(), |line| format!("{path}:{line}"));
+                    error.message =
+                        super::bounded_message(&format!("{location}: {}", error.message));
+                }
+                error
+            })?;
+            replacements.push((index, module));
+        }
+        self.check_cancelled()?;
+        modules.instances.extend(replacements);
+        Arc::make_mut(&mut runtime.authoring)
+            .sources
+            .insert(source_id.to_owned(), source);
+        Ok(true)
+    }
+
     /// Initialize a native flat-array runtime directly from an authored/baked `ComponentScene`.
     pub fn reset_component(
         &mut self,
@@ -311,7 +405,7 @@ impl Engine {
             &hierarchy.parents,
             Phase::Setup,
         )?;
-        let draw_frame = draw_plan
+        let mut draw_frame = draw_plan
             .build_frame(scene, &world_matrices, &world_rotations)
             .map_err(|error| {
                 diag(
@@ -352,6 +446,7 @@ impl Engine {
         let defaults = RuntimeState::defaults(&authoring)?;
         let mut state = defaults.clone();
 
+        let mut modules = BTreeMap::new();
         if !scripts.is_empty() {
             let input = ValidatedActionFrame::neutral(&authoring.actions).map_err(|error| {
                 diag(
@@ -404,7 +499,21 @@ impl Engine {
             )?;
             let audio_cues = RefCell::new(Vec::new());
             let mut trial_transforms: Option<Vec<Transform>> = None;
-            for slot in &scripts {
+            let mut start_transforms = Vec::new();
+            let _input = scripts
+                .iter()
+                .any(|slot| {
+                    let binding = &authoring.bindings[&slot.component_id];
+                    authoring
+                        .sources
+                        .get(&binding.source_id)
+                        .is_some_and(|source| {
+                            lua_component::file_source(&binding.source_id, source)
+                        })
+                })
+                .then(|| CurrentInput::new(&self.lua, &input));
+            for (index, slot) in scripts.iter().enumerate() {
+                let mut module = None;
                 let output = self.evaluate_component_binding(
                     slot,
                     &authoring,
@@ -415,8 +524,16 @@ impl Engine {
                     queries.as_ref(),
                     has_sound_binding.then_some(&audio_cues),
                     &state,
+                    Some(&mut module),
                 )?;
-                if let Some(transform) = output.transform {
+                if let Some(module) = module {
+                    modules.insert(index, module);
+                    if let Some(transform) = output.transform {
+                        if !same_transform(&local_transforms[slot.owner_index], &transform) {
+                            start_transforms.push((slot.owner_index, transform));
+                        }
+                    }
+                } else if let Some(transform) = output.transform {
                     if !same_transform(&local_transforms[slot.owner_index], &transform) {
                         trial_transforms.get_or_insert_with(|| local_transforms.clone())
                             [slot.owner_index] = transform;
@@ -466,6 +583,43 @@ impl Engine {
                     })?;
             }
             trial_state.validate_total()?;
+            if !start_transforms.is_empty() {
+                for (index, transform) in start_transforms {
+                    local_transforms[index] = transform;
+                }
+                scene
+                    .resolve_world_matrices_into(&hierarchy, &local_transforms, &mut world_matrices)
+                    .map_err(|error| {
+                        diag(
+                            DiagnosticCode::InvalidOutput,
+                            Phase::Commit,
+                            &error.to_string(),
+                        )
+                    })?;
+                scene.resolve_world_rotations_into(
+                    &hierarchy,
+                    &local_transforms,
+                    &mut world_rotations,
+                );
+                validate_component_colliders(
+                    scene,
+                    &colliders,
+                    &local_transforms,
+                    &world_matrices,
+                    &world_rotations,
+                    &hierarchy.parents,
+                    Phase::Commit,
+                )?;
+                draw_frame = draw_plan
+                    .build_frame(scene, &world_matrices, &world_rotations)
+                    .map_err(|error| {
+                        diag(
+                            DiagnosticCode::InvalidOutput,
+                            Phase::Commit,
+                            &error.to_string(),
+                        )
+                    })?;
+            }
         }
 
         self.check_cancelled()?;
@@ -504,6 +658,7 @@ impl Engine {
                 world_matrices,
                 world_rotations,
                 scripts,
+                modules: Modules::new(self, modules),
                 animations,
                 colliders,
                 draw_plan,
@@ -551,6 +706,24 @@ impl Engine {
             runtime.commit_revision = commit_revision;
             runtime.last_step_commit_revision = Some(commit_revision);
             return Ok(());
+        }
+
+        let module_set = world.modules.clone();
+        let mut modules = module_set.as_ref().map(|modules| modules.borrow_mut());
+        if let Some(modules) = &modules {
+            modules.validate(self, runtime.tick)?;
+            if let Some((&index, _)) = modules
+                .instances
+                .iter()
+                .find(|(_, module)| module.last_attempt > runtime.tick)
+            {
+                let slot = &world.scripts[index];
+                let binding = &runtime.authoring.bindings[&slot.component_id];
+                return Err(diag(
+                    DiagnosticCode::Runtime, Phase::Setup,
+                    "A previous tick was discarded after Lua ran. Restart Play or replace the affected script before continuing.",
+                ).context(&slot.component_id, binding, runtime.authoring.sources.get(&binding.source_id)));
+            }
         }
 
         self.begin()?;
@@ -611,18 +784,59 @@ impl Engine {
         }
 
         let audio_cues = RefCell::new(Vec::new());
-        for slot in &world.scripts {
-            let output = self.evaluate_component_binding(
-                slot,
-                &runtime.authoring,
-                &world.local_transforms,
-                &world.object_indices,
-                self.limits.fixed_dt,
-                &validated,
-                queries.as_ref(),
-                runtime.has_sound_binding.then_some(&audio_cues),
-                &runtime.state,
-            )?;
+        let _input = modules
+            .as_ref()
+            .map(|_| CurrentInput::new(&self.lua, &validated));
+        for (index, slot) in world.scripts.iter().enumerate() {
+            let output = if let Some(module) = modules
+                .as_mut()
+                .and_then(|modules| modules.instances.get_mut(&index))
+            {
+                let binding = &runtime.authoring.bindings[&slot.component_id];
+                self.binding_count.set(0);
+                if let Some(session) = self.debugger.borrow_mut().as_mut() {
+                    session.context(super::debug::Context {
+                        source_id: binding.source_id.clone(),
+                        source_hash: module.source_hash.clone(),
+                        binding_id: slot.component_id.clone(),
+                        object_id: Some(slot.owner_id.clone()),
+                        phase: Phase::Update,
+                    });
+                }
+                let result = module.update(
+                    self,
+                    &world.local_transforms[slot.owner_index],
+                    &binding.properties,
+                    self.limits.fixed_dt,
+                    next,
+                );
+                if let Some(session) = self.debugger.borrow_mut().as_mut() {
+                    session.clear();
+                }
+                BindingOutput {
+                    transform: result.map_err(|error| {
+                        error.context(
+                            &slot.component_id,
+                            binding,
+                            runtime.authoring.sources.get(&binding.source_id),
+                        )
+                    })?,
+                    state: rot_scene::StateFields::new(),
+                }
+            } else {
+                self.evaluate_component_binding(
+                    slot,
+                    &runtime.authoring,
+                    &world.local_transforms,
+                    &world.object_indices,
+                    self.limits.fixed_dt,
+                    &validated,
+                    queries.as_ref(),
+                    runtime.has_sound_binding.then_some(&audio_cues),
+                    &runtime.state,
+                    None,
+                )?
+            };
             if let Some(transform) = output.transform {
                 if !same_transform(&world.local_transforms[slot.owner_index], &transform) {
                     staged_transforms.get_or_insert_with(|| world.local_transforms.clone())
@@ -721,6 +935,9 @@ impl Engine {
         runtime.last_step_commit_revision = Some(commit_revision);
         runtime.query_observations = observations;
         runtime.state = staged_state;
+        if let Some(modules) = &mut modules {
+            modules.tick = next;
+        }
         Ok(())
     }
 
@@ -736,6 +953,7 @@ impl Engine {
         spatial: Option<&super::spatial_host::QueryInvocation>,
         audio: Option<&RefCell<Vec<super::AudioCue>>>,
         state: &RuntimeState,
+        probe: Option<&mut Option<Module>>,
     ) -> Result<BindingOutput, Diagnostic> {
         let binding = &authoring.bindings[&slot.component_id];
         let source = authoring.sources.get(&binding.source_id);
@@ -819,7 +1037,12 @@ impl Engine {
             let input = slot
                 .has_object_input
                 .then(|| &local_transforms[slot.owner_index]);
-            let result = self.evaluate_with_input(
+            let mut detected = None;
+            let probe = probe.filter(|_| {
+                matches!(binding.target, BindingTarget::Object(_))
+                    && lua_component::file_source(&binding.source_id, source)
+            });
+            let result = self.evaluate_with_module_probe(
                 &main,
                 input,
                 &binding.properties,
@@ -836,7 +1059,14 @@ impl Engine {
                     binding_id: &slot.component_id,
                     state,
                 },
+                probe.as_ref().map(|_| &mut detected),
             );
+            if let (Some(probe), Some(mut module)) = (probe, detected) {
+                module
+                    .source_hash
+                    .clone_from(&self.cache[&binding.source_id].hash);
+                *probe = Some(module);
+            }
             let cleanup = self
                 .lua
                 .create_table()
@@ -898,6 +1128,167 @@ mod tests {
             hud: Default::default(),
             gameplay_camera: None,
         }
+    }
+
+    fn file_script(text: &str) -> BehaviorSource {
+        BehaviorSource {
+            label: Some("Scripts/gate.lua".into()),
+            ..script_source(text, super::super::INPUT_HOST_API_VERSION)
+        }
+    }
+
+    fn shared_module_scene(text: &str) -> ComponentScene {
+        use rot_scene::component_scene::ScriptSourceKind;
+        use rot_scene::input::{ActionDefinition, ActionKind};
+        let mut scene = base_scene("gate");
+        scene.actions.insert(
+            "slide".into(),
+            ActionDefinition {
+                label: None,
+                kind: ActionKind::Button {
+                    keys: Vec::new(),
+                    primary_mouse: false,
+                },
+            },
+        );
+        for (id, speed) in [("left", 1.0), ("right", 2.0)] {
+            scene.objects.push(ObjectNode {
+                id: id.into(),
+                name: id.into(),
+                enabled: true,
+                parent: None,
+                transform: Transform::default(),
+                components: vec![ComponentInstance {
+                    id: format!("{id}-script"),
+                    enabled: true,
+                    kind: Component::Script {
+                        source_kind: Some(ScriptSourceKind::Asset),
+                        movement: Default::default(),
+                        binding: BehaviorBinding {
+                            source_id: "gate-file".into(),
+                            target: BindingTarget::Object(id.into()),
+                            enabled: true,
+                            properties: BTreeMap::from([(
+                                "speed".into(),
+                                rot_scene::PropertyValue::Number(speed),
+                            )]),
+                            state_defaults: BTreeMap::new(),
+                            commands: BTreeMap::new(),
+                        },
+                    },
+                }],
+            });
+        }
+        scene
+            .bake_script_assets(BTreeMap::from([("gate-file".into(), file_script(text))]))
+            .unwrap();
+        scene
+    }
+
+    #[test]
+    fn file_modules_start_once_in_isolation_and_retained_input_reads_each_tick() {
+        use rot_scene::input::ButtonState;
+        let scene = shared_module_scene(
+            r#"
+            local count = 0
+            local button
+            return {
+                on_start = function(transform, props, host)
+                    count = count + 1
+                    button = host.button
+                    transform.translation[2] = count
+                end,
+                on_update = function(transform, props, dt)
+                    if button("slide").held then
+                        count = count + 1
+                        transform.translation[1] = math.abs(count) * props.speed
+                    end
+                end
+            }
+        "#,
+        );
+        let mut engine = Engine::new(Limits::default()).unwrap();
+        let mut runtime = engine.reset_component(&scene, 0).unwrap();
+        for id in ["left", "right"] {
+            assert_eq!(runtime.object_translation(id), Some([0.0, 1.0, 0.0]));
+        }
+        let held = ActionFrame(BTreeMap::from([(
+            "slide".into(),
+            ActionValue::Button(ButtonState {
+                held: true,
+                pressed: true,
+                released: false,
+            }),
+        )]));
+        engine.step_with_input(&mut runtime, &held).unwrap();
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.object_translation("left"), Some([2.0, 1.0, 0.0]));
+        engine.step_with_input(&mut runtime, &held).unwrap();
+        assert_eq!(runtime.object_translation("left"), Some([3.0, 1.0, 0.0]));
+        assert_eq!(runtime.object_translation("right"), Some([6.0, 1.0, 0.0]));
+    }
+
+    #[test]
+    fn invalid_reload_retains_live_modules_and_failed_tick_can_be_repaired() {
+        let scene = shared_module_scene(
+            r#"
+            local updates = 0
+            return { on_update = function(transform, props)
+                updates = updates + 1
+                if updates == 3 and props.speed == 2 then
+                    transform.scale[1] = 0
+                end
+                transform.translation[1] = updates
+            end }
+        "#,
+        );
+        let mut engine = Engine::new(Limits::default()).unwrap();
+        let mut runtime = engine.reset_component(&scene, 0).unwrap();
+        engine.step(&mut runtime).unwrap();
+        let error = engine
+            .reload_component_source(
+                &mut runtime,
+                "asset-lua-1",
+                file_script("return {\n    on_update = function(\n}"),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, DiagnosticCode::Compile);
+        assert_eq!(error.line, Some(3));
+        assert!(error.message.contains("Scripts/gate.lua:3"));
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.tick(), 2);
+        assert_eq!(runtime.object_translation("left"), Some([2.0, 0.0, 0.0]));
+
+        let error = engine.step(&mut runtime).unwrap_err();
+        assert_eq!(error.binding_id.as_deref(), Some("right-script"));
+        assert_eq!(runtime.tick(), 2);
+        assert_eq!(runtime.object_translation("left"), Some([2.0, 0.0, 0.0]));
+        assert_eq!(runtime.object_translation("right"), Some([2.0, 0.0, 0.0]));
+        assert_eq!(engine.step(&mut runtime).unwrap_err().phase, Phase::Setup);
+
+        let replacement = file_script(
+            r#"
+            local start
+            return {
+                on_start = function(transform)
+                    start = transform.translation[1]
+                    transform.translation[2] = 100
+                end,
+                on_update = function(transform, props)
+                    transform.translation[1] = start + props.speed
+                end
+            }
+        "#,
+        );
+        assert!(engine
+            .reload_component_source(&mut runtime, "asset-lua-1", replacement)
+            .unwrap());
+        assert_eq!(runtime.tick(), 2);
+        assert_eq!(runtime.object_translation("left"), Some([2.0, 0.0, 0.0]));
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.tick(), 3);
+        assert_eq!(runtime.object_translation("left"), Some([3.0, 0.0, 0.0]));
+        assert_eq!(runtime.object_translation("right"), Some([4.0, 0.0, 0.0]));
     }
 
     #[test]

@@ -179,7 +179,7 @@ impl RuntimeUi {
             self.cancel_control_focus();
         }
         let operation = match event {
-            VmEvent::HudActivation { .. } => return,
+            VmEvent::HudActivation { .. } | VmEvent::ScriptReload { .. } => return,
             VmEvent::Reset { .. } => Operation::Reset,
             VmEvent::Command { .. } => Operation::Command,
             VmEvent::Step { .. } => Operation::Step,

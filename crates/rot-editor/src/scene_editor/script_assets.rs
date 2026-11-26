@@ -26,6 +26,25 @@ pub(super) fn source(path: &str, text: String) -> BehaviorSource {
     }
 }
 
+pub(crate) fn reload_candidate(
+    store: &AssetStore,
+    asset_id: &str,
+    observed_hash: &str,
+) -> Option<(ProjectSource, BehaviorSource)> {
+    let (info, text) = store.ready_script(asset_id)?;
+    let hash = info.hash.as_ref()?;
+    (hash != observed_hash).then(|| {
+        (
+            ProjectSource {
+                asset_id: asset_id.to_owned(),
+                source: info.source.clone(),
+                accepted_hash: hash.clone(),
+            },
+            source(&info.source, text.to_string()),
+        )
+    })
+}
+
 #[derive(Clone, Debug, serde::Serialize)]
 pub(crate) struct ProjectSource {
     pub asset_id: String,

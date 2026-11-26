@@ -674,6 +674,7 @@ impl ComponentWorkspace {
         self.update_sound_audition();
         self.observe_runtime();
         self.runtime.poll(ctx);
+        self.runtime.reload_scripts(ctx, self.assets.as_ref());
     }
 
     #[cfg(target_os = "linux")]

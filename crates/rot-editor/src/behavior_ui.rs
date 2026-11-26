@@ -2149,6 +2149,9 @@ pub(super) struct RuntimeUi {
     transition_source: Option<String>,
     project_sources: crate::scene_editor::script_assets::ProjectSources,
     transition_project_sources: crate::scene_editor::script_assets::ProjectSources,
+    reload_asset_revision: Option<u64>,
+    reload_observed: BTreeMap<String, String>,
+    reload_error_source: Option<crate::scene_editor::script_assets::ProjectSource>,
     #[cfg(target_os = "linux")]
     pub(super) open_project_error: Option<(String, String, Option<u32>)>,
     hud_activation: hud_activation::HudActivationControl,
@@ -2304,8 +2307,69 @@ impl RuntimeUi {
         &self,
     ) -> Option<&crate::scene_editor::script_assets::ProjectSource> {
         let diagnostic = self.diagnostic.as_ref()?;
+        if let Some(source) = &self.reload_error_source {
+            if diagnostic.source_hash.as_deref()? == source.accepted_hash {
+                return Some(source);
+            }
+        }
         let source = self.project_sources.get(diagnostic.source_id.as_deref()?)?;
         (diagnostic.source_hash.as_deref()? == source.accepted_hash).then_some(source)
+    }
+
+    pub(super) fn reload_scripts(
+        &mut self,
+        ctx: &egui::Context,
+        assets: Option<&rot_assets::AssetStore>,
+    ) {
+        let (Some(worker), Some(frame), Some(assets)) = (&self.worker, &self.frame, assets) else {
+            return;
+        };
+        if !self.ready
+            || self.stale
+            || self.project_sources.is_empty()
+            || self.reload_asset_revision == Some(assets.revision())
+            || !worker.accepts(frame.key)
+        {
+            return;
+        }
+        for (source_id, captured) in &self.project_sources {
+            let observed = self
+                .reload_observed
+                .get(source_id)
+                .unwrap_or(&captured.accepted_hash);
+            let Some((provenance, source)) = crate::scene_editor::script_assets::reload_candidate(
+                assets,
+                &captured.asset_id,
+                observed,
+            ) else {
+                continue;
+            };
+            let hash = provenance.accepted_hash.clone();
+            let command = VmCommand::ReloadScript {
+                key: frame.key,
+                scene_id: frame.scene.id.clone(),
+                source_id: source_id.clone(),
+                provenance,
+                source,
+            };
+            match worker.try_request(command) {
+                Ok(()) => {
+                    self.reload_observed.insert(source_id.clone(), hash);
+                }
+                Err(error) if error.kind == RequestErrorKind::Busy => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(20));
+                    return;
+                }
+                Err(_) => return,
+            }
+        }
+        self.reload_asset_revision = Some(assets.revision());
+    }
+
+    fn clear_script_reload(&mut self) {
+        self.reload_asset_revision = None;
+        self.reload_observed.clear();
+        self.reload_error_source = None;
     }
 
     pub fn queue_shortcut(&mut self, shortcut: PlayShortcut) {
@@ -2649,6 +2713,7 @@ impl RuntimeUi {
         self.reset_succeeded = None;
     }
     fn begin_reset(&mut self, key: RunKey) {
+        self.clear_script_reload();
         self.invocation = InvocationDraft::default();
         self.spatial_feedback_index = 0;
         self.clear_reset();
@@ -2683,6 +2748,7 @@ impl RuntimeUi {
                 {
                     self.status = format!("Started {}.", frame.scene.id);
                     self.project_sources = std::mem::take(&mut self.transition_project_sources);
+                    self.clear_script_reload();
                     self.diagnostic = None;
                 }
                 self.captured = Some(frame.authoring.clone());
@@ -2763,10 +2829,60 @@ impl RuntimeUi {
                         continue;
                     }
                     let program_step_pending = self.program_step_pending();
-                    if !matches!(&event, VmEvent::HudActivation { .. }) {
+                    if !matches!(
+                        &event,
+                        VmEvent::HudActivation { .. } | VmEvent::ScriptReload { .. }
+                    ) {
                         self.accept_operation(&event);
                     }
                     match event {
+                        VmEvent::ScriptReload {
+                            scene_id,
+                            source_id,
+                            provenance,
+                            result,
+                            ..
+                        } => {
+                            if self
+                                .frame
+                                .as_ref()
+                                .is_none_or(|frame| frame.scene.id != scene_id)
+                            {
+                                continue;
+                            }
+                            match result {
+                                Ok(true) => {
+                                    self.project_sources.insert(source_id.clone(), provenance);
+                                    if self.reload_error_source.is_some()
+                                        && self.diagnostic.as_ref().is_some_and(|diagnostic| {
+                                            diagnostic.source_id.as_deref() == Some(&source_id)
+                                        })
+                                    {
+                                        self.reload_error_source = None;
+                                        self.diagnostic = None;
+                                        self.status = if self.playing {
+                                            Text::Playing
+                                        } else {
+                                            Text::ReadyToPlay
+                                        }
+                                        .plain()
+                                        .into();
+                                    }
+                                }
+                                Ok(false) => {}
+                                Err(diagnostic) => {
+                                    let path = &provenance.source;
+                                    let location = diagnostic.line.map_or_else(
+                                        || path.clone(),
+                                        |line| format!("{path}:{line}"),
+                                    );
+                                    self.status =
+                                        format!("{} {location}", Text::PlayRefreshFailed.plain());
+                                    self.reload_error_source = Some(provenance);
+                                    self.diagnostic = Some(diagnostic);
+                                }
+                            }
+                        }
                         VmEvent::HudActivation {
                             key,
                             activation_id,
@@ -2859,6 +2975,7 @@ impl RuntimeUi {
                             } else {
                                 summary
                             };
+                            self.reload_error_source = None;
                             self.diagnostic = Some(diagnostic);
                         }
                         VmEvent::Rejected {
