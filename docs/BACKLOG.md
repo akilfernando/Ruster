@@ -31,26 +31,14 @@ One line each. Anyone may add; the user or a planning pass orders them.
 - Idle repaints: an open scene repaints ~3 frames per 10 s (0.2% CPU); track under
   Phase 3A/5A polish.
 
-## Now — Phase 3A: Look (PBR & Scene Scale)
+## Now — Phase 3B: Look (Lighting & Post)
 
-`L-01` (`71aacda`), `L-02` (`611a640`), `L-03` (`93d7390`), `L-04` (`16a3859`), `L-05` (`4f8e16d`), and `L-06` (`3264a4e`) shipped on `2026-11-26`. Close Phase 3A with `L-EXIT` below.
-
-| Package | Outcome | Status & remaining gap |
-| --- | --- | --- |
-| `L-EXIT` Phase 3A exit gate | Khronos PBR sample assets (`DamagedHelmet`, `MetalRoughSpheres`, transparent/cutout assets) render recognizably within frame budgets (Size S, *brief needed*). | `open` · Next and final step to close Phase 3A. |
+Phase 3A (`L-01`–`L-EXIT`) shipped on `2026-11-26`. Phase 3B packages (clustered forward many-lights, cascaded directional + spot/point shadow atlas, fog, bloom/color grading/AO/AA, debug views) await a planning review per [PARITY-PLAN](PARITY-PLAN.md#7-changing-this-plan).
 
 ## Later
 
 One line each until their phase is active. See [phases](PARITY-PLAN.md#3-phases).
 
-- **Phase 3A — Look: PBR & Scene Scale.** After `L-02` (`rot-render` refactor),
-  implement full metallic-roughness PBR with normal, emissive and occlusion
-  maps; sky and IBL; alpha transparency; frustum culling and dirty-range
-  instancing.
-- **Phase 3B — Look: Lighting & Post.** Verify `wgpu-hal` SPIR-V/compute readiness
-  and implement clustered forward many-lights; cascaded directional plus spot
-  and point shadow atlas; fog; bloom, color grading, ambient occlusion and AA
-  options; shading and debug view modes.
 - **Phase 4 — Play.** Strict order: (1) unified persistent-VM Lua API with
   events/coroutines + native component runtime (if not already closed in Phase 2)
   + live editing during Play (deferred from `C-05`);
@@ -109,7 +97,11 @@ completed packages:
   `InstanceUploadTracker` dirty-range GPU uploads with gap coalescing, RTX 4060
   probes green, steady `0 B` instance upload; 5k CPU p50 `0.554 ms` / GPU p50
   `0.291 ms` / frame p50 `1.211 ms` / p95 `1.557 ms`; 50k CPU p50 `3.976 ms` /
-  GPU p50 `0.520 ms` / frame p50 `4.942 ms` / p95 `5.647 ms`).
+  GPU p50 `0.520 ms` / frame p50 `4.942 ms` / p95 `5.647 ms`), and `L-EXIT`
+  (`2026-11-26`, `7283208`: Phase 3A Khronos PBR sample gate verified visually and
+  on RTX 4060 at `1280×720` 4× MSAA — `DamagedHelmet` frame p50 `0.395 ms` / p95
+  `0.610 ms`, `MetalRoughSpheres` p50 `1.654 ms` / p95 `2.023 ms`,
+  `AlphaBlendModeTest` p50 `0.277 ms` / p95 `0.628 ms`, steady `0 B` upload).
 - **Phase 2 — Core completed packages:** `C-00a` (retired legacy logistics
   crates, Rhai mode, editor logistics UI, and superseded MCP
   enrollment/registry plumbing; promoted `crates/rot-support`), `C-01` (v23

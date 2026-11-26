@@ -13,7 +13,7 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
-## Current phase — Phase 3A: Look (Next: `L-EXIT`)
+## Current phase — Phase 3A complete (Next: Phase 3B planning review)
 
 - **Done:** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`, `A-01`–`A-07`,
   `P-01`–`P-02`), `C-00a` (retired legacy logistics crates, Rhai mode, editor
@@ -73,8 +73,11 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   instancing (`3264a4e`: Gribb-Hartmann `[0, 1]` world-AABB culling with shadow
   caster retention, `InstanceUploadTracker` gap-coalesced uploads, `0 B` steady
   state, RTX 4060 probes green, 5k frame p50 `1.211 ms` / p95 `1.557 ms`, 50k
-  frame p50 `4.942 ms` / p95 `5.647 ms`).
-- **Next:** `L-EXIT` Phase 3A exit gate (Khronos PBR samples & frame budgets).
+  frame p50 `4.942 ms` / p95 `5.647 ms`), and `L-EXIT` Phase 3A exit gate
+  (`7283208`: Khronos `DamagedHelmet`, `MetalRoughSpheres`, and
+  `AlphaBlendModeTest` visually verified on RTX 4060 at `1280×720` 4× MSAA at
+  `0.610 ms` / `2.023 ms` / `0.628 ms` p95 frame time).
+- **Next:** Phase 3B planning review (Lighting & Post).
 
 ## What a creator can do today
 
@@ -91,9 +94,10 @@ See the [historical inventory](PARITY-PLAN.md#2-where-we-are) and
 ## Installed on this machine
 
 The **Rot Engine** launcher uses the 2026-11-26 release build (`rot-editor`,
-`rot-mcp`, and `rot-player` built with UI checklist fixes, `4096` px textures,
-and unified persistent Lua). Reinstall with `python3 scripts/install_local.py`;
-the previous build is in `~/.local/share/rot-engine/previous` for `--rollback`.
+`rot-mcp`, and `rot-player` built with Phase 3A PBR, Sky/IBL, alpha
+transparency, frustum culling, instancing, `4096` px textures, and unified
+persistent Lua). Reinstall with `python3 scripts/install_local.py`; the
+previous build is in `~/.local/share/rot-engine/previous` for `--rollback`.
 
 ## Known problems & Not verified
 
