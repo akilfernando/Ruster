@@ -33,11 +33,14 @@ One line each. Anyone may add; the user or a planning pass orders them.
 
 ## Now — Phase 3A: Look (PBR & Scene Scale)
 
-`L-01` (`71aacda`) and `L-02` (`611a640`) shipped on `2026-11-26`. Continue Phase 3A with `L-03` below.
+`L-01` (`71aacda`), `L-02` (`611a640`), and `L-03` (`93d7390`) shipped on `2026-11-26`. Continue Phase 3A with `L-04` below.
 
 | Package | Outcome | Status & remaining gap |
 | --- | --- | --- |
-| `L-03` Full metallic-roughness PBR & surface maps | Metallic-roughness PBR with tangent-space normal, emissive, and occlusion maps; material asset/inspector/glTF parity (Size M, *brief needed*). | `open` · Wire metallic/normal/emissive/occlusion channels end-to-end across `rot-material`, `rot-assets`, `rot-scene`, `rot-editor`, `rot-mcp`, and `surface.wgsl`. |
+| `L-04` Sky & image-based lighting | Procedural physical sky + environment irradiance/specular IBL reflection so metallic and smooth surfaces reflect the world naturally (Size M, *brief needed*). | `open` · Design sky parameters, prefiltered environment/irradiance GPU bindings, and `surface.wgsl` + editor/MCP wiring. |
+| `L-05` Alpha transparency | Alpha modes (`Opaque` / `Mask` cutout / `Blend` back-to-front sorted pass) with glTF `alphaMode`/`alphaCutoff` and shadow cutout parity (Size M, *brief needed*). | `open` · Blocked behind `L-04` only by ordering. |
+| `L-06` Frustum culling & dirty-range instancing | View-frustum culling and dirty-range GPU instance uploads for scaled scenes within the 60 fps 1080p budget (Size M, *brief needed*). | `open` · Follow `L-05`. |
+| `L-EXIT` Phase 3A exit gate | Khronos PBR sample assets (`DamagedHelmet`, `MetalRoughSpheres`, transparent/cutout assets) render recognizably within frame budgets (Size S, *brief needed*). | `open` · Closes Phase 3A after `L-06`. |
 
 ## Later
 
@@ -88,7 +91,12 @@ completed packages:
   cache across `rot-assets`/`rot-render`/`surface.wgsl`, decoupled `R8Unorm`
   `selection_mask` pass + `composite.wgsl`, lifted `rot-assets`/512 MiB target
   caps, RTX 4060 GPU probes passed, 5k benchmark GPU p50 `321.5 → 245.8 us`,
-  CPU p50 `648.7 → 627.8 us`).
+  CPU p50 `648.7 → 627.8 us`), and `L-03` (`2026-11-26`, `93d7390`: full
+  metallic-roughness PBR with `metallic`, tangent-space `normal_texture`,
+  `emissive_texture`, `occlusion_texture`, tangent +Y UV fix, 6-role
+  `TextureRole`, glTF/editor/MCP wiring, RTX 4060 probes green, headless 5k
+  1080p 4× MSAA CPU p50 `0.442 ms` / GPU p50 `0.294 ms` / frame p50
+  `1.114 ms`).
 - **Phase 2 — Core completed packages:** `C-00a` (retired legacy logistics
   crates, Rhai mode, editor logistics UI, and superseded MCP
   enrollment/registry plumbing; promoted `crates/rot-support`), `C-01` (v23

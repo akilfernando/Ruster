@@ -13,7 +13,7 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
-## Current phase — Phase 3A: Look (Next: `L-03`)
+## Current phase — Phase 3A: Look (Next: `L-04`)
 
 - **Done:** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`, `A-01`–`A-07`,
   `P-01`–`P-02`), `C-00a` (retired legacy logistics crates, Rhai mode, editor
@@ -47,15 +47,19 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   events and visual review, and refreshed release install), and `P-03` Platform
   seams & Windows CI (`rot_support::platform::{dirs,ipc}`,
   `rot_editor::platform::{shell,dialogs,watcher}`, `rot-mcp` child detachment,
-  target-scoped `rustix`/`rfd`, and `windows-latest` `cargo check` CI job), and
+  target-scoped `rustix`/`rfd`, and `windows-latest` `cargo check` CI job),
   `L-01` Material asset files (`71aacda`: versioned `.material.json` + `.rotmeta`
-  assets, live reload, Inspector/Assets authoring, and MCP alignment), and `L-02`
+  assets, live reload, Inspector/Assets authoring, and MCP alignment), `L-02`
   `rot-render` refactor (`611a640`: GPU storage-buffer instances, vertex
   tangents across `rot-assets`/primitives/`surface.wgsl`, decoupled `R8Unorm`
   selection mask pass, lifted caps, RTX 4060 probes green, 5k GPU p50
-  `321.5 → 245.8 us`).
-- **Next:** `L-03` Full metallic-roughness PBR with normal, emissive, and
-  occlusion maps (Phase 3A).
+  `321.5 → 245.8 us`), and `L-03` Full metallic-roughness PBR (`93d7390`:
+  `metallic` + `metallic_texture`, tangent-space `normal_texture` +
+  `normal_scale`, `emissive_texture`, `occlusion_texture` + `occlusion_strength`,
+  tangent +Y UV fix, 6-role `TextureRole`, glTF/editor/MCP wiring, RTX 4060
+  probes green, headless 5k 1080p 4× MSAA CPU p50 `0.442 ms` / GPU p50
+  `0.294 ms` / frame p50 `1.114 ms`).
+- **Next:** `L-04` Sky & image-based lighting (Phase 3A).
 
 ## What a creator can do today
 
