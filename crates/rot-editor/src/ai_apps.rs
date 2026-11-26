@@ -52,13 +52,9 @@ pub struct Machine {
 }
 impl Machine {
     pub fn current() -> Self {
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_default();
-        let config = std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .filter(|p| p.is_absolute())
-            .unwrap_or_else(|| home.join(".config"));
+        let home = rot_support::platform::dirs::home_dir().unwrap_or_default();
+        let config =
+            rot_support::platform::dirs::config_dir().unwrap_or_else(|| home.join(".config"));
         let path = std::env::var_os("PATH")
             .map(|p| std::env::split_paths(&p).collect())
             .unwrap_or_default();

@@ -980,11 +980,8 @@ impl Workspace {
         let path = std::env::var_os("ROT_EDITOR_STATE")
             .map(PathBuf::from)
             .or_else(|| {
-                std::env::var_os("XDG_CONFIG_HOME")
-                    .map(PathBuf::from)
-                    .filter(|p| p.is_absolute())
-                    .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".config")))
-                    .map(|p| p.join("rot/editor.json"))
+                rot_support::platform::dirs::config_dir()
+                    .map(|path| path.join("rot").join("editor.json"))
             });
         Self::at(path)
     }

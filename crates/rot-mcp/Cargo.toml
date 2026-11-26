@@ -14,7 +14,6 @@ rot-scene = { path = "../rot-scene" }
 rot-support = { path = "../rot-support", features = ["ipc"] }
 serde = "1"
 serde_json = { version = "1", features = ["float_roundtrip"] }
-rustix = { version = "0.38.44", features = ["net", "process"] }
 
 [dev-dependencies]
 tempfile = "3"

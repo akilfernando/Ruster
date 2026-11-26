@@ -1526,9 +1526,7 @@ impl ComponentWorkspace {
                     if !folder.starts_with(root) || !folder.is_dir() {
                         return Err("The folder is outside the open project.");
                     }
-                    std::process::Command::new("xdg-open")
-                        .arg(folder)
-                        .spawn()
+                    crate::platform::shell::open_in_file_manager(&folder)
                         .map_err(|_| Text::AssetOpenFileManagerError.plain())?;
                     Ok(())
                 })();

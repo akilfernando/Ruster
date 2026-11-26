@@ -167,16 +167,15 @@ impl ProjectPicker {
                                     for path in &visible[range] {
                                         let response = project_row(ui, path, now);
                                         response.context_menu(|ui| {
-                                            #[cfg(target_os = "linux")]
                                             if ui
                                                 .button(Text::AssetShowInFileManager.plain())
                                                 .clicked()
                                             {
                                                 let folder = path.parent().unwrap_or(path);
                                                 if let Err(error) =
-                                                    std::process::Command::new("xdg-open")
-                                                        .arg(folder)
-                                                        .spawn()
+                                                    crate::platform::shell::open_in_file_manager(
+                                                        folder,
+                                                    )
                                                 {
                                                     self.error = format!(
                                                         "Couldn't open the file manager. {error}."
@@ -863,27 +862,27 @@ pub(super) fn browse(
 ) -> std::sync::mpsc::Receiver<BrowseResult> {
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     std::thread::spawn(move || {
-        let dialog = rfd::FileDialog::new();
         let picked = match kind {
-            BrowseKind::Directory => dialog
-                .set_title(Text::ChooseAProjectLocation.plain())
-                .pick_folder(),
-            BrowseKind::OpenScene => dialog
-                .set_title(Text::ComponentOpenScene.plain())
-                .add_filter("Rot scene", &["json"])
-                .pick_file(),
-            BrowseKind::BuildParent { directory } => dialog
-                .set_title(Text::BuildChooseParentFolder.plain())
-                .set_directory(directory)
-                .pick_folder(),
+            BrowseKind::Directory => {
+                crate::platform::dialogs::pick_folder(Text::ChooseAProjectLocation.plain(), None)
+            }
+            BrowseKind::OpenScene => crate::platform::dialogs::pick_file(
+                Text::ComponentOpenScene.plain(),
+                "Rot scene",
+                &["json"],
+            ),
+            BrowseKind::BuildParent { directory } => crate::platform::dialogs::pick_folder(
+                Text::BuildChooseParentFolder.plain(),
+                Some(&directory),
+            ),
             BrowseKind::BuildArchive {
                 directory,
                 filename,
-            } => dialog
-                .set_title(Text::BuildChooseArchiveFile.plain())
-                .set_directory(directory)
-                .set_file_name(filename)
-                .save_file(),
+            } => crate::platform::dialogs::save_file(
+                Text::BuildChooseArchiveFile.plain(),
+                &directory,
+                &filename,
+            ),
         };
         let _ = tx.send(Ok(picked));
         ctx.request_repaint();

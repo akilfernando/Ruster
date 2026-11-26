@@ -175,9 +175,22 @@ fn scene_file(path: &Path) -> Option<PathBuf> {
     scenes.next().is_none().then_some(only)
 }
 
+fn detach_child(command: &mut std::process::Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+    }
+}
+
 /// Start the editor on a scene and wait until it can be found.
 fn launch(directory: &Path, target: &str, cwd: Option<&Path>) -> Result<discovery::Running, Value> {
-    use std::os::unix::process::CommandExt;
     let path = Path::new(target);
     let path = if path.is_absolute() {
         path.to_path_buf()
@@ -187,31 +200,31 @@ fn launch(directory: &Path, target: &str, cwd: Option<&Path>) -> Result<discover
     let Some(scene) = path.canonicalize().ok().and_then(|p| scene_file(&p)) else {
         return Err(domain_error("project_not_found", &format!("No open Rot Engine project matches \"{target}\", and it is not a scene file or a project folder with one scene. Call project_list to see open projects.")));
     };
+    let editor_name = format!("rot-editor{}", std::env::consts::EXE_SUFFIX);
     let editor = std::env::current_exe()
         .ok()
-        .map(|exe| exe.with_file_name("rot-editor"))
+        .map(|exe| exe.with_file_name(&editor_name))
         .filter(|exe| exe.is_file())
-        .unwrap_or_else(|| PathBuf::from("rot-editor"));
+        .unwrap_or_else(|| PathBuf::from(&editor_name));
     let mut command = std::process::Command::new(editor);
     for (key, _) in std::env::vars_os() {
         if key.to_string_lossy().starts_with("ROT_MCP_") {
             command.env_remove(key);
         }
     }
-    let mut child = command
+    command
         .arg("--scene")
         .arg(&scene)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .process_group(0)
-        .spawn()
-        .map_err(|e| {
-            domain_error(
-                "editor_start_failed",
-                &format!("Could not start Rot Engine: {e}"),
-            )
-        })?;
+        .stderr(std::process::Stdio::null());
+    detach_child(&mut command);
+    let mut child = command.spawn().map_err(|e| {
+        domain_error(
+            "editor_start_failed",
+            &format!("Could not start Rot Engine: {e}"),
+        )
+    })?;
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         if let Some(editor) = discovery::list(directory)

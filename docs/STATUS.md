@@ -13,7 +13,7 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
-## Current phase — Phase 2: Core (Complete; Next: `P-03`)
+## Current phase — Phase 3A: Look (Next: `L-01`)
 
 - **Done:** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`, `A-01`–`A-07`,
   `P-01`–`P-02`), `C-00a` (retired legacy logistics crates, Rhai mode, editor
@@ -44,9 +44,11 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   5,000-object Riverside desktop pan `190.2`/`217.7 fps`, 50.7 MB GLB import
   `251–314 ms`, `4096` px texture limits, workspace-2
   [UI checklist](UX-STANDARDS.md#10-ui-review-checklist) pass via injected
-  events and visual review, and refreshed release install).
-- **Next:** `P-03` Platform seams & `windows-latest` `cargo check --workspace` CI
-  job, then Phase 3A (`L-01` `.material.json` assets).
+  events and visual review, and refreshed release install), and `P-03` Platform
+  seams & Windows CI (`rot_support::platform::{dirs,ipc}`,
+  `rot_editor::platform::{shell,dialogs,watcher}`, `rot-mcp` child detachment,
+  target-scoped `rustix`/`rfd`, and `windows-latest` `cargo check` CI job).
+- **Next:** `L-01` Material asset files (`Assets/*.material.json`, Phase 3A).
 
 ## What a creator can do today
 
@@ -74,4 +76,5 @@ the previous build is in `~/.local/share/rot-engine/previous` for `--rollback`.
   entries in `~/.codex/config.toml` and `~/Projects/Ruster-Creations`.
 - Unverified physical pointer/gizmo display latency. Note on empty-player memory:
   warm windowed launch reaches `127.0 MiB` median peak RSS (< `150 MB` target),
-  while a cold empty Vulkan shader-cache launch reached `163.6 MiB`.
+  while a cold empty Vulkan shader-cache launch reached `163.6 MiB`. Windows
+  compilation is checked on `windows-latest` in CI (not locally compiled).

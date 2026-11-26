@@ -170,7 +170,9 @@ pub struct SceneEditor {
     generation: u64,
     #[cfg(unix)]
     connection_authority: Option<crate::bridge::Authority>,
+    #[cfg(unix)]
     connection_incarnation: String,
+    #[cfg(unix)]
     connection_generation: String,
     /// Listen for AI apps whenever a scene is open.
     ai_listen: bool,
@@ -208,8 +210,10 @@ impl SceneEditor {
             generation: GENERATION.fetch_add(1, Ordering::Relaxed),
             #[cfg(unix)]
             connection_authority: None,
+            #[cfg(unix)]
             connection_incarnation: crate::connection::unpredictable()
                 .expect("editor incarnation entropy unavailable"),
+            #[cfg(unix)]
             connection_generation: crate::connection::unpredictable()
                 .expect("project generation entropy unavailable"),
             ai_listen: false,
@@ -602,9 +606,13 @@ impl SceneEditor {
                 }
             }
         };
-        next.connection_incarnation = self.connection_incarnation.clone();
-        next.ai_listen = self.ai_listen;
-        next.retired_connection_receipts = std::mem::take(&mut self.retired_connection_receipts);
+        #[cfg(unix)]
+        {
+            next.connection_incarnation = self.connection_incarnation.clone();
+            next.ai_listen = self.ai_listen;
+            next.retired_connection_receipts =
+                std::mem::take(&mut self.retired_connection_receipts);
+        }
         next.workspace = std::mem::replace(&mut self.workspace, Workspace::detached());
         next.recovery = std::mem::replace(
             &mut self.recovery,

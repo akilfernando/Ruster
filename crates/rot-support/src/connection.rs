@@ -3,11 +3,17 @@
 //! persistent owner socket and is never persisted or selected again per call.
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+#[cfg(unix)]
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io;
+#[cfg(unix)]
+use std::io::{Read, Write};
+#[cfg(unix)]
 use std::os::unix::{fs::MetadataExt, net::UnixStream};
 use std::path::{Component, Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 
 pub const WIRE: &str = "rot-owner-1";
 pub const LIMIT: usize = 65536;
@@ -16,55 +22,26 @@ pub const DEADLINE: Duration = Duration::from_secs(2);
 
 pub fn unpredictable() -> io::Result<String> {
     let mut bytes = [0u8; 32];
-    fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    crate::platform::ipc::unpredictable_bytes(&mut bytes)?;
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// Linux AF_UNIX has a short sockaddr pathname even when the backing private
-/// directory has a valid long absolute path. Address via a retained directory
-/// FD, while all persisted identities and validation keep the original path.
-/// No filesystem alias is created and no locator symlink is trusted.
+#[cfg(unix)]
 pub fn connect_socket(path: &Path) -> io::Result<UnixStream> {
-    with_socket_address(path, |address| UnixStream::connect(address))
+    crate::platform::ipc::connect_socket(path)
 }
+
+#[cfg(unix)]
 pub fn bind_socket(path: &Path) -> io::Result<std::os::unix::net::UnixListener> {
-    with_socket_address(path, |address| {
-        std::os::unix::net::UnixListener::bind(address)
-    })
-}
-fn with_socket_address<T>(
-    path: &Path,
-    use_address: impl FnOnce(&Path) -> io::Result<T>,
-) -> io::Result<T> {
-    use std::os::unix::ffi::OsStrExt;
-    if path.as_os_str().as_bytes().len() < 104 {
-        return use_address(path);
-    }
-    #[cfg(target_os = "linux")]
-    {
-        use std::os::fd::AsRawFd;
-        let parent = path
-            .parent()
-            .ok_or_else(|| io::Error::other("socket parent required"))?;
-        no_symlinks(parent)?;
-        let directory = fs::File::open(parent)?;
-        let name = path
-            .file_name()
-            .ok_or_else(|| io::Error::other("socket filename required"))?;
-        let address = PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd())).join(name);
-        use_address(&address)
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        Err(io::Error::other("socket path too long"))
-    }
+    crate::platform::ipc::bind_socket(path)
 }
 
+#[cfg(unix)]
 pub fn peer(stream: &UnixStream) -> io::Result<(u32, u32)> {
-    let cred = rustix::net::sockopt::get_socket_peercred(stream)?;
-    Ok((cred.uid.as_raw(), cred.pid.as_raw_nonzero().get() as u32))
+    crate::platform::ipc::peer_credentials(stream)
 }
 
+#[cfg(unix)]
 pub fn no_symlinks(path: &Path) -> io::Result<()> {
     if !path.is_absolute() {
         return Err(io::Error::other("absolute locator required"));
@@ -81,6 +58,20 @@ pub fn no_symlinks(path: &Path) -> io::Result<()> {
         if fs::symlink_metadata(&part)?.file_type().is_symlink() {
             return Err(io::Error::other("symlink locator component"));
         }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub fn no_symlinks(path: &Path) -> io::Result<()> {
+    if !path.is_absolute() {
+        return Err(io::Error::other("absolute locator required"));
+    }
+    if path
+        .components()
+        .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
+    {
+        return Err(io::Error::other("noncanonical locator"));
     }
     Ok(())
 }
@@ -113,6 +104,7 @@ pub fn socket_path(locator: &Path) -> PathBuf {
     locator.with_extension("sock")
 }
 impl Locator {
+    #[cfg(unix)]
     pub fn validate_file(&self, path: &Path, dev: u64, ino: u64) -> io::Result<()> {
         no_symlinks(path)?;
         let meta = fs::symlink_metadata(path)?;
@@ -128,6 +120,7 @@ impl Locator {
         }
         self.validate_socket(&socket_path(path))
     }
+    #[cfg(unix)]
     pub fn capture(path: &Path, incarnation: String, generation: String) -> io::Result<Self> {
         let dir =
             fs::symlink_metadata(path.parent().ok_or_else(|| io::Error::other("no parent"))?)?;
@@ -138,7 +131,7 @@ impl Locator {
             generation,
             connection: unpredictable()?,
             pid: std::process::id(),
-            uid: rustix::process::getuid().as_raw(),
+            uid: crate::platform::ipc::current_uid(),
             directory_dev: dir.dev(),
             directory_ino: dir.ino(),
             socket_dev: socket.dev(),
@@ -150,6 +143,7 @@ impl Locator {
         locator.validate_socket(path)?;
         Ok(locator)
     }
+    #[cfg(unix)]
     pub fn validate_socket(&self, path: &Path) -> io::Result<()> {
         use std::os::unix::fs::FileTypeExt;
         no_symlinks(path)?;
@@ -157,7 +151,7 @@ impl Locator {
             fs::symlink_metadata(path.parent().ok_or_else(|| io::Error::other("no parent"))?)?;
         let socket = fs::symlink_metadata(path)?;
         if self.wire != WIRE
-            || self.uid != rustix::process::getuid().as_raw()
+            || self.uid != crate::platform::ipc::current_uid()
             || !dir.is_dir()
             || dir.mode() & 0o777 != 0o700
             || dir.uid() != self.uid
@@ -182,12 +176,14 @@ impl Locator {
 
 /// Incremental framing has a total deadline, not a fresh timeout per byte.
 /// Idle polling is permitted only on the owning persistent connection.
+#[cfg(unix)]
 #[derive(Default)]
 pub struct Framing {
     bytes: Vec<u8>,
     started: Option<Instant>,
     last_deadline: Option<Instant>,
 }
+#[cfg(unix)]
 impl Framing {
     pub fn deadline(&self) -> Instant {
         self.last_deadline.expect("complete frame")
@@ -243,6 +239,7 @@ impl Framing {
     }
 }
 
+#[cfg(unix)]
 pub fn send(stream: &mut UnixStream, value: &Value) -> io::Result<()> {
     let mut bytes = serde_json::to_vec(value)?;
     if bytes.len() >= LIMIT {
@@ -268,6 +265,7 @@ pub fn send(stream: &mut UnixStream, value: &Value) -> io::Result<()> {
 /// One adapter instance, one immutable locator and one socket. Discovery never
 /// constructs this object. Any transport/identity failure permanently disables
 /// this instance; a replacement adapter needs fresh human approval.
+#[cfg(unix)]
 pub struct Client {
     locator_path: PathBuf,
     locator_dev: u64,
@@ -279,6 +277,7 @@ pub struct Client {
     client: Option<Value>,
     failed: bool,
 }
+#[cfg(unix)]
 impl Client {
     pub fn disconnect(&mut self) {
         self.stream.take();
@@ -308,7 +307,7 @@ impl Client {
         let meta = fs::symlink_metadata(&path)?;
         if !meta.is_file()
             || meta.mode() & 0o777 != 0o600
-            || meta.uid() != rustix::process::getuid().as_raw()
+            || meta.uid() != crate::platform::ipc::current_uid()
             || meta.len() > 4096
         {
             return Err(io::Error::other("invalid private locator"));
@@ -396,5 +395,28 @@ impl Client {
                 json!({"ok":false,"error":{"code":"bridge_unavailable","message":"Selected owner transport unavailable or retired. Outcome may be unknown; do not replay. New explicit editor consent is required."}})
             }
         }
+    }
+}
+
+#[cfg(not(unix))]
+pub struct Client;
+#[cfg(not(unix))]
+impl Client {
+    pub fn disconnect(&mut self) {}
+    pub fn available(&self) -> bool {
+        false
+    }
+    pub fn identify(&mut self, _client: Value) {}
+    pub fn native_pid(&self) -> u32 {
+        0
+    }
+    pub fn binding(&self) -> Value {
+        Value::Null
+    }
+    pub fn open(_path: PathBuf) -> io::Result<Self> {
+        Err(crate::platform::ipc::unsupported())
+    }
+    pub fn call(&mut self, _operation: &str, _arguments: &Value) -> Value {
+        json!({"ok":false,"error":{"code":"bridge_unavailable","message":"Local editor IPC is not yet implemented on this platform."}})
     }
 }

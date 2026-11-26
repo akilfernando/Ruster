@@ -18,6 +18,7 @@ mod editor_theme;
 mod focus;
 mod input_ui;
 mod manipulation;
+mod platform;
 mod recovery;
 mod recovery_ui;
 mod recovery_worker;

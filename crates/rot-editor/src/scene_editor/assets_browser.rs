@@ -59,11 +59,8 @@ pub(super) fn asset_glyph(kind: &str) -> &'static str {
 pub(super) fn pick_asset_files(ctx: egui::Context) -> mpsc::Receiver<Vec<PathBuf>> {
     let (send, receive) = mpsc::sync_channel(1);
     std::thread::spawn(move || {
-        let picked = rfd::FileDialog::new()
-            .set_title(Text::ImportAssets.plain())
-            .add_filter("Assets", &IMPORTABLE)
-            .pick_files()
-            .unwrap_or_default();
+        let picked =
+            crate::platform::dialogs::pick_files(Text::ImportAssets.plain(), "Assets", &IMPORTABLE);
         let _ = send.send(picked);
         ctx.request_repaint();
     });

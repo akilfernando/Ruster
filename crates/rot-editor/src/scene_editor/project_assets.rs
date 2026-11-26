@@ -1,30 +1,23 @@
 //! Watch the open Linux project's Assets tree without polling the filesystem.
 use crate::behavior_files::LaunchSpec;
+use crate::platform::watcher::{wake_channel, AssetWatcher, WakeReceiver, WakeSender};
 use eframe::egui::Context;
 use rot_assets::{AssetKind, AssetStatus, AssetStore, PrefabFile, ProjectFileIssue};
-use rustix::event::{poll, PollFd, PollFlags};
 use rustix::fd::OwnedFd;
-use rustix::fs::{
-    self as at,
-    inotify::{self, ReadFlags, WatchFlags},
-};
+use rustix::fs as at;
 use rustix::io::Errno;
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::{self, Read, Write};
-use std::mem::MaybeUninit;
-use std::os::{
-    fd::AsRawFd,
-    unix::{fs::MetadataExt, net::UnixStream},
-};
+use std::os::{fd::AsRawFd, unix::fs::MetadataExt};
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc::{self, Receiver, SyncSender},
     Arc, Mutex,
 };
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 pub(super) struct Snapshot {
     pub(super) store: AssetStore,
@@ -126,7 +119,7 @@ enum Job {
 
 pub(super) struct ProjectAssets {
     // Both a wakeup for queued imports and a shutdown signal when dropped.
-    signal: UnixStream,
+    signal: WakeSender,
     jobs: SyncSender<Job>,
     active: Arc<AtomicBool>,
     latest: Mailbox,
@@ -134,9 +127,7 @@ pub(super) struct ProjectAssets {
 
 impl ProjectAssets {
     pub(super) fn start(root: PathBuf, context: &Context) -> io::Result<Self> {
-        let (signal, wake) = UnixStream::pair()?;
-        signal.set_nonblocking(true)?;
-        wake.set_nonblocking(true)?;
+        let (signal, wake) = wake_channel()?;
         let (jobs, queued) = mpsc::sync_channel(1);
         let active = Arc::new(AtomicBool::new(true));
         let latest = Mailbox::default();
@@ -219,14 +210,7 @@ impl ProjectAssets {
             mpsc::TrySendError::Full(_) => "Another asset operation is waiting.",
             mpsc::TrySendError::Disconnected(_) => "The project asset worker is unavailable.",
         })?;
-        loop {
-            match (&self.signal).write(&[1]) {
-                Ok(_) => return Ok(()),
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => return Err(error.to_string()),
-            }
-        }
+        self.signal.signal().map_err(|error| error.to_string())
     }
 
     pub(super) fn take_update(&self) -> Option<Update> {
@@ -245,7 +229,7 @@ impl Drop for ProjectAssets {
 
 fn run(
     root: &Path,
-    wake: &UnixStream,
+    wake: &WakeReceiver,
     active: &AtomicBool,
     queued: &Receiver<Job>,
     context: &Context,
@@ -259,9 +243,7 @@ fn run(
             current.is_dir() && current.ino() == metadata.ino() && current.dev() == metadata.dev()
         })
     };
-    let fd = inotify::init(inotify::CreateFlags::CLOEXEC | inotify::CreateFlags::NONBLOCK)
-        .map_err(|err| err.to_string())?;
-    let watcher = WatchTree::new(&fd, &root);
+    let watcher = AssetWatcher::new(&root);
     let attached = || active.load(Ordering::Acquire);
     let active = || attached() && same_root();
     let mut store = AssetStore::open(&root).map_err(|err| err.to_string())?;
@@ -426,8 +408,7 @@ fn run(
                 .map(ToString::to_string)
         });
         let state = store.state_identity();
-        let mut folders: Vec<_> = watcher.paths.values().cloned().collect();
-        folders.sort_unstable();
+        let folders = watcher.folders();
         if delivered.as_ref().is_none_or(
             |(previous, previous_issues, previous_warning, previous_folders, previous_prefabs)| {
                 previous != &state
@@ -560,7 +541,7 @@ fn ensure_assets(root: &fs::File, folder: &Path) -> Result<(), String> {
 fn file_action(
     store: &mut AssetStore,
     held_root: &fs::File,
-    watcher: &mut WatchTree<'_>,
+    watcher: &mut AssetWatcher,
     action: FileAction,
     active: impl Fn() -> bool,
 ) -> Result<PathBuf, String> {
@@ -1313,174 +1294,11 @@ fn copy_source(
     unreachable!()
 }
 
-struct WatchTree<'a> {
-    fd: &'a OwnedFd,
-    root: &'a Path,
-    watch_root: i32,
-    paths: BTreeMap<i32, PathBuf>,
-}
-
-const CHANGES: WatchFlags = WatchFlags::CLOSE_WRITE
-    .union(WatchFlags::CREATE)
-    .union(WatchFlags::DELETE)
-    .union(WatchFlags::MOVE)
-    .union(WatchFlags::DELETE_SELF)
-    .union(WatchFlags::MOVE_SELF)
-    .union(WatchFlags::DONT_FOLLOW)
-    .union(WatchFlags::ONLYDIR);
-
-impl<'a> WatchTree<'a> {
-    fn new(fd: &'a OwnedFd, root: &'a Path) -> io::Result<Self> {
-        let mut tree = Self {
-            fd,
-            root,
-            watch_root: inotify::add_watch(fd, root, CHANGES)?,
-            paths: BTreeMap::new(),
-        };
-        tree.rebuild()?;
-        Ok(tree)
-    }
-
-    fn rebuild(&mut self) -> io::Result<()> {
-        let mut next = BTreeMap::new();
-        let mut directories = vec![PathBuf::from("Assets")];
-        while let Some(relative) = directories.pop() {
-            let dir = self.root.join(&relative);
-            match inotify::add_watch(self.fd, &dir, CHANGES) {
-                Ok(watch) => {
-                    next.insert(watch, relative.clone());
-                }
-                Err(Errno::NOENT | Errno::NOTDIR | Errno::LOOP) => continue,
-                Err(err) => return Err(err.into()),
-            }
-            let entries = match fs::read_dir(&dir) {
-                Ok(entries) => entries,
-                Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
-                Err(err) => return Err(err),
-            };
-            for entry in entries {
-                let entry = entry?;
-                if entry.file_type()?.is_dir()
-                    && !entry.file_name().to_string_lossy().starts_with('.')
-                {
-                    directories.push(relative.join(entry.file_name()));
-                }
-            }
-        }
-        for watch in self.paths.keys().filter(|watch| !next.contains_key(watch)) {
-            let _ = inotify::remove_watch(self.fd, *watch);
-        }
-        self.paths = next;
-        Ok(())
-    }
-
-    fn wait(&mut self, mut wake: &UnixStream) -> io::Result<Option<BTreeSet<PathBuf>>> {
-        let mut changed = BTreeSet::new();
-        let mut tree_changed = false;
-        let mut deadline: Option<Instant> = None;
-        let mut buffers = [MaybeUninit::uninit(); 8192];
-        loop {
-            let timeout = match deadline {
-                None => -1,
-                Some(deadline) => {
-                    let remaining = deadline.saturating_duration_since(Instant::now());
-                    if remaining.is_zero() {
-                        break;
-                    }
-                    remaining.as_millis().clamp(1, 35) as i32
-                }
-            };
-            let mut fds = [
-                PollFd::new(wake, PollFlags::IN),
-                PollFd::new(self.fd, PollFlags::IN),
-            ];
-            match poll(&mut fds, timeout) {
-                Ok(0) => break,
-                Ok(_) if fds[0].revents().intersects(PollFlags::HUP | PollFlags::ERR) => {
-                    return Ok(None);
-                }
-                Ok(_) if fds[0].revents().contains(PollFlags::IN) => match wake.read(&mut [0]) {
-                    Ok(0) => return Ok(None),
-                    Ok(_) => break,
-                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                    Err(error) => return Err(error),
-                },
-                Ok(_) => {}
-                Err(Errno::INTR) => continue,
-                Err(err) => return Err(err.into()),
-            }
-            if !fds[1].revents().contains(PollFlags::IN) {
-                return Err(io::Error::other("The asset watcher stopped."));
-            }
-            let mut reader = inotify::Reader::new(self.fd, &mut buffers);
-            loop {
-                let event = match reader.next() {
-                    Ok(event) => event,
-                    Err(Errno::AGAIN) => break,
-                    Err(Errno::INTR) => continue,
-                    Err(err) => return Err(err.into()),
-                };
-                let flags = event.events();
-                if event.wd() == self.watch_root
-                    && flags.intersects(ReadFlags::DELETE_SELF | ReadFlags::MOVE_SELF)
-                {
-                    return Err(io::Error::other("The project folder moved or was removed."));
-                }
-                let name = event.file_name().and_then(|name| name.to_str().ok());
-                if flags.contains(ReadFlags::QUEUE_OVERFLOW)
-                    || event.wd() == self.watch_root && name == Some("Assets")
-                {
-                    tree_changed = true;
-                    changed.insert(PathBuf::from("Assets"));
-                    continue;
-                }
-                if event.wd() == self.watch_root && name == Some(".rot-assets.json") {
-                    changed.insert(PathBuf::from(".rot-assets.json"));
-                    continue;
-                }
-                let Some(directory) = self.paths.get(&event.wd()) else {
-                    continue;
-                };
-                if flags.intersects(ReadFlags::DELETE_SELF | ReadFlags::MOVE_SELF) {
-                    tree_changed = true;
-                    changed.insert(directory.clone());
-                } else if let Some(name) = name.filter(|name| !name.starts_with('.')) {
-                    if flags.contains(ReadFlags::ISDIR) {
-                        tree_changed = true;
-                        changed.insert(directory.join(name));
-                    } else {
-                        let source = name.strip_suffix(".rotmeta").unwrap_or(name);
-                        if source.ends_with(".obj")
-                            || source.ends_with(".glb")
-                            || source.ends_with(".gltf")
-                            || source.ends_with(".bin")
-                            || source.ends_with(".png")
-                            || source.ends_with(".jpg")
-                            || source.ends_with(".jpeg")
-                            || source.ends_with(".wav")
-                            || source.ends_with(".lua")
-                            || source.ends_with(".prefab")
-                        {
-                            changed.insert(directory.join(source));
-                        }
-                    }
-                }
-            }
-            if !changed.is_empty() {
-                deadline.get_or_insert_with(|| Instant::now() + Duration::from_millis(100));
-            }
-        }
-        if tree_changed {
-            self.rebuild()?;
-        }
-        Ok(Some(changed))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
+    use std::time::Duration;
 
     #[test]
     fn reimport_recovers_spot_from_same_bytes_without_auto_upgrading_catalog() {

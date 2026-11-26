@@ -6,21 +6,24 @@
 //! The checks below keep out other users and accidental damage.
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::{self, Write};
+use std::io;
+#[cfg(unix)]
+use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 /// Untrusted entries kept; older ones are dropped so the file stays small.
+#[cfg(unix)]
 const UNTRUSTED_KEPT: usize = 32;
+#[cfg(unix)]
 const MAX_BYTES: u64 = 65536;
 
 pub fn path() -> PathBuf {
-    let config = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
-        .unwrap_or_else(|| PathBuf::from("/nonexistent"));
-    config.join("rot").join("ai-apps.json")
+    crate::platform::dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("/nonexistent"))
+        .join("rot")
+        .join("ai-apps.json")
 }
 
 /// A client name as the adapter reports it: at most 64 bytes of letters,
@@ -63,23 +66,15 @@ pub struct Store {
 
 /// The folder must be a real directory owned by this user that no one else
 /// can write to.
+#[cfg(unix)]
 fn check_directory(directory: &Path) -> io::Result<()> {
-    let meta = fs::symlink_metadata(directory)?;
-    if !meta.is_dir()
-        || meta.uid() != rustix::process::getuid().as_raw()
-        || meta.mode() & 0o022 != 0
-    {
-        return Err(io::Error::other(format!(
-            "{} must be a folder only you can change",
-            directory.display()
-        )));
-    }
-    Ok(())
+    crate::platform::ipc::check_private_dir_writable_only_by_owner(directory)
 }
 
 impl Store {
     /// The store, `None` when there is no file yet, or an error when the file
     /// or its folder is not private to this user or cannot be read.
+    #[cfg(unix)]
     pub fn read(path: &Path) -> io::Result<Option<Self>> {
         let meta = match fs::symlink_metadata(path) {
             Ok(meta) => meta,
@@ -89,7 +84,7 @@ impl Store {
         check_directory(path.parent().ok_or_else(|| io::Error::other("no parent"))?)?;
         if !meta.is_file()
             || meta.mode() & 0o077 != 0
-            || meta.uid() != rustix::process::getuid().as_raw()
+            || meta.uid() != crate::platform::ipc::current_uid()
             || meta.len() > MAX_BYTES
         {
             return Err(io::Error::other(format!(
@@ -98,6 +93,11 @@ impl Store {
             )));
         }
         Ok(Some(serde_json::from_slice(&fs::read(path)?)?))
+    }
+
+    #[cfg(not(unix))]
+    pub fn read(_path: &Path) -> io::Result<Option<Self>> {
+        Err(crate::platform::ipc::unsupported())
     }
 
     /// For trust decisions: anything unreadable trusts nobody.
@@ -123,6 +123,7 @@ impl Store {
 
     /// Change the store under an exclusive lock and replace it atomically.
     /// A file that exists but cannot be read is left alone, not overwritten.
+    #[cfg(unix)]
     fn update<T>(path: &Path, change: impl FnOnce(&mut Self) -> T) -> io::Result<T> {
         let directory = path.parent().ok_or_else(|| io::Error::other("no parent"))?;
         fs::DirBuilder::new()
@@ -164,6 +165,7 @@ impl Store {
     }
 
     /// The adapter's token for `name`, creating an untrusted entry if needed.
+    #[cfg(unix)]
     pub fn token_for(path: &Path, name: &str) -> io::Result<String> {
         if let Some(app) = Self::read(path)?
             .unwrap_or_default()
@@ -189,7 +191,13 @@ impl Store {
         })
     }
 
+    #[cfg(not(unix))]
+    pub fn token_for(_path: &Path, _name: &str) -> io::Result<String> {
+        Err(crate::platform::ipc::unsupported())
+    }
+
     /// Allow Always: trust this name with this token from now on.
+    #[cfg(unix)]
     pub fn allow(path: &Path, name: &str, token: &str) -> io::Result<()> {
         Self::update(path, |store| {
             store.apps.retain(|a| a.name != name);
@@ -201,13 +209,24 @@ impl Store {
         })
     }
 
+    #[cfg(not(unix))]
+    pub fn allow(_path: &Path, _name: &str, _token: &str) -> io::Result<()> {
+        Err(crate::platform::ipc::unsupported())
+    }
+
     /// Revoke: forget the app, so its next connection asks again.
+    #[cfg(unix)]
     pub fn revoke(path: &Path, name: &str) -> io::Result<()> {
         Self::update(path, |store| store.apps.retain(|a| a.name != name))
     }
+
+    #[cfg(not(unix))]
+    pub fn revoke(_path: &Path, _name: &str) -> io::Result<()> {
+        Err(crate::platform::ipc::unsupported())
+    }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;

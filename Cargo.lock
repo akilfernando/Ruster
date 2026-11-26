@@ -3248,7 +3248,6 @@ dependencies = [
  "png",
  "rot-scene",
  "rot-support",
- "rustix 0.38.44",
  "serde",
  "serde_json",
  "tempfile",

@@ -978,15 +978,8 @@ impl BuildUi {
     }
 
     fn open_in_file_manager(path: &Path) -> Result<(), Text> {
-        match std::process::Command::new("xdg-open").arg(path).spawn() {
-            Ok(mut child) => {
-                std::thread::spawn(move || {
-                    let _ = child.wait();
-                });
-                Ok(())
-            }
-            Err(_) => Err(Text::AssetOpenFileManagerError),
-        }
+        crate::platform::shell::open_in_file_manager(path)
+            .map_err(|_| Text::AssetOpenFileManagerError)
     }
 
     fn launch(application: &Path) -> BuildOutcome {

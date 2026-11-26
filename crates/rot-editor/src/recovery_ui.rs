@@ -99,14 +99,10 @@ impl RecoveryUi {
             path.parent()
                 .ok_or("Editor state has no parent directory.")?
                 .join("recovery")
-        } else if let Some(path) = std::env::var_os("XDG_STATE_HOME") {
-            PathBuf::from(path).join("rot/recovery")
+        } else if let Some(path) = rot_support::platform::dirs::state_dir_raw() {
+            path.join("rot").join("recovery")
         } else {
-            PathBuf::from(
-                std::env::var_os("HOME")
-                    .ok_or("Cannot locate local recovery storage; set ROT_RECOVERY_DIR.")?,
-            )
-            .join(".local/state/rot/recovery")
+            return Err("Cannot locate local recovery storage; set ROT_RECOVERY_DIR.".into());
         };
         if !root.is_absolute() {
             return Err("Recovery directory must be absolute; set ROT_RECOVERY_DIR.".into());

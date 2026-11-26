@@ -31,13 +31,13 @@ One line each. Anyone may add; the user or a planning pass orders them.
 - Idle repaints: an open scene repaints ~3 frames per 10 s (0.2% CPU); track under
   Phase 3A/5A polish.
 
-## Now — Pre-Phase 3 Gate
+## Now — Phase 3A: Look (PBR & Scene Scale)
 
-`C-EXIT` passed on `2026-11-26`. Land `P-03` before starting Phase 3A (`L-01`).
+`C-EXIT` and `P-03` passed on `2026-11-26`. Start Phase 3A with `L-01` below.
 
 | Package | Outcome | Status & remaining gap |
 | --- | --- | --- |
-| `P-03` Platform seams & Windows CI | Protect `A11` immediately after Phase 2 exit before Phase 3/4 work begins. | `open` · Extract `rustix`, Unix sockets, `inotify` watcher, `rfd` target features, `xdg-open`, and OS dirs into platform modules; add a `windows-latest` `cargo check --workspace` CI job. |
+| `L-01` Material asset files (`Assets/*.material.json`) | Move materials from scene-embedded JSON into first-class file-backed `Assets/` assets (Size M, *brief needed*). | `open` · Design and implement `.material.json` asset import/save/reload/Inspector binding without breaking v23 compatibility. |
 
 ## Later
 
@@ -73,8 +73,12 @@ One line each until their phase is active. See [phases](PARITY-PLAN.md#3-phases)
 See [BACKLOG-2026-11-25](archive/BACKLOG-2026-11-25.md) for full details on
 completed packages:
 
-- **Phase 1 — Shell (done 2026-11-17–19):** `S-01`–`S-13`, `T-01`–`T-02`,
+  - **Phase 1 — Shell (done 2026-11-17–19):** `S-01`–`S-13`, `T-01`–`T-02`,
   `A-01`–`A-07`, `P-01`–`P-02`.
+- **Cross-phase hardening:** `P-03` (`2026-11-26`: extracted `rustix`, socket
+  IPC, `inotify` watcher, `rfd` features, file manager open, and OS dirs into
+  `rot_support::platform::{dirs,ipc}`, `rot_editor::platform::{shell,dialogs,watcher}`,
+  and `rot-mcp` child detachment; added `windows-latest` `cargo check --workspace --locked` CI job).
 - **Phase 2 — Core completed packages:** `C-00a` (retired legacy logistics
   crates, Rhai mode, editor logistics UI, and superseded MCP
   enrollment/registry plumbing; promoted `crates/rot-support`), `C-01` (v23

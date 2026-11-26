@@ -4,55 +4,31 @@
 use crate::connection::{self, Locator};
 use std::fs;
 use std::io;
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 /// `$XDG_RUNTIME_DIR/rot`. Some AI apps start MCP servers with a trimmed
 /// environment, so without the variable `/run/user/<uid>` is used when it
 /// exists, else a private folder in the system temporary directory.
 pub fn directory() -> PathBuf {
-    let uid = rustix::process::getuid().as_raw();
-    match std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from) {
-        Some(runtime) if runtime.is_absolute() => runtime.join("rot"),
-        _ if Path::new(&format!("/run/user/{uid}")).is_dir() => {
-            PathBuf::from(format!("/run/user/{uid}/rot"))
-        }
-        _ => std::env::temp_dir().join(format!("rot-{uid}")),
-    }
+    crate::platform::dirs::runtime_dir("rot")
 }
 
 /// Create the directory owner-only, or check that an existing one is ours.
 pub fn prepare(directory: &Path) -> io::Result<()> {
-    match fs::DirBuilder::new().mode(0o700).create(directory) {
-        Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-        Err(error) => return Err(error),
+    #[cfg(unix)]
+    {
+        crate::platform::ipc::create_private_dir(directory)
     }
-    let meta = fs::symlink_metadata(directory)?;
-    if !meta.is_dir() || meta.uid() != rustix::process::getuid().as_raw() {
-        return Err(io::Error::other(format!(
-            "{} is not a directory owned by this user",
-            directory.display()
-        )));
+    #[cfg(not(unix))]
+    {
+        let _ = directory;
+        Err(crate::platform::ipc::unsupported())
     }
-    if meta.mode() & 0o777 != 0o700 {
-        fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
-    }
-    Ok(())
 }
 
 /// Start time of a live process, used to tell a reused process ID apart.
 pub fn process_start(pid: u32) -> Option<String> {
-    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    stat.rsplit_once(") ")
-        .and_then(|(_, s)| {
-            let state = s.split_whitespace().next()?;
-            if matches!(state, "Z" | "X") {
-                return None;
-            }
-            s.split_whitespace().nth(19)
-        })
-        .map(str::to_owned)
+    crate::platform::ipc::process_start(pid)
 }
 
 /// One running editor, as read from its record.
@@ -179,14 +155,14 @@ pub fn find(running: &[Running], target: &str, cwd: Option<&Path>) -> Vec<Runnin
         .collect()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
     fn record(directory: &Path, pid: u32, started: Option<String>, project: &Path) {
         let mut locator: Locator = serde_json::from_value(serde_json::json!({
             "wire":connection::WIRE,"incarnation":"i","generation":"g","connection":"c",
-            "pid":pid,"uid":rustix::process::getuid().as_raw(),
+            "pid":pid,"uid":crate::platform::ipc::current_uid(),
             "directory_dev":0,"directory_ino":0,"socket_dev":0,"socket_ino":0}))
         .unwrap();
         locator.project = Some(project.to_path_buf());
