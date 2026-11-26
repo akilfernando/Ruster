@@ -41,7 +41,7 @@ cuts below in order.
 | Package | Outcome | Status & remaining gap |
 | --- | --- | --- |
 | `C-10` Unified file-backed Lua API | One persistent-VM Lua component API (`A8`) with live reload on save. | `in progress — Codex (Astra/Sol), 2026-11-26` · Replace `host API1`–`7` and per-tick scene cloning with one growing component API (`on_start`, `on_update`, `find`, `spawn`, `destroy`, component access) and live reload on save. |
-| `C-EXIT` Phase 2 reference project & gate | Prove Phase 2 end-to-end on a tracked reference level within budgets. | `in progress — Codex (Astra/Sol), 2026-11-26` · [Rot Yard](../examples/rot-yard/README.md) tracks the CC0 pack, Blender gate and 5,000-object prefab level. Lift prototype caps (`16 MiB` GLB, `32k` tris, `2048` px edge) per `A12`; measure 50 MB import, address fresh-cache player RSS and run the full UI checklist. The 5,000-object desktop pan exceeded 60 fps. Refresh the local install. |
+| `C-EXIT` Phase 2 reference project & gate | Prove Phase 2 end-to-end on a tracked reference level within budgets. | `in progress — Codex (Astra/Sol), 2026-11-26` · [Rot Yard](../examples/rot-yard/README.md) tracks the CC0 pack, Blender gate and 5,000-object prefab level. The 50 MB GLB import and 5,000-object desktop pan met their budgets. Lift the `2048` px texture cap per `A12`, address fresh-cache player RSS, run the full UI checklist, and refresh the local install. |
 | `P-03` Platform seams & Windows CI | Protect `A11` immediately after Phase 2 exit before Phase 3/4 work begins. | `open` · Extract `rustix`, Unix sockets, `inotify` watcher, `rfd` target features, `xdg-open`, and OS dirs into platform modules; add a `windows-latest` `cargo check --workspace` CI job. |
 
 ## Later

@@ -477,11 +477,11 @@ fn catalog_and_resolved_payload_limits_preserve_previous_state() {
     );
     let root = project();
     let mut source = String::from("v 0 0 0\nv 1 0 0\nv 0 1 0\n");
-    source.push_str(&"f 1 2 3\n".repeat(32_768));
+    source.push_str(&"f 1 2 3\n".repeat(rot_assets::MAX_TRIANGLES));
     fs::write(root.path().join("mesh.obj"), source).unwrap();
     let mut store = AssetStore::open(root.path()).unwrap();
-    let per_mesh =
-        98_304 * (std::mem::size_of::<rot_assets::Vertex>() + std::mem::size_of::<u32>());
+    let per_mesh = rot_assets::MAX_VERTICES
+        * (std::mem::size_of::<rot_assets::Vertex>() + std::mem::size_of::<u32>());
     let accepted = rot_assets::MAX_RESOLVED_BYTES / per_mesh;
     for i in 0..accepted {
         let source = format!("large-{i}.obj");
@@ -492,7 +492,10 @@ fn catalog_and_resolved_payload_limits_preserve_previous_state() {
         .import("overflow", "mesh.obj")
         .unwrap_err()
         .to_string()
-        .contains("48 MiB"));
+        .contains(&format!(
+            "{} MiB",
+            rot_assets::MAX_RESOLVED_BYTES / (1024 * 1024)
+        )));
     assert_eq!(store.inspect().len(), accepted);
     assert_eq!(store.revision(), accepted as u64);
     assert_eq!(

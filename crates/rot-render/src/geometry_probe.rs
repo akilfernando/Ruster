@@ -12,19 +12,55 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue) {
         rot_assets::MAX_VERTICES,
         rot_assets::MAX_TRIANGLES * 3,
     ));
-    verify_case(device, queue, "near", vec![plain.clone(); 18]);
-    let mut exact = vec![plain.clone(); 18];
-    exact.push(Arc::new(mesh(false, 32767, 6)));
+    let budget = rot_assets::MAX_RESOLVED_BYTES;
+    let plain_count = budget / plain.payload_bytes();
+    verify_case(device, queue, "near", vec![plain.clone(); plain_count]);
+    // Without UVs every vertex costs 24 bytes and each triangle costs 12.
+    let plain_limit = budget - budget % 12;
+    let mut near_plain = vec![plain.clone(); plain_count];
+    let remaining = plain_limit - plain_count * plain.payload_bytes();
+    if remaining != 0 {
+        let indices = if remaining.is_multiple_of(24) { 6 } else { 3 };
+        near_plain.push(Arc::new(mesh(
+            false,
+            (remaining - indices * 4) / 24,
+            indices,
+        )));
+    }
     assert_eq!(
-        exact.iter().map(|mesh| mesh.payload_bytes()).sum::<usize>(),
-        rot_assets::MAX_RESOLVED_BYTES
+        near_plain
+            .iter()
+            .map(|mesh| mesh.payload_bytes())
+            .sum::<usize>(),
+        plain_limit
     );
-    verify_case(device, queue, "exact-plain", exact);
-    let mut mixed = vec![plain; 8];
-    mixed.extend(vec![uv; 8]);
+    verify_case(device, queue, "near-plain", near_plain);
+
+    let pair_bytes = plain.payload_bytes() + uv.payload_bytes();
+    let pair_count = budget / pair_bytes;
+    let mut mixed = vec![plain; pair_count];
+    mixed.extend(vec![uv; pair_count]);
+    let remaining = budget % pair_bytes;
+    if remaining != 0 {
+        // A UV-complete vertex costs 32 bytes. Up to 8 triangles supply
+        // every multiple-of-four index remainder modulo 32.
+        let indices = (1..=8)
+            .map(|triangles| triangles * 3)
+            .find(|&indices| {
+                remaining
+                    .checked_sub(indices * 4)
+                    .is_some_and(|bytes| bytes.is_multiple_of(32))
+            })
+            .unwrap();
+        mixed.push(Arc::new(mesh(
+            true,
+            (remaining - indices * 4) / 32,
+            indices,
+        )));
+    }
     assert_eq!(
         mixed.iter().map(|mesh| mesh.payload_bytes()).sum::<usize>(),
-        rot_assets::MAX_RESOLVED_BYTES
+        budget
     );
     verify_case(device, queue, "exact-mixed", mixed);
 }
@@ -61,7 +97,7 @@ fn verify_case(
 ) {
     use egui_wgpu::CallbackTrait;
     let count = meshes.len();
-    let columns = if count <= 18 { 6 } else { 7 };
+    let columns = count.div_ceil(3).max(6);
     let width = columns * 64;
     let cpu_bytes = meshes
         .iter()

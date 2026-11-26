@@ -51,9 +51,10 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   - `C-EXIT`: [Rot Yard](../examples/rot-yard/README.md) has a scripted Blender
     gate, a Kenney CC0 pack, and a 5,000-object linked-prefab level.
     The Riverside scene exceeded 60 fps on the focused Wayland desktop.
-    A 150,152-triangle GLB panel now imports, reopens and renders in a
-    relocated build with indexed geometry. The 50 MB model, larger textures,
-    fresh-cache player memory, UI checklist, and local install remain open.
+    The 50.7 MB, 12-panel GLB met the 3 s import budget and retained
+    1,801,824 triangles through Save, reopen, and a relocated build.
+    Larger textures, fresh-cache player memory, the UI checklist, and
+    the local install refresh remain open.
 
 ## What a creator can do today
 
@@ -78,9 +79,8 @@ previous build is in `~/.local/share/rot-engine/previous` for `--rollback`.
 - An editor serves one AI adapter at a time; a second waits or fails.
 - External leftovers outside this repo still use pre-rename names: two MCP
   entries in `~/.codex/config.toml` and `~/Projects/Ruster-Creations`.
-- Unverified gates: full Phase 1 [UI checklist](UX-STANDARDS.md#10-ui-review-checklist),
-  physical pointer/gizmo display latency, and the Phase 2 budget for importing
-  a 50 MB model. A 50.7 MB geometry fixture hit the 16 MiB GLB source
-  cap before parsing. The empty windowed player reaches `127.0 MiB` median
+- Unverified gates include the full [UI checklist](UX-STANDARDS.md#10-ui-review-checklist)
+  and physical pointer/gizmo display latency. The empty windowed
+  player reaches `127.0 MiB` median
   peak RSS after warmup. Its fresh-cache launch used `163.6 MiB`, above
   the `150 MB` target.

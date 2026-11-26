@@ -413,10 +413,11 @@ fn content_rejects_missing_references_and_invalid_mesh_before_rendering() {
     );
     Content::new(plain_scene.clone(), meshes.clone()).unwrap();
     meshes.insert("overflow".into(), content.meshes()["triangle"].clone());
+    let geometry_budget = format!("{} MiB", rot_assets::MAX_RESOLVED_BYTES / (1024 * 1024));
     assert!(Content::new(plain_scene.clone(), meshes.clone())
         .err()
         .unwrap()
-        .contains("48 MiB"));
+        .contains(&geometry_budget));
     // Mesh validation/budget precede texture validation, while all geometry
     // validation precedes the mesh budget in the existing Content contract.
     assert!(Content::with_textures(
@@ -426,7 +427,7 @@ fn content_rejects_missing_references_and_invalid_mesh_before_rendering() {
     )
     .err()
     .unwrap()
-    .contains("48 MiB"));
+    .contains(&geometry_budget));
     let mut invalid_mesh = triangle.clone();
     invalid_mesh.indices[0] = u32::MAX;
     meshes.insert("zz-invalid".into(), Arc::new(invalid_mesh));

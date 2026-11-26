@@ -20,7 +20,7 @@ pub const MAX_VERTICES: usize = MAX_TRIANGLES * 3;
 const MAX_MESH_TRIANGLES: usize = 192 * 1024;
 const MAX_MESH_VERTICES: usize = MAX_MESH_TRIANGLES * 3;
 const MAX_MODEL_ITEMS: usize = 64;
-pub const MAX_RESOLVED_BYTES: usize = 48 * 1024 * 1024;
+pub const MAX_RESOLVED_BYTES: usize = 64 * 1024 * 1024;
 mod audio;
 use audio::SOUND_CACHE_VERSION;
 mod glb;
@@ -97,6 +97,12 @@ impl Mesh {
         (!self.has_complete_uvs())
             .then_some("UVs missing/incomplete; textured materials require a complete UV set")
     }
+}
+
+fn checked_payload_bytes(current: usize, additional: usize, limit: usize) -> Option<usize> {
+    current
+        .checked_add(additional)
+        .filter(|&total| total <= limit)
 }
 
 /// Immutable interpretation selected when a mesh asset identity is imported.
@@ -997,10 +1003,15 @@ impl AssetStore {
                     .iter()
                     .filter(|(key, _)| key.as_str() != id)
                     .map(|(_, mesh)| mesh.payload_bytes())
-                    .sum::<usize>()
-                    + mesh.payload_bytes();
-                if total > MAX_RESOLVED_BYTES {
-                    return Err(error("resolved mesh payload exceeds 48 MiB project limit"));
+                    .chain(std::iter::once(mesh.payload_bytes()))
+                    .try_fold(0, |total, bytes| {
+                        checked_payload_bytes(total, bytes, MAX_RESOLVED_BYTES)
+                    });
+                if total.is_none() {
+                    return Err(error(format!(
+                        "resolved mesh payload exceeds {} MiB project limit",
+                        MAX_RESOLVED_BYTES / (1024 * 1024)
+                    )));
                 }
             }
             Payload::Texture(texture) => {

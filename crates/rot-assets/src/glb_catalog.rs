@@ -608,31 +608,39 @@ impl AssetStore {
     }
 
     fn check_model_budget(&self, model: &DecodedModel) -> Result<(), AssetError> {
+        let over_budget =
+            || error("GLB resources exceed the project's aggregate mesh or texture payload limits");
         let mut mesh_bytes = self
             .meshes
             .iter()
             .filter(|(id, _)| !model.resources.contains_key(*id))
             .map(|(_, mesh)| mesh.payload_bytes())
-            .sum::<usize>();
+            .try_fold(0, |total, bytes| {
+                checked_payload_bytes(total, bytes, MAX_RESOLVED_BYTES)
+            })
+            .ok_or_else(over_budget)?;
         let mut texture_bytes = self
             .textures
             .iter()
             .filter(|(id, _)| !model.resources.contains_key(*id))
             .map(|(_, texture)| texture.payload_bytes())
-            .sum::<usize>();
+            .try_fold(0, |total, bytes| {
+                checked_payload_bytes(total, bytes, MAX_TEXTURE_RESOLVED_BYTES)
+            })
+            .ok_or_else(over_budget)?;
         for resource in model.resources.values() {
-            match &resource.payload {
-                Payload::Mesh(mesh) => mesh_bytes += mesh.payload_bytes(),
-                Payload::Texture(texture) => texture_bytes += texture.payload_bytes(),
+            let (total, bytes, limit) = match &resource.payload {
+                Payload::Mesh(mesh) => (&mut mesh_bytes, mesh.payload_bytes(), MAX_RESOLVED_BYTES),
+                Payload::Texture(texture) => (
+                    &mut texture_bytes,
+                    texture.payload_bytes(),
+                    MAX_TEXTURE_RESOLVED_BYTES,
+                ),
                 Payload::Sound(_) | Payload::Script(_) => {
                     return Err(error("GLB cannot own external source assets"))
                 }
-            }
-        }
-        if mesh_bytes > MAX_RESOLVED_BYTES || texture_bytes > MAX_TEXTURE_RESOLVED_BYTES {
-            return Err(error(
-                "GLB resources exceed the project's aggregate mesh or texture payload limits",
-            ));
+            };
+            *total = checked_payload_bytes(*total, bytes, limit).ok_or_else(over_budget)?;
         }
         Ok(())
     }

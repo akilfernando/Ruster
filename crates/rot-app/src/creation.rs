@@ -2041,16 +2041,23 @@ mod tests {
         let large_obj = "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\n".to_owned()
             + &"f 1/1 2/2 3/3\n".repeat(rot_assets::MAX_TRIANGLES);
         assert!(large_obj.len() <= rot_assets::MAX_SOURCE_BYTES);
+        let mesh_bytes = rot_assets::parse_obj(large_obj.as_bytes())
+            .unwrap()
+            .payload_bytes();
+        let budget = rot_assets::MAX_RESOLVED_BYTES;
+        let first_over_budget = budget / mesh_bytes + 1;
+        let geometry_budget = format!("{} MiB", budget / (1024 * 1024));
         std::fs::write(directory.path().join("large.obj"), large_obj).unwrap();
         let mut over_meshes = manifest.clone();
         over_meshes.textures.clear();
         over_meshes.texture_roles = Some(BTreeMap::new());
-        over_meshes.meshes = (1..=15)
+        over_meshes.meshes = (1..=first_over_budget)
             .map(|index| (format!("m{index:02}"), "large.obj".into()))
             .collect();
-        over_meshes
-            .meshes
-            .insert("m16".into(), "after-budget.obj".into());
+        over_meshes.meshes.insert(
+            format!("m{:02}", first_over_budget + 1),
+            "after-budget.obj".into(),
+        );
         over_meshes.mesh_normal_policies = over_meshes
             .meshes
             .keys()
@@ -2060,8 +2067,8 @@ mod tests {
         assert!(
             texture_error.contains("64 MiB")
                 && texture_error.contains("t04")
-                && mesh_error.contains("48 MiB")
-                && mesh_error.contains("m15"),
+                && mesh_error.contains(&geometry_budget)
+                && mesh_error.contains(&format!("m{first_over_budget:02}")),
             "first-crossing texture error {texture_error:?}; mesh error {mesh_error:?}"
         );
         assert!(!directory.path().join(".rot-assets.json").exists());

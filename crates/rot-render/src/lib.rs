@@ -3338,7 +3338,7 @@ fn scene_pipeline_format(
     }
 }
 
-/// Engine-owned geometry: fixed renderer overhead outside the 48 MiB asset
+/// Engine-owned geometry: fixed renderer overhead outside the imported asset
 /// admission total and the 64-asset closure.
 struct BuiltinMeshes {
     cube: GpuMesh,
@@ -3473,13 +3473,16 @@ fn prepare_mesh(
         return None;
     }
     let candidate_bytes = mesh.payload_bytes() as u64;
-    let retained_bytes = meshes
+    let total_bytes = meshes
         .iter()
         .filter(|(key, _)| key.as_str() != id)
         .map(|(_, gpu)| gpu.bytes)
-        .sum::<u64>();
-    if candidate_bytes + retained_bytes > rot_assets::MAX_RESOLVED_BYTES as u64 {
-        eprintln!("Rot Engine mesh {id} exceeds total 48 MiB mesh payload limit; cube fallback");
+        .try_fold(candidate_bytes, u64::checked_add);
+    if total_bytes.is_none_or(|bytes| bytes > rot_assets::MAX_RESOLVED_BYTES as u64) {
+        eprintln!(
+            "Rot Engine mesh {id} exceeds total {} MiB mesh payload limit; cube fallback",
+            rot_assets::MAX_RESOLVED_BYTES / (1024 * 1024)
+        );
         meshes.remove(id);
         return None;
     }

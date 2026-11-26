@@ -29,7 +29,12 @@ fn checked_mesh_bytes(current: usize, additional: usize) -> Result<usize, String
     current
         .checked_add(additional)
         .filter(|bytes| *bytes <= rot_assets::MAX_RESOLVED_BYTES)
-        .ok_or_else(|| "application meshes exceed 48 MiB resolved geometry".into())
+        .ok_or_else(|| {
+            format!(
+                "application meshes exceed {} MiB resolved geometry",
+                rot_assets::MAX_RESOLVED_BYTES / (1024 * 1024)
+            )
+        })
 }
 
 fn checked_texture_bytes(current: usize, additional: usize) -> Result<usize, String> {

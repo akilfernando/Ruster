@@ -5,6 +5,8 @@ use sha2::{Digest, Sha256};
 use std::io::Cursor;
 
 pub const MAX_TEXTURE_SOURCE_BYTES: usize = 8 * 1024 * 1024;
+// Embedded JPEGs were bounded by the original 16 MiB GLB container limit.
+const MAX_EMBEDDED_JPEG_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_TEXTURE_EDGE: u32 = 2048;
 pub const MAX_TEXTURE_BYTES: usize = 24 * 1024 * 1024;
 pub const MAX_TEXTURE_RESOLVED_BYTES: usize = 64 * 1024 * 1024;
@@ -457,6 +459,9 @@ pub(crate) fn encode_rgb_source(texture: &Texture) -> Result<Vec<u8>, AssetError
 }
 
 fn decode_jpeg_rgb(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), AssetError> {
+    if bytes.len() > MAX_EMBEDDED_JPEG_BYTES {
+        return Err(error("embedded JPEG exceeds the 16 MiB source limit"));
+    }
     use zune_jpeg::zune_core::{
         bytestream::ZCursor, colorspace::ColorSpace, options::DecoderOptions,
     };
@@ -1140,5 +1145,14 @@ pub(crate) mod tests {
         assert_eq!((tex.width, tex.height), (1, 1));
         assert!(tex.mips[0].bytes[0] > 170 && tex.mips[0].bytes[2] < 90);
         assert_eq!(decode_png(&png_bytes).unwrap(), tex);
+
+        let mut embedded = jpeg.to_vec();
+        embedded.resize(MAX_TEXTURE_SOURCE_BYTES + 1, 0);
+        assert_eq!(decode_jpeg(&embedded).unwrap().0, tex);
+        embedded.resize(MAX_EMBEDDED_JPEG_BYTES + 1, 0);
+        assert!(decode_glb_jpeg_roughness(&embedded)
+            .unwrap_err()
+            .0
+            .contains("16 MiB source limit"));
     }
 }

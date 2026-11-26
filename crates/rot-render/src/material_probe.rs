@@ -281,8 +281,8 @@ fn verify_role_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue, gpu: &mut
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
 }
 
-// Source meshes without UVs use24-byte vertices, but the render layout uses32.
-// A valid final GPU closure must be budgeted before any ID-ordered replacement.
+// Applying a size swap in ID order can briefly exceed the budget. Admission
+// checks the requested closure before replacing either GPU mesh.
 fn verify_mesh_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue) {
     let mesh = |count: usize| {
         Arc::new(rot_assets::Mesh {
@@ -299,9 +299,11 @@ fn verify_mesh_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue) {
     };
     let large = mesh(rot_assets::MAX_VERTICES);
     let small = mesh(rot_assets::MAX_VERTICES / 8);
-    assert!(large.payload_bytes() * 14 + small.payload_bytes() <= rot_assets::MAX_RESOLVED_BYTES);
-    assert!(large.payload_bytes() * 15 > rot_assets::MAX_RESOLVED_BYTES);
-    let mut groups = (0..15)
+    let budget = rot_assets::MAX_RESOLVED_BYTES;
+    let large_count = budget / large.payload_bytes();
+    assert!(large.payload_bytes() * large_count + small.payload_bytes() <= budget);
+    assert!(large.payload_bytes() * (large_count + 1) > budget);
+    let mut groups = (0..=large_count)
         .map(|index| DrawGroup {
             double_sided: false,
             key: Some(format!("mesh-{index:02}")),
@@ -321,8 +323,8 @@ fn verify_mesh_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue) {
     let mut assets = asset_gpu::AssetGpu::default();
     let mut gpu = BTreeMap::new();
     let before = assets.plan_mesh(&gpu, &groups).apply(device, &mut gpu);
-    assert_eq!(before.0, 15);
-    assert!(before.1 <= rot_assets::MAX_RESOLVED_BYTES as u64);
+    assert_eq!(before.0, large_count as u64 + 1);
+    assert!(before.1 <= budget as u64);
     queue.submit(std::iter::empty());
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     groups[0].mesh = Some(large.clone());

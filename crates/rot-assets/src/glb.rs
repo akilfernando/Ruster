@@ -11,7 +11,7 @@ pub use punctual::ModelLight;
 mod camera;
 pub use camera::{ModelCamera, ModelOrthographicCamera, ModelPerspectiveCamera};
 
-pub const MAX_GLB_SOURCE_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_GLB_SOURCE_BYTES: usize = 64 * 1024 * 1024;
 pub(super) const MAX_JSON_BYTES: usize = 2 * 1024 * 1024;
 // Match the scene hierarchy qualification bound, including the creator root
 // and the Group placed around an imported mesh that also has children.
@@ -798,7 +798,7 @@ fn embed_image_entries(
             };
             let mime = resolve_image_mime(uri, declared_mime, data_mime);
             let offset = combined.len().next_multiple_of(4);
-            if offset + image_bytes.len() > MAX_GLB_SOURCE_BYTES {
+            if checked_payload_bytes(offset, image_bytes.len(), MAX_GLB_SOURCE_BYTES).is_none() {
                 return Err(error("GLB and external images exceed the model size limit"));
             }
             let index = views.len();
@@ -822,12 +822,14 @@ fn assemble_glb(
     mut combined: Vec<u8>,
 ) -> Result<Vec<u8>, AssetError> {
     let mut json = serde_json::to_vec(document)?;
-    json.resize(json.len().next_multiple_of(4), b' ');
+    let json_len = json
+        .len()
+        .checked_next_multiple_of(4)
+        .filter(|&len| len <= MAX_JSON_BYTES)
+        .ok_or_else(|| error("glTF document exceeds the model size limit"))?;
+    json.resize(json_len, b' ');
     if combined.is_empty() {
         let total = 20 + json.len();
-        if total > MAX_GLB_SOURCE_BYTES || json.len() > MAX_JSON_BYTES {
-            return Err(error("glTF document exceeds the model size limit"));
-        }
         let mut result = Vec::with_capacity(total);
         result.extend(b"glTF");
         result.extend(2_u32.to_le_bytes());
@@ -837,11 +839,10 @@ fn assemble_glb(
         result.extend(json);
         return Ok(result);
     }
-    combined.resize(combined.len().next_multiple_of(4), 0);
-    let total = 28 + json.len() + combined.len();
-    if total > MAX_GLB_SOURCE_BYTES || json.len() > MAX_JSON_BYTES {
-        return Err(error("GLB and external images exceed the model size limit"));
-    }
+    let bin_len = combined.len().next_multiple_of(4);
+    let total = checked_payload_bytes(28 + json.len(), bin_len, MAX_GLB_SOURCE_BYTES)
+        .ok_or_else(|| error("GLB and external images exceed the model size limit"))?;
+    combined.resize(bin_len, 0);
     let mut result = Vec::with_capacity(total);
     result.extend(b"glTF");
     result.extend(2_u32.to_le_bytes());
@@ -876,23 +877,25 @@ pub(super) fn pack_gltf(
             .get("uri")
             .and_then(Value::as_str)
             .ok_or_else(|| error("glTF external or data URI buffer requires a uri"))?;
+        let byte_length = buffer
+            .get("byteLength")
+            .and_then(Value::as_u64)
+            .and_then(|size| usize::try_from(size).ok())
+            .ok_or_else(|| error("invalid glTF buffer byteLength"))?;
+        let offset = combined.len().next_multiple_of(4);
+        if checked_payload_bytes(offset, byte_length, MAX_GLB_SOURCE_BYTES).is_none() {
+            return Err(error("glTF buffers exceed the model size limit"));
+        }
         let data = if uri.starts_with("data:") {
             decode_data_uri(uri)?.1
         } else {
             read_buffer(uri)?
         };
-        let byte_length = buffer
-            .get("byteLength")
-            .and_then(Value::as_u64)
-            .and_then(|size| usize::try_from(size).ok())
-            .filter(|&size| size <= data.len())
+        let buffer = data
+            .get(..byte_length)
             .ok_or_else(|| error("invalid glTF buffer byteLength"))?;
-        let offset = combined.len().next_multiple_of(4);
-        if offset + byte_length > MAX_GLB_SOURCE_BYTES {
-            return Err(error("glTF buffers exceed the model size limit"));
-        }
         combined.resize(offset, 0);
-        combined.extend(&data[..byte_length]);
+        combined.extend_from_slice(buffer);
         buffer_offsets.push(offset);
         buffer_lengths.push(byte_length);
     }
@@ -1261,21 +1264,26 @@ struct Decoder<'a> {
 
 impl Decoder<'_> {
     fn retain(&mut self, id: String, resource: ModelResource) -> Result<(), AssetError> {
-        match &resource.payload {
-            Payload::Mesh(mesh) => self.mesh_bytes += mesh.payload_bytes(),
-            Payload::Texture(texture) => self.texture_bytes += texture.payload_bytes(),
+        let (total, bytes, limit) = match &resource.payload {
+            Payload::Mesh(mesh) => (
+                &mut self.mesh_bytes,
+                mesh.payload_bytes(),
+                MAX_RESOLVED_BYTES,
+            ),
+            Payload::Texture(texture) => (
+                &mut self.texture_bytes,
+                texture.payload_bytes(),
+                MAX_TEXTURE_RESOLVED_BYTES,
+            ),
             Payload::Sound(_) | Payload::Script(_) => {
                 return Err(error("GLB cannot own external source assets"))
             }
-        }
-        if self.mesh_bytes > MAX_RESOLVED_BYTES
-            || self.texture_bytes > MAX_TEXTURE_RESOLVED_BYTES
-            || self.model.resources.len() >= MAX_MODEL_ITEMS
-        {
-            return Err(error(
-                "GLB decoded resources exceed the project payload or asset count limit",
-            ));
-        }
+        };
+        *total = checked_payload_bytes(*total, bytes, limit)
+            .filter(|_| self.model.resources.len() < MAX_MODEL_ITEMS)
+            .ok_or_else(|| {
+                error("GLB decoded resources exceed the project payload or asset count limit")
+            })?;
         self.model.resources.insert(id, resource);
         Ok(())
     }
@@ -2597,6 +2605,26 @@ pub(super) fn decode_accepted(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn gltf_rejects_oversized_buffer_declarations_before_reading_references() {
+        let document = json!({"buffers": [
+            {"uri": "first.bin", "byteLength": 4},
+            {"uri": "too-big.bin", "byteLength": MAX_GLB_SOURCE_BYTES},
+        ]});
+        let diagnostic = pack_gltf(
+            &serde_json::to_vec(&document).unwrap(),
+            |uri| {
+                assert_eq!(uri, "first.bin");
+                Ok(vec![0; 4])
+            },
+            |_| unreachable!(),
+        )
+        .unwrap_err();
+        assert!(diagnostic
+            .0
+            .contains("glTF buffers exceed the model size limit"));
+    }
 
     fn surface_glb(mode: Option<u32>, positions: &[[f32; 3]], indices: Option<&[u16]>) -> Vec<u8> {
         let mut bin: Vec<_> = positions
