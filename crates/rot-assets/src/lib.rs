@@ -11,16 +11,16 @@ use std::{
     sync::Arc,
 };
 
-pub const MAX_SOURCE_BYTES: usize = 1024 * 1024;
+pub const MAX_SOURCE_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_LUA_SOURCE_BYTES: usize = 16 * 1024;
 const MAX_LUA_RESOLVED_BYTES: usize = 16 * 1024 * 1024;
 /// Wavefront OBJ admission limits.
-pub const MAX_TRIANGLES: usize = 32_768;
+pub const MAX_TRIANGLES: usize = 262_144;
 pub const MAX_VERTICES: usize = MAX_TRIANGLES * 3;
-const MAX_MESH_TRIANGLES: usize = 192 * 1024;
+const MAX_MESH_TRIANGLES: usize = 524_288;
 const MAX_MESH_VERTICES: usize = MAX_MESH_TRIANGLES * 3;
-const MAX_MODEL_ITEMS: usize = 64;
-pub const MAX_RESOLVED_BYTES: usize = 64 * 1024 * 1024;
+const MAX_MODEL_ITEMS: usize = 512;
+pub const MAX_RESOLVED_BYTES: usize = 256 * 1024 * 1024;
 mod audio;
 use audio::SOUND_CACHE_VERSION;
 mod glb;
@@ -51,7 +51,7 @@ pub use texture::{
     decode_png, decode_png_with_role, validate_texture, Texture, TextureMip, TextureRole,
     MAX_TEXTURE_BYTES, MAX_TEXTURE_EDGE, MAX_TEXTURE_RESOLVED_BYTES, MAX_TEXTURE_SOURCE_BYTES,
 };
-const MAX_CACHE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_CACHE_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_PACKAGED_MESH_BYTES: usize = MAX_CACHE_BYTES;
 pub const PACKAGED_MESH_EXTENSION: &str = "rotmesh";
 const MAX_REGISTRY_BYTES: usize = 8 * 1024 * 1024;
@@ -81,6 +81,9 @@ pub struct Mesh {
     /// Complete UVs in the OBJ convention, one per vertex.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub texcoords: Option<Vec<[f32; 2]>>,
+    /// Complete glTF-convention tangents `(tx, ty, tz, sign)`, one per vertex.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tangents: Option<Vec<[f32; 4]>>,
 }
 impl Mesh {
     pub fn has_complete_uvs(&self) -> bool {
@@ -88,16 +91,126 @@ impl Mesh {
             .as_ref()
             .is_some_and(|uv| uv.len() == self.vertices.len())
     }
+    pub fn has_complete_tangents(&self) -> bool {
+        self.tangents
+            .as_ref()
+            .is_some_and(|t| t.len() == self.vertices.len())
+    }
     /// Logical payload only, excluding container/Arc overhead and retained snapshots.
     pub fn payload_bytes(&self) -> usize {
         self.vertices.len() * 24
             + self.indices.len() * 4
             + self.texcoords.as_ref().map_or(0, |uv| uv.len() * 8)
+            + self.tangents.as_ref().map_or(0, |t| t.len() * 16)
     }
     pub fn uv_diagnostic(&self) -> Option<&'static str> {
         (!self.has_complete_uvs())
             .then_some("UVs missing/incomplete; textured materials require a complete UV set")
     }
+}
+
+/// Compute per-vertex orthonormal tangent + bitangent handedness matching the
+/// renderer's V-flipped UV convention (`v' = 1 - v`).
+pub fn compute_mesh_tangents(
+    vertices: &[Vertex],
+    indices: &[u32],
+    texcoords: &[[f32; 2]],
+) -> Vec<[f32; 4]> {
+    let mut tan = vec![[0.0_f64; 3]; vertices.len()];
+    let mut bitan = vec![[0.0_f64; 3]; vertices.len()];
+    for &[i0, i1, i2] in indices.as_chunks::<3>().0 {
+        let (i0, i1, i2) = (i0 as usize, i1 as usize, i2 as usize);
+        if i0 >= vertices.len()
+            || i1 >= vertices.len()
+            || i2 >= vertices.len()
+            || i0 >= texcoords.len()
+            || i1 >= texcoords.len()
+            || i2 >= texcoords.len()
+        {
+            continue;
+        }
+        let p0 = vertices[i0].position;
+        let p1 = vertices[i1].position;
+        let p2 = vertices[i2].position;
+        let uv0 = texcoords[i0];
+        let uv1 = texcoords[i1];
+        let uv2 = texcoords[i2];
+        let e1 = [
+            f64::from(p1[0] - p0[0]),
+            f64::from(p1[1] - p0[1]),
+            f64::from(p1[2] - p0[2]),
+        ];
+        let e2 = [
+            f64::from(p2[0] - p0[0]),
+            f64::from(p2[1] - p0[1]),
+            f64::from(p2[2] - p0[2]),
+        ];
+        let du1 = f64::from(uv1[0] - uv0[0]);
+        let dv1 = f64::from(uv0[1] - uv1[1]);
+        let du2 = f64::from(uv2[0] - uv0[0]);
+        let dv2 = f64::from(uv0[1] - uv2[1]);
+        let det = du1 * dv2 - du2 * dv1;
+        if det.abs() <= 1e-12 || !det.is_finite() {
+            continue;
+        }
+        let inv = 1.0 / det;
+        let tx = (e1[0] * dv2 - e2[0] * dv1) * inv;
+        let ty = (e1[1] * dv2 - e2[1] * dv1) * inv;
+        let tz = (e1[2] * dv2 - e2[2] * dv1) * inv;
+        let bx = (e2[0] * du1 - e1[0] * du2) * inv;
+        let by = (e2[1] * du1 - e1[1] * du2) * inv;
+        let bz = (e2[2] * du1 - e1[2] * du2) * inv;
+        for idx in [i0, i1, i2] {
+            tan[idx][0] += tx;
+            tan[idx][1] += ty;
+            tan[idx][2] += tz;
+            bitan[idx][0] += bx;
+            bitan[idx][1] += by;
+            bitan[idx][2] += bz;
+        }
+    }
+    vertices
+        .iter()
+        .enumerate()
+        .map(|(i, vertex)| {
+            let n = vertex.normal.map(f64::from);
+            let t = tan[i];
+            let ndott = n[0] * t[0] + n[1] * t[1] + n[2] * t[2];
+            let mut ortho = [
+                t[0] - n[0] * ndott,
+                t[1] - n[1] * ndott,
+                t[2] - n[2] * ndott,
+            ];
+            let len_sq = ortho[0] * ortho[0] + ortho[1] * ortho[1] + ortho[2] * ortho[2];
+            if len_sq <= 1e-12 || !len_sq.is_finite() {
+                let axis = if n[1].abs() < 0.99 {
+                    [0.0, 1.0, 0.0]
+                } else {
+                    [1.0, 0.0, 0.0]
+                };
+                ortho = [
+                    n[1] * axis[2] - n[2] * axis[1],
+                    n[2] * axis[0] - n[0] * axis[2],
+                    n[0] * axis[1] - n[1] * axis[0],
+                ];
+            }
+            let norm = (ortho[0] * ortho[0] + ortho[1] * ortho[1] + ortho[2] * ortho[2]).sqrt();
+            let unit = if norm > 1e-12 && norm.is_finite() {
+                [ortho[0] / norm, ortho[1] / norm, ortho[2] / norm]
+            } else {
+                [1.0, 0.0, 0.0]
+            };
+            let cross = [
+                n[1] * unit[2] - n[2] * unit[1],
+                n[2] * unit[0] - n[0] * unit[2],
+                n[0] * unit[1] - n[1] * unit[0],
+            ];
+            let b = bitan[i];
+            let hand = cross[0] * b[0] + cross[1] * b[1] + cross[2] * b[2];
+            let sign = if hand < 0.0 { -1.0 } else { 1.0 };
+            [unit[0] as f32, unit[1] as f32, unit[2] as f32, sign]
+        })
+        .collect()
 }
 
 fn checked_payload_bytes(current: usize, additional: usize, limit: usize) -> Option<usize> {
@@ -1235,6 +1348,7 @@ impl AssetStore {
             vertices: cache.mesh.vertices,
             indices: cache.mesh.indices,
             texcoords: None,
+            tangents: None,
         };
         validate_mesh(&mesh)?;
         Ok(mesh)
@@ -1260,7 +1374,12 @@ fn cache_checksum(bytes: &[u8]) -> [u8; 32] {
     hasher.update(&bytes[CACHE_HEADER_BYTES..]);
     hasher.finalize().into()
 }
-fn binary_mesh_length(vertices: usize, indices: usize, uvs: bool) -> Result<usize, AssetError> {
+fn binary_mesh_length(
+    vertices: usize,
+    indices: usize,
+    uvs: bool,
+    tangents: bool,
+) -> Result<usize, AssetError> {
     if vertices == 0
         || vertices > MAX_MESH_VERTICES
         || indices == 0
@@ -1269,12 +1388,18 @@ fn binary_mesh_length(vertices: usize, indices: usize, uvs: bool) -> Result<usiz
     {
         return Err(error("invalid binary mesh counts"));
     }
+    let vertex_bytes = 6 * 4 + if uvs { 2 * 4 } else { 0 } + if tangents { 4 * 4 } else { 0 };
     vertices
-        .checked_mul(if uvs { 8 * 4 } else { 6 * 4 })
+        .checked_mul(vertex_bytes)
         .and_then(|bytes| indices.checked_mul(4).and_then(|n| bytes.checked_add(n)))
         .and_then(|bytes| bytes.checked_add(CACHE_HEADER_BYTES))
         .filter(|&bytes| bytes <= MAX_CACHE_BYTES)
-        .ok_or_else(|| error("binary mesh exceeds 16 MiB byte limit"))
+        .ok_or_else(|| {
+            error(format!(
+                "binary mesh exceeds {} MiB byte limit",
+                MAX_CACHE_BYTES / (1024 * 1024)
+            ))
+        })
 }
 #[cfg(test)]
 fn encode_cache(hash: &str, mesh: &Mesh) -> Result<Vec<u8>, AssetError> {
@@ -1309,14 +1434,14 @@ fn encode_binary_mesh(
         mesh.vertices.len(),
         mesh.indices.len(),
         mesh.texcoords.is_some(),
+        mesh.tangents.is_some(),
     )?;
     let mut bytes = Vec::with_capacity(length);
     bytes.extend_from_slice(magic);
     bytes.extend_from_slice(&version.to_le_bytes());
-    bytes.extend_from_slice(
-        &((mesh.vertices.len() as u32) | if mesh.texcoords.is_some() { 1 << 31 } else { 0 })
-            .to_le_bytes(),
-    );
+    let flags = if mesh.texcoords.is_some() { 1 << 31 } else { 0 }
+        | if mesh.tangents.is_some() { 1 << 30 } else { 0 };
+    bytes.extend_from_slice(&((mesh.vertices.len() as u32) | flags).to_le_bytes());
     bytes.extend_from_slice(&(mesh.indices.len() as u32).to_le_bytes());
     bytes.extend_from_slice(hash.as_bytes());
     bytes.extend_from_slice(&[0; 32]);
@@ -1328,6 +1453,13 @@ fn encode_binary_mesh(
     if let Some(uvs) = &mesh.texcoords {
         for uv in uvs {
             for value in uv {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+    }
+    if let Some(tangents) = &mesh.tangents {
+        for tangent in tangents {
+            for value in tangent {
                 bytes.extend_from_slice(&value.to_le_bytes());
             }
         }
@@ -1369,13 +1501,14 @@ fn decode_binary_mesh(
     let number = |field: &[u8]| u32::from_le_bytes(field.try_into().expect("four byte field"));
     let raw_count = number(&bytes[12..16]);
     let uvs = version >= 3 && raw_count & (1 << 31) != 0;
+    let has_tangents = version >= 3 && raw_count & (1 << 30) != 0;
     let vertex_count = (if version >= 3 {
-        raw_count & !(1 << 31)
+        raw_count & !(0b11 << 30)
     } else {
         raw_count
     }) as usize;
     let index_count = number(&bytes[16..20]) as usize;
-    let length = binary_mesh_length(vertex_count, index_count, uvs)?;
+    let length = binary_mesh_length(vertex_count, index_count, uvs, has_tangents)?;
     // Reject count overflows, truncation and trailing bytes before mesh allocation.
     if bytes.len() != length
         || cache_checksum(bytes).as_ref() != &bytes[CACHE_SEMANTIC_BYTES..CACHE_HEADER_BYTES]
@@ -1395,9 +1528,9 @@ fn decode_binary_mesh(
             }
         })
         .collect();
-    let index_start = vertex_end + if uvs { vertex_count * 8 } else { 0 };
+    let uv_end = vertex_end + if uvs { vertex_count * 8 } else { 0 };
     let texcoords = uvs.then(|| {
-        bytes[vertex_end..index_start]
+        bytes[vertex_end..uv_end]
             .as_chunks::<8>()
             .0
             .iter()
@@ -1405,6 +1538,22 @@ fn decode_binary_mesh(
                 [
                     f32::from_bits(number(&chunk[..4])),
                     f32::from_bits(number(&chunk[4..])),
+                ]
+            })
+            .collect()
+    });
+    let index_start = uv_end + if has_tangents { vertex_count * 16 } else { 0 };
+    let tangents = has_tangents.then(|| {
+        bytes[uv_end..index_start]
+            .as_chunks::<16>()
+            .0
+            .iter()
+            .map(|chunk| {
+                [
+                    f32::from_bits(number(&chunk[..4])),
+                    f32::from_bits(number(&chunk[4..8])),
+                    f32::from_bits(number(&chunk[8..12])),
+                    f32::from_bits(number(&chunk[12..])),
                 ]
             })
             .collect()
@@ -1419,6 +1568,7 @@ fn decode_binary_mesh(
         vertices,
         indices,
         texcoords,
+        tangents,
     };
     validate_mesh(&mesh)?;
     Ok(mesh)
@@ -1712,6 +1862,14 @@ pub fn validate_mesh(mesh: &Mesh) -> Result<(), AssetError> {
                     .flatten()
                     .any(|v| !v.is_finite() || v.abs() > 1_000_000.0)
         })
+        || mesh.tangents.as_ref().is_some_and(|tangents| {
+            tangents.len() != mesh.vertices.len()
+                || tangents.iter().any(|t| {
+                    t.iter().any(|c| !c.is_finite())
+                        || !(0.95..=1.05).contains(&(t[0] * t[0] + t[1] * t[1] + t[2] * t[2]))
+                        || (t[3] != 1.0 && t[3] != -1.0)
+                })
+        })
         || mesh.vertices.iter().any(|v| {
             v.position.iter().chain(&v.normal).any(|c| !c.is_finite())
                 || v.position.iter().any(|c| c.abs() > 1_000_000.0)
@@ -1751,7 +1909,10 @@ pub fn parse_obj_with_normal_policy(
     policy: MeshNormalPolicy,
 ) -> Result<Mesh, AssetError> {
     if bytes.len() > MAX_SOURCE_BYTES {
-        return Err(error("OBJ exceeds 1 MiB source limit"));
+        return Err(error(format!(
+            "OBJ exceeds {} MiB source limit",
+            MAX_SOURCE_BYTES / (1024 * 1024)
+        )));
     }
     let source = std::str::from_utf8(bytes).map_err(|_| error("OBJ must be UTF-8 text"))?;
     let mut positions: Vec<[f32; 3]> = Vec::new();
@@ -1766,6 +1927,7 @@ pub fn parse_obj_with_normal_policy(
         vertices: Vec::new(),
         indices: Vec::new(),
         texcoords: None,
+        tangents: None,
     };
     for (number, line) in source.lines().enumerate() {
         let words: Vec<_> = line
@@ -1896,6 +2058,11 @@ pub fn parse_obj_with_normal_policy(
         }
     }
     if complete_uvs {
+        mesh.tangents = Some(compute_mesh_tangents(
+            &mesh.vertices,
+            &mesh.indices,
+            &expanded_uvs,
+        ));
         mesh.texcoords = Some(expanded_uvs);
     }
     validate_mesh(&mesh)?;
@@ -2109,7 +2276,7 @@ mod tests {
             &[[0., 0.], [1., 0.], [0., 1.], [2., 1.], [0., 1.], [1., 0.]]
         );
         assert_eq!(mapped.vertices[0].position, mapped.vertices[3].position);
-        assert_eq!(mapped.payload_bytes(), 6 * 36);
+        assert_eq!(mapped.payload_bytes(), 6 * 52);
         let partial = parse_obj(
             &String::from_utf8(source.to_vec())
                 .unwrap()
@@ -2131,6 +2298,7 @@ mod tests {
             vertices: mapped.vertices.clone(),
             indices: mapped.indices.clone(),
             texcoords: None,
+            tangents: None,
         };
         assert!(!serde_json::to_string(&legacy)
             .unwrap()
@@ -2813,5 +2981,59 @@ mod tests {
         drop(held);
         let _next = super::lock(root.path()).unwrap();
         drop(duplicate);
+    }
+
+    #[test]
+    fn tangents_are_computed_validated_and_cached_backwards_compatibly() {
+        use super::*;
+
+        let source = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n";
+        let mesh = parse_obj(source).unwrap();
+        assert!(mesh.has_complete_uvs());
+        assert!(mesh.has_complete_tangents());
+        let tangents = mesh.tangents.as_ref().unwrap();
+        assert_eq!(tangents.len(), mesh.vertices.len());
+        for (vertex, tangent) in mesh.vertices.iter().zip(tangents) {
+            let len_sq =
+                tangent[0] * tangent[0] + tangent[1] * tangent[1] + tangent[2] * tangent[2];
+            assert!((len_sq - 1.0).abs() < 1e-4);
+            let dot = vertex.normal[0] * tangent[0]
+                + vertex.normal[1] * tangent[1]
+                + vertex.normal[2] * tangent[2];
+            assert!(
+                dot.abs() < 1e-4,
+                "tangent must be orthogonal to normal: {dot}"
+            );
+            assert!(tangent[3] == 1.0 || tangent[3] == -1.0);
+        }
+
+        // Validation rejects mismatched count, zero tangent, and invalid handedness.
+        let mut bad = mesh.clone();
+        bad.tangents.as_mut().unwrap().pop();
+        assert!(validate_mesh(&bad).is_err());
+        let mut zero_t = mesh.clone();
+        zero_t.tangents.as_mut().unwrap()[0] = [0.0, 0.0, 0.0, 1.0];
+        assert!(validate_mesh(&zero_t).is_err());
+        let mut bad_w = mesh.clone();
+        bad_w.tangents.as_mut().unwrap()[0][3] = 0.5;
+        assert!(validate_mesh(&bad_w).is_err());
+
+        // Binary cache roundtrips tangents (bit 30) and decodes v3 caches without tangents.
+        let hash = digest(source);
+        let encoded = encode_cache(&hash, &mesh).unwrap();
+        assert_eq!(decode_cache(&encoded, &hash, 3).unwrap(), mesh);
+
+        let no_tangents = Mesh {
+            tangents: None,
+            ..mesh.clone()
+        };
+        let encoded_no_t = encode_cache(&hash, &no_tangents).unwrap();
+        assert_eq!(decode_cache(&encoded_no_t, &hash, 3).unwrap(), no_tangents);
+
+        // Verify lifted cap above old 32,768 triangle limit works.
+        let mut large = String::from("v 0 0 0\nv 1 0 0\nv 0 1 0\n");
+        large.push_str(&"f 1 2 3\n".repeat(40_000));
+        let large_mesh = parse_obj(large.as_bytes()).unwrap();
+        assert_eq!(large_mesh.indices.len(), 40_000 * 3);
     }
 }

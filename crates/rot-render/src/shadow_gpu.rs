@@ -59,7 +59,7 @@ pub(super) struct Geometry<'a> {
     pub groups: &'a [DrawGroup],
     pub meshes: &'a BTreeMap<String, GpuMesh>,
     pub builtins: &'a BuiltinMeshes,
-    pub instances: &'a wgpu::Buffer,
+    pub instance_bind: &'a wgpu::BindGroup,
 }
 impl Geometry<'_> {
     fn mesh(&self, group: &DrawGroup) -> &GpuMesh {
@@ -136,7 +136,11 @@ pub(super) struct ShadowGpu {
     frame: Frame,
 }
 impl ShadowGpu {
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        instance_layout: &wgpu::BindGroupLayout,
+    ) -> Self {
         let entry = wgpu::BindGroupLayoutEntry {
             binding: 0,
             visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -218,11 +222,39 @@ impl ShadowGpu {
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Sun depth ABI without sampled attachment"),
-            bind_group_layouts: &[Some(&depth_layout)],
+            bind_group_layouts: &[Some(&depth_layout), Some(instance_layout)],
             immediate_size: 0,
         });
         let shader = device.create_shader_module(wgpu::include_wgsl!("shadow_depth.wgsl"));
-        let pipeline=device.create_render_pipeline(&wgpu::RenderPipelineDescriptor{label:Some("retained opaque Sun depth pipeline"),layout:Some(&pipeline_layout),vertex:wgpu::VertexState{module:&shader,entry_point:Some("vs"),compilation_options:Default::default(),buffers:&[Some(wgpu::VertexBufferLayout{array_stride:size_of::<Vertex>()as u64,step_mode:wgpu::VertexStepMode::Vertex,attributes:&wgpu::vertex_attr_array![0=>Float32x3]}),Some(wgpu::VertexBufferLayout{array_stride:size_of::<Instance>()as u64,step_mode:wgpu::VertexStepMode::Instance,attributes:&wgpu::vertex_attr_array![2=>Float32x4,3=>Float32x4,4=>Float32x4,5=>Float32x4]})]},fragment:None,primitive:wgpu::PrimitiveState{cull_mode:None,..Default::default()},depth_stencil:Some(wgpu::DepthStencilState{format:DEPTH,depth_write_enabled:Some(true),depth_compare:Some(wgpu::CompareFunction::LessEqual),stencil:Default::default(),bias:Default::default()}),multisample:Default::default(),multiview_mask:None,cache:None});
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("retained opaque Sun depth pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: size_of::<Vertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0=>Float32x3],
+                })],
+            },
+            fragment: None,
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        });
         Self {
             layout,
             uniform,
@@ -426,7 +458,7 @@ impl ShadowGpu {
                         });
                         pass.set_pipeline(&self.pipeline);
                         pass.set_bind_group(0, &self.depth_bind, &[]);
-                        pass.set_vertex_buffer(1, geometry.instances.slice(..));
+                        pass.set_bind_group(1, geometry.instance_bind, &[]);
                         for group in geometry.groups {
                             let mesh = geometry.mesh(group);
                             pass.set_vertex_buffer(0, mesh.vertices.slice(..));

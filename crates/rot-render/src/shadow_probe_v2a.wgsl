@@ -1,5 +1,20 @@
 struct Camera { view_projection: mat4x4<f32> };
+struct Instance {
+    model0: vec4<f32>,
+    model1: vec4<f32>,
+    model2: vec4<f32>,
+    model3: vec4<f32>,
+    normal0: vec4<f32>,
+    normal1: vec4<f32>,
+    normal2: vec4<f32>,
+    color: vec4<f32>,
+    base_color: vec4<f32>,
+    response: vec4<f32>,
+    emission_color: vec4<f32>,
+    uv_transform: vec4<f32>,
+};
 @group(0) @binding(0) var<uniform> camera: Camera;
+@group(0) @binding(1) var<storage, read> instances: array<Instance>;
 @group(1) @binding(0) var base_color_texture: texture_2d<f32>;
 @group(1) @binding(1) var base_color_sampler: sampler;
 struct PointLight {
@@ -18,16 +33,7 @@ struct Lighting {
 struct Vertex {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
-    @location(2) model0: vec4<f32>,
-    @location(3) model1: vec4<f32>,
-    @location(4) model2: vec4<f32>,
-    @location(5) model3: vec4<f32>,
-    @location(6) normal0: vec4<f32>,
-    @location(7) normal1: vec4<f32>,
-    @location(8) normal2: vec4<f32>,
-    @location(9) color: vec4<f32>,
-    @location(10) uv: vec2<f32>,
-    @location(11) base_color: vec4<f32>,
+    @location(2) uv: vec2<f32>,
 };
 struct Output {
     @builtin(position) position: vec4<f32>,
@@ -37,16 +43,17 @@ struct Output {
     @location(3) base_color: vec4<f32>,
     @location(4) world_position: vec3<f32>,
 };
-@vertex fn vs(v: Vertex) -> Output {
+@vertex fn vs(v: Vertex, @builtin(instance_index) instance_index: u32) -> Output {
     var o: Output;
-    let model = mat4x4<f32>(v.model0, v.model1, v.model2, v.model3);
-    let normal = mat3x3<f32>(v.normal0.xyz, v.normal1.xyz, v.normal2.xyz);
+    let inst = instances[instance_index];
+    let model = mat4x4<f32>(inst.model0, inst.model1, inst.model2, inst.model3);
+    let normal = mat3x3<f32>(inst.normal0.xyz, inst.normal1.xyz, inst.normal2.xyz);
     o.position = camera.view_projection * model * vec4<f32>(v.position, 1.0);
     o.normal = normal * v.normal;
-    o.color = v.color;
+    o.color = inst.color;
     // OBJ V grows upward; decoded PNG rows grow downward. Convert once here.
     o.uv = vec2<f32>(v.uv.x, 1.0 - v.uv.y);
-    o.base_color = v.base_color;
+    o.base_color = inst.base_color;
     o.world_position = (model * vec4<f32>(v.position, 1.0)).xyz;
     return o;
 }

@@ -48,7 +48,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
     queue.write_buffer(&r.camera, 0, bytemuck::cast_slice(&identity));
     let instance = Instance {
         uv_transform: [1.0, 1.0, 0.0, 0.0],
-        emission_color: [0.0; 3],
+        emission_color: [0.0; 4],
         model: Mat4::IDENTITY.to_cols_array_2d(),
         normal: [
             [1.0, 0.0, 0.0, 0.0],
@@ -81,7 +81,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
     capture(&bytes, false);
     let emitting = Instance {
         base_color: [0.0; 4],
-        emission_color: [0.25, 0.5, 0.0],
+        emission_color: [0.25, 0.5, 0.0, 0.0],
         ..instance
     };
     queue.write_buffer(&r.instances, 0, bytemuck::bytes_of(&emitting));
@@ -152,9 +152,9 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
     eprintln!("GPU probe: decoded PNG UV/sRGB pixels, per-draw missing UV isolation, unchanged zero uploads, same-ID mesh/texture replacement and rendering after worker CPU-source release passed");
 }
 
-// Observe location10 directly through both layouts under the same stable ID.
+// Observe location 2 directly through both layouts under the same stable ID.
 fn verify_uv_stream_switch(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resources) {
-    let source = "struct Output { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f32> }; @vertex fn vs(@location(0) position: vec3<f32>, @location(10) uv: vec2<f32>) -> Output { return Output(vec4<f32>(position, 1.), uv); } @fragment fn fs(input: Output) -> @location(0) vec4<f32> { return vec4<f32>(input.uv, 1., 1.); }";
+    let source = "struct Output { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f32> }; @vertex fn vs(@location(0) position: vec3<f32>, @location(2) uv: vec2<f32>) -> Output { return Output(vec4<f32>(position, 1.), uv); } @fragment fn fs(input: Output) -> @location(0) vec4<f32> { return vec4<f32>(input.uv, 1., 1.); }";
     let original = r.pipeline.clone();
     r.pipeline = validated_pipeline(device, &r.pipeline_layout, source, r.sample_count).unwrap();
     let mut mesh = rot_assets::parse_obj(
@@ -295,6 +295,7 @@ fn verify_mesh_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue) {
             ],
             indices: (0..count).map(|index| (index % 3) as u32).collect(),
             texcoords: Some(vec![[0.; 2]; count]),
+            tangents: None,
         })
     };
     let large = mesh(rot_assets::MAX_VERTICES);
@@ -489,8 +490,14 @@ fn render(
         pass.set_bind_group(2, &r.lighting.bind, &[]);
         pass.set_bind_group(3, r.shadows.bind(), &[]);
         pass.set_vertex_buffer(0, gpu.vertices.slice(..));
-        pass.set_vertex_buffer(1, r.instances.slice(..));
-        pass.set_vertex_buffer(2, gpu.uvs.as_ref().unwrap_or(&r.zero_uv).slice(..));
+        pass.set_vertex_buffer(1, gpu.uvs.as_ref().unwrap_or(&r.zero_uv).slice(..));
+        pass.set_vertex_buffer(
+            2,
+            gpu.tangents
+                .as_ref()
+                .unwrap_or(&r.default_tangent)
+                .slice(..),
+        );
         pass.set_index_buffer(gpu.indices.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..gpu.count, 0, 0..1);
     }
@@ -797,7 +804,7 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
                 mesh: Some(source.clone()),
                 instances: vec![Instance {
                     uv_transform: [1.0, 1.0, 0.0, 0.0],
-                    emission_color: [0.0; 3],
+                    emission_color: [0.0; 4],
                     model: matrix.to_cols_array_2d(),
                     normal: normal.to_cols_array_2d().map(|c| [c[0], c[1], c[2], 0.]),
                     color: [1.; 4],
@@ -1215,9 +1222,12 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
                     min_filter: wgpu::FilterMode::Linear,
                     ..Default::default()
                 });
+                let composite_layout = r.composite.get_bind_group_layout(0);
+                let display_binding = r.display_uniform.as_entire_binding();
+                let target = r.target.as_mut().unwrap();
                 let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("grazing production composite binding"),
-                    layout: &r.composite.get_bind_group_layout(0),
+                    layout: &composite_layout,
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
@@ -1229,11 +1239,14 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
                         },
                         wgpu::BindGroupEntry {
                             binding: 2,
-                            resource: r.display_uniform.as_entire_binding(),
+                            resource: display_binding,
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: wgpu::BindingResource::TextureView(&target.selection_mask),
                         },
                     ],
                 });
-                let target = r.target.as_mut().unwrap();
                 target.color = color;
                 target.bind = bind;
             }
@@ -1268,7 +1281,7 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
                         range: index..index + 1,
                         instances: vec![Instance {
                             uv_transform: [1.0, 1.0, 0.0, 0.0],
-                            emission_color: [0.0; 3],
+                            emission_color: [0.0; 4],
                             model: if mapped_case {
                                 Mat4::from_scale_rotation_translation(
                                     Vec3::new(0.5, 1., 1.),
@@ -1756,7 +1769,7 @@ pub(super) fn verify_cube_material(device: &wgpu::Device, queue: &wgpu::Queue) {
                 range: 0..1,
                 instances: vec![Instance {
                     uv_transform: [1.0, 1.0, 0.0, 0.0],
-                    emission_color: [0.0; 3],
+                    emission_color: [0.0; 4],
                     model: Mat4::IDENTITY.to_cols_array_2d(),
                     normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
                     color: [1.; 4],

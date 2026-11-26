@@ -13,7 +13,7 @@ struct Probe {
     shadows: ShadowGpu,
     builtins: BuiltinMeshes,
     meshes: BTreeMap<String, GpuMesh>,
-    instances: wgpu::Buffer,
+    instance_bind: wgpu::BindGroup,
     groups: Vec<DrawGroup>,
     context: egui::Context,
     repaint_requests: Arc<AtomicUsize>,
@@ -23,7 +23,7 @@ impl Probe {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let instance = Instance {
             uv_transform: [1.0, 1.0, 0.0, 0.0],
-            emission_color: [0.0; 3],
+            emission_color: [0.0; 4],
             model: Mat4::IDENTITY.to_cols_array_2d(),
             normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
             color: [1.; 4],
@@ -32,6 +32,20 @@ impl Probe {
         };
         let instances = instance_buffer(device, 1);
         queue.write_buffer(&instances, 0, bytemuck::bytes_of(&instance));
+        let instance_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("probe storage instances"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: wgpu::BufferSize::new(size_of::<Instance>() as u64),
+                },
+                count: None,
+            }],
+        });
+        let instance_bind = instance_bind_group(device, &instance_layout, &instances);
         let context = egui::Context::default();
         let repaint_requests = Arc::new(AtomicUsize::new(0));
         let observed = repaint_requests.clone();
@@ -39,7 +53,7 @@ impl Probe {
             observed.fetch_add(1, Ordering::Relaxed);
         });
         Self {
-            shadows: ShadowGpu::new(device, queue),
+            shadows: ShadowGpu::new(device, queue, &instance_layout),
             builtins: BuiltinMeshes {
                 cube: GpuMesh::new(device, None, &primitives::cube()),
                 sphere: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Sphere)),
@@ -53,7 +67,7 @@ impl Probe {
                 ),
             },
             meshes: BTreeMap::new(),
-            instances,
+            instance_bind,
             groups: vec![DrawGroup {
                 double_sided: false,
                 key: None,
@@ -96,7 +110,7 @@ impl Probe {
                         groups: if has_geometry { &self.groups } else { &[] },
                         meshes: &self.meshes,
                         builtins: &self.builtins,
-                        instances: &self.instances,
+                        instance_bind: &self.instance_bind,
                     },
                     Request {
                         settings,
@@ -473,7 +487,7 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
     resources.insert(r);
     let object = Instance {
         uv_transform: [1.0, 1.0, 0.0, 0.0],
-        emission_color: [0.0; 3],
+        emission_color: [0.0; 4],
         model: Mat4::IDENTITY.to_cols_array_2d(),
         normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
         color: [1.; 4],
@@ -935,7 +949,7 @@ fn verify_asset_submission_backpressure(
                 mesh: Some(mesh),
                 instances: vec![Instance {
                     uv_transform: [1.0, 1.0, 0.0, 0.0],
-                    emission_color: [0.0; 3],
+                    emission_color: [0.0; 4],
                     model: Mat4::IDENTITY.to_cols_array_2d(),
                     normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
                     color: [1.; 4],

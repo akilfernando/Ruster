@@ -57,7 +57,9 @@ impl<'a> MeshPlan<'a> {
         if bytes.is_none_or(|bytes| bytes > rot_assets::MAX_RESOLVED_BYTES as u64) {
             // A stable fallback closure owns no rejected buffers. In particular,
             // invalid source identity changes cannot create repeated epochs.
-            rejection = Some("Rot Engine requested mesh vertex/UV/index payload exceeds 64 MiB; meshes use cube fallback");
+            rejection = Some(
+                "Rot Engine requested mesh payload exceeds resolved budget; meshes use cube fallback",
+            );
             sources.clear();
         }
         if rejection != validation.rejection {

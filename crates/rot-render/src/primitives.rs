@@ -63,25 +63,32 @@ pub(crate) fn cube() -> Mesh {
         }
         indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
     }
+    let tangents = rot_assets::compute_mesh_tangents(&vertices, &indices, &texcoords);
     Mesh {
         vertices,
         indices,
         texcoords: Some(texcoords),
+        tangents: Some(tangents),
     }
 }
 
 fn plane() -> Mesh {
     // Same corner order and UVs as the Cube's top face.
+    let vertices: Vec<_> = [[-5., 0., 5.], [5., 0., 5.], [5., 0., -5.], [-5., 0., -5.]]
+        .into_iter()
+        .map(|position| Vertex {
+            position,
+            normal: [0., 1., 0.],
+        })
+        .collect();
+    let indices = vec![0, 1, 2, 0, 2, 3];
+    let texcoords = vec![[0., 0.], [1., 0.], [1., 1.], [0., 1.]];
+    let tangents = rot_assets::compute_mesh_tangents(&vertices, &indices, &texcoords);
     Mesh {
-        vertices: [[-5., 0., 5.], [5., 0., 5.], [5., 0., -5.], [-5., 0., -5.]]
-            .into_iter()
-            .map(|position| Vertex {
-                position,
-                normal: [0., 1., 0.],
-            })
-            .collect(),
-        indices: vec![0, 1, 2, 0, 2, 3],
-        texcoords: Some(vec![[0., 0.], [1., 0.], [1., 1.], [0., 1.]]),
+        vertices,
+        indices,
+        texcoords: Some(texcoords),
+        tangents: Some(tangents),
     }
 }
 
@@ -135,10 +142,12 @@ fn cylinder() -> Mesh {
             });
         }
     }
+    let tangents = rot_assets::compute_mesh_tangents(&vertices, &indices, &texcoords);
     Mesh {
         vertices,
         indices,
         texcoords: Some(texcoords),
+        tangents: Some(tangents),
     }
 }
 
@@ -177,9 +186,11 @@ fn triangular_prism() -> Mesh {
             indices.extend([base, base + 2, base + 3]);
         }
     }
+    let tangents = rot_assets::compute_mesh_tangents(&vertices, &indices, &texcoords);
     Mesh {
         vertices,
         texcoords: Some(texcoords),
+        tangents: Some(tangents),
         indices,
     }
 }
@@ -291,10 +302,12 @@ fn revolve(rows: &[Row]) -> Mesh {
     for (s, pole) in top.into_iter().enumerate() {
         indices.extend([ring(interior - 1, s), ring(interior - 1, s + 1), pole]);
     }
+    let tangents = rot_assets::compute_mesh_tangents(&vertices, &indices, &texcoords);
     Mesh {
         vertices,
         indices,
         texcoords: Some(texcoords),
+        tangents: Some(tangents),
     }
 }
 
@@ -314,7 +327,7 @@ mod tests {
                 mesh.indices.len(),
                 mesh.payload_bytes()
             ),
-            (132, 384, 5760)
+            (132, 384, 7872)
         );
         let uvs = mesh.texcoords.as_ref().unwrap();
         let columns = SEGMENTS + 1;
@@ -366,7 +379,7 @@ mod tests {
                 mesh.indices.len(),
                 mesh.payload_bytes()
             ),
-            (18, 24, 672)
+            (18, 24, 960)
         );
         let uvs = mesh.texcoords.as_ref().unwrap();
         let points: Vec<_> = mesh
@@ -496,7 +509,7 @@ mod tests {
         assert_eq!(
             builtin_mesh(Primitive::Sphere).payload_bytes()
                 + builtin_mesh(Primitive::Capsule).payload_bytes(),
-            60_640
+            79_056
         );
         assert!(std::ptr::eq(
             builtin_mesh(Primitive::Sphere),

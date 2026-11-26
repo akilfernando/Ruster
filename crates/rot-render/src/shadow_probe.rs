@@ -58,8 +58,7 @@ impl Probe {
             queue,
             [(&BindingKey::default(), None, None)].into_iter(),
         );
-        resources.instances = instance_buffer(device, 2);
-        resources.capacity = 2;
+        resources.ensure_instance_capacity(device, 2);
         assert!(resources.resize(
             device,
             queue,
@@ -130,7 +129,7 @@ impl Probe {
         let depth_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("separate light projection"),
-                bind_group_layouts: &[Some(&depth_layout)],
+                bind_group_layouts: &[Some(&depth_layout), Some(&resources.instance_layout)],
                 immediate_size: 0,
             });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -138,13 +137,33 @@ impl Probe {
             source: wgpu::ShaderSource::Wgsl(DEPTH_SHADER.into()),
         });
         let shadow_depth = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("single-map depth feasibility"), layout: Some(&depth_pipeline_layout),
-            vertex: wgpu::VertexState {module: &shader, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[
-                Some(wgpu::VertexBufferLayout{array_stride:size_of::<Vertex>() as u64,step_mode:wgpu::VertexStepMode::Vertex,attributes:&wgpu::vertex_attr_array![0=>Float32x3]}),
-                Some(wgpu::VertexBufferLayout{array_stride:size_of::<Instance>() as u64,step_mode:wgpu::VertexStepMode::Instance,attributes:&wgpu::vertex_attr_array![2=>Float32x4,3=>Float32x4,4=>Float32x4,5=>Float32x4]})]},
-            fragment: None, primitive: wgpu::PrimitiveState{cull_mode:None,..Default::default()},
-            depth_stencil:Some(wgpu::DepthStencilState{format:DEPTH,depth_write_enabled:Some(true),depth_compare:Some(wgpu::CompareFunction::LessEqual),stencil:Default::default(),bias:Default::default()}),
-            multisample:Default::default(),multiview_mask:None,cache:None,
+            label: Some("single-map depth feasibility"),
+            layout: Some(&depth_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: size_of::<Vertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0=>Float32x3],
+                })],
+            },
+            fragment: None,
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
         });
         let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("separate80byte shadow packet"),
@@ -246,7 +265,7 @@ impl Probe {
             let normal = Mat3::from_mat4(model).inverse().transpose();
             Instance {
                 uv_transform: [1.0, 1.0, 0.0, 0.0],
-                emission_color: [0.0; 3],
+                emission_color: [0.0; 4],
                 model: model.to_cols_array_2d(),
                 normal: normal.to_cols_array_2d().map(|v| [v[0], v[1], v[2], 0.]),
                 color: [1.; 4],
@@ -330,8 +349,8 @@ impl Probe {
             });
             pass.set_pipeline(&self.shadow_depth);
             pass.set_bind_group(0, &self.depth_bind, &[]);
+            pass.set_bind_group(1, &self.resources.instance_bind, &[]);
             pass.set_vertex_buffer(0, self.resources.builtins.cube.vertices.slice(..));
-            pass.set_vertex_buffer(1, self.resources.instances.slice(..));
             pass.set_index_buffer(
                 self.resources.builtins.cube.indices.slice(..),
                 wgpu::IndexFormat::Uint32,
@@ -375,15 +394,24 @@ impl Probe {
             pass.set_bind_group(2, &self.resources.lighting.bind, &[]);
             pass.set_bind_group(3, &self.shadow_bind, &[]);
             pass.set_vertex_buffer(0, self.resources.builtins.cube.vertices.slice(..));
-            pass.set_vertex_buffer(1, self.resources.instances.slice(..));
             pass.set_vertex_buffer(
-                2,
+                1,
                 self.resources
                     .builtins
                     .cube
                     .uvs
                     .as_ref()
                     .unwrap_or(&self.resources.zero_uv)
+                    .slice(..),
+            );
+            pass.set_vertex_buffer(
+                2,
+                self.resources
+                    .builtins
+                    .cube
+                    .tangents
+                    .as_ref()
+                    .unwrap_or(&self.resources.default_tangent)
                     .slice(..),
             );
             pass.set_index_buffer(

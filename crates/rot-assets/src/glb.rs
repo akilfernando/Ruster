@@ -1359,7 +1359,7 @@ impl Decoder<'_> {
         index: usize,
         shape: &str,
     ) -> Result<Vec<[f32; N]>, AssetError> {
-        self.rows(index, shape, N, 5126, MAX_VERTICES)?
+        self.rows(index, shape, N, 5126, MAX_MESH_VERTICES)?
             .map(|bytes| {
                 let values = std::array::from_fn(|i| f32::from_bits(u32_at(bytes, i * 4)));
                 if !values
@@ -1393,11 +1393,36 @@ impl Decoder<'_> {
             self.has_vertex_colors = true;
         }
         let positions = self.vectors::<3>(primitive.attributes.positions, "VEC3")?;
-        if let Some(tangents) = primitive.attributes.tangents {
-            if self.rows(tangents, "VEC4", 4, 5126, MAX_VERTICES)?.len() != positions.len() {
+        let authored_tangents = if let Some(tangents) = primitive.attributes.tangents {
+            let rows: Vec<[f32; 4]> = self
+                .rows(tangents, "VEC4", 4, 5126, MAX_MESH_VERTICES)?
+                .map(|bytes| std::array::from_fn(|i| f32::from_bits(u32_at(bytes, i * 4))))
+                .collect();
+            if rows.len() != positions.len() {
                 return Err(error("GLB tangent count must match positions"));
             }
-        }
+            let mut valid = true;
+            let mut normalized = Vec::with_capacity(rows.len());
+            for raw in rows {
+                let len_sq = f64::from(raw[0]).powi(2)
+                    + f64::from(raw[1]).powi(2)
+                    + f64::from(raw[2]).powi(2);
+                if !raw.iter().all(|v| v.is_finite()) || !len_sq.is_finite() || len_sq <= 1e-12 {
+                    valid = false;
+                    break;
+                }
+                let inv = 1.0 / len_sq.sqrt();
+                normalized.push([
+                    (f64::from(raw[0]) * inv) as f32,
+                    (f64::from(raw[1]) * inv) as f32,
+                    (f64::from(raw[2]) * inv) as f32,
+                    if raw[3] < 0.0 { -1.0 } else { 1.0 },
+                ]);
+            }
+            valid.then_some(normalized)
+        } else {
+            None
+        };
         let mut normal = primitive
             .attributes
             .normals
@@ -1498,11 +1523,15 @@ impl Decoder<'_> {
         } else {
             corners
         };
-        binary_mesh_length(vertices, corners, uv.is_some())?;
+        let expect_tangents = authored_tangents.is_some() || uv.is_some();
+        binary_mesh_length(vertices, corners, uv.is_some(), expect_tangents)?;
         let mut mesh = Mesh {
             vertices: Vec::with_capacity(vertices),
             indices: Vec::with_capacity(corners),
             texcoords: uv.as_ref().map(|_| Vec::with_capacity(vertices)),
+            tangents: authored_tangents
+                .as_ref()
+                .map(|_| Vec::with_capacity(vertices)),
         };
         const UNUSED: u32 = u32::MAX;
         let mut remap = normal.as_ref().map(|_| vec![UNUSED; positions.len()]);
@@ -1525,6 +1554,9 @@ impl Decoder<'_> {
                         normal: face_normal,
                     });
                     if let (Some(source), Some(target)) = (&uv, &mut mesh.texcoords) {
+                        target.push(source[index as usize]);
+                    }
+                    if let (Some(source), Some(target)) = (&authored_tangents, &mut mesh.tangents) {
                         target.push(source[index as usize]);
                     }
                 }
@@ -1570,9 +1602,17 @@ impl Decoder<'_> {
                 if let (Some(source), Some(target)) = (&uv, &mut mesh.texcoords) {
                     target.push(source[index]);
                 }
+                if let (Some(source), Some(target)) = (&authored_tangents, &mut mesh.tangents) {
+                    target.push(source[index]);
+                }
             }
             for index in &mut mesh.indices {
                 *index = remap[*index as usize];
+            }
+        }
+        if mesh.tangents.is_none() {
+            if let Some(uvs) = &mesh.texcoords {
+                mesh.tangents = Some(compute_mesh_tangents(&mesh.vertices, &mesh.indices, uvs));
             }
         }
         validate_mesh(&mesh)?;
@@ -2922,5 +2962,84 @@ mod tests {
                     .contains(diagnostic)),
             }
         }
+    }
+
+    #[test]
+    fn glb_preserves_authored_tangents_and_generates_missing_uv_tangents() {
+        let positions = [[0.0_f32, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        let normals = [[0.0_f32, 0.0, 1.0]; 3];
+        let uvs = [[0.0_f32, 0.0], [1.0, 0.0], [0.0, 1.0]];
+        let tangents = [[0.0_f32, 1.0, 0.0, -1.0]; 3];
+
+        let build = |with_tangents: bool| {
+            let mut bin = Vec::new();
+            let push_f32 = |buf: &mut Vec<u8>, data: &[f32]| {
+                let offset = buf.len();
+                for &v in data {
+                    buf.extend_from_slice(&v.to_le_bytes());
+                }
+                (offset, buf.len() - offset)
+            };
+            let (p_off, p_len) = push_f32(&mut bin, positions.as_flattened());
+            let (n_off, n_len) = push_f32(&mut bin, normals.as_flattened());
+            let (u_off, u_len) = push_f32(&mut bin, uvs.as_flattened());
+            let mut views = vec![
+                serde_json::json!({"buffer":0,"byteOffset":p_off,"byteLength":p_len}),
+                serde_json::json!({"buffer":0,"byteOffset":n_off,"byteLength":n_len}),
+                serde_json::json!({"buffer":0,"byteOffset":u_off,"byteLength":u_len}),
+            ];
+            let mut accessors = vec![
+                serde_json::json!({"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]}),
+                serde_json::json!({"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"}),
+                serde_json::json!({"bufferView":2,"componentType":5126,"count":3,"type":"VEC2"}),
+            ];
+            let mut attrs = serde_json::json!({"POSITION":0,"NORMAL":1,"TEXCOORD_0":2});
+            if with_tangents {
+                let (t_off, t_len) = push_f32(&mut bin, tangents.as_flattened());
+                views.push(serde_json::json!({"buffer":0,"byteOffset":t_off,"byteLength":t_len}));
+                accessors.push(serde_json::json!({"bufferView":3,"componentType":5126,"count":3,"type":"VEC4"}));
+                attrs["TANGENT"] = serde_json::json!(3);
+            }
+            let doc = serde_json::json!({
+                "asset":{"version":"2.0"},
+                "buffers":[{"byteLength":bin.len()}],
+                "bufferViews":views,
+                "accessors":accessors,
+                "meshes":[{"primitives":[{"attributes":attrs}]}],
+                "nodes":[{"name":"Tri","mesh":0}],
+                "scenes":[{"nodes":[0]}],
+                "scene":0,
+            });
+            let mut json_bytes = serde_json::to_vec(&doc).unwrap();
+            while !json_bytes.len().is_multiple_of(4) {
+                json_bytes.push(b' ');
+            }
+            while !bin.len().is_multiple_of(4) {
+                bin.push(0);
+            }
+            let total = 12 + 8 + json_bytes.len() + 8 + bin.len();
+            let mut glb = Vec::with_capacity(total);
+            glb.extend_from_slice(b"glTF");
+            glb.extend_from_slice(&2u32.to_le_bytes());
+            glb.extend_from_slice(&(total as u32).to_le_bytes());
+            glb.extend_from_slice(&(json_bytes.len() as u32).to_le_bytes());
+            glb.extend_from_slice(b"JSON");
+            glb.extend_from_slice(&json_bytes);
+            glb.extend_from_slice(&(bin.len() as u32).to_le_bytes());
+            glb.extend_from_slice(b"BIN\0");
+            glb.extend_from_slice(&bin);
+            glb
+        };
+
+        let authored = decode("authored", "authored.glb", &build(true)).unwrap();
+        assert_eq!(
+            model_mesh(&authored).tangents.as_deref(),
+            Some(&tangents[..])
+        );
+
+        let generated = decode("generated", "generated.glb", &build(false)).unwrap();
+        let gen_mesh = model_mesh(&generated);
+        assert!(gen_mesh.has_complete_tangents());
+        assert_ne!(gen_mesh.tangents.as_deref(), Some(&tangents[..]));
     }
 }

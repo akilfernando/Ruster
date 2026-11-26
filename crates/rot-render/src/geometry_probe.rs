@@ -76,6 +76,7 @@ fn mesh(uv: bool, vertices: usize, indices: usize) -> rot_assets::Mesh {
         ],
         indices: vec![3; indices],
         texcoords: uv.then(|| vec![[0.; 2]; vertices]),
+        tangents: None,
     };
     for (vertex, position) in
         mesh.vertices
@@ -127,7 +128,7 @@ fn verify_case(
                 mesh: Some(mesh),
                 instances: vec![Instance {
                     uv_transform: [1.0, 1.0, 0.0, 0.0],
-                    emission_color: [0.0; 3],
+                    emission_color: [0.0; 4],
                     model: matrix.to_cols_array_2d(),
                     normal: [
                         [columns as f32, 0., 0., 0.],
@@ -254,12 +255,14 @@ fn verify_case(
     );
     assert_eq!(metrics.asset_live_mesh_bytes, cpu_bytes as u64);
     assert_eq!(r.zero_uv.size(), 8);
+    assert_eq!(r.default_tangent.size(), 16);
     let actual_bytes = r
         .meshes
         .values()
         .map(|mesh| {
             let bytes = mesh.vertices.size()
                 + mesh.uvs.as_ref().map_or(0, wgpu::Buffer::size)
+                + mesh.tangents.as_ref().map_or(0, wgpu::Buffer::size)
                 + mesh.indices.size();
             assert_eq!(bytes, mesh.bytes);
             bytes
@@ -268,7 +271,7 @@ fn verify_case(
     assert_eq!(actual_bytes, cpu_bytes as u64);
     assert_eq!(
         metrics.mesh_bytes,
-        actual_bytes + r.builtins.bytes() + r.zero_uv.size()
+        actual_bytes + r.builtins.bytes() + r.zero_uv.size() + r.default_tangent.size()
     );
     // Each fully visible triangle reaches the left edge of its cell. A cube
     // fallback covers only the central half, so this observes actual geometry.

@@ -35,10 +35,11 @@ use wgpu::util::DeviceExt;
 
 const COLOR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const HDR_COLOR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+const SELECTION_MASK: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const MAX_SAMPLES: usize = 4096;
 // Retained attachment payload only, excluding driver allocations and resize overlap.
-const MAX_TARGET_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_TARGET_BYTES: u64 = 512 * 1024 * 1024;
 pub const MAX_SHADER_BYTES: usize = 64 * 1024;
 
 /// Bundled Rot Engine icon for native runtime windows.
@@ -2241,7 +2242,14 @@ fn render_draw_scene(
             normal: normal.to_cols_array_2d().map(|c| [c[0], c[1], c[2], 0.0]),
             color,
             base_color,
-            emission_color: material.map_or([0.0; 3], |material| material.emission_color),
+            emission_color: material.map_or([0.0; 4], |material| {
+                [
+                    material.emission_color[0],
+                    material.emission_color[1],
+                    material.emission_color[2],
+                    0.0,
+                ]
+            }),
             uv_transform: material.map_or([1.0, 1.0, 0.0, 0.0], |material| {
                 let [x, y] = material.uv_tiling;
                 let [u, v] = material.uv_offset;
@@ -2617,7 +2625,7 @@ struct Instance {
     color: [f32; 4],
     base_color: [f32; 4],
     response: [f32; 4],
-    emission_color: [f32; 3],
+    emission_color: [f32; 4],
     uv_transform: [f32; 4],
 }
 fn choose_samples(
@@ -2648,7 +2656,11 @@ fn supported_samples(adapter: &wgpu::Adapter, device: &wgpu::Device, requested: 
             adapter_flags & format.guaranteed_format_features(device.features()).flags
         }
     };
-    choose_samples(flags(COLOR), flags(DEPTH), requested)
+    choose_samples(
+        flags(COLOR) & flags(SELECTION_MASK),
+        flags(DEPTH),
+        requested,
+    )
 }
 fn supported_hdr_samples(
     adapter: &wgpu::Adapter,
@@ -2671,26 +2683,33 @@ fn supported_hdr_samples(
         }
     };
     let color = features(HDR_COLOR);
+    let mask = features(SELECTION_MASK);
     let depth = features(DEPTH);
     let usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
     if !color.allowed_usages.contains(usage)
         || !color
             .flags
             .contains(wgpu::TextureFormatFeatureFlags::FILTERABLE)
+        || !mask.allowed_usages.contains(usage)
         || !depth
             .allowed_usages
             .contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
     {
         return None;
     }
-    Some(choose_samples(color.flags, depth.flags, requested))
+    Some(choose_samples(
+        color.flags & mask.flags,
+        depth.flags,
+        requested,
+    ))
 }
 fn format_target_bytes(size: [u32; 2], samples: u32, format: wgpu::TextureFormat) -> u64 {
     let color = if format == HDR_COLOR { 8 } else { 4 };
+    let mask = 1;
     let bytes_per_pixel = if samples == 1 {
-        color + 4
+        color + mask + 4
     } else {
-        color + (color + 4) * samples
+        color + mask + (color + mask + 4) * samples
     };
     u64::from(size[0])
         .saturating_mul(u64::from(size[1]))
@@ -2730,6 +2749,8 @@ fn format_target_size(
 struct Target {
     color: wgpu::TextureView,
     multisample: Option<wgpu::TextureView>,
+    selection_mask: wgpu::TextureView,
+    selection_mask_msaa: Option<wgpu::TextureView>,
     depth: wgpu::TextureView,
     bind: wgpu::BindGroup,
     size: [u32; 2],
@@ -2799,6 +2820,27 @@ impl Target {
             },
         }
     }
+    fn selection_mask_attachment(&self) -> wgpu::RenderPassColorAttachment<'_> {
+        wgpu::RenderPassColorAttachment {
+            view: self
+                .selection_mask_msaa
+                .as_ref()
+                .unwrap_or(&self.selection_mask),
+            resolve_target: self
+                .selection_mask_msaa
+                .as_ref()
+                .map(|_| &self.selection_mask),
+            depth_slice: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                store: if self.selection_mask_msaa.is_some() {
+                    wgpu::StoreOp::Discard
+                } else {
+                    wgpu::StoreOp::Store
+                },
+            },
+        }
+    }
 }
 struct Timestamps {
     queries: wgpu::QuerySet,
@@ -2809,12 +2851,15 @@ struct Timestamps {
 struct Resources {
     builtin_sdr: ScenePipelines,
     builtin_hdr: Option<ScenePipelines>,
+    selection_sdr: SelectionPipelines,
+    selection_hdr: Option<SelectionPipelines>,
     hdr_samples: Option<u32>,
     requested_samples: u32,
     pipeline: ScenePipelines,
     composite: wgpu::RenderPipeline,
     builtins: BuiltinMeshes,
     zero_uv: wgpu::Buffer,
+    default_tangent: wgpu::Buffer,
     meshes: BTreeMap<String, GpuMesh>,
     pipeline_layout: wgpu::PipelineLayout,
     materials: MaterialGpu,
@@ -2823,6 +2868,8 @@ struct Resources {
     shadows: shadow_gpu::ShadowGpu,
     builtin_appearance: bool,
     instances: wgpu::Buffer,
+    instance_layout: wgpu::BindGroupLayout,
+    instance_bind: wgpu::BindGroup,
     capacity: usize,
     camera: wgpu::Buffer,
     camera_layout: wgpu::BindGroupLayout,
@@ -2853,22 +2900,39 @@ impl Resources {
         sample_count: u32,
     ) -> Self {
         let composite_shader = device.create_shader_module(wgpu::include_wgsl!("composite.wgsl"));
+        let instance_entry = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::VERTEX,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: wgpu::BufferSize::new(size_of::<Instance>() as u64),
+            },
+            count: None,
+        };
         let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("fixed scene camera ABI"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: wgpu::BufferSize::new(80),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(80),
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                instance_entry(1),
+            ],
+        });
+        let instance_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("shared storage instances"),
+            entries: &[instance_entry(0)],
         });
         let materials = MaterialGpu::new(device, queue);
         let lighting = LightingGpu::new(device);
-        let shadows = shadow_gpu::ShadowGpu::new(device, queue);
+        let shadows = shadow_gpu::ShadowGpu::new(device, queue, &instance_layout);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("fixed scene ABI"),
             bind_group_layouts: &[
@@ -2880,6 +2944,7 @@ impl Resources {
             immediate_size: 0,
         });
         let pipeline = scene_pipeline(device, &pipeline_layout, default_shader(), sample_count);
+        let selection_sdr = selection_pipelines(device, &camera_layout, sample_count);
         let composite = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Rot Engine scene composite"),
             layout: None,
@@ -2917,35 +2982,34 @@ impl Resources {
                 builtin_mesh(rot_scene::Primitive::TriangularPrism),
             ),
         };
-        // One constant attribute serves every mesh without authored UVs. This
-        // fixed renderer overhead is separate from imported mesh admission.
+        // Constant fallback attributes serve meshes without authored UVs or
+        // tangents. This fixed overhead is separate from imported asset budgets.
         let zero_uv = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("shared constant zero UV"),
             contents: bytemuck::bytes_of(&[0.0_f32; 2]),
             usage: wgpu::BufferUsages::VERTEX,
         });
-        let mesh_bytes = builtins.bytes() + zero_uv.size();
+        let default_tangent = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("shared constant default tangent"),
+            contents: bytemuck::bytes_of(&[1.0_f32, 0.0, 0.0, 1.0]),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let mesh_bytes = builtins.bytes() + zero_uv.size() + default_tangent.size();
         let camera = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("scene camera"),
             size: 80,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let camera_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("camera"),
-            layout: &camera_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera.as_entire_binding(),
-            }],
-        });
+        let instances = instance_buffer(device, 1);
+        let camera_bind = camera_bind_group(device, &camera_layout, &camera, &instances);
+        let instance_bind = instance_bind_group(device, &instance_layout, &instances);
         let display_packet = [0.; 4];
         let display_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("fixed display packet"),
             contents: bytemuck::cast_slice(&display_packet),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        let instances = instance_buffer(device, 1);
         let timestamps = device
             .features()
             .contains(wgpu::Features::TIMESTAMP_QUERY)
@@ -2983,12 +3047,15 @@ impl Resources {
         Self {
             builtin_sdr: pipeline.clone(),
             builtin_hdr: None,
+            selection_sdr,
+            selection_hdr: None,
             hdr_samples: None,
             requested_samples: sample_count,
             pipeline,
             composite,
             builtins,
             zero_uv,
+            default_tangent,
             meshes: BTreeMap::new(),
             pipeline_layout,
             materials,
@@ -2997,6 +3064,8 @@ impl Resources {
             shadows,
             builtin_appearance: true,
             instances,
+            instance_layout,
+            instance_bind,
             capacity: 1,
             camera,
             camera_layout,
@@ -3017,6 +3086,16 @@ impl Resources {
             metrics,
         }
     }
+    fn ensure_instance_capacity(&mut self, device: &wgpu::Device, count: usize) {
+        if count <= self.capacity {
+            return;
+        }
+        self.capacity = count.next_power_of_two();
+        self.instances = instance_buffer(device, self.capacity);
+        self.camera_bind =
+            camera_bind_group(device, &self.camera_layout, &self.camera, &self.instances);
+        self.instance_bind = instance_bind_group(device, &self.instance_layout, &self.instances);
+    }
     fn enable_hdr(&mut self, device: &wgpu::Device, samples: u32) {
         self.builtin_hdr = Some(scene_pipeline_format(
             device,
@@ -3025,6 +3104,7 @@ impl Resources {
             samples,
             HDR_COLOR,
         ));
+        self.selection_hdr = Some(selection_pipelines(device, &self.camera_layout, samples));
         self.hdr_samples = Some(samples);
     }
     fn asset_metrics(&self) {
@@ -3144,6 +3224,18 @@ impl Resources {
         );
         let multisample =
             (samples > 1).then(|| texture(format, wgpu::TextureUsages::RENDER_ATTACHMENT, samples));
+        let selection_mask = texture(
+            SELECTION_MASK,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            1,
+        );
+        let selection_mask_msaa = (samples > 1).then(|| {
+            texture(
+                SELECTION_MASK,
+                wgpu::TextureUsages::RENDER_ATTACHMENT,
+                samples,
+            )
+        });
         let depth = texture(DEPTH, wgpu::TextureUsages::RENDER_ATTACHMENT, samples);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("scene sampling"),
@@ -3167,11 +3259,17 @@ impl Resources {
                     binding: 2,
                     resource: self.display_uniform.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&selection_mask),
+                },
             ],
         });
         self.target = Some(Target {
             color,
             multisample,
+            selection_mask,
+            selection_mask_msaa,
             depth,
             bind,
             size,
@@ -3182,22 +3280,121 @@ impl Resources {
         true
     }
 }
+fn camera_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    camera: &wgpu::Buffer,
+    instances: &wgpu::Buffer,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("camera"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: instances.as_entire_binding(),
+            },
+        ],
+    })
+}
+fn instance_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    instances: &wgpu::Buffer,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("shared storage instances"),
+        layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: instances.as_entire_binding(),
+        }],
+    })
+}
 fn instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("scene instances"),
         size: (capacity * size_of::<Instance>()) as u64,
-        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     })
 }
 #[derive(Clone)]
+struct SelectionPipelines {
+    sided: [wgpu::RenderPipeline; 2],
+}
+impl SelectionPipelines {
+    fn for_sided(&self, double_sided: bool) -> &wgpu::RenderPipeline {
+        &self.sided[usize::from(double_sided)]
+    }
+}
+fn selection_pipelines(
+    device: &wgpu::Device,
+    camera_layout: &wgpu::BindGroupLayout,
+    sample_count: u32,
+) -> SelectionPipelines {
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("Rot Engine selection mask ABI"),
+        bind_group_layouts: &[Some(camera_layout)],
+        immediate_size: 0,
+    });
+    let shader = device.create_shader_module(wgpu::include_wgsl!("selection_mask.wgsl"));
+    let attributes = wgpu::vertex_attr_array![0 => Float32x3];
+    SelectionPipelines {
+        sided: [false, true].map(|double_sided| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Rot Engine decoupled selection mask"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[Some(wgpu::VertexBufferLayout {
+                        array_stride: size_of::<Vertex>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &attributes,
+                    })],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(SELECTION_MASK.into())],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    cull_mode: (!double_sided).then_some(wgpu::Face::Back),
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: sample_count,
+                    ..Default::default()
+                },
+                multiview_mask: None,
+                cache: None,
+            })
+        }),
+    }
+}
+#[derive(Clone)]
 struct ScenePipelines {
-    // First index is culling mode, second is presence of the UV stream.
-    sided: [[wgpu::RenderPipeline; 2]; 2],
+    // Indexed by [double_sided][has_uv][has_tangent].
+    sided: [[[wgpu::RenderPipeline; 2]; 2]; 2],
 }
 impl ScenePipelines {
     fn for_mesh(&self, mesh: &GpuMesh, double_sided: bool) -> &wgpu::RenderPipeline {
         &self.sided[usize::from(double_sided)][usize::from(mesh.uvs.is_some())]
+            [usize::from(mesh.tangents.is_some())]
     }
 }
 
@@ -3277,12 +3474,10 @@ fn scene_pipeline_format(
             .collect::<Vec<_>>()
     };
     let mesh_attributes = used(&wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3]);
-    let uv_attributes = used(&wgpu::vertex_attr_array![10=>Float32x2]);
-    let instance_attributes = used(
-        &wgpu::vertex_attr_array![2=>Float32x4,3=>Float32x4,4=>Float32x4,5=>Float32x4,6=>Float32x4,7=>Float32x4,8=>Float32x4,9=>Float32x4,11=>Float32x4,12=>Float32x4,13=>Float32x3,14=>Float32x4],
-    );
+    let uv_attributes = used(&wgpu::vertex_attr_array![2=>Float32x2]);
+    let tangent_attributes = used(&wgpu::vertex_attr_array![3=>Float32x4]);
     let builtin = source == default_shader() || source == surface_shader();
-    let create = |uv_stride, double_sided| {
+    let create = |uv_stride, tangent_stride, double_sided| {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Rot Engine shared depth-tested instanced meshes"),
             layout: Some(layout),
@@ -3297,14 +3492,14 @@ fn scene_pipeline_format(
                         attributes: &mesh_attributes,
                     }),
                     Some(wgpu::VertexBufferLayout {
-                        array_stride: size_of::<Instance>() as u64,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &instance_attributes,
-                    }),
-                    Some(wgpu::VertexBufferLayout {
                         array_stride: uv_stride,
                         step_mode: wgpu::VertexStepMode::Vertex,
                         attributes: &uv_attributes,
+                    }),
+                    Some(wgpu::VertexBufferLayout {
+                        array_stride: tangent_stride,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &tangent_attributes,
                     }),
                 ],
             },
@@ -3339,7 +3534,10 @@ fn scene_pipeline_format(
     };
     ScenePipelines {
         sided: [false, true].map(|double_sided| {
-            [0, size_of::<[f32; 2]>() as u64].map(|stride| create(stride, double_sided))
+            [0, size_of::<[f32; 2]>() as u64].map(|uv_stride| {
+                [0, size_of::<[f32; 4]>() as u64]
+                    .map(|tangent_stride| create(uv_stride, tangent_stride, double_sided))
+            })
         }),
     }
 }
@@ -3392,6 +3590,7 @@ struct GpuMesh {
     source: Option<Weak<rot_assets::Mesh>>,
     vertices: wgpu::Buffer,
     uvs: Option<wgpu::Buffer>,
+    tangents: Option<wgpu::Buffer>,
     indices: wgpu::Buffer,
     count: u32,
     bytes: u64,
@@ -3441,6 +3640,13 @@ impl GpuMesh {
                 device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("retained scene UVs"),
                     contents: bytemuck::cast_slice(uvs),
+                    usage: wgpu::BufferUsages::VERTEX,
+                })
+            }),
+            tangents: mesh.tangents.as_ref().map(|tangents| {
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("retained scene tangents"),
+                    contents: bytemuck::cast_slice(tangents),
                     usage: wgpu::BufferUsages::VERTEX,
                 })
             }),
@@ -3676,10 +3882,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             .iter()
             .map(|group| group.instances.len())
             .sum::<usize>();
-        if instance_count > r.capacity {
-            r.capacity = instance_count.next_power_of_two();
-            r.instances = instance_buffer(device, r.capacity);
-        }
+        r.ensure_instance_capacity(device, instance_count);
         for group in &self.groups {
             if !group.instances.is_empty() {
                 queue.write_buffer(
@@ -3715,7 +3918,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 groups: &self.groups,
                 meshes: &r.meshes,
                 builtins: &r.builtins,
-                instances: &r.instances,
+                instance_bind: &r.instance_bind,
             },
             shadow_gpu::Request {
                 settings: self.shadow,
@@ -3739,7 +3942,11 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                     view: &target.depth,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Discard,
+                        store: if selection {
+                            wgpu::StoreOp::Store
+                        } else {
+                            wgpu::StoreOp::Discard
+                        },
                     }),
                     stencil_ops: None,
                 }),
@@ -3759,13 +3966,19 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             pass.set_bind_group(0, &r.camera_bind, &[]);
             pass.set_bind_group(2, &r.lighting.bind, &[]);
             pass.set_bind_group(3, r.shadows.bind(), &[]);
-            pass.set_vertex_buffer(1, r.instances.slice(..));
             for group in &self.groups {
                 pass.set_bind_group(1, r.materials.bind(&group.binding), &[]);
                 let mesh = r.builtins.group_mesh(group, &r.meshes);
                 pass.set_pipeline(pipelines.for_mesh(mesh, group.double_sided));
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
-                pass.set_vertex_buffer(2, mesh.uvs.as_ref().unwrap_or(&r.zero_uv).slice(..));
+                pass.set_vertex_buffer(1, mesh.uvs.as_ref().unwrap_or(&r.zero_uv).slice(..));
+                pass.set_vertex_buffer(
+                    2,
+                    mesh.tangents
+                        .as_ref()
+                        .unwrap_or(&r.default_tangent)
+                        .slice(..),
+                );
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..mesh.count, 0, group.range.clone());
             }
@@ -3773,6 +3986,62 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 pass.set_pipeline(grid);
                 pass.set_bind_group(0, &r.camera_bind, &[]);
                 pass.draw(0..editor_grid::VERTICES, 0..1);
+            }
+        }
+        if selection {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Rot Engine selection mask"),
+                color_attachments: &[Some(target.selection_mask_attachment())],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &target.depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            let selection_pipelines = if applied_hdr {
+                r.selection_hdr
+                    .as_ref()
+                    .expect("HDR selection capability checked")
+            } else {
+                &r.selection_sdr
+            };
+            pass.set_bind_group(0, &r.camera_bind, &[]);
+            for group in &self.groups {
+                if !group
+                    .instances
+                    .iter()
+                    .any(|instance| instance.response[3] > 0.5)
+                {
+                    continue;
+                }
+                let mesh = r.builtins.group_mesh(group, &r.meshes);
+                pass.set_pipeline(selection_pipelines.for_sided(group.double_sided));
+                pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                let mut cursor = 0;
+                while let Some(rel_start) = group.instances[cursor..]
+                    .iter()
+                    .position(|instance| instance.response[3] > 0.5)
+                {
+                    let start = cursor + rel_start;
+                    let end = start
+                        + group.instances[start..]
+                            .iter()
+                            .position(|instance| instance.response[3] <= 0.5)
+                            .unwrap_or(group.instances.len() - start);
+                    pass.draw_indexed(
+                        0..mesh.count,
+                        0,
+                        group.range.start + start as u32..group.range.start + end as u32,
+                    );
+                    cursor = end;
+                }
             }
         }
         if let Some(t) = timing {
@@ -3849,6 +4118,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         metrics.objects = instance_count;
         metrics.mesh_bytes = r.builtins.bytes()
             + r.zero_uv.size()
+            + r.default_tangent.size()
             + r.meshes.values().map(|mesh| mesh.bytes).sum::<u64>();
         metrics.instance_capacity_bytes = (r.capacity * size_of::<Instance>()) as u64;
         metrics.target_bytes = format_target_bytes(size, samples, format);
@@ -4242,21 +4512,67 @@ mod tests {
         );
 
         // Additive camera/instance ABI protects old custom shaders and verifies
-        // that opt-in fragment view data and material inputs are present.
-        assert_eq!(size_of::<Instance>(), 188);
-        assert_eq!(offset_of!(Instance, uv_transform), 172);
+        // that opt-in fragment view data, storage instance layout, and tangents validate.
+        assert_eq!(size_of::<Instance>(), 192);
+        assert_eq!(offset_of!(Instance, model), 0);
+        assert_eq!(offset_of!(Instance, normal), 64);
+        assert_eq!(offset_of!(Instance, color), 112);
         assert_eq!(offset_of!(Instance, base_color), 128);
         assert_eq!(offset_of!(Instance, response), 144);
         assert_eq!(offset_of!(Instance, emission_color), 160);
-        for source in [surface_shader(), include_str!("composite.wgsl")] {
-            let module =
-                wgpu::naga::front::wgsl::parse_str(source).expect("surface/display WGSL parses");
+        assert_eq!(offset_of!(Instance, uv_transform), 176);
+        let expected_instance_offsets = [0, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176];
+        for (name, source) in [
+            ("scene", default_shader()),
+            ("surface", surface_shader()),
+            ("shadow_depth", include_str!("shadow_depth.wgsl")),
+            ("selection_mask", include_str!("selection_mask.wgsl")),
+            (
+                "example_scene",
+                include_str!("../../../examples/content/scene.wgsl"),
+            ),
+            ("composite", include_str!("composite.wgsl")),
+        ] {
+            let module = wgpu::naga::front::wgsl::parse_str(source)
+                .unwrap_or_else(|e| panic!("{name} WGSL parses: {e:?}"));
             wgpu::naga::valid::Validator::new(
                 wgpu::naga::valid::ValidationFlags::all(),
                 wgpu::naga::valid::Capabilities::all(),
             )
             .validate(&module)
-            .expect("surface/display WGSL validates");
+            .unwrap_or_else(|e| panic!("{name} WGSL validates: {e:?}"));
+            if name != "composite" {
+                let (_, instance_ty) = module
+                    .types
+                    .iter()
+                    .find(|(_, ty)| ty.name.as_deref() == Some("Instance"))
+                    .unwrap_or_else(|| panic!("{name} declares struct Instance"));
+                let wgpu::naga::TypeInner::Struct { members, span } = &instance_ty.inner else {
+                    panic!("{name} Instance must be a struct");
+                };
+                assert_eq!(
+                    *span,
+                    size_of::<Instance>() as u32,
+                    "{name} Instance byte span mismatch"
+                );
+                assert_eq!(
+                    members.iter().map(|m| m.offset).collect::<Vec<_>>(),
+                    expected_instance_offsets,
+                    "{name} Instance member offsets mismatch"
+                );
+            }
+        }
+        for primitive in rot_scene::Primitive::ALL {
+            let mesh = builtin_mesh(primitive);
+            assert!(
+                mesh.has_complete_tangents(),
+                "{primitive:?} must ship complete tangents"
+            );
+            for t in mesh.tangents.as_ref().unwrap() {
+                let len = Vec3::from_slice(&t[..3]).length();
+                assert!((len - 1.0).abs() < 1e-4, "{primitive:?} tangent len {len}");
+                assert!(t[3] == 1.0 || t[3] == -1.0);
+            }
         }
         let module = wgpu::naga::front::wgsl::parse_str(surface_shader()).unwrap();
         let uniform = module
@@ -4955,6 +5271,7 @@ mod tests {
             scene.validate().unwrap();
             let mesh = rot_assets::Mesh {
                 texcoords: None,
+                tangents: None,
                 indices: vec![0, 1, 2],
                 vertices: positions
                     .map(|position| rot_assets::Vertex {
@@ -5195,6 +5512,7 @@ mod tests {
         let triangle = |unit: f32| {
             Arc::new(rot_assets::Mesh {
                 texcoords: None,
+                tangents: None,
                 vertices: [[-1.0, -1.0, 0.0], [1.0, -1.0, 0.0], [0.0, 1.0, 0.0]]
                     .map(|point| rot_assets::Vertex {
                         position: point.map(|coordinate| coordinate * unit),
@@ -5403,6 +5721,7 @@ mod tests {
         object.transform.scale = [1.2, 0.8, 1.0];
         let mesh = Arc::new(rot_assets::Mesh {
             texcoords: None,
+            tangents: None,
             vertices: [[2.0, -1.0, 0.0], [4.0, -1.0, 0.0], [2.0, 1.0, 0.0]]
                 .into_iter()
                 .map(|position| rot_assets::Vertex {
@@ -5459,6 +5778,7 @@ mod tests {
             object.transform.scale = [unit.recip(); 3];
             let mesh = rot_assets::Mesh {
                 texcoords: None,
+                tangents: None,
                 vertices: [[-0.5, -0.5, 0.0], [0.5, -0.5, 0.0], [0.0, 0.5, 0.0]]
                     .map(|point| rot_assets::Vertex {
                         position: point.map(|coordinate| coordinate * unit),
@@ -5567,7 +5887,7 @@ mod tests {
         ] {
             assert_eq!(choose_samples(color, depth, requested), expected);
         }
-        for (samples, bytes_per_pixel) in [(1, 12), (2, 32), (4, 56)] {
+        for (samples, bytes_per_pixel) in [(1, 13), (2, 35), (4, 61)] {
             assert_eq!(
                 format_target_bytes([1, 1], samples, HDR_COLOR),
                 bytes_per_pixel
@@ -5577,7 +5897,7 @@ mod tests {
                 assert!(format_target_bytes(size, samples, HDR_COLOR) <= MAX_TARGET_BYTES);
             }
         }
-        for (samples, bytes_per_pixel) in [(1, 8), (2, 20), (4, 36)] {
+        for (samples, bytes_per_pixel) in [(1, 9), (2, 23), (4, 41)] {
             assert_eq!(target_bytes([1, 1], samples), bytes_per_pixel);
             for (width, height, scale, limit) in [
                 (1100.0, 760.0, 1.0, 16384),
@@ -5686,7 +6006,7 @@ mod tests {
                 color: [1.0; 4],
                 base_color: [1.0, 1.0, 1.0, 0.0],
                 response: [0.; 4],
-                emission_color: [0.; 3],
+                emission_color: [0.; 4],
                 uv_transform: [1., 1., 0., 0.],
             };
             queue.write_buffer(&r.instances, 0, bytemuck::bytes_of(&object));
@@ -5722,10 +6042,18 @@ mod tests {
                     pass.set_bind_group(2, &r.lighting.bind, &[]);
                     pass.set_bind_group(3, r.shadows.bind(), &[]);
                     pass.set_vertex_buffer(0, r.builtins.cube.vertices.slice(..));
-                    pass.set_vertex_buffer(1, r.instances.slice(..));
+                    pass.set_vertex_buffer(
+                        1,
+                        r.builtins.cube.uvs.as_ref().unwrap_or(&r.zero_uv).slice(..),
+                    );
                     pass.set_vertex_buffer(
                         2,
-                        r.builtins.cube.uvs.as_ref().unwrap_or(&r.zero_uv).slice(..),
+                        r.builtins
+                            .cube
+                            .tangents
+                            .as_ref()
+                            .unwrap_or(&r.default_tangent)
+                            .slice(..),
                     );
                     pass.set_index_buffer(
                         r.builtins.cube.indices.slice(..),

@@ -1,5 +1,20 @@
 struct Camera { view_projection: mat4x4<f32>, eye_mode: vec4<f32> };
+struct Instance {
+    model0: vec4<f32>,
+    model1: vec4<f32>,
+    model2: vec4<f32>,
+    model3: vec4<f32>,
+    normal0: vec4<f32>,
+    normal1: vec4<f32>,
+    normal2: vec4<f32>,
+    color: vec4<f32>,
+    base_color: vec4<f32>,
+    response: vec4<f32>,
+    emission_color: vec4<f32>,
+    uv_transform: vec4<f32>,
+};
 @group(0) @binding(0) var<uniform> camera: Camera;
+@group(0) @binding(1) var<storage, read> instances: array<Instance>;
 @group(1) @binding(0) var base_color_texture: texture_2d<f32>;
 @group(1) @binding(1) var base_color_sampler: sampler;
 @group(1) @binding(2) var roughness_texture: texture_2d<f32>;
@@ -20,19 +35,8 @@ struct Lighting {
 struct Vertex {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
-    @location(2) model0: vec4<f32>,
-    @location(3) model1: vec4<f32>,
-    @location(4) model2: vec4<f32>,
-    @location(5) model3: vec4<f32>,
-    @location(6) normal0: vec4<f32>,
-    @location(7) normal1: vec4<f32>,
-    @location(8) normal2: vec4<f32>,
-    @location(9) color: vec4<f32>,
-    @location(10) uv: vec2<f32>,
-    @location(11) base_color: vec4<f32>,
-    @location(12) response: vec4<f32>,
-    @location(13) emission_color: vec3<f32>,
-    @location(14) uv_transform: vec4<f32>,
+    @location(2) uv: vec2<f32>,
+    @location(3) tangent: vec4<f32>,
 };
 struct Output {
     @builtin(position) position: vec4<f32>,
@@ -43,20 +47,23 @@ struct Output {
     @location(4) world_position: vec3<f32>,
     @location(5) @interpolate(flat) response: vec4<f32>,
     @location(6) @interpolate(flat) emission_color: vec3<f32>,
+    @location(7) tangent: vec4<f32>,
 };
-@vertex fn vs(v: Vertex) -> Output {
+@vertex fn vs(v: Vertex, @builtin(instance_index) instance_index: u32) -> Output {
     var o: Output;
-    let model = mat4x4<f32>(v.model0, v.model1, v.model2, v.model3);
-    let normal = mat3x3<f32>(v.normal0.xyz, v.normal1.xyz, v.normal2.xyz);
+    let inst = instances[instance_index];
+    let model = mat4x4<f32>(inst.model0, inst.model1, inst.model2, inst.model3);
+    let normal = mat3x3<f32>(inst.normal0.xyz, inst.normal1.xyz, inst.normal2.xyz);
     o.position = camera.view_projection * model * vec4<f32>(v.position, 1.0);
     o.normal = normal * v.normal;
-    o.color = v.color;
+    o.color = inst.color;
     // OBJ V grows upward; decoded PNG rows grow downward. Convert once here.
-    o.uv = vec2<f32>(v.uv.x, 1.0 - v.uv.y) * v.uv_transform.xy + v.uv_transform.zw;
-    o.base_color = v.base_color;
-    o.response = v.response;
-    o.emission_color = v.emission_color;
+    o.uv = vec2<f32>(v.uv.x, 1.0 - v.uv.y) * inst.uv_transform.xy + inst.uv_transform.zw;
+    o.base_color = inst.base_color;
+    o.response = inst.response;
+    o.emission_color = inst.emission_color.xyz;
     o.world_position = (model * vec4<f32>(v.position, 1.0)).xyz;
+    o.tangent = vec4<f32>(safe_unit((model * vec4<f32>(v.tangent.xyz, 0.0)).xyz), v.tangent.w);
     return o;
 }
 // Direct-lit opaque dielectric: GGX NDF, height-correlated Smith visibility,
@@ -110,7 +117,6 @@ fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
         response.y = clamp(response.y * textureSampleGrad(roughness_texture, base_color_sampler, v.uv, uv_dx, uv_dy).r, 0.08, 1.0);
     }
     let albedo = sampled * v.base_color.rgb;
-    let selection_alpha = select(1.0, 0.0, v.response.w > 0.5);
     let highlighted = mix(albedo, vec3<f32>(1.0), select(v.base_color.a, 0.0, v.response.w > 0.5));
     let n = safe_unit(normal);
     // w=1: eye position, w=0: parallel orthographic direction to camera.
@@ -119,7 +125,7 @@ fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
     if lighting.mode_counts.x == 0u {
         let incoming = normalize(vec3<f32>(0.4, 0.8, 0.6));
         let stored = hdr_storage(highlighted * (0.28 * ambient_scale) + 0.72 * direct_response(highlighted, n, view, incoming, response) + v.emission_color);
-        return vec4<f32>(stored.rgb, selection_alpha);
+        return vec4<f32>(stored.rgb, 1.0);
     }
     var result = highlighted * lighting.ambient.rgb * ambient_scale;
     if lighting.mode_counts.z != 0u {
@@ -146,5 +152,5 @@ fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
         }
         result += point.color_intensity.rgb * direct_response(highlighted, n, view, direction, response) * attenuation;
     }
-    return vec4<f32>(hdr_storage(result + v.emission_color).rgb, selection_alpha);
+    return vec4<f32>(hdr_storage(result + v.emission_color).rgb, 1.0);
 }

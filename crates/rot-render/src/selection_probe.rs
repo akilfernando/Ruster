@@ -72,7 +72,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue) {
                         range: index as u32..index as u32 + 1,
                         instances: vec![Instance {
                             uv_transform: [1.0, 1.0, 0.0, 0.0],
-                            emission_color: [0.0; 3],
+                            emission_color: [0.0; 4],
                             model: matrix.to_cols_array_2d(),
                             normal: Mat3::from_mat4(matrix)
                                 .inverse()
