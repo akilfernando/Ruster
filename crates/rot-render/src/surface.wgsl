@@ -131,11 +131,17 @@ fn hdr_storage(radiance: vec3<f32>) -> vec4<f32> {
     return shade(v, select(-v.normal, v.normal, front));
 }
 fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
-    let sampled = textureSample(base_color_texture, base_color_sampler, v.uv).rgb;
+    let sampled_rgba = textureSample(base_color_texture, base_color_sampler, v.uv);
+    let sampled = sampled_rgba.rgb;
+    let alpha = clamp(sampled_rgba.a * v.pbr_params.w, 0.0, 1.0);
     // Explicit gradients are computed outside per-map branches.
     // No-map draws preserve scalar arithmetic and avoid extra texture fetches.
     let uv_dx = dpdx(v.uv);
     let uv_dy = dpdy(v.uv);
+    if v.pbr_maps.w >= 0.0 && alpha < v.pbr_maps.w {
+        discard;
+    }
+    let out_alpha = select(1.0, alpha, v.pbr_maps.w < -1.5);
     var response = v.response;
     if response.z > 0.5 {
         response.y = clamp(response.y * textureSampleGrad(roughness_texture, base_color_sampler, v.uv, uv_dx, uv_dy).r, 0.08, 1.0);
@@ -202,7 +208,7 @@ fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
         let incoming = normalize(vec3<f32>(0.4, 0.8, 0.6));
         let fill = select(ambient_albedo * (0.28 * ao), ibl_total, ibl.params.x > 0.5 && response.x > 0.5);
         let stored = hdr_storage(fill + 0.72 * direct_response(highlighted, n, view, incoming, response, metallic) + emission);
-        return vec4<f32>(stored.rgb, 1.0);
+        return vec4<f32>(stored.rgb, out_alpha);
     }
     var result = ambient_albedo * lighting.ambient.rgb * ao + ibl_total;
     if lighting.mode_counts.z != 0u {
@@ -229,5 +235,5 @@ fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
         }
         result += point.color_intensity.rgb * direct_response(highlighted, n, view, direction, response, metallic) * attenuation;
     }
-    return vec4<f32>(hdr_storage(result + emission).rgb, 1.0);
+    return vec4<f32>(hdr_storage(result + emission).rgb, out_alpha);
 }

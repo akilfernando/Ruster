@@ -124,6 +124,9 @@ fn same_material_structure(old: &ModelInfo, new: &ModelInfo) -> bool {
                 let mut upgraded = prior.clone();
                 // Material shading flags do not change resources or placed copies.
                 upgraded.emission_color = next.emission_color;
+                upgraded.opacity = next.opacity;
+                upgraded.alpha_mode = next.alpha_mode;
+                upgraded.alpha_cutoff = next.alpha_cutoff;
                 upgraded.double_sided = next.double_sided;
                 upgraded.uv_tiling = next.uv_tiling;
                 upgraded.uv_offset = next.uv_offset;
@@ -246,6 +249,15 @@ pub(super) fn read_accepted(root: &Path, info: &ModelInfo) -> Result<DecodedMode
                 || material_warning(info, name, "emissive map omitted")
                 || material_warning(info, name, "emissive texture unsupported (black fallback)")
         }));
+    let alpha_transparency = info.materials.values().any(|material| {
+        material.opacity != 1.0
+            || material.alpha_mode != glb::ModelAlphaMode::Opaque
+            || material.alpha_cutoff != 0.5
+    }) || (pbr_maps
+        && !info
+            .materials
+            .keys()
+            .any(|name| material_warning(info, name, "alpha rendered opaque")));
     let decoded = glb::decode_accepted(
         &info.id,
         &info.source,
@@ -253,6 +265,7 @@ pub(super) fn read_accepted(root: &Path, info: &ModelInfo) -> Result<DecodedMode
         glb::ImportFeatures {
             packed_roughness,
             pbr_maps,
+            alpha_transparency,
             place_spots,
             place_orthographic,
             emission,
@@ -780,6 +793,7 @@ mod tests {
             glb::ImportFeatures {
                 packed_roughness: false,
                 pbr_maps: false,
+                alpha_transparency: false,
                 place_spots: true,
                 place_orthographic: true,
                 emission: false,
@@ -1246,6 +1260,7 @@ mod tests {
             glb::ImportFeatures {
                 packed_roughness: true,
                 pbr_maps: false,
+                alpha_transparency: false,
                 place_spots: true,
                 place_orthographic: false,
                 emission: true,
@@ -1354,6 +1369,7 @@ mod tests {
             glb::ImportFeatures {
                 packed_roughness: true,
                 pbr_maps: false,
+                alpha_transparency: false,
                 place_spots: false,
                 place_orthographic: true,
                 emission: true,
@@ -1619,6 +1635,67 @@ mod tests {
         assert_eq!(
             AssetStore::open(root.path()).unwrap().model("beacon"),
             Some(&second)
+        );
+    }
+
+    #[test]
+    fn imports_gltf_mask_cutoff_and_blend_opacity_with_double_sided() {
+        let mask_glb = crate::fixtures::punctual_glb(|doc| {
+            doc["materials"][0] = serde_json::json!({
+                "name": "Cutout",
+                "pbrMetallicRoughness": {
+                    "baseColorFactor": [0.9, 0.8, 0.7, 0.95],
+                    "roughnessFactor": 0.4,
+                    "metallicFactor": 0.0
+                },
+                "alphaMode": "MASK",
+                "alphaCutoff": 0.35,
+                "doubleSided": true
+            });
+            doc["meshes"][0]["primitives"][0]["material"] = serde_json::json!(0);
+        });
+        let mask_model = glb::decode("cutout", "cutout.glb", &mask_glb).unwrap();
+        let cutout = &mask_model.info.materials["Cutout"];
+        assert_eq!(cutout.alpha_mode, glb::ModelAlphaMode::Mask);
+        assert!((cutout.alpha_cutoff - 0.35).abs() < 1e-6);
+        assert!((cutout.opacity - 0.95).abs() < 1e-6);
+        assert!(cutout.double_sided);
+        assert!(
+            !mask_model
+                .info
+                .warnings
+                .iter()
+                .any(|warning| warning.starts_with("Cutout:")),
+            "unexpected Cutout warnings: {:?}",
+            mask_model.info.warnings
+        );
+
+        let blend_glb = crate::fixtures::punctual_glb(|doc| {
+            doc["materials"][0] = serde_json::json!({
+                "name": "Glass",
+                "pbrMetallicRoughness": {
+                    "baseColorFactor": [0.2, 0.5, 0.9, 0.4],
+                    "roughnessFactor": 0.1,
+                    "metallicFactor": 0.0
+                },
+                "alphaMode": "BLEND",
+                "doubleSided": true
+            });
+            doc["meshes"][0]["primitives"][0]["material"] = serde_json::json!(0);
+        });
+        let blend_model = glb::decode("glass", "glass.glb", &blend_glb).unwrap();
+        let glass = &blend_model.info.materials["Glass"];
+        assert_eq!(glass.alpha_mode, glb::ModelAlphaMode::Blend);
+        assert!((glass.opacity - 0.4).abs() < 1e-6);
+        assert!(glass.double_sided);
+        assert!(
+            !blend_model
+                .info
+                .warnings
+                .iter()
+                .any(|warning| warning.starts_with("Glass:")),
+            "unexpected Glass warnings: {:?}",
+            blend_model.info.warnings
         );
     }
 }

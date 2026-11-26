@@ -1,10 +1,17 @@
-use rot_scene::{MaterialResponse, OpaqueMaterial, TextureAddress, TextureFilter};
+use rot_scene::{AlphaMode, MaterialResponse, OpaqueMaterial, TextureAddress, TextureFilter};
 
 pub(super) fn imported_material(name: &str, source: &rot_assets::ModelMaterial) -> OpaqueMaterial {
     OpaqueMaterial {
         name: Some(name.to_owned()),
         tint: source.base_color_factor,
         emission_color: source.emission_color,
+        opacity: source.opacity,
+        alpha_mode: match source.alpha_mode {
+            rot_assets::ModelAlphaMode::Opaque => AlphaMode::Opaque,
+            rot_assets::ModelAlphaMode::Mask => AlphaMode::Mask,
+            rot_assets::ModelAlphaMode::Blend => AlphaMode::Blend,
+        },
+        alpha_cutoff: source.alpha_cutoff,
         metallic: source.metallic,
         normal_scale: source.normal_scale,
         occlusion_strength: source.occlusion_strength,

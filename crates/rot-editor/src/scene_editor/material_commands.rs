@@ -111,6 +111,9 @@ pub(super) fn material(
                     "normal_scale",
                     "occlusion_strength",
                     "double_sided",
+                    "opacity",
+                    "alpha_mode",
+                    "alpha_cutoff",
                     "uv_tiling",
                     "uv_offset",
                 ],
@@ -200,6 +203,29 @@ pub(super) fn material(
                 .ok_or_else(|| error("invalid_arguments", "Double Sided must be true or false"))?,
             None => prior.is_some_and(|material| material.double_sided),
         },
+        opacity: scalar(
+            "opacity",
+            0.0,
+            1.0,
+            prior.map_or(1.0, |prior| prior.opacity),
+            "Opacity",
+        )?,
+        alpha_mode: match map.get("alpha_mode") {
+            Some(value) => serde_json::from_value(value.clone()).map_err(|_| {
+                error(
+                    "invalid_arguments",
+                    "Alpha Mode must be opaque, mask, or blend",
+                )
+            })?,
+            None => prior.map_or(rot_scene::AlphaMode::Opaque, |material| material.alpha_mode),
+        },
+        alpha_cutoff: scalar(
+            "alpha_cutoff",
+            0.0,
+            1.0,
+            prior.map_or(0.5, |prior| prior.alpha_cutoff),
+            "Alpha Cutoff",
+        )?,
         base_color_texture: if map["base_color_texture"].is_null() {
             None
         } else {

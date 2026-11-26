@@ -41,6 +41,26 @@ impl BindingKey<&str> {
     }
 }
 
+impl BindingKey {
+    pub(super) fn as_borrowed(&self) -> BindingKey<&str> {
+        BindingKey {
+            texture: self.texture.as_deref(),
+            roughness: self.roughness.as_deref(),
+            metallic: self.metallic.as_deref(),
+            normal: self.normal.as_deref(),
+            emissive: self.emissive.as_deref(),
+            occlusion: self.occlusion.as_deref(),
+            missing_roughness: self.missing_roughness,
+            missing_metallic: self.missing_metallic,
+            missing_normal: self.missing_normal,
+            missing_emissive: self.missing_emissive,
+            missing_occlusion: self.missing_occlusion,
+            missing: self.missing,
+            sampling: self.sampling,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 pub(super) struct MaterialTextureInputs<'a> {
     pub texture: Option<&'a Arc<rot_assets::Texture>>,

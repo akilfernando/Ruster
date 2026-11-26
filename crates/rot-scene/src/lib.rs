@@ -109,6 +109,24 @@ pub enum TextureAddress {
     Repeat,
     Clamp,
 }
+
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum AlphaMode {
+    #[default]
+    Opaque,
+    Mask,
+    Blend,
+}
+
+impl AlphaMode {
+    pub fn is_opaque(&self) -> bool {
+        matches!(self, Self::Opaque)
+    }
+}
+
 /// Reusable scene-owned opaque material. Tint is linear RGB; external texture
 /// availability is diagnosed by asset-aware callers, not silently repaired here.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -117,6 +135,12 @@ pub struct OpaqueMaterial {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub tint: [f32; 3],
+    #[serde(default = "default_one", skip_serializing_if = "is_one")]
+    pub opacity: f32,
+    #[serde(default, skip_serializing_if = "AlphaMode::is_opaque")]
+    pub alpha_mode: AlphaMode,
+    #[serde(default = "default_half", skip_serializing_if = "is_half")]
+    pub alpha_cutoff: f32,
     #[serde(default, skip_serializing_if = "black_emission")]
     pub emission_color: [f32; 3],
     #[serde(default, skip_serializing_if = "is_zero")]
@@ -157,6 +181,9 @@ impl Default for OpaqueMaterial {
         Self {
             name: None,
             tint: [1.0; 3],
+            opacity: 1.0,
+            alpha_mode: AlphaMode::Opaque,
+            alpha_cutoff: 0.5,
             emission_color: [0.0; 3],
             metallic: 0.0,
             normal_scale: 1.0,
@@ -184,6 +211,12 @@ fn default_one() -> f32 {
 }
 fn is_one(value: &f32) -> bool {
     *value == 1.0
+}
+fn default_half() -> f32 {
+    0.5
+}
+fn is_half(value: &f32) -> bool {
+    *value == 0.5
 }
 fn black_emission(color: &[f32; 3]) -> bool {
     *color == [0.0; 3]
@@ -230,6 +263,16 @@ impl OpaqueMaterial {
         if !self.normal_scale.is_finite() || !(0.0..=2.0).contains(&self.normal_scale) {
             return Err(SceneError::Invalid(
                 "material normal scale must be finite in 0..=2".into(),
+            ));
+        }
+        if !self.opacity.is_finite() || !(0.0..=1.0).contains(&self.opacity) {
+            return Err(SceneError::Invalid(
+                "material opacity must be finite in 0..=1".into(),
+            ));
+        }
+        if !self.alpha_cutoff.is_finite() || !(0.0..=1.0).contains(&self.alpha_cutoff) {
+            return Err(SceneError::Invalid(
+                "material alpha cutoff must be finite in 0..=1".into(),
             ));
         }
         if !self.occlusion_strength.is_finite() || !(0.0..=1.0).contains(&self.occlusion_strength) {

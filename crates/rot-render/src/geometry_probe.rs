@@ -119,6 +119,7 @@ fn verify_case(
                 ),
             );
             DrawGroup {
+                alpha_mode: rot_scene::AlphaMode::Opaque,
                 double_sided: false,
                 key: Some(format!("boundary-{index:02}")),
                 primitive: None,

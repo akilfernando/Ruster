@@ -62,6 +62,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue) {
                         Vec3::new(x, 0., z),
                     );
                     DrawGroup {
+                        alpha_mode: rot_scene::AlphaMode::Opaque,
                         double_sided: false,
                         key: Some("selection-plane".into()),
                         primitive: None,

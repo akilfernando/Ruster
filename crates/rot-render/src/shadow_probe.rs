@@ -101,7 +101,11 @@ impl Probe {
         });
         let camera_layout = resources
             .pipeline
-            .for_mesh(&resources.builtins.cube, false)
+            .for_mesh(
+                &resources.builtins.cube,
+                false,
+                rot_scene::AlphaMode::Opaque,
+            )
             .get_bind_group_layout(0);
         let color_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("feasibility compatible color layout"),
@@ -386,7 +390,11 @@ impl Probe {
             } else {
                 &self.baseline_color
             };
-            pass.set_pipeline(pipelines.for_mesh(&self.resources.builtins.cube, false));
+            pass.set_pipeline(pipelines.for_mesh(
+                &self.resources.builtins.cube,
+                false,
+                rot_scene::AlphaMode::Opaque,
+            ));
             pass.set_bind_group(0, &self.resources.camera_bind, &[]);
             pass.set_bind_group(
                 1,
@@ -661,10 +669,302 @@ fn sun_shadow_depth_readback_probe() {
         "outside shadow footprint must stay lit"
     );
     drop(p);
+    verify_alpha_shadows(&device, &queue);
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     assert!(
         pollster::block_on(scope.pop()).is_none(),
         "shadow pipeline/attachment validation"
     );
     assert!(errors.lock().unwrap().is_empty());
+}
+
+fn verify_alpha_shadows(device: &wgpu::Device, queue: &wgpu::Queue) {
+    use rot_assets::{Texture, TextureMip, TextureRole};
+    use rot_scene::{AlphaMode, ShadowQuality, SunShadow};
+
+    let cutout = Arc::new(Texture {
+        role: TextureRole::BaseColor,
+        width: 2,
+        height: 2,
+        mips: vec![
+            TextureMip {
+                width: 2,
+                height: 2,
+                bytes: vec![
+                    255, 255, 255, 255, 255, 255, 255, 0, 255, 255, 255, 255, 255, 255, 255, 0,
+                ],
+            },
+            TextureMip {
+                width: 1,
+                height: 1,
+                bytes: vec![255, 255, 255, 128],
+            },
+        ],
+    });
+    let quad_mesh = Arc::new(
+        rot_assets::parse_obj(
+            b"v -1 0.8 -1.5\nv 1 0.8 -1.5\nv 1 0.8 -0.5\nv -1 0.8 -0.5\nvt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nf 1/1 2/2 3/3\nf 1/1 3/3 4/4\n",
+        )
+        .unwrap(),
+    );
+
+    let mut r = Resources::new(device, queue, COLOR, 1);
+    r.ensure_instance_capacity(device, 2);
+    let context = egui::Context::default();
+    assert!(r.resize(device, queue, [SIZE, SIZE], COLOR, 1, &context));
+    assert!(prepare_mesh(device, &mut r.meshes, "cutout-quad", &quad_mesh).is_some());
+
+    let solid_key = BindingKey::default();
+    let mask_key = BindingKey {
+        texture: Some("cutout-tex".into()),
+        sampling: 2,
+        ..Default::default()
+    };
+    r.materials.prepare(
+        device,
+        queue,
+        [
+            (&solid_key, MaterialTextureInputs::default()),
+            (
+                &mask_key,
+                MaterialTextureInputs::base_and_roughness(Some(&cutout), None),
+            ),
+        ]
+        .into_iter(),
+    );
+
+    let camera = Mat4::perspective_rh(45_f32.to_radians(), 1., 0.1, 100.)
+        * Mat4::look_at_rh(Vec3::new(0., 5., 5.), Vec3::ZERO, Vec3::Y);
+    queue.write_buffer(&r.camera, 0, bytemuck::cast_slice(&camera.to_cols_array()));
+
+    let direction = Vec3::new(0., 1., -1.).normalize();
+    let mut lighting = LightingPacket::authored_dark();
+    lighting.mode_counts[2] = 1;
+    lighting.ambient = [0.12, 0.12, 0.12, 0.];
+    lighting.direction_to_light = direction.extend(0.).to_array();
+    lighting.directional_color_intensity = [0.9, 0.9, 0.9, 0.];
+    r.lighting.prepare(queue, &lighting);
+
+    let floor_model = Mat4::from_scale_rotation_translation(
+        Vec3::new(6., 0.1, 6.),
+        Quat::IDENTITY,
+        Vec3::new(0., -0.05, 0.),
+    );
+    let floor_instance = Instance {
+        uv_transform: [1.0, 1.0, 0.0, 0.0],
+        emission_color: [0.0; 4],
+        pbr_params: [0.0, 1.0, 1.0, 1.0],
+        pbr_maps: [0.0, 0.0, 0.0, -1.0],
+        model: floor_model.to_cols_array_2d(),
+        normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
+        color: [1.; 4],
+        base_color: [1., 1., 1., 0.],
+        response: [0.; 4],
+    };
+
+    let render_case = |r: &mut Resources, caster_mode: AlphaMode| -> (Vec<u8>, usize) {
+        let caster_pbr_map_w = match caster_mode {
+            AlphaMode::Mask => 0.5,
+            AlphaMode::Blend => -2.0,
+            AlphaMode::Opaque => -1.0,
+        };
+        let caster_instance = Instance {
+            uv_transform: [1.0, 1.0, 0.0, 0.0],
+            emission_color: [0.0; 4],
+            pbr_params: [0.0, 1.0, 1.0, 1.0],
+            pbr_maps: [0.0, 0.0, 0.0, caster_pbr_map_w],
+            model: Mat4::IDENTITY.to_cols_array_2d(),
+            normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
+            color: [1.; 4],
+            base_color: [1., 1., 1., 0.],
+            response: [0.; 4],
+        };
+        queue.write_buffer(
+            &r.instances,
+            0,
+            bytemuck::cast_slice(&[floor_instance, caster_instance]),
+        );
+        let groups = vec![
+            DrawGroup {
+                alpha_mode: AlphaMode::Opaque,
+                double_sided: false,
+                key: None,
+                primitive: None,
+                binding: solid_key.clone(),
+                texture: None,
+                roughness: None,
+                metallic: None,
+                normal: None,
+                emissive: None,
+                occlusion: None,
+                mesh: None,
+                instances: vec![floor_instance],
+                range: 0..1,
+            },
+            DrawGroup {
+                alpha_mode: caster_mode,
+                double_sided: true,
+                key: Some("cutout-quad".into()),
+                primitive: None,
+                binding: mask_key.clone(),
+                texture: Some(Arc::clone(&cutout)),
+                roughness: None,
+                metallic: None,
+                normal: None,
+                emissive: None,
+                occlusion: None,
+                mesh: Some(Arc::clone(&quad_mesh)),
+                instances: vec![caster_instance],
+                range: 1..2,
+            },
+        ];
+        let mut encoder = device.create_command_encoder(&Default::default());
+        let frame = r.shadows.prepare(
+            device,
+            queue,
+            &mut encoder,
+            shadow_gpu::Geometry {
+                groups: &groups,
+                meshes: &r.meshes,
+                builtins: &r.builtins,
+                materials: &r.materials,
+                zero_uv: &r.zero_uv,
+                instance_bind: &r.instance_bind,
+            },
+            shadow_gpu::Request {
+                settings: Some(SunShadow {
+                    enabled: true,
+                    quality: ShadowQuality::Standard,
+                    depth_bias_texels: 1.0,
+                    normal_bias_texels: 0.5,
+                }),
+                direction,
+                builtin: true,
+                context: &context,
+                timestamps: None,
+            },
+        );
+        let image = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("alpha shadow probe image"),
+            size: wgpu::Extent3d {
+                width: SIZE,
+                height: SIZE,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: COLOR,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = image.create_view(&Default::default());
+        let read = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("alpha shadow readback"),
+            size: u64::from(SIZE * SIZE * 4),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("alpha shadow color pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &r.target.as_ref().unwrap().depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            pass.set_bind_group(0, &r.camera_bind, &[]);
+            pass.set_bind_group(2, &r.lighting.bind, &[]);
+            pass.set_bind_group(3, r.shadows.bind(), &[]);
+            for group in &groups {
+                if group.alpha_mode == AlphaMode::Blend {
+                    continue;
+                }
+                pass.set_bind_group(1, r.materials.bind(&group.binding), &[]);
+                let mesh = r.builtins.group_mesh(group, &r.meshes);
+                pass.set_pipeline(
+                    r.pipeline
+                        .for_mesh(mesh, group.double_sided, group.alpha_mode),
+                );
+                pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                pass.set_vertex_buffer(1, mesh.uvs.as_ref().unwrap_or(&r.zero_uv).slice(..));
+                pass.set_vertex_buffer(
+                    2,
+                    mesh.tangents
+                        .as_ref()
+                        .unwrap_or(&r.default_tangent)
+                        .slice(..),
+                );
+                pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..mesh.count, 0, group.range.clone());
+            }
+        }
+        encoder.copy_texture_to_buffer(
+            image.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &read,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(SIZE * 4),
+                    rows_per_image: Some(SIZE),
+                },
+            },
+            wgpu::Extent3d {
+                width: SIZE,
+                height: SIZE,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit([encoder.finish()]);
+        let slice = read.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| {});
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        let bytes = slice.get_mapped_range().expect("mapped").to_vec();
+        read.unmap();
+        (bytes, frame.draw_calls)
+    };
+
+    let sample = |bytes: &[u8], world: Vec3| -> [u8; 4] {
+        let clip = camera * world.extend(1.);
+        let ndc = clip.truncate() / clip.w;
+        let x = (((ndc.x + 1.) * 0.5) * SIZE as f32).clamp(0., (SIZE - 1) as f32) as usize;
+        let y = (((1. - ndc.y) * 0.5) * SIZE as f32).clamp(0., (SIZE - 1) as f32) as usize;
+        let offset = (y * SIZE as usize + x) * 4;
+        bytes[offset..offset + 4].try_into().unwrap()
+    };
+
+    let (mask_bytes, mask_draws) = render_case(&mut r, AlphaMode::Mask);
+    assert_eq!(mask_draws, 2, "Mask caster must participate in shadow pass");
+    let under_opaque = sample(&mask_bytes, Vec3::new(-0.5, 0., -0.2));
+    let under_cutout = sample(&mask_bytes, Vec3::new(0.5, 0., -0.2));
+    assert!(
+        u16::from(under_cutout[0]) > u16::from(under_opaque[0]) + 60,
+        "Mask opaque half must cast shadow ({under_opaque:?}) while discarded half stays lit ({under_cutout:?})"
+    );
+
+    let (blend_bytes, blend_draws) = render_case(&mut r, AlphaMode::Blend);
+    assert_eq!(
+        blend_draws, 1,
+        "Blend caster must be excluded from shadow pass"
+    );
+    let under_blend = sample(&blend_bytes, Vec3::new(-0.5, 0., -0.2));
+    assert!(
+        under_blend[0].abs_diff(under_cutout[0]) <= 3,
+        "Excluded Blend caster must leave floor lit ({under_blend:?} vs {under_cutout:?})"
+    );
+    eprintln!("GPU probe: ShadowGpu Mask cutout shadows and Blend exclusion passed");
 }

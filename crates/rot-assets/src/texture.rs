@@ -76,7 +76,7 @@ enum PackedChannel {
 pub struct TextureMip {
     pub width: u32,
     pub height: u32,
-    /// Top-row-first tight pixels: BaseColor sRGB RGBA8/alpha255; Roughness linear R8.
+    /// Top-row-first tight pixels: BaseColor sRGB RGBA8 (straight alpha); Normal/Emissive RGBA8/alpha255; scalar linear R8.
     pub bytes: Vec<u8>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -126,6 +126,7 @@ pub fn validate_texture(texture: &Texture) -> Result<(), AssetError> {
             || mip.height != height
             || mip.bytes.len() != image_bytes(width, height, texture.role)?
             || (!texture.role.is_scalar_linear()
+                && texture.role != TextureRole::BaseColor
                 && mip.bytes.as_chunks::<4>().0.iter().any(|p| p[3] != 255))
         {
             return Err(error(
@@ -328,7 +329,7 @@ fn preflight(bytes: &[u8], role: TextureRole, channel: PackedChannel) -> Result<
     Ok(())
 }
 
-/// Decode one bounded opaque sRGB base-color texture. Image alpha is ignored;
+/// Decode one bounded sRGB base-color texture. Straight alpha is preserved for BaseColor;
 /// RGB is never premultiplied. Raw row order is retained; rendering flips V once.
 pub fn decode_png(bytes: &[u8]) -> Result<Texture, AssetError> {
     decode_png_with_role(bytes, TextureRole::BaseColor)
@@ -426,14 +427,23 @@ fn decode_png_channel(
         None
     };
     if info.color_type == png::ColorType::Indexed {
-        let palette = reader
-            .info()
+        let png_info = reader.info();
+        let palette = png_info
             .palette
             .as_deref()
             .ok_or_else(|| error("indexed PNG is missing its palette"))?;
+        let trns = (role == TextureRole::BaseColor)
+            .then_some(png_info.trns.as_deref())
+            .flatten();
         let (colors, _) = palette.as_chunks::<3>();
         if depth == 8 {
-            append_indexed_pixels(decoded.iter().copied(), colors, scalar_index, &mut pixels)?;
+            append_indexed_pixels(
+                decoded.iter().copied(),
+                colors,
+                trns,
+                scalar_index,
+                &mut pixels,
+            )?;
         } else {
             let mask = (1u8 << depth) - 1;
             // Each scanline starts on a byte boundary, with the first index
@@ -444,14 +454,19 @@ fn decode_png_channel(
                     (row[bit / 8] >> (8 - depth - bit % 8)) & mask
                 })
             });
-            append_indexed_pixels(indices, colors, scalar_index, &mut pixels)?;
+            append_indexed_pixels(indices, colors, trns, scalar_index, &mut pixels)?;
         }
     } else {
         for pixel in decoded.chunks_exact(channels) {
             if let Some(ch) = scalar_index {
                 pixels.push(pixel[if channels == 1 { 0 } else { ch }]);
             } else {
-                pixels.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
+                let alpha = if channels == 4 && role == TextureRole::BaseColor {
+                    pixel[3]
+                } else {
+                    255
+                };
+                pixels.extend_from_slice(&[pixel[0], pixel[1], pixel[2], alpha]);
             }
         }
     }
@@ -476,7 +491,8 @@ fn build_texture(
     {
         let source = mips.last().expect("level0 exists");
         mips.push(match role {
-            TextureRole::BaseColor | TextureRole::Emissive => downsample(source),
+            TextureRole::BaseColor => downsample(source, true),
+            TextureRole::Emissive => downsample(source, false),
             TextureRole::Roughness | TextureRole::Metallic | TextureRole::Occlusion => {
                 downsample_roughness(source)
             }
@@ -493,24 +509,41 @@ fn build_texture(
     Ok(texture)
 }
 
-/// Package an already admitted RGBA8 level zero as ordinary RGB PNG for export/standalone loading.
+/// Package an already admitted RGBA8 level zero as RGB or RGBA PNG for export/standalone loading.
 pub(crate) fn encode_rgb_source(texture: &Texture) -> Result<Vec<u8>, AssetError> {
-    let mut rgb = Vec::with_capacity(texture.width as usize * texture.height as usize * 3);
-    for rgba in texture.mips[0].bytes.as_chunks::<4>().0 {
-        rgb.extend_from_slice(&rgba[..3]);
-    }
+    let has_alpha = texture.role == TextureRole::BaseColor
+        && texture.mips[0]
+            .bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|rgba| rgba[3] != 255);
     let mut bytes = Vec::new();
     {
         let mut encoder = png::Encoder::new(&mut bytes, texture.width, texture.height);
-        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_color(if has_alpha {
+            png::ColorType::Rgba
+        } else {
+            png::ColorType::Rgb
+        });
         encoder.set_depth(png::BitDepth::Eight);
         encoder.set_compression(png::Compression::Fast);
         let mut writer = encoder
             .write_header()
             .map_err(|e| error(format!("RGB PNG encode: {e}")))?;
-        writer
-            .write_image_data(&rgb)
-            .map_err(|e| error(format!("RGB PNG pixels: {e}")))?;
+        if has_alpha {
+            writer
+                .write_image_data(&texture.mips[0].bytes)
+                .map_err(|e| error(format!("RGBA PNG pixels: {e}")))?;
+        } else {
+            let mut rgb = Vec::with_capacity(texture.width as usize * texture.height as usize * 3);
+            for rgba in texture.mips[0].bytes.as_chunks::<4>().0 {
+                rgb.extend_from_slice(&rgba[..3]);
+            }
+            writer
+                .write_image_data(&rgb)
+                .map_err(|e| error(format!("RGB PNG pixels: {e}")))?;
+        }
     }
     Ok(bytes)
 }
@@ -590,6 +623,7 @@ pub(crate) fn decode_glb_jpeg_occlusion(bytes: &[u8]) -> Result<Texture, AssetEr
 fn append_indexed_pixels(
     indices: impl Iterator<Item = u8>,
     colors: &[[u8; 3]],
+    trns: Option<&[u8]>,
     scalar_channel: Option<usize>,
     pixels: &mut Vec<u8>,
 ) -> Result<(), AssetError> {
@@ -600,7 +634,10 @@ fn append_indexed_pixels(
         if let Some(ch) = scalar_channel {
             pixels.push(rgb[ch]);
         } else {
-            pixels.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+            let alpha = trns
+                .and_then(|table| table.get(usize::from(index)).copied())
+                .unwrap_or(255);
+            pixels.extend_from_slice(&[rgb[0], rgb[1], rgb[2], alpha]);
         }
     }
     Ok(())
@@ -640,7 +677,7 @@ fn from_linear(value: f64) -> u8 {
     };
     (encoded * 255.0).round().clamp(0.0, 255.0) as u8
 }
-fn downsample(source: &TextureMip) -> TextureMip {
+fn downsample(source: &TextureMip, preserve_alpha: bool) -> TextureMip {
     let width = (source.width / 2).max(1);
     let height = (source.height / 2).max(1);
     let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
@@ -653,19 +690,40 @@ fn downsample(source: &TextureMip) -> TextureMip {
             let x0 = f64::from(x) * f64::from(source.width) / f64::from(width);
             let x1 = f64::from(x + 1) * f64::from(source.width) / f64::from(width);
             let mut sum = [0.0; 3];
+            let mut unweighted_sum = [0.0; 3];
+            let mut alpha_sum = 0.0;
             for sy in y0.floor() as u32..y1.ceil() as u32 {
                 for sx in x0.floor() as u32..x1.ceil() as u32 {
                     let weight = (y1.min(f64::from(sy + 1)) - y0.max(f64::from(sy)))
                         * (x1.min(f64::from(sx + 1)) - x0.max(f64::from(sx)));
                     let index = (sy as usize * source.width as usize + sx as usize) * 4;
-                    for (channel, value) in sum.iter_mut().enumerate() {
-                        *value += linear[source.bytes[index + channel] as usize] * weight;
+                    let alpha_w = if preserve_alpha {
+                        f64::from(source.bytes[index + 3]) / 255.0
+                    } else {
+                        1.0
+                    };
+                    alpha_sum += alpha_w * weight;
+                    for (channel, (value, unweighted)) in
+                        sum.iter_mut().zip(unweighted_sum.iter_mut()).enumerate()
+                    {
+                        let lin = linear[source.bytes[index + channel] as usize];
+                        *value += lin * (weight * alpha_w);
+                        *unweighted += lin * weight;
                     }
                 }
             }
             let area = (x1 - x0) * (y1 - y0);
-            rgba.extend(sum.map(|sum| from_linear(sum / area)));
-            rgba.push(255);
+            let rgb = if alpha_sum > 0.0 {
+                sum.map(|value| from_linear(value / alpha_sum))
+            } else {
+                unweighted_sum.map(|value| from_linear(value / area))
+            };
+            rgba.extend(rgb);
+            rgba.push(if preserve_alpha {
+                ((alpha_sum / area) * 255.0).round().clamp(0.0, 255.0) as u8
+            } else {
+                255
+            });
         }
     }
     TextureMip {
@@ -893,7 +951,7 @@ pub(crate) mod tests {
         let palette = decode_png(&encoded).unwrap();
         assert_eq!(
             palette.mips[0].bytes,
-            [12, 34, 56, 255, 70, 80, 90, 255, 70, 80, 90, 255, 12, 34, 56, 255]
+            [12, 34, 56, 0, 70, 80, 90, 120, 70, 80, 90, 120, 12, 34, 56, 0]
         );
         assert_eq!(palette, decode_png(&expected).unwrap());
         assert!(decode_png_with_role(&encoded, TextureRole::Roughness).is_err());
@@ -915,7 +973,6 @@ pub(crate) mod tests {
         encoder.set_color(png::ColorType::Indexed);
         encoder.set_depth(depth);
         encoder.set_palette(palette.as_flattened());
-        encoder.set_trns(vec![0; palette.len()]);
         encoder
             .write_header()
             .unwrap()
@@ -1020,7 +1077,27 @@ pub(crate) mod tests {
             png::BitDepth::Eight,
             &[12, 34, 56, 0],
         );
-        assert_eq!(decode_png(&rgba).unwrap().mips[0].bytes, [12, 34, 56, 255]);
+        assert_eq!(decode_png(&rgba).unwrap().mips[0].bytes, [12, 34, 56, 0]);
+        assert_eq!(
+            decode_png_with_role(&rgba, TextureRole::Emissive)
+                .unwrap()
+                .mips[0]
+                .bytes,
+            [12, 34, 56, 255]
+        );
+        let alpha_mip = png(
+            2,
+            2,
+            png::ColorType::Rgba,
+            png::BitDepth::Eight,
+            &[255, 0, 0, 255, 0, 0, 0, 0, 255, 0, 0, 255, 0, 0, 0, 0],
+        );
+        let decoded_alpha = decode_png(&alpha_mip).unwrap();
+        assert_eq!(decoded_alpha.mips[1].bytes, [255, 0, 0, 128]);
+        assert_eq!(
+            decode_png(&encode_rgb_source(&decoded_alpha).unwrap()).unwrap(),
+            decoded_alpha
+        );
         for (width, height) in [(3, 1), (1, 3)] {
             let odd = png(
                 width,
@@ -1091,7 +1168,21 @@ pub(crate) mod tests {
         *nonopaque.last_mut().unwrap() = 0;
         let sum = checksum(&nonopaque);
         nonopaque[CACHE_HASH..CACHE_HEADER].copy_from_slice(&sum);
-        assert!(decode_cache(&nonopaque, &hash).is_err());
+        assert_eq!(
+            decode_cache(&nonopaque, &hash)
+                .unwrap()
+                .mips
+                .last()
+                .unwrap()
+                .bytes[3],
+            0
+        );
+        let emissive = decode_png_with_role(&bytes, TextureRole::Emissive).unwrap();
+        let mut emissive_nonopaque = encode_cache(&hash, &emissive).unwrap();
+        *emissive_nonopaque.last_mut().unwrap() = 0;
+        let emissive_sum = checksum(&emissive_nonopaque);
+        emissive_nonopaque[CACHE_HASH..CACHE_HEADER].copy_from_slice(&emissive_sum);
+        assert!(decode_cache_with_role(&emissive_nonopaque, &hash, TextureRole::Emissive).is_err());
         let mut incomplete = texture;
         incomplete.mips.pop();
         assert!(validate_texture(&incomplete).is_err());

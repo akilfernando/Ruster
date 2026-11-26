@@ -2185,81 +2185,16 @@ fn render_draw_scene(
         Err(_) => (LightingPacket::authored_dark(), true),
     };
     let mut grouped = BTreeMap::new();
+    let mut blended = Vec::new();
     let mut triangles = 0u64;
-    for (object, matrix) in draw.objects() {
-        let mesh = object_mesh(object, meshes);
-        triangles += mesh.map_or(12, |mesh| mesh.indices.len() as u64 / 3);
-        let key = mesh.and(object.mesh.as_deref());
-        let primitive = object.mesh.is_none().then_some(object.primitive).flatten();
-        let material = object
-            .material
-            .as_ref()
-            .and_then(|id| scene.materials.get(id));
-        let binding = draw_material_binding(object, mesh, material);
-        let double_sided = material.is_some_and(|material| material.double_sided);
-        let mut base_color = object.color;
-        if let Some(material) = material {
-            for (channel, tint) in base_color[..3].iter_mut().zip(material.tint) {
-                *channel *= tint;
-            }
-        }
-        let is_selected = !selected.is_empty() && selected.contains(&object.id.as_str());
-        base_color[3] = if is_selected { 0.35 } else { 0.0 };
-        let group = grouped
-            .entry((key, primitive, binding, double_sided))
-            .or_insert_with(|| DrawGroup {
-                key: key.map(str::to_owned),
-                double_sided,
-                primitive,
-                texture: binding
-                    .texture
-                    .and_then(|id| (!binding.missing).then(|| textures.get(id)).flatten())
-                    .cloned(),
-                roughness: binding
-                    .roughness
-                    .and_then(|id| {
-                        (!binding.missing_roughness)
-                            .then(|| textures.get(id))
-                            .flatten()
-                    })
-                    .cloned(),
-                metallic: binding
-                    .metallic
-                    .and_then(|id| {
-                        (!binding.missing_metallic)
-                            .then(|| textures.get(id))
-                            .flatten()
-                    })
-                    .cloned(),
-                normal: binding
-                    .normal
-                    .and_then(|id| {
-                        (!binding.missing_normal)
-                            .then(|| textures.get(id))
-                            .flatten()
-                    })
-                    .cloned(),
-                emissive: binding
-                    .emissive
-                    .and_then(|id| {
-                        (!binding.missing_emissive)
-                            .then(|| textures.get(id))
-                            .flatten()
-                    })
-                    .cloned(),
-                occlusion: binding
-                    .occlusion
-                    .and_then(|id| {
-                        (!binding.missing_occlusion)
-                            .then(|| textures.get(id))
-                            .flatten()
-                    })
-                    .cloned(),
-                binding: binding.into_owned(),
-                mesh: mesh.cloned(),
-                instances: Vec::new(),
-                range: 0..0,
-            });
+    let eye_vec = Vec3::from_slice(&camera_eye_mode[..3]);
+    let is_perspective = camera_eye_mode[3] > 0.5;
+    let make_instance = |object: &Object,
+                         matrix: Mat4,
+                         material: Option<&rot_scene::OpaqueMaterial>,
+                         binding: &BindingKey<&str>,
+                         base_color: [f32; 4],
+                         is_selected: bool| {
         let (matrix, normal) = instance_matrices(matrix);
         let mut color = object.color;
         if is_selected {
@@ -2267,7 +2202,12 @@ fn render_draw_scene(
                 *channel = (*channel * 0.65 + 0.35).min(1.0);
             }
         }
-        group.instances.push(Instance {
+        let alpha_cutoff = match material.map(|m| m.alpha_mode) {
+            Some(rot_scene::AlphaMode::Mask) => material.map_or(0.5, |m| m.alpha_cutoff),
+            Some(rot_scene::AlphaMode::Blend) => -2.0,
+            _ => -1.0,
+        };
+        Instance {
             model: matrix.to_cols_array_2d(),
             normal: normal.to_cols_array_2d().map(|c| [c[0], c[1], c[2], 0.0]),
             color,
@@ -2287,15 +2227,15 @@ fn render_draw_scene(
                 let [u, v] = material.uv_offset;
                 [x, y, u, v]
             }),
-            pbr_params: material.map_or([0.0, 1.0, 1.0, 0.0], |material| {
+            pbr_params: material.map_or([0.0, 1.0, 1.0, 1.0], |material| {
                 [
                     material.metallic,
                     material.normal_scale,
                     material.occlusion_strength,
-                    0.0,
+                    material.opacity,
                 ]
             }),
-            pbr_maps: material.map_or([0.0; 4], |material| {
+            pbr_maps: material.map_or([0.0, 0.0, 0.0, -1.0], |material| {
                 [
                     f32::from(u8::from(
                         material.metallic_texture.is_some() && !binding.missing_metallic,
@@ -2306,7 +2246,7 @@ fn render_draw_scene(
                     f32::from(u8::from(
                         material.occlusion_texture.is_some() && !binding.missing_occlusion,
                     )),
-                    0.0,
+                    alpha_cutoff,
                 ]
             }),
             response: match material.map(|material| material.response) {
@@ -2325,10 +2265,116 @@ fn render_draw_scene(
                     f32::from(u8::from(navigation.selection_feedback && is_selected)),
                 ],
             },
-        });
+        }
+    };
+    let make_group = |key: Option<&str>,
+                      primitive: Option<rot_scene::Primitive>,
+                      binding: BindingKey<&str>,
+                      double_sided: bool,
+                      alpha_mode: rot_scene::AlphaMode,
+                      mesh: Option<&Arc<rot_assets::Mesh>>| DrawGroup {
+        key: key.map(str::to_owned),
+        double_sided,
+        alpha_mode,
+        primitive,
+        texture: binding
+            .texture
+            .and_then(|id| (!binding.missing).then(|| textures.get(id)).flatten())
+            .cloned(),
+        roughness: binding
+            .roughness
+            .and_then(|id| {
+                (!binding.missing_roughness)
+                    .then(|| textures.get(id))
+                    .flatten()
+            })
+            .cloned(),
+        metallic: binding
+            .metallic
+            .and_then(|id| {
+                (!binding.missing_metallic)
+                    .then(|| textures.get(id))
+                    .flatten()
+            })
+            .cloned(),
+        normal: binding
+            .normal
+            .and_then(|id| {
+                (!binding.missing_normal)
+                    .then(|| textures.get(id))
+                    .flatten()
+            })
+            .cloned(),
+        emissive: binding
+            .emissive
+            .and_then(|id| {
+                (!binding.missing_emissive)
+                    .then(|| textures.get(id))
+                    .flatten()
+            })
+            .cloned(),
+        occlusion: binding
+            .occlusion
+            .and_then(|id| {
+                (!binding.missing_occlusion)
+                    .then(|| textures.get(id))
+                    .flatten()
+            })
+            .cloned(),
+        binding: binding.into_owned(),
+        mesh: mesh.cloned(),
+        instances: Vec::new(),
+        range: 0..0,
+    };
+    for (order_idx, (object, matrix)) in draw.objects().enumerate() {
+        let mesh = object_mesh(object, meshes);
+        triangles += mesh.map_or(12, |mesh| mesh.indices.len() as u64 / 3);
+        let key = mesh.and(object.mesh.as_deref());
+        let primitive = object.mesh.is_none().then_some(object.primitive).flatten();
+        let material = object
+            .material
+            .as_ref()
+            .and_then(|id| scene.materials.get(id));
+        let binding = draw_material_binding(object, mesh, material);
+        let double_sided = material.is_some_and(|material| material.double_sided);
+        let alpha_mode = material.map_or(rot_scene::AlphaMode::Opaque, |m| m.alpha_mode);
+        let mut base_color = object.color;
+        if let Some(material) = material {
+            for (channel, tint) in base_color[..3].iter_mut().zip(material.tint) {
+                *channel *= tint;
+            }
+        }
+        let is_selected = !selected.is_empty() && selected.contains(&object.id.as_str());
+        base_color[3] = if is_selected { 0.35 } else { 0.0 };
+        let instance = make_instance(object, matrix, material, &binding, base_color, is_selected);
+        if alpha_mode == rot_scene::AlphaMode::Blend {
+            let world_pos = matrix.w_axis.truncate();
+            let depth = if is_perspective {
+                (world_pos - eye_vec).length_squared()
+            } else {
+                -world_pos.dot(eye_vec)
+            };
+            blended.push((
+                depth,
+                order_idx,
+                key,
+                primitive,
+                binding,
+                double_sided,
+                mesh,
+                instance,
+            ));
+        } else {
+            let group = grouped
+                .entry((key, primitive, binding, double_sided, alpha_mode))
+                .or_insert_with(|| {
+                    make_group(key, primitive, binding, double_sided, alpha_mode, mesh)
+                });
+            group.instances.push(instance);
+        }
     }
     let mut offset = 0;
-    let groups = grouped
+    let mut groups: Vec<DrawGroup> = grouped
         .into_values()
         .map(|mut group| {
             group.range = offset..offset + group.instances.len() as u32;
@@ -2336,6 +2382,37 @@ fn render_draw_scene(
             group
         })
         .collect();
+    if !blended.is_empty() {
+        blended.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        for (_, _, key, primitive, binding, double_sided, mesh, instance) in blended {
+            let same_last = groups.last().is_some_and(|last| {
+                last.alpha_mode == rot_scene::AlphaMode::Blend
+                    && last.key.as_deref() == key
+                    && last.primitive == primitive
+                    && last.double_sided == double_sided
+                    && last.binding.as_borrowed() == binding
+            });
+            if same_last {
+                let last = groups.last_mut().expect("checked");
+                last.instances.push(instance);
+                last.range.end += 1;
+                offset += 1;
+            } else {
+                let mut group = make_group(
+                    key,
+                    primitive,
+                    binding,
+                    double_sided,
+                    rot_scene::AlphaMode::Blend,
+                    mesh,
+                );
+                group.instances.push(instance);
+                group.range = offset..offset + 1;
+                offset += 1;
+                groups.push(group);
+            }
+        }
+    }
     let draw_rect = player_content.unwrap_or(rect);
     if paint_bars {
         ui.painter().rect_filled(rect, 0., egui::Color32::BLACK);
@@ -3009,7 +3086,8 @@ impl Resources {
         let materials = MaterialGpu::new(device, queue);
         let ibl = ibl_gpu::IblGpu::new(device, queue);
         let lighting = LightingGpu::new(device, &ibl);
-        let shadows = shadow_gpu::ShadowGpu::new(device, queue, &instance_layout);
+        let shadows =
+            shadow_gpu::ShadowGpu::new(device, queue, &instance_layout, &materials.layout);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("fixed scene ABI"),
             bind_group_layouts: &[
@@ -3468,10 +3546,21 @@ fn selection_pipelines(
 struct ScenePipelines {
     // Indexed by [double_sided][has_uv][has_tangent].
     sided: [[[wgpu::RenderPipeline; 2]; 2]; 2],
+    blend: [[[wgpu::RenderPipeline; 2]; 2]; 2],
 }
 impl ScenePipelines {
-    fn for_mesh(&self, mesh: &GpuMesh, double_sided: bool) -> &wgpu::RenderPipeline {
-        &self.sided[usize::from(double_sided)][usize::from(mesh.uvs.is_some())]
+    fn for_mesh(
+        &self,
+        mesh: &GpuMesh,
+        double_sided: bool,
+        alpha_mode: rot_scene::AlphaMode,
+    ) -> &wgpu::RenderPipeline {
+        let bank = if alpha_mode == rot_scene::AlphaMode::Blend {
+            &self.blend
+        } else {
+            &self.sided
+        };
+        &bank[usize::from(double_sided)][usize::from(mesh.uvs.is_some())]
             [usize::from(mesh.tangents.is_some())]
     }
 }
@@ -3555,9 +3644,13 @@ fn scene_pipeline_format(
     let uv_attributes = used(&wgpu::vertex_attr_array![2=>Float32x2]);
     let tangent_attributes = used(&wgpu::vertex_attr_array![3=>Float32x4]);
     let builtin = source == default_shader() || source == surface_shader();
-    let create = |uv_stride, tangent_stride, double_sided| {
+    let create = |uv_stride, tangent_stride, double_sided, alpha_blend| {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Rot Engine shared depth-tested instanced meshes"),
+            label: Some(if alpha_blend {
+                "Rot Engine blended depth-tested instanced meshes"
+            } else {
+                "Rot Engine shared depth-tested instanced meshes"
+            }),
             layout: Some(layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -3589,7 +3682,11 @@ fn scene_pipeline_format(
                     "fs"
                 }),
                 compilation_options: Default::default(),
-                targets: &[Some(format.into())],
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: alpha_blend.then_some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
             }),
             primitive: wgpu::PrimitiveState {
                 cull_mode: (!double_sided).then_some(wgpu::Face::Back),
@@ -3597,7 +3694,7 @@ fn scene_pipeline_format(
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: DEPTH,
-                depth_write_enabled: Some(true),
+                depth_write_enabled: Some(!alpha_blend),
                 depth_compare: Some(wgpu::CompareFunction::Less),
                 stencil: Default::default(),
                 bias: Default::default(),
@@ -3610,13 +3707,18 @@ fn scene_pipeline_format(
             cache: None,
         })
     };
-    ScenePipelines {
-        sided: [false, true].map(|double_sided| {
+    let build_bank = |alpha_blend| {
+        [false, true].map(|double_sided| {
             [0, size_of::<[f32; 2]>() as u64].map(|uv_stride| {
-                [0, size_of::<[f32; 4]>() as u64]
-                    .map(|tangent_stride| create(uv_stride, tangent_stride, double_sided))
+                [0, size_of::<[f32; 4]>() as u64].map(|tangent_stride| {
+                    create(uv_stride, tangent_stride, double_sided, alpha_blend)
+                })
             })
-        }),
+        })
+    };
+    ScenePipelines {
+        sided: build_bank(false),
+        blend: build_bank(true),
     }
 }
 
@@ -3783,6 +3885,7 @@ fn prepare_mesh(
 }
 struct DrawGroup {
     double_sided: bool,
+    alpha_mode: rot_scene::AlphaMode,
     key: Option<String>,
     /// Built-in shape when `key` is None; None with no key draws the cube.
     primitive: Option<rot_scene::Primitive>,
@@ -4025,6 +4128,8 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 groups: &self.groups,
                 meshes: &r.meshes,
                 builtins: &r.builtins,
+                materials: &r.materials,
+                zero_uv: &r.zero_uv,
                 instance_bind: &r.instance_bind,
             },
             shadow_gpu::Request {
@@ -4070,13 +4175,10 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             } else {
                 &r.pipeline
             };
-            pass.set_bind_group(0, &r.camera_bind, &[]);
-            pass.set_bind_group(2, &r.lighting.bind, &[]);
-            pass.set_bind_group(3, r.shadows.bind(), &[]);
-            for group in &self.groups {
+            let draw_group = |pass: &mut wgpu::RenderPass<'_>, group: &DrawGroup| {
                 pass.set_bind_group(1, r.materials.bind(&group.binding), &[]);
                 let mesh = r.builtins.group_mesh(group, &r.meshes);
-                pass.set_pipeline(pipelines.for_mesh(mesh, group.double_sided));
+                pass.set_pipeline(pipelines.for_mesh(mesh, group.double_sided, group.alpha_mode));
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_vertex_buffer(1, mesh.uvs.as_ref().unwrap_or(&r.zero_uv).slice(..));
                 pass.set_vertex_buffer(
@@ -4088,6 +4190,16 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 );
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..mesh.count, 0, group.range.clone());
+            };
+            pass.set_bind_group(0, &r.camera_bind, &[]);
+            pass.set_bind_group(2, &r.lighting.bind, &[]);
+            pass.set_bind_group(3, r.shadows.bind(), &[]);
+            for group in self
+                .groups
+                .iter()
+                .filter(|g| g.alpha_mode != rot_scene::AlphaMode::Blend)
+            {
+                draw_group(&mut pass, group);
             }
             if draw_sky {
                 r.ibl.render_sky(&mut pass, &r.lighting.bind, format);
@@ -4096,6 +4208,22 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 pass.set_pipeline(grid);
                 pass.set_bind_group(0, &r.camera_bind, &[]);
                 pass.draw(0..editor_grid::VERTICES, 0..1);
+            }
+            if self
+                .groups
+                .iter()
+                .any(|g| g.alpha_mode == rot_scene::AlphaMode::Blend)
+            {
+                pass.set_bind_group(0, &r.camera_bind, &[]);
+                pass.set_bind_group(2, &r.lighting.bind, &[]);
+                pass.set_bind_group(3, r.shadows.bind(), &[]);
+                for group in self
+                    .groups
+                    .iter()
+                    .filter(|g| g.alpha_mode == rot_scene::AlphaMode::Blend)
+                {
+                    draw_group(&mut pass, group);
+                }
             }
         }
         if selection {
@@ -4678,6 +4806,7 @@ mod tests {
             ("scene", default_shader()),
             ("surface", surface_shader()),
             ("shadow_depth", include_str!("shadow_depth.wgsl")),
+            ("shadow_depth_mask", include_str!("shadow_depth_mask.wgsl")),
             ("selection_mask", include_str!("selection_mask.wgsl")),
             (
                 "example_scene",
@@ -6192,7 +6321,11 @@ mod tests {
                         }),
                         ..Default::default()
                     });
-                    pass.set_pipeline(r.pipeline.for_mesh(&r.builtins.cube, false));
+                    pass.set_pipeline(r.pipeline.for_mesh(
+                        &r.builtins.cube,
+                        false,
+                        rot_scene::AlphaMode::Opaque,
+                    ));
                     pass.set_bind_group(0, &r.camera_bind, &[]);
                     pass.set_bind_group(1, r.materials.bind(&BindingKey::default()), &[]);
                     pass.set_bind_group(2, &r.lighting.bind, &[]);

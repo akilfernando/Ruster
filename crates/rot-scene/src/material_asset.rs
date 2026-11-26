@@ -1,7 +1,7 @@
 //! Versioned JSON authoring format for project-local `.material.json` assets.
 use crate::{
-    identity_uv_tiling, strict_json, MaterialResponse, OpaqueMaterial, SceneError, TextureAddress,
-    TextureFilter,
+    identity_uv_tiling, strict_json, AlphaMode, MaterialResponse, OpaqueMaterial, SceneError,
+    TextureAddress, TextureFilter,
 };
 use serde::{Deserialize, Serialize};
 
@@ -23,6 +23,12 @@ struct MaterialFields {
     name: Option<String>,
     #[serde(default = "default_tint")]
     tint: [f32; 3],
+    #[serde(default = "default_one")]
+    opacity: f32,
+    #[serde(default)]
+    alpha_mode: AlphaMode,
+    #[serde(default = "default_half")]
+    alpha_cutoff: f32,
     #[serde(default)]
     emission_color: [f32; 3],
     #[serde(default)]
@@ -65,11 +71,18 @@ fn default_one() -> f32 {
     1.0
 }
 
+fn default_half() -> f32 {
+    0.5
+}
+
 impl From<MaterialFields> for OpaqueMaterial {
     fn from(fields: MaterialFields) -> Self {
         Self {
             name: fields.name,
             tint: fields.tint,
+            opacity: fields.opacity,
+            alpha_mode: fields.alpha_mode,
+            alpha_cutoff: fields.alpha_cutoff,
             emission_color: fields.emission_color,
             metallic: fields.metallic,
             normal_scale: fields.normal_scale,
@@ -154,6 +167,9 @@ mod tests {
         let material = OpaqueMaterial {
             name: Some("Brushed Bronze".into()),
             tint: [0.72, 0.45, 0.21],
+            opacity: 0.75,
+            alpha_mode: AlphaMode::Mask,
+            alpha_cutoff: 0.42,
             emission_color: [0.05, 0.02, 0.0],
             metallic: 0.85,
             normal_scale: 1.4,

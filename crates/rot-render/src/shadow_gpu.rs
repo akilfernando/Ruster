@@ -60,13 +60,20 @@ pub(super) struct Geometry<'a> {
     pub meshes: &'a BTreeMap<String, GpuMesh>,
     pub builtins: &'a BuiltinMeshes,
     pub instance_bind: &'a wgpu::BindGroup,
+    pub materials: &'a super::MaterialGpu,
+    pub zero_uv: &'a wgpu::Buffer,
 }
 impl Geometry<'_> {
     fn mesh(&self, group: &DrawGroup) -> &GpuMesh {
         self.builtins.group_mesh(group, self.meshes)
     }
+    fn shadow_groups(&self) -> impl Iterator<Item = &DrawGroup> + '_ {
+        self.groups
+            .iter()
+            .filter(|group| group.alpha_mode != rot_scene::AlphaMode::Blend)
+    }
     fn corners(&self) -> impl Iterator<Item = Vec3> + '_ {
-        self.groups.iter().flat_map(|group| {
+        self.shadow_groups().flat_map(|group| {
             let mesh = self.mesh(group);
             let [lo, hi] = mesh.bounds;
             let count = mesh.count;
@@ -92,7 +99,7 @@ impl Geometry<'_> {
     }
     fn smallest_feature(&self) -> f64 {
         let mut smallest = f64::INFINITY;
-        for group in self.groups {
+        for group in self.shadow_groups() {
             let mesh = self.mesh(group);
             let extent = mesh.bounds[1] - mesh.bounds[0];
             for instance in &group.instances {
@@ -126,6 +133,7 @@ pub(super) struct ShadowGpu {
     neutral: Map,
     depth_bind: wgpu::BindGroup,
     pipeline: wgpu::RenderPipeline,
+    mask_pipelines: [wgpu::RenderPipeline; 2],
     active: Option<Map>,
     retiring: Option<Retired>,
     enabled: bool,
@@ -140,6 +148,7 @@ impl ShadowGpu {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         instance_layout: &wgpu::BindGroupLayout,
+        material_layout: &wgpu::BindGroupLayout,
     ) -> Self {
         let entry = wgpu::BindGroupLayoutEntry {
             binding: 0,
@@ -255,6 +264,60 @@ impl ShadowGpu {
             multiview_mask: None,
             cache: None,
         });
+        let mask_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Sun depth mask ABI"),
+            bind_group_layouts: &[
+                Some(&depth_layout),
+                Some(instance_layout),
+                Some(material_layout),
+            ],
+            immediate_size: 0,
+        });
+        let mask_shader =
+            device.create_shader_module(wgpu::include_wgsl!("shadow_depth_mask.wgsl"));
+        let mask_pipelines = [0_u64, size_of::<[f32; 2]>() as u64].map(|uv_stride| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("retained cutout Sun depth pipeline"),
+                layout: Some(&mask_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &mask_shader,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[
+                        Some(wgpu::VertexBufferLayout {
+                            array_stride: size_of::<Vertex>() as u64,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &wgpu::vertex_attr_array![0=>Float32x3],
+                        }),
+                        Some(wgpu::VertexBufferLayout {
+                            array_stride: uv_stride,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &wgpu::vertex_attr_array![2=>Float32x2],
+                        }),
+                    ],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &mask_shader,
+                    entry_point: Some("fs"),
+                    compilation_options: Default::default(),
+                    targets: &[],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        });
         Self {
             layout,
             uniform,
@@ -263,6 +326,7 @@ impl ShadowGpu {
             neutral,
             depth_bind,
             pipeline,
+            mask_pipelines,
             active: None,
             retiring: None,
             enabled: false,
@@ -456,12 +520,28 @@ impl ShadowGpu {
                             timestamp_writes: request.timestamps,
                             ..Default::default()
                         });
-                        pass.set_pipeline(&self.pipeline);
                         pass.set_bind_group(0, &self.depth_bind, &[]);
                         pass.set_bind_group(1, geometry.instance_bind, &[]);
-                        for group in geometry.groups {
+                        for group in geometry.shadow_groups() {
                             let mesh = geometry.mesh(group);
-                            pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                            if group.alpha_mode == rot_scene::AlphaMode::Mask {
+                                pass.set_pipeline(
+                                    &self.mask_pipelines[usize::from(mesh.uvs.is_some())],
+                                );
+                                pass.set_bind_group(
+                                    2,
+                                    geometry.materials.bind(&group.binding),
+                                    &[],
+                                );
+                                pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                                pass.set_vertex_buffer(
+                                    1,
+                                    mesh.uvs.as_ref().unwrap_or(geometry.zero_uv).slice(..),
+                                );
+                            } else {
+                                pass.set_pipeline(&self.pipeline);
+                                pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                            }
                             pass.set_index_buffer(
                                 mesh.indices.slice(..),
                                 wgpu::IndexFormat::Uint32,

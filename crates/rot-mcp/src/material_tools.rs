@@ -106,6 +106,9 @@ fn shape(tool: &str, field: &str) -> Value {
                 "uv_tiling":{"type":"array","minItems":2,"maxItems":2,"items":{"type":"number"}},
                 "uv_offset":{"type":"array","minItems":2,"maxItems":2,"items":{"type":"number"}},
                 "double_sided":{"type":"boolean"},
+                "opacity":{"type":"number","minimum":0,"maximum":1},
+                "alpha_mode":{"enum":["opaque","mask","blend"]},
+                "alpha_cutoff":{"type":"number","minimum":0,"maximum":1},
                 "emission_color":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number","minimum":0,"maximum":1}},
                 "metallic":{"type":"number","minimum":0,"maximum":1},
                 "normal_scale":{"type":"number","minimum":0,"maximum":2},
@@ -188,11 +191,26 @@ fn valid_material(value: &Value) -> bool {
             "normal_scale",
             "occlusion_strength",
             "double_sided",
+            "opacity",
+            "alpha_mode",
+            "alpha_cutoff",
             "uv_tiling",
             "uv_offset",
         ],
     ) && material.get("name").is_none_or(valid_name)
         && material.get("response").is_none_or(valid_response)
+        && material.get("opacity").is_none_or(|v| {
+            v.as_f64()
+                .is_some_and(|n| n.is_finite() && (0.0..=1.0).contains(&n))
+        })
+        && material.get("alpha_mode").is_none_or(|v| {
+            v.as_str()
+                .is_some_and(|m| ["opaque", "mask", "blend"].contains(&m))
+        })
+        && material.get("alpha_cutoff").is_none_or(|v| {
+            v.as_f64()
+                .is_some_and(|n| n.is_finite() && (0.0..=1.0).contains(&n))
+        })
         && [
             "roughness_texture",
             "metallic_texture",
@@ -415,6 +433,31 @@ mod tests {
             let mut args = set.clone();
             args["material"]["double_sided"] = flag;
             assert_eq!(valid("scene_material_set", &args), accepted);
+        }
+        for (mode, accepted) in [
+            (json!("opaque"), true),
+            (json!("mask"), true),
+            (json!("blend"), true),
+            (json!("additive"), false),
+            (Value::Null, false),
+        ] {
+            let mut args = set.clone();
+            args["material"]["alpha_mode"] = mode;
+            assert_eq!(valid("scene_material_set", &args), accepted);
+        }
+        for field in ["opacity", "alpha_cutoff"] {
+            for (val, accepted) in [
+                (json!(0.0), true),
+                (json!(0.5), true),
+                (json!(1.0), true),
+                (json!(-0.01), false),
+                (json!(1.01), false),
+                (Value::Null, false),
+            ] {
+                let mut args = set.clone();
+                args["material"][field] = val;
+                assert_eq!(valid("scene_material_set", &args), accepted);
+            }
         }
         for (pair, accepted) in [
             (json!([-2, 0.125]), true),

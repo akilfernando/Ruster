@@ -361,6 +361,7 @@ fn verify_mesh_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue) {
     assert!(large.payload_bytes() * (large_count + 1) > budget);
     let mut groups = (0..=large_count)
         .map(|index| DrawGroup {
+            alpha_mode: rot_scene::AlphaMode::Opaque,
             double_sided: false,
             key: Some(format!("mesh-{index:02}")),
             primitive: None,
@@ -543,7 +544,10 @@ fn render(
             }),
             ..Default::default()
         });
-        pass.set_pipeline(r.pipeline.for_mesh(gpu, false));
+        pass.set_pipeline(
+            r.pipeline
+                .for_mesh(gpu, false, rot_scene::AlphaMode::Opaque),
+        );
         pass.set_bind_group(0, &r.camera_bind, &[]);
         pass.set_bind_group(1, r.materials.bind(key), &[]);
         pass.set_bind_group(2, &r.lighting.bind, &[]);
@@ -855,6 +859,7 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
             inv_camera: Mat4::IDENTITY.to_cols_array(),
             show_editor_grid: false,
             groups: vec![DrawGroup {
+                alpha_mode: rot_scene::AlphaMode::Opaque,
                 double_sided: false,
                 key: Some("lighting-plane".into()),
                 primitive: None,
@@ -1333,6 +1338,7 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
                 show_editor_grid: false,
                 groups: (0..if mapped_case { 2 } else { 1 })
                     .map(|index| DrawGroup {
+                        alpha_mode: rot_scene::AlphaMode::Opaque,
                         double_sided: false,
                         key: Some("surface-plane".into()),
                         primitive: None,
@@ -1642,6 +1648,7 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
     }
     verify_pbr_maps(device, queue);
     verify_sky_and_ibl(device, queue);
+    verify_alpha_transparency(device, queue);
     eprintln!("GPU probe: production dielectric/PBR/HDR/exposure/custom restore and both output conventions passed");
 }
 
@@ -1729,6 +1736,7 @@ fn verify_pbr_maps(device: &wgpu::Device, queue: &wgpu::Queue) {
         };
         let binding = draw_material_binding(&obj, Some(&quad), Some(mat)).into_owned();
         let group = DrawGroup {
+            alpha_mode: rot_scene::AlphaMode::Opaque,
             double_sided: false,
             key: Some("quad".into()),
             primitive: None,
@@ -2020,6 +2028,7 @@ fn verify_sky_and_ibl(device: &wgpu::Device, queue: &wgpu::Queue) {
                 };
                 let binding = draw_material_binding(&obj, Some(&quad), Some(mat)).into_owned();
                 vec![DrawGroup {
+                    alpha_mode: rot_scene::AlphaMode::Opaque,
                     double_sided: false,
                     key: Some("quad".into()),
                     primitive: None,
@@ -2444,6 +2453,7 @@ pub(super) fn verify_cube_material(device: &wgpu::Device, queue: &wgpu::Queue) {
             inv_camera: Mat4::IDENTITY.to_cols_array(),
             show_editor_grid: false,
             groups: vec![DrawGroup {
+                alpha_mode: rot_scene::AlphaMode::Opaque,
                 double_sided: false,
                 key: None,
                 primitive: None,
@@ -2557,4 +2567,273 @@ pub(super) fn verify_cube_material(device: &wgpu::Device, queue: &wgpu::Queue) {
     assert_eq!(second.texture_uploads, first.texture_uploads);
     assert_eq!(second.target_allocations, first.target_allocations);
     eprintln!("GPU probe: built-in Cube six-face PNG orientation, split roughness and stable mesh/texture uploads passed");
+}
+
+/// Real GPU readback checks for AlphaMode::Mask cutout and AlphaMode::Blend
+/// translucency compositing (in both LegacySdr and SurfaceHdr pipelines).
+fn verify_alpha_transparency(device: &wgpu::Device, queue: &wgpu::Queue) {
+    use rot_assets::{Texture, TextureMip, TextureRole};
+    use rot_scene::{AlphaMode, Ambient, DisplayProfile, Lighting, OpaqueMaterial};
+
+    // Left column (u < 0.5): opaque red; right column (u > 0.5): transparent alpha=0.
+    let cutout_texture = Arc::new(Texture {
+        role: TextureRole::BaseColor,
+        width: 2,
+        height: 2,
+        mips: vec![
+            TextureMip {
+                width: 2,
+                height: 2,
+                bytes: vec![255, 0, 0, 255, 255, 0, 0, 0, 255, 0, 0, 255, 255, 0, 0, 0],
+            },
+            TextureMip {
+                width: 1,
+                height: 1,
+                bytes: vec![255, 0, 0, 128],
+            },
+        ],
+    });
+
+    let mut r = Resources::new(device, queue, COLOR, 1);
+    r.enable_hdr(device, 1);
+    let mut resources = egui_wgpu::CallbackResources::default();
+    resources.insert(r);
+    let context = egui::Context::default();
+    let cube = Object::cube("cube", None);
+    let mask_mat = OpaqueMaterial {
+        base_color_texture: Some("alpha-cutout".into()),
+        alpha_mode: AlphaMode::Mask,
+        alpha_cutoff: 0.5,
+        filter: rot_scene::TextureFilter::Nearest,
+        address: rot_scene::TextureAddress::Clamp,
+        ..Default::default()
+    };
+    let solid_mat = OpaqueMaterial {
+        alpha_mode: AlphaMode::Opaque,
+        ..Default::default()
+    };
+    let lighting = Lighting::Authored {
+        ambient: Ambient {
+            color: [1.; 3],
+            intensity: 1.,
+        },
+        lights: BTreeMap::new(),
+    };
+    let mut camera = Camera {
+        distance: 1.6,
+        ..Default::default()
+    };
+    camera.set_preset(ViewPreset::Front);
+    let (view, projection, _) = camera.matrices(256. / 192.);
+    let pixel = |bytes: &[u8], x: usize, y: usize| {
+        let offset = (y * 256 + x) * 4;
+        <[u8; 3]>::try_from(&bytes[offset..offset + 3]).unwrap()
+    };
+
+    let mut render_groups = |groups: Vec<DrawGroup>, display: DisplayProfile| {
+        context
+            .run_pass(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        complete_submitted_assets(device, queue, &context, &mut resources);
+        let callback = SceneCallback {
+            background: None,
+            sky: None,
+            inv_camera: Mat4::IDENTITY.to_cols_array(),
+            show_editor_grid: false,
+            groups,
+            camera: (projection * view).to_cols_array(),
+            camera_eye_mode: camera.eye_mode(),
+            display,
+            lighting: LightingPacket::try_pack(&lighting).unwrap(),
+            size: egui::vec2(256., 192.),
+            cpu_us: 0.,
+            shadow: None,
+            context: context.clone(),
+            receipt: FrameReceipt::default(),
+            prepared: std::sync::atomic::AtomicBool::new(false),
+        };
+        selection_probe::render(device, queue, &mut resources, &callback, COLOR)
+    };
+
+    let bg_instance = |tint: [f32; 3]| {
+        let model = Mat4::from_scale_rotation_translation(
+            Vec3::new(4., 4., 0.2),
+            Quat::IDENTITY,
+            Vec3::new(0., 0., -1.5),
+        );
+        Instance {
+            uv_transform: [1.0, 1.0, 0.0, 0.0],
+            emission_color: [0.0; 4],
+            pbr_params: [0.0, 1.0, 1.0, 1.0],
+            pbr_maps: [0.0, 0.0, 0.0, -1.0],
+            model: model.to_cols_array_2d(),
+            normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
+            color: [1.; 4],
+            base_color: [tint[0], tint[1], tint[2], 0.],
+            response: [0.; 4],
+        }
+    };
+    let front_instance = |z: f32, tint: [f32; 3], opacity: f32, pbr_map_alpha: f32| {
+        let model = Mat4::from_translation(Vec3::new(0., 0., z));
+        Instance {
+            uv_transform: [1.0, 1.0, 0.0, 0.0],
+            emission_color: [0.0; 4],
+            pbr_params: [0.0, 1.0, 1.0, opacity],
+            pbr_maps: [0.0, 0.0, 0.0, pbr_map_alpha],
+            model: model.to_cols_array_2d(),
+            normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
+            color: [1.; 4],
+            base_color: [tint[0], tint[1], tint[2], 0.],
+            response: [0.; 4],
+        }
+    };
+
+    let solid_binding = draw_material_binding(&cube, None, Some(&solid_mat)).into_owned();
+    let mask_binding = draw_material_binding(&cube, None, Some(&mask_mat)).into_owned();
+
+    for display in [
+        DisplayProfile::LegacySdr,
+        DisplayProfile::SurfaceHdr { exposure_stops: 0. },
+    ] {
+        // 1. AlphaMode::Mask cutout over opaque blue background.
+        let mask_pixels = render_groups(
+            vec![
+                DrawGroup {
+                    alpha_mode: AlphaMode::Opaque,
+                    double_sided: false,
+                    key: None,
+                    primitive: None,
+                    binding: solid_binding.clone(),
+                    texture: None,
+                    roughness: None,
+                    metallic: None,
+                    normal: None,
+                    emissive: None,
+                    occlusion: None,
+                    mesh: None,
+                    instances: vec![bg_instance([0., 0., 1.])],
+                    range: 0..1,
+                },
+                DrawGroup {
+                    alpha_mode: AlphaMode::Mask,
+                    double_sided: false,
+                    key: None,
+                    primitive: None,
+                    binding: mask_binding.clone(),
+                    texture: Some(Arc::clone(&cutout_texture)),
+                    roughness: None,
+                    metallic: None,
+                    normal: None,
+                    emissive: None,
+                    occlusion: None,
+                    mesh: None,
+                    instances: vec![front_instance(0., [1., 1., 1.], 1.0, 0.5)],
+                    range: 1..2,
+                },
+            ],
+            display,
+        );
+        let left = pixel(&mask_pixels, 96, 96);
+        let right = pixel(&mask_pixels, 160, 96);
+        assert!(
+            u16::from(left[0]) > u16::from(left[2]) + 40,
+            "Mask opaque texel must be red ({display:?}): {left:?}"
+        );
+        assert!(
+            u16::from(right[2]) > u16::from(right[0]) + 40,
+            "Mask discarded texel must reveal blue background ({display:?}): {right:?}"
+        );
+
+        // 2. AlphaMode::Blend partial opacity compositing over opaque blue.
+        let blend_pixels = render_groups(
+            vec![
+                DrawGroup {
+                    alpha_mode: AlphaMode::Opaque,
+                    double_sided: false,
+                    key: None,
+                    primitive: None,
+                    binding: solid_binding.clone(),
+                    texture: None,
+                    roughness: None,
+                    metallic: None,
+                    normal: None,
+                    emissive: None,
+                    occlusion: None,
+                    mesh: None,
+                    instances: vec![bg_instance([0., 0., 1.])],
+                    range: 0..1,
+                },
+                DrawGroup {
+                    alpha_mode: AlphaMode::Blend,
+                    double_sided: false,
+                    key: None,
+                    primitive: None,
+                    binding: solid_binding.clone(),
+                    texture: None,
+                    roughness: None,
+                    metallic: None,
+                    normal: None,
+                    emissive: None,
+                    occlusion: None,
+                    mesh: None,
+                    instances: vec![front_instance(0., [1., 0., 0.], 0.5, -2.0)],
+                    range: 1..2,
+                },
+            ],
+            display,
+        );
+        let center = pixel(&blend_pixels, 128, 96);
+        assert!(
+            center[0] > 40 && center[2] > 40,
+            "Blend red over blue must mix both channels ({display:?}): {center:?}"
+        );
+
+        // 3. Back-to-front ordered Blend quads: green behind, red in front.
+        let layered = render_groups(
+            vec![
+                DrawGroup {
+                    alpha_mode: AlphaMode::Opaque,
+                    double_sided: false,
+                    key: None,
+                    primitive: None,
+                    binding: solid_binding.clone(),
+                    texture: None,
+                    roughness: None,
+                    metallic: None,
+                    normal: None,
+                    emissive: None,
+                    occlusion: None,
+                    mesh: None,
+                    instances: vec![bg_instance([0., 0., 1.])],
+                    range: 0..1,
+                },
+                DrawGroup {
+                    alpha_mode: AlphaMode::Blend,
+                    double_sided: false,
+                    key: None,
+                    primitive: None,
+                    binding: solid_binding.clone(),
+                    texture: None,
+                    roughness: None,
+                    metallic: None,
+                    normal: None,
+                    emissive: None,
+                    occlusion: None,
+                    mesh: None,
+                    instances: vec![
+                        front_instance(-0.3, [0., 1., 0.], 0.5, -2.0),
+                        front_instance(0.0, [1., 0., 0.], 0.5, -2.0),
+                    ],
+                    range: 1..3,
+                },
+            ],
+            display,
+        );
+        let layered_center = pixel(&layered, 128, 96);
+        assert!(
+            u16::from(layered_center[0]) > u16::from(layered_center[1]) + 15,
+            "Front red Blend quad must dominate back green Blend quad ({display:?}): {layered_center:?}"
+        );
+    }
+    eprintln!("GPU probe: AlphaMode Mask cutout and back-to-front Blend compositing passed");
 }

@@ -47,6 +47,7 @@ struct Output {
     @location(4) world_position: vec3<f32>,
     @location(5) @interpolate(flat) editor_selection: f32,
     @location(6) @interpolate(flat) emission_color: vec3<f32>,
+    @location(7) @interpolate(flat) alpha_params: vec2<f32>,
 };
 @vertex fn vs(v: Vertex, @builtin(instance_index) instance_index: u32) -> Output {
     var o: Output;
@@ -61,6 +62,7 @@ struct Output {
     o.base_color = inst.base_color;
     o.editor_selection = inst.response.w;
     o.emission_color = inst.emission_color.xyz;
+    o.alpha_params = vec2<f32>(inst.pbr_params.w, inst.pbr_maps.w);
     o.world_position = (model * vec4<f32>(v.position, 1.0)).xyz;
     return o;
 }
@@ -72,12 +74,18 @@ struct Output {
 }
 fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
     let diffuse = max(dot(normalize(normal), normalize(vec3<f32>(0.4, 0.8, 0.6))), 0.0);
-    let sampled = textureSample(base_color_texture, base_color_sampler, v.uv).rgb;
+    let sampled_rgba = textureSample(base_color_texture, base_color_sampler, v.uv);
+    let alpha = clamp(sampled_rgba.a * v.alpha_params.x, 0.0, 1.0);
+    if v.alpha_params.y >= 0.0 && alpha < v.alpha_params.y {
+        discard;
+    }
+    let out_alpha = select(1.0, alpha, v.alpha_params.y < -1.5);
+    let sampled = sampled_rgba.rgb;
     let albedo = sampled * v.base_color.rgb;
     let highlighted = mix(albedo, vec3<f32>(1.0), select(v.base_color.a, 0.0, v.editor_selection > 0.5));
     if lighting.mode_counts.x == 0u {
         // Preserve V1 arithmetic; zero authored lights never select this path.
-        return vec4<f32>(highlighted * (0.28 + 0.72 * diffuse) + v.emission_color, 1.0);
+        return vec4<f32>(highlighted * (0.28 + 0.72 * diffuse) + v.emission_color, out_alpha);
     }
     let n = normal / sqrt(max(dot(normal, normal), 1e-8));
     var light_sum = lighting.ambient.rgb;
@@ -105,5 +113,5 @@ fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
         light_sum += point.color_intensity.rgb * (max(dot(n, direction), 0.0) * attenuation);
     }
     // Relative diffuse output in the existing SDR target; no HDR/exposure claim.
-    return vec4<f32>(clamp(highlighted * light_sum + v.emission_color, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    return vec4<f32>(clamp(highlighted * light_sum + v.emission_color, vec3<f32>(0.0), vec3<f32>(1.0)), out_alpha);
 }

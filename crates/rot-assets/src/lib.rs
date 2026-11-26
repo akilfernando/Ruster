@@ -31,8 +31,8 @@ pub use audio::{
     decode_wav, AudioClip, MAX_SOUND_RESOLVED_BYTES, MAX_SOUND_SECONDS, MAX_SOUND_SOURCE_BYTES,
 };
 pub use glb::{
-    ClipProperty, ClipTarget, ModelCamera, ModelClip, ModelInfo, ModelLight, ModelMaterial,
-    ModelNode, ModelOrthographicCamera, ModelPerspectiveCamera, MAX_CLIP_BYTES,
+    ClipProperty, ClipTarget, ModelAlphaMode, ModelCamera, ModelClip, ModelInfo, ModelLight,
+    ModelMaterial, ModelNode, ModelOrthographicCamera, ModelPerspectiveCamera, MAX_CLIP_BYTES,
     MAX_GLB_SOURCE_BYTES, MAX_MODEL_CLIPS,
 };
 #[doc(hidden)]
@@ -2554,9 +2554,9 @@ mod tests {
         let first = texture::tests::png(
             1,
             1,
-            png::ColorType::Rgba,
+            png::ColorType::Rgb,
             png::BitDepth::Eight,
-            &[12, 34, 56, 0],
+            &[12, 34, 56],
         );
         fs::write(root.path().join("color.png"), &first).unwrap();
         let mut store = AssetStore::open(root.path()).unwrap();

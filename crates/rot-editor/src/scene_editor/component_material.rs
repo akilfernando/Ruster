@@ -954,6 +954,53 @@ impl ComponentWorkspace {
                         .labelled_by(label)
                         .on_hover_text(Text::DoubleSidedDetail.plain());
                 });
+                ui_kit::property_row_with_label(ui, Text::AlphaMode.plain(), |ui, label| {
+                    egui::ComboBox::from_id_salt("alpha_mode")
+                        .selected_text(match draft.value.alpha_mode {
+                            rot_scene::AlphaMode::Opaque => Text::AlphaOpaque.plain(),
+                            rot_scene::AlphaMode::Mask => Text::AlphaMask.plain(),
+                            rot_scene::AlphaMode::Blend => Text::AlphaBlend.plain(),
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut draft.value.alpha_mode,
+                                rot_scene::AlphaMode::Opaque,
+                                Text::AlphaOpaque.plain(),
+                            );
+                            ui.selectable_value(
+                                &mut draft.value.alpha_mode,
+                                rot_scene::AlphaMode::Mask,
+                                Text::AlphaMask.plain(),
+                            );
+                            ui.selectable_value(
+                                &mut draft.value.alpha_mode,
+                                rot_scene::AlphaMode::Blend,
+                                Text::AlphaBlend.plain(),
+                            );
+                        })
+                        .response
+                        .labelled_by(label);
+                });
+                if draft.value.alpha_mode != rot_scene::AlphaMode::Opaque {
+                    ui_kit::property_row_with_label(ui, Text::Opacity.plain(), |ui, label| {
+                        ui.add(
+                            egui::DragValue::new(&mut draft.value.opacity)
+                                .range(0.0..=1.0)
+                                .speed(0.01),
+                        )
+                        .labelled_by(label);
+                    });
+                }
+                if draft.value.alpha_mode == rot_scene::AlphaMode::Mask {
+                    ui_kit::property_row_with_label(ui, Text::AlphaCutoff.plain(), |ui, label| {
+                        ui.add(
+                            egui::DragValue::new(&mut draft.value.alpha_cutoff)
+                                .range(0.0..=1.0)
+                                .speed(0.01),
+                        )
+                        .labelled_by(label);
+                    });
+                }
                 uv_edit_focused = material_uv_row(
                     ui,
                     Text::TextureTiling,
@@ -1548,7 +1595,7 @@ impl ComponentWorkspace {
                 "material":{
                     "name":value.name,"tint":value.tint,"emission_color":value.emission_color,
                     "metallic":value.metallic,"normal_scale":value.normal_scale,"occlusion_strength":value.occlusion_strength,
-                    "double_sided":value.double_sided,"uv_tiling":value.uv_tiling,"uv_offset":value.uv_offset,"base_color_texture":value.base_color_texture,
+                    "double_sided":value.double_sided,"opacity":value.opacity,"alpha_mode":value.alpha_mode,"alpha_cutoff":value.alpha_cutoff,"uv_tiling":value.uv_tiling,"uv_offset":value.uv_offset,"base_color_texture":value.base_color_texture,
                     "roughness_texture":value.roughness_texture,"metallic_texture":value.metallic_texture,"normal_texture":value.normal_texture,
                     "emissive_texture":value.emissive_texture,"occlusion_texture":value.occlusion_texture,"filter":value.filter,"address":value.address,
                     "response":value.response,
@@ -1641,6 +1688,9 @@ mod tests {
             name: Some("Varnish".into()),
             tint: [0.21, 0.37, 0.59],
             emission_color: [0.11, 0.0, 0.35],
+            opacity: 0.72,
+            alpha_mode: rot_scene::AlphaMode::Mask,
+            alpha_cutoff: 0.35,
             double_sided: true,
             uv_tiling: [2.0, -3.0],
             uv_offset: [0.2, -0.1],

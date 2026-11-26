@@ -117,10 +117,33 @@ impl ModelNode {
     }
 }
 
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelAlphaMode {
+    #[default]
+    Opaque,
+    Mask,
+    Blend,
+}
+
+impl ModelAlphaMode {
+    pub fn is_opaque(&self) -> bool {
+        matches!(self, Self::Opaque)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelMaterial {
     pub base_color_factor: [f32; 3],
+    #[serde(default = "default_one", skip_serializing_if = "is_one")]
+    pub opacity: f32,
+    #[serde(default, skip_serializing_if = "ModelAlphaMode::is_opaque")]
+    pub alpha_mode: ModelAlphaMode,
+    #[serde(default = "default_half", skip_serializing_if = "is_half")]
+    pub alpha_cutoff: f32,
     #[serde(default, skip_serializing_if = "black_emission")]
     pub emission_color: [f32; 3],
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -188,6 +211,14 @@ fn default_one() -> f32 {
 
 fn is_one(value: &f32) -> bool {
     *value == 1.0
+}
+
+fn default_half() -> f32 {
+    0.5
+}
+
+fn is_half(value: &f32) -> bool {
+    *value == 0.5
 }
 
 const IDENTITY_UV: ([f32; 2], [f32; 2]) = ([1.0; 2], [0.0; 2]);
@@ -503,7 +534,7 @@ struct Material {
     pbr_metallic_roughness: Surface,
     alpha_mode: Option<String>,
     #[serde(default, rename = "alphaCutoff")]
-    _alpha_cutoff: Option<f32>,
+    alpha_cutoff: Option<f32>,
     #[serde(default)]
     double_sided: bool,
     normal_texture: Option<TextureBinding>,
@@ -1287,6 +1318,7 @@ struct Decoder<'a> {
     imported_material_names: BTreeMap<usize, String>,
     packed_roughness: bool,
     pbr_maps: bool,
+    alpha_transparency: bool,
     emission: bool,
     double_sided: bool,
     uv_transforms: bool,
@@ -1724,6 +1756,9 @@ impl Decoder<'_> {
                 .chain([roughness, metallic])
                 .all(|value| (0.0..=1.0).contains(&value))
             || material
+                .alpha_cutoff
+                .is_some_and(|cutoff| !cutoff.is_finite() || cutoff < 0.0)
+            || material
                 .emissive_factor
                 .is_some_and(|color| color.into_iter().any(|value| !(0.0..=1.0).contains(&value)))
         {
@@ -1731,10 +1766,21 @@ impl Decoder<'_> {
                 "GLB material {name:?} has invalid factors or alpha mode"
             )));
         }
-        if alpha != "OPAQUE" {
+        let alpha_mode = if self.alpha_transparency {
+            match alpha {
+                "MASK" => ModelAlphaMode::Mask,
+                "BLEND" => ModelAlphaMode::Blend,
+                _ => ModelAlphaMode::Opaque,
+            }
+        } else {
+            ModelAlphaMode::Opaque
+        };
+        if !self.alpha_transparency && alpha != "OPAQUE" {
             fallbacks.push("alpha rendered opaque".into());
         }
-        let double_sided = self.double_sided && material.double_sided && alpha == "OPAQUE";
+        let double_sided = self.double_sided
+            && material.double_sided
+            && (self.alpha_transparency || alpha == "OPAQUE");
         if material.double_sided && !double_sided {
             fallbacks.push("double-sided surface rendered single-sided".into());
         }
@@ -1790,9 +1836,23 @@ impl Decoder<'_> {
             .and_then(|binding| binding.strength)
             .filter(|value| value.is_finite())
             .map_or(1.0, |value| value.clamp(0.0, 1.0));
+        let alpha_cutoff = if self.alpha_transparency {
+            material
+                .alpha_cutoff
+                .map_or(0.5, |value| value.clamp(0.0, 1.0))
+        } else {
+            0.5
+        };
         let mut sampler_warning = None;
         let mut definition = ModelMaterial {
             base_color_factor: [rgba[0], rgba[1], rgba[2]],
+            opacity: if self.alpha_transparency {
+                rgba[3]
+            } else {
+                1.0
+            },
+            alpha_mode,
+            alpha_cutoff,
             double_sided,
             emission_color: if self.pbr_maps
                 || (self.emission && material.emissive_texture.is_none())
@@ -2635,6 +2695,7 @@ impl Decoder<'_> {
 pub(super) struct ImportFeatures {
     pub packed_roughness: bool,
     pub pbr_maps: bool,
+    pub alpha_transparency: bool,
     pub place_spots: bool,
     pub place_orthographic: bool,
     pub emission: bool,
@@ -2646,6 +2707,7 @@ impl ImportFeatures {
     const CURRENT: Self = Self {
         packed_roughness: true,
         pbr_maps: true,
+        alpha_transparency: true,
         place_spots: true,
         place_orthographic: true,
         emission: true,
@@ -2667,6 +2729,7 @@ pub(super) fn decode_accepted(
     let ImportFeatures {
         packed_roughness,
         pbr_maps,
+        alpha_transparency,
         place_spots,
         place_orthographic,
         emission,
@@ -2759,6 +2822,7 @@ pub(super) fn decode_accepted(
         imported_material_names: BTreeMap::new(),
         packed_roughness,
         pbr_maps,
+        alpha_transparency,
         emission,
         double_sided,
         uv_transforms,

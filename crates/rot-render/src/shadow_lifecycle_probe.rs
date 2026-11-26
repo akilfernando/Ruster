@@ -11,6 +11,8 @@ const HIGH_BYTES: u64 = 2048 * 2048 * 4;
 
 struct Probe {
     shadows: ShadowGpu,
+    materials: MaterialGpu,
+    zero_uv: wgpu::Buffer,
     builtins: BuiltinMeshes,
     meshes: BTreeMap<String, GpuMesh>,
     instance_bind: wgpu::BindGroup,
@@ -24,8 +26,8 @@ impl Probe {
         let instance = Instance {
             uv_transform: [1.0, 1.0, 0.0, 0.0],
             emission_color: [0.0; 4],
-            pbr_params: [0.0, 1.0, 1.0, 0.0],
-            pbr_maps: [0.0; 4],
+            pbr_params: [0.0, 1.0, 1.0, 1.0],
+            pbr_maps: [0.0, 0.0, 0.0, -1.0],
             model: Mat4::IDENTITY.to_cols_array_2d(),
             normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
             color: [1.; 4],
@@ -48,6 +50,12 @@ impl Probe {
             }],
         });
         let instance_bind = instance_bind_group(device, &instance_layout, &instances);
+        let materials = MaterialGpu::new(device, queue);
+        let zero_uv = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("probe zero uv"),
+            contents: bytemuck::bytes_of(&[0.0_f32; 2]),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
         let context = egui::Context::default();
         let repaint_requests = Arc::new(AtomicUsize::new(0));
         let observed = repaint_requests.clone();
@@ -55,7 +63,9 @@ impl Probe {
             observed.fetch_add(1, Ordering::Relaxed);
         });
         Self {
-            shadows: ShadowGpu::new(device, queue, &instance_layout),
+            shadows: ShadowGpu::new(device, queue, &instance_layout, &materials.layout),
+            materials,
+            zero_uv,
             builtins: BuiltinMeshes {
                 cube: GpuMesh::new(device, None, &primitives::cube()),
                 sphere: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Sphere)),
@@ -71,6 +81,7 @@ impl Probe {
             meshes: BTreeMap::new(),
             instance_bind,
             groups: vec![DrawGroup {
+                alpha_mode: rot_scene::AlphaMode::Opaque,
                 double_sided: false,
                 key: None,
                 primitive: None,
@@ -117,6 +128,8 @@ impl Probe {
                         meshes: &self.meshes,
                         builtins: &self.builtins,
                         instance_bind: &self.instance_bind,
+                        materials: &self.materials,
+                        zero_uv: &self.zero_uv,
                     },
                     Request {
                         settings,
@@ -508,6 +521,7 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
         inv_camera: Mat4::IDENTITY.to_cols_array(),
         show_editor_grid: false,
         groups: vec![DrawGroup {
+            alpha_mode: rot_scene::AlphaMode::Opaque,
             double_sided: false,
             key: None,
             primitive: None,
@@ -952,6 +966,7 @@ fn verify_asset_submission_backpressure(
             inv_camera: Mat4::IDENTITY.to_cols_array(),
             show_editor_grid: false,
             groups: vec![DrawGroup {
+                alpha_mode: rot_scene::AlphaMode::Opaque,
                 double_sided: false,
                 key: Some("epoch-mesh".into()),
                 primitive: None,
