@@ -225,12 +225,34 @@ pub(super) fn read_accepted(root: &Path, info: &ModelInfo) -> Result<DecodedMode
                 "roughness map omitted because its UV transform is unsupported",
             )
     });
+    let pbr_maps = info.materials.values().any(|material| {
+        material.metallic != 0.0
+            || material.normal_scale != 1.0
+            || material.occlusion_strength != 1.0
+            || material.metallic_texture.is_some()
+            || material.normal_texture.is_some()
+            || material.emissive_texture.is_some()
+            || material.occlusion_texture.is_some()
+    }) || (packed_roughness
+        && emission
+        && double_sided
+        && uv_transforms
+        && !info.materials.keys().any(|name| {
+            material_warning(info, name, "metallic factor rendered as dielectric")
+                || material_warning(info, name, "metallic-roughness blue channel omitted")
+                || material_warning(info, name, "metallic-roughness map omitted")
+                || material_warning(info, name, "normal map omitted")
+                || material_warning(info, name, "occlusion map omitted")
+                || material_warning(info, name, "emissive map omitted")
+                || material_warning(info, name, "emissive texture unsupported (black fallback)")
+        }));
     let decoded = glb::decode_accepted(
         &info.id,
         &info.source,
         &bytes,
         glb::ImportFeatures {
             packed_roughness,
+            pbr_maps,
             place_spots,
             place_orthographic,
             emission,
@@ -403,7 +425,7 @@ impl AssetStore {
             return None;
         }
         model.materials.values().find_map(|material| {
-            [TextureRole::BaseColor, TextureRole::Roughness]
+            TextureRole::ALL
                 .into_iter()
                 .find(|&role| material.texture(role) == Some(id))
                 .map(|role| (model, role))
@@ -700,19 +722,33 @@ mod tests {
     }
 
     #[test]
-    fn factor_with_an_emissive_texture_stays_black() {
+    fn emissive_normal_metallic_and_occlusion_maps_import_without_fallbacks() {
         use serde_json::json;
-        let bytes = packed_fixture(&[240; 12], |doc, _| {
-            doc["materials"][0]["emissiveFactor"] = json!([0.25, 0.125, 0.5]);
-            doc["materials"][0]["emissiveTexture"] = json!({"index":0});
-        });
+        let bytes = packed_fixture(
+            &[240, 180, 128, 240, 180, 128, 240, 180, 128, 240, 180, 128],
+            |doc, _| {
+                doc["materials"][0]["pbrMetallicRoughness"]["metallicFactor"] = json!(0.85);
+                doc["materials"][0]["emissiveFactor"] = json!([0.25, 0.125, 0.5]);
+                doc["materials"][0]["emissiveTexture"] = json!({"index":0});
+                doc["materials"][0]["normalTexture"] = json!({"index":0, "scale": 1.5});
+                doc["materials"][0]["occlusionTexture"] = json!({"index":0, "strength": 0.6});
+            },
+        );
         let decoded = glb::decode("paint", "paint.glb", &bytes).unwrap();
-        assert_eq!(decoded.info.materials["Paint"].emission_color, [0.0; 3]);
-        assert!(decoded
-            .info
-            .warnings
-            .iter()
-            .any(|text| text.contains("emissive texture unsupported (black fallback)")));
+        let mat = &decoded.info.materials["Paint"];
+        assert_eq!(mat.emission_color, [0.25, 0.125, 0.5]);
+        assert!((mat.metallic - 0.85).abs() < 1e-6);
+        assert!((mat.normal_scale - 1.5).abs() < 1e-6);
+        assert!((mat.occlusion_strength - 0.6).abs() < 1e-6);
+        assert!(mat.metallic_texture.is_some());
+        assert!(mat.normal_texture.is_some());
+        assert!(mat.emissive_texture.is_some());
+        assert!(mat.occlusion_texture.is_some());
+        assert!(
+            decoded.info.warnings.is_empty(),
+            "expected no PBR warnings, got: {:?}",
+            decoded.info.warnings
+        );
         let invalid = packed_fixture(&[240; 12], |doc, _| {
             doc["materials"][0]["emissiveFactor"] = json!([1.0000000001, 0.0, 0.0]);
         });
@@ -743,6 +779,7 @@ mod tests {
             &bytes,
             glb::ImportFeatures {
                 packed_roughness: false,
+                pbr_maps: false,
                 place_spots: true,
                 place_orthographic: true,
                 emission: false,
@@ -1208,6 +1245,7 @@ mod tests {
             &bytes,
             glb::ImportFeatures {
                 packed_roughness: true,
+                pbr_maps: false,
                 place_spots: true,
                 place_orthographic: false,
                 emission: true,
@@ -1315,6 +1353,7 @@ mod tests {
             &bytes,
             glb::ImportFeatures {
                 packed_roughness: true,
+                pbr_maps: false,
                 place_spots: false,
                 place_orthographic: true,
                 emission: true,

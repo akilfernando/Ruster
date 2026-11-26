@@ -82,10 +82,14 @@ pub(super) fn asset_mutation(
                 let role = match role.as_str() {
                     Some("base_color_srgb") => TextureRole::BaseColor,
                     Some("roughness_linear") => TextureRole::Roughness,
+                    Some("metallic_linear") => TextureRole::Metallic,
+                    Some("normal_linear") => TextureRole::Normal,
+                    Some("emissive_srgb") => TextureRole::Emissive,
+                    Some("occlusion_linear") => TextureRole::Occlusion,
                     _ => {
                         return Err(error(
                             "invalid_arguments",
-                            "texture_role must be base_color_srgb or roughness_linear",
+                            "texture_role must be base_color_srgb, roughness_linear, metallic_linear, normal_linear, emissive_srgb, or occlusion_linear",
                         ));
                     }
                 };

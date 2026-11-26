@@ -9,7 +9,7 @@ const TOOLS: &[(&str, &str, &[&str])] = &[
     ),
     (
         "scene_material_set",
-        "Create or fully replace a scene-owned opaque material. Shared edits affect every assigned object; object tint remains multiplied into appearance. Optional assign_object_id atomically assigns only a newly created material. New or changed texture slots require matching ready import roles and complete UVs for all users, including inactive roughness maps. Unchanged, recoverable references can be retained. In v23, component_id selects an exact Mesh Renderer for assign_object_id. Omitted emission_color preserves existing linear RGB or defaults to black. Optional uv_tiling and uv_offset are finite [X,Y] pairs shared by both textures. Omission preserves the pair or defaults to [1,1] tiling and [0,0] offset. Omitted or null roughness_texture clears that slot; assignment never changes the scalar or scene display. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry. Source imports/refresh remain outside scene Undo.",
+        "Create or replace an opaque PBR material. Edits share across users; assign_object_id assigns to one object (component_id disambiguates). Texture slots require matching ready imports and complete UVs; omitted/null optional map slots clear.",
         &["material_id", "material"],
     ),
     (
@@ -102,16 +102,20 @@ fn shape(tool: &str, field: &str) -> Value {
         "material" => super::object_schema(
             json!({
                 "name":name_schema(),
-                "tint":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number","minimum":0,"maximum":1},"description":"Finite linear RGB tint; all three channels are required."},
+                "tint":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number","minimum":0,"maximum":1},"description":"Linear RGB tint."},
                 "uv_tiling":{"type":"array","minItems":2,"maxItems":2,"items":{"type":"number"}},
                 "uv_offset":{"type":"array","minItems":2,"maxItems":2,"items":{"type":"number"}},
-                "double_sided":{"type":"boolean","description":"Draw both faces. Omission keeps the current value or defaults to false."},
-                "emission_color":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number","minimum":0,"maximum":1},"description":"Linear RGB self-emission. Omitted preserves the edited color or defaults to black on new materials."},
+                "double_sided":{"type":"boolean"},
+                "emission_color":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number","minimum":0,"maximum":1}},
+                "metallic":{"type":"number","minimum":0,"maximum":1},
+                "normal_scale":{"type":"number","minimum":0,"maximum":2},
+                "occlusion_strength":{"type":"number","minimum":0,"maximum":1},
                 "base_color_texture":id_schema(true),
-                "roughness_texture":{
-                    "type":["string","null"],"minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9_.-]+$",
-                    "description":"Optional linear roughness-map asset ID. Full replacement: omission or null clears this slot. Requires a ready roughness_linear import and complete UVs for all users, even while inactive. The scalar multiplies the map, clamped to0.08..1; assignment does not change the scalar or scene display."
-                },
+                "roughness_texture":id_schema(true),
+                "metallic_texture":id_schema(true),
+                "normal_texture":id_schema(true),
+                "emissive_texture":id_schema(true),
+                "occlusion_texture":id_schema(true),
                 "filter":{"enum":["nearest","linear"]},
                 "address":{"enum":["repeat","clamp"]},
                 "response":response_schema()
@@ -175,16 +179,45 @@ fn valid_material(value: &Value) -> bool {
             "name",
             "response",
             "roughness_texture",
+            "metallic_texture",
+            "normal_texture",
+            "emissive_texture",
+            "occlusion_texture",
             "emission_color",
+            "metallic",
+            "normal_scale",
+            "occlusion_strength",
             "double_sided",
             "uv_tiling",
             "uv_offset",
         ],
     ) && material.get("name").is_none_or(valid_name)
         && material.get("response").is_none_or(valid_response)
-        && material
-            .get("roughness_texture")
-            .is_none_or(|value| value.is_null() || valid_id(value))
+        && [
+            "roughness_texture",
+            "metallic_texture",
+            "normal_texture",
+            "emissive_texture",
+            "occlusion_texture",
+        ]
+        .into_iter()
+        .all(|key| {
+            material
+                .get(key)
+                .is_none_or(|value| value.is_null() || valid_id(value))
+        })
+        && material.get("metallic").is_none_or(|v| {
+            v.as_f64()
+                .is_some_and(|n| n.is_finite() && (0.0..=1.0).contains(&n))
+        })
+        && material.get("normal_scale").is_none_or(|v| {
+            v.as_f64()
+                .is_some_and(|n| n.is_finite() && (0.0..=2.0).contains(&n))
+        })
+        && material.get("occlusion_strength").is_none_or(|v| {
+            v.as_f64()
+                .is_some_and(|n| n.is_finite() && (0.0..=1.0).contains(&n))
+        })
         && valid_rgb(&material["tint"])
         && material.get("emission_color").is_none_or(valid_rgb)
         && ["uv_tiling", "uv_offset"]

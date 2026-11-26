@@ -119,6 +119,12 @@ pub struct OpaqueMaterial {
     pub tint: [f32; 3],
     #[serde(default, skip_serializing_if = "black_emission")]
     pub emission_color: [f32; 3],
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub metallic: f32,
+    #[serde(default = "default_one", skip_serializing_if = "is_one")]
+    pub normal_scale: f32,
+    #[serde(default = "default_one", skip_serializing_if = "is_one")]
+    pub occlusion_strength: f32,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub double_sided: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -126,6 +132,14 @@ pub struct OpaqueMaterial {
     /// Linear roughness-data asset; retained when its surface response is inactive.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub roughness_texture: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metallic_texture: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normal_texture: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emissive_texture: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occlusion_texture: Option<String>,
     #[serde(
         default = "identity_uv_tiling",
         skip_serializing_if = "is_identity_uv_tiling"
@@ -144,9 +158,16 @@ impl Default for OpaqueMaterial {
             name: None,
             tint: [1.0; 3],
             emission_color: [0.0; 3],
+            metallic: 0.0,
+            normal_scale: 1.0,
+            occlusion_strength: 1.0,
             double_sided: false,
             base_color_texture: None,
             roughness_texture: None,
+            metallic_texture: None,
+            normal_texture: None,
+            emissive_texture: None,
+            occlusion_texture: None,
             uv_tiling: identity_uv_tiling(),
             uv_offset: [0.0; 2],
             filter: TextureFilter::Linear,
@@ -154,6 +175,15 @@ impl Default for OpaqueMaterial {
             response: MaterialResponse::LegacyDiffuse,
         }
     }
+}
+fn is_zero(value: &f32) -> bool {
+    *value == 0.0
+}
+fn default_one() -> f32 {
+    1.0
+}
+fn is_one(value: &f32) -> bool {
+    *value == 1.0
 }
 fn black_emission(color: &[f32; 3]) -> bool {
     *color == [0.0; 3]
@@ -192,6 +222,21 @@ impl OpaqueMaterial {
                 "material emission color must be finite in 0..=1".into(),
             ));
         }
+        if !self.metallic.is_finite() || !(0.0..=1.0).contains(&self.metallic) {
+            return Err(SceneError::Invalid(
+                "material metallic must be finite in 0..=1".into(),
+            ));
+        }
+        if !self.normal_scale.is_finite() || !(0.0..=2.0).contains(&self.normal_scale) {
+            return Err(SceneError::Invalid(
+                "material normal scale must be finite in 0..=2".into(),
+            ));
+        }
+        if !self.occlusion_strength.is_finite() || !(0.0..=1.0).contains(&self.occlusion_strength) {
+            return Err(SceneError::Invalid(
+                "material occlusion strength must be finite in 0..=1".into(),
+            ));
+        }
         if !self
             .uv_tiling
             .iter()
@@ -202,14 +247,29 @@ impl OpaqueMaterial {
                 "material UV tiling and offset must be finite".into(),
             ));
         }
-        if let Some(id) = &self.base_color_texture {
-            validate_id(id)?;
-        }
-        if let Some(id) = &self.roughness_texture {
+        for id in [
+            &self.base_color_texture,
+            &self.roughness_texture,
+            &self.metallic_texture,
+            &self.normal_texture,
+            &self.emissive_texture,
+            &self.occlusion_texture,
+        ]
+        .into_iter()
+        .flatten()
+        {
             validate_id(id)?;
         }
         self.response.validate()?;
         Ok(())
+    }
+    pub fn has_any_texture(&self) -> bool {
+        self.base_color_texture.is_some()
+            || self.roughness_texture.is_some()
+            || self.metallic_texture.is_some()
+            || self.normal_texture.is_some()
+            || self.emissive_texture.is_some()
+            || self.occlusion_texture.is_some()
     }
     pub fn display_name<'a>(&'a self, id: &'a str) -> &'a str {
         self.name.as_deref().unwrap_or(id)
@@ -1189,7 +1249,7 @@ impl Change {
                 .iter()
                 .flat_map(|d| [&d.before, &d.after])
                 .flatten()
-                .any(|m| m.base_color_texture.is_some() || m.roughness_texture.is_some())
+                .any(OpaqueMaterial::has_any_texture)
             || self
                 .bindings
                 .iter()
@@ -3111,7 +3171,7 @@ impl Session {
                 .scene()
                 .materials
                 .values()
-                .any(|m| m.base_color_texture.is_some() || m.roughness_texture.is_some())
+                .any(OpaqueMaterial::has_any_texture)
             || self.document.authoring.has_asset_references()
             || self
                 .document

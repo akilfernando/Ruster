@@ -33,9 +33,10 @@ fn unsupported_material_settings_import_with_persistent_warnings() {
         Some("Material 1")
     );
     assert!(model.clips.contains_key("Swing"));
+    assert_eq!(model.materials["Material 1"].metallic, 1.0);
     assert_eq!(
         model.warnings,
-        ["Material 1: alpha rendered opaque, double-sided surface rendered single-sided, metallic factor rendered as dielectric, roughness raised to 0.08"]
+        ["Material 1: alpha rendered opaque, double-sided surface rendered single-sided, roughness raised to 0.08"]
     );
     assert_eq!(
         AssetStore::open(root.path()).unwrap().model("rig"),

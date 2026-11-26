@@ -126,6 +126,12 @@ pub struct ModelMaterial {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub double_sided: bool,
     pub roughness: f32,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub metallic: f32,
+    #[serde(default = "default_one", skip_serializing_if = "is_one")]
+    pub normal_scale: f32,
+    #[serde(default = "default_one", skip_serializing_if = "is_one")]
+    pub occlusion_strength: f32,
     pub base_color_texture: Option<String>,
     #[serde(
         default,
@@ -133,6 +139,30 @@ pub struct ModelMaterial {
         deserialize_with = "present"
     )]
     pub roughness_texture: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub metallic_texture: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub normal_texture: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub emissive_texture: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub occlusion_texture: Option<String>,
     #[serde(
         default = "identity_uv_tiling",
         skip_serializing_if = "is_identity_uv_tiling"
@@ -146,6 +176,18 @@ pub struct ModelMaterial {
 
 fn black_emission(color: &[f32; 3]) -> bool {
     *color == [0.0; 3]
+}
+
+fn is_zero(value: &f32) -> bool {
+    *value == 0.0
+}
+
+fn default_one() -> f32 {
+    1.0
+}
+
+fn is_one(value: &f32) -> bool {
+    *value == 1.0
 }
 
 const IDENTITY_UV: ([f32; 2], [f32; 2]) = ([1.0; 2], [0.0; 2]);
@@ -167,6 +209,10 @@ impl ModelMaterial {
         match role {
             TextureRole::BaseColor => self.base_color_texture.as_deref(),
             TextureRole::Roughness => self.roughness_texture.as_deref(),
+            TextureRole::Metallic => self.metallic_texture.as_deref(),
+            TextureRole::Normal => self.normal_texture.as_deref(),
+            TextureRole::Emissive => self.emissive_texture.as_deref(),
+            TextureRole::Occlusion => self.occlusion_texture.as_deref(),
         }
     }
 }
@@ -183,7 +229,7 @@ impl ModelInfo {
             .values()
             .filter_map(|node| node.mesh_id.as_deref().map(|id| (id, AssetKind::Mesh)))
             .chain(self.materials.values().flat_map(|material| {
-                [TextureRole::BaseColor, TextureRole::Roughness]
+                TextureRole::ALL
                     .into_iter()
                     .filter_map(|role| material.texture(role).map(|id| (id, AssetKind::Texture)))
             }))
@@ -203,9 +249,10 @@ impl ModelResource {
         }
         match self.payload {
             Payload::Mesh(mesh) => encode_packaged_mesh(&mesh),
-            Payload::Texture(texture) if texture.role == TextureRole::Roughness => {
+            Payload::Texture(texture) if texture.role.is_scalar_linear() => {
                 texture::encode_roughness_source(&texture)
             }
+            Payload::Texture(texture) => texture::encode_rgb_source(&texture),
             _ => unreachable!("model resource has no package source"),
         }
     }
@@ -481,10 +528,10 @@ struct TextureBinding {
     index: usize,
     #[serde(default)]
     tex_coord: usize,
-    #[serde(default, rename = "scale")]
-    _scale: Option<f32>,
-    #[serde(default, rename = "strength")]
-    _strength: Option<f32>,
+    #[serde(default)]
+    scale: Option<f32>,
+    #[serde(default)]
+    strength: Option<f32>,
     #[serde(default)]
     extensions: TextureExtensions,
 }
@@ -506,7 +553,7 @@ struct TextureTransform {
 
 fn unsupported_uv(
     required: bool,
-    warnings: &mut Vec<&str>,
+    warnings: &mut Vec<std::borrow::Cow<'static, str>>,
     detail: &'static str,
 ) -> Result<(), AssetError> {
     if required {
@@ -514,7 +561,7 @@ fn unsupported_uv(
             "required KHR_texture_transform cannot be honored: {detail}"
         )));
     }
-    warnings.push(detail);
+    warnings.push(detail.into());
     Ok(())
 }
 
@@ -1239,6 +1286,7 @@ struct Decoder<'a> {
     used_materials: BTreeMap<String, usize>,
     imported_material_names: BTreeMap<usize, String>,
     packed_roughness: bool,
+    pbr_maps: bool,
     emission: bool,
     double_sided: bool,
     uv_transforms: bool,
@@ -1648,9 +1696,9 @@ impl Decoder<'_> {
                 })
                 .expect("finite material names")
         };
-        let mut fallbacks = Vec::new();
+        let mut fallbacks: Vec<std::borrow::Cow<'static, str>> = Vec::new();
         let name = if self.used_materials.contains_key(&base_name) {
-            fallbacks.push("duplicate material name disambiguated");
+            fallbacks.push("duplicate material name disambiguated".into());
             (2..)
                 .map(|suffix| format!("{base_name} ({suffix})"))
                 .find(|candidate| {
@@ -1684,41 +1732,43 @@ impl Decoder<'_> {
             )));
         }
         if alpha != "OPAQUE" {
-            fallbacks.push("alpha rendered opaque");
+            fallbacks.push("alpha rendered opaque".into());
         }
         let double_sided = self.double_sided && material.double_sided && alpha == "OPAQUE";
         if material.double_sided && !double_sided {
-            fallbacks.push("double-sided surface rendered single-sided");
+            fallbacks.push("double-sided surface rendered single-sided".into());
         }
-        if metallic != 0. {
-            fallbacks.push("metallic factor rendered as dielectric");
+        if !self.pbr_maps && metallic != 0. {
+            fallbacks.push("metallic factor rendered as dielectric".into());
         }
         if roughness < MIN_DIELECTRIC_ROUGHNESS {
-            fallbacks.push("roughness raised to 0.08");
+            fallbacks.push("roughness raised to 0.08".into());
         }
-        for (texture, warning) in [
-            (material.normal_texture.as_ref(), "normal map omitted"),
-            (material.occlusion_texture.as_ref(), "occlusion map omitted"),
-            (
-                material.emissive_texture.as_ref(),
-                if self.emission {
-                    "emissive texture unsupported (black fallback)"
-                } else {
-                    "emissive map omitted"
-                },
-            ),
-            (
-                (!self.packed_roughness)
-                    .then_some(surface.metallic_roughness_texture.as_ref())
-                    .flatten(),
-                "metallic-roughness map omitted",
-            ),
-        ] {
-            if let Some(texture) = texture {
-                let binding = at(&self.doc.textures, texture.index, "material texture")?;
-                let image = at(&self.doc.images, binding.source, "material image")?;
-                self.view(image.buffer_view)?;
-                fallbacks.push(warning);
+        if !self.pbr_maps {
+            for (texture, warning) in [
+                (material.normal_texture.as_ref(), "normal map omitted"),
+                (material.occlusion_texture.as_ref(), "occlusion map omitted"),
+                (
+                    material.emissive_texture.as_ref(),
+                    if self.emission {
+                        "emissive texture unsupported (black fallback)"
+                    } else {
+                        "emissive map omitted"
+                    },
+                ),
+                (
+                    (!self.packed_roughness)
+                        .then_some(surface.metallic_roughness_texture.as_ref())
+                        .flatten(),
+                    "metallic-roughness map omitted",
+                ),
+            ] {
+                if let Some(texture) = texture {
+                    let binding = at(&self.doc.textures, texture.index, "material texture")?;
+                    let image = at(&self.doc.images, binding.source, "material image")?;
+                    self.view(image.buffer_view)?;
+                    fallbacks.push(warning.into());
+                }
             }
         }
         if !self.emission
@@ -1726,13 +1776,27 @@ impl Decoder<'_> {
                 .emissive_factor
                 .is_some_and(|color| color != [0.; 3])
         {
-            fallbacks.push("emissive factor omitted");
+            fallbacks.push("emissive factor omitted".into());
         }
+        let normal_scale = material
+            .normal_texture
+            .as_ref()
+            .and_then(|binding| binding.scale)
+            .filter(|value| value.is_finite())
+            .map_or(1.0, |value| value.clamp(0.0, 2.0));
+        let occlusion_strength = material
+            .occlusion_texture
+            .as_ref()
+            .and_then(|binding| binding.strength)
+            .filter(|value| value.is_finite())
+            .map_or(1.0, |value| value.clamp(0.0, 1.0));
         let mut sampler_warning = None;
         let mut definition = ModelMaterial {
             base_color_factor: [rgba[0], rgba[1], rgba[2]],
             double_sided,
-            emission_color: if self.emission && material.emissive_texture.is_none() {
+            emission_color: if self.pbr_maps
+                || (self.emission && material.emissive_texture.is_none())
+            {
                 material
                     .emissive_factor
                     .unwrap_or_default()
@@ -1741,8 +1805,19 @@ impl Decoder<'_> {
                 [0.0; 3]
             },
             roughness: roughness.max(MIN_DIELECTRIC_ROUGHNESS),
+            metallic: if self.pbr_maps { metallic } else { 0.0 },
+            normal_scale: if self.pbr_maps { normal_scale } else { 1.0 },
+            occlusion_strength: if self.pbr_maps {
+                occlusion_strength
+            } else {
+                1.0
+            },
             base_color_texture: None,
             roughness_texture: None,
+            metallic_texture: None,
+            normal_texture: None,
+            emissive_texture: None,
+            occlusion_texture: None,
             uv_tiling: IDENTITY_UV.0,
             uv_offset: IDENTITY_UV.1,
             linear: true,
@@ -1765,7 +1840,7 @@ impl Decoder<'_> {
             } else if self.uv_transforms && tex_coord == 0 {
                 (definition.uv_tiling, definition.uv_offset) = uv;
             } else if !self.uv_transforms && (uv != IDENTITY_UV || binding.has_uv_rotation()) {
-                fallbacks.push("base color UV transform omitted");
+                fallbacks.push("base color UV transform omitted".into());
             }
             if tex_coord != 0 {
                 uv_allowed = false;
@@ -1787,7 +1862,7 @@ impl Decoder<'_> {
                 "image/png" => Some((decode_png(bytes)?, bytes.to_vec())),
                 "image/jpeg" | "image/jpg" => Some(texture::decode_jpeg(bytes)?),
                 _ => {
-                    fallbacks.push("Base Color map omitted (unsupported image format)");
+                    fallbacks.push("Base Color map omitted (unsupported image format)".into());
                     None
                 }
             };
@@ -1797,7 +1872,7 @@ impl Decoder<'_> {
                     (definition.linear, sampler_warning) = sampler.filtering()?;
                     let (repeat, wrap_warning) = sampler.wrapping()?;
                     definition.repeat = repeat;
-                    fallbacks.extend(wrap_warning);
+                    fallbacks.extend(wrap_warning.map(std::borrow::Cow::Borrowed));
                 }
                 let id = resource_id(&self.model.info.id, "base-color", &name);
                 base_resource = Some(ModelResource {
@@ -1807,90 +1882,271 @@ impl Decoder<'_> {
                 definition.base_color_texture = Some(id);
             }
         }
-        let mut roughness_sampler_warning = None;
-        if let Some(binding) = surface
-            .metallic_roughness_texture
-            .as_ref()
-            .filter(|_| self.packed_roughness)
-        {
-            let texture = at(&self.doc.textures, binding.index, "roughness texture")?;
-            let image = at(&self.doc.images, texture.source, "roughness image")?;
-            let (view, bytes) = self.view(image.buffer_view)?;
+        let mut bound_uv_and_sampler = definition.base_color_texture.is_some();
+        let mut secondary_sampler_warning = None;
+        let mut pending_resources = Vec::new();
+        let read_compatible_slot = |binding: &TextureBinding,
+                                    label: &str,
+                                    tex_coord_msg: &'static str,
+                                    uv_compat_msg: &'static str,
+                                    rot_msg: &'static str,
+                                    diff_uv_msg: &'static str,
+                                    definition: &mut ModelMaterial,
+                                    bound_uv_and_sampler: &mut bool,
+                                    secondary_sampler_warning: &mut Option<String>,
+                                    fallbacks: &mut Vec<std::borrow::Cow<'static, str>>|
+         -> Result<Option<(usize, String)>, AssetError> {
+            let texture = at(&self.doc.textures, binding.index, "material texture")?;
+            let image = at(&self.doc.images, texture.source, "material image")?;
+            let (view, _) = self.view(image.buffer_view)?;
             let uv = binding.uv_transform()?;
-            fallbacks.push("metallic-roughness blue channel omitted");
             if binding.effective_tex_coord() != 0 {
-                unsupported_uv(
-                    self.required_uv_transform,
-                    &mut fallbacks,
-                    "roughness map omitted because it requires TEXCOORD_0",
-                )?;
+                unsupported_uv(self.required_uv_transform, fallbacks, tex_coord_msg)?;
+                return Ok(None);
             } else if !self.uv_transforms && (uv != IDENTITY_UV || binding.has_uv_rotation()) {
-                fallbacks.push("roughness map omitted because its UV transform is unsupported");
+                fallbacks.push(uv_compat_msg.into());
+                return Ok(None);
             } else if binding.has_uv_rotation() {
-                unsupported_uv(
-                    self.required_uv_transform,
-                    &mut fallbacks,
-                    "roughness map omitted because UV rotation is unsupported",
-                )?;
-            } else if definition.base_color_texture.is_some()
-                && uv != (definition.uv_tiling, definition.uv_offset)
-            {
-                unsupported_uv(self.required_uv_transform, &mut fallbacks, "roughness map omitted because it needs different tiling or offset from Base Color")?;
+                unsupported_uv(self.required_uv_transform, fallbacks, rot_msg)?;
+                return Ok(None);
+            } else if *bound_uv_and_sampler && uv != (definition.uv_tiling, definition.uv_offset) {
+                unsupported_uv(self.required_uv_transform, fallbacks, diff_uv_msg)?;
+                return Ok(None);
             } else if view.target.is_some() || view.byte_stride.is_some() {
-                fallbacks.push("roughness map omitted because it requires a tightly stored image");
+                fallbacks.push(
+                    match label {
+                        "roughness" => {
+                            "roughness map omitted because it requires a tightly stored image"
+                        }
+                        "normal" => "normal map omitted because it requires a tightly stored image",
+                        "emissive" => {
+                            "emissive map omitted because it requires a tightly stored image"
+                        }
+                        _ => "occlusion map omitted because it requires a tightly stored image",
+                    }
+                    .into(),
+                );
+                return Ok(None);
             } else if !matches!(
                 image.mime_type.as_str(),
                 "image/png" | "image/jpeg" | "image/jpg"
             ) {
-                fallbacks.push("roughness map omitted (unsupported image format)");
-            } else {
-                let mut repeat = true;
-                let mut linear = true;
-                let mut wrap_warning = None;
-                if let Some(index) = texture.sampler {
-                    let sampler = at(&self.doc.samplers, index, "roughness sampler")?;
-                    (linear, roughness_sampler_warning) = sampler.filtering()?;
-                    (repeat, wrap_warning) = sampler.wrapping()?;
-                }
-                if definition.base_color_texture.is_some()
-                    && (linear, repeat) != (definition.linear, definition.repeat)
-                {
-                    fallbacks.push("roughness map omitted because it needs a different sampler from Base Color");
-                    roughness_sampler_warning = None;
+                fallbacks.push(
+                    match label {
+                        "roughness" => "roughness map omitted (unsupported image format)",
+                        "normal" => "normal map omitted (unsupported image format)",
+                        "emissive" => "emissive map omitted (unsupported image format)",
+                        _ => "occlusion map omitted (unsupported image format)",
+                    }
+                    .into(),
+                );
+                return Ok(None);
+            }
+            let mut repeat = true;
+            let mut linear = true;
+            let mut wrap_warning = None;
+            let mut filter_warning = None;
+            if let Some(index) = texture.sampler {
+                let sampler = at(&self.doc.samplers, index, "material sampler")?;
+                (linear, filter_warning) = sampler.filtering()?;
+                (repeat, wrap_warning) = sampler.wrapping()?;
+            }
+            if *bound_uv_and_sampler && (linear, repeat) != (definition.linear, definition.repeat) {
+                fallbacks.push(match label {
+                        "roughness" => {
+                            "roughness map omitted because it needs a different sampler from Base Color"
+                        }
+                        "normal" => "normal map omitted because it needs a different sampler",
+                        "emissive" => "emissive map omitted because it needs a different sampler",
+                        _ => "occlusion map omitted because it needs a different sampler",
+                    }.into());
+                return Ok(None);
+            }
+            fallbacks.extend(wrap_warning.map(std::borrow::Cow::Borrowed));
+            if secondary_sampler_warning.is_none() {
+                *secondary_sampler_warning =
+                    filter_warning.map(|warning| format!("{label} {warning}"));
+            }
+            (definition.uv_tiling, definition.uv_offset) = uv;
+            definition.linear = linear;
+            definition.repeat = repeat;
+            *bound_uv_and_sampler = true;
+            Ok(Some((image.buffer_view, image.mime_type.clone())))
+        };
+        if let Some(binding) = surface
+            .metallic_roughness_texture
+            .as_ref()
+            .filter(|_| self.packed_roughness || self.pbr_maps)
+        {
+            if !self.pbr_maps {
+                fallbacks.push("metallic-roughness blue channel omitted".into());
+            }
+            if let Some((buffer_view, mime)) = read_compatible_slot(
+                binding,
+                "roughness",
+                "roughness map omitted because it requires TEXCOORD_0",
+                "roughness map omitted because its UV transform is unsupported",
+                "roughness map omitted because UV rotation is unsupported",
+                "roughness map omitted because it needs different tiling or offset from Base Color",
+                &mut definition,
+                &mut bound_uv_and_sampler,
+                &mut secondary_sampler_warning,
+                &mut fallbacks,
+            )? {
+                let (_, bytes) = self.view(buffer_view)?;
+                let roughness = if mime == "image/png" {
+                    texture::decode_glb_roughness(bytes)
                 } else {
-                    fallbacks.extend(wrap_warning);
-                    (definition.uv_tiling, definition.uv_offset) = uv;
-                    definition.linear = linear;
-                    definition.repeat = repeat;
-                    let roughness = if image.mime_type == "image/png" {
-                        texture::decode_glb_roughness(bytes)
+                    texture::decode_glb_jpeg_roughness(bytes)
+                }
+                .map_err(|failure| {
+                    error(format!(
+                        "GLB material {name:?} roughness texture: {failure}"
+                    ))
+                })?;
+                let id = resource_id(&self.model.info.id, "roughness", &name);
+                pending_resources.push((
+                    id.clone(),
+                    ModelResource {
+                        bytes: None,
+                        payload: Payload::Texture(roughness),
+                    },
+                ));
+                definition.roughness_texture = Some(id);
+                if self.pbr_maps && metallic > 0.0 {
+                    let metallic_tex = if mime == "image/png" {
+                        texture::decode_glb_metallic(bytes)
                     } else {
-                        texture::decode_glb_jpeg_roughness(bytes)
+                        texture::decode_glb_jpeg_metallic(bytes)
                     }
                     .map_err(|failure| {
-                        error(format!(
-                            "GLB material {name:?} roughness texture: {failure}"
-                        ))
+                        error(format!("GLB material {name:?} metallic texture: {failure}"))
                     })?;
-                    let id = resource_id(&self.model.info.id, "roughness", &name);
-                    self.retain(
-                        id.clone(),
+                    let metallic_id = resource_id(&self.model.info.id, "metallic", &name);
+                    pending_resources.push((
+                        metallic_id.clone(),
                         ModelResource {
                             bytes: None,
-                            payload: Payload::Texture(roughness),
+                            payload: Payload::Texture(metallic_tex),
                         },
-                    )?;
-                    definition.roughness_texture = Some(id);
+                    ));
+                    definition.metallic_texture = Some(metallic_id);
                 }
             }
         }
-        let roughness_sampler_warning =
-            roughness_sampler_warning.map(|warning| format!("roughness {warning}"));
-        fallbacks.extend(roughness_sampler_warning.as_deref());
+        if self.pbr_maps {
+            if let Some(binding) = &material.normal_texture {
+                if let Some((buffer_view, mime)) = read_compatible_slot(
+                    binding,
+                    "normal",
+                    "normal map omitted because it requires TEXCOORD_0",
+                    "normal map omitted because its UV transform is unsupported",
+                    "normal map omitted because UV rotation is unsupported",
+                    "normal map omitted because it needs different tiling or offset",
+                    &mut definition,
+                    &mut bound_uv_and_sampler,
+                    &mut secondary_sampler_warning,
+                    &mut fallbacks,
+                )? {
+                    let (_, bytes) = self.view(buffer_view)?;
+                    let (tex, exported) = if mime == "image/png" {
+                        (texture::decode_glb_normal(bytes)?, Some(bytes.to_vec()))
+                    } else {
+                        let (tex, png_bytes) =
+                            texture::decode_jpeg_with_role(bytes, TextureRole::Normal)?;
+                        (tex, Some(png_bytes))
+                    };
+                    let id = resource_id(&self.model.info.id, "normal", &name);
+                    pending_resources.push((
+                        id.clone(),
+                        ModelResource {
+                            bytes: exported,
+                            payload: Payload::Texture(tex),
+                        },
+                    ));
+                    definition.normal_texture = Some(id);
+                }
+            }
+            if let Some(binding) = &material.emissive_texture {
+                if let Some((buffer_view, mime)) = read_compatible_slot(
+                    binding,
+                    "emissive",
+                    "emissive map omitted because it requires TEXCOORD_0",
+                    "emissive map omitted because its UV transform is unsupported",
+                    "emissive map omitted because UV rotation is unsupported",
+                    "emissive map omitted because it needs different tiling or offset",
+                    &mut definition,
+                    &mut bound_uv_and_sampler,
+                    &mut secondary_sampler_warning,
+                    &mut fallbacks,
+                )? {
+                    let (_, bytes) = self.view(buffer_view)?;
+                    let (tex, exported) = if mime == "image/png" {
+                        (texture::decode_glb_emissive(bytes)?, Some(bytes.to_vec()))
+                    } else {
+                        let (tex, png_bytes) =
+                            texture::decode_jpeg_with_role(bytes, TextureRole::Emissive)?;
+                        (tex, Some(png_bytes))
+                    };
+                    let id = resource_id(&self.model.info.id, "emissive", &name);
+                    pending_resources.push((
+                        id.clone(),
+                        ModelResource {
+                            bytes: exported,
+                            payload: Payload::Texture(tex),
+                        },
+                    ));
+                    definition.emissive_texture = Some(id);
+                }
+            }
+            if let Some(binding) = &material.occlusion_texture {
+                if let Some((buffer_view, mime)) = read_compatible_slot(
+                    binding,
+                    "occlusion",
+                    "occlusion map omitted because it requires TEXCOORD_0",
+                    "occlusion map omitted because its UV transform is unsupported",
+                    "occlusion map omitted because UV rotation is unsupported",
+                    "occlusion map omitted because it needs different tiling or offset",
+                    &mut definition,
+                    &mut bound_uv_and_sampler,
+                    &mut secondary_sampler_warning,
+                    &mut fallbacks,
+                )? {
+                    let (_, bytes) = self.view(buffer_view)?;
+                    let occlusion_tex = if mime == "image/png" {
+                        texture::decode_glb_occlusion(bytes)
+                    } else {
+                        texture::decode_glb_jpeg_occlusion(bytes)
+                    }
+                    .map_err(|failure| {
+                        error(format!(
+                            "GLB material {name:?} occlusion texture: {failure}"
+                        ))
+                    })?;
+                    let id = resource_id(&self.model.info.id, "occlusion", &name);
+                    pending_resources.push((
+                        id.clone(),
+                        ModelResource {
+                            bytes: None,
+                            payload: Payload::Texture(occlusion_tex),
+                        },
+                    ));
+                    definition.occlusion_texture = Some(id);
+                }
+            }
+        }
+        fallbacks.extend(
+            secondary_sampler_warning
+                .into_iter()
+                .map(std::borrow::Cow::Owned),
+        );
         if let (Some(id), Some(resource)) = (&definition.base_color_texture, base_resource) {
             self.retain(id.clone(), resource)?;
         }
-        fallbacks.extend(sampler_warning.as_deref());
+        for (id, resource) in pending_resources {
+            self.retain(id, resource)?;
+        }
+        fallbacks.extend(sampler_warning.into_iter().map(std::borrow::Cow::Owned));
         if !fallbacks.is_empty() {
             self.model
                 .info
@@ -1912,7 +2168,9 @@ impl Decoder<'_> {
     ) -> Result<(), AssetError> {
         let textured = material.as_ref().is_some_and(|material| {
             let material = &self.model.info.materials[material];
-            material.base_color_texture.is_some() || material.roughness_texture.is_some()
+            TextureRole::ALL
+                .into_iter()
+                .any(|role| material.texture(role).is_some())
         });
         let resource = self
             .mesh(primitive, textured)
@@ -2376,6 +2634,7 @@ impl Decoder<'_> {
 
 pub(super) struct ImportFeatures {
     pub packed_roughness: bool,
+    pub pbr_maps: bool,
     pub place_spots: bool,
     pub place_orthographic: bool,
     pub emission: bool,
@@ -2386,6 +2645,7 @@ pub(super) struct ImportFeatures {
 impl ImportFeatures {
     const CURRENT: Self = Self {
         packed_roughness: true,
+        pbr_maps: true,
         place_spots: true,
         place_orthographic: true,
         emission: true,
@@ -2406,6 +2666,7 @@ pub(super) fn decode_accepted(
 ) -> Result<DecodedModel, AssetError> {
     let ImportFeatures {
         packed_roughness,
+        pbr_maps,
         place_spots,
         place_orthographic,
         emission,
@@ -2497,6 +2758,7 @@ pub(super) fn decode_accepted(
         used_materials: BTreeMap::new(),
         imported_material_names: BTreeMap::new(),
         packed_roughness,
+        pbr_maps,
         emission,
         double_sided,
         uv_transforms,

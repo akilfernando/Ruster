@@ -523,7 +523,15 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
                     })
                     && args.get("texture_role").is_none_or(|value| {
                         value.as_str().is_some_and(|role| {
-                            matches!(role, "base_color_srgb" | "roughness_linear")
+                            matches!(
+                                role,
+                                "base_color_srgb"
+                                    | "roughness_linear"
+                                    | "metallic_linear"
+                                    | "normal_linear"
+                                    | "emissive_srgb"
+                                    | "occlusion_linear"
+                            )
                         }) && args["source"]
                             .as_str()
                             .is_some_and(|source| source.ends_with(".png"))
@@ -671,7 +679,7 @@ fn tools() -> Value {
             required.extend(["action","object_id"]);
         }
         if name=="asset_import" {properties.insert("normal_policy".into(),json!({"type":"string","enum":["flat","authored_when_complete"],"description":"OBJ mesh import interpretation: flat geometric normals, or complete valid authored corner normals with flat fallback when incomplete. Omitted uses the existing flat route; PNG and GLB imports reject this field. Import another asset identity to change an accepted interpretation."}));}
-        if name=="asset_import" {properties.insert("texture_role".into(),json!({"type":"string","enum":["base_color_srgb","roughness_linear"],"description":"PNG-only immutable interpretation. Base color decodes sRGB; roughness reads grayscale/red as linear byte/255 and builds arithmetic perceptual-roughness mips. Omission uses base_color_srgb. Cannot combine with normal_policy; use a distinct asset ID for another interpretation of the same source."}));}
+        if name=="asset_import" {properties.insert("texture_role".into(),json!({"type":"string","enum":["base_color_srgb","roughness_linear","metallic_linear","normal_linear","emissive_srgb","occlusion_linear"],"description":"PNG-only immutable role. Omission uses base_color_srgb. Cannot combine with normal_policy."}));}
         if matches!(name, "scene_create" | "scene_rename" | "scene_delete") {
             properties.insert("object_id".into(), json!({"type":"string","minLength":1,"maxLength":128,"description":"Immutable object identity, distinct from its display name."}));
             required.push("object_id");
@@ -2480,7 +2488,14 @@ mod tests {
         );
         assert_eq!(
             schema("asset_import")["properties"]["texture_role"]["enum"],
-            json!(["base_color_srgb", "roughness_linear"])
+            json!([
+                "base_color_srgb",
+                "roughness_linear",
+                "metallic_linear",
+                "normal_linear",
+                "emissive_srgb",
+                "occlusion_linear"
+            ])
         );
         assert_eq!(schema("asset_import")["allOf"].as_array().unwrap().len(), 3);
         assert_eq!(

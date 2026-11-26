@@ -453,6 +453,10 @@ pub fn texture_roles<'a>(
         for (id, role) in [
             (&material.base_color_texture, TextureRole::BaseColor),
             (&material.roughness_texture, TextureRole::Roughness),
+            (&material.metallic_texture, TextureRole::Metallic),
+            (&material.normal_texture, TextureRole::Normal),
+            (&material.emissive_texture, TextureRole::Emissive),
+            (&material.occlusion_texture, TextureRole::Occlusion),
         ] {
             if let Some(id) = id {
                 if roles

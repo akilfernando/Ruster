@@ -88,11 +88,15 @@ pub(super) struct Draft {
     copy_scope: Option<String>,
     base_colors: BTreeMap<String, String>,
     roughness_maps: BTreeMap<String, String>,
+    metallic_maps: BTreeMap<String, String>,
+    normal_maps: BTreeMap<String, String>,
+    emissive_maps: BTreeMap<String, String>,
+    occlusion_maps: BTreeMap<String, String>,
     opened_frame: Option<u64>,
     error: Option<String>,
 }
 
-fn textures(material: &OpaqueMaterial) -> [(Option<&str>, TextureRole); 2] {
+fn textures(material: &OpaqueMaterial) -> [(Option<&str>, TextureRole); 6] {
     [
         (
             material.base_color_texture.as_deref(),
@@ -101,6 +105,13 @@ fn textures(material: &OpaqueMaterial) -> [(Option<&str>, TextureRole); 2] {
         (
             material.roughness_texture.as_deref(),
             TextureRole::Roughness,
+        ),
+        (material.metallic_texture.as_deref(), TextureRole::Metallic),
+        (material.normal_texture.as_deref(), TextureRole::Normal),
+        (material.emissive_texture.as_deref(), TextureRole::Emissive),
+        (
+            material.occlusion_texture.as_deref(),
+            TextureRole::Occlusion,
         ),
     ]
 }
@@ -137,6 +148,10 @@ fn ready_texture_choices(
     let embedded = match role {
         TextureRole::BaseColor => Text::ComponentEmbeddedBaseColor,
         TextureRole::Roughness => Text::ComponentEmbeddedRoughness,
+        TextureRole::Metallic => Text::ComponentEmbeddedMetallic,
+        TextureRole::Normal => Text::ComponentEmbeddedNormal,
+        TextureRole::Emissive => Text::ComponentEmbeddedEmissive,
+        TextureRole::Occlusion => Text::ComponentEmbeddedOcclusion,
     };
     for model in assets.models() {
         for id in model
@@ -422,7 +437,7 @@ impl ComponentWorkspace {
         for ((texture, role), old) in textures(&value).into_iter().zip(
             previous
                 .as_ref()
-                .map_or([None; 2], |m| textures(m).map(|(id, _)| id)),
+                .map_or([None; 6], |m| textures(m).map(|(id, _)| id)),
         ) {
             if let Some(texture) = texture.filter(|_| texture != old) {
                 validate_texture(self.assets.as_ref(), texture, role)?;
@@ -546,6 +561,10 @@ impl ComponentWorkspace {
             copy_scope: None,
             base_colors: ready_texture_choices(self.assets.as_ref(), TextureRole::BaseColor),
             roughness_maps: ready_texture_choices(self.assets.as_ref(), TextureRole::Roughness),
+            metallic_maps: ready_texture_choices(self.assets.as_ref(), TextureRole::Metallic),
+            normal_maps: ready_texture_choices(self.assets.as_ref(), TextureRole::Normal),
+            emissive_maps: ready_texture_choices(self.assets.as_ref(), TextureRole::Emissive),
+            occlusion_maps: ready_texture_choices(self.assets.as_ref(), TextureRole::Occlusion),
             opened_frame: None,
             error: None,
         });
@@ -574,7 +593,7 @@ impl ComponentWorkspace {
         let previous = scene.materials.get(old_id);
         for ((texture, role), old) in textures(&value)
             .into_iter()
-            .zip(previous.map_or([None; 2], |m| textures(m).map(|(id, _)| id)))
+            .zip(previous.map_or([None; 6], |m| textures(m).map(|(id, _)| id)))
         {
             if let Some(texture) = texture.filter(|_| texture != old) {
                 validate_texture(self.assets.as_ref(), texture, role)?;
@@ -796,6 +815,10 @@ impl ComponentWorkspace {
             copy_scope,
             base_colors: ready_texture_choices(self.assets.as_ref(), TextureRole::BaseColor),
             roughness_maps: ready_texture_choices(self.assets.as_ref(), TextureRole::Roughness),
+            metallic_maps: ready_texture_choices(self.assets.as_ref(), TextureRole::Metallic),
+            normal_maps: ready_texture_choices(self.assets.as_ref(), TextureRole::Normal),
+            emissive_maps: ready_texture_choices(self.assets.as_ref(), TextureRole::Emissive),
+            occlusion_maps: ready_texture_choices(self.assets.as_ref(), TextureRole::Occlusion),
             opened_frame: None,
             error: None,
         });
@@ -970,6 +993,12 @@ impl ComponentWorkspace {
                     &mut draft.value.base_color_texture,
                     &draft.base_colors,
                 );
+                texture_choice(
+                    ui,
+                    Text::EmissiveMapSrgb,
+                    &mut draft.value.emissive_texture,
+                    &draft.emissive_maps,
+                );
                 ui_kit::property_row_with_label(
                     ui,
                     Text::ComponentMaterialResponse.plain(),
@@ -1017,6 +1046,52 @@ impl ComponentWorkspace {
                         )
                         .labelled_by(label);
                     });
+                    ui_kit::property_row_with_label(ui, Text::Metallic.plain(), |ui, label| {
+                        ui.add(
+                            egui::DragValue::new(&mut draft.value.metallic)
+                                .range(0.0..=1.0)
+                                .speed(0.01),
+                        )
+                        .labelled_by(label);
+                    });
+                    texture_choice(
+                        ui,
+                        Text::MetallicMapLinear,
+                        &mut draft.value.metallic_texture,
+                        &draft.metallic_maps,
+                    );
+                    texture_choice(
+                        ui,
+                        Text::NormalMapLinear,
+                        &mut draft.value.normal_texture,
+                        &draft.normal_maps,
+                    );
+                    ui_kit::property_row_with_label(ui, Text::NormalScale.plain(), |ui, label| {
+                        ui.add(
+                            egui::DragValue::new(&mut draft.value.normal_scale)
+                                .range(0.0..=2.0)
+                                .speed(0.01),
+                        )
+                        .labelled_by(label);
+                    });
+                    texture_choice(
+                        ui,
+                        Text::OcclusionMapLinear,
+                        &mut draft.value.occlusion_texture,
+                        &draft.occlusion_maps,
+                    );
+                    ui_kit::property_row_with_label(
+                        ui,
+                        Text::OcclusionStrength.plain(),
+                        |ui, label| {
+                            ui.add(
+                                egui::DragValue::new(&mut draft.value.occlusion_strength)
+                                    .range(0.0..=1.0)
+                                    .speed(0.01),
+                            )
+                            .labelled_by(label);
+                        },
+                    );
                 }
                 if let Some(error) = &draft.error {
                     ui.colored_label(editor_theme::colors(ui).error, error);
@@ -1471,12 +1546,19 @@ impl ComponentWorkspace {
                 "material_id":id, "assigned_count":users.len(), "users_truncated":users.len()>4,
                 "user_ids":users.iter().take(4).map(|&index| &scene.objects[index].id).collect::<Vec<_>>(),
                 "material":{
-                    "name":value.name,"tint":value.tint,"emission_color":value.emission_color,"double_sided":value.double_sided,"uv_tiling":value.uv_tiling,"uv_offset":value.uv_offset,"base_color_texture":value.base_color_texture,
-                    "roughness_texture":value.roughness_texture,"filter":value.filter,"address":value.address,
+                    "name":value.name,"tint":value.tint,"emission_color":value.emission_color,
+                    "metallic":value.metallic,"normal_scale":value.normal_scale,"occlusion_strength":value.occlusion_strength,
+                    "double_sided":value.double_sided,"uv_tiling":value.uv_tiling,"uv_offset":value.uv_offset,"base_color_texture":value.base_color_texture,
+                    "roughness_texture":value.roughness_texture,"metallic_texture":value.metallic_texture,"normal_texture":value.normal_texture,
+                    "emissive_texture":value.emissive_texture,"occlusion_texture":value.occlusion_texture,"filter":value.filter,"address":value.address,
                     "response":value.response,
                 },
                 "texture":value.base_color_texture.as_deref().map(|id|inspect_texture(id, TextureRole::BaseColor)),
                 "roughness_texture":value.roughness_texture.as_deref().map(|id|inspect_texture(id, TextureRole::Roughness)),
+                "metallic_texture":value.metallic_texture.as_deref().map(|id|inspect_texture(id, TextureRole::Metallic)),
+                "normal_texture":value.normal_texture.as_deref().map(|id|inspect_texture(id, TextureRole::Normal)),
+                "emissive_texture":value.emissive_texture.as_deref().map(|id|inspect_texture(id, TextureRole::Emissive)),
+                "occlusion_texture":value.occlusion_texture.as_deref().map(|id|inspect_texture(id, TextureRole::Occlusion)),
                 "uv":{"invalid_user_count":invalid,"object_ids":invalid_ids,"truncated":invalid>4},
             });
             if let Some(file) = self.material_files.get(id) {
@@ -1567,6 +1649,7 @@ mod tests {
             filter: rot_scene::TextureFilter::Nearest,
             address: rot_scene::TextureAddress::Clamp,
             response: MaterialResponse::Dielectric { roughness: 0.73 },
+            ..Default::default()
         };
         scene.materials.insert("varnish".into(), source.clone());
         let Component::MeshRenderer { material, .. } = &mut scene.objects[0].components[0].kind

@@ -56,7 +56,7 @@ impl Probe {
         resources.materials.prepare(
             device,
             queue,
-            [(&BindingKey::default(), None, None)].into_iter(),
+            [(&BindingKey::default(), MaterialTextureInputs::default())].into_iter(),
         );
         resources.ensure_instance_capacity(device, 2);
         assert!(resources.resize(
@@ -266,6 +266,8 @@ impl Probe {
             Instance {
                 uv_transform: [1.0, 1.0, 0.0, 0.0],
                 emission_color: [0.0; 4],
+                pbr_params: [0.0, 1.0, 1.0, 0.0],
+                pbr_maps: [0.0; 4],
                 model: model.to_cols_array_2d(),
                 normal: normal.to_cols_array_2d().map(|v| [v[0], v[1], v[2], 0.]),
                 color: [1.; 4],

@@ -22,20 +22,54 @@ pub enum TextureRole {
     BaseColor,
     #[serde(rename = "roughness_linear")]
     Roughness,
+    #[serde(rename = "metallic_linear")]
+    Metallic,
+    #[serde(rename = "normal_linear")]
+    Normal,
+    #[serde(rename = "emissive_srgb")]
+    Emissive,
+    #[serde(rename = "occlusion_linear")]
+    Occlusion,
 }
 impl TextureRole {
+    pub const ALL: [Self; 6] = [
+        Self::BaseColor,
+        Self::Roughness,
+        Self::Metallic,
+        Self::Normal,
+        Self::Emissive,
+        Self::Occlusion,
+    ];
+    pub const fn is_scalar_linear(self) -> bool {
+        matches!(self, Self::Roughness | Self::Metallic | Self::Occlusion)
+    }
+    pub const fn is_srgb(self) -> bool {
+        matches!(self, Self::BaseColor | Self::Emissive)
+    }
     pub const fn bytes_per_pixel(self) -> usize {
-        match self {
-            Self::BaseColor => 4,
-            Self::Roughness => 1,
+        if self.is_scalar_linear() {
+            1
+        } else {
+            4
         }
     }
     pub(crate) const fn cache_version(self) -> u32 {
         match self {
             Self::BaseColor => 1,
             Self::Roughness => 2,
+            Self::Metallic => 3,
+            Self::Normal => 4,
+            Self::Emissive => 5,
+            Self::Occlusion => 6,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PackedChannel {
+    Primary,
+    Green,
+    Blue,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -91,7 +125,7 @@ pub fn validate_texture(texture: &Texture) -> Result<(), AssetError> {
             || mip.width != width
             || mip.height != height
             || mip.bytes.len() != image_bytes(width, height, texture.role)?
-            || (texture.role == TextureRole::BaseColor
+            || (!texture.role.is_scalar_linear()
                 && mip.bytes.as_chunks::<4>().0.iter().any(|p| p[3] != 255))
         {
             return Err(error(
@@ -142,7 +176,7 @@ fn number(bytes: &[u8]) -> u32 {
 // Inspect all chunks before decoder allocation, including chunks after IDAT.
 // This prevents ignored profile/APNG/ancillary chunks or trailing data from
 // bypassing the fixed input policy. The PNG decoder still validates structure.
-fn preflight(bytes: &[u8], role: TextureRole, packed_green: bool) -> Result<(), AssetError> {
+fn preflight(bytes: &[u8], role: TextureRole, channel: PackedChannel) -> Result<(), AssetError> {
     if bytes.len() > MAX_TEXTURE_SOURCE_BYTES {
         return Err(error("PNG exceeds 32 MiB source limit"));
     }
@@ -188,22 +222,22 @@ fn preflight(bytes: &[u8], role: TextureRole, packed_green: bool) -> Result<(), 
                 ihdr = true;
                 let (width, height) = (number(&data[..4]), number(&data[4..8]));
                 chain_bytes(width, height, role)?;
-                let indexed = (role == TextureRole::BaseColor || packed_green) && data[9] == 3;
+                let indexed =
+                    (!role.is_scalar_linear() || channel != PackedChannel::Primary) && data[9] == 3;
                 let depth = data[8];
                 if !(depth == 8 || indexed && matches!(depth, 1 | 2 | 4))
                     || !(matches!(data[9], 2 | 6)
                         || indexed
-                        || (role == TextureRole::Roughness && data[9] == 0))
+                        || (role.is_scalar_linear() && data[9] == 0))
                     || data[10] != 0
                     || data[11] != 0
                     || data[12] != 0
                 {
-                    return Err(error(
-                        match role {
-                            TextureRole::BaseColor => "supported PNG is noninterlaced 8-bit RGB/RGBA or 1/2/4/8-bit indexed with standard compression/filtering",
-                            TextureRole::Roughness => "supported roughness PNG is noninterlaced 8-bit grayscale/RGB/RGBA with standard compression/filtering",
-                        },
-                    ));
+                    return Err(error(if role.is_scalar_linear() {
+                        "supported scalar linear PNG is noninterlaced 8-bit grayscale/RGB/RGBA with standard compression/filtering"
+                    } else {
+                        "supported PNG is noninterlaced 8-bit RGB/RGBA or 1/2/4/8-bit indexed with standard compression/filtering"
+                    }));
                 }
                 if indexed {
                     max_palette_bytes = Some(3usize << depth);
@@ -242,32 +276,28 @@ fn preflight(bytes: &[u8], role: TextureRole, packed_green: bool) -> Result<(), 
             }
             b"acTL" | b"fcTL" | b"fdAT" => return Err(error("animated PNG is unsupported")),
             b"iCCP" | b"cICP" | b"mDCV" | b"cLLI" => {
-                return Err(error(
-                    match role {
-                        TextureRole::BaseColor => "PNG color profiles/HDR transfer encodings are unsupported; export sRGB",
-                        TextureRole::Roughness => "PNG color profiles/HDR transfer encodings are unsupported; export unprofiled roughness data",
-                    },
-                ));
+                return Err(error(if role.is_srgb() {
+                    "PNG color profiles/HDR transfer encodings are unsupported; export sRGB"
+                } else {
+                    "PNG color profiles/HDR transfer encodings are unsupported; export unprofiled linear data"
+                }));
             }
             b"gAMA" => {
                 if length != 4
-                    || (role == TextureRole::BaseColor && number(data) != 45455)
-                    || (role == TextureRole::Roughness && number(data) == 0)
+                    || (role.is_srgb() && number(data) != 45455)
+                    || (!role.is_srgb() && number(data) == 0)
                 {
-                    return Err(error(match role {
-                        TextureRole::BaseColor => {
-                            "PNG gamma conflicts with fixed sRGB base-color interpretation"
-                        }
-                        TextureRole::Roughness => {
-                            "roughness PNG gamma must be a nonzero four-byte value; it is ignored"
-                        }
+                    return Err(error(if role.is_srgb() {
+                        "PNG gamma conflicts with fixed sRGB interpretation"
+                    } else {
+                        "linear PNG gamma must be a nonzero four-byte value; it is ignored"
                     }));
                 }
             }
             b"cHRM" => {
                 let srgb = [31270, 32900, 64000, 33000, 30000, 60000, 15000, 6000];
                 if length != 32
-                    || (role == TextureRole::BaseColor
+                    || (role.is_srgb()
                         && !data
                             .as_chunks::<4>()
                             .0
@@ -275,11 +305,10 @@ fn preflight(bytes: &[u8], role: TextureRole, packed_green: bool) -> Result<(), 
                             .zip(srgb)
                             .all(|(v, expected)| number(v) == expected))
                 {
-                    return Err(error(match role {
-                        TextureRole::BaseColor => "PNG chromaticities conflict with sRGB",
-                        TextureRole::Roughness => {
-                            "roughness PNG chromaticities require a 32-byte chunk; they are ignored"
-                        }
+                    return Err(error(if role.is_srgb() {
+                        "PNG chromaticities conflict with sRGB"
+                    } else {
+                        "linear PNG chromaticities require a 32-byte chunk; they are ignored"
                     }));
                 }
             }
@@ -305,22 +334,37 @@ pub fn decode_png(bytes: &[u8]) -> Result<Texture, AssetError> {
     decode_png_with_role(bytes, TextureRole::BaseColor)
 }
 
-/// Roughness uses raw gray/red bytes, ignores alpha and valid color tags, and
-/// averages perceptual roughness directly. This is not general color management.
+/// Decode one bounded PNG with an explicit immutable role interpretation.
 pub fn decode_png_with_role(bytes: &[u8], role: TextureRole) -> Result<Texture, AssetError> {
-    decode_png_channel(bytes, role, false)
+    decode_png_channel(bytes, role, PackedChannel::Primary)
 }
 
 pub(crate) fn decode_glb_roughness(bytes: &[u8]) -> Result<Texture, AssetError> {
-    decode_png_channel(bytes, TextureRole::Roughness, true)
+    decode_png_channel(bytes, TextureRole::Roughness, PackedChannel::Green)
+}
+
+pub(crate) fn decode_glb_metallic(bytes: &[u8]) -> Result<Texture, AssetError> {
+    decode_png_channel(bytes, TextureRole::Metallic, PackedChannel::Blue)
+}
+
+pub(crate) fn decode_glb_normal(bytes: &[u8]) -> Result<Texture, AssetError> {
+    decode_png_channel(bytes, TextureRole::Normal, PackedChannel::Primary)
+}
+
+pub(crate) fn decode_glb_emissive(bytes: &[u8]) -> Result<Texture, AssetError> {
+    decode_png_channel(bytes, TextureRole::Emissive, PackedChannel::Primary)
+}
+
+pub(crate) fn decode_glb_occlusion(bytes: &[u8]) -> Result<Texture, AssetError> {
+    decode_png_channel(bytes, TextureRole::Occlusion, PackedChannel::Primary)
 }
 
 fn decode_png_channel(
     bytes: &[u8],
     role: TextureRole,
-    packed_green: bool,
+    channel: PackedChannel,
 ) -> Result<Texture, AssetError> {
-    preflight(bytes, role, packed_green)?;
+    preflight(bytes, role, channel)?;
     let mut decoder = png::Decoder::new_with_limits(
         Cursor::new(bytes),
         png::Limits {
@@ -334,7 +378,7 @@ fn decode_png_channel(
         .map_err(|e| error(format!("PNG decode: {e}")))?;
     let (width, height) = (reader.info().width, reader.info().height);
     let header_depth = reader.info().bit_depth;
-    // A roughness RGB/RGBA decoder buffer can still use four bytes per pixel;
+    // A scalar RGB/RGBA decoder buffer can still use four bytes per pixel;
     // it is a temporary owner, separate from the accepted R8 chain accounting.
     let raw_limit = image_bytes(width, height, TextureRole::BaseColor)?;
     let size = image_bytes(width, height, role)?;
@@ -350,8 +394,12 @@ fn decode_png_channel(
         .finish()
         .map_err(|e| error(format!("PNG finish: {e}")))?;
     let channels = match info.color_type {
-        png::ColorType::Grayscale if role == TextureRole::Roughness => 1,
-        png::ColorType::Indexed if role == TextureRole::BaseColor || packed_green => 1,
+        png::ColorType::Grayscale if role.is_scalar_linear() => 1,
+        png::ColorType::Indexed
+            if !role.is_scalar_linear() || channel != PackedChannel::Primary =>
+        {
+            1
+        }
         png::ColorType::Rgb => 3,
         png::ColorType::Rgba => 4,
         _ => return Err(error("unexpected PNG output type")),
@@ -368,6 +416,15 @@ fn decode_png_channel(
     }
     let mut pixels = Vec::with_capacity(size);
     let decoded = &raw[..info.buffer_size()];
+    let scalar_index = if role.is_scalar_linear() {
+        Some(match channel {
+            PackedChannel::Primary => 0,
+            PackedChannel::Green => 1,
+            PackedChannel::Blue => 2,
+        })
+    } else {
+        None
+    };
     if info.color_type == png::ColorType::Indexed {
         let palette = reader
             .info()
@@ -376,7 +433,7 @@ fn decode_png_channel(
             .ok_or_else(|| error("indexed PNG is missing its palette"))?;
         let (colors, _) = palette.as_chunks::<3>();
         if depth == 8 {
-            append_indexed_pixels(decoded.iter().copied(), colors, packed_green, &mut pixels)?;
+            append_indexed_pixels(decoded.iter().copied(), colors, scalar_index, &mut pixels)?;
         } else {
             let mask = (1u8 << depth) - 1;
             // Each scanline starts on a byte boundary, with the first index
@@ -387,17 +444,14 @@ fn decode_png_channel(
                     (row[bit / 8] >> (8 - depth - bit % 8)) & mask
                 })
             });
-            append_indexed_pixels(indices, colors, packed_green, &mut pixels)?;
+            append_indexed_pixels(indices, colors, scalar_index, &mut pixels)?;
         }
     } else {
         for pixel in decoded.chunks_exact(channels) {
-            match role {
-                TextureRole::BaseColor => {
-                    pixels.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
-                }
-                TextureRole::Roughness => {
-                    pixels.push(pixel[usize::from(packed_green && channels != 1)])
-                }
+            if let Some(ch) = scalar_index {
+                pixels.push(pixel[if channels == 1 { 0 } else { ch }]);
+            } else {
+                pixels.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
             }
         }
     }
@@ -422,8 +476,11 @@ fn build_texture(
     {
         let source = mips.last().expect("level0 exists");
         mips.push(match role {
-            TextureRole::BaseColor => downsample(source),
-            TextureRole::Roughness => downsample_roughness(source),
+            TextureRole::BaseColor | TextureRole::Emissive => downsample(source),
+            TextureRole::Roughness | TextureRole::Metallic | TextureRole::Occlusion => {
+                downsample_roughness(source)
+            }
+            TextureRole::Normal => downsample_normal(source),
         });
     }
     let texture = Texture {
@@ -487,38 +544,61 @@ fn decode_jpeg_rgb(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), AssetError> {
     Ok((width, height, rgb))
 }
 
-pub(crate) fn decode_jpeg(bytes: &[u8]) -> Result<(Texture, Vec<u8>), AssetError> {
+pub(crate) fn decode_jpeg_with_role(
+    bytes: &[u8],
+    role: TextureRole,
+) -> Result<(Texture, Vec<u8>), AssetError> {
     let (width, height, rgb) = decode_jpeg_rgb(bytes)?;
-    let mut pixels = Vec::with_capacity(image_bytes(width, height, TextureRole::BaseColor)?);
+    let mut pixels = Vec::with_capacity(image_bytes(width, height, role)?);
     for pixel in rgb.as_chunks::<3>().0 {
         pixels.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
     }
-    let texture = build_texture(TextureRole::BaseColor, width, height, pixels)?;
+    let texture = build_texture(role, width, height, pixels)?;
     let png_bytes = encode_rgb_source(&texture)?;
     Ok((texture, png_bytes))
 }
 
-pub(crate) fn decode_glb_jpeg_roughness(bytes: &[u8]) -> Result<Texture, AssetError> {
+pub(crate) fn decode_jpeg(bytes: &[u8]) -> Result<(Texture, Vec<u8>), AssetError> {
+    decode_jpeg_with_role(bytes, TextureRole::BaseColor)
+}
+
+fn decode_glb_jpeg_scalar(
+    bytes: &[u8],
+    role: TextureRole,
+    channel: usize,
+) -> Result<Texture, AssetError> {
     let (width, height, rgb) = decode_jpeg_rgb(bytes)?;
-    let mut pixels = Vec::with_capacity(image_bytes(width, height, TextureRole::Roughness)?);
+    let mut pixels = Vec::with_capacity(image_bytes(width, height, role)?);
     for pixel in rgb.as_chunks::<3>().0 {
-        pixels.push(pixel[1]);
+        pixels.push(pixel[channel]);
     }
-    build_texture(TextureRole::Roughness, width, height, pixels)
+    build_texture(role, width, height, pixels)
+}
+
+pub(crate) fn decode_glb_jpeg_roughness(bytes: &[u8]) -> Result<Texture, AssetError> {
+    decode_glb_jpeg_scalar(bytes, TextureRole::Roughness, 1)
+}
+
+pub(crate) fn decode_glb_jpeg_metallic(bytes: &[u8]) -> Result<Texture, AssetError> {
+    decode_glb_jpeg_scalar(bytes, TextureRole::Metallic, 2)
+}
+
+pub(crate) fn decode_glb_jpeg_occlusion(bytes: &[u8]) -> Result<Texture, AssetError> {
+    decode_glb_jpeg_scalar(bytes, TextureRole::Occlusion, 0)
 }
 
 fn append_indexed_pixels(
     indices: impl Iterator<Item = u8>,
     colors: &[[u8; 3]],
-    packed_green: bool,
+    scalar_channel: Option<usize>,
     pixels: &mut Vec<u8>,
 ) -> Result<(), AssetError> {
     for index in indices {
         let rgb = colors
             .get(usize::from(index))
             .ok_or_else(|| error("PNG pixel references an undefined palette entry"))?;
-        if packed_green {
-            pixels.push(rgb[1]);
+        if let Some(ch) = scalar_channel {
+            pixels.push(rgb[ch]);
         } else {
             pixels.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
         }
@@ -585,6 +665,46 @@ fn downsample(source: &TextureMip) -> TextureMip {
             }
             let area = (x1 - x0) * (y1 - y0);
             rgba.extend(sum.map(|sum| from_linear(sum / area)));
+            rgba.push(255);
+        }
+    }
+    TextureMip {
+        width,
+        height,
+        bytes: rgba,
+    }
+}
+
+fn downsample_normal(source: &TextureMip) -> TextureMip {
+    let width = (source.width / 2).max(1);
+    let height = (source.height / 2).max(1);
+    let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
+    for y in 0..height {
+        let y0 = f64::from(y) * f64::from(source.height) / f64::from(height);
+        let y1 = f64::from(y + 1) * f64::from(source.height) / f64::from(height);
+        for x in 0..width {
+            let x0 = f64::from(x) * f64::from(source.width) / f64::from(width);
+            let x1 = f64::from(x + 1) * f64::from(source.width) / f64::from(width);
+            let mut sum = [0.0_f64; 3];
+            for sy in y0.floor() as u32..y1.ceil() as u32 {
+                for sx in x0.floor() as u32..x1.ceil() as u32 {
+                    let weight = (y1.min(f64::from(sy + 1)) - y0.max(f64::from(sy)))
+                        * (x1.min(f64::from(sx + 1)) - x0.max(f64::from(sx)));
+                    let index = (sy as usize * source.width as usize + sx as usize) * 4;
+                    for (channel, value) in sum.iter_mut().enumerate() {
+                        let unpacked =
+                            f64::from(source.bytes[index + channel]) * (2.0 / 255.0) - 1.0;
+                        *value += unpacked * weight;
+                    }
+                }
+            }
+            let norm = (sum[0] * sum[0] + sum[1] * sum[1] + sum[2] * sum[2]).sqrt();
+            let unit = if norm > 1e-12 && norm.is_finite() {
+                [sum[0] / norm, sum[1] / norm, sum[2] / norm]
+            } else {
+                [0.0, 0.0, 1.0]
+            };
+            rgba.extend(unit.map(|v| ((v * 0.5 + 0.5) * 255.0).round().clamp(0.0, 255.0) as u8));
             rgba.push(255);
         }
     }
@@ -1173,5 +1293,65 @@ pub(crate) mod tests {
             .unwrap_err()
             .0
             .contains("64 MiB source limit"));
+    }
+
+    #[test]
+    fn pbr_texture_roles_decode_cache_and_renormalize_normals() {
+        let hash = "b".repeat(64);
+        // Packed RGB PNG: R=210 (occlusion), G=150 (roughness), B=80 (metallic).
+        let packed = png(
+            2,
+            2,
+            png::ColorType::Rgb,
+            png::BitDepth::Eight,
+            &[210, 150, 80, 210, 150, 80, 210, 150, 80, 210, 150, 80],
+        );
+        let metallic = decode_glb_metallic(&packed).unwrap();
+        assert_eq!(metallic.role, TextureRole::Metallic);
+        assert_eq!(metallic.mips[0].bytes, [80; 4]);
+        let metallic_cache = encode_cache(&hash, &metallic).unwrap();
+        assert_eq!(
+            decode_cache_with_role(&metallic_cache, &hash, TextureRole::Metallic).unwrap(),
+            metallic
+        );
+
+        let occlusion = decode_glb_occlusion(&packed).unwrap();
+        assert_eq!(occlusion.role, TextureRole::Occlusion);
+        assert_eq!(occlusion.mips[0].bytes, [210; 4]);
+
+        let emissive = decode_glb_emissive(&packed).unwrap();
+        assert_eq!(emissive.role, TextureRole::Emissive);
+        assert_eq!(&emissive.mips[0].bytes[..4], &[210, 150, 80, 255]);
+
+        // Normal map downsampling renormalizes opposite XY tilts instead of blindly clamping.
+        let normal_png = png(
+            2,
+            2,
+            png::ColorType::Rgb,
+            png::BitDepth::Eight,
+            &[
+                255, 128, 200, 0, 128, 200, // +X and -X tilt cancel on level 1; +Z wins
+                255, 128, 200, 0, 128, 200,
+            ],
+        );
+        let normal = decode_png_with_role(&normal_png, TextureRole::Normal).unwrap();
+        assert_eq!(normal.role, TextureRole::Normal);
+        assert_eq!(normal.mips.len(), 2);
+        let mip1 = &normal.mips[1].bytes;
+        assert!(
+            (i16::from(mip1[0]) - 128).abs() <= 1,
+            "expected centered X, got {mip1:?}"
+        );
+        assert!(
+            (i16::from(mip1[1]) - 128).abs() <= 1,
+            "expected centered Y, got {mip1:?}"
+        );
+        assert_eq!(mip1[2], 255, "renormalized Z must reach +1.0 (255)");
+        assert_eq!(mip1[3], 255);
+        let normal_cache = encode_cache(&hash, &normal).unwrap();
+        assert_eq!(
+            decode_cache_with_role(&normal_cache, &hash, TextureRole::Normal).unwrap(),
+            normal
+        );
     }
 }

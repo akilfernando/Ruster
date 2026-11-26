@@ -146,9 +146,9 @@ pub fn compute_mesh_tangents(
             f64::from(p2[2] - p0[2]),
         ];
         let du1 = f64::from(uv1[0] - uv0[0]);
-        let dv1 = f64::from(uv0[1] - uv1[1]);
+        let dv1 = f64::from(uv1[1] - uv0[1]);
         let du2 = f64::from(uv2[0] - uv0[0]);
-        let dv2 = f64::from(uv0[1] - uv2[1]);
+        let dv2 = f64::from(uv2[1] - uv0[1]);
         let det = du1 * dv2 - du2 * dv1;
         if det.abs() <= 1e-12 || !det.is_finite() {
             continue;
@@ -616,6 +616,10 @@ impl ResourcePin {
         let interpretation = match role {
             TextureRole::BaseColor => 3,
             TextureRole::Roughness => 4,
+            TextureRole::Metallic => 7,
+            TextureRole::Normal => 8,
+            TextureRole::Emissive => 9,
+            TextureRole::Occlusion => 10,
         };
         Self {
             source_sha256: Sha256::digest(bytes).into(),
@@ -2993,6 +2997,7 @@ mod tests {
         assert!(mesh.has_complete_tangents());
         let tangents = mesh.tangents.as_ref().unwrap();
         assert_eq!(tangents.len(), mesh.vertices.len());
+        assert_eq!(tangents[0], [1.0, 0.0, 0.0, 1.0]);
         for (vertex, tangent) in mesh.vertices.iter().zip(tangents) {
             let len_sq =
                 tangent[0] * tangent[0] + tangent[1] * tangent[1] + tangent[2] * tangent[2];

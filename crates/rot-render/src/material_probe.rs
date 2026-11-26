@@ -21,7 +21,14 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
     let first = r.materials.prepare(
         device,
         queue,
-        [(&key, Some(&texture), None), (&missing_uv, None, None)].into_iter(),
+        [
+            (
+                &key,
+                MaterialTextureInputs::base_and_roughness(Some(&texture), None),
+            ),
+            (&missing_uv, MaterialTextureInputs::default()),
+        ]
+        .into_iter(),
     );
     assert_eq!(
         first.count, 1,
@@ -32,7 +39,14 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
             .prepare(
                 device,
                 queue,
-                [(&key, Some(&texture), None), (&missing_uv, None, None)].into_iter()
+                [
+                    (
+                        &key,
+                        MaterialTextureInputs::base_and_roughness(Some(&texture), None),
+                    ),
+                    (&missing_uv, MaterialTextureInputs::default()),
+                ]
+                .into_iter()
             )
             .count,
         0,
@@ -49,6 +63,8 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
     let instance = Instance {
         uv_transform: [1.0, 1.0, 0.0, 0.0],
         emission_color: [0.0; 4],
+        pbr_params: [0.0, 1.0, 1.0, 0.0],
+        pbr_maps: [0.0; 4],
         model: Mat4::IDENTITY.to_cols_array_2d(),
         normal: [
             [1.0, 0.0, 0.0, 0.0],
@@ -107,8 +123,11 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
         device,
         queue,
         [
-            (&key, Some(&replacement_texture), None),
-            (&missing_uv, None, None),
+            (
+                &key,
+                MaterialTextureInputs::base_and_roughness(Some(&replacement_texture), None),
+            ),
+            (&missing_uv, MaterialTextureInputs::default()),
         ]
         .into_iter(),
     );
@@ -124,8 +143,11 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
                 device,
                 queue,
                 [
-                    (&key, Some(&replacement_texture), None),
-                    (&missing_uv, None, None)
+                    (
+                        &key,
+                        MaterialTextureInputs::base_and_roughness(Some(&replacement_texture), None),
+                    ),
+                    (&missing_uv, MaterialTextureInputs::default()),
                 ]
                 .into_iter()
             )
@@ -139,11 +161,14 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
     assert_pixel(&replaced, 48, 16, [0, 0, 0]);
     assert_pixel(&replaced, 48, 48, [0, 0, 0]);
     capture(&replaced, true);
-    r.materials
-        .prepare(device, queue, std::iter::once((&key, None, None)));
+    r.materials.prepare(
+        device,
+        queue,
+        std::iter::once((&key, MaterialTextureInputs::default())),
+    );
     assert_eq!(
         r.materials.bytes(),
-        9,
+        r.materials.fallback_bytes(),
         "unresolved content must retire cached pixels/bindings"
     );
     verify_uv_stream_switch(device, queue, r);
@@ -162,8 +187,11 @@ fn verify_uv_stream_switch(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut R
     )
     .unwrap();
     let key = BindingKey::default();
-    r.materials
-        .prepare(device, queue, std::iter::once((&key, None, None)));
+    r.materials.prepare(
+        device,
+        queue,
+        std::iter::once((&key, MaterialTextureInputs::default())),
+    );
     for with_uvs in [true, false, true] {
         mesh.texcoords = with_uvs.then(|| vec![[0.75, 0.5]; mesh.vertices.len()]);
         let snapshot = Arc::new(mesh.clone());
@@ -219,9 +247,18 @@ fn verify_role_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue, gpu: &mut
         device,
         queue,
         [
-            (&keys[0], Some(&small), Some(&map)),
-            (&keys[1], Some(&large_a), Some(&map)),
-            (&keys[2], Some(&large_b), Some(&map)),
+            (
+                &keys[0],
+                MaterialTextureInputs::base_and_roughness(Some(&small), Some(&map)),
+            ),
+            (
+                &keys[1],
+                MaterialTextureInputs::base_and_roughness(Some(&large_a), Some(&map)),
+            ),
+            (
+                &keys[2],
+                MaterialTextureInputs::base_and_roughness(Some(&large_b), Some(&map)),
+            ),
         ]
         .into_iter(),
     );
@@ -229,20 +266,29 @@ fn verify_role_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue, gpu: &mut
         before.count, 4,
         "shared R8 map must have one owner across three materials"
     );
-    let bytes = 9
+    let bytes = gpu.fallback_bytes() as usize
         + small.payload_bytes()
         + large_a.payload_bytes()
         + large_b.payload_bytes()
         + map.payload_bytes();
-    assert!(bytes < rot_assets::MAX_TEXTURE_RESOLVED_BYTES + 9);
+    assert!(bytes < rot_assets::MAX_TEXTURE_RESOLVED_BYTES + gpu.fallback_bytes() as usize);
     assert_eq!(gpu.bytes(), bytes as u64);
     let replacement = gpu.prepare(
         device,
         queue,
         [
-            (&keys[0], Some(&large_a), Some(&map)),
-            (&keys[1], Some(&small), Some(&map)),
-            (&keys[2], Some(&large_b), Some(&map)),
+            (
+                &keys[0],
+                MaterialTextureInputs::base_and_roughness(Some(&large_a), Some(&map)),
+            ),
+            (
+                &keys[1],
+                MaterialTextureInputs::base_and_roughness(Some(&small), Some(&map)),
+            ),
+            (
+                &keys[2],
+                MaterialTextureInputs::base_and_roughness(Some(&large_b), Some(&map)),
+            ),
         ]
         .into_iter(),
     );
@@ -256,9 +302,18 @@ fn verify_role_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue, gpu: &mut
             device,
             queue,
             [
-                (&keys[0], Some(&large_a), Some(&map)),
-                (&keys[1], Some(&small), Some(&map)),
-                (&keys[2], Some(&large_b), Some(&map))
+                (
+                    &keys[0],
+                    MaterialTextureInputs::base_and_roughness(Some(&large_a), Some(&map)),
+                ),
+                (
+                    &keys[1],
+                    MaterialTextureInputs::base_and_roughness(Some(&small), Some(&map)),
+                ),
+                (
+                    &keys[2],
+                    MaterialTextureInputs::base_and_roughness(Some(&large_b), Some(&map)),
+                ),
             ]
             .into_iter()
         )
@@ -274,7 +329,7 @@ fn verify_role_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue, gpu: &mut
     gpu.prepare(device, queue, std::iter::empty());
     assert_eq!(
         gpu.bytes(),
-        9,
+        gpu.fallback_bytes(),
         "pruning must release every binding's retained views"
     );
     queue.submit(std::iter::empty());
@@ -312,6 +367,10 @@ fn verify_mesh_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue) {
             binding: BindingKey::default(),
             texture: None,
             roughness: None,
+            metallic: None,
+            normal: None,
+            emissive: None,
+            occlusion: None,
             mesh: Some(if index == 0 {
                 small.clone()
             } else {
@@ -801,10 +860,16 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
                 binding: key.clone(),
                 texture: Some(texture.clone()),
                 roughness: None,
+                metallic: None,
+                normal: None,
+                emissive: None,
+                occlusion: None,
                 mesh: Some(source.clone()),
                 instances: vec![Instance {
                     uv_transform: [1.0, 1.0, 0.0, 0.0],
                     emission_color: [0.0; 4],
+                    pbr_params: [0.0, 1.0, 1.0, 0.0],
+                    pbr_maps: [0.0; 4],
                     model: matrix.to_cols_array_2d(),
                     normal: normal.to_cols_array_2d().map(|c| [c[0], c[1], c[2], 0.]),
                     color: [1.; 4],
@@ -1277,11 +1342,17 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
                         },
                         texture: None,
                         roughness: map_source.clone(),
+                        metallic: None,
+                        normal: None,
+                        emissive: None,
+                        occlusion: None,
                         mesh: Some(mesh.clone()),
                         range: index..index + 1,
                         instances: vec![Instance {
                             uv_transform: [1.0, 1.0, 0.0, 0.0],
                             emission_color: [0.0; 4],
+                            pbr_params: [0.0, 1.0, 1.0, 0.0],
+                            pbr_maps: [0.0; 4],
                             model: if mapped_case {
                                 Mat4::from_scale_rotation_translation(
                                     Vec3::new(0.5, 1., 1.),
@@ -1567,7 +1638,332 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
             "surface output transfer applied exactly once: {name}"
         );
     }
-    eprintln!("GPU probe: production dielectric/HDR/exposure/custom restore and both output conventions passed");
+    verify_pbr_maps(device, queue);
+    eprintln!("GPU probe: production dielectric/PBR/HDR/exposure/custom restore and both output conventions passed");
+}
+
+/// Real GPU readback checks for metallic (conductor + metallic map), tangent-space
+/// normal mapping (+ normal_scale), emissive maps, and ambient occlusion maps.
+fn verify_pbr_maps(device: &wgpu::Device, queue: &wgpu::Queue) {
+    use rot_assets::{Texture, TextureMip, TextureRole};
+    use rot_scene::{Ambient, DisplayProfile, Light, Lighting, MaterialResponse, OpaqueMaterial};
+
+    let quad = Arc::new(
+        rot_assets::parse_obj(
+            b"v -1 -1 0\nv 1 -1 0\nv 1 1 0\nv -1 1 0\nvt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nf 1/1 2/2 3/3\nf 1/1 3/3 4/4\n",
+        )
+        .unwrap(),
+    );
+    assert!(quad.has_complete_tangents());
+    let tex_2x1_metallic = Arc::new(Texture {
+        role: TextureRole::Metallic,
+        width: 2,
+        height: 1,
+        mips: vec![
+            TextureMip {
+                width: 2,
+                height: 1,
+                bytes: vec![0, 255],
+            },
+            TextureMip {
+                width: 1,
+                height: 1,
+                bytes: vec![128],
+            },
+        ],
+    });
+    let tex_normal_up = Arc::new(Texture {
+        role: TextureRole::Normal,
+        width: 1,
+        height: 1,
+        mips: vec![TextureMip {
+            width: 1,
+            height: 1,
+            bytes: vec![128, 255, 128, 255],
+        }],
+    });
+    let tex_emissive_orange = Arc::new(Texture {
+        role: TextureRole::Emissive,
+        width: 1,
+        height: 1,
+        mips: vec![TextureMip {
+            width: 1,
+            height: 1,
+            bytes: vec![255, 128, 0, 255],
+        }],
+    });
+    let tex_ao_black = Arc::new(Texture {
+        role: TextureRole::Occlusion,
+        width: 1,
+        height: 1,
+        mips: vec![TextureMip {
+            width: 1,
+            height: 1,
+            bytes: vec![0],
+        }],
+    });
+
+    let mut r = Resources::new(device, queue, COLOR, 1);
+    r.enable_hdr(device, 1);
+    let mut resources = egui_wgpu::CallbackResources::default();
+    resources.insert(r);
+    let context = egui::Context::default();
+    let textures: BTreeMap<String, Arc<Texture>> = BTreeMap::from([
+        ("metal-split".into(), tex_2x1_metallic),
+        ("norm-up".into(), tex_normal_up),
+        ("emit-orange".into(), tex_emissive_orange),
+        ("ao-black".into(), tex_ao_black),
+    ]);
+
+    let mut render_case = |mat: &OpaqueMaterial, light: &Lighting| -> Vec<u8> {
+        context
+            .run_pass(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        complete_submitted_assets(device, queue, &context, &mut resources);
+        let obj = rot_scene::Object {
+            mesh: Some("quad".into()),
+            ..rot_scene::Object::cube("quad-obj", None)
+        };
+        let binding = draw_material_binding(&obj, Some(&quad), Some(mat)).into_owned();
+        let group = DrawGroup {
+            double_sided: false,
+            key: Some("quad".into()),
+            primitive: None,
+            texture: None,
+            roughness: None,
+            metallic: binding
+                .metallic
+                .as_ref()
+                .and_then(|id| textures.get(id))
+                .cloned(),
+            normal: binding
+                .normal
+                .as_ref()
+                .and_then(|id| textures.get(id))
+                .cloned(),
+            emissive: binding
+                .emissive
+                .as_ref()
+                .and_then(|id| textures.get(id))
+                .cloned(),
+            occlusion: binding
+                .occlusion
+                .as_ref()
+                .and_then(|id| textures.get(id))
+                .cloned(),
+            binding,
+            mesh: Some(quad.clone()),
+            range: 0..1,
+            instances: vec![Instance {
+                model: Mat4::IDENTITY.to_cols_array_2d(),
+                normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
+                color: [1.; 4],
+                base_color: [mat.tint[0], mat.tint[1], mat.tint[2], 0.],
+                response: match mat.response {
+                    MaterialResponse::LegacyDiffuse => [0.; 4],
+                    MaterialResponse::Dielectric { roughness } => [
+                        1.,
+                        roughness,
+                        f32::from(u8::from(mat.roughness_texture.is_some())),
+                        0.,
+                    ],
+                },
+                emission_color: [
+                    mat.emission_color[0],
+                    mat.emission_color[1],
+                    mat.emission_color[2],
+                    f32::from(u8::from(mat.emissive_texture.is_some())),
+                ],
+                uv_transform: [1., 1., 0., 0.],
+                pbr_params: [mat.metallic, mat.normal_scale, mat.occlusion_strength, 0.],
+                pbr_maps: [
+                    f32::from(u8::from(mat.metallic_texture.is_some())),
+                    f32::from(u8::from(mat.normal_texture.is_some())),
+                    f32::from(u8::from(mat.occlusion_texture.is_some())),
+                    0.,
+                ],
+            }],
+        };
+        let callback = SceneCallback {
+            background: None,
+            show_editor_grid: false,
+            groups: vec![group],
+            camera: Mat4::IDENTITY.to_cols_array(),
+            camera_eye_mode: [0., 0., 2., 1.],
+            display: DisplayProfile::SurfaceHdr { exposure_stops: 0. },
+            lighting: LightingPacket::try_pack(light).unwrap(),
+            size: egui::vec2(256., 192.),
+            cpu_us: 0.,
+            shadow: None,
+            context: context.clone(),
+            receipt: FrameReceipt::default(),
+            prepared: std::sync::atomic::AtomicBool::new(false),
+        };
+        selection_probe::render(device, queue, &mut resources, &callback, COLOR)
+    };
+    let pixel = |bytes: &[u8], x: usize, y: usize| -> [u8; 3] {
+        let offset = (y * 256 + x) * 4;
+        [bytes[offset], bytes[offset + 1], bytes[offset + 2]]
+    };
+    let dir_light = |dir: Vec3| {
+        let mut sun = Light::directional(None);
+        sun.color = [1.; 3];
+        sun.intensity = 1.0;
+        let q = Quat::from_rotation_arc(Vec3::Z, dir.normalize());
+        let (z, y, x) = q.to_euler(glam::EulerRot::ZYX);
+        sun.transform.rotation = [x, y, z];
+        Lighting::Authored {
+            ambient: Ambient {
+                color: [0.; 3],
+                intensity: 0.,
+            },
+            lights: BTreeMap::from([("sun".into(), sun)]),
+        }
+    };
+
+    // 1. Conductor specular tint + suppressed diffuse vs dielectric.
+    let front_light = dir_light(Vec3::Z);
+    let dielectric_gold = OpaqueMaterial {
+        tint: [1.0, 0.76, 0.33],
+        response: MaterialResponse::Dielectric { roughness: 0.3 },
+        ..Default::default()
+    };
+    let conductor_gold = OpaqueMaterial {
+        metallic: 1.0,
+        ..dielectric_gold.clone()
+    };
+    let spec_conductor = pixel(&render_case(&conductor_gold, &front_light), 128, 96);
+    assert!(
+        spec_conductor[0] > spec_conductor[1] && spec_conductor[1] > spec_conductor[2],
+        "gold conductor specular must carry gold F0 tint: {spec_conductor:?}"
+    );
+    let grazing_light = dir_light(Vec3::new(1.0, 0.0, 0.25));
+    let graze_dielectric_img = render_case(&dielectric_gold, &grazing_light);
+    let graze_conductor_img = render_case(&conductor_gold, &grazing_light);
+    let graze_dielectric = pixel(&graze_dielectric_img, 128, 96);
+    let graze_conductor = pixel(&graze_conductor_img, 128, 96);
+    assert!(
+        graze_dielectric[1] > graze_conductor[1] + 20,
+        "conductor must suppress diffuse response: dielectric={graze_dielectric:?} conductor={graze_conductor:?}"
+    );
+
+    // 2. Metallic map splits left dielectric (0) vs right conductor (255).
+    let metal_mapped = OpaqueMaterial {
+        metallic_texture: Some("metal-split".into()),
+        filter: rot_scene::TextureFilter::Nearest,
+        address: rot_scene::TextureAddress::Clamp,
+        ..conductor_gold.clone()
+    };
+    let split_img = render_case(&metal_mapped, &grazing_light);
+    assert_ne!(
+        pixel(&split_img, 64, 96),
+        pixel(&split_img, 192, 96),
+        "metallic map must produce distinct dielectric and conductor halves"
+    );
+    assert_eq!(
+        pixel(&split_img, 64, 96),
+        pixel(&graze_dielectric_img, 64, 96)
+    );
+    assert_eq!(
+        pixel(&split_img, 192, 96),
+        pixel(&graze_conductor_img, 192, 96)
+    );
+
+    // 3. Tangent-space normal map tilts normal toward +Y overhead light, and normal_scale=0 reverts.
+    let top_light = dir_light(Vec3::new(0.0, 1.0, 0.2));
+    let flat = OpaqueMaterial {
+        tint: [0.8, 0.8, 0.8],
+        response: MaterialResponse::Dielectric { roughness: 0.9 },
+        ..Default::default()
+    };
+    let normal_mapped = OpaqueMaterial {
+        normal_texture: Some("norm-up".into()),
+        normal_scale: 1.0,
+        ..flat.clone()
+    };
+    let flat_px = pixel(&render_case(&flat, &top_light), 128, 96);
+    let normal_px = pixel(&render_case(&normal_mapped, &top_light), 128, 96);
+    assert!(
+        normal_px[0] > flat_px[0] + 60,
+        "normal map tilted toward +Y overhead light must brighten surface: normal={normal_px:?} flat={flat_px:?}"
+    );
+    let normal_zero_scale = OpaqueMaterial {
+        normal_scale: 0.0,
+        ..normal_mapped
+    };
+    assert_eq!(
+        pixel(&render_case(&normal_zero_scale, &top_light), 128, 96),
+        flat_px,
+        "normal_scale = 0 must match flat surface"
+    );
+
+    // 4. Emissive map under zero light.
+    let dark = Lighting::Authored {
+        ambient: Ambient {
+            color: [0.; 3],
+            intensity: 0.,
+        },
+        lights: BTreeMap::new(),
+    };
+    let emissive = OpaqueMaterial {
+        tint: [0.0; 3],
+        emission_color: [1.0, 1.0, 1.0],
+        emissive_texture: Some("emit-orange".into()),
+        response: MaterialResponse::Dielectric { roughness: 0.5 },
+        ..Default::default()
+    };
+    let g_lin = ((128.0_f32 / 255.0 + 0.055) / 1.055).powf(2.4);
+    let emissive_ref = OpaqueMaterial {
+        emissive_texture: None,
+        emission_color: [1.0, g_lin, 0.0],
+        ..emissive.clone()
+    };
+    assert_eq!(pixel(&render_case(&flat, &dark), 128, 96), [0, 0, 0]);
+    let emit_px = pixel(&render_case(&emissive, &dark), 128, 96);
+    let ref_px = pixel(&render_case(&emissive_ref, &dark), 128, 96);
+    assert!(
+        emit_px[0] > 200 && emit_px[1] > 90 && emit_px[0] > emit_px[1] && emit_px[1] > emit_px[2],
+        "emissive map must output orange self-illumination: {emit_px:?}"
+    );
+    assert!(
+        emit_px
+            .into_iter()
+            .zip(ref_px)
+            .all(|(a, b)| a.abs_diff(b) <= 1),
+        "emissive map must match sRGB-decoded untextured emission under PBR Neutral display: tex={emit_px:?} ref={ref_px:?}"
+    );
+
+    // 5. AO map darkens ambient fill proportionally to occlusion_strength, leaving direct light intact.
+    let amb_only = Lighting::Authored {
+        ambient: Ambient {
+            color: [1.; 3],
+            intensity: 0.5,
+        },
+        lights: BTreeMap::new(),
+    };
+    let occluded = OpaqueMaterial {
+        occlusion_texture: Some("ao-black".into()),
+        occlusion_strength: 1.0,
+        ..flat.clone()
+    };
+    assert_eq!(
+        pixel(&render_case(&occluded, &amb_only), 128, 96),
+        [0, 0, 0]
+    );
+    let ao_zero_strength = OpaqueMaterial {
+        occlusion_strength: 0.0,
+        ..occluded.clone()
+    };
+    assert_eq!(
+        pixel(&render_case(&ao_zero_strength, &amb_only), 128, 96),
+        pixel(&render_case(&flat, &amb_only), 128, 96)
+    );
+    assert_eq!(
+        pixel(&render_case(&occluded, &front_light), 128, 96),
+        pixel(&render_case(&flat, &front_light), 128, 96),
+        "AO must not attenuate direct directional lighting"
+    );
+    eprintln!("GPU probe: conductor, metallic map, tangent-space normal map, emissive map, and occlusion map passed");
 }
 
 /// Numerically establish the permitted grazing fixture crosses half-float range
@@ -1582,7 +1978,7 @@ fn verify_unstored_grazing_radiance(device: &wgpu::Device, queue: &wgpu::Queue) 
 @compute @workgroup_size(1) fn grazing_probe() {
     let view = safe_unit(vec3<f32>(1.0, 0.0, 0.00001));
     let light = vec3<f32>(-1.0, 0.0, 0.00001);
-    unstored[0] = vec4<f32>(16.0 * direct_response(vec3<f32>(0.05), vec3<f32>(0.0, 0.0, 1.0), view, light, vec4<f32>(1.0, 0.08, 0.0, 0.0)), 1.0);
+    unstored[0] = vec4<f32>(16.0 * direct_response(vec3<f32>(0.05), vec3<f32>(0.0, 0.0, 1.0), view, light, vec4<f32>(1.0, 0.08, 0.0, 0.0), 0.0), 1.0);
 }
 "#
     );
@@ -1764,12 +2160,18 @@ pub(super) fn verify_cube_material(device: &wgpu::Device, queue: &wgpu::Queue) {
                 primitive: None,
                 texture: binding.texture.as_ref().map(|_| Arc::clone(&texture)),
                 roughness: binding.roughness.as_ref().map(|_| Arc::clone(&roughness)),
+                metallic: None,
+                normal: None,
+                emissive: None,
+                occlusion: None,
                 binding,
                 mesh: None,
                 range: 0..1,
                 instances: vec![Instance {
                     uv_transform: [1.0, 1.0, 0.0, 0.0],
                     emission_color: [0.0; 4],
+                    pbr_params: [0.0, 1.0, 1.0, 0.0],
+                    pbr_maps: [0.0; 4],
                     model: Mat4::IDENTITY.to_cols_array_2d(),
                     normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
                     color: [1.; 4],

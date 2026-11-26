@@ -18,6 +18,10 @@ const PAGE_SIZE: usize = 16;
 enum Slot {
     BaseColor,
     Roughness,
+    Metallic,
+    Normal,
+    Emissive,
+    Occlusion,
 }
 
 impl Slot {
@@ -26,6 +30,10 @@ impl Slot {
         match self {
             Self::BaseColor => "base_color",
             Self::Roughness => "roughness",
+            Self::Metallic => "metallic",
+            Self::Normal => "normal",
+            Self::Emissive => "emissive",
+            Self::Occlusion => "occlusion",
         }
     }
 
@@ -33,6 +41,10 @@ impl Slot {
         match self {
             Self::BaseColor => Text::TextureUsesBaseColor.plain(),
             Self::Roughness => Text::TextureUsesRoughness.plain(),
+            Self::Metallic => Text::TextureUsesMetallic.plain(),
+            Self::Normal => Text::TextureUsesNormal.plain(),
+            Self::Emissive => Text::TextureUsesEmissive.plain(),
+            Self::Occlusion => Text::TextureUsesOcclusion.plain(),
         }
     }
 }
@@ -97,13 +109,16 @@ impl TextureUses {
         };
         let mut slots = HashMap::new();
         for (material_id, material) in &scene.materials {
-            let base = material.base_color_texture.as_deref() == Some(asset_id);
-            let roughness = material.roughness_texture.as_deref() == Some(asset_id);
-            if base || roughness {
-                slots.insert(
-                    material_id.as_str(),
-                    (result.materials.len(), base, roughness),
-                );
+            let flags = [
+                material.base_color_texture.as_deref() == Some(asset_id),
+                material.roughness_texture.as_deref() == Some(asset_id),
+                material.metallic_texture.as_deref() == Some(asset_id),
+                material.normal_texture.as_deref() == Some(asset_id),
+                material.emissive_texture.as_deref() == Some(asset_id),
+                material.occlusion_texture.as_deref() == Some(asset_id),
+            ];
+            if flags.into_iter().any(|used| used) {
+                slots.insert(material_id.as_str(), (result.materials.len(), flags));
                 result.materials.push(material_id.clone());
             }
         }
@@ -126,9 +141,17 @@ impl TextureUses {
                 && parents[index].is_none_or(|parent| owner_enabled[parent]);
         }
         let mut assigned = vec![false; slots.len()];
+        let slot_kinds = [
+            Slot::BaseColor,
+            Slot::Roughness,
+            Slot::Metallic,
+            Slot::Normal,
+            Slot::Emissive,
+            Slot::Occlusion,
+        ];
         let mut push =
-            |material, base, roughness, renderer, enabled, effectively_enabled, prefab_owned| {
-                for (used, slot) in [(base, Slot::BaseColor), (roughness, Slot::Roughness)] {
+            |material, flags: [bool; 6], renderer, enabled, effectively_enabled, prefab_owned| {
+                for (used, slot) in flags.into_iter().zip(slot_kinds) {
                     if used {
                         result.rows.push(Use {
                             material,
@@ -149,12 +172,11 @@ impl TextureUses {
                 else {
                     continue;
                 };
-                if let Some(&(material, base, roughness)) = slots.get(id.as_str()) {
+                if let Some(&(material, flags)) = slots.get(id.as_str()) {
                     assigned[material] = true;
                     push(
                         material,
-                        base,
-                        roughness,
+                        flags,
                         Some((owner, renderer)),
                         component.enabled,
                         component.enabled && owner_enabled[owner],
@@ -164,12 +186,11 @@ impl TextureUses {
             }
         }
         for id in &result.materials {
-            let (material, base, roughness) = slots[id.as_str()];
+            let (material, flags) = slots[id.as_str()];
             if !assigned[material] {
                 push(
                     material,
-                    base,
-                    roughness,
+                    flags,
                     None,
                     false,
                     false,

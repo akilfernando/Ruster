@@ -21,7 +21,7 @@ mod shadow_lifecycle_probe;
 #[cfg(test)]
 mod shadow_probe;
 use lighting_gpu::{LightingGpu, LightingPacket, LIGHTING_BYTES};
-use material_gpu::{BindingKey, MaterialGpu};
+use material_gpu::{BindingKey, MaterialGpu, MaterialTextureInputs};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use std::sync::{Arc, Mutex, Weak};
@@ -2202,11 +2202,8 @@ fn render_draw_scene(
                 *channel *= tint;
             }
         }
-        base_color[3] = if selected.contains(&object.id.as_str()) {
-            0.35
-        } else {
-            0.0
-        };
+        let is_selected = !selected.is_empty() && selected.contains(&object.id.as_str());
+        base_color[3] = if is_selected { 0.35 } else { 0.0 };
         let group = grouped
             .entry((key, primitive, binding, double_sided))
             .or_insert_with(|| DrawGroup {
@@ -2225,6 +2222,38 @@ fn render_draw_scene(
                             .flatten()
                     })
                     .cloned(),
+                metallic: binding
+                    .metallic
+                    .and_then(|id| {
+                        (!binding.missing_metallic)
+                            .then(|| textures.get(id))
+                            .flatten()
+                    })
+                    .cloned(),
+                normal: binding
+                    .normal
+                    .and_then(|id| {
+                        (!binding.missing_normal)
+                            .then(|| textures.get(id))
+                            .flatten()
+                    })
+                    .cloned(),
+                emissive: binding
+                    .emissive
+                    .and_then(|id| {
+                        (!binding.missing_emissive)
+                            .then(|| textures.get(id))
+                            .flatten()
+                    })
+                    .cloned(),
+                occlusion: binding
+                    .occlusion
+                    .and_then(|id| {
+                        (!binding.missing_occlusion)
+                            .then(|| textures.get(id))
+                            .flatten()
+                    })
+                    .cloned(),
                 binding: binding.into_owned(),
                 mesh: mesh.cloned(),
                 instances: Vec::new(),
@@ -2232,7 +2261,7 @@ fn render_draw_scene(
             });
         let (matrix, normal) = instance_matrices(matrix);
         let mut color = object.color;
-        if selected.contains(&object.id.as_str()) {
+        if is_selected {
             for channel in &mut color[..3] {
                 *channel = (*channel * 0.65 + 0.35).min(1.0);
             }
@@ -2247,13 +2276,37 @@ fn render_draw_scene(
                     material.emission_color[0],
                     material.emission_color[1],
                     material.emission_color[2],
-                    0.0,
+                    f32::from(u8::from(
+                        material.emissive_texture.is_some() && !binding.missing_emissive,
+                    )),
                 ]
             }),
             uv_transform: material.map_or([1.0, 1.0, 0.0, 0.0], |material| {
                 let [x, y] = material.uv_tiling;
                 let [u, v] = material.uv_offset;
                 [x, y, u, v]
+            }),
+            pbr_params: material.map_or([0.0, 1.0, 1.0, 0.0], |material| {
+                [
+                    material.metallic,
+                    material.normal_scale,
+                    material.occlusion_strength,
+                    0.0,
+                ]
+            }),
+            pbr_maps: material.map_or([0.0; 4], |material| {
+                [
+                    f32::from(u8::from(
+                        material.metallic_texture.is_some() && !binding.missing_metallic,
+                    )),
+                    f32::from(u8::from(
+                        material.normal_texture.is_some() && !binding.missing_normal,
+                    )),
+                    f32::from(u8::from(
+                        material.occlusion_texture.is_some() && !binding.missing_occlusion,
+                    )),
+                    0.0,
+                ]
             }),
             response: match material.map(|material| material.response) {
                 Some(rot_scene::MaterialResponse::Dielectric { roughness }) => [
@@ -2262,17 +2315,13 @@ fn render_draw_scene(
                     f32::from(u8::from(
                         material.is_some_and(|m| m.roughness_texture.is_some()),
                     )),
-                    f32::from(u8::from(
-                        navigation.selection_feedback && selected.contains(&object.id.as_str()),
-                    )),
+                    f32::from(u8::from(navigation.selection_feedback && is_selected)),
                 ],
                 _ => [
                     0.,
                     0.,
                     0.,
-                    f32::from(u8::from(
-                        navigation.selection_feedback && selected.contains(&object.id.as_str()),
-                    )),
+                    f32::from(u8::from(navigation.selection_feedback && is_selected)),
                 ],
             },
         });
@@ -2414,24 +2463,39 @@ fn draw_mesh_has_complete_uvs(object: &Object, mesh: Option<&Arc<rot_assets::Mes
     mesh.map_or(object.mesh.is_none(), |mesh| mesh.has_complete_uvs())
 }
 
+fn draw_mesh_has_complete_tangents(object: &Object, mesh: Option<&Arc<rot_assets::Mesh>>) -> bool {
+    mesh.map_or(object.mesh.is_none(), |mesh| mesh.has_complete_tangents())
+}
+
 fn draw_material_binding<'a>(
     object: &Object,
     mesh: Option<&Arc<rot_assets::Mesh>>,
     material: Option<&'a rot_scene::OpaqueMaterial>,
 ) -> BindingKey<&'a str> {
-    let has_uvs = material.is_some_and(|material| {
-        material.base_color_texture.is_some() || material.roughness_texture.is_some()
-    }) && draw_mesh_has_complete_uvs(object, mesh);
+    let Some(material) = material else {
+        return BindingKey {
+            sampling: 1,
+            ..Default::default()
+        };
+    };
+    let has_uvs = material.has_any_texture() && draw_mesh_has_complete_uvs(object, mesh);
+    let has_tangents =
+        material.normal_texture.is_some() && draw_mesh_has_complete_tangents(object, mesh);
     BindingKey {
-        texture: material.and_then(|material| material.base_color_texture.as_deref()),
-        roughness: material.and_then(|material| material.roughness_texture.as_deref()),
-        missing_roughness: material.is_some_and(|material| material.roughness_texture.is_some())
-            && !has_uvs,
-        missing: material.is_some_and(|material| material.base_color_texture.is_some()) && !has_uvs,
-        sampling: material.map_or(1, |material| {
-            u8::from(material.filter == rot_scene::TextureFilter::Linear)
-                | (u8::from(material.address == rot_scene::TextureAddress::Clamp) << 1)
-        }),
+        texture: material.base_color_texture.as_deref(),
+        roughness: material.roughness_texture.as_deref(),
+        metallic: material.metallic_texture.as_deref(),
+        normal: material.normal_texture.as_deref(),
+        emissive: material.emissive_texture.as_deref(),
+        occlusion: material.occlusion_texture.as_deref(),
+        missing_roughness: material.roughness_texture.is_some() && !has_uvs,
+        missing_metallic: material.metallic_texture.is_some() && !has_uvs,
+        missing_normal: material.normal_texture.is_some() && (!has_uvs || !has_tangents),
+        missing_emissive: material.emissive_texture.is_some() && !has_uvs,
+        missing_occlusion: material.occlusion_texture.is_some() && !has_uvs,
+        missing: material.base_color_texture.is_some() && !has_uvs,
+        sampling: u8::from(material.filter == rot_scene::TextureFilter::Linear)
+            | (u8::from(material.address == rot_scene::TextureAddress::Clamp) << 1),
     }
 }
 
@@ -2627,6 +2691,8 @@ struct Instance {
     response: [f32; 4],
     emission_color: [f32; 4],
     uv_transform: [f32; 4],
+    pbr_params: [f32; 4],
+    pbr_maps: [f32; 4],
 }
 fn choose_samples(
     color: wgpu::TextureFormatFeatureFlags,
@@ -3114,7 +3180,7 @@ impl Resources {
         metrics.asset_epoch_phase = self.assets.phase();
         metrics.asset_live_mesh_bytes = self.meshes.values().map(|mesh| mesh.bytes).sum();
         metrics.asset_retired_mesh_bytes = mesh;
-        metrics.asset_live_texture_bytes = self.materials.bytes() - 9;
+        metrics.asset_live_texture_bytes = self.materials.bytes() - self.materials.fallback_bytes();
         metrics.asset_retired_texture_bytes = texture;
     }
     fn arm_assets(&mut self, queue: &wgpu::Queue, ctx: &egui::Context) -> Result<bool, String> {
@@ -3711,9 +3777,28 @@ struct DrawGroup {
     binding: BindingKey,
     texture: Option<Arc<rot_assets::Texture>>,
     roughness: Option<Arc<rot_assets::Texture>>,
+    metallic: Option<Arc<rot_assets::Texture>>,
+    normal: Option<Arc<rot_assets::Texture>>,
+    emissive: Option<Arc<rot_assets::Texture>>,
+    occlusion: Option<Arc<rot_assets::Texture>>,
     mesh: Option<Arc<rot_assets::Mesh>>,
     instances: Vec<Instance>,
     range: Range<u32>,
+}
+impl DrawGroup {
+    fn material_inputs(&self) -> (&BindingKey, MaterialTextureInputs<'_>) {
+        (
+            &self.binding,
+            MaterialTextureInputs {
+                texture: self.texture.as_ref(),
+                roughness: self.roughness.as_ref(),
+                metallic: self.metallic.as_ref(),
+                normal: self.normal.as_ref(),
+                emissive: self.emissive.as_ref(),
+                occlusion: self.occlusion.as_ref(),
+            },
+        )
+    }
 }
 struct SceneCallback {
     receipt: FrameReceipt,
@@ -3755,16 +3840,9 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         // The unique frame claim precedes maintenance: a duplicate callback
         // cannot treat an extra layout pass as a queue-submission boundary.
         let maintenance_failed = r.arm_assets(queue, &self.context).is_err();
-        let material_plan = r.materials.plan(
-            device,
-            self.groups.iter().map(|group| {
-                (
-                    &group.binding,
-                    group.texture.as_ref(),
-                    group.roughness.as_ref(),
-                )
-            }),
-        );
+        let material_plan = r
+            .materials
+            .plan(device, self.groups.iter().map(DrawGroup::material_inputs));
         let mesh_plan = r.assets.plan_mesh(&r.meshes, &self.groups);
         let assets_changed = material_plan.changed(&r.materials) || mesh_plan.changed(&r.meshes);
         let requested_hdr = matches!(self.display, rot_scene::DisplayProfile::SurfaceHdr { .. });
@@ -4513,7 +4591,7 @@ mod tests {
 
         // Additive camera/instance ABI protects old custom shaders and verifies
         // that opt-in fragment view data, storage instance layout, and tangents validate.
-        assert_eq!(size_of::<Instance>(), 192);
+        assert_eq!(size_of::<Instance>(), 224);
         assert_eq!(offset_of!(Instance, model), 0);
         assert_eq!(offset_of!(Instance, normal), 64);
         assert_eq!(offset_of!(Instance, color), 112);
@@ -4521,7 +4599,10 @@ mod tests {
         assert_eq!(offset_of!(Instance, response), 144);
         assert_eq!(offset_of!(Instance, emission_color), 160);
         assert_eq!(offset_of!(Instance, uv_transform), 176);
-        let expected_instance_offsets = [0, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176];
+        assert_eq!(offset_of!(Instance, pbr_params), 192);
+        assert_eq!(offset_of!(Instance, pbr_maps), 208);
+        let expected_instance_offsets =
+            [0, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208];
         for (name, source) in [
             ("scene", default_shader()),
             ("surface", surface_shader()),
@@ -5977,7 +6058,7 @@ mod tests {
             r.materials.prepare(
                 &device,
                 &queue,
-                std::iter::once((&BindingKey::default(), None, None)),
+                std::iter::once((&BindingKey::default(), MaterialTextureInputs::default())),
             );
             r.pipeline = validated_pipeline(&device, &r.pipeline_layout, default_shader(), samples)
                 .expect("valid replacement");
@@ -6008,6 +6089,8 @@ mod tests {
                 response: [0.; 4],
                 emission_color: [0.; 4],
                 uv_transform: [1., 1., 0., 0.],
+                pbr_params: [0.0, 1.0, 1.0, 0.0],
+                pbr_maps: [0.0; 4],
             };
             queue.write_buffer(&r.instances, 0, bytemuck::bytes_of(&object));
             // The second submission replaces attachments while prior work may be pending.

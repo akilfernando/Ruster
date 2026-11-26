@@ -31,11 +31,10 @@ pub(super) fn texture_thumbnail(
         .find(|mip| mip.width.max(mip.height) >= 64)
         .unwrap_or(&texture.mips[0]);
     let size = [mip.width as usize, mip.height as usize];
-    let image = match texture.role {
-        rot_assets::TextureRole::BaseColor => {
-            egui::ColorImage::from_rgba_unmultiplied(size, &mip.bytes)
-        }
-        rot_assets::TextureRole::Roughness => egui::ColorImage::from_gray(size, &mip.bytes),
+    let image = if texture.role.is_scalar_linear() {
+        egui::ColorImage::from_gray(size, &mip.bytes)
+    } else {
+        egui::ColorImage::from_rgba_unmultiplied(size, &mip.bytes)
     };
     let handle = ctx.load_texture(
         format!("asset-thumb-{id}"),

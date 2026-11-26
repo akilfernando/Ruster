@@ -102,7 +102,14 @@ pub(super) fn material(
                     "name",
                     "response",
                     "roughness_texture",
+                    "metallic_texture",
+                    "normal_texture",
+                    "emissive_texture",
+                    "occlusion_texture",
                     "emission_color",
+                    "metallic",
+                    "normal_scale",
+                    "occlusion_strength",
                     "double_sided",
                     "uv_tiling",
                     "uv_offset",
@@ -115,6 +122,25 @@ pub(super) fn material(
                 "Expected the complete opaque material shape",
             )
         })?;
+    let scalar = |key: &str, min: f64, max: f64, fallback: f32, label: &str| match map.get(key) {
+        None => Ok(fallback),
+        Some(value) => value
+            .as_f64()
+            .filter(|v| v.is_finite() && (min..=max).contains(v))
+            .map(|v| v as f32)
+            .ok_or_else(|| {
+                error(
+                    "invalid_arguments",
+                    format!("{label} must be finite in {min}..={max}"),
+                )
+            }),
+    };
+    let optional_slot = |key: &str| -> Result<Option<String>, CommandError> {
+        match map.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(value) => Ok(Some(id(value)?.into())),
+        }
+    };
     let uv_pair = |key: &str, fallback: [f32; 2]| {
         map.get(key)
             .map(|value| serde_json::from_value(value.clone()))
@@ -147,6 +173,27 @@ pub(super) fn material(
             Some(value) => rgb(value, "Emission Color")?,
             None => prior.map_or([0.0; 3], |prior| prior.emission_color),
         },
+        metallic: scalar(
+            "metallic",
+            0.0,
+            1.0,
+            prior.map_or(0.0, |prior| prior.metallic),
+            "Metallic",
+        )?,
+        normal_scale: scalar(
+            "normal_scale",
+            0.0,
+            2.0,
+            prior.map_or(1.0, |prior| prior.normal_scale),
+            "Normal Scale",
+        )?,
+        occlusion_strength: scalar(
+            "occlusion_strength",
+            0.0,
+            1.0,
+            prior.map_or(1.0, |prior| prior.occlusion_strength),
+            "Occlusion Strength",
+        )?,
         double_sided: match map.get("double_sided") {
             Some(value) => value
                 .as_bool()
@@ -158,10 +205,11 @@ pub(super) fn material(
         } else {
             Some(id(&map["base_color_texture"])?.into())
         },
-        roughness_texture: match map.get("roughness_texture") {
-            None | Some(Value::Null) => None,
-            Some(value) => Some(id(value)?.into()),
-        },
+        roughness_texture: optional_slot("roughness_texture")?,
+        metallic_texture: optional_slot("metallic_texture")?,
+        normal_texture: optional_slot("normal_texture")?,
+        emissive_texture: optional_slot("emissive_texture")?,
+        occlusion_texture: optional_slot("occlusion_texture")?,
         filter: serde_json::from_value(map["filter"].clone())
             .map_err(|_| error("invalid_arguments", "Filter must be nearest or linear"))?,
         address: serde_json::from_value(map["address"].clone())

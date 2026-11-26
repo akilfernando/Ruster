@@ -26,11 +26,25 @@ struct MaterialFields {
     #[serde(default)]
     emission_color: [f32; 3],
     #[serde(default)]
+    metallic: f32,
+    #[serde(default = "default_one")]
+    normal_scale: f32,
+    #[serde(default = "default_one")]
+    occlusion_strength: f32,
+    #[serde(default)]
     double_sided: bool,
     #[serde(default)]
     base_color_texture: Option<String>,
     #[serde(default)]
     roughness_texture: Option<String>,
+    #[serde(default)]
+    metallic_texture: Option<String>,
+    #[serde(default)]
+    normal_texture: Option<String>,
+    #[serde(default)]
+    emissive_texture: Option<String>,
+    #[serde(default)]
+    occlusion_texture: Option<String>,
     #[serde(default = "identity_uv_tiling")]
     uv_tiling: [f32; 2],
     #[serde(default)]
@@ -47,15 +61,26 @@ fn default_tint() -> [f32; 3] {
     [1.0; 3]
 }
 
+fn default_one() -> f32 {
+    1.0
+}
+
 impl From<MaterialFields> for OpaqueMaterial {
     fn from(fields: MaterialFields) -> Self {
         Self {
             name: fields.name,
             tint: fields.tint,
             emission_color: fields.emission_color,
+            metallic: fields.metallic,
+            normal_scale: fields.normal_scale,
+            occlusion_strength: fields.occlusion_strength,
             double_sided: fields.double_sided,
             base_color_texture: fields.base_color_texture,
             roughness_texture: fields.roughness_texture,
+            metallic_texture: fields.metallic_texture,
+            normal_texture: fields.normal_texture,
+            emissive_texture: fields.emissive_texture,
+            occlusion_texture: fields.occlusion_texture,
             uv_tiling: fields.uv_tiling,
             uv_offset: fields.uv_offset,
             filter: fields.filter,
@@ -130,9 +155,16 @@ mod tests {
             name: Some("Brushed Bronze".into()),
             tint: [0.72, 0.45, 0.21],
             emission_color: [0.05, 0.02, 0.0],
+            metallic: 0.85,
+            normal_scale: 1.4,
+            occlusion_strength: 0.75,
             double_sided: true,
             base_color_texture: Some("bronze-albedo".into()),
             roughness_texture: Some("bronze-rough".into()),
+            metallic_texture: Some("bronze-metal".into()),
+            normal_texture: Some("bronze-normal".into()),
+            emissive_texture: Some("bronze-emissive".into()),
+            occlusion_texture: Some("bronze-ao".into()),
             uv_tiling: [2.0, 3.0],
             uv_offset: [0.25, -0.5],
             filter: TextureFilter::Nearest,
@@ -183,7 +215,7 @@ mod tests {
         let unknown_field = br#"{"format":"rot-material","format_version":1,"extra":true,"material":{"tint":[1,1,1]}}"#;
         assert!(MaterialSource::read_json(unknown_field).is_err());
 
-        let unknown_mat_field = br#"{"format":"rot-material","format_version":1,"material":{"tint":[1,1,1],"metallic":1.0}}"#;
+        let unknown_mat_field = br#"{"format":"rot-material","format_version":1,"material":{"tint":[1,1,1],"unknown_future_field":1.0}}"#;
         assert!(MaterialSource::read_json(unknown_mat_field).is_err());
 
         let bad_tint =

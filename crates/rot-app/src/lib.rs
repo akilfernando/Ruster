@@ -215,6 +215,19 @@ impl Content {
                         &material.roughness_texture,
                         rot_assets::TextureRole::Roughness,
                     ),
+                    (
+                        &material.metallic_texture,
+                        rot_assets::TextureRole::Metallic,
+                    ),
+                    (&material.normal_texture, rot_assets::TextureRole::Normal),
+                    (
+                        &material.emissive_texture,
+                        rot_assets::TextureRole::Emissive,
+                    ),
+                    (
+                        &material.occlusion_texture,
+                        rot_assets::TextureRole::Occlusion,
+                    ),
                 ] {
                     let Some(texture) = texture else {
                         continue;

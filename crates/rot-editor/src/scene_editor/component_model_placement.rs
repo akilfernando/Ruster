@@ -67,6 +67,10 @@ impl ComponentWorkspace {
                 .base_color_texture
                 .iter()
                 .chain(&source.roughness_texture)
+                .chain(&source.metallic_texture)
+                .chain(&source.normal_texture)
+                .chain(&source.emissive_texture)
+                .chain(&source.occlusion_texture)
                 .any(|texture| !self.textures.contains_key(texture))
             {
                 return Err(invalid(

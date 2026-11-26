@@ -12,6 +12,8 @@ struct Instance {
     response: vec4<f32>,
     emission_color: vec4<f32>,
     uv_transform: vec4<f32>,
+    pbr_params: vec4<f32>,
+    pbr_maps: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(0) @binding(1) var<storage, read> instances: array<Instance>;

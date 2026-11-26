@@ -12,12 +12,18 @@ struct Instance {
     response: vec4<f32>,
     emission_color: vec4<f32>,
     uv_transform: vec4<f32>,
+    pbr_params: vec4<f32>,
+    pbr_maps: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(0) @binding(1) var<storage, read> instances: array<Instance>;
 @group(1) @binding(0) var base_color_texture: texture_2d<f32>;
 @group(1) @binding(1) var base_color_sampler: sampler;
 @group(1) @binding(2) var roughness_texture: texture_2d<f32>;
+@group(1) @binding(3) var metallic_texture: texture_2d<f32>;
+@group(1) @binding(4) var normal_texture: texture_2d<f32>;
+@group(1) @binding(5) var emissive_texture: texture_2d<f32>;
+@group(1) @binding(6) var occlusion_texture: texture_2d<f32>;
 struct PointLight {
     position_inverse_range_squared: vec4<f32>,
     color_intensity: vec4<f32>,
@@ -46,8 +52,10 @@ struct Output {
     @location(3) base_color: vec4<f32>,
     @location(4) world_position: vec3<f32>,
     @location(5) @interpolate(flat) response: vec4<f32>,
-    @location(6) @interpolate(flat) emission_color: vec3<f32>,
+    @location(6) @interpolate(flat) emission_color: vec4<f32>,
     @location(7) tangent: vec4<f32>,
+    @location(8) @interpolate(flat) pbr_params: vec4<f32>,
+    @location(9) @interpolate(flat) pbr_maps: vec4<f32>,
 };
 @vertex fn vs(v: Vertex, @builtin(instance_index) instance_index: u32) -> Output {
     var o: Output;
@@ -61,18 +69,19 @@ struct Output {
     o.uv = vec2<f32>(v.uv.x, 1.0 - v.uv.y) * inst.uv_transform.xy + inst.uv_transform.zw;
     o.base_color = inst.base_color;
     o.response = inst.response;
-    o.emission_color = inst.emission_color.xyz;
+    o.emission_color = inst.emission_color;
     o.world_position = (model * vec4<f32>(v.position, 1.0)).xyz;
     o.tangent = vec4<f32>(safe_unit((model * vec4<f32>(v.tangent.xyz, 0.0)).xyz), v.tangent.w);
+    o.pbr_params = inst.pbr_params;
+    o.pbr_maps = inst.pbr_maps;
     return o;
 }
-// Direct-lit opaque dielectric: GGX NDF, height-correlated Smith visibility,
-// Schlick Fresnel F0=.04, energy-shared Lambert. Perceptual r -> alpha=r².
-// Artistic ambient is diffuse fill; no environment reflection is implied.
+// Direct-lit metallic-roughness PBR: GGX NDF, height-correlated Smith visibility,
+// Schlick Fresnel F0 = mix(0.04, albedo, metallic), energy-shared Lambert diffuse.
 fn safe_unit(value: vec3<f32>) -> vec3<f32> {
     return value * inverseSqrt(max(dot(value, value), 1e-20));
 }
-fn direct_response(albedo: vec3<f32>, n: vec3<f32>, view: vec3<f32>, light: vec3<f32>, response: vec4<f32>) -> vec3<f32> {
+fn direct_response(albedo: vec3<f32>, n: vec3<f32>, view: vec3<f32>, light: vec3<f32>, response: vec4<f32>, metallic: f32) -> vec3<f32> {
     let nl = max(dot(n, light), 0.0);
     if response.x < 0.5 { return albedo * nl; }
     let nv = max(dot(n, view), 0.0);
@@ -90,9 +99,10 @@ fn direct_response(albedo: vec3<f32>, n: vec3<f32>, view: vec3<f32>, light: vec3
     let lambda_v = nl * sqrt(nv * nv * (1.0 - a2) + a2);
     let lambda_l = nv * sqrt(nl * nl * (1.0 - a2) + a2);
     let visibility = 0.5 / max(lambda_v + lambda_l, 1e-20);
-    let fresnel = 0.04 + 0.96 * pow(1.0 - vh, 5.0);
-    let diffuse = albedo * ((1.0 - fresnel) / 3.14159265359);
-    return (diffuse + vec3<f32>(distribution * visibility * fresnel)) * nl;
+    let f0 = mix(vec3<f32>(0.04), albedo, metallic);
+    let fresnel = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vh, 5.0);
+    let diffuse = albedo * (1.0 - metallic) * ((vec3<f32>(1.0) - fresnel) / 3.14159265359);
+    return (diffuse + distribution * visibility * fresnel) * nl;
 }
 // Saturate at the finite RGBA16F storage ceiling. Permitted grazing GGX
 // configurations can exceed it even with bounded lights and roughness>=.08.
@@ -108,28 +118,52 @@ fn hdr_storage(radiance: vec3<f32>) -> vec4<f32> {
 }
 fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
     let sampled = textureSample(base_color_texture, base_color_sampler, v.uv).rgb;
-    // Explicit gradients are computed outside the per-primitive map branch.
-    // No-map draws preserve scalar arithmetic and avoid an extra texture fetch.
+    // Explicit gradients are computed outside per-map branches.
+    // No-map draws preserve scalar arithmetic and avoid extra texture fetches.
     let uv_dx = dpdx(v.uv);
     let uv_dy = dpdy(v.uv);
     var response = v.response;
     if response.z > 0.5 {
         response.y = clamp(response.y * textureSampleGrad(roughness_texture, base_color_sampler, v.uv, uv_dx, uv_dy).r, 0.08, 1.0);
     }
+    var metallic = clamp(v.pbr_params.x, 0.0, 1.0);
+    if v.pbr_maps.x > 0.5 {
+        metallic = clamp(metallic * textureSampleGrad(metallic_texture, base_color_sampler, v.uv, uv_dx, uv_dy).r, 0.0, 1.0);
+    }
+    var n = safe_unit(normal);
+    if v.pbr_maps.y > 0.5 {
+        let ortho_t = v.tangent.xyz - n * dot(v.tangent.xyz, n);
+        if dot(ortho_t, ortho_t) > 1e-12 {
+            let t = safe_unit(ortho_t);
+            let b = cross(n, t) * v.tangent.w;
+            let raw_n = textureSampleGrad(normal_texture, base_color_sampler, v.uv, uv_dx, uv_dy).xyz * 2.0 - vec3<f32>(1.0);
+            let scaled_n = safe_unit(vec3<f32>(raw_n.xy * v.pbr_params.y, raw_n.z));
+            n = safe_unit(t * scaled_n.x + b * scaled_n.y + n * scaled_n.z);
+        }
+    }
+    var emission = v.emission_color.xyz;
+    if v.emission_color.w > 0.5 {
+        emission *= textureSampleGrad(emissive_texture, base_color_sampler, v.uv, uv_dx, uv_dy).rgb;
+    }
+    var ao = 1.0;
+    if v.pbr_maps.z > 0.5 {
+        ao = mix(1.0, textureSampleGrad(occlusion_texture, base_color_sampler, v.uv, uv_dx, uv_dy).r, clamp(v.pbr_params.z, 0.0, 1.0));
+    }
     let albedo = sampled * v.base_color.rgb;
     let highlighted = mix(albedo, vec3<f32>(1.0), select(v.base_color.a, 0.0, v.response.w > 0.5));
-    let n = safe_unit(normal);
     // w=1: eye position, w=0: parallel orthographic direction to camera.
     let view = safe_unit(camera.eye_mode.xyz - v.world_position * camera.eye_mode.w);
     let ambient_scale = select(1.0, 0.96, response.x > 0.5);
+    let f0_amb = mix(vec3<f32>(0.04), highlighted, metallic);
+    let ambient_albedo = select(highlighted, highlighted * (1.0 - metallic) * ambient_scale + f0_amb * (metallic * 0.25), response.x > 0.5);
     if lighting.mode_counts.x == 0u {
         let incoming = normalize(vec3<f32>(0.4, 0.8, 0.6));
-        let stored = hdr_storage(highlighted * (0.28 * ambient_scale) + 0.72 * direct_response(highlighted, n, view, incoming, response) + v.emission_color);
+        let stored = hdr_storage(ambient_albedo * (0.28 * ao) + 0.72 * direct_response(highlighted, n, view, incoming, response, metallic) + emission);
         return vec4<f32>(stored.rgb, 1.0);
     }
-    var result = highlighted * lighting.ambient.rgb * ambient_scale;
+    var result = ambient_albedo * lighting.ambient.rgb * ao;
     if lighting.mode_counts.z != 0u {
-        var direct = lighting.directional_color_intensity.rgb * direct_response(highlighted, n, view, lighting.direction_to_light.xyz, response);
+        var direct = lighting.directional_color_intensity.rgb * direct_response(highlighted, n, view, lighting.direction_to_light.xyz, response, metallic);
         // Shadow attenuates the entire Sun contribution, including specular.
         if sun_shadow.parameters.x > 0.5 { direct *= sun_visibility(v.world_position, n); }
         result += direct;
@@ -150,7 +184,7 @@ fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
             let angular = clamp((cone.w - dot(chord, chord)) * point.color_intensity.w, 0.0, 1.0);
             attenuation *= angular * angular;
         }
-        result += point.color_intensity.rgb * direct_response(highlighted, n, view, direction, response) * attenuation;
+        result += point.color_intensity.rgb * direct_response(highlighted, n, view, direction, response, metallic) * attenuation;
     }
-    return vec4<f32>(hdr_storage(result + v.emission_color).rgb, 1.0);
+    return vec4<f32>(hdr_storage(result + emission).rgb, 1.0);
 }

@@ -599,6 +599,10 @@ impl Browser {
                 (Some(MeshNormalPolicy::AuthoredWhenComplete), _) => Some("Normals: From the file"),
                 (_, Some(TextureRole::BaseColor)) => Some(Text::BaseColorSrgb.plain()),
                 (_, Some(TextureRole::Roughness)) => Some(Text::RoughnessMapLinear.plain()),
+                (_, Some(TextureRole::Metallic)) => Some(Text::MetallicMapLinear.plain()),
+                (_, Some(TextureRole::Normal)) => Some(Text::NormalMapLinear.plain()),
+                (_, Some(TextureRole::Emissive)) => Some(Text::EmissiveMapSrgb.plain()),
+                (_, Some(TextureRole::Occlusion)) => Some(Text::OcclusionMapLinear.plain()),
                 _ => None,
             };
             self.rows.push(row);
@@ -752,6 +756,10 @@ impl Browser {
                     .map(|role| match role {
                         TextureRole::BaseColor => Text::BaseColorSrgb.plain(),
                         TextureRole::Roughness => Text::RoughnessMapLinear.plain(),
+                        TextureRole::Metallic => Text::MetallicMapLinear.plain(),
+                        TextureRole::Normal => Text::NormalMapLinear.plain(),
+                        TextureRole::Emissive => Text::EmissiveMapSrgb.plain(),
+                        TextureRole::Occlusion => Text::OcclusionMapLinear.plain(),
                     });
                 row.diagnostic.clone_from(&issue.diagnostic);
                 #[cfg(target_os = "linux")]

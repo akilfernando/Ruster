@@ -125,10 +125,16 @@ fn verify_case(
                 binding: BindingKey::default(),
                 texture: None,
                 roughness: None,
+                metallic: None,
+                normal: None,
+                emissive: None,
+                occlusion: None,
                 mesh: Some(mesh),
                 instances: vec![Instance {
                     uv_transform: [1.0, 1.0, 0.0, 0.0],
                     emission_color: [0.0; 4],
+                    pbr_params: [0.0, 1.0, 1.0, 0.0],
+                    pbr_maps: [0.0; 4],
                     model: matrix.to_cols_array_2d(),
                     normal: [
                         [columns as f32, 0., 0., 0.],
