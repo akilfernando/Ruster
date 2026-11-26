@@ -13,7 +13,7 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
-## Current phase — Phase 3B: Look — Lighting & Post (Next: `L-11`)
+## Current phase — Phase 3B: Look — Lighting & Post (Next: `L-3B-EXIT`)
 
 - **Done (earlier phases):** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`,
   `A-01`–`A-07`, `P-01`–`P-02`), `P-03` platform seams & Windows CI, Phase 2 Core
@@ -37,10 +37,13 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   `L-10` Post-processing stack (`5b163b4`: SSAO, 5-mip bloom, color grading,
   PBR Neutral/ACES/Reinhard/None, `MSAA 4x/2x`/`FXAA`/`Off`, Scene Display UI
   & MCP, all 7 RTX 4060 GPU probes green, Cinematic `1280×720` p50 `1.670 ms`,
-  5k 1080p frame p50 `1.075 ms` / p95 `1.527 ms`).
-- **Next:** `L-11` Viewport shading & debug view modes (`Lit`, `Unlit`,
-  `Wireframe`, `Normals`, `Roughness`, `Metallic`, `Albedo`, `AO`, `Depth`,
-  `Clusters`, `Cascades`).
+  5k 1080p frame p50 `1.075 ms` / p95 `1.527 ms`), `L-11` Viewport shading &
+  debug views (`34dc485`: `Lit`/`Unlit`/`Wireframe`/`Normals`/`Roughness`/
+  `Metallic`/`Albedo`/`AO`/`Depth`/`Clusters`/`Cascades`, viewport menu,
+  `Alt+2..5` shortcuts & Command Palette, all 8 RTX 4060 GPU probes green, 5k
+  1080p frame p50 `1.264 ms` / p95 `1.567 ms`).
+- **Next:** `L-3B-EXIT` Phase 3B exit gate (lit multi-light interior reference
+  scene in `examples/rot-yard/`, visual & RTX 4060 budget verification).
 
 ## What a creator can do today
 

@@ -41,7 +41,7 @@ Phase 3A (`L-01`–`L-EXIT`) shipped on `2026-11-26`. Phase 3B closes clustered 
 | `L-08` CSM & shadow atlas | 4-cascade directional Sun shadows + spot/point shadow atlas integrated into clustered shading (Size M, *ready*). | `done — 2026-11-26, 9801f4c` · RTX 4060 CSM+Spot+Point+Mask probe p50 `0.264 ms` / p95 `0.534 ms`; 5k 1080p frame p50 `0.788 ms` / p95 `0.886 ms`. |
 | `L-09` Atmospheric fog | Linear/exponential/height fog in scene data, shaders, Scene Display UI, MCP, and player (Size S, *ready*). | `done — 2026-11-26, eb31118` · RTX 4060 fog probe passed (Linear, height fog, sky horizon); 5k 1080p frame p50 `0.838 ms` / p95 `0.974 ms`. |
 | `L-10` Post-processing stack | SSAO, bloom, color grading/tonemappers, and AA options (`MSAA 4x/2x`, `FXAA`, `Off`) (Size M, *ready*). | `done — 2026-11-26, 5b163b4` · RTX 4060 Cinematic `1280×720` probe p50 `1.670 ms` / p95 `2.387 ms`; 5k 1080p frame p50 `1.075 ms` / p95 `1.527 ms`. |
-| `L-11` Viewport shading & debug views | Editor/runtime shading & debug modes (`Lit`, `Unlit`, `Wireframe`, `Normals`, `Roughness`, `Metallic`, `Albedo`, `AO`, `Depth`, `Clusters`, `Cascades`) (Size M, *brief needed*). | `open` · After `L-10`. |
+| `L-11` Viewport shading & debug views | Editor/runtime shading & debug modes (`Lit`, `Unlit`, `Wireframe`, `Normals`, `Roughness`, `Metallic`, `Albedo`, `AO`, `Depth`, `Clusters`, `Cascades`) (Size M, *ready*). | `done — 2026-11-26, 34dc485` · All 11 modes verified on RTX 4060 (`shading_debug_views_gpu_probe` + 7 probes); 5k 1080p frame p50 `1.264 ms` / p95 `1.567 ms` (`0 B` steady upload). |
 | `L-3B-EXIT` Phase 3B exit gate | Lit multi-light interior reference scene in `examples/rot-yard/`, visual & RTX 4060 budget verification (Size S, *brief needed*). | `open` · Closes Phase 3B. |
 
 ## Later
@@ -138,7 +138,15 @@ completed packages:
   `scene_display_set`/`material_inspect` keeping `tools/list` at `14,457` B, all
   7 RTX 4060 GPU probes green including Cinematic `1280×720` p50 `1.670 ms` /
   p95 `2.387 ms`, 5k 1080p 4× MSAA CPU p50 `0.386 ms` / GPU p50 `0.284 ms` /
-  frame p50 `1.075 ms` / p95 `1.527 ms` / steady `0 B`).
+  frame p50 `1.075 ms` / p95 `1.527 ms` / steady `0 B`), and `L-11` (`2026-11-26`,
+  `34dc485`: `ShadingMode` 11 viewport shading & debug view modes `Lit`, `Unlit`,
+  `Wireframe` via optional `POLYGON_MODE_LINE` with fallback, `Normals`,
+  `Roughness`, `Metallic`, `Albedo`, `AO`, `Depth`, `Clusters` heatmap, and
+  `Cascades` CSM palette across `rot-render`/`surface.wgsl`/`composite.wgsl`/
+  `ibl_gpu.rs`, viewport overlay dropdown, remappable `Alt+2..5` shortcuts &
+  Command Palette actions in `rot-editor`, all 8 RTX 4060 GPU probes green
+  including `shading_debug_views_gpu_probe`, 5k 1080p 4× MSAA CPU p50 `0.510 ms` /
+  GPU p50 `0.284 ms` / frame p50 `1.264 ms` / p95 `1.567 ms` / steady `0 B`).
 - **Phase 2 — Core completed packages:** `C-00a` (retired legacy logistics
   crates, Rhai mode, editor logistics UI, and superseded MCP
   enrollment/registry plumbing; promoted `crates/rot-support`), `C-01` (v23
