@@ -110,9 +110,21 @@ pub(super) enum Action {
     GameControls,
     About,
     CommandPalette,
+    ShadingLit,
+    ShadingUnlit,
+    ShadingWireframe,
+    ShadingNormals,
+    ShadingRoughness,
+    ShadingMetallic,
+    ShadingAlbedo,
+    ShadingAo,
+    ShadingDepth,
+    ShadingClusters,
+    ShadingCascades,
+    ShadingCycle,
 }
 impl Action {
-    pub const ALL: [Self; 75] = [
+    pub const ALL: [Self; 87] = [
         Self::New,
         Self::Open,
         Self::Save,
@@ -188,6 +200,18 @@ impl Action {
         Self::GameControls,
         Self::About,
         Self::CommandPalette,
+        Self::ShadingLit,
+        Self::ShadingUnlit,
+        Self::ShadingWireframe,
+        Self::ShadingNormals,
+        Self::ShadingRoughness,
+        Self::ShadingMetallic,
+        Self::ShadingAlbedo,
+        Self::ShadingAo,
+        Self::ShadingDepth,
+        Self::ShadingClusters,
+        Self::ShadingCascades,
+        Self::ShadingCycle,
     ];
     /// Title Case menu label (UX-STANDARDS §8). `name` stays the stored id.
     pub fn label(self) -> &'static str {
@@ -267,6 +291,18 @@ impl Action {
             Self::GameControls => Text::LabelGameControls.plain(),
             Self::About => Text::LabelAbout.plain(),
             Self::CommandPalette => Text::LabelCommandPalette.plain(),
+            Self::ShadingLit => Text::LabelShadingLit.plain(),
+            Self::ShadingUnlit => Text::LabelShadingUnlit.plain(),
+            Self::ShadingWireframe => Text::LabelShadingWireframe.plain(),
+            Self::ShadingNormals => Text::LabelShadingNormals.plain(),
+            Self::ShadingRoughness => Text::LabelShadingRoughness.plain(),
+            Self::ShadingMetallic => Text::LabelShadingMetallic.plain(),
+            Self::ShadingAlbedo => Text::LabelShadingAlbedo.plain(),
+            Self::ShadingAo => Text::LabelShadingAo.plain(),
+            Self::ShadingDepth => Text::LabelShadingDepth.plain(),
+            Self::ShadingClusters => Text::LabelShadingClusters.plain(),
+            Self::ShadingCascades => Text::LabelShadingCascades.plain(),
+            Self::ShadingCycle => Text::LabelShadingCycle.plain(),
         }
     }
     pub fn name(self) -> &'static str {
@@ -346,6 +382,18 @@ impl Action {
             Self::GameControls => "Game controls",
             Self::About => "About",
             Self::CommandPalette => "Command palette",
+            Self::ShadingLit => "Shading: Lit",
+            Self::ShadingUnlit => "Shading: Unlit",
+            Self::ShadingWireframe => "Shading: Wireframe",
+            Self::ShadingNormals => "Shading: Normals",
+            Self::ShadingRoughness => "Shading: Roughness",
+            Self::ShadingMetallic => "Shading: Metallic",
+            Self::ShadingAlbedo => "Shading: Albedo",
+            Self::ShadingAo => "Shading: AO",
+            Self::ShadingDepth => "Shading: Depth",
+            Self::ShadingClusters => "Shading: Clusters",
+            Self::ShadingCascades => "Shading: Cascades",
+            Self::ShadingCycle => "Cycle shading mode",
         }
     }
 }
@@ -517,6 +565,22 @@ impl Default for Preferences {
                 })
                 .chain(
                     [
+                        (Action::ShadingWireframe, Key::Num2),
+                        (Action::ShadingUnlit, Key::Num3),
+                        (Action::ShadingLit, Key::Num4),
+                        (Action::ShadingCycle, Key::Num5),
+                    ]
+                    .into_iter()
+                    .map(|(action, key)| Binding {
+                        action,
+                        key: Some(key),
+                        ctrl: false,
+                        shift: false,
+                        alt: true,
+                    }),
+                )
+                .chain(
+                    [
                         Action::PlaceSelectionOnGround,
                         Action::CreateCube,
                         Action::CreateSphere,
@@ -554,6 +618,14 @@ impl Default for Preferences {
                         Action::KeyboardShortcuts,
                         Action::GameControls,
                         Action::About,
+                        Action::ShadingNormals,
+                        Action::ShadingRoughness,
+                        Action::ShadingMetallic,
+                        Action::ShadingAlbedo,
+                        Action::ShadingAo,
+                        Action::ShadingDepth,
+                        Action::ShadingClusters,
+                        Action::ShadingCascades,
                     ]
                     .into_iter()
                     .map(|action| Binding {

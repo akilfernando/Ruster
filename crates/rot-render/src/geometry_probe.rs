@@ -179,6 +179,7 @@ fn verify_case(
         sky: None,
         fog: None,
         post_process: None,
+        shading_mode: ShadingMode::Lit,
         inv_camera: Mat4::IDENTITY.to_cols_array(),
         show_editor_grid: false,
         groups,

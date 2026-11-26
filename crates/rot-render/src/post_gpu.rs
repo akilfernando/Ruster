@@ -840,6 +840,7 @@ mod tests {
                 sky: None,
                 fog: None,
                 post_process: post,
+                shading_mode: crate::ShadingMode::Lit,
                 camera: (proj * view).to_cols_array(),
                 inv_camera: (proj * view).inverse().to_cols_array(),
                 cluster_camera: ClusterCamera::from_matrices(view, proj),

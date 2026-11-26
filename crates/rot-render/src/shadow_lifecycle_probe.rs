@@ -526,6 +526,7 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
         sky: None,
         fog: None,
         post_process: None,
+        shading_mode: ShadingMode::Lit,
         inv_camera: Mat4::IDENTITY.to_cols_array(),
         show_editor_grid: false,
         groups: vec![DrawGroup {
@@ -568,6 +569,7 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
         sky: None,
         fog: None,
         post_process: None,
+        shading_mode: ShadingMode::Lit,
         inv_camera: Mat4::IDENTITY.to_cols_array(),
         show_editor_grid: false,
         groups: Vec::new(),
@@ -984,6 +986,7 @@ fn verify_asset_submission_backpressure(
             sky: None,
             fog: None,
             post_process: None,
+            shading_mode: ShadingMode::Lit,
             inv_camera: Mat4::IDENTITY.to_cols_array(),
             show_editor_grid: false,
             groups: vec![DrawGroup {

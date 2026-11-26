@@ -25,7 +25,7 @@ struct Display {
     parameters: vec4<f32>, // x: applied_hdr, y: exposure_stops, z: selection, w: pixels_per_point
     post_flags: vec4<f32>, // x: tonemapper (0 PBR Neutral, 1 ACES, 2 Reinhard, 3 None), y: bloom_intensity, z: ssao_enabled, w: fxaa_enabled
     grading_a: vec4<f32>,  // x: saturation, y: contrast, z: temperature, w: tint
-    grading_b: vec4<f32>,  // x: vignette, y: inv_width, z: inv_height, w: reserved
+    grading_b: vec4<f32>,  // x: vignette, y: inv_width, z: inv_height, w: debug_bypass (0 lit, 1 debug, 2 ao)
 };
 @group(0) @binding(2) var<uniform> display: Display;
 @group(0) @binding(3) var selection_mask: texture_2d<f32>;
@@ -61,6 +61,14 @@ fn grade_and_tonemap(uv: vec2<f32>) -> vec3<f32> {
     let raw = textureSampleLevel(image, image_sampler, uv, 0.0).rgb;
     if display.parameters.x < 0.5 {
         return raw;
+    }
+    let debug_bypass = display.grading_b.w;
+    if debug_bypass > 0.5 {
+        var dbg = clamp(raw, vec3<f32>(0.0), vec3<f32>(1.0));
+        if debug_bypass > 1.5 && display.post_flags.z > 0.5 {
+            dbg *= textureSampleLevel(ao_texture, image_sampler, uv, 0.0).r;
+        }
+        return dbg;
     }
     var c = max(raw, vec3<f32>(0.0));
     if display.post_flags.z > 0.5 {

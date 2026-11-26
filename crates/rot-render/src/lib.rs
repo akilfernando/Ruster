@@ -3,6 +3,8 @@ mod asset_gpu;
 pub mod benchmark;
 mod cluster_gpu;
 pub mod component_preview;
+#[cfg(test)]
+mod debug_views_probe;
 mod editor_grid;
 mod frustum;
 #[cfg(test)]
@@ -139,7 +141,8 @@ pub fn configure_setup(setup: &mut egui_wgpu::WgpuSetupCreateNew) {
         let mut desc = previous(adapter);
         desc.required_features |= adapter.features()
             & (wgpu::Features::TIMESTAMP_QUERY
-                | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
+                | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+                | wgpu::Features::POLYGON_MODE_LINE);
         desc
     });
 }
@@ -700,6 +703,96 @@ fn player_view_keeps_vertical_fov_and_rejects_invalid_lenses() {
     .is_none());
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ShadingMode {
+    #[default]
+    Lit,
+    Unlit,
+    Wireframe,
+    Normals,
+    Roughness,
+    Metallic,
+    Albedo,
+    Ao,
+    Depth,
+    Clusters,
+    Cascades,
+}
+
+impl ShadingMode {
+    pub const ALL: [Self; 11] = [
+        Self::Lit,
+        Self::Unlit,
+        Self::Wireframe,
+        Self::Normals,
+        Self::Roughness,
+        Self::Metallic,
+        Self::Albedo,
+        Self::Ao,
+        Self::Depth,
+        Self::Clusters,
+        Self::Cascades,
+    ];
+
+    pub const fn id(self) -> u32 {
+        match self {
+            Self::Lit => 0,
+            Self::Unlit => 1,
+            Self::Wireframe => 2,
+            Self::Normals => 3,
+            Self::Roughness => 4,
+            Self::Metallic => 5,
+            Self::Albedo => 6,
+            Self::Ao => 7,
+            Self::Depth => 8,
+            Self::Clusters => 9,
+            Self::Cascades => 10,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Lit => "Lit",
+            Self::Unlit => "Unlit",
+            Self::Wireframe => "Wireframe",
+            Self::Normals => "Normals",
+            Self::Roughness => "Roughness",
+            Self::Metallic => "Metallic",
+            Self::Albedo => "Albedo",
+            Self::Ao => "AO",
+            Self::Depth => "Depth",
+            Self::Clusters => "Clusters",
+            Self::Cascades => "Cascades",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "lit" => Some(Self::Lit),
+            "unlit" => Some(Self::Unlit),
+            "wireframe" => Some(Self::Wireframe),
+            "normals" => Some(Self::Normals),
+            "roughness" => Some(Self::Roughness),
+            "metallic" => Some(Self::Metallic),
+            "albedo" => Some(Self::Albedo),
+            "ao" | "ambient_occlusion" => Some(Self::Ao),
+            "depth" => Some(Self::Depth),
+            "clusters" | "light_clusters" => Some(Self::Clusters),
+            "cascades" | "shadow_cascades" => Some(Self::Cascades),
+            _ => None,
+        }
+    }
+
+    pub const fn next(self) -> Self {
+        let next_idx = (self.id() as usize + 1) % Self::ALL.len();
+        Self::ALL[next_idx]
+    }
+
+    pub const fn is_debug(self) -> bool {
+        !matches!(self, Self::Lit)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ViewPreset {
     Front,
@@ -722,6 +815,8 @@ pub struct ViewportWording {
     pub presets: &'static str,
     pub reset: &'static str,
     pub fit: &'static str,
+    pub shading_hint: &'static str,
+    pub shading_labels: [&'static str; 11],
     pub stats: &'static str,
     pub stats_hint: &'static str,
     pub orientation_hint: &'static str,
@@ -746,6 +841,20 @@ static DEFAULT_VIEWPORT_WORDING: ViewportWording = ViewportWording {
     presets: "View Presets",
     reset: "Reset Camera",
     fit: "Fit",
+    shading_hint: "Choose viewport shading or debug visualization mode.",
+    shading_labels: [
+        "Lit",
+        "Unlit",
+        "Wireframe",
+        "Normals",
+        "Roughness",
+        "Metallic",
+        "Albedo",
+        "AO",
+        "Depth",
+        "Clusters",
+        "Cascades",
+    ],
     stats: "Stats",
     stats_hint: "Show frame time, FPS, draw calls and triangles.",
     orientation_hint: "Click an axis to align. Click the center to switch projection.",
@@ -802,6 +911,8 @@ pub struct NavigationOptions {
     /// when side panels cover part of the surface. Defaults to the surface corner.
     /// The orientation gizmo uses the surface's top-right corner.
     pub overlay_origin: Option<egui::Pos2>,
+    /// Editor/runtime viewport shading and debug view mode (default `Lit`).
+    pub shading_mode: ShadingMode,
     /// The Stats overlay is open. Toggled by the Stats button in the view options.
     pub show_stats: bool,
     /// Renderer counters for the Stats overlay (from `install`).
@@ -832,6 +943,7 @@ impl Default for NavigationOptions {
             capture_camera_requested: false,
             clear_fit_error: false,
             overlay_origin: None,
+            shading_mode: ShadingMode::Lit,
             show_stats: false,
             metrics: None,
             frame_cpu_seconds: None,
@@ -1464,6 +1576,44 @@ pub fn allocate_viewport(
                 selected_fit = false;
                 fitted = true;
             }
+            let current_shading = wording.shading_labels[navigation.shading_mode.id() as usize];
+            ui.menu_button(current_shading, |ui| {
+                let groups: [&[ShadingMode]; 3] = [
+                    &[ShadingMode::Lit, ShadingMode::Unlit, ShadingMode::Wireframe],
+                    &[
+                        ShadingMode::Normals,
+                        ShadingMode::Roughness,
+                        ShadingMode::Metallic,
+                        ShadingMode::Albedo,
+                        ShadingMode::Ao,
+                    ],
+                    &[
+                        ShadingMode::Depth,
+                        ShadingMode::Clusters,
+                        ShadingMode::Cascades,
+                    ],
+                ];
+                for (gi, group) in groups.into_iter().enumerate() {
+                    if gi > 0 {
+                        ui.separator();
+                    }
+                    for &mode in group {
+                        let label = wording.shading_labels[mode.id() as usize];
+                        if ui
+                            .add(egui::Button::selectable(
+                                navigation.shading_mode == mode,
+                                label,
+                            ))
+                            .clicked()
+                        {
+                            navigation.shading_mode = mode;
+                            ui.close();
+                        }
+                    }
+                }
+            })
+            .response
+            .on_hover_text(wording.shading_hint);
             if ui
                 .add(
                     egui::Button::selectable(navigation.show_stats, wording.stats)
@@ -2231,6 +2381,7 @@ fn render_draw_scene(
         && scene.display.is_legacy()
         && scene.sky.is_none()
         && !show_editor_grid
+        && navigation.shading_mode == ShadingMode::Lit
     {
         paint_solid_sdr(ui, draw_rect, scene.background);
         FrameReceipt::default()
@@ -2258,6 +2409,7 @@ fn render_draw_scene(
                 sky: scene.sky,
                 fog: scene.fog,
                 post_process: scene.post_process,
+                shading_mode: navigation.shading_mode,
                 lighting,
                 size: draw_rect.size(),
                 cpu_us: start.elapsed().as_secs_f64() * 1.0e6,
@@ -3128,6 +3280,10 @@ struct Timestamps {
 struct Resources {
     builtin_sdr: ScenePipelines,
     hdr_pipelines: BTreeMap<u32, ScenePipelines>,
+    wireframe_supported: bool,
+    wireframe_sdr: Option<ScenePipelines>,
+    wireframe_hdr: BTreeMap<u32, ScenePipelines>,
+    debug_sdr: Option<ScenePipelines>,
     selection_sdr: SelectionPipelines,
     selection_hdr: BTreeMap<u32, SelectionPipelines>,
     hdr_samples: Option<u32>,
@@ -3374,6 +3530,12 @@ impl Resources {
         Self {
             builtin_sdr: pipeline.clone(),
             hdr_pipelines: BTreeMap::new(),
+            wireframe_supported: device
+                .features()
+                .contains(wgpu::Features::POLYGON_MODE_LINE),
+            wireframe_sdr: None,
+            wireframe_hdr: BTreeMap::new(),
+            debug_sdr: None,
             selection_sdr,
             selection_hdr: BTreeMap::new(),
             hdr_samples: None,
@@ -3446,6 +3608,50 @@ impl Resources {
         self.selection_hdr
             .entry(samples)
             .or_insert_with(|| selection_pipelines(device, &self.camera_layout, samples));
+    }
+    fn ensure_debug_pipelines(
+        &mut self,
+        device: &wgpu::Device,
+        applied_hdr: bool,
+        samples: u32,
+        use_hw_wireframe: bool,
+        needs_debug_sdr: bool,
+    ) {
+        if use_hw_wireframe {
+            if applied_hdr {
+                self.wireframe_hdr.entry(samples).or_insert_with(|| {
+                    scene_pipeline_format_mode(
+                        device,
+                        &self.pipeline_layout,
+                        surface_shader(),
+                        samples,
+                        HDR_COLOR,
+                        wgpu::PolygonMode::Line,
+                        true,
+                    )
+                });
+            } else if self.wireframe_sdr.is_none() {
+                self.wireframe_sdr = Some(scene_pipeline_format_mode(
+                    device,
+                    &self.pipeline_layout,
+                    surface_shader(),
+                    samples,
+                    COLOR,
+                    wgpu::PolygonMode::Line,
+                    true,
+                ));
+            }
+        } else if needs_debug_sdr && self.debug_sdr.is_none() {
+            self.debug_sdr = Some(scene_pipeline_format_mode(
+                device,
+                &self.pipeline_layout,
+                surface_shader(),
+                samples,
+                COLOR,
+                wgpu::PolygonMode::Fill,
+                false,
+            ));
+        }
     }
     fn asset_metrics(&self) {
         let (mesh, texture) = self.assets.retired_bytes();
@@ -3796,6 +4002,25 @@ fn scene_pipeline_format(
     sample_count: u32,
     format: wgpu::TextureFormat,
 ) -> ScenePipelines {
+    scene_pipeline_format_mode(
+        device,
+        layout,
+        source,
+        sample_count,
+        format,
+        wgpu::PolygonMode::Fill,
+        false,
+    )
+}
+fn scene_pipeline_format_mode(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    source: &str,
+    sample_count: u32,
+    format: wgpu::TextureFormat,
+    polygon_mode: wgpu::PolygonMode,
+    force_no_cull: bool,
+) -> ScenePipelines {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Rot Engine refreshable scene shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -3889,7 +4114,8 @@ fn scene_pipeline_format(
                 })],
             }),
             primitive: wgpu::PrimitiveState {
-                cull_mode: (!double_sided).then_some(wgpu::Face::Back),
+                cull_mode: (!double_sided && !force_no_cull).then_some(wgpu::Face::Back),
+                polygon_mode,
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
@@ -4083,6 +4309,7 @@ fn prepare_mesh(
     meshes.insert(id.into(), gpu);
     Some(bytes)
 }
+#[derive(Clone)]
 struct DrawGroup {
     double_sided: bool,
     alpha_mode: rot_scene::AlphaMode,
@@ -4131,6 +4358,7 @@ struct SceneCallback {
     sky: Option<rot_scene::Sky>,
     fog: Option<rot_scene::Fog>,
     post_process: Option<rot_scene::PostProcess>,
+    shading_mode: ShadingMode,
     lighting: PackedLighting,
     size: egui::Vec2,
     cpu_us: f64,
@@ -4189,9 +4417,23 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         } else {
             r.sample_count
         };
+        let effective_mode = if r.builtin_appearance {
+            self.shading_mode
+        } else {
+            ShadingMode::Lit
+        };
+        let use_hw_wireframe = effective_mode == ShadingMode::Wireframe && r.wireframe_supported;
+        let wireframe_fallback = effective_mode == ShadingMode::Wireframe && !r.wireframe_supported;
         if applied_hdr {
             r.ensure_hdr_pipelines(device, samples);
         }
+        r.ensure_debug_pipelines(
+            device,
+            applied_hdr,
+            samples,
+            use_hw_wireframe,
+            effective_mode != ShadingMode::Lit && !applied_hdr,
+        );
         let status = if !valid_display {
             DisplayStatus::InvalidSettings
         } else if !r.builtin_appearance {
@@ -4266,13 +4508,23 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                     .any(|instance| instance.response[3] > 0.)
             });
         let post = self.post_process.unwrap_or_default();
-        let ssao_active = applied_hdr && post.ssao.enabled;
-        let bloom_intensity = if applied_hdr && post.bloom.enabled {
-            post.bloom.intensity
-        } else {
-            0.0
+        let ssao_active = applied_hdr
+            && post.ssao.enabled
+            && matches!(effective_mode, ShadingMode::Lit | ShadingMode::Ao);
+        let bloom_intensity =
+            if applied_hdr && post.bloom.enabled && effective_mode == ShadingMode::Lit {
+                post.bloom.intensity
+            } else {
+                0.0
+            };
+        let fxaa_enabled = applied_hdr
+            && post.anti_aliasing == rot_scene::AntiAliasing::Fxaa
+            && effective_mode == ShadingMode::Lit;
+        let debug_bypass = match effective_mode {
+            ShadingMode::Lit => 0.0,
+            ShadingMode::Ao => 2.0,
+            _ => 1.0,
         };
-        let fxaa_enabled = applied_hdr && post.anti_aliasing == rot_scene::AntiAliasing::Fxaa;
         let tonemapper_id = match post.grading.tonemapper {
             rot_scene::Tonemapper::PbrNeutral => 0.0,
             rot_scene::Tonemapper::AcesFitted => 1.0,
@@ -4306,7 +4558,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 post.grading.vignette,
                 1.0 / size[0].max(1) as f32,
                 1.0 / size[1].max(1) as f32,
-                0.0,
+                debug_bypass,
             ],
         ];
         if display_packet != r.display_packet {
@@ -4343,13 +4595,18 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             device,
             queue,
             encoder,
-            self.sky,
-            self.fog,
+            (self.sky, self.fog),
+            (
+                effective_mode.id() as f32,
+                f32::from(u8::from(wireframe_fallback)),
+            ),
             &self.lighting.uniform,
         ) {
             r.lighting.rebuild_bind(device, &r.ibl, &r.cluster);
         }
-        let draw_sky = r.builtin_appearance && self.sky.is_some_and(|sky| sky.show_backdrop);
+        let draw_sky = r.builtin_appearance
+            && self.sky.is_some_and(|sky| sky.show_backdrop)
+            && matches!(effective_mode, ShadingMode::Lit | ShadingMode::Unlit);
         if draw_sky {
             r.ibl.prepare_sky_draw(
                 device,
@@ -4444,8 +4701,16 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            let pipelines = if applied_hdr {
+            let pipelines = if use_hw_wireframe {
+                if applied_hdr {
+                    &r.wireframe_hdr[&samples]
+                } else {
+                    r.wireframe_sdr.as_ref().expect("wireframe sdr pipeline")
+                }
+            } else if applied_hdr {
                 &r.hdr_pipelines[&samples]
+            } else if effective_mode != ShadingMode::Lit {
+                r.debug_sdr.as_ref().expect("debug sdr pipeline")
             } else {
                 &r.pipeline
             };
@@ -4560,6 +4825,14 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             }
         }
         {
+            let effective_post = match effective_mode {
+                ShadingMode::Lit => self.post_process,
+                ShadingMode::Ao => self.post_process.map(|mut p| {
+                    p.bloom.enabled = false;
+                    p
+                }),
+                _ => None,
+            };
             let target = r.target.as_mut().expect("target just resized");
             let post_out = r.post.prepare(
                 device,
@@ -4571,7 +4844,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 &target.color,
                 &target.depth,
                 Mat4::from_cols_array(&self.camera_projection),
-                self.post_process,
+                effective_post,
             );
             if post_out.view_generation != target.post_generation {
                 target.rebuild_composite_bind(
@@ -5773,6 +6046,83 @@ mod tests {
         assert!(delay <= std::time::Duration::from_millis(250), "{delay:?}");
     }
 
+    #[test]
+    fn shading_mode_parse_and_cycle_cover_all_modes() {
+        let mut seen = BTreeSet::new();
+        let mut cur = ShadingMode::Lit;
+        for _ in 0..ShadingMode::ALL.len() {
+            seen.insert(cur);
+            assert_eq!(ShadingMode::parse(cur.label()), Some(cur));
+            assert_eq!(cur.is_debug(), cur != ShadingMode::Lit);
+            cur = cur.next();
+        }
+        assert_eq!(cur, ShadingMode::Lit);
+        assert_eq!(seen.len(), ShadingMode::ALL.len());
+    }
+
+    #[test]
+    fn viewport_shading_menu_switches_mode_and_preserves_other_controls() {
+        let scene = Scene::demo();
+        let meshes = BTreeMap::new();
+        let ctx = egui::Context::default();
+        let mut navigation = NavigationOptions::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 500.0));
+        let frame = |navigation: &mut NavigationOptions, events: Vec<egui::Event>| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    viewport_with_navigation(ui, &scene, &[], &meshes, navigation);
+                },
+            );
+            output.textures_delta.clear();
+            output
+        };
+        let label_center = |shapes: &[egui::epaint::ClippedShape], label: &str| {
+            shapes.iter().find_map(|s| match &s.shape {
+                egui::epaint::Shape::Text(text) if text.galley.job.text == label => Some(
+                    s.clip_rect
+                        .intersect(egui::Rect::from_min_size(text.pos, text.galley.size()))
+                        .center(),
+                ),
+                _ => None,
+            })
+        };
+        let click = |navigation: &mut NavigationOptions, pos: egui::Pos2| {
+            frame(navigation, vec![egui::Event::PointerMoved(pos)]);
+            frame(
+                navigation,
+                vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+            frame(
+                navigation,
+                vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+            frame(navigation, vec![])
+        };
+        let output = frame(&mut navigation, vec![]);
+        let lit_pos = label_center(&output.shapes, "Lit").expect("Lit shading button");
+        let output = click(&mut navigation, lit_pos);
+        let clusters_pos =
+            label_center(&output.shapes, "Clusters").expect("Clusters item inside menu");
+        click(&mut navigation, clusters_pos);
+        assert_eq!(navigation.shading_mode, ShadingMode::Clusters);
+    }
+
     // Unique UI contract: navigation options frame exact selected content,
     // pan without rotating and gate RMB flight on frontend text/focus ownership.
     #[test]
@@ -6635,7 +6985,8 @@ mod tests {
                 .expect("Vulkan adapter");
         let descriptor = wgpu::DeviceDescriptor {
             required_features: adapter.features()
-                & wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
+                & (wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+                    | wgpu::Features::POLYGON_MODE_LINE),
             ..Default::default()
         };
         let (device, queue) =

@@ -2151,6 +2151,54 @@ impl ComponentWorkspace {
                 self.error = self.frame_objects(None, None).err().map(str::to_owned);
                 return;
             }
+            Action::ShadingLit => {
+                self.navigation.shading_mode = rot_render::ShadingMode::Lit;
+                return;
+            }
+            Action::ShadingUnlit => {
+                self.navigation.shading_mode = rot_render::ShadingMode::Unlit;
+                return;
+            }
+            Action::ShadingWireframe => {
+                self.navigation.shading_mode = rot_render::ShadingMode::Wireframe;
+                return;
+            }
+            Action::ShadingNormals => {
+                self.navigation.shading_mode = rot_render::ShadingMode::Normals;
+                return;
+            }
+            Action::ShadingRoughness => {
+                self.navigation.shading_mode = rot_render::ShadingMode::Roughness;
+                return;
+            }
+            Action::ShadingMetallic => {
+                self.navigation.shading_mode = rot_render::ShadingMode::Metallic;
+                return;
+            }
+            Action::ShadingAlbedo => {
+                self.navigation.shading_mode = rot_render::ShadingMode::Albedo;
+                return;
+            }
+            Action::ShadingAo => {
+                self.navigation.shading_mode = rot_render::ShadingMode::Ao;
+                return;
+            }
+            Action::ShadingDepth => {
+                self.navigation.shading_mode = rot_render::ShadingMode::Depth;
+                return;
+            }
+            Action::ShadingClusters => {
+                self.navigation.shading_mode = rot_render::ShadingMode::Clusters;
+                return;
+            }
+            Action::ShadingCascades => {
+                self.navigation.shading_mode = rot_render::ShadingMode::Cascades;
+                return;
+            }
+            Action::ShadingCycle => {
+                self.navigation.shading_mode = self.navigation.shading_mode.next();
+                return;
+            }
             Action::CreateEmpty
             | Action::CreateCube
             | Action::CreateSphere
@@ -3436,6 +3484,18 @@ impl ComponentWorkspace {
                             | Action::Play
                             | Action::Pause
                             | Action::Step
+                            | Action::ShadingLit
+                            | Action::ShadingUnlit
+                            | Action::ShadingWireframe
+                            | Action::ShadingNormals
+                            | Action::ShadingRoughness
+                            | Action::ShadingMetallic
+                            | Action::ShadingAlbedo
+                            | Action::ShadingAo
+                            | Action::ShadingDepth
+                            | Action::ShadingClusters
+                            | Action::ShadingCascades
+                            | Action::ShadingCycle
                     ) || cfg!(target_os = "linux")
                         && matches!(action, Action::ImportAsset | Action::Export)
                 },
@@ -6461,5 +6521,37 @@ mod tests {
         assert!(editor.inspector_scrub.is_none());
         assert_eq!(editor.session.revision(), 0);
         assert_eq!(editor.session.scene(), &scene);
+    }
+
+    #[test]
+    fn shading_actions_and_command_palette_switch_modes() {
+        for query in ["wireframe", "clusters", "cascades", "normals", "ao"] {
+            assert!(
+                !palette::matches(query).is_empty(),
+                "command palette must match {query}"
+            );
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        let scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        let mut editor = ComponentWorkspace::new(path, ComponentSession::new(scene).unwrap());
+        assert_eq!(editor.navigation.shading_mode, rot_render::ShadingMode::Lit);
+        editor.command(Action::ShadingWireframe);
+        assert_eq!(
+            editor.navigation.shading_mode,
+            rot_render::ShadingMode::Wireframe
+        );
+        editor.command(Action::ShadingClusters);
+        assert_eq!(
+            editor.navigation.shading_mode,
+            rot_render::ShadingMode::Clusters
+        );
+        editor.command(Action::ShadingCycle);
+        assert_eq!(
+            editor.navigation.shading_mode,
+            rot_render::ShadingMode::Cascades
+        );
+        editor.command(Action::ShadingCycle);
+        assert_eq!(editor.navigation.shading_mode, rot_render::ShadingMode::Lit);
     }
 }

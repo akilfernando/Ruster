@@ -115,10 +115,10 @@ fn sample_csm_cascade(cascade_idx: u32, world: vec3<f32>, normal: vec3<f32>) -> 
     return visibility / 9.0;
 }
 
-fn csm_sun_visibility(world: vec3<f32>, normal: vec3<f32>, view_depth: f32) -> f32 {
+fn csm_cascade_index(view_depth: f32) -> u32 {
     let count = u32(max(csm_shadow.csm_flags.y, 1.0));
     if count > 1u && view_depth > csm_shadow.csm_flags.z {
-        return 1.0;
+        return 4u;
     }
     var cascade = count - 1u;
     for (var i = 0u; i < 3u; i = i + 1u) {
@@ -126,6 +126,15 @@ fn csm_sun_visibility(world: vec3<f32>, normal: vec3<f32>, view_depth: f32) -> f
             cascade = i;
             break;
         }
+    }
+    return cascade;
+}
+
+fn csm_sun_visibility(world: vec3<f32>, normal: vec3<f32>, view_depth: f32) -> f32 {
+    let count = u32(max(csm_shadow.csm_flags.y, 1.0));
+    let cascade = csm_cascade_index(view_depth);
+    if cascade >= count {
+        return 1.0;
     }
     let vis = sample_csm_cascade(cascade, world, normal);
     if cascade + 1u < count {
@@ -140,6 +149,55 @@ fn csm_sun_visibility(world: vec3<f32>, normal: vec3<f32>, view_depth: f32) -> f
         }
     }
     return vis;
+}
+
+fn cluster_coords(frag_xy: vec2<f32>, view_depth: f32) -> vec4<u32> {
+    let gx = max(cluster_params.grid_counts.x, 1u);
+    let gy = max(cluster_params.grid_counts.y, 1u);
+    let gz = max(cluster_params.grid_counts.z, 1u);
+    let cx = min(
+        u32(max(frag_xy.x, 0.0) / max(cluster_params.screen_z_params.x, 1.0) * f32(gx)),
+        gx - 1u,
+    );
+    let cy = min(
+        u32(max(frag_xy.y, 0.0) / max(cluster_params.screen_z_params.y, 1.0) * f32(gy)),
+        gy - 1u,
+    );
+    var cz: u32;
+    if cluster_params.slice_params.z >= 0.5 {
+        cz = u32(clamp(
+            floor(view_depth * cluster_params.slice_params.x + cluster_params.slice_params.y),
+            0.0,
+            f32(gz - 1u),
+        ));
+    } else {
+        cz = u32(clamp(
+            floor(log2(max(view_depth, 1e-5)) * cluster_params.slice_params.x + cluster_params.slice_params.y),
+            0.0,
+            f32(gz - 1u),
+        ));
+    }
+    let idx = cx + cy * gx + cz * gx * gy;
+    return vec4<u32>(cx, cy, cz, idx);
+}
+
+fn cluster_heatmap(count: u32) -> vec3<f32> {
+    if count == 0u {
+        return vec3<f32>(0.03, 0.06, 0.14);
+    }
+    if count <= 4u {
+        let t = f32(count - 1u) / 3.0;
+        return mix(vec3<f32>(0.08, 0.35, 0.90), vec3<f32>(0.10, 0.85, 0.45), t);
+    }
+    if count <= 12u {
+        let t = f32(count - 4u) / 8.0;
+        return mix(vec3<f32>(0.10, 0.85, 0.45), vec3<f32>(0.95, 0.85, 0.10), t);
+    }
+    if count < 64u {
+        let t = f32(count - 12u) / 51.0;
+        return mix(vec3<f32>(0.95, 0.85, 0.10), vec3<f32>(0.95, 0.15, 0.10), t);
+    }
+    return vec3<f32>(0.95, 0.10, 0.90);
 }
 
 fn point_face_index(offset_from_light: vec3<f32>) -> u32 {
@@ -323,6 +381,7 @@ fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
     // No-map draws preserve scalar arithmetic and avoid extra texture fetches.
     let uv_dx = dpdx(v.uv);
     let uv_dy = dpdy(v.uv);
+    let edge_delta = length(dpdx(v.normal)) + length(dpdy(v.normal));
     if v.pbr_maps.w >= 0.0 && alpha < v.pbr_maps.w {
         discard;
     }
@@ -391,6 +450,87 @@ fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
     }
     let view_pos_all = (cluster_params.view * vec4<f32>(v.world_position, 1.0)).xyz;
     let sun_view_depth = max(-view_pos_all.z, 0.0);
+    let shading_mode = u32(round(ibl.fog_extra.z));
+    if shading_mode == 1u {
+        return vec4<f32>(clamp(highlighted + emission, vec3<f32>(0.0), vec3<f32>(1.0)), out_alpha);
+    }
+    if shading_mode == 2u {
+        let depth_fade = clamp(1.0 - sun_view_depth / 120.0, 0.25, 1.0);
+        if ibl.fog_extra.w < 0.5 {
+            let tint = mix(
+                vec3<f32>(0.55, 0.72, 0.88),
+                clamp(albedo, vec3<f32>(0.2), vec3<f32>(1.0)),
+                0.35,
+            );
+            return vec4<f32>(tint * depth_fade, 1.0);
+        }
+        let edge_factor = clamp(edge_delta * 2.5, 0.0, 1.0);
+        let fill = vec3<f32>(0.10, 0.12, 0.15);
+        let wire = vec3<f32>(0.55, 0.78, 0.95);
+        return vec4<f32>(mix(fill, wire, edge_factor) * depth_fade, 1.0);
+    }
+    if shading_mode == 3u {
+        return vec4<f32>(clamp(n * 0.5 + vec3<f32>(0.5), vec3<f32>(0.0), vec3<f32>(1.0)), out_alpha);
+    }
+    if shading_mode == 4u {
+        return vec4<f32>(vec3<f32>(clamp(response.y, 0.0, 1.0)), out_alpha);
+    }
+    if shading_mode == 5u {
+        return vec4<f32>(vec3<f32>(metallic), out_alpha);
+    }
+    if shading_mode == 6u {
+        return vec4<f32>(clamp(highlighted, vec3<f32>(0.0), vec3<f32>(1.0)), out_alpha);
+    }
+    if shading_mode == 7u {
+        return vec4<f32>(vec3<f32>(clamp(ao, 0.0, 1.0)), out_alpha);
+    }
+    if shading_mode == 8u {
+        let d = 1.0 - clamp(sun_view_depth / (sun_view_depth + 10.0), 0.0, 1.0);
+        return vec4<f32>(vec3<f32>(d), out_alpha);
+    }
+    if shading_mode == 9u {
+        let coords = cluster_coords(
+            v.position.xy,
+            clamp(sun_view_depth, cluster_params.screen_z_params.z, cluster_params.screen_z_params.w),
+        );
+        var count = 0u;
+        if cluster_params.grid_counts.w > 0u {
+            count = min(cluster_counts[coords.w], 64u);
+        }
+        var color = cluster_heatmap(count);
+        let tile_w = max(cluster_params.screen_z_params.x / f32(max(cluster_params.grid_counts.x, 1u)), 1.0);
+        let tile_h = max(cluster_params.screen_z_params.y / f32(max(cluster_params.grid_counts.y, 1u)), 1.0);
+        let local_x = v.position.x - f32(coords.x) * tile_w;
+        let local_y = v.position.y - f32(coords.y) * tile_h;
+        if local_x < 1.0 || local_y < 1.0 {
+            color = mix(color, vec3<f32>(0.02, 0.03, 0.05), 0.55);
+        }
+        return vec4<f32>(color, out_alpha);
+    }
+    if shading_mode == 10u {
+        var band = vec3<f32>(0.35, 0.35, 0.40);
+        var vis = 1.0;
+        if lighting.mode_counts.x != 0u && lighting.mode_counts.z != 0u {
+            if csm_shadow.csm_flags.x > 0.5 {
+                let idx = csm_cascade_index(sun_view_depth);
+                if idx == 0u {
+                    band = vec3<f32>(0.15, 0.85, 0.25);
+                } else if idx == 1u {
+                    band = vec3<f32>(0.95, 0.85, 0.15);
+                } else if idx == 2u {
+                    band = vec3<f32>(0.95, 0.45, 0.10);
+                } else if idx == 3u {
+                    band = vec3<f32>(0.90, 0.15, 0.18);
+                }
+                vis = csm_sun_visibility(v.world_position, n, sun_view_depth);
+            } else if sun_shadow.parameters.x > 0.5 {
+                vis = sun_visibility(v.world_position, n);
+            }
+            let nl = max(dot(n, lighting.direction_to_light.xyz), 0.0);
+            band *= 0.45 + 0.55 * nl * vis;
+        }
+        return vec4<f32>(band, out_alpha);
+    }
     if lighting.mode_counts.x == 0u {
         let incoming = normalize(vec3<f32>(0.4, 0.8, 0.6));
         let fill = select(ambient_albedo * (0.28 * ao), ibl_total, ibl.params.x > 0.5 && response.x > 0.5);
@@ -410,39 +550,12 @@ fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
         result += direct;
     }
     if cluster_params.grid_counts.w > 0u {
-        let view_pos = view_pos_all;
         let view_depth = clamp(
-            -view_pos.z,
+            -view_pos_all.z,
             cluster_params.screen_z_params.z,
             cluster_params.screen_z_params.w,
         );
-        let cx = min(
-            u32(max(v.position.x, 0.0) / max(cluster_params.screen_z_params.x, 1.0)
-                * f32(cluster_params.grid_counts.x)),
-            cluster_params.grid_counts.x - 1u,
-        );
-        let cy = min(
-            u32(max(v.position.y, 0.0) / max(cluster_params.screen_z_params.y, 1.0)
-                * f32(cluster_params.grid_counts.y)),
-            cluster_params.grid_counts.y - 1u,
-        );
-        var cz: u32;
-        if cluster_params.slice_params.z >= 0.5 {
-            cz = u32(clamp(
-                floor(view_depth * cluster_params.slice_params.x + cluster_params.slice_params.y),
-                0.0,
-                f32(cluster_params.grid_counts.z - 1u),
-            ));
-        } else {
-            cz = u32(clamp(
-                floor(log2(max(view_depth, 1e-5)) * cluster_params.slice_params.x + cluster_params.slice_params.y),
-                0.0,
-                f32(cluster_params.grid_counts.z - 1u),
-            ));
-        }
-        let cluster_idx = cx
-            + cy * cluster_params.grid_counts.x
-            + cz * cluster_params.grid_counts.x * cluster_params.grid_counts.y;
+        let cluster_idx = cluster_coords(v.position.xy, view_depth).w;
         let cluster_light_count = min(cluster_counts[cluster_idx], 64u);
         let base_offset = cluster_idx * 64u;
         for (var ci = 0u; ci < cluster_light_count; ci++) {

@@ -25,23 +25,38 @@ pub(super) struct IblUniform {
     pub fog_color_mode: [f32; 4],
     /// x: start (linear) or density (exp/exp2), y: end, z: height_falloff, w: height.
     pub fog_params: [f32; 4],
-    /// x: max_opacity, y: sky_affect, z/w: reserved.
+    /// x: max_opacity, y: sky_affect, z: shading_mode id (0 Lit, 1..10 debug), w: wireframe_fallback.
     pub fog_extra: [f32; 4],
 }
 
-fn pack_fog(fog: Option<rot_scene::Fog>) -> ([f32; 4], [f32; 4], [f32; 4]) {
-    let Some(fog) = fog else {
-        return ([0.0; 4], [0.0; 4], [0.0; 4]);
-    };
-    let (mode_id, density_or_start) = match fog.mode {
-        rot_scene::FogMode::Linear => (1.0, fog.start),
-        rot_scene::FogMode::Exponential => (2.0, fog.density),
-        rot_scene::FogMode::ExponentialSquared => (3.0, fog.density),
-    };
+fn pack_fog(
+    fog: Option<rot_scene::Fog>,
+    shading_mode: (f32, f32),
+) -> ([f32; 4], [f32; 4], [f32; 4]) {
+    let (mode_id, density_or_start, end, height_falloff, height, max_opacity, sky_affect, color) =
+        if let Some(fog) = fog {
+            let (mode_id, density_or_start) = match fog.mode {
+                rot_scene::FogMode::Linear => (1.0, fog.start),
+                rot_scene::FogMode::Exponential => (2.0, fog.density),
+                rot_scene::FogMode::ExponentialSquared => (3.0, fog.density),
+            };
+            (
+                mode_id,
+                density_or_start,
+                fog.end,
+                fog.height_falloff,
+                fog.height,
+                fog.max_opacity,
+                fog.sky_affect,
+                fog.color,
+            )
+        } else {
+            (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, [0.0; 3])
+        };
     (
-        [fog.color[0], fog.color[1], fog.color[2], mode_id],
-        [density_or_start, fog.end, fog.height_falloff, fog.height],
-        [fog.max_opacity, fog.sky_affect, 0.0, 0.0],
+        [color[0], color[1], color[2], mode_id],
+        [density_or_start, end, height_falloff, height],
+        [max_opacity, sky_affect, shading_mode.0, shading_mode.1],
     )
 }
 
@@ -483,11 +498,12 @@ impl IblGpu {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
-        sky: Option<rot_scene::Sky>,
-        fog: Option<rot_scene::Fog>,
+        environment: (Option<rot_scene::Sky>, Option<rot_scene::Fog>),
+        shading_mode: (f32, f32),
         lighting: &LightingPacket,
     ) -> bool {
-        let (fog_color_mode, fog_params, fog_extra) = pack_fog(fog);
+        let (sky, fog) = environment;
+        let (fog_color_mode, fog_params, fog_extra) = pack_fog(fog, shading_mode);
         let Some(sky) = sky else {
             let off = IblUniform {
                 fog_color_mode,
@@ -917,6 +933,7 @@ mod tests {
                 sky,
                 fog,
                 post_process: None,
+                shading_mode: ShadingMode::Lit,
                 camera: (proj * view).to_cols_array(),
                 inv_camera: (proj * view).inverse().to_cols_array(),
                 cluster_camera: ClusterCamera::from_matrices(view, proj),
