@@ -37,7 +37,21 @@ struct Lighting {
     points: array<PointLight, 4>,
     spot_cones: array<vec4<f32>, 4>,
 };
+struct IblUniform {
+    // x: enabled (>0.5), y: show_backdrop (>0.5), z: intensity, w: sun_enabled (>0.5)
+    params: vec4<f32>,
+    zenith: vec4<f32>,
+    horizon: vec4<f32>,
+    ground: vec4<f32>,
+    sun_dir: vec4<f32>,
+    sun_color: vec4<f32>,
+    sh: array<vec4<f32>, 9>,
+};
 @group(2) @binding(0) var<uniform> lighting: Lighting;
+@group(2) @binding(1) var ibl_specular: texture_cube<f32>;
+@group(2) @binding(2) var ibl_brdf_lut: texture_2d<f32>;
+@group(2) @binding(3) var ibl_sampler: sampler;
+@group(2) @binding(4) var<uniform> ibl: IblUniform;
 struct Vertex {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -156,12 +170,41 @@ fn shade(v: Output, normal: vec3<f32>) -> vec4<f32> {
     let ambient_scale = select(1.0, 0.96, response.x > 0.5);
     let f0_amb = mix(vec3<f32>(0.04), highlighted, metallic);
     let ambient_albedo = select(highlighted, highlighted * (1.0 - metallic) * ambient_scale + f0_amb * (metallic * 0.25), response.x > 0.5);
+    var ibl_total = vec3<f32>(0.0);
+    if ibl.params.x > 0.5 && response.x > 0.5 {
+        let roughness = clamp(response.y, 0.08, 1.0);
+        let nv = max(dot(n, view), 1e-4);
+        let reflect_dir = reflect(-view, n);
+        let brdf = textureSampleLevel(ibl_brdf_lut, ibl_sampler, vec2<f32>(nv, roughness), 0.0).rg;
+        let f_ss = f0_amb * brdf.x + vec3<f32>(brdf.y);
+        let e_ss = brdf.x + brdf.y;
+        let f_avg = f0_amb + (vec3<f32>(1.0) - f0_amb) * (1.0 / 21.0);
+        let f_ms = (f_ss * f_avg / max(vec3<f32>(1.0) - f_avg * (1.0 - e_ss), vec3<f32>(1e-4))) * (1.0 - e_ss);
+        let k_s = f_ss + f_ms;
+        let k_d = (1.0 - metallic) * max(vec3<f32>(1.0) - k_s, vec3<f32>(0.0)) * highlighted;
+        let irr = max(
+            ibl.sh[0].xyz
+                + ibl.sh[1].xyz * n.y
+                + ibl.sh[2].xyz * n.z
+                + ibl.sh[3].xyz * n.x
+                + ibl.sh[4].xyz * (n.x * n.y)
+                + ibl.sh[5].xyz * (n.y * n.z)
+                + ibl.sh[6].xyz * (3.0 * n.z * n.z - 1.0)
+                + ibl.sh[7].xyz * (n.x * n.z)
+                + ibl.sh[8].xyz * (n.x * n.x - n.y * n.y),
+            vec3<f32>(0.0),
+        );
+        let spec_occ = clamp(pow(nv + ao, exp2(-16.0 * roughness - 1.0)) - 1.0 + ao, 0.0, 1.0);
+        let prefiltered = textureSampleLevel(ibl_specular, ibl_sampler, reflect_dir, roughness * 4.0).rgb;
+        ibl_total = k_d * irr * ao + prefiltered * k_s * spec_occ;
+    }
     if lighting.mode_counts.x == 0u {
         let incoming = normalize(vec3<f32>(0.4, 0.8, 0.6));
-        let stored = hdr_storage(ambient_albedo * (0.28 * ao) + 0.72 * direct_response(highlighted, n, view, incoming, response, metallic) + emission);
+        let fill = select(ambient_albedo * (0.28 * ao), ibl_total, ibl.params.x > 0.5 && response.x > 0.5);
+        let stored = hdr_storage(fill + 0.72 * direct_response(highlighted, n, view, incoming, response, metallic) + emission);
         return vec4<f32>(stored.rgb, 1.0);
     }
-    var result = ambient_albedo * lighting.ambient.rgb * ao;
+    var result = ambient_albedo * lighting.ambient.rgb * ao + ibl_total;
     if lighting.mode_counts.z != 0u {
         var direct = lighting.directional_color_intensity.rgb * direct_response(highlighted, n, view, lighting.direction_to_light.xyz, response, metallic);
         // Shadow attenuates the entire Sun contribution, including specular.

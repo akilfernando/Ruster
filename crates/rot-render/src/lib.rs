@@ -5,6 +5,7 @@ pub mod component_preview;
 mod editor_grid;
 #[cfg(test)]
 mod geometry_probe;
+mod ibl_gpu;
 mod lighting_gpu;
 mod material_gpu;
 mod primitives;
@@ -2343,22 +2344,30 @@ fn render_draw_scene(
     let receipt = if allow_solid_sdr
         && scene.objects.is_empty()
         && scene.display.is_legacy()
+        && scene.sky.is_none()
         && !show_editor_grid
     {
         paint_solid_sdr(ui, draw_rect, scene.background);
         FrameReceipt::default()
     } else {
         let receipt = FrameReceipt::scene_callback();
+        let inv_camera = if view_projection.determinant().abs() > 1e-12 {
+            view_projection.inverse().to_cols_array()
+        } else {
+            Mat4::IDENTITY.to_cols_array()
+        };
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(
             draw_rect,
             SceneCallback {
                 receipt: receipt.clone(),
                 groups,
                 camera: view_projection.to_cols_array(),
+                inv_camera,
                 show_editor_grid,
                 camera_eye_mode,
                 display: scene.display,
                 background: scene.background,
+                sky: scene.sky,
                 lighting,
                 size: draw_rect.size(),
                 cpu_us: start.elapsed().as_secs_f64() * 1.0e6,
@@ -2930,6 +2939,7 @@ struct Resources {
     pipeline_layout: wgpu::PipelineLayout,
     materials: MaterialGpu,
     assets: asset_gpu::AssetGpu,
+    ibl: ibl_gpu::IblGpu,
     lighting: LightingGpu,
     shadows: shadow_gpu::ShadowGpu,
     builtin_appearance: bool,
@@ -2997,7 +3007,8 @@ impl Resources {
             entries: &[instance_entry(0)],
         });
         let materials = MaterialGpu::new(device, queue);
-        let lighting = LightingGpu::new(device);
+        let ibl = ibl_gpu::IblGpu::new(device, queue);
+        let lighting = LightingGpu::new(device, &ibl);
         let shadows = shadow_gpu::ShadowGpu::new(device, queue, &instance_layout);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("fixed scene ABI"),
@@ -3126,6 +3137,7 @@ impl Resources {
             pipeline_layout,
             materials,
             assets: Default::default(),
+            ibl,
             lighting,
             shadows,
             builtin_appearance: true,
@@ -3804,10 +3816,12 @@ struct SceneCallback {
     receipt: FrameReceipt,
     groups: Vec<DrawGroup>,
     camera: [f32; 16],
+    inv_camera: [f32; 16],
     show_editor_grid: bool,
     camera_eye_mode: [f32; 4],
     display: rot_scene::DisplayProfile,
     background: Option<rot_scene::BackgroundColor>,
+    sky: Option<rot_scene::Sky>,
     lighting: LightingPacket,
     size: egui::Vec2,
     cpu_us: f64,
@@ -3973,6 +3987,21 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         queue.write_buffer(&r.camera, 0, bytemuck::cast_slice(&self.camera));
         queue.write_buffer(&r.camera, 64, bytemuck::cast_slice(&self.camera_eye_mode));
         let lighting_uploaded = r.lighting.prepare(queue, &self.lighting);
+        if r.ibl
+            .prepare(device, queue, encoder, self.sky, &self.lighting)
+        {
+            r.lighting.rebuild_bind(device, &r.ibl);
+        }
+        let draw_sky = r.builtin_appearance && self.sky.is_some_and(|sky| sky.show_backdrop);
+        if draw_sky {
+            r.ibl.prepare_sky_draw(
+                device,
+                queue,
+                &r.lighting.layout,
+                (format, samples),
+                (self.inv_camera, self.camera_eye_mode),
+            );
+        }
         let grid = self.show_editor_grid.then(|| {
             let slot = if applied_hdr {
                 &mut r.editor_grid_hdr
@@ -4059,6 +4088,9 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 );
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..mesh.count, 0, group.range.clone());
+            }
+            if draw_sky {
+                r.ibl.render_sky(&mut pass, &r.lighting.bind, format);
             }
             if let Some(grid) = grid {
                 pass.set_pipeline(grid);
@@ -4588,6 +4620,45 @@ mod tests {
                 .collect::<Vec<_>>(),
             offsets
         );
+        assert_eq!(
+            size_of::<ibl_gpu::IblUniform>(),
+            ibl_gpu::IBL_BYTES as usize
+        );
+        let surface_module =
+            wgpu::naga::front::wgsl::parse_str(surface_shader()).expect("surface WGSL parses");
+        let ibl_uniform = surface_module
+            .global_variables
+            .iter()
+            .map(|(_, var)| var)
+            .find(|var| {
+                var.binding
+                    .as_ref()
+                    .is_some_and(|binding| binding.group == 2 && binding.binding == 4)
+            })
+            .unwrap();
+        let wgpu::naga::TypeInner::Struct {
+            members: ibl_members,
+            span: ibl_span,
+        } = &surface_module.types[ibl_uniform.ty].inner
+        else {
+            panic!("ibl uniform is a struct")
+        };
+        assert_eq!(*ibl_span, ibl_gpu::IBL_BYTES as u32);
+        assert_eq!(
+            ibl_members
+                .iter()
+                .map(|member| member.offset as usize)
+                .collect::<Vec<_>>(),
+            [
+                offset_of!(ibl_gpu::IblUniform, params),
+                offset_of!(ibl_gpu::IblUniform, zenith),
+                offset_of!(ibl_gpu::IblUniform, horizon),
+                offset_of!(ibl_gpu::IblUniform, ground),
+                offset_of!(ibl_gpu::IblUniform, sun_dir),
+                offset_of!(ibl_gpu::IblUniform, sun_color),
+                offset_of!(ibl_gpu::IblUniform, sh),
+            ]
+        );
 
         // Additive camera/instance ABI protects old custom shaders and verifies
         // that opt-in fragment view data, storage instance layout, and tangents validate.
@@ -4613,6 +4684,8 @@ mod tests {
                 include_str!("../../../examples/content/scene.wgsl"),
             ),
             ("composite", include_str!("composite.wgsl")),
+            ("sky", include_str!("sky.wgsl")),
+            ("ibl_bake", include_str!("ibl_bake.wgsl")),
         ] {
             let module = wgpu::naga::front::wgsl::parse_str(source)
                 .unwrap_or_else(|e| panic!("{name} WGSL parses: {e:?}"));
@@ -4622,7 +4695,7 @@ mod tests {
             )
             .validate(&module)
             .unwrap_or_else(|e| panic!("{name} WGSL validates: {e:?}"));
-            if name != "composite" {
+            if !matches!(name, "composite" | "sky" | "ibl_bake") {
                 let (_, instance_ty) = module
                     .types
                     .iter()

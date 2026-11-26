@@ -55,10 +55,12 @@ impl ComponentPreview {
         &mut self,
         display: rot_scene::DisplayProfile,
         background: Option<rot_scene::BackgroundColor>,
+        sky: Option<rot_scene::Sky>,
     ) {
         let scene = Arc::make_mut(&mut self.scene);
         scene.display = display;
         scene.background = background;
+        scene.sky = sky;
     }
 
     pub fn draw_matrices(&self) -> &[Mat4] {
@@ -385,6 +387,7 @@ pub fn project_editor_with_world(
     scene.materials.clone_from(&component_scene.materials);
     scene.display = component_scene.display;
     scene.background = component_scene.background;
+    scene.sky = component_scene.sky;
     let transform_camera = match component_scene.effective_camera(&hierarchy) {
         Some((index, CameraView::Transform(lens))) => {
             Some(component_scene.transform_camera_pose(index, &hierarchy, &world, lens)?)

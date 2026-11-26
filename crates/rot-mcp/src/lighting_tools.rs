@@ -3,7 +3,7 @@ use serde_json::{json, Map, Value};
 
 const TOOLS: &[(&str, &str, &[&str])] = &[(
     "scene_display_set",
-    "Set Scene Display using the current session and revision. Supply display, background, or both. Background is finite linear RGB in [0,1], or null for Engine Default. Omitted fields stay unchanged. Use material_inspect to read committed values. This is one unsaved shared Undo edit. Surface HDR uses internal HDR plus an SDR tone map; exposure is in stops.",
+    "Set Scene Display (display, background, sky). Omitted fields stay unchanged; null background/sky resets. Shared Undo edit.",
     &[],
 )];
 
@@ -31,6 +31,23 @@ fn display_schema() -> Value {
     ]})
 }
 
+fn sky_schema() -> Value {
+    let rgb = vector_schema(0.0, 1.0);
+    json!({"anyOf":[
+        super::object_schema(
+            json!({
+                "zenith":rgb,
+                "horizon":rgb,
+                "ground":rgb,
+                "intensity":{"type":"number","minimum":0.0,"maximum":8.0},
+                "show_backdrop":{"type":"boolean"}
+            }),
+            vec!["zenith","horizon","ground","intensity"]
+        ),
+        {"type":"null"}
+    ]})
+}
+
 fn shape(field: &str) -> Value {
     match field {
         "expected_session_token" => json!({"type":"string","minLength":1,"maxLength":256,
@@ -39,7 +56,8 @@ fn shape(field: &str) -> Value {
             "description":"Canonical decimal u64 scene revision; maximum18446744073709551615."}),
         "display" => display_schema(),
         "background" => json!({"anyOf":[vector_schema(0.0, 1.0), {"type":"null"}],
-            "description":"v23 linear RGB clear, or null to restore Engine Default. Omission preserves the existing background."}),
+            "description":"v23 linear RGB clear, or null for Engine Default."}),
+        "sky" => sky_schema(),
         _ => unreachable!("fixed lighting tool field"),
     }
 }
@@ -53,9 +71,14 @@ pub fn list() -> Vec<Value> {
                 .iter()
                 .map(|field| ((*field).into(), shape(field)))
                 .collect();
-            properties.extend(["display", "background"].map(|field| (field.into(), shape(field))));
+            properties
+                .extend(["display", "background", "sky"].map(|field| (field.into(), shape(field))));
             let mut schema = super::object_schema(Value::Object(properties), required);
-            schema["anyOf"] = json!([{"required":["display"]}, {"required":["background"]}]);
+            schema["anyOf"] = json!([
+                {"required":["display"]},
+                {"required":["background"]},
+                {"required":["sky"]}
+            ]);
             json!({"name":name,"description":description,
                 "inputSchema":schema,
                 "annotations":{"readOnlyHint":false,"destructiveHint":false,"openWorldHint":false}})
@@ -88,6 +111,21 @@ fn valid_display(value: &Value) -> bool {
     )
 }
 
+fn valid_sky(value: &Value) -> bool {
+    value.is_null()
+        || value.as_object().is_some_and(|sky| {
+            super::exact_keys(
+                sky,
+                &["zenith", "horizon", "ground", "intensity"],
+                &["show_backdrop"],
+            ) && vector(&sky["zenith"], 0.0, 1.0)
+                && vector(&sky["horizon"], 0.0, 1.0)
+                && vector(&sky["ground"], 0.0, 1.0)
+                && number(&sky["intensity"], 0.0, 8.0)
+                && sky.get("show_backdrop").is_none_or(Value::is_boolean)
+        })
+}
+
 pub fn valid(name: &str, arguments: &Value) -> bool {
     let Some(required) = fields(name) else {
         return false;
@@ -95,10 +133,13 @@ pub fn valid(name: &str, arguments: &Value) -> bool {
     let Some(args) = arguments.as_object() else {
         return false;
     };
-    if !args.contains_key("display") && !args.contains_key("background") {
+    if !args.contains_key("display")
+        && !args.contains_key("background")
+        && !args.contains_key("sky")
+    {
         return false;
     }
-    super::exact_keys(args, &required, &["display", "background"])
+    super::exact_keys(args, &required, &["display", "background", "sky"])
         && args.iter().all(|(field, value)| match field.as_str() {
             "expected_revision" => super::canonical_u64(value),
             "expected_session_token" => value
@@ -106,6 +147,7 @@ pub fn valid(name: &str, arguments: &Value) -> bool {
                 .is_some_and(|token| !token.is_empty() && token.len() <= 256),
             "display" => valid_display(value),
             "background" => value.is_null() || vector(value, 0.0, 1.0),
+            "sky" => valid_sky(value),
             _ => false,
         })
 }
@@ -145,6 +187,24 @@ mod tests {
         for background in [json!([0.2, 0, 1]), Value::Null] {
             let args = json!({"expected_session_token":"scene","expected_revision":"0","background":background});
             assert!(valid("scene_display_set", &args));
+        }
+        for sky in [
+            json!({"zenith":[0.1,0.3,0.8],"horizon":[0.6,0.7,0.9],"ground":[0.1,0.1,0.1],"intensity":1.5}),
+            json!({"zenith":[0.1,0.3,0.8],"horizon":[0.6,0.7,0.9],"ground":[0.1,0.1,0.1],"intensity":1.0,"show_backdrop":false}),
+            Value::Null,
+        ] {
+            let args = json!({"expected_session_token":"scene","expected_revision":"0","sky":sky});
+            assert!(valid("scene_display_set", &args), "{args}");
+        }
+        for bad_sky in [
+            json!({"zenith":[0.1,0.3,0.8],"horizon":[0.6,0.7,0.9],"ground":[0.1,0.1,0.1]}),
+            json!({"zenith":[0.1,0.3,1.1],"horizon":[0.6,0.7,0.9],"ground":[0.1,0.1,0.1],"intensity":1.0}),
+            json!({"zenith":[0.1,0.3,0.8],"horizon":[0.6,0.7,0.9],"ground":[0.1,0.1,0.1],"intensity":8.1}),
+            json!({"zenith":[0.1,0.3,0.8],"horizon":[0.6,0.7,0.9],"ground":[0.1,0.1,0.1],"intensity":1.0,"extra":true}),
+        ] {
+            let args =
+                json!({"expected_session_token":"scene","expected_revision":"0","sky":bad_sky});
+            assert!(!valid("scene_display_set", &args), "{args}");
         }
         for background in [
             json!([0, 1]),

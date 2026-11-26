@@ -5,7 +5,7 @@ use super::{
 use crate::input::{self, ActionDefinition};
 use crate::{
     BackgroundColor, BehaviorSource, BindingTarget, DisplayProfile, OpaqueMaterial, PlayerAnchor,
-    PropertyValue, SceneError, SceneLock, Transform,
+    PropertyValue, SceneError, SceneLock, Sky, Transform,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -143,7 +143,7 @@ enum SceneChange {
     },
     InsertCopies(Vec<(usize, ObjectNode)>),
     RemoveCopies(Vec<usize>),
-    Display(DisplayProfile, Option<BackgroundColor>),
+    Display(DisplayProfile, Option<BackgroundColor>, Option<Sky>),
     Hud(crate::hud::Hud),
     GameplayCamera(Option<String>),
     Action {
@@ -208,9 +208,10 @@ impl SceneChange {
                 Self::InsertCopies(copies)
             }
             Self::Hud(value) => Self::Hud(std::mem::replace(&mut scene.hud, value)),
-            Self::Display(value, background) => Self::Display(
+            Self::Display(value, background, sky) => Self::Display(
                 std::mem::replace(&mut scene.display, value),
                 std::mem::replace(&mut scene.background, background),
+                std::mem::replace(&mut scene.sky, sky),
             ),
             Self::GameplayCamera(value) => {
                 Self::GameplayCamera(std::mem::replace(&mut scene.gameplay_camera, value))
@@ -712,13 +713,20 @@ impl ComponentSession {
         expected: u64,
         display: DisplayProfile,
         background: Option<BackgroundColor>,
+        sky: Option<Sky>,
     ) -> Result<u64, SceneError> {
         self.check_revision(expected)?;
         display.validate()?;
-        if display == self.scene.display && background == self.scene.background {
+        if let Some(sky) = &sky {
+            sky.validate()?;
+        }
+        if display == self.scene.display
+            && background == self.scene.background
+            && sky == self.scene.sky
+        {
             return Ok(self.revision);
         }
-        self.commit([SceneChange::Display(display, background)])
+        self.commit([SceneChange::Display(display, background, sky)])
     }
 
     /// Sync one already-referenced material in the scene with an updated asset

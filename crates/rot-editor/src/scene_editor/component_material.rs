@@ -1568,7 +1568,7 @@ impl ComponentWorkspace {
         }).collect();
         let count = scene.materials.len();
         let mut result = json!({
-            "scene_id":scene.id, "display":scene.display, "background":scene.background, "catalog_available":self.assets.is_some(),
+            "scene_id":scene.id, "display":scene.display, "background":scene.background, "sky":scene.sky, "catalog_available":self.assets.is_some(),
             "asset_revision":(!self.assets_loading()).then(||self.material_asset_revision().to_string()),
             "materials":materials, "material_count":count, "next_offset":(offset+limit<count).then(||(offset+limit).to_string()),
             "dirty":self.session.is_dirty(), "drafts_pending":self.authored_edit_pending(),

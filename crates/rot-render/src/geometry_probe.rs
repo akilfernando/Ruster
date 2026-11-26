@@ -174,7 +174,8 @@ fn verify_case(
     resources.insert(r);
     let callback = SceneCallback {
         background: None,
-
+        sky: None,
+        inv_camera: Mat4::IDENTITY.to_cols_array(),
         show_editor_grid: false,
         groups,
         camera: Mat4::IDENTITY.to_cols_array(),

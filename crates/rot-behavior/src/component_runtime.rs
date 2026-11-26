@@ -1706,6 +1706,7 @@ mod tests {
             materials: BTreeMap::new(),
             display: DisplayProfile::default(),
             background: None,
+            sky: None,
             ambient: None,
             sources: BTreeMap::new(),
             script_files: BTreeMap::new(),

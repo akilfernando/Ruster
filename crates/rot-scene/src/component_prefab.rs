@@ -700,6 +700,7 @@ impl PrefabSource {
             materials,
             display: Default::default(),
             background: None,
+            sky: None,
             ambient: None,
             sources,
             script_files: BTreeMap::new(),
@@ -715,6 +716,7 @@ impl PrefabSource {
         }
         if scene.display != Default::default()
             || scene.background.is_some()
+            || scene.sky.is_some()
             || scene.ambient.is_some()
             || !scene.actions.is_empty()
             || scene.hud != Default::default()

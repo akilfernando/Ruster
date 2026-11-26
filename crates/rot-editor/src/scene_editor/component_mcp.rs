@@ -269,6 +269,7 @@ impl ComponentWorkspace {
                 result["project_startup"] = self.startup_context();
                 result["display"] = json!(scene.display);
                 result["background"] = json!(scene.background);
+                result["sky"] = json!(scene.sky);
                 if self.light_budget_exceeded() {
                     result["lighting_warning"] = json!(Text::ViewportLightLimitDetail.plain());
                 }

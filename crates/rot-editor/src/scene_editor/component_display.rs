@@ -8,7 +8,7 @@ use crate::{
     ui_kit,
 };
 use eframe::egui;
-use rot_scene::{BackgroundColor, DisplayProfile, SceneError};
+use rot_scene::{BackgroundColor, DisplayProfile, SceneError, Sky};
 
 fn exposure_id() -> egui::Id {
     egui::Id::unique("v23_scene_display_exposure")
@@ -37,6 +37,54 @@ impl BackgroundDraft {
             return Err(Text::SceneBackgroundHexInvalid);
         }
         Ok(self.solid.then_some(self.color))
+    }
+}
+
+struct SkyDraft {
+    enabled: bool,
+    sky: Sky,
+    intensity: String,
+    invalid_intensity: bool,
+}
+
+impl SkyDraft {
+    fn new(value: Option<Sky>) -> Self {
+        let sky = value.unwrap_or_else(Sky::daylight);
+        Self {
+            enabled: value.is_some(),
+            sky,
+            intensity: format!("{}", sky.intensity),
+            invalid_intensity: false,
+        }
+    }
+
+    fn set_preset(&mut self, preset: Sky) {
+        self.sky = Sky {
+            show_backdrop: self.sky.show_backdrop,
+            ..preset
+        };
+        self.intensity = format!("{}", self.sky.intensity);
+        self.invalid_intensity = false;
+    }
+
+    fn value(&self) -> Result<Option<Sky>, Text> {
+        if !self.enabled {
+            return Ok(None);
+        }
+        if self.invalid_intensity {
+            return Err(Text::SceneSkyIntensityInvalid);
+        }
+        let intensity = self
+            .intensity
+            .trim()
+            .parse::<f32>()
+            .ok()
+            .filter(|v| v.is_finite() && (0.0..=8.0).contains(v))
+            .ok_or(Text::SceneSkyIntensityInvalid)?;
+        Ok(Some(Sky {
+            intensity,
+            ..self.sky
+        }))
     }
 }
 
@@ -121,9 +169,84 @@ fn edit_background(ui: &mut egui::Ui, draft: &mut BackgroundDraft) {
     });
 }
 
+fn edit_sky(ui: &mut egui::Ui, draft: &mut SkyDraft) {
+    ui_kit::property_row_with_label(ui, Text::SceneSky.plain(), |ui, label| {
+        egui::ComboBox::from_id_salt("sky_mode")
+            .selected_text(
+                if draft.enabled {
+                    Text::SceneSkyProcedural
+                } else {
+                    Text::SceneSkyNone
+                }
+                .plain(),
+            )
+            .show_ui(ui, |ui| {
+                for (enabled, text) in [
+                    (false, Text::SceneSkyNone),
+                    (true, Text::SceneSkyProcedural),
+                ] {
+                    if ui
+                        .selectable_value(&mut draft.enabled, enabled, text.plain())
+                        .clicked()
+                    {
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .labelled_by(label);
+    });
+    if !draft.enabled {
+        return;
+    }
+    ui_kit::property_row_with_label(ui, Text::SceneSkyPreset.plain(), |ui, _| {
+        ui.horizontal(|ui| {
+            if ui.button(Text::SceneSkyDaylight.plain()).clicked() {
+                draft.set_preset(Sky::daylight());
+            }
+            if ui.button(Text::SceneSkyStudio.plain()).clicked() {
+                draft.set_preset(Sky::studio());
+            }
+            if ui.button(Text::SceneSkySunset.plain()).clicked() {
+                draft.set_preset(Sky::sunset());
+            }
+        });
+    });
+    for (text, rgb) in [
+        (Text::SceneSkyZenith, &mut draft.sky.zenith),
+        (Text::SceneSkyHorizon, &mut draft.sky.horizon),
+        (Text::SceneSkyGround, &mut draft.sky.ground),
+    ] {
+        ui_kit::property_row_with_label(ui, text.plain(), |ui, label| {
+            ui.color_edit_button_rgb(rgb).labelled_by(label);
+        });
+    }
+    ui_kit::property_row_with_label(ui, Text::SceneSkyIntensity.plain(), |ui, label| {
+        if ui
+            .add(
+                egui::TextEdit::singleline(&mut draft.intensity)
+                    .char_limit(16)
+                    .desired_width(ui.available_width()),
+            )
+            .labelled_by(label)
+            .changed()
+        {
+            draft.invalid_intensity = draft
+                .intensity
+                .trim()
+                .parse::<f32>()
+                .ok()
+                .filter(|v| v.is_finite() && (0.0..=8.0).contains(v))
+                .is_none();
+        }
+    });
+    ui.checkbox(&mut draft.sky.show_backdrop, Text::SceneSkyBackdrop.plain());
+}
+
 pub(super) struct Draft {
     value: DisplayDraft,
     background: BackgroundDraft,
+    sky: SkyDraft,
     opened_frame: Option<u64>,
     error: Option<String>,
 }
@@ -139,6 +262,7 @@ impl ComponentWorkspace {
                 self.session.scene().display,
             ),
             background: BackgroundDraft::new(self.session.scene().background),
+            sky: SkyDraft::new(self.session.scene().sky),
             opened_frame: None,
             error: None,
         });
@@ -151,11 +275,14 @@ impl ComponentWorkspace {
         revision: u64,
         display: DisplayProfile,
         background: Option<BackgroundColor>,
+        sky: Option<Sky>,
     ) -> Result<u64, SceneError> {
-        let next = self.session.set_display(revision, display, background)?;
+        let next = self
+            .session
+            .set_display(revision, display, background, sky)?;
         if revision != next {
             if let Ok(preview) = &mut self.preview {
-                preview.set_display(display, background);
+                preview.set_display(display, background, sky);
             }
             #[cfg(unix)]
             self.invalidate_display_capture();
@@ -235,8 +362,11 @@ impl ComponentWorkspace {
                     });
                 }
                 edit_background(ui, &mut draft.background);
-                if draft.error.as_deref() == Some(Text::SceneBackgroundHexInvalid.plain())
-                    && draft.background.value().is_ok()
+                edit_sky(ui, &mut draft.sky);
+                if (draft.error.as_deref() == Some(Text::SceneBackgroundHexInvalid.plain())
+                    && draft.background.value().is_ok())
+                    || (draft.error.as_deref() == Some(Text::SceneSkyIntensityInvalid.plain())
+                        && draft.sky.value().is_ok())
                 {
                     draft.error = None;
                 }
@@ -270,10 +400,12 @@ impl ComponentWorkspace {
                     .value
                     .value()
                     .map_err(|_| Text::ComponentDisplayExposureInvalid)
-                    .and_then(|display| Ok((display, draft.background.value()?)));
+                    .and_then(|display| {
+                        Ok((display, draft.background.value()?, draft.sky.value()?))
+                    });
                 draft.error = Some(match candidate {
-                    Ok((display, background)) => {
-                        match self.commit_display(draft.value.revision, display, background) {
+                    Ok((display, background, sky)) => {
+                        match self.commit_display(draft.value.revision, display, background, sky) {
                             Ok(_) => return,
                             Err(error) => error.to_string(),
                         }
@@ -299,8 +431,10 @@ impl ComponentWorkspace {
             exact_keys(
                 map,
                 &["expected_session_token", "expected_revision"],
-                &["display", "background"],
-            ) && (map.contains_key("display") || map.contains_key("background"))
+                &["display", "background", "sky"],
+            ) && (map.contains_key("display")
+                || map.contains_key("background")
+                || map.contains_key("sky"))
         }) {
             return Err(fail("invalid_arguments", "Check the Scene Display fields."));
         }
@@ -338,8 +472,16 @@ impl ComponentWorkspace {
                     .map_err(|error| ("invalid_arguments".into(), error.to_string()))?,
             ),
         };
+        let sky = match args.get("sky") {
+            None => scene.sky,
+            Some(value) if value.is_null() => None,
+            Some(value) => Some(
+                serde_json::from_value(value.clone())
+                    .map_err(|error| ("invalid_arguments".into(), error.to_string()))?,
+            ),
+        };
         let next = self
-            .commit_display(revision, candidate, background)
+            .commit_display(revision, candidate, background, sky)
             .map_err(|error| {
                 let code = match error {
                     SceneError::RevisionOverflow => "revision_exhausted",
@@ -348,7 +490,7 @@ impl ComponentWorkspace {
                 (code.into(), error.to_string())
             })?;
         Ok(json!({
-            "display":candidate, "background":background, "changed":next != revision, "dirty":self.session.is_dirty(),
+            "display":candidate, "background":background, "sky":sky, "changed":next != revision, "dirty":self.session.is_dirty(),
         }))
     }
 }
@@ -592,5 +734,61 @@ mod tests {
             editor.preview.as_ref().unwrap().scene().display,
             DisplayProfile::LegacySdr
         );
+    }
+
+    #[test]
+    fn sky_edits_preserve_omitted_fields_and_reset_with_shared_undo() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        let legacy = rot_scene::Session::new(rot_scene::Scene::demo()).unwrap();
+        let scene = ComponentScene::from_legacy(&legacy).unwrap();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let scene_display = |editor: &mut ComponentWorkspace,
+                             revision,
+                             patch: serde_json::Value| {
+            let mut args = json!({"expected_session_token":"scene", "expected_revision":revision});
+            args.as_object_mut()
+                .unwrap()
+                .extend(patch.as_object().unwrap().clone());
+            editor.ai_command("scene", "scene_display_set", &args)
+        };
+        let invalid = scene_display(
+            &mut editor,
+            "0",
+            json!({"sky":{"zenith":[0.1,0.2,1.1],"horizon":[0.5,0.6,0.7],"ground":[0.1,0.1,0.1],"intensity":1.0}}),
+        );
+        assert_eq!(invalid["error"]["code"], "invalid_arguments");
+
+        let sky = Sky {
+            intensity: 2.0,
+            show_backdrop: false,
+            ..Sky::daylight()
+        };
+        let changed = scene_display(&mut editor, "0", json!({"sky": sky}));
+        assert_eq!(changed["ok"], true, "{changed}");
+        assert_eq!(editor.session.scene().sky, Some(sky));
+        assert_eq!(editor.preview.as_ref().unwrap().scene().sky, Some(sky));
+
+        let background = [0.2, 0.3, 0.4];
+        let bg_only = scene_display(&mut editor, "1", json!({"background": background}));
+        assert_eq!(bg_only["ok"], true, "{bg_only}");
+        assert_eq!(editor.session.scene().sky, Some(sky));
+        assert_eq!(bg_only["result"]["sky"], json!(sky));
+
+        let reset = scene_display(&mut editor, "2", json!({"sky": null}));
+        assert_eq!(reset["result"]["sky"], serde_json::Value::Null);
+        assert_eq!(editor.session.scene().sky, None);
+        assert_eq!(editor.preview.as_ref().unwrap().scene().sky, None);
+
+        let undo = editor.ai_command(
+            "scene",
+            "scene_undo",
+            &json!({"expected_session_token":"scene", "expected_revision":"3"}),
+        );
+        assert_eq!(undo["ok"], true, "{undo}");
+        assert_eq!(editor.session.scene().sky, Some(sky));
+        assert_eq!(editor.preview.as_ref().unwrap().scene().sky, Some(sky));
     }
 }

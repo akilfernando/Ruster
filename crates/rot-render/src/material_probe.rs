@@ -851,7 +851,8 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
         let normal = Mat3::from_mat4(matrix).inverse().transpose();
         let callback = SceneCallback {
             background: None,
-
+            sky: None,
+            inv_camera: Mat4::IDENTITY.to_cols_array(),
             show_editor_grid: false,
             groups: vec![DrawGroup {
                 double_sided: false,
@@ -1327,7 +1328,8 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
             let before = metrics.lock().unwrap().clone();
             let callback = SceneCallback {
                 background: None,
-
+                sky: None,
+                inv_camera: Mat4::IDENTITY.to_cols_array(),
                 show_editor_grid: false,
                 groups: (0..if mapped_case { 2 } else { 1 })
                     .map(|index| DrawGroup {
@@ -1639,6 +1641,7 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
         );
     }
     verify_pbr_maps(device, queue);
+    verify_sky_and_ibl(device, queue);
     eprintln!("GPU probe: production dielectric/PBR/HDR/exposure/custom restore and both output conventions passed");
 }
 
@@ -1786,6 +1789,8 @@ fn verify_pbr_maps(device: &wgpu::Device, queue: &wgpu::Queue) {
         };
         let callback = SceneCallback {
             background: None,
+            sky: None,
+            inv_camera: Mat4::IDENTITY.to_cols_array(),
             show_editor_grid: false,
             groups: vec![group],
             camera: Mat4::IDENTITY.to_cols_array(),
@@ -1964,6 +1969,289 @@ fn verify_pbr_maps(device: &wgpu::Device, queue: &wgpu::Queue) {
         "AO must not attenuate direct directional lighting"
     );
     eprintln!("GPU probe: conductor, metallic map, tangent-space normal map, emissive map, and occlusion map passed");
+}
+
+/// Real GPU readback checks for procedural sky backdrop, specular cubemap IBL reflections,
+/// SH diffuse irradiance, conductor F0 reflection tinting, roughness filtering, and AO darkening.
+fn verify_sky_and_ibl(device: &wgpu::Device, queue: &wgpu::Queue) {
+    use rot_assets::{Texture, TextureMip, TextureRole};
+    use rot_scene::{
+        Ambient, BackgroundColor, DisplayProfile, Light, Lighting, MaterialResponse,
+        OpaqueMaterial, Sky,
+    };
+
+    let quad = Arc::new(
+        rot_assets::parse_obj(
+            b"v -2 -2 0\nv 2 -2 0\nv 2 2 0\nv -2 2 0\nvt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nf 1/1 2/2 3/3\nf 1/1 3/3 4/4\n",
+        )
+        .unwrap(),
+    );
+    let tex_ao_black = Arc::new(Texture {
+        role: TextureRole::Occlusion,
+        width: 1,
+        height: 1,
+        mips: vec![TextureMip {
+            width: 1,
+            height: 1,
+            bytes: vec![0],
+        }],
+    });
+    let mut r = Resources::new(device, queue, COLOR, 1);
+    r.enable_hdr(device, 1);
+    let mut resources = egui_wgpu::CallbackResources::default();
+    resources.insert(r);
+    let context = egui::Context::default();
+    let textures: BTreeMap<String, Arc<Texture>> =
+        BTreeMap::from([("ao-black".into(), tex_ao_black)]);
+
+    let mut render_sky =
+        |mat: Option<&OpaqueMaterial>, light: &Lighting, sky: Option<Sky>, eye: Vec3| -> Vec<u8> {
+            context
+                .run_pass(egui::RawInput::default(), |_| {})
+                .drop_without_applying_deltas();
+            complete_submitted_assets(device, queue, &context, &mut resources);
+            let proj = Mat4::perspective_rh(60_f32.to_radians(), 256. / 192., 0.1, 100.0);
+            let view = Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y);
+            let vp = proj * view;
+            let groups = mat.map_or_else(Vec::new, |mat| {
+                let obj = rot_scene::Object {
+                    mesh: Some("quad".into()),
+                    ..rot_scene::Object::cube("quad-obj", None)
+                };
+                let binding = draw_material_binding(&obj, Some(&quad), Some(mat)).into_owned();
+                vec![DrawGroup {
+                    double_sided: false,
+                    key: Some("quad".into()),
+                    primitive: None,
+                    texture: None,
+                    roughness: None,
+                    metallic: None,
+                    normal: None,
+                    emissive: None,
+                    occlusion: binding
+                        .occlusion
+                        .as_ref()
+                        .and_then(|id| textures.get(id))
+                        .cloned(),
+                    binding,
+                    mesh: Some(quad.clone()),
+                    range: 0..1,
+                    instances: vec![Instance {
+                        model: Mat4::IDENTITY.to_cols_array_2d(),
+                        normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
+                        color: [1.; 4],
+                        base_color: [mat.tint[0], mat.tint[1], mat.tint[2], 0.],
+                        response: match mat.response {
+                            MaterialResponse::LegacyDiffuse => [0.; 4],
+                            MaterialResponse::Dielectric { roughness } => [
+                                1.,
+                                roughness,
+                                f32::from(u8::from(mat.roughness_texture.is_some())),
+                                0.,
+                            ],
+                        },
+                        emission_color: [0.; 4],
+                        uv_transform: [1., 1., 0., 0.],
+                        pbr_params: [mat.metallic, mat.normal_scale, mat.occlusion_strength, 0.],
+                        pbr_maps: [
+                            0.0,
+                            0.0,
+                            f32::from(u8::from(mat.occlusion_texture.is_some())),
+                            0.0,
+                        ],
+                    }],
+                }]
+            });
+            let callback = SceneCallback {
+                background: Some(BackgroundColor::new([0., 0., 0.]).unwrap()),
+                sky,
+                inv_camera: vp.inverse().to_cols_array(),
+                show_editor_grid: false,
+                groups,
+                camera: vp.to_cols_array(),
+                camera_eye_mode: eye.extend(1.).to_array(),
+                display: DisplayProfile::SurfaceHdr { exposure_stops: 0. },
+                lighting: LightingPacket::try_pack(light).unwrap(),
+                size: egui::vec2(256., 192.),
+                cpu_us: 0.,
+                shadow: None,
+                context: context.clone(),
+                receipt: FrameReceipt::default(),
+                prepared: std::sync::atomic::AtomicBool::new(false),
+            };
+            selection_probe::render(device, queue, &mut resources, &callback, COLOR)
+        };
+    let pixel = |bytes: &[u8], x: usize, y: usize| -> [u8; 3] {
+        let offset = (y * 256 + x) * 4;
+        [bytes[offset], bytes[offset + 1], bytes[offset + 2]]
+    };
+    let dark = Lighting::Authored {
+        ambient: Ambient {
+            color: [0.; 3],
+            intensity: 0.,
+        },
+        lights: BTreeMap::new(),
+    };
+
+    // 1. Sky backdrop gradient renders zenith > ground and respects show_backdrop=false.
+    let backdrop_img = render_sky(None, &dark, Some(Sky::daylight()), Vec3::new(0., 0., 2.));
+    let upper_sky = pixel(&backdrop_img, 128, 20);
+    let lower_sky = pixel(&backdrop_img, 128, 172);
+    assert!(
+        upper_sky[2] > upper_sky[0] + 40 && upper_sky[2] > lower_sky[2] + 40,
+        "sky backdrop must render blue zenith above darker ground: upper={upper_sky:?} lower={lower_sky:?}"
+    );
+    let hidden_sky = Sky {
+        show_backdrop: false,
+        ..Sky::daylight()
+    };
+    let hidden_img = render_sky(None, &dark, Some(hidden_sky), Vec3::new(0., 0., 2.));
+    assert_eq!(pixel(&hidden_img, 128, 20), [0, 0, 0]);
+    assert_eq!(pixel(&hidden_img, 128, 172), [0, 0, 0]);
+
+    // 2. Mirror conductor reflects blue zenith sky upward vs darker ground downward under zero direct lights.
+    let mirror = OpaqueMaterial {
+        tint: [1.0, 1.0, 1.0],
+        metallic: 1.0,
+        response: MaterialResponse::Dielectric { roughness: 0.08 },
+        ..Default::default()
+    };
+    let reflect_up = pixel(
+        &render_sky(
+            Some(&mirror),
+            &dark,
+            Some(hidden_sky),
+            Vec3::new(0., -2., 2.),
+        ),
+        128,
+        96,
+    );
+    let reflect_down = pixel(
+        &render_sky(
+            Some(&mirror),
+            &dark,
+            Some(hidden_sky),
+            Vec3::new(0., 2., 2.),
+        ),
+        128,
+        96,
+    );
+    assert!(
+        reflect_up[2] > reflect_up[0] + 20 && reflect_up[2] > reflect_down[2] + 40,
+        "smooth conductor must reflect zenith sky upward vs darker ground downward: up={reflect_up:?} down={reflect_down:?}"
+    );
+
+    // 3. Studio sky gold conductor carries F0 tint, and roughness filters the baked environment sun highlight.
+    let gold = OpaqueMaterial {
+        tint: [1.0, 0.76, 0.33],
+        metallic: 1.0,
+        response: MaterialResponse::Dielectric { roughness: 0.08 },
+        ..Default::default()
+    };
+    let studio_hidden = Sky {
+        show_backdrop: false,
+        ..Sky::studio()
+    };
+    let gold_px = pixel(
+        &render_sky(
+            Some(&gold),
+            &dark,
+            Some(studio_hidden),
+            Vec3::new(0., 0., 2.),
+        ),
+        128,
+        96,
+    );
+    assert!(
+        gold_px[0] > gold_px[1] && gold_px[1] > gold_px[2] && gold_px[0] > 120,
+        "gold conductor IBL reflection must carry warm gold F0 tint: {gold_px:?}"
+    );
+    let mut sun = Light::directional(None);
+    sun.color = [1.; 3];
+    sun.intensity = 1.0;
+    let sun_dir = Vec3::new(0.0, 0.25, 1.0).normalize();
+    let (z, y, x) = Quat::from_rotation_arc(Vec3::Z, sun_dir).to_euler(glam::EulerRot::ZYX);
+    sun.transform.rotation = [x, y, z];
+    let sun_sky_light = Lighting::Authored {
+        ambient: Ambient {
+            color: [0.; 3],
+            intensity: 0.,
+        },
+        lights: BTreeMap::from([("sun".into(), sun)]),
+    };
+    let matte_mirror = OpaqueMaterial {
+        response: MaterialResponse::Dielectric { roughness: 0.85 },
+        ..mirror.clone()
+    };
+    let smooth_sun = pixel(
+        &render_sky(
+            Some(&mirror),
+            &sun_sky_light,
+            Some(hidden_sky),
+            Vec3::new(0., -0.5, 2.),
+        ),
+        128,
+        96,
+    );
+    let rough_sun = pixel(
+        &render_sky(
+            Some(&matte_mirror),
+            &sun_sky_light,
+            Some(hidden_sky),
+            Vec3::new(0., -0.5, 2.),
+        ),
+        128,
+        96,
+    );
+    assert!(
+        smooth_sun[0] > rough_sun[0] + 20,
+        "roughness must blur/dim sky sun IBL reflection: smooth={smooth_sun:?} rough={rough_sun:?}"
+    );
+
+    // 4. Diffuse SH irradiance lights matte dielectric under zero direct lights and AO=0 darkens it to black.
+    let matte = OpaqueMaterial {
+        tint: [0.8, 0.8, 0.8],
+        metallic: 0.0,
+        response: MaterialResponse::Dielectric { roughness: 0.95 },
+        ..Default::default()
+    };
+    assert_eq!(
+        pixel(
+            &render_sky(Some(&matte), &dark, None, Vec3::new(0., 0., 2.)),
+            128,
+            96
+        ),
+        [0, 0, 0]
+    );
+    let lit_matte = pixel(
+        &render_sky(Some(&matte), &dark, Some(hidden_sky), Vec3::new(0., 0., 2.)),
+        128,
+        96,
+    );
+    assert!(
+        lit_matte[2] > 60 && lit_matte[2] >= lit_matte[0],
+        "daylight SH irradiance must light matte dielectric with sky tint: {lit_matte:?}"
+    );
+    let occluded_matte = OpaqueMaterial {
+        occlusion_texture: Some("ao-black".into()),
+        occlusion_strength: 1.0,
+        ..matte
+    };
+    assert_eq!(
+        pixel(
+            &render_sky(
+                Some(&occluded_matte),
+                &dark,
+                Some(hidden_sky),
+                Vec3::new(0., 0., 2.)
+            ),
+            128,
+            96
+        ),
+        [0, 0, 0],
+        "AO=0 must darken diffuse and specular IBL to black"
+    );
+    eprintln!("GPU probe: sky backdrop, specular cubemap IBL, SH irradiance, conductor tint, roughness filtering, and AO passed");
 }
 
 /// Numerically establish the permitted grazing fixture crosses half-float range
@@ -2152,7 +2440,8 @@ pub(super) fn verify_cube_material(device: &wgpu::Device, queue: &wgpu::Queue) {
         assert!(!binding.missing && !binding.missing_roughness);
         let callback = SceneCallback {
             background: None,
-
+            sky: None,
+            inv_camera: Mat4::IDENTITY.to_cols_array(),
             show_editor_grid: false,
             groups: vec![DrawGroup {
                 double_sided: false,

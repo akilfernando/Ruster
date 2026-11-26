@@ -108,19 +108,91 @@ pub(super) struct LightingGpu {
 }
 
 impl LightingGpu {
-    pub fn new(device: &wgpu::Device) -> Self {
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("authored diffuse lighting ABI"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: wgpu::BufferSize::new(LIGHTING_BYTES),
+    fn create_bind_group(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        buffer: &wgpu::Buffer,
+        ibl: &super::ibl_gpu::IblGpu,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("scene lighting and ibl"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
                 },
-                count: None,
-            }],
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(ibl.cube_view()),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(ibl.lut_view()),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&ibl.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: ibl.uniform_buffer.as_entire_binding(),
+                },
+            ],
+        })
+    }
+
+    pub fn new(device: &wgpu::Device, ibl: &super::ibl_gpu::IblGpu) -> Self {
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("authored lighting and IBL ABI"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(LIGHTING_BYTES),
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::Cube,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(super::ibl_gpu::IBL_BYTES),
+                    },
+                    count: None,
+                },
+            ],
         });
         let current = LightingPacket::legacy();
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -128,20 +200,17 @@ impl LightingGpu {
             contents: bytemuck::bytes_of(&current),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("scene lighting"),
-            layout: &layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
-        });
+        let bind = Self::create_bind_group(device, &layout, &buffer, ibl);
         Self {
             layout,
             bind,
             buffer,
             current,
         }
+    }
+
+    pub fn rebuild_bind(&mut self, device: &wgpu::Device, ibl: &super::ibl_gpu::IblGpu) {
+        self.bind = Self::create_bind_group(device, &self.layout, &self.buffer, ibl);
     }
 
     /// Includes only an actual queue write; initial legacy payload creation is

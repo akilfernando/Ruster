@@ -49,7 +49,7 @@ pub use authoring::*;
 pub use collider::{Collider, ColliderRole, ColliderShape, ResolvedCollider, ResolvedShape};
 pub use lighting::*;
 pub use lighting_authoring::LightingEdit;
-pub use surface::{BackgroundColor, DisplayProfile, MaterialResponse};
+pub use surface::{BackgroundColor, DisplayProfile, MaterialResponse, Sky};
 pub const MAX_OBJECTS: usize = 256;
 pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 pub const HISTORY_LIMIT: usize = 32;
@@ -429,6 +429,9 @@ pub struct Scene {
     /// Clear color carried by a runtime projection of an authored v23 scene.
     #[serde(skip)]
     pub background: Option<BackgroundColor>,
+    /// Procedural sky and IBL environment carried by a runtime projection of an authored v23 scene.
+    #[serde(skip)]
+    pub sky: Option<Sky>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub player_view: Option<PlayerView>,
     /// Imported clip bindings keyed by their placement root Group ID.
@@ -447,6 +450,7 @@ impl Scene {
             lighting: Lighting::Legacy,
             display: DisplayProfile::LegacySdr,
             background: None,
+            sky: None,
             player_view: None,
             animations: BTreeMap::new(),
         }
@@ -469,6 +473,7 @@ impl Scene {
             lighting: Lighting::Legacy,
             display: DisplayProfile::LegacySdr,
             background: None,
+            sky: None,
             player_view: None,
             animations: BTreeMap::new(),
             objects: [
@@ -1389,6 +1394,7 @@ impl From<LegacyDocument> for Document {
                 lighting: Lighting::Legacy,
                 display: DisplayProfile::LegacySdr,
                 background: None,
+                sky: None,
                 player_view: None,
                 animations: BTreeMap::new(),
                 objects: old
@@ -1482,6 +1488,7 @@ impl From<V2Document> for Document {
                 lighting: Lighting::Legacy,
                 display: DisplayProfile::LegacySdr,
                 background: None,
+                sky: None,
                 player_view: None,
                 animations: BTreeMap::new(),
                 objects: old

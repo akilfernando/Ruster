@@ -15,7 +15,7 @@ use crate::{
     strict_json, validate_id, validate_name, Ambient, AnimationBinding, BackgroundColor,
     BehaviorBinding, BehaviorSource, BindingTarget, Collider, ColliderRole, ColliderShape,
     DisplayProfile, Light, LightKind, Lighting, OpaqueMaterial, PlayerView, Primitive,
-    PropertyValue, SceneError, Session, SoundAssetReferences, Transform, MAX_SOURCES,
+    PropertyValue, SceneError, Session, Sky, SoundAssetReferences, Transform, MAX_SOURCES,
     MAX_SOURCE_BYTES,
 };
 
@@ -49,6 +49,12 @@ pub struct ComponentScene {
         deserialize_with = "present_lens_value"
     )]
     pub background: Option<BackgroundColor>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_lens_value"
+    )]
+    pub sky: Option<Sky>,
     /// None preserves the implicit lighting used by legacy scenes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ambient: Option<Ambient>,
@@ -421,6 +427,9 @@ impl ComponentScene {
             material.validate()?;
         }
         self.display.validate()?;
+        if let Some(sky) = &self.sky {
+            sky.validate()?;
+        }
         if let Some(ambient) = &self.ambient {
             ambient.validate()?;
         }
@@ -812,6 +821,7 @@ impl ComponentScene {
             materials: scene.materials.clone(),
             display: scene.display,
             background: None,
+            sky: None,
             ambient,
             sources: authoring.sources.clone(),
             script_files: BTreeMap::new(),
@@ -1800,6 +1810,7 @@ mod tests {
             materials: BTreeMap::new(),
             display: DisplayProfile::default(),
             background: None,
+            sky: None,
             ambient: None,
             sources: BTreeMap::new(),
             script_files: BTreeMap::new(),
@@ -1864,6 +1875,7 @@ mod tests {
             materials: BTreeMap::new(),
             display: DisplayProfile::default(),
             background: None,
+            sky: None,
             ambient: None,
             sources: BTreeMap::new(),
             script_files: BTreeMap::new(),

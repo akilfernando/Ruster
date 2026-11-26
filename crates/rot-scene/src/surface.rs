@@ -75,6 +75,115 @@ impl<'de> Deserialize<'de> for BackgroundColor {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
+fn validate_unit_rgb(rgb: &[f32; 3], label: &str) -> Result<(), SceneError> {
+    if rgb
+        .iter()
+        .all(|channel| channel.is_finite() && (0.0..=1.0).contains(channel))
+    {
+        Ok(())
+    } else {
+        Err(SceneError::Invalid(format!(
+            "sky {label} must be finite linear RGB in 0..=1"
+        )))
+    }
+}
+
+fn deserialize_unit_rgb<'de, D: Deserializer<'de>>(deserializer: D) -> Result<[f32; 3], D::Error> {
+    let raw = <[f64; 3]>::deserialize(deserializer)?;
+    if raw
+        .iter()
+        .all(|channel| channel.is_finite() && (0.0..=1.0).contains(channel))
+    {
+        Ok(raw.map(|channel| channel as f32))
+    } else {
+        Err(serde::de::Error::custom(
+            "sky color channels must be finite in 0..=1",
+        ))
+    }
+}
+
+fn deserialize_sky_intensity<'de, D: Deserializer<'de>>(deserializer: D) -> Result<f32, D::Error> {
+    let raw = f64::deserialize(deserializer)?;
+    if raw.is_finite() && (0.0..=8.0).contains(&raw) {
+        Ok(raw as f32)
+    } else {
+        Err(serde::de::Error::custom(
+            "sky intensity must be finite in 0..=8",
+        ))
+    }
+}
+
+/// Procedural physical sky and image-based environment lighting settings.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Sky {
+    #[serde(deserialize_with = "deserialize_unit_rgb")]
+    pub zenith: [f32; 3],
+    #[serde(deserialize_with = "deserialize_unit_rgb")]
+    pub horizon: [f32; 3],
+    #[serde(deserialize_with = "deserialize_unit_rgb")]
+    pub ground: [f32; 3],
+    #[serde(deserialize_with = "deserialize_sky_intensity")]
+    pub intensity: f32,
+    #[serde(default = "default_true")]
+    pub show_backdrop: bool,
+}
+
+impl Default for Sky {
+    fn default() -> Self {
+        Self::daylight()
+    }
+}
+
+impl Sky {
+    pub fn daylight() -> Self {
+        Self {
+            zenith: [0.10, 0.28, 0.72],
+            horizon: [0.58, 0.74, 0.90],
+            ground: [0.14, 0.12, 0.10],
+            intensity: 1.0,
+            show_backdrop: true,
+        }
+    }
+
+    pub fn studio() -> Self {
+        Self {
+            zenith: [0.55, 0.58, 0.62],
+            horizon: [0.76, 0.76, 0.75],
+            ground: [0.22, 0.21, 0.20],
+            intensity: 1.0,
+            show_backdrop: true,
+        }
+    }
+
+    pub fn sunset() -> Self {
+        Self {
+            zenith: [0.08, 0.14, 0.36],
+            horizon: [0.88, 0.42, 0.18],
+            ground: [0.10, 0.07, 0.06],
+            intensity: 1.0,
+            show_backdrop: true,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), SceneError> {
+        validate_unit_rgb(&self.zenith, "zenith")?;
+        validate_unit_rgb(&self.horizon, "horizon")?;
+        validate_unit_rgb(&self.ground, "ground")?;
+        if self.intensity.is_finite() && (0.0..=8.0).contains(&self.intensity) {
+            Ok(())
+        } else {
+            Err(SceneError::Invalid(
+                "sky intensity must be finite in 0..=8".into(),
+            ))
+        }
+    }
+}
+
 /// Scalar opaque dielectric response; ambient/environment policy is not data.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -265,6 +374,46 @@ mod tests {
             json!({"type":"surface_hdr","exposure_stops":0,"extra":0}),
         ] {
             assert!(serde_json::from_value::<DisplayProfile>(value).is_err());
+        }
+        for sky in [Sky::daylight(), Sky::studio(), Sky::sunset()] {
+            sky.validate().unwrap();
+            assert_eq!(
+                serde_json::from_value::<Sky>(serde_json::to_value(sky).unwrap()).unwrap(),
+                sky
+            );
+        }
+        let minimal: Sky = serde_json::from_value(json!({
+            "zenith": [0.1, 0.2, 0.5],
+            "horizon": [0.4, 0.5, 0.6],
+            "ground": [0.1, 0.1, 0.1],
+            "intensity": 2.0
+        }))
+        .unwrap();
+        assert!(minimal.show_backdrop);
+        for bad in [
+            json!({"zenith":[-0.1,0,0],"horizon":[0,0,0],"ground":[0,0,0],"intensity":1}),
+            json!({"zenith":[0,1.1,0],"horizon":[0,0,0],"ground":[0,0,0],"intensity":1}),
+            json!({"zenith":[0,0,0],"horizon":[0,0,0],"ground":[0,0,0],"intensity":-0.1}),
+            json!({"zenith":[0,0,0],"horizon":[0,0,0],"ground":[0,0,0],"intensity":8.1}),
+            json!({"zenith":[0,0,0],"horizon":[0,0,0],"ground":[0,0,0],"intensity":1,"extra":true}),
+        ] {
+            assert!(serde_json::from_value::<Sky>(bad).is_err());
+        }
+        for bad in [
+            Sky {
+                intensity: f32::NAN,
+                ..Sky::daylight()
+            },
+            Sky {
+                intensity: 8.1,
+                ..Sky::daylight()
+            },
+            Sky {
+                zenith: [1.1, 0.0, 0.0],
+                ..Sky::daylight()
+            },
+        ] {
+            assert!(bad.validate().is_err());
         }
     }
 }

@@ -273,6 +273,7 @@ impl ComponentDrawPlan {
         base.materials.clone_from(&scene.materials);
         base.display = scene.display;
         base.background = scene.background;
+        base.sky = scene.sky;
         let camera = match scene.effective_camera(hierarchy) {
             Some((owner_index, CameraView::Transform(lens))) => RuntimeCamera::Transform {
                 owner_index,
