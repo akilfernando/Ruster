@@ -1,0 +1,34 @@
+[package]
+name = "rot-player"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "rot-player"
+path = "src/main.rs"
+
+[features]
+default = []
+inspection = ["rot-app/inspection"]
+
+[dependencies]
+rot-app = { path = "../rot-app", features = ["audio-output"] }
+rot-scene = { path = "../rot-scene" }
+rot-behavior = { path = "../rot-behavior" }
+rot-assets = { path = "../rot-assets" }
+rot-support = { path = "../rot-support" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

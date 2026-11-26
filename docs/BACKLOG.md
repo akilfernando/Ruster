@@ -40,7 +40,6 @@ cuts below in order.
 
 | Package | Outcome | Status & remaining gap |
 | --- | --- | --- |
-| `C-09` Build and Run | Editor ships a dedicated player binary and packages runnable Linux folders/archives. | `in progress` · Extract a lean `rot-player` binary crate out of `examples/motion-lab` (without `rot-script` or runtime kit); record Build and empty-player budgets. |
 | `C-10` Unified file-backed Lua API | One persistent-VM Lua component API (`A8`) with live reload on save. | `in progress` · Replace `host API1`–`7` and per-tick scene cloning with one growing component API (`on_start`, `on_update`, `find`, `spawn`, `destroy`, component access) and live reload on save. |
 | `C-EXIT` Phase 2 reference project & gate | Prove Phase 2 end-to-end on a tracked reference level within budgets. | `open` · Commit one v23 reference project in `examples/` (CC0 pack + Blender scene + 5,000-object prefab level); lift prototype caps (`16 MiB` GLB, `32k` tris, `2048` px edge) per `A12`; measure blank Phase 2 budgets, run desktop 60 fps and full UI checklist, and update the local install. |
 | `P-03` Platform seams & Windows CI | Protect `A11` immediately after Phase 2 exit before Phase 3/4 work begins. | `open` · Extract `rustix`, Unix sockets, `inotify` watcher, `rfd` target features, `xdg-open`, and OS dirs into platform modules; add a `windows-latest` `cargo check --workspace` CI job. |
@@ -100,7 +99,10 @@ completed packages:
   `C-08` (non-refusal `.glb`/`.gltf`
   import with external `.bin`/image & `data:` URI packing, JPEG textures, and
   warnings on real-world CC0/Blender fallbacks; full PBR maps, animated
-  lenses, and animated lights tracked in Phase 3A/3B), `C-11` &
+  lenses, and animated lights tracked in Phase 3A/3B), `C-09` (dedicated
+  `rot-player` binary crate extracted from `examples/motion-lab`, wired to
+  editor Build and `scripts/install_local.py`, and measured in release for
+  small-project Build and empty-player budgets), `C-11` &
   `C-11a` (multi-scene projects & crash recovery), `C-12` (5k/50k benchmark
   scenes), `C-05a`–`d`, `C-09a`, and slices `C-13`–`C-61`.
 - **Phase 4 — Early slice:** Game HUD labels (`2026-11-23`, `607fc96`).

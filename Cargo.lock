@@ -3270,6 +3270,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rot-player"
+version = "0.1.0"
+dependencies = [
+ "rot-app",
+ "rot-assets",
+ "rot-behavior",
+ "rot-scene",
+ "rot-support",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "rot-render"
 version = "0.1.0"
 dependencies = [

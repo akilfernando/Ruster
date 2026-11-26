@@ -250,8 +250,8 @@ See [benchmark commands](../crates/rot-render/README.md#large-scene-benchmark).
 | Scene view, 5,000 objects, about 1 M triangles, 1080p | 60 fps | 2 | Offscreen p95 0.97–1.20 ms through GPU completion, including CPU preparation and composite. |
 | Changed asset file to visible in the editor | 1 s | 2 | 507 ms from atomic replacement of an OBJ to the first inspection screenshot with changed viewport pixels (Linux release, one fixture). |
 | Import a 50 MB model | 3 s, editor stays responsive | 2 | |
-| Build a small project | 10 s | 2 | |
-| Built game, empty scene | Starts in 1 s, under 150 MB | 2 | |
+| Build a small project | 10 s | 2 | Release `BuildRequest::capture` + `publish_output` over 5 runs with `rot-player` (`34.1 MiB`), OBJ mesh, 16×16 PNG texture, and `spin.lua`: folder `1.3 ms` median (`2.6 ms` max); `.tar.gz` archive (`13.4 MiB`) `231.5 ms` median (`247.4 ms` max) (C-09, 2026-11-26). |
+| Built game, empty scene | Starts in 1 s, under 150 MB | 2 | Release `rot-player` on an empty v23 scene: headless (`--ticks 1`, 5 runs) `2.4 ms` median (`22.9 ms` cold max), `14.0 MB` peak RSS; windowed Vulkan (`--frames 5`, hidden workspace 2, RTX 4060, 4× MSAA, 3 runs) completed exec-to-exit in `533 ms` median (`1018 ms` cold max) at `247.3 MB` median peak RSS / `170.2 MB` PSS (exceeds 150 MB RSS target; C-09, 2026-11-26). |
 | Scene view, 50,000 instanced objects | 60 fps | 3 | Offscreen p95 4.46–5.54 ms at 1080p through GPU completion, including CPU preparation and composite. |
 | 10,000 script updates per frame | 2 ms | 4 | |
 | 1,000 active rigid bodies | 4 ms per step | 4 | |

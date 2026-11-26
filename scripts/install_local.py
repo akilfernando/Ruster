@@ -5,7 +5,7 @@
     python3 scripts/install_local.py --no-build   # install the existing target/release binaries
     python3 scripts/install_local.py --rollback   # put the previous version back
 
-Installs `rot-editor`, `rot-mcp` and the `rot-motion-lab` player into ~/.local/bin, the desktop entry
+Installs `rot-editor`, `rot-mcp` and the `rot-player` player into ~/.local/bin, the desktop entry
 `org.rot.editor.desktop` and its icon. Whatever those files replace, plus the
 pre-rename `ruster-*` install, is moved to ~/.local/share/rot-engine/previous
 so `--rollback` can restore it exactly. AI app configuration is never touched.
@@ -39,7 +39,7 @@ StartupWMClass=org.rot.editor
 """
 
 # Files from the pre-rename build. Install moves them aside; rollback restores them.
-LEGACY = [BIN / "ruster-editor", BIN / "ruster-mcp", APPS / "org.ruster.editor.desktop",
+LEGACY = [BIN / "ruster-editor", BIN / "ruster-mcp", BIN / "rot-motion-lab", APPS / "org.ruster.editor.desktop",
           ICONS / "128x128/apps/org.ruster.editor.png", ICONS / "128x128/apps/rot-engine-launcher.png"]
 
 
@@ -48,7 +48,7 @@ def targets(release):
     return {
         EDITOR: (release / "rot-editor").read_bytes(),
         BIN / "rot-mcp": (release / "rot-mcp").read_bytes(),
-        BIN / "rot-motion-lab": (release / "rot-motion-lab").read_bytes(),
+        BIN / "rot-player": (release / "rot-player").read_bytes(),
         APPS / "org.rot.editor.desktop": DESKTOP.encode(),
         ICONS / "128x128/apps/org.rot.editor.png": (ROOT / "crates/rot-editor/assets/rot-engine-launcher.png").read_bytes(),
     }
@@ -126,10 +126,10 @@ def main():
     if args.rollback:
         return rollback()
     if not args.no_build:
-        subprocess.run(["cargo", "build", "--release", "--locked", "-p", "rot-editor", "-p", "rot-mcp", "-p", "rot-motion-lab"],
+        subprocess.run(["cargo", "build", "--release", "--locked", "-p", "rot-editor", "-p", "rot-mcp", "-p", "rot-player"],
                        cwd=ROOT, check=True)
     release = ROOT / "target/release"
-    for name in ("rot-editor", "rot-mcp", "rot-motion-lab"):
+    for name in ("rot-editor", "rot-mcp", "rot-player"):
         if not (release / name).is_file():
             raise SystemExit(f"{release / name} is missing; run without --no-build.")
     install(release)

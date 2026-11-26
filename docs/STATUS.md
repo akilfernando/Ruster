@@ -30,12 +30,13 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   one-step Undo; live Play editing deferred to Phase 4), `C-08` General glTF
   import (non-refusal `.glb`/`.gltf` with external `.bin`/`data:` URIs, JPEG
   textures, and fallback warnings; full PBR/animated rigs in Phase 3A/3B),
+  `C-09` Build and Run (dedicated `rot-player` binary crate wired into editor
+  Build and `scripts/install_local.py`; small-project Build `1.3 ms` folder /
+  `231.5 ms` `.tar.gz` and empty player startup `< 1 s`),
   `C-05a`–`d`, `C-09a`, `C-13`–`C-61` authoring slices, and Phase 4 Game HUD
   labels.
 - **Open to exit Phase 2** (new `C-62+` convenience slices are frozen per
   2026-11-25 user approval until `C-EXIT` passes):
-  - `C-09`: extract a dedicated `rot-player` binary crate out of
-    `examples/motion-lab`.
   - `C-10`: replace `host API1`–`7` with one persistent-VM Lua component API
     and live reload on save.
   - `C-EXIT`: add one tracked v23 reference project in `examples/`, measure
@@ -68,5 +69,6 @@ previous build is in `~/.local/share/rot-engine/previous` for `--rollback`.
   entries in `~/.codex/config.toml` and `~/Projects/Ruster-Creations`.
 - Unverified gates: full Phase 1 [UI checklist](UX-STANDARDS.md#10-ui-review-checklist),
   physical pointer/gizmo display latency, desktop interactive 60 fps at 5,000
-  objects, and three blank Phase 2 budgets (50 MB model import, formalized
-  small-project Build, empty built-game RSS).
+  objects, and one blank Phase 2 budget (50 MB model import). Note: windowed
+  Vulkan empty `rot-player` peak memory (`247.3 MB` RSS / `170.2 MB` PSS)
+  exceeds the `150 MB` Phase 2 target (`14.0 MB` headless RSS).

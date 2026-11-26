@@ -28,7 +28,7 @@ use std::sync::{
     mpsc, Arc,
 };
 
-pub(super) const PLAYER: &str = "rot-motion-lab";
+pub(super) const PLAYER: &str = "rot-player";
 const APPLICATION: &str = "application";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -2662,5 +2662,141 @@ f 1 2 3
         assert_eq!(folder.path_to_open(), Err(Text::BuildFolderUnavailable));
         deliver(&mut ui, Err(PublishError::Cancelled), true);
         assert!(ui.folder.is_none());
+    }
+
+    #[ignore]
+    #[test]
+    fn measure_release_small_project_build() {
+        let player = PathBuf::from(
+            std::env::var("ROT_MEASURE_PLAYER")
+                .expect("set ROT_MEASURE_PLAYER to target/release/rot-player"),
+        );
+        assert!(player.is_file(), "missing player at {}", player.display());
+        let player_bytes = fs::metadata(&player).unwrap().len();
+
+        let target_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target");
+        fs::create_dir_all(&target_dir).unwrap();
+        let root = tempfile::tempdir_in(&target_dir).unwrap();
+        let project = root.path().join("project");
+        let assets_dir = project.join("Assets");
+        fs::create_dir_all(&assets_dir).unwrap();
+        fs::write(
+            assets_dir.join("cube.obj"),
+            b"v -0.5 -0.5 0\nv 0.5 -0.5 0\nv 0.5 0.5 0\nv -0.5 0.5 0\nvt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nf 1/1 2/2 3/3\nf 1/1 3/3 4/4\n",
+        )
+        .unwrap();
+        let mut png_bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut png_bytes, 16, 16);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&vec![200u8; 16 * 16 * 4]).unwrap();
+        }
+        fs::write(assets_dir.join("albedo.png"), &png_bytes).unwrap();
+        fs::write(
+            assets_dir.join("spin.lua"),
+            b"return {update=function(o,p,dt) o.rotation[2]=o.rotation[2]+dt; return o end}",
+        )
+        .unwrap();
+
+        let mut assets = AssetStore::open(&project).unwrap();
+        assets.import("cube", "Assets/cube.obj").unwrap();
+        assets.import("albedo", "Assets/albedo.png").unwrap();
+        assets.import("spin", "Assets/spin.lua").unwrap();
+
+        let mut session = Session::new(Scene::demo()).unwrap();
+        let revision = session.scene().revision;
+        let revision = session
+            .set_mesh(revision, "left", Some("cube".into()))
+            .unwrap();
+        session
+            .set_material(
+                revision,
+                "left",
+                rot_scene::OpaqueMaterial {
+                    base_color_texture: Some("albedo".into()),
+                    ..rot_scene::OpaqueMaterial::default()
+                },
+            )
+            .unwrap();
+        let mut scene = ComponentScene::from_legacy(&session).unwrap();
+        scene.objects[0]
+            .components
+            .push(rot_scene::component_scene::ComponentInstance {
+                id: "spin-script".into(),
+                enabled: true,
+                kind: rot_scene::component_scene::Component::Script {
+                    source_kind: Some(rot_scene::component_scene::ScriptSourceKind::Asset),
+                    binding: rot_scene::BehaviorBinding {
+                        target: rot_scene::BindingTarget::Object("left".into()),
+                        source_id: "spin".into(),
+                        enabled: true,
+                        properties: Default::default(),
+                        state_defaults: Default::default(),
+                        commands: Default::default(),
+                    },
+                    movement: rot_scene::component_scene::ScriptMovement::Ordinary,
+                },
+            });
+        let scene_path = project.join("small.scene.json");
+        scene.save_new(&scene_path).unwrap();
+        let component_session = ComponentSession::open(&scene_path).unwrap();
+
+        let mut folder_ms = Vec::with_capacity(5);
+        let mut archive_ms = Vec::with_capacity(5);
+        let mut archive_bytes = 0u64;
+        let cancel = AtomicBool::new(false);
+
+        for iteration in 0..5 {
+            let folder_dest = root.path().join(format!("folder-{iteration}"));
+            let started = std::time::Instant::now();
+            let request = BuildRequest::capture(&component_session, Some(&assets)).unwrap();
+            let artifact = request
+                .publish_output(&folder_dest, &player, &cancel, OutputFormat::Folder, || {})
+                .unwrap();
+            folder_ms.push(started.elapsed().as_secs_f64() * 1000.0);
+            if iteration == 0 {
+                let BuildArtifact::Folder(folder) = artifact else {
+                    panic!("expected folder artifact");
+                };
+                let check = std::process::Command::new(folder.path.join(APPLICATION))
+                    .args(["--headless", "--ticks", "2"])
+                    .output()
+                    .unwrap();
+                assert!(
+                    check.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&check.stderr)
+                );
+            }
+
+            let archive_dest = root.path().join(format!("archive-{iteration}.tar.gz"));
+            let started = std::time::Instant::now();
+            let request = BuildRequest::capture(&component_session, Some(&assets)).unwrap();
+            let artifact = request
+                .publish_output(
+                    &archive_dest,
+                    &player,
+                    &cancel,
+                    OutputFormat::LinuxArchive,
+                    || {},
+                )
+                .unwrap();
+            archive_ms.push(started.elapsed().as_secs_f64() * 1000.0);
+            let BuildArtifact::Archive(archive) = artifact else {
+                panic!("expected archive artifact");
+            };
+            archive_bytes = archive.bytes;
+        }
+        println!(
+            "{}",
+            serde_json::json!({
+                "folder_ms": folder_ms,
+                "archive_ms": archive_ms,
+                "player_bytes": player_bytes,
+                "archive_bytes": archive_bytes,
+            })
+        );
     }
 }
