@@ -30,9 +30,9 @@ pub(super) fn legacy_file_source(id: &str, source: &BehaviorSource) -> bool {
             .is_some_and(|path| path.ends_with(".lua"))
 }
 
-pub(super) enum ModuleProbe<'a> {
-    Ordinary(&'a mut Option<Module>),
-    Kinematic,
+pub(super) struct ModuleProbe<'a> {
+    pub(super) target: &'a mut Option<Module>,
+    pub(super) kinematic: bool,
 }
 
 #[derive(Debug)]
@@ -289,6 +289,16 @@ impl ObjectHandle {
 
 impl UserData for ObjectHandle {
     fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("id", |lua, object| {
+            let snapshot = current_callback(lua)?;
+            Ok(object.index_in(&snapshot).map(|_| object.id.clone()))
+        });
+        fields.add_field_method_get("name", |lua, object| {
+            let snapshot = current_callback(lua)?;
+            Ok(object
+                .index_in(&snapshot)
+                .map(|index| snapshot.lookup.scene.objects[index].name.clone()))
+        });
         fields.add_field_method_get("transform", |lua, object| {
             let snapshot = current_callback(lua)?;
             object
@@ -474,6 +484,7 @@ impl Engine {
         module: &Table,
         binding_id: &str,
         properties: &BTreeMap<String, PropertyValue>,
+        kinematic: bool,
     ) -> Result<Option<Module>, Diagnostic> {
         let parse = || -> mlua::Result<Option<Module>> {
             if !matches!(module.raw_get::<Value>("update")?, Value::Nil) {
@@ -525,6 +536,33 @@ impl Engine {
             host.raw_set("spawn", self.lua.create_function(spawn_object)?)?;
             host.raw_set("destroy", self.lua.create_function(destroy_object)?)?;
             let binding = Rc::<str>::from(binding_id);
+            if kinematic {
+                let slide_binding = Rc::clone(&binding);
+                host.raw_set(
+                    "move_and_slide",
+                    self.lua.create_function(move |lua, delta: Value| {
+                        let snapshot = current_callback(lua)?;
+                        snapshot
+                            .queries
+                            .move_and_slide_lua(lua, &slide_binding, delta)
+                    })?,
+                )?;
+                let sensor_binding = Rc::clone(&binding);
+                let sensor_properties = Arc::new(properties.clone());
+                host.raw_set(
+                    "sensor_crossing",
+                    self.lua
+                        .create_function(move |lua, name: mlua::LuaString| {
+                            let snapshot = current_callback(lua)?;
+                            snapshot.queries.sensor_crossing_lua(
+                                lua,
+                                &sensor_binding,
+                                &sensor_properties,
+                                name,
+                            )
+                        })?,
+                )?;
+            }
             if has_sound_cue(properties) {
                 let audio_binding = Rc::clone(&binding);
                 host.raw_set(
@@ -589,6 +627,7 @@ impl Engine {
         text: &str,
         binding_id: &str,
         properties: &BTreeMap<String, PropertyValue>,
+        kinematic: bool,
     ) -> Result<Module, Diagnostic> {
         self.binding_count.set(0);
         let main = self.compile_lua(id, text)?;
@@ -602,7 +641,7 @@ impl Engine {
         let result = main
             .call::<Table>(())
             .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))
-            .and_then(|module| self.component_module(&module, binding_id, properties));
+            .and_then(|module| self.component_module(&module, binding_id, properties, kinematic));
         let cleanup = self
             .lua
             .create_table()

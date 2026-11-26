@@ -2155,17 +2155,38 @@ f 1 2 3
             .script_files
             .get_mut(kinematic_id)
             .unwrap()
-            .text = "return {on_update=function(o) o.translation[1] = 1 end}".into();
-        let error = engine
-            .reset_component(&persistent_kinematic, 0)
-            .unwrap_err();
-        assert_eq!(
-            error.binding_id.as_deref(),
-            Some(format!("{}-script", scene.objects[1].id).as_str())
+            .text = r#"return {on_update=function(o,p,dt,h)
+                if dt > 0 then o.translation[1] = 1 end
+            end}"#
+            .into();
+        let mut bad_runtime = engine.reset_component(&persistent_kinematic, 0).unwrap();
+        let error = engine.step(&mut bad_runtime).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("exact move_and_slide translation"),
+            "{error}"
         );
-        assert!(error
-            .message
-            .contains("Kinematic Sphere scripts require update"));
+        assert_eq!(bad_runtime.tick(), 0);
+        assert_eq!(
+            bad_runtime.component_transforms().unwrap()[1],
+            scene.objects[1].transform
+        );
+
+        persistent_kinematic
+            .script_files
+            .get_mut(kinematic_id)
+            .unwrap()
+            .text = r#"return {on_update=function(o,p,dt,h)
+                if dt > 0 then
+                    o.translation = h.move_and_slide({0.125, 0, 0}).suggested_translation
+                end
+            end}"#
+            .into();
+        let mut persistent_runtime = engine.reset_component(&persistent_kinematic, 0).unwrap();
+        engine.step(&mut persistent_runtime).unwrap();
+        assert_eq!(persistent_runtime.tick(), 1);
+        assert_eq!(persistent_runtime.component_transforms().unwrap()[1], moved);
     }
 
     #[test]

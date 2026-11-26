@@ -1418,17 +1418,38 @@ impl Engine {
                         .call(())
                         .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
                     if let Some(probe) = probe {
-                        if let Some(module) = self.component_module(&module, host_input.binding_id, properties)? {
-                            let lua_component::ModuleProbe::Ordinary(probe) = probe else {
-                                return Err(Diagnostic::plain(
-                                    DiagnosticCode::UnsupportedBackend,
-                                    Phase::Module,
-                                    "Kinematic Sphere scripts require update and host.move_and_slide. The on_start/on_update API does not have a kinematic controller yet.",
-                                ));
-                            };
-                            let transform = module.start(self, input.expect("Object input"), properties)?;
-                            *probe = Some(module);
-                            return Ok(BindingOutput { transform, state: StateFields::new() });
+                        if let Some(module) = self.component_module(
+                            &module,
+                            host_input.binding_id,
+                            properties,
+                            probe.kinematic,
+                        )? {
+                            let original = input.expect("Object input");
+                            let transform = module.start(self, original, properties)?;
+                            if probe.kinematic {
+                                if let Some(output) = &transform {
+                                    host_input
+                                        .spatial
+                                        .expect("kinematic snapshot")
+                                        .validate_kinematic_output(
+                                            host_input.binding_id,
+                                            original,
+                                            output,
+                                        )
+                                        .map_err(|message| {
+                                            Diagnostic::plain(
+                                                DiagnosticCode::InvalidOutput,
+                                                Phase::Output,
+                                                &message,
+                                            )
+                                        })?;
+                                }
+                            }
+                            *probe.target = Some(module);
+                            return Ok(BindingOutput {
+                                transform,
+                                state: StateFields::new(),
+                            });
                         }
                     }
                     let update: Function = module

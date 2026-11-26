@@ -563,17 +563,25 @@ impl Engine {
                         "Replacement must be a file-backed Lua component",
                     ));
                 }
+                let kinematic = slot.movement == ScriptMovement::KinematicSphere;
                 let mut module = self.load_replacement_module(
                     source_id,
                     &source.text,
                     &slot.component_id,
                     &binding.properties,
+                    kinematic,
                 )?;
-                let implicit = module.start(
-                    self,
-                    &world.local_transforms[slot.owner_index],
-                    &binding.properties,
-                )?;
+                let original = &world.local_transforms[slot.owner_index];
+                let implicit = module.start(self, original, &binding.properties)?;
+                if kinematic {
+                    if let Some(output) = &implicit {
+                        queries
+                            .validate_kinematic_output(&slot.component_id, original, output)
+                            .map_err(|message| {
+                                diag(DiagnosticCode::InvalidOutput, Phase::Output, &message)
+                            })?;
+                    }
+                }
                 stage_file_writes(
                     &callback,
                     &world.local_transforms,
@@ -923,7 +931,7 @@ impl Engine {
                 .any(|slot| {
                     let binding = &authoring.bindings[&slot.component_id];
                     if scene.script_files.contains_key(&binding.source_id) {
-                        return slot.movement == ScriptMovement::Ordinary;
+                        return true;
                     }
                     authoring
                         .sources
@@ -1325,9 +1333,10 @@ impl Engine {
                         phase: Phase::Update,
                     });
                 }
+                let original = &world.local_transforms[slot.owner_index];
                 let result = module.update(
                     self,
-                    &world.local_transforms[slot.owner_index],
+                    original,
                     &binding.properties,
                     self.limits.fixed_dt,
                     next,
@@ -1342,6 +1351,22 @@ impl Engine {
                         runtime.authoring.sources.get(&binding.source_id),
                     )
                 })?;
+                if slot.movement == ScriptMovement::KinematicSphere {
+                    if let Some(output) = &implicit {
+                        queries
+                            .as_ref()
+                            .expect("kinematic snapshot")
+                            .validate_kinematic_output(&slot.component_id, original, output)
+                            .map_err(|message| {
+                                diag(DiagnosticCode::InvalidOutput, Phase::Output, &message)
+                                    .context(
+                                        &slot.component_id,
+                                        binding,
+                                        runtime.authoring.sources.get(&binding.source_id),
+                                    )
+                            })?;
+                    }
+                }
                 stage_file_writes(
                     callback.as_ref().expect("file callback snapshot"),
                     &world.local_transforms,
@@ -1593,16 +1618,13 @@ impl Engine {
                 .then(|| &local_transforms[slot.owner_index]);
             let mut detected = None;
             let module_probe = probe.as_ref().and_then(|_| {
-                if file.is_some() && slot.movement == ScriptMovement::KinematicSphere {
-                    Some(ModuleProbe::Kinematic)
-                } else if file.is_some()
+                (file.is_some()
                     || (matches!(binding.target, BindingTarget::Object(_))
-                        && lua_component::legacy_file_source(&binding.source_id, source))
-                {
-                    Some(ModuleProbe::Ordinary(&mut detected))
-                } else {
-                    None
-                }
+                        && lua_component::legacy_file_source(&binding.source_id, source)))
+                .then(|| ModuleProbe {
+                    target: &mut detected,
+                    kinematic: slot.movement == ScriptMovement::KinematicSphere,
+                })
             });
             let result = self.evaluate_with_module_probe(
                 &main,
@@ -3852,5 +3874,287 @@ mod tests {
         assert_eq!(err.code, DiagnosticCode::InvalidOutput);
         assert_eq!(runtime.tick(), 1);
         assert_eq!(runtime.object_translation("mover"), Some([1.0, 0.0, 0.0]));
+    }
+
+    fn persistent_kinematic_scene(script_text: &str) -> ComponentScene {
+        use rot_scene::input::{ActionDefinition, ActionKind, InputKey};
+        use rot_scene::PropertyValue;
+        let mut scene = base_scene("kinematic-persistent");
+        scene.actions.insert(
+            "step_right".into(),
+            ActionDefinition {
+                label: None,
+                kind: ActionKind::Button {
+                    keys: vec![InputKey::ArrowRight],
+                    primary_mouse: false,
+                },
+            },
+        );
+        scene
+            .script_files
+            .insert(GATE_FILE_ID.into(), file_script(script_text));
+        scene.objects.push(ObjectNode {
+            id: "mover".into(),
+            name: "KinematicMover".into(),
+            enabled: true,
+            parent: None,
+            transform: Transform::default(),
+            components: vec![
+                ComponentInstance {
+                    id: "mover-collider".into(),
+                    enabled: true,
+                    kind: Component::Collider {
+                        role: ColliderRole::Blocker,
+                        offset: [0.0; 3],
+                        shape: ColliderShape::Sphere { radius: 0.5 },
+                    },
+                },
+                ComponentInstance {
+                    id: "mover-script".into(),
+                    enabled: true,
+                    kind: Component::Script {
+                        source_kind: None,
+                        movement: ScriptMovement::KinematicSphere,
+                        binding: BehaviorBinding {
+                            source_id: GATE_FILE_ID.into(),
+                            target: BindingTarget::Object("mover".into()),
+                            enabled: true,
+                            properties: BTreeMap::from([
+                                ("checkpoint".into(), PropertyValue::SensorRef("zone".into())),
+                                (
+                                    "chime".into(),
+                                    PropertyValue::SoundRef(rot_scene::SoundRef {
+                                        asset_id: Some("chime-wav".into()),
+                                        gain: 0.8,
+                                        playback: Default::default(),
+                                    }),
+                                ),
+                            ]),
+                            state_defaults: BTreeMap::new(),
+                            commands: BTreeMap::new(),
+                        },
+                    },
+                },
+            ],
+        });
+        scene.objects.push(ObjectNode {
+            id: "wall".into(),
+            name: "BlockerWall".into(),
+            enabled: true,
+            parent: None,
+            transform: Transform {
+                translation: [1.5, 0.0, 0.0],
+                ..Transform::default()
+            },
+            components: vec![ComponentInstance {
+                id: "wall-collider".into(),
+                enabled: true,
+                kind: Component::Collider {
+                    role: ColliderRole::Blocker,
+                    offset: [0.0; 3],
+                    shape: ColliderShape::Box {
+                        half_extents: [0.25, 1.0, 1.0],
+                    },
+                },
+            }],
+        });
+        scene.objects.push(ObjectNode {
+            id: "zone".into(),
+            name: "CheckpointZone".into(),
+            enabled: true,
+            parent: None,
+            transform: Transform {
+                translation: [1.0, 0.0, 0.0],
+                ..Transform::default()
+            },
+            components: vec![ComponentInstance {
+                id: "zone-collider".into(),
+                enabled: true,
+                kind: Component::Collider {
+                    role: ColliderRole::Sensor,
+                    offset: [0.0; 3],
+                    shape: ColliderShape::Box {
+                        half_extents: [0.3, 1.0, 1.0],
+                    },
+                },
+            }],
+        });
+        scene.objects.push(ObjectNode {
+            id: "marker".into(),
+            name: "MarkerTemplate".into(),
+            enabled: false,
+            parent: None,
+            transform: Transform::default(),
+            components: Vec::new(),
+        });
+        scene
+    }
+
+    #[test]
+    fn persistent_kinematic_lua_moves_senses_plays_audio_and_exposes_object_identity() {
+        let scene = persistent_kinematic_scene(
+            r#"local ticks, marker_ref = 0, nil
+local function check(ok)
+    if not ok then local missing = nil; missing() end
+end
+return {
+    on_start = function(o, props, host)
+        local me = host.find("mover")
+        check(me and me.id == "mover" and me.name == "KinematicMover")
+        local template = host.find("MarkerTemplate")
+        check(template and template.id == "marker" and template.name == "MarkerTemplate")
+        marker_ref = host.spawn(template, template.transform)
+        check(marker_ref ~= nil)
+    end,
+    on_update = function(o, props, dt, host)
+        ticks = ticks + 1
+        local slide = host.move_and_slide({0.45, 0, 0})
+        o.translation = slide.suggested_translation
+        local hit = host.sensor_crossing("checkpoint")
+        if hit.state == "entered" then
+            host.play_sound("chime")
+            if marker_ref then
+                check(marker_ref.id ~= nil and marker_ref.name == "MarkerTemplate")
+                host.destroy(marker_ref)
+            end
+        elseif ticks == 3 and marker_ref then
+            check(marker_ref.id == nil and marker_ref.name == nil)
+            local wall = host.find("wall")
+            check(wall:component("Light") == nil)
+        end
+    end,
+}"#,
+        );
+
+        let mut engine = Engine::new(Limits::default()).unwrap();
+        let mut runtime = engine.reset_component(&scene, 0).unwrap();
+        // Tick 0 spawned marker_ref, so total objects = 5.
+        assert_eq!(runtime.component_scene().unwrap().objects.len(), 5);
+
+        // Tick 1: mover reaches x = 0.45, overlapping zone [0.3..0.9] -> "entered", plays cue once, destroys marker.
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.tick(), 1);
+        assert_eq!(runtime.component_scene().unwrap().objects.len(), 4);
+        assert_eq!(runtime.object_translation("mover"), Some([0.45, 0.0, 0.0]));
+        assert_eq!(
+            runtime.audio_batch().unwrap().cues.len(),
+            1,
+            "entered sensor should emit one Sound Cue"
+        );
+        assert!(runtime.query_observations().iter().any(|obs| matches!(
+            &obs.query,
+            crate::spatial_host::QueryResult::SensorCrossing { state, .. } if *state == "entered"
+        )));
+
+        // Tick 2: mover stops just ahead of wall at x ~ 0.75 (inside zone [0.7..1.3]) -> "inside", no second audio cue.
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.tick(), 2);
+        let x2 = runtime.object_translation("mover").unwrap()[0];
+        assert!(
+            x2 > 0.7 && x2 <= 0.75,
+            "expected mover near wall clearance <= 0.75, got {x2}"
+        );
+        assert!(runtime.query_observations().iter().any(|obs| matches!(
+            &obs.query,
+            crate::spatial_host::QueryResult::SensorCrossing { state, .. } if *state == "inside"
+        )));
+        assert!(runtime.audio_batch().is_none());
+
+        // Tick 3: destroyed marker_ref.id and marker_ref.name are nil; local `ticks` counter preserved.
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.tick(), 3);
+    }
+
+    #[test]
+    fn persistent_kinematic_rejects_tampered_writes_and_supports_live_reload() {
+        let mut scene = persistent_kinematic_scene(
+            r#"return {
+    on_update = function(o, props, dt, host)
+        local slide = host.move_and_slide({0.2, 0, 0})
+        o.translation = slide.suggested_translation
+    end,
+}"#,
+        );
+        let mut engine = Engine::new(Limits::default()).unwrap();
+        let mut runtime = engine.reset_component(&scene, 0).unwrap();
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.tick(), 1);
+        assert_eq!(runtime.object_translation("mover"), Some([0.2, 0.0, 0.0]));
+
+        // Live reload replaces the persistent kinematic module and preserves pose and tick.
+        let reloaded = engine
+            .reload_component_file(
+                &mut runtime,
+                GATE_FILE_ID,
+                file_script(
+                    r#"local count = 0
+return {
+    on_start = function(o, props, host)
+        if not (host.move_and_slide and host.sensor_crossing) then
+            local missing = nil
+            missing()
+        end
+    end,
+    on_update = function(o, props, dt, host)
+        count = count + 1
+        local slide = host.move_and_slide({0.1, 0, 0})
+        o.translation = slide.suggested_translation
+        if count == 2 then
+            o.translation[1] = 99.0 -- tamper without solver authorization
+            host.play_sound("chime")
+        end
+    end,
+}"#,
+                ),
+            )
+            .unwrap();
+        assert!(reloaded);
+        engine.step(&mut runtime).unwrap();
+        assert_eq!(runtime.tick(), 2);
+        assert!((runtime.object_translation("mover").unwrap()[0] - 0.3).abs() < 1e-5);
+
+        // Tampering on count==2 fails closed and preserves tick=2, translation=0.3, and zero audio.
+        let err = engine.step(&mut runtime).unwrap_err();
+        assert!(
+            err.message.contains("exact move_and_slide translation"),
+            "{}",
+            err.message
+        );
+        assert_eq!(runtime.tick(), 2);
+        assert!((runtime.object_translation("mover").unwrap()[0] - 0.3).abs() < 1e-5);
+        assert!(runtime.audio_batch().is_none());
+
+        // Broken reload (syntax/runtime) is rejected while keeping committed state intact, then clean reload recovers.
+        let invalid = engine
+            .reload_component_file(
+                &mut runtime,
+                GATE_FILE_ID,
+                file_script("return { on_start = function(o) o.translation[1] = 5 end }"),
+            )
+            .unwrap_err();
+        assert!(invalid.message.contains("exact move_and_slide translation"));
+        assert_eq!(runtime.tick(), 2);
+
+        scene.script_files.get_mut(GATE_FILE_ID).unwrap().text = r#"return {
+    on_update = function(o, props, dt, host)
+        host.move_and_slide({0, 0, 0})
+        host.move_and_slide({0, 0, 0})
+    end,
+}"#
+        .into();
+        let mut rt_double = engine.reset_component(&scene, 0).unwrap();
+        let err_double = engine.step(&mut rt_double).unwrap_err();
+        assert!(err_double.message.contains("only one move_and_slide"));
+
+        scene.script_files.get_mut(GATE_FILE_ID).unwrap().text = r#"return {
+    on_update = function(o, props, dt, host)
+        local p = o
+        host.find("mover"):set_transform({translation={1,0,0}, rotation=p.rotation, scale=p.scale})
+    end,
+}"#
+        .into();
+        let mut rt_set = engine.reset_component(&scene, 0).unwrap();
+        let err_set = engine.step(&mut rt_set).unwrap_err();
+        assert!(err_set.message.contains("outside its controller"));
     }
 }

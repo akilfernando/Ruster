@@ -586,109 +586,16 @@ pub(super) fn install_kinematic<'scope, 'env: 'scope>(
     let queries = input
         .spatial
         .ok_or_else(|| mlua::Error::runtime("kinematic snapshot unavailable"))?;
-    let controller = queries
-        .controller
-        .as_ref()
-        .filter(|controller| controller.owner.binding_id == input.binding_id)
-        .ok_or_else(|| mlua::Error::runtime("kinematic ownership unavailable"))?;
     host.raw_set(
         "move_and_slide",
         scope.create_function(move |lua, delta: Value| {
-            if controller.translation.get().is_some() {
-                return Err(mlua::Error::runtime(
-                    "API7 permits only one move_and_slide call per Reset or Step",
-                ));
-            }
-            let Value::Table(delta) = delta else {
-                return Err(mlua::Error::runtime(
-                    "move_and_slide requires a displacement vector",
-                ));
-            };
-            let delta = query_vector(delta)?;
-            queries.admit()?;
-            let result = queries
-                .world()?
-                .move_and_slide(&controller.owner.object_id, delta, &|| queries.cancelled())
-                .map_err(mlua::Error::runtime)?;
-            let translation = result.suggested_translation.ok_or_else(|| {
-                let status = slide_outcome(result.outcome);
-                let context = result.blocking_id.as_ref().map_or_else(
-                    || " at the requested displacement".into(),
-                    |blocker| format!(" at blocker {blocker:?}"),
-                );
-                mlua::Error::runtime(format!(
-                    "move_and_slide {status}{context}; no movement committed"
-                ))
-            })?;
-            let copied = lua.create_table()?;
-            copied.raw_set("outcome", slide_outcome(result.outcome))?;
-            copied.raw_set(
-                "suggested_translation",
-                lua.create_sequence_from(translation)?,
-            )?;
-            let contacts = lua.create_table()?;
-            for (index, contact) in result.contacts.iter().enumerate() {
-                let value = lua.create_table()?;
-                value.raw_set("target_id", contact.target_id.as_str())?;
-                value.raw_set("point", lua.create_sequence_from(contact.point)?)?;
-                value.raw_set("normal", lua.create_sequence_from(contact.normal)?)?;
-                value.raw_set("clearance", contact.clearance)?;
-                contacts.raw_set(index + 1, value)?;
-            }
-            copied.raw_set("contacts", contacts)?;
-            queries.observe(
-                input.binding_id,
-                QueryResult::MoveAndSlide {
-                    probe_id: controller.owner.object_id.clone(),
-                    delta,
-                    result,
-                },
-            );
-            controller.translation.set(Some(translation));
-            Ok(copied)
+            queries.move_and_slide_lua(lua, input.binding_id, delta)
         })?,
     )?;
     host.raw_set(
         "sensor_crossing",
         scope.create_function(move |lua, name: mlua::LuaString| {
-            let endpoint = controller.translation.get().ok_or_else(|| {
-                mlua::Error::runtime("sensor_crossing requires a successful move_and_slide first")
-            })?;
-            let name = object_id(&name)?;
-            let Some(PropertyValue::SensorRef(sensor_id)) = properties.get(name.as_str()) else {
-                return Err(mlua::Error::runtime(format!(
-                    "unknown named Box Sensor {name:?}"
-                )));
-            };
-            queries.admit()?;
-            let (was_inside, is_inside) = queries
-                .world()?
-                .sensor_occupancy(&controller.owner.object_id, sensor_id, endpoint, &|| {
-                    queries.cancelled()
-                })
-                .map_err(mlua::Error::runtime)?;
-            let state = match (was_inside, is_inside) {
-                (false, true) => "entered",
-                (true, true) => "inside",
-                (true, false) => "exited",
-                (false, false) => "outside",
-            };
-            let copied = lua.create_table()?;
-            copied.raw_set("state", state)?;
-            copied.raw_set("sensor_id", sensor_id.as_str())?;
-            copied.raw_set("was_inside", was_inside)?;
-            copied.raw_set("is_inside", is_inside)?;
-            queries.observe(
-                input.binding_id,
-                QueryResult::SensorCrossing {
-                    name,
-                    sensor_id: sensor_id.clone(),
-                    was_inside,
-                    is_inside,
-                    state,
-                },
-            );
-            Ok(copied)
+            queries.sensor_crossing_lua(lua, input.binding_id, properties, name)
         })?,
     )
 }
@@ -736,6 +643,123 @@ pub(super) fn install_spatial<'scope, 'env: 'scope>(
 }
 
 impl QueryInvocation {
+    pub(super) fn move_and_slide_lua(
+        &self,
+        lua: &Lua,
+        binding_id: &str,
+        delta: Value,
+    ) -> mlua::Result<Table> {
+        let controller = self
+            .controller
+            .as_ref()
+            .filter(|controller| controller.owner.binding_id == binding_id)
+            .ok_or_else(|| mlua::Error::runtime("kinematic ownership unavailable"))?;
+        if controller.translation.get().is_some() {
+            return Err(mlua::Error::runtime(
+                "API7 permits only one move_and_slide call per Reset or Step",
+            ));
+        }
+        let Value::Table(delta) = delta else {
+            return Err(mlua::Error::runtime(
+                "move_and_slide requires a displacement vector",
+            ));
+        };
+        let delta = query_vector(delta)?;
+        self.admit()?;
+        let result = self
+            .world()?
+            .move_and_slide(&controller.owner.object_id, delta, &|| self.cancelled())
+            .map_err(mlua::Error::runtime)?;
+        let translation = result.suggested_translation.ok_or_else(|| {
+            let status = slide_outcome(result.outcome);
+            let context = result.blocking_id.as_ref().map_or_else(
+                || " at the requested displacement".into(),
+                |blocker| format!(" at blocker {blocker:?}"),
+            );
+            mlua::Error::runtime(format!(
+                "move_and_slide {status}{context}; no movement committed"
+            ))
+        })?;
+        let copied = lua.create_table()?;
+        copied.raw_set("outcome", slide_outcome(result.outcome))?;
+        copied.raw_set(
+            "suggested_translation",
+            lua.create_sequence_from(translation)?,
+        )?;
+        let contacts = lua.create_table()?;
+        for (index, contact) in result.contacts.iter().enumerate() {
+            let value = lua.create_table()?;
+            value.raw_set("target_id", contact.target_id.as_str())?;
+            value.raw_set("point", lua.create_sequence_from(contact.point)?)?;
+            value.raw_set("normal", lua.create_sequence_from(contact.normal)?)?;
+            value.raw_set("clearance", contact.clearance)?;
+            contacts.raw_set(index + 1, value)?;
+        }
+        copied.raw_set("contacts", contacts)?;
+        self.observe(
+            binding_id,
+            QueryResult::MoveAndSlide {
+                probe_id: controller.owner.object_id.clone(),
+                delta,
+                result,
+            },
+        );
+        controller.translation.set(Some(translation));
+        Ok(copied)
+    }
+
+    pub(super) fn sensor_crossing_lua(
+        &self,
+        lua: &Lua,
+        binding_id: &str,
+        properties: &BTreeMap<String, PropertyValue>,
+        name: mlua::LuaString,
+    ) -> mlua::Result<Table> {
+        let controller = self
+            .controller
+            .as_ref()
+            .filter(|controller| controller.owner.binding_id == binding_id)
+            .ok_or_else(|| mlua::Error::runtime("kinematic ownership unavailable"))?;
+        let endpoint = controller.translation.get().ok_or_else(|| {
+            mlua::Error::runtime("sensor_crossing requires a successful move_and_slide first")
+        })?;
+        let name = object_id(&name)?;
+        let Some(PropertyValue::SensorRef(sensor_id)) = properties.get(name.as_str()) else {
+            return Err(mlua::Error::runtime(format!(
+                "unknown named Box Sensor {name:?}"
+            )));
+        };
+        self.admit()?;
+        let (was_inside, is_inside) = self
+            .world()?
+            .sensor_occupancy(&controller.owner.object_id, sensor_id, endpoint, &|| {
+                self.cancelled()
+            })
+            .map_err(mlua::Error::runtime)?;
+        let state = match (was_inside, is_inside) {
+            (false, true) => "entered",
+            (true, true) => "inside",
+            (true, false) => "exited",
+            (false, false) => "outside",
+        };
+        let copied = lua.create_table()?;
+        copied.raw_set("state", state)?;
+        copied.raw_set("sensor_id", sensor_id.as_str())?;
+        copied.raw_set("was_inside", was_inside)?;
+        copied.raw_set("is_inside", is_inside)?;
+        self.observe(
+            binding_id,
+            QueryResult::SensorCrossing {
+                name,
+                sensor_id: sensor_id.clone(),
+                was_inside,
+                is_inside,
+                state,
+            },
+        );
+        Ok(copied)
+    }
+
     pub(super) fn sweep_lua(
         &self,
         lua: &Lua,

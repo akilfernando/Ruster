@@ -34,21 +34,15 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   Build and `scripts/install_local.py`; small-project Build `1.3 ms` folder /
   `231.5 ms` `.tar.gz`; windowed empty-scene five-frame run
   `533 ms` median exec-to-exit),
+  `C-10` Unified file-backed Lua API (persistent per-component VM with
+  `on_start`/`on_update`, live reload on save, `host.find` with `id`/`name`/
+  `transform`/`set_transform`, `Light` component access, `spawn`/`destroy`,
+  `sweep`/`overlap`, `play_sound`, `move_and_slide`/`sensor_crossing`, and
+  versionless baking with legacy `update` fallback),
   `C-05a`–`d`, `C-09a`, `C-13`–`C-61` authoring slices, and Phase 4 Game HUD
   labels.
 - **Open to exit Phase 2** (new `C-62+` convenience slices are frozen per
   2026-11-25 user approval until `C-EXIT` passes):
-  - `C-10`: file-backed `on_start` and `on_update` retain per-component
-    Lua state and reload on save in Play. `host.find` reads another object's
-    committed local Transform and `set_transform` stages writes on the
-    same tick transaction. New Builds bake file scripts without a numbered
-    contract. Existing `update` scripts and packages still run. Lua can
-    read and stage Light intensity in the same tick as a Transform write.
-    Lua can also spawn and remove static subtrees during Play. Editor Play
-    and the relocated Rot Yard build both replay two warning-marker
-    cycles. Persistent callbacks use the committed collider snapshot for
-    sweep and overlap and request positional sound from authored Sound Cues.
-    The remaining persistent callback capabilities are open.
   - `C-EXIT`: [Rot Yard](../examples/rot-yard/README.md) has a scripted Blender
     gate, a Kenney CC0 pack, and a 5,000-object linked-prefab level.
     The Riverside scene exceeded 60 fps on the focused Wayland desktop.

@@ -653,24 +653,19 @@ stationary. In **Input Actions**, add two axes such as `move_x` and `move_z`.
 
 ```lua
 return {
-    update = function(object, properties, dt, host)
-        if host.move_and_slide then
-            if dt > 0 then
-                local dx = host.axis("move_x") * 4 * dt
-                local dz = host.axis("move_z") * 4 * dt
-                local result = host.move_and_slide({dx, 0, dz})
-                object.translation = result.suggested_translation
-            end
-            return {transform = object}
-        end
-        return object
+    on_update = function(transform, properties, dt, host)
+        local dx = host.axis("move_x") * 4 * dt
+        local dz = host.axis("move_z") * 4 * dt
+        local result = host.move_and_slide({dx, 0, dz})
+        transform.translation = result.suggested_translation
     end
 }
 ```
 
-Use the solver translation as returned and call it once per Step. **Ordinary**
-keeps the normal transform-return API, and each Script chooses its own mode
-even when several components use the same file.
+Use the solver translation as returned and call it once per Step. Legacy
+`update(object, properties, dt, host)` scripts returning `{transform = object}`
+remain supported. **Ordinary** keeps the standard transform-write API, and each
+Script chooses its own mode even when several components use the same file.
 
 ### Detect a named checkpoint
 
