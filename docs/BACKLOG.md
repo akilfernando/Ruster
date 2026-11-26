@@ -33,12 +33,11 @@ One line each. Anyone may add; the user or a planning pass orders them.
 
 ## Now — Phase 3A: Look (PBR & Scene Scale)
 
-`L-01` (`71aacda`), `L-02` (`611a640`), `L-03` (`93d7390`), and `L-04` (`16a3859`) shipped on `2026-11-26`. Continue Phase 3A with `L-05` below.
+`L-01` (`71aacda`), `L-02` (`611a640`), `L-03` (`93d7390`), `L-04` (`16a3859`), and `L-05` (`4f8e16d`) shipped on `2026-11-26`. Continue Phase 3A with `L-06` below.
 
 | Package | Outcome | Status & remaining gap |
 | --- | --- | --- |
-| `L-05` Alpha transparency | Alpha modes (`Opaque` / `Mask` cutout / `Blend` back-to-front sorted pass) with glTF `alphaMode`/`alphaCutoff` and shadow cutout parity (Size M, *brief needed*). | `open` · Wire `alpha_mode`/`alpha_cutoff` end-to-end across `rot-assets`, `rot-scene`, `rot-render`, `rot-editor`, and `rot-mcp`. |
-| `L-06` Frustum culling & dirty-range instancing | View-frustum culling and dirty-range GPU instance uploads for scaled scenes within the 60 fps 1080p budget (Size M, *brief needed*). | `open` · Follow `L-05`. |
+| `L-06` Frustum culling & dirty-range instancing | View-frustum culling and dirty-range GPU instance uploads for scaled scenes within the 60 fps 1080p budget (Size M, *brief needed*). | `open` · Next in Phase 3A after `L-05`. |
 | `L-EXIT` Phase 3A exit gate | Khronos PBR sample assets (`DamagedHelmet`, `MetalRoughSpheres`, transparent/cutout assets) render recognizably within frame budgets (Size S, *brief needed*). | `open` · Closes Phase 3A after `L-06`. |
 
 ## Later
@@ -100,7 +99,12 @@ completed packages:
   `64×64×6` 5-mip prefiltered specular cubemap, L2 SH diffuse irradiance,
   multiscattering split-sum IBL in `surface.wgsl`, Scene Display UI +
   `scene_display_set` MCP wiring, RTX 4060 probes green, headless 5k 1080p
-  4× MSAA CPU p50 `0.423 ms` / GPU p50 `0.292 ms` / frame p50 `0.980 ms`).
+  4× MSAA CPU p50 `0.423 ms` / GPU p50 `0.292 ms` / frame p50 `0.980 ms`), and `L-05`
+  (`2026-11-26`, `4f8e16d`: `Opaque`/`Mask` cutout/`Blend` back-to-front sorted pass,
+  straight-alpha `BaseColor` PNG/mip preservation, glTF `alphaMode`/`alphaCutoff`/
+  `opacity`, `shadow_depth_mask.wgsl` cutout shadows + `Blend` exclusion, material UI
+  & MCP `opacity`/`alpha_mode`/`alpha_cutoff`, RTX 4060 probes green, headless 5k
+  1080p 4× MSAA CPU p50 `0.458 ms` / GPU p50 `0.292 ms` / frame p50 `1.213 ms`).
 - **Phase 2 — Core completed packages:** `C-00a` (retired legacy logistics
   crates, Rhai mode, editor logistics UI, and superseded MCP
   enrollment/registry plumbing; promoted `crates/rot-support`), `C-01` (v23

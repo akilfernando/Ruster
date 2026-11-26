@@ -13,7 +13,7 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
-## Current phase — Phase 3A: Look (Next: `L-05`)
+## Current phase — Phase 3A: Look (Next: `L-06`)
 
 - **Done:** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`, `A-01`–`A-07`,
   `P-01`–`P-02`), `C-00a` (retired legacy logistics crates, Rhai mode, editor
@@ -64,13 +64,18 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   cubemap, L2 SH diffuse irradiance, multiscattering split-sum IBL in
   `surface.wgsl`, Scene Display UI + `scene_display_set` MCP wiring, RTX 4060
   probes green, headless 5k 1080p 4× MSAA CPU p50 `0.423 ms` / GPU p50
-  `0.292 ms` / frame p50 `0.980 ms`).
-- **Next:** `L-05` Alpha transparency (`Opaque` / `Mask` / `Blend`) (Phase 3A).
+  `0.292 ms` / frame p50 `0.980 ms`), and `L-05` Alpha transparency (`4f8e16d`:
+  `Opaque`/`Mask` cutout/`Blend` back-to-front sorted pass, straight-alpha
+  `BaseColor` PNG/mips, glTF `alphaMode`/`alphaCutoff`/`opacity`,
+  `shadow_depth_mask.wgsl` cutout shadows + `Blend` exclusion, material UI & MCP
+  wiring, RTX 4060 probes green, headless 5k 1080p 4× MSAA CPU p50 `0.458 ms` / GPU
+  p50 `0.292 ms` / frame p50 `1.213 ms`).
+- **Next:** `L-06` Frustum culling & dirty-range instancing (Phase 3A).
 
 ## What a creator can do today
 
 In v23, create projects and scenes, assemble component hierarchies and prefabs,
-and edit transforms, lighting, cameras, colliders and opaque materials. Import
+and edit transforms, lighting, cameras, colliders and PBR/alpha materials. Import
 OBJ, PNG, WAV, GLB and glTF assets. Attach Lua files, set per-object
 number, Boolean and Vector3 properties, and test gameplay in Play. Build
 packages supported scenes as a runnable Linux folder or `.tar.gz` archive.
