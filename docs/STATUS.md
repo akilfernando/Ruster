@@ -13,7 +13,7 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
-## Current phase — Phase 3A complete (Next: Phase 3B planning review)
+## Current phase — Phase 3B: Look — Lighting & Post (Next: `L-08`)
 
 - **Done:** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`, `A-01`–`A-07`,
   `P-01`–`P-02`), `C-00a` (retired legacy logistics crates, Rhai mode, editor
@@ -73,11 +73,15 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   instancing (`3264a4e`: Gribb-Hartmann `[0, 1]` world-AABB culling with shadow
   caster retention, `InstanceUploadTracker` gap-coalesced uploads, `0 B` steady
   state, RTX 4060 probes green, 5k frame p50 `1.211 ms` / p95 `1.557 ms`, 50k
-  frame p50 `4.942 ms` / p95 `5.647 ms`), and `L-EXIT` Phase 3A exit gate
+  frame p50 `4.942 ms` / p95 `5.647 ms`), `L-EXIT` Phase 3A exit gate
   (`7283208`: Khronos `DamagedHelmet`, `MetalRoughSpheres`, and
   `AlphaBlendModeTest` visually verified on RTX 4060 at `1280×720` 4× MSAA at
-  `0.610 ms` / `2.023 ms` / `0.628 ms` p95 frame time).
-- **Next:** Phase 3B planning review (Lighting & Post).
+  `0.610 ms` / `2.023 ms` / `0.628 ms` p95 frame time), and `L-07` Clustered
+  forward many-lights (`bbd7075`: `16×9×24` compute culling up to `1024`
+  Point/Spot lights in `cluster_cull.wgsl`/`surface.wgsl`, Persp+Ortho,
+  64-light RTX 4060 probe p50 `0.361 ms`, 5k 1080p frame p50 `1.062 ms` / p95
+  `1.771 ms`).
+- **Next:** `L-08` Cascaded directional shadows + spot/point shadow atlas.
 
 ## What a creator can do today
 

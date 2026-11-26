@@ -33,7 +33,16 @@ One line each. Anyone may add; the user or a planning pass orders them.
 
 ## Now — Phase 3B: Look (Lighting & Post)
 
-Phase 3A (`L-01`–`L-EXIT`) shipped on `2026-11-26`. Phase 3B packages (clustered forward many-lights, cascaded directional + spot/point shadow atlas, fog, bloom/color grading/AO/AA, debug views) await a planning review per [PARITY-PLAN](PARITY-PLAN.md#7-changing-this-plan).
+Phase 3A (`L-01`–`L-EXIT`) shipped on `2026-11-26`. Phase 3B closes clustered lighting, multi-light/cascaded shadows, fog, post-processing, and viewport debug views.
+
+| Package | Outcome | Status & remaining gap |
+| --- | --- | --- |
+| `L-07` Clustered forward many-lights | Verify `wgpu-hal` compute/SPIR-V 1.3 readiness; GPU compute `16×9×24` cluster culling up to `1024` local lights (`Surface` PBR, perspective & ortho) (Size M, *ready*). | `done — 2026-11-26, bbd7075` · 64-light RTX 4060 probe p50 `0.361 ms` / p95 `0.530 ms`; 5k 1080p frame p50 `1.062 ms` / p95 `1.771 ms`. |
+| `L-08` CSM & shadow atlas | 4-cascade directional Sun shadows + spot/point shadow atlas integrated into clustered shading (Size M, *brief needed*). | `open` · After `L-07`. |
+| `L-09` Atmospheric fog | Linear/exponential/height fog in scene data, shaders, Scene Display UI, MCP, and player (Size S, *brief needed*). | `open` · After `L-08`. |
+| `L-10` Post-processing stack | SSAO, bloom, color grading/tonemappers, and AA options (`MSAA 4x/2x`, `FXAA`, `Off`) (Size M, *brief needed*). | `open` · After `L-09`. |
+| `L-11` Viewport shading & debug views | Editor/runtime shading & debug modes (`Lit`, `Unlit`, `Wireframe`, `Normals`, `Roughness`, `Metallic`, `Albedo`, `AO`, `Depth`, `Clusters`, `Cascades`) (Size M, *brief needed*). | `open` · After `L-10`. |
+| `L-3B-EXIT` Phase 3B exit gate | Lit multi-light interior reference scene in `examples/rot-yard/`, visual & RTX 4060 budget verification (Size S, *brief needed*). | `open` · Closes Phase 3B. |
 
 ## Later
 
@@ -102,6 +111,13 @@ completed packages:
   on RTX 4060 at `1280×720` 4× MSAA — `DamagedHelmet` frame p50 `0.395 ms` / p95
   `0.610 ms`, `MetalRoughSpheres` p50 `1.654 ms` / p95 `2.023 ms`,
   `AlphaBlendModeTest` p50 `0.277 ms` / p95 `0.628 ms`, steady `0 B` upload).
+- **Phase 3B — Look completed packages:** `L-07` (`2026-11-26`, `bbd7075`:
+  GPU compute `16×9×24` clustered forward local lighting up to `1024` Point/Spot
+  lights in `cluster_cull.wgsl` + `cluster_gpu.rs` + `surface.wgsl` +
+  `PackedLighting`, lifted v23 `ComponentDrawPlan`/`ComponentPreview`/`rot-app`
+  limit with dirty-skip compute & `0 B` steady uploads, 64-light Persp+Ortho RTX
+  4060 probe green p50 `0.361 ms` / p95 `0.530 ms`, 5k 1080p 4× MSAA CPU p50
+  `0.504 ms` / GPU p50 `0.295 ms` / frame p50 `1.062 ms` / p95 `1.771 ms`).
 - **Phase 2 — Core completed packages:** `C-00a` (retired legacy logistics
   crates, Rhai mode, editor logistics UI, and superseded MCP
   enrollment/registry plumbing; promoted `crates/rot-support`), `C-01` (v23
