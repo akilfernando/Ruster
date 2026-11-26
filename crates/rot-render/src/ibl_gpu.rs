@@ -916,6 +916,7 @@ mod tests {
                 background: Some(BackgroundColor::new([0.05, 0.05, 0.08]).unwrap()),
                 sky,
                 fog,
+                post_process: None,
                 camera: (proj * view).to_cols_array(),
                 inv_camera: (proj * view).inverse().to_cols_array(),
                 cluster_camera: ClusterCamera::from_matrices(view, proj),

@@ -839,9 +839,10 @@ fn listed() -> Value {
             *edits = object_schema(json!(properties), vec!["operation", "object_id"]);
         }
         if name == "scene_display_set" {
-            // Advertise compact fog/sky shapes; rot_tools describe exposes full bounds.
+            // Advertise compact fog/post shapes; rot_tools describe exposes full bounds.
             if let Some(props) = schema.get_mut("properties").and_then(Value::as_object_mut) {
                 props.insert("fog".into(), json!({"type":["object","null"]}));
+                props.insert("post_process".into(), json!({"type":["object","null"]}));
             }
         }
         compact(schema);

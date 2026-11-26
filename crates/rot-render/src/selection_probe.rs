@@ -103,6 +103,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue) {
                 background: None,
                 sky: None,
                 fog: None,
+                post_process: None,
                 inv_camera: Mat4::IDENTITY.to_cols_array(),
                 show_editor_grid: false,
                 groups,

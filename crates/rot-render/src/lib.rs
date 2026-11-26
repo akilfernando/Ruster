@@ -13,6 +13,7 @@ mod instancing;
 mod khronos_probe;
 mod lighting_gpu;
 mod material_gpu;
+mod post_gpu;
 mod primitives;
 pub use primitives::{builtin_cube, builtin_mesh};
 #[cfg(test)]
@@ -2256,6 +2257,7 @@ fn render_draw_scene(
                 background: scene.background,
                 sky: scene.sky,
                 fog: scene.fog,
+                post_process: scene.post_process,
                 lighting,
                 size: draw_rect.size(),
                 cpu_us: start.elapsed().as_secs_f64() * 1.0e6,
@@ -2983,10 +2985,54 @@ struct Target {
     selection_mask: wgpu::TextureView,
     selection_mask_msaa: Option<wgpu::TextureView>,
     depth: wgpu::TextureView,
+    sampler: wgpu::Sampler,
     bind: wgpu::BindGroup,
+    post_generation: u64,
     size: [u32; 2],
     format: wgpu::TextureFormat,
     samples: u32,
+}
+
+impl Target {
+    fn rebuild_composite_bind(
+        &mut self,
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        display_uniform: &wgpu::Buffer,
+        post: &post_gpu::PostOutputs<'_>,
+    ) {
+        self.bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("scene composite"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&self.color),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: display_uniform.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&self.selection_mask),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(post.bloom_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(post.ao_view),
+                },
+            ],
+        });
+        self.post_generation = post.view_generation;
+    }
 }
 struct RetiringTarget {
     target: Target,
@@ -3081,12 +3127,13 @@ struct Timestamps {
 }
 struct Resources {
     builtin_sdr: ScenePipelines,
-    builtin_hdr: Option<ScenePipelines>,
+    hdr_pipelines: BTreeMap<u32, ScenePipelines>,
     selection_sdr: SelectionPipelines,
-    selection_hdr: Option<SelectionPipelines>,
+    selection_hdr: BTreeMap<u32, SelectionPipelines>,
     hdr_samples: Option<u32>,
     requested_samples: u32,
     pipeline: ScenePipelines,
+    composite_layout: wgpu::BindGroupLayout,
     composite: wgpu::RenderPipeline,
     builtins: BuiltinMeshes,
     zero_uv: wgpu::Buffer,
@@ -3099,6 +3146,7 @@ struct Resources {
     cluster: ClusterGpu,
     lighting: LightingGpu,
     shadows: shadow_gpu::ShadowGpu,
+    post: post_gpu::PostGpu,
     builtin_appearance: bool,
     instances: wgpu::Buffer,
     instance_uploads: instancing::InstanceUploadTracker,
@@ -3108,7 +3156,7 @@ struct Resources {
     camera: wgpu::Buffer,
     camera_layout: wgpu::BindGroupLayout,
     editor_grid_sdr: Option<wgpu::RenderPipeline>,
-    editor_grid_hdr: Option<wgpu::RenderPipeline>,
+    editor_grid_hdr: BTreeMap<u32, wgpu::RenderPipeline>,
     camera_bind: wgpu::BindGroup,
     target: Option<Target>,
     retiring_target: Option<RetiringTarget>,
@@ -3117,7 +3165,7 @@ struct Resources {
     hold_target_acknowledgement: bool,
     target_allocations: u64,
     display_uniform: wgpu::Buffer,
-    display_packet: [f32; 4],
+    display_packet: [[f32; 4]; 4],
     // Configuration includes actual target allocation and composite packet.
     // Eligibility is set only by exact fresh paint, and survives receipt reuse.
     image_configuration: u64,
@@ -3170,6 +3218,7 @@ impl Resources {
         let lighting = LightingGpu::new(device, &ibl, &cluster);
         let shadows =
             shadow_gpu::ShadowGpu::new(device, queue, &instance_layout, &materials.layout);
+        let post = post_gpu::PostGpu::new(device, queue);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("fixed scene ABI"),
             bind_group_layouts: &[
@@ -3182,9 +3231,50 @@ impl Resources {
         });
         let pipeline = scene_pipeline(device, &pipeline_layout, default_shader(), sample_count);
         let selection_sdr = selection_pipelines(device, &camera_layout, sample_count);
+        let tex_entry = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let composite_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("scene composite ABI"),
+            entries: &[
+                tex_entry(0),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(64),
+                    },
+                    count: None,
+                },
+                tex_entry(3),
+                tex_entry(4),
+                tex_entry(5),
+            ],
+        });
+        let composite_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("scene composite pipeline layout"),
+                bind_group_layouts: &[Some(&composite_layout)],
+                immediate_size: 0,
+            });
         let composite = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Rot Engine scene composite"),
-            layout: None,
+            layout: Some(&composite_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &composite_shader,
                 entry_point: Some("vs"),
@@ -3241,7 +3331,7 @@ impl Resources {
         let instances = instance_buffer(device, 1);
         let camera_bind = camera_bind_group(device, &camera_layout, &camera, &instances);
         let instance_bind = instance_bind_group(device, &instance_layout, &instances);
-        let display_packet = [0.; 4];
+        let display_packet = [[0.; 4]; 4];
         let display_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("fixed display packet"),
             contents: bytemuck::cast_slice(&display_packet),
@@ -3283,12 +3373,13 @@ impl Resources {
         }));
         Self {
             builtin_sdr: pipeline.clone(),
-            builtin_hdr: None,
+            hdr_pipelines: BTreeMap::new(),
             selection_sdr,
-            selection_hdr: None,
+            selection_hdr: BTreeMap::new(),
             hdr_samples: None,
             requested_samples: sample_count,
             pipeline,
+            composite_layout,
             composite,
             builtins,
             zero_uv,
@@ -3301,6 +3392,7 @@ impl Resources {
             cluster,
             lighting,
             shadows,
+            post,
             builtin_appearance: true,
             instances,
             instance_uploads: instancing::InstanceUploadTracker::default(),
@@ -3310,7 +3402,7 @@ impl Resources {
             camera,
             camera_layout,
             editor_grid_sdr: None,
-            editor_grid_hdr: None,
+            editor_grid_hdr: BTreeMap::new(),
             camera_bind,
             target: None,
             retiring_target: None,
@@ -3338,15 +3430,22 @@ impl Resources {
         self.instance_bind = instance_bind_group(device, &self.instance_layout, &self.instances);
     }
     fn enable_hdr(&mut self, device: &wgpu::Device, samples: u32) {
-        self.builtin_hdr = Some(scene_pipeline_format(
-            device,
-            &self.pipeline_layout,
-            surface_shader(),
-            samples,
-            HDR_COLOR,
-        ));
-        self.selection_hdr = Some(selection_pipelines(device, &self.camera_layout, samples));
         self.hdr_samples = Some(samples);
+        self.ensure_hdr_pipelines(device, samples);
+    }
+    fn ensure_hdr_pipelines(&mut self, device: &wgpu::Device, samples: u32) {
+        self.hdr_pipelines.entry(samples).or_insert_with(|| {
+            scene_pipeline_format(
+                device,
+                &self.pipeline_layout,
+                surface_shader(),
+                samples,
+                HDR_COLOR,
+            )
+        });
+        self.selection_hdr
+            .entry(samples)
+            .or_insert_with(|| selection_pipelines(device, &self.camera_layout, samples));
     }
     fn asset_metrics(&self) {
         let (mesh, texture) = self.assets.retired_bytes();
@@ -3477,16 +3576,22 @@ impl Resources {
                 samples,
             )
         });
-        let depth = texture(DEPTH, wgpu::TextureUsages::RENDER_ATTACHMENT, samples);
+        let depth = texture(
+            DEPTH,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            samples,
+        );
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("scene sampling"),
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
+        self.post.invalidate_views();
+        let initial_post = self.post.initial_outputs();
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("scene composite"),
-            layout: &self.composite.get_bind_group_layout(0),
+            layout: &self.composite_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -3504,6 +3609,14 @@ impl Resources {
                     binding: 3,
                     resource: wgpu::BindingResource::TextureView(&selection_mask),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(initial_post.bloom_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(initial_post.ao_view),
+                },
             ],
         });
         self.target = Some(Target {
@@ -3512,7 +3625,9 @@ impl Resources {
             selection_mask,
             selection_mask_msaa,
             depth,
+            sampler,
             bind,
+            post_generation: initial_post.view_generation,
             size,
             format,
             samples,
@@ -4015,6 +4130,7 @@ struct SceneCallback {
     background: Option<rot_scene::BackgroundColor>,
     sky: Option<rot_scene::Sky>,
     fog: Option<rot_scene::Fog>,
+    post_process: Option<rot_scene::PostProcess>,
     lighting: PackedLighting,
     size: egui::Vec2,
     cpu_us: f64,
@@ -4061,13 +4177,21 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         let valid_display =
             requested_exposure.is_finite() && (-8. ..=8.).contains(&requested_exposure);
         let applied_hdr =
-            requested_hdr && valid_display && r.builtin_appearance && r.builtin_hdr.is_some();
+            requested_hdr && valid_display && r.builtin_appearance && r.hdr_samples.is_some();
         let format = if applied_hdr { HDR_COLOR } else { COLOR };
         let samples = if applied_hdr {
-            r.hdr_samples.unwrap()
+            let max_hdr = r.hdr_samples.unwrap();
+            match self.post_process.map(|p| p.anti_aliasing) {
+                Some(rot_scene::AntiAliasing::Msaa2x) => max_hdr.min(2),
+                Some(rot_scene::AntiAliasing::Fxaa | rot_scene::AntiAliasing::Off) => 1,
+                _ => max_hdr,
+            }
         } else {
             r.sample_count
         };
+        if applied_hdr {
+            r.ensure_hdr_pipelines(device, samples);
+        }
         let status = if !valid_display {
             DisplayStatus::InvalidSettings
         } else if !r.builtin_appearance {
@@ -4094,7 +4218,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         {
             let mut metrics = r.metrics.lock().expect("metrics lock");
             metrics.display_requested_hdr = requested_hdr;
-            metrics.display_available_hdr = r.builtin_hdr.is_some();
+            metrics.display_available_hdr = r.hdr_samples.is_some();
             metrics.display_requested_exposure_stops = requested_exposure;
             metrics.requested_sample_count = r.requested_samples;
             metrics.target_requested_size = requested_size;
@@ -4141,15 +4265,49 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                     .iter()
                     .any(|instance| instance.response[3] > 0.)
             });
+        let post = self.post_process.unwrap_or_default();
+        let ssao_active = applied_hdr && post.ssao.enabled;
+        let bloom_intensity = if applied_hdr && post.bloom.enabled {
+            post.bloom.intensity
+        } else {
+            0.0
+        };
+        let fxaa_enabled = applied_hdr && post.anti_aliasing == rot_scene::AntiAliasing::Fxaa;
+        let tonemapper_id = match post.grading.tonemapper {
+            rot_scene::Tonemapper::PbrNeutral => 0.0,
+            rot_scene::Tonemapper::AcesFitted => 1.0,
+            rot_scene::Tonemapper::Reinhard => 2.0,
+            rot_scene::Tonemapper::None => 3.0,
+        };
         let display_packet = [
-            f32::from(u8::from(applied_hdr)),
-            if applied_hdr { requested_exposure } else { 0. },
-            f32::from(u8::from(selection)),
-            if selection {
-                screen.pixels_per_point
-            } else {
-                0.
-            },
+            [
+                f32::from(u8::from(applied_hdr)),
+                if applied_hdr { requested_exposure } else { 0. },
+                f32::from(u8::from(selection)),
+                if selection {
+                    screen.pixels_per_point
+                } else {
+                    0.
+                },
+            ],
+            [
+                tonemapper_id,
+                bloom_intensity,
+                f32::from(u8::from(ssao_active)),
+                f32::from(u8::from(fxaa_enabled)),
+            ],
+            [
+                post.grading.saturation,
+                post.grading.contrast,
+                post.grading.temperature,
+                post.grading.tint,
+            ],
+            [
+                post.grading.vignette,
+                1.0 / size[0].max(1) as f32,
+                1.0 / size[1].max(1) as f32,
+                0.0,
+            ],
         ];
         if display_packet != r.display_packet {
             r.invalidate_image();
@@ -4203,13 +4361,15 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         }
         let grid = self.show_editor_grid.then(|| {
             let slot = if applied_hdr {
-                &mut r.editor_grid_hdr
+                r.editor_grid_hdr.entry(samples).or_insert_with(|| {
+                    editor_grid::pipeline(device, &r.camera_layout, format, samples)
+                })
             } else {
-                &mut r.editor_grid_sdr
+                r.editor_grid_sdr.get_or_insert_with(|| {
+                    editor_grid::pipeline(device, &r.camera_layout, format, samples)
+                })
             };
-            slot.get_or_insert_with(|| {
-                editor_grid::pipeline(device, &r.camera_layout, format, samples)
-            })
+            slot
         });
         let timing = r
             .timestamps
@@ -4268,7 +4428,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                     view: &target.depth,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
-                        store: if selection {
+                        store: if selection || ssao_active {
                             wgpu::StoreOp::Store
                         } else {
                             wgpu::StoreOp::Discard
@@ -4285,7 +4445,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 multiview_mask: None,
             });
             let pipelines = if applied_hdr {
-                r.builtin_hdr.as_ref().expect("HDR capability checked")
+                &r.hdr_pipelines[&samples]
             } else {
                 &r.pipeline
             };
@@ -4351,7 +4511,11 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                     view: &target.depth,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Discard,
+                        store: if ssao_active {
+                            wgpu::StoreOp::Store
+                        } else {
+                            wgpu::StoreOp::Discard
+                        },
                     }),
                     stencil_ops: None,
                 }),
@@ -4360,9 +4524,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 multiview_mask: None,
             });
             let selection_pipelines = if applied_hdr {
-                r.selection_hdr
-                    .as_ref()
-                    .expect("HDR selection capability checked")
+                &r.selection_hdr[&samples]
             } else {
                 &r.selection_sdr
             };
@@ -4395,6 +4557,29 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                     );
                     cursor = end;
                 }
+            }
+        }
+        {
+            let target = r.target.as_mut().expect("target just resized");
+            let post_out = r.post.prepare(
+                device,
+                queue,
+                encoder,
+                target.size,
+                target.samples,
+                applied_hdr,
+                &target.color,
+                &target.depth,
+                Mat4::from_cols_array(&self.camera_projection),
+                self.post_process,
+            );
+            if post_out.view_generation != target.post_generation {
+                target.rebuild_composite_bind(
+                    device,
+                    &r.composite_layout,
+                    &r.display_uniform,
+                    &post_out,
+                );
             }
         }
         if let Some(t) = timing {
@@ -5025,6 +5210,8 @@ mod tests {
             ("composite", include_str!("composite.wgsl")),
             ("sky", include_str!("sky.wgsl")),
             ("ibl_bake", include_str!("ibl_bake.wgsl")),
+            ("post_ssao", include_str!("post_ssao.wgsl")),
+            ("post_bloom", include_str!("post_bloom.wgsl")),
         ] {
             let module = wgpu::naga::front::wgsl::parse_str(source)
                 .unwrap_or_else(|e| panic!("{name} WGSL parses: {e:?}"));
@@ -5034,7 +5221,10 @@ mod tests {
             )
             .validate(&module)
             .unwrap_or_else(|e| panic!("{name} WGSL validates: {e:?}"));
-            if !matches!(name, "composite" | "sky" | "ibl_bake") {
+            if !matches!(
+                name,
+                "composite" | "sky" | "ibl_bake" | "post_ssao" | "post_bloom"
+            ) {
                 let (_, instance_ty) = module
                     .types
                     .iter()

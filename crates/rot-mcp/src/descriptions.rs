@@ -32,7 +32,7 @@ pub const DESCRIPTIONS: &[(&str, &str)] = &[
     ("scene_material_set", "Set a shared material. assign_object_id assigns a new material; component_id selects an exact Mesh Renderer."),
     ("scene_material_assign", "Assign or clear a material on an object or specific Mesh Renderer component_id."),
     ("scene_material_copy", "Copy one material into a new ID and assign it to assign_object_id and component_id in one Undo (Make Unique)."),
-    ("scene_display_set", "Set scene SDR/HDR display, background, sky/IBL, or atmospheric fog."),
+    ("scene_display_set", "Set scene SDR/HDR display, background, sky/IBL, fog, or post-processing/AA."),
     ("viewport_inspect", "Read the Scene view camera, the selection and whether the Scene or Game view is showing."),
     ("viewport_capture_pick", "Find the object at a point (u, v from 0 to 1, top-left origin) of a screenshot from viewport_capture_inspect."),
     ("viewport_capture_start", "Start a screenshot of the viewport; fetch it with viewport_capture_inspect. viewport_screenshot does both."),

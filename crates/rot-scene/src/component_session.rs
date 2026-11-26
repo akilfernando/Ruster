@@ -5,7 +5,7 @@ use super::{
 use crate::input::{self, ActionDefinition};
 use crate::{
     BackgroundColor, BehaviorSource, BindingTarget, DisplayProfile, Fog, OpaqueMaterial,
-    PlayerAnchor, PropertyValue, SceneError, SceneLock, Sky, Transform,
+    PlayerAnchor, PostProcess, PropertyValue, SceneError, SceneLock, Sky, Transform,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -148,6 +148,7 @@ enum SceneChange {
         Option<BackgroundColor>,
         Option<Sky>,
         Option<Fog>,
+        Option<PostProcess>,
     ),
     Hud(crate::hud::Hud),
     GameplayCamera(Option<String>),
@@ -213,11 +214,12 @@ impl SceneChange {
                 Self::InsertCopies(copies)
             }
             Self::Hud(value) => Self::Hud(std::mem::replace(&mut scene.hud, value)),
-            Self::Display(value, background, sky, fog) => Self::Display(
+            Self::Display(value, background, sky, fog, post_process) => Self::Display(
                 std::mem::replace(&mut scene.display, value),
                 std::mem::replace(&mut scene.background, background),
                 std::mem::replace(&mut scene.sky, sky),
                 std::mem::replace(&mut scene.fog, fog),
+                std::mem::replace(&mut scene.post_process, post_process),
             ),
             Self::GameplayCamera(value) => {
                 Self::GameplayCamera(std::mem::replace(&mut scene.gameplay_camera, value))
@@ -721,6 +723,7 @@ impl ComponentSession {
         background: Option<BackgroundColor>,
         sky: Option<Sky>,
         fog: Option<Fog>,
+        post_process: Option<PostProcess>,
     ) -> Result<u64, SceneError> {
         self.check_revision(expected)?;
         display.validate()?;
@@ -730,14 +733,24 @@ impl ComponentSession {
         if let Some(fog) = &fog {
             fog.validate()?;
         }
+        if let Some(post) = &post_process {
+            post.validate()?;
+        }
         if display == self.scene.display
             && background == self.scene.background
             && sky == self.scene.sky
             && fog == self.scene.fog
+            && post_process == self.scene.post_process
         {
             return Ok(self.revision);
         }
-        self.commit([SceneChange::Display(display, background, sky, fog)])
+        self.commit([SceneChange::Display(
+            display,
+            background,
+            sky,
+            fog,
+            post_process,
+        )])
     }
 
     /// Sync one already-referenced material in the scene with an updated asset

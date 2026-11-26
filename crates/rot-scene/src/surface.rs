@@ -324,6 +324,218 @@ impl Fog {
     }
 }
 
+/// Screen-space tonemapper applied before sRGB encoding in Surface HDR.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Tonemapper {
+    #[default]
+    PbrNeutral,
+    AcesFitted,
+    Reinhard,
+    None,
+}
+
+/// Anti-aliasing strategy for Surface HDR viewports and standalone builds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AntiAliasing {
+    #[default]
+    Msaa4x,
+    Msaa2x,
+    Fxaa,
+    Off,
+}
+
+fn default_ssao_radius() -> f32 {
+    0.5
+}
+fn default_one() -> f32 {
+    1.0
+}
+fn default_ssao_bias() -> f32 {
+    0.025
+}
+fn default_bloom_knee() -> f32 {
+    0.5
+}
+fn default_bloom_intensity() -> f32 {
+    0.15
+}
+
+fn check_post_range(value: f32, lo: f32, hi: f32, label: &str) -> Result<(), SceneError> {
+    if value.is_finite() && (lo..=hi).contains(&value) {
+        Ok(())
+    } else {
+        Err(SceneError::Invalid(format!(
+            "post_process {label} must be finite in {lo}..={hi}"
+        )))
+    }
+}
+
+/// Depth-based screen-space ambient occlusion settings.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SsaoSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_ssao_radius")]
+    pub radius: f32,
+    #[serde(default = "default_one")]
+    pub intensity: f32,
+    #[serde(default = "default_ssao_bias")]
+    pub bias: f32,
+}
+
+impl Default for SsaoSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            radius: 0.5,
+            intensity: 1.0,
+            bias: 0.025,
+        }
+    }
+}
+
+impl SsaoSettings {
+    pub fn validate(&self) -> Result<(), SceneError> {
+        check_post_range(self.radius, 0.05, 5.0, "ssao.radius")?;
+        check_post_range(self.intensity, 0.0, 4.0, "ssao.intensity")?;
+        check_post_range(self.bias, 0.0, 0.5, "ssao.bias")
+    }
+}
+
+/// Multi-mip HDR bloom settings.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BloomSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_one")]
+    pub threshold: f32,
+    #[serde(default = "default_bloom_knee")]
+    pub soft_knee: f32,
+    #[serde(default = "default_bloom_intensity")]
+    pub intensity: f32,
+}
+
+impl Default for BloomSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            threshold: 1.0,
+            soft_knee: 0.5,
+            intensity: 0.15,
+        }
+    }
+}
+
+impl BloomSettings {
+    pub fn validate(&self) -> Result<(), SceneError> {
+        check_post_range(self.threshold, 0.0, 16.0, "bloom.threshold")?;
+        check_post_range(self.soft_knee, 0.0, 1.0, "bloom.soft_knee")?;
+        check_post_range(self.intensity, 0.0, 2.0, "bloom.intensity")
+    }
+}
+
+/// Color grading and tonemapping parameters.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ColorGradingSettings {
+    #[serde(default)]
+    pub tonemapper: Tonemapper,
+    #[serde(default = "default_one")]
+    pub saturation: f32,
+    #[serde(default = "default_one")]
+    pub contrast: f32,
+    #[serde(default)]
+    pub temperature: f32,
+    #[serde(default)]
+    pub tint: f32,
+    #[serde(default)]
+    pub vignette: f32,
+}
+
+impl Default for ColorGradingSettings {
+    fn default() -> Self {
+        Self {
+            tonemapper: Tonemapper::PbrNeutral,
+            saturation: 1.0,
+            contrast: 1.0,
+            temperature: 0.0,
+            tint: 0.0,
+            vignette: 0.0,
+        }
+    }
+}
+
+impl ColorGradingSettings {
+    pub fn validate(&self) -> Result<(), SceneError> {
+        check_post_range(self.saturation, 0.0, 2.0, "grading.saturation")?;
+        check_post_range(self.contrast, 0.5, 2.0, "grading.contrast")?;
+        check_post_range(self.temperature, -1.0, 1.0, "grading.temperature")?;
+        check_post_range(self.tint, -1.0, 1.0, "grading.tint")?;
+        check_post_range(self.vignette, 0.0, 1.0, "grading.vignette")
+    }
+}
+
+/// Scene-wide HDR post-processing and anti-aliasing settings.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PostProcess {
+    #[serde(default)]
+    pub ssao: SsaoSettings,
+    #[serde(default)]
+    pub bloom: BloomSettings,
+    #[serde(default)]
+    pub grading: ColorGradingSettings,
+    #[serde(default)]
+    pub anti_aliasing: AntiAliasing,
+}
+
+impl PostProcess {
+    pub fn cinematic() -> Self {
+        Self {
+            ssao: SsaoSettings {
+                enabled: true,
+                radius: 0.65,
+                intensity: 1.25,
+                bias: 0.025,
+            },
+            bloom: BloomSettings {
+                enabled: true,
+                threshold: 1.0,
+                soft_knee: 0.5,
+                intensity: 0.18,
+            },
+            grading: ColorGradingSettings {
+                tonemapper: Tonemapper::AcesFitted,
+                saturation: 1.05,
+                contrast: 1.08,
+                temperature: 0.04,
+                tint: 0.0,
+                vignette: 0.18,
+            },
+            anti_aliasing: AntiAliasing::Msaa4x,
+        }
+    }
+
+    pub fn performance() -> Self {
+        Self {
+            ssao: SsaoSettings::default(),
+            bloom: BloomSettings::default(),
+            grading: ColorGradingSettings::default(),
+            anti_aliasing: AntiAliasing::Fxaa,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), SceneError> {
+        self.ssao.validate()?;
+        self.bloom.validate()?;
+        self.grading.validate()
+    }
+}
+
 /// Scalar opaque dielectric response; ambient/environment policy is not data.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -609,6 +821,80 @@ mod tests {
         }
         assert!(serde_json::from_value::<Fog>(json!({
             "color": [0.4, 0.5, 0.6],
+            "extra": true
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn post_process_wire_validates_presets_and_rejects_invalid_bounds() {
+        for post in [
+            PostProcess::default(),
+            PostProcess::cinematic(),
+            PostProcess::performance(),
+        ] {
+            post.validate().unwrap();
+            assert_eq!(
+                serde_json::from_value::<PostProcess>(serde_json::to_value(post).unwrap()).unwrap(),
+                post
+            );
+        }
+        let minimal: PostProcess = serde_json::from_value(json!({
+            "anti_aliasing": "fxaa"
+        }))
+        .unwrap();
+        assert_eq!(minimal.anti_aliasing, AntiAliasing::Fxaa);
+        assert!(!minimal.ssao.enabled);
+        assert!(!minimal.bloom.enabled);
+        assert_eq!(minimal.grading.tonemapper, Tonemapper::PbrNeutral);
+
+        for bad in [
+            PostProcess {
+                ssao: SsaoSettings {
+                    radius: 0.01,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            PostProcess {
+                ssao: SsaoSettings {
+                    intensity: 4.5,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            PostProcess {
+                bloom: BloomSettings {
+                    threshold: -0.1,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            PostProcess {
+                bloom: BloomSettings {
+                    intensity: 2.5,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            PostProcess {
+                grading: ColorGradingSettings {
+                    contrast: 0.4,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            PostProcess {
+                grading: ColorGradingSettings {
+                    vignette: 1.2,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        ] {
+            assert!(bad.validate().is_err());
+        }
+        assert!(serde_json::from_value::<PostProcess>(json!({
             "extra": true
         }))
         .is_err());

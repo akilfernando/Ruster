@@ -14,9 +14,9 @@ use crate::{
     input::{validate_action_map, ActionMap},
     strict_json, validate_id, validate_name, Ambient, AnimationBinding, BackgroundColor,
     BehaviorBinding, BehaviorSource, BindingTarget, Collider, ColliderRole, ColliderShape,
-    DisplayProfile, Fog, Light, LightKind, Lighting, OpaqueMaterial, PlayerView, Primitive,
-    PropertyValue, SceneError, Session, Sky, SoundAssetReferences, Transform, MAX_SOURCES,
-    MAX_SOURCE_BYTES,
+    DisplayProfile, Fog, Light, LightKind, Lighting, OpaqueMaterial, PlayerView, PostProcess,
+    Primitive, PropertyValue, SceneError, Session, Sky, SoundAssetReferences, Transform,
+    MAX_SOURCES, MAX_SOURCE_BYTES,
 };
 
 #[path = "component_session.rs"]
@@ -61,6 +61,12 @@ pub struct ComponentScene {
         deserialize_with = "present_lens_value"
     )]
     pub fog: Option<Fog>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_lens_value"
+    )]
+    pub post_process: Option<PostProcess>,
     /// None preserves the implicit lighting used by legacy scenes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ambient: Option<Ambient>,
@@ -438,6 +444,9 @@ impl ComponentScene {
         }
         if let Some(fog) = &self.fog {
             fog.validate()?;
+        }
+        if let Some(post) = &self.post_process {
+            post.validate()?;
         }
         if let Some(ambient) = &self.ambient {
             ambient.validate()?;
@@ -832,6 +841,7 @@ impl ComponentScene {
             background: None,
             sky: None,
             fog: None,
+            post_process: None,
             ambient,
             sources: authoring.sources.clone(),
             script_files: BTreeMap::new(),
@@ -1822,6 +1832,7 @@ mod tests {
             background: None,
             sky: None,
             fog: None,
+            post_process: None,
             ambient: None,
             sources: BTreeMap::new(),
             script_files: BTreeMap::new(),
@@ -1888,6 +1899,7 @@ mod tests {
             background: None,
             sky: None,
             fog: None,
+            post_process: None,
             ambient: None,
             sources: BTreeMap::new(),
             script_files: BTreeMap::new(),

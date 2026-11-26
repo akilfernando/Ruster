@@ -8,7 +8,10 @@ use crate::{
     ui_kit,
 };
 use eframe::egui;
-use rot_scene::{BackgroundColor, DisplayProfile, Fog, FogMode, SceneError, Sky};
+use rot_scene::{
+    AntiAliasing, BackgroundColor, BloomSettings, ColorGradingSettings, DisplayProfile, Fog,
+    FogMode, PostProcess, SceneError, Sky, SsaoSettings, Tonemapper,
+};
 
 fn exposure_id() -> egui::Id {
     egui::Id::unique("v23_scene_display_exposure")
@@ -239,6 +242,239 @@ fn edit_fog(ui: &mut egui::Ui, draft: &mut FogDraft) {
     edit_fog_field(ui, Text::SceneFogSkyAffect.plain(), &mut draft.sky_affect);
 }
 
+struct PostProcessDraft {
+    enabled: bool,
+    anti_aliasing: AntiAliasing,
+    tonemapper: Tonemapper,
+    ssao_enabled: bool,
+    ssao_radius: String,
+    ssao_intensity: String,
+    ssao_bias: String,
+    bloom_enabled: bool,
+    bloom_threshold: String,
+    bloom_soft_knee: String,
+    bloom_intensity: String,
+    saturation: String,
+    contrast: String,
+    temperature: String,
+    tint: String,
+    vignette: String,
+}
+
+impl PostProcessDraft {
+    fn new(value: Option<PostProcess>) -> Self {
+        let p = value.unwrap_or_default();
+        Self {
+            enabled: value.is_some(),
+            anti_aliasing: p.anti_aliasing,
+            tonemapper: p.grading.tonemapper,
+            ssao_enabled: p.ssao.enabled,
+            ssao_radius: format!("{}", p.ssao.radius),
+            ssao_intensity: format!("{}", p.ssao.intensity),
+            ssao_bias: format!("{}", p.ssao.bias),
+            bloom_enabled: p.bloom.enabled,
+            bloom_threshold: format!("{}", p.bloom.threshold),
+            bloom_soft_knee: format!("{}", p.bloom.soft_knee),
+            bloom_intensity: format!("{}", p.bloom.intensity),
+            saturation: format!("{}", p.grading.saturation),
+            contrast: format!("{}", p.grading.contrast),
+            temperature: format!("{}", p.grading.temperature),
+            tint: format!("{}", p.grading.tint),
+            vignette: format!("{}", p.grading.vignette),
+        }
+    }
+
+    fn set_preset(&mut self, p: PostProcess) {
+        self.enabled = true;
+        self.anti_aliasing = p.anti_aliasing;
+        self.tonemapper = p.grading.tonemapper;
+        self.ssao_enabled = p.ssao.enabled;
+        self.ssao_radius = format!("{}", p.ssao.radius);
+        self.ssao_intensity = format!("{}", p.ssao.intensity);
+        self.ssao_bias = format!("{}", p.ssao.bias);
+        self.bloom_enabled = p.bloom.enabled;
+        self.bloom_threshold = format!("{}", p.bloom.threshold);
+        self.bloom_soft_knee = format!("{}", p.bloom.soft_knee);
+        self.bloom_intensity = format!("{}", p.bloom.intensity);
+        self.saturation = format!("{}", p.grading.saturation);
+        self.contrast = format!("{}", p.grading.contrast);
+        self.temperature = format!("{}", p.grading.temperature);
+        self.tint = format!("{}", p.grading.tint);
+        self.vignette = format!("{}", p.grading.vignette);
+    }
+
+    fn value(&self) -> Result<Option<PostProcess>, Text> {
+        if !self.enabled {
+            return Ok(None);
+        }
+        let parse = |raw: &str| {
+            raw.trim()
+                .parse::<f32>()
+                .map_err(|_| Text::ScenePostInvalid)
+        };
+        let candidate = PostProcess {
+            ssao: SsaoSettings {
+                enabled: self.ssao_enabled,
+                radius: parse(&self.ssao_radius)?,
+                intensity: parse(&self.ssao_intensity)?,
+                bias: parse(&self.ssao_bias)?,
+            },
+            bloom: BloomSettings {
+                enabled: self.bloom_enabled,
+                threshold: parse(&self.bloom_threshold)?,
+                soft_knee: parse(&self.bloom_soft_knee)?,
+                intensity: parse(&self.bloom_intensity)?,
+            },
+            grading: ColorGradingSettings {
+                tonemapper: self.tonemapper,
+                saturation: parse(&self.saturation)?,
+                contrast: parse(&self.contrast)?,
+                temperature: parse(&self.temperature)?,
+                tint: parse(&self.tint)?,
+                vignette: parse(&self.vignette)?,
+            },
+            anti_aliasing: self.anti_aliasing,
+        };
+        candidate
+            .validate()
+            .map(|()| Some(candidate))
+            .map_err(|_| Text::ScenePostInvalid)
+    }
+}
+
+fn edit_post_process(ui: &mut egui::Ui, draft: &mut PostProcessDraft) {
+    ui_kit::property_row_with_label(ui, Text::ScenePost.plain(), |ui, label| {
+        egui::ComboBox::from_id_salt("post_mode")
+            .selected_text(
+                if draft.enabled {
+                    Text::ScenePostCustom
+                } else {
+                    Text::ScenePostDefault
+                }
+                .plain(),
+            )
+            .show_ui(ui, |ui| {
+                for (enabled, text) in [
+                    (false, Text::ScenePostDefault),
+                    (true, Text::ScenePostCustom),
+                ] {
+                    if ui
+                        .selectable_value(&mut draft.enabled, enabled, text.plain())
+                        .clicked()
+                    {
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .labelled_by(label);
+    });
+    if !draft.enabled {
+        return;
+    }
+    ui_kit::property_row_with_label(ui, Text::ScenePostPreset.plain(), |ui, _| {
+        ui.horizontal(|ui| {
+            if ui.button(Text::ScenePostCinematic.plain()).clicked() {
+                draft.set_preset(PostProcess::cinematic());
+            }
+            if ui.button(Text::ScenePostPerformance.plain()).clicked() {
+                draft.set_preset(PostProcess::performance());
+            }
+        });
+    });
+    let aa_label = |aa| match aa {
+        AntiAliasing::Msaa4x => Text::ScenePostAaMsaa4x,
+        AntiAliasing::Msaa2x => Text::ScenePostAaMsaa2x,
+        AntiAliasing::Fxaa => Text::ScenePostAaFxaa,
+        AntiAliasing::Off => Text::ScenePostAaOff,
+    };
+    ui_kit::property_row_with_label(ui, Text::ScenePostAntiAliasing.plain(), |ui, label| {
+        egui::ComboBox::from_id_salt("post_aa")
+            .selected_text(aa_label(draft.anti_aliasing).plain())
+            .show_ui(ui, |ui| {
+                for aa in [
+                    AntiAliasing::Msaa4x,
+                    AntiAliasing::Msaa2x,
+                    AntiAliasing::Fxaa,
+                    AntiAliasing::Off,
+                ] {
+                    if ui
+                        .selectable_value(&mut draft.anti_aliasing, aa, aa_label(aa).plain())
+                        .clicked()
+                    {
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .labelled_by(label);
+    });
+    let tm_label = |tm| match tm {
+        Tonemapper::PbrNeutral => Text::ScenePostTmPbrNeutral,
+        Tonemapper::AcesFitted => Text::ScenePostTmAces,
+        Tonemapper::Reinhard => Text::ScenePostTmReinhard,
+        Tonemapper::None => Text::ScenePostTmNone,
+    };
+    ui_kit::property_row_with_label(ui, Text::ScenePostTonemapper.plain(), |ui, label| {
+        egui::ComboBox::from_id_salt("post_tm")
+            .selected_text(tm_label(draft.tonemapper).plain())
+            .show_ui(ui, |ui| {
+                for tm in [
+                    Tonemapper::PbrNeutral,
+                    Tonemapper::AcesFitted,
+                    Tonemapper::Reinhard,
+                    Tonemapper::None,
+                ] {
+                    if ui
+                        .selectable_value(&mut draft.tonemapper, tm, tm_label(tm).plain())
+                        .clicked()
+                    {
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .labelled_by(label);
+    });
+    ui.checkbox(&mut draft.ssao_enabled, Text::ScenePostSsao.plain());
+    if draft.ssao_enabled {
+        edit_fog_field(ui, Text::ScenePostRadius.plain(), &mut draft.ssao_radius);
+        edit_fog_field(
+            ui,
+            Text::ScenePostIntensity.plain(),
+            &mut draft.ssao_intensity,
+        );
+        edit_fog_field(ui, Text::ScenePostBias.plain(), &mut draft.ssao_bias);
+    }
+    ui.checkbox(&mut draft.bloom_enabled, Text::ScenePostBloom.plain());
+    if draft.bloom_enabled {
+        edit_fog_field(
+            ui,
+            Text::ScenePostThreshold.plain(),
+            &mut draft.bloom_threshold,
+        );
+        edit_fog_field(
+            ui,
+            Text::ScenePostSoftKnee.plain(),
+            &mut draft.bloom_soft_knee,
+        );
+        edit_fog_field(
+            ui,
+            Text::ScenePostIntensity.plain(),
+            &mut draft.bloom_intensity,
+        );
+    }
+    edit_fog_field(ui, Text::ScenePostSaturation.plain(), &mut draft.saturation);
+    edit_fog_field(ui, Text::ScenePostContrast.plain(), &mut draft.contrast);
+    edit_fog_field(
+        ui,
+        Text::ScenePostTemperature.plain(),
+        &mut draft.temperature,
+    );
+    edit_fog_field(ui, Text::ScenePostTint.plain(), &mut draft.tint);
+    edit_fog_field(ui, Text::ScenePostVignette.plain(), &mut draft.vignette);
+}
+
 fn srgb_hex(color: BackgroundColor) -> String {
     let [r, g, b] = color.linear();
     let [r, g, b, _] = egui::Rgba::from_rgb(r, g, b).to_srgba_unmultiplied();
@@ -399,6 +635,7 @@ pub(super) struct Draft {
     background: BackgroundDraft,
     sky: SkyDraft,
     fog: FogDraft,
+    post_process: PostProcessDraft,
     opened_frame: Option<u64>,
     error: Option<String>,
 }
@@ -416,6 +653,7 @@ impl ComponentWorkspace {
             background: BackgroundDraft::new(self.session.scene().background),
             sky: SkyDraft::new(self.session.scene().sky),
             fog: FogDraft::new(self.session.scene().fog),
+            post_process: PostProcessDraft::new(self.session.scene().post_process),
             opened_frame: None,
             error: None,
         });
@@ -430,13 +668,14 @@ impl ComponentWorkspace {
         background: Option<BackgroundColor>,
         sky: Option<Sky>,
         fog: Option<Fog>,
+        post_process: Option<PostProcess>,
     ) -> Result<u64, SceneError> {
-        let next = self
-            .session
-            .set_display(revision, display, background, sky, fog)?;
+        let next =
+            self.session
+                .set_display(revision, display, background, sky, fog, post_process)?;
         if revision != next {
             if let Ok(preview) = &mut self.preview {
-                preview.set_display(display, background, sky, fog);
+                preview.set_display(display, background, sky, fog, post_process);
             }
             #[cfg(unix)]
             self.invalidate_display_capture();
@@ -515,15 +754,22 @@ impl ComponentWorkspace {
                         }
                     });
                 }
-                edit_background(ui, &mut draft.background);
-                edit_sky(ui, &mut draft.sky);
-                edit_fog(ui, &mut draft.fog);
+                egui::ScrollArea::vertical()
+                    .max_height(520.0)
+                    .show(ui, |ui| {
+                        edit_background(ui, &mut draft.background);
+                        edit_sky(ui, &mut draft.sky);
+                        edit_fog(ui, &mut draft.fog);
+                        edit_post_process(ui, &mut draft.post_process);
+                    });
                 if (draft.error.as_deref() == Some(Text::SceneBackgroundHexInvalid.plain())
                     && draft.background.value().is_ok())
                     || (draft.error.as_deref() == Some(Text::SceneSkyIntensityInvalid.plain())
                         && draft.sky.value().is_ok())
                     || (draft.error.as_deref() == Some(Text::SceneFogInvalid.plain())
                         && draft.fog.value().is_ok())
+                    || (draft.error.as_deref() == Some(Text::ScenePostInvalid.plain())
+                        && draft.post_process.value().is_ok())
                 {
                     draft.error = None;
                 }
@@ -563,16 +809,18 @@ impl ComponentWorkspace {
                             draft.background.value()?,
                             draft.sky.value()?,
                             draft.fog.value()?,
+                            draft.post_process.value()?,
                         ))
                     });
                 draft.error = Some(match candidate {
-                    Ok((display, background, sky, fog)) => {
+                    Ok((display, background, sky, fog, post_process)) => {
                         match self.commit_display(
                             draft.value.revision,
                             display,
                             background,
                             sky,
                             fog,
+                            post_process,
                         ) {
                             Ok(_) => return,
                             Err(error) => error.to_string(),
@@ -599,11 +847,12 @@ impl ComponentWorkspace {
             exact_keys(
                 map,
                 &["expected_session_token", "expected_revision"],
-                &["display", "background", "sky", "fog"],
+                &["display", "background", "sky", "fog", "post_process"],
             ) && (map.contains_key("display")
                 || map.contains_key("background")
                 || map.contains_key("sky")
-                || map.contains_key("fog"))
+                || map.contains_key("fog")
+                || map.contains_key("post_process"))
         }) {
             return Err(fail("invalid_arguments", "Check the Scene Display fields."));
         }
@@ -657,8 +906,16 @@ impl ComponentWorkspace {
                     .map_err(|error| ("invalid_arguments".into(), error.to_string()))?,
             ),
         };
+        let post_process = match args.get("post_process") {
+            None => scene.post_process,
+            Some(value) if value.is_null() => None,
+            Some(value) => Some(
+                serde_json::from_value(value.clone())
+                    .map_err(|error| ("invalid_arguments".into(), error.to_string()))?,
+            ),
+        };
         let next = self
-            .commit_display(revision, candidate, background, sky, fog)
+            .commit_display(revision, candidate, background, sky, fog, post_process)
             .map_err(|error| {
                 let code = match error {
                     SceneError::RevisionOverflow => "revision_exhausted",
@@ -667,7 +924,7 @@ impl ComponentWorkspace {
                 (code.into(), error.to_string())
             })?;
         Ok(json!({
-            "display":candidate, "background":background, "sky":sky, "fog":fog, "changed":next != revision, "dirty":self.session.is_dirty(),
+            "display":candidate, "background":background, "sky":sky, "fog":fog, "post_process":post_process, "changed":next != revision, "dirty":self.session.is_dirty(),
         }))
     }
 }
@@ -1019,5 +1276,63 @@ mod tests {
         assert_eq!(undo["ok"], true, "{undo}");
         assert_eq!(editor.session.scene().fog, Some(fog));
         assert_eq!(editor.preview.as_ref().unwrap().scene().fog, Some(fog));
+    }
+
+    #[test]
+    fn post_process_edits_preserve_omitted_fields_and_reset_with_shared_undo() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        let legacy = rot_scene::Session::new(rot_scene::Scene::demo()).unwrap();
+        let scene = ComponentScene::from_legacy(&legacy).unwrap();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let scene_display = |editor: &mut ComponentWorkspace,
+                             revision,
+                             patch: serde_json::Value| {
+            let mut args = json!({"expected_session_token":"scene", "expected_revision":revision});
+            args.as_object_mut()
+                .unwrap()
+                .extend(patch.as_object().unwrap().clone());
+            editor.ai_command("scene", "scene_display_set", &args)
+        };
+        let invalid = scene_display(
+            &mut editor,
+            "0",
+            json!({"post_process":{"bloom":{"intensity":3.0}}}),
+        );
+        assert_eq!(invalid["error"]["code"], "invalid_arguments");
+
+        let post = PostProcess::cinematic();
+        let changed = scene_display(&mut editor, "0", json!({"post_process": post}));
+        assert_eq!(changed["ok"], true, "{changed}");
+        assert_eq!(editor.session.scene().post_process, Some(post));
+        assert_eq!(
+            editor.preview.as_ref().unwrap().scene().post_process,
+            Some(post)
+        );
+
+        let background = [0.2, 0.3, 0.4];
+        let bg_only = scene_display(&mut editor, "1", json!({"background": background}));
+        assert_eq!(bg_only["ok"], true, "{bg_only}");
+        assert_eq!(editor.session.scene().post_process, Some(post));
+        assert_eq!(bg_only["result"]["post_process"], json!(post));
+
+        let reset = scene_display(&mut editor, "2", json!({"post_process": null}));
+        assert_eq!(reset["result"]["post_process"], serde_json::Value::Null);
+        assert_eq!(editor.session.scene().post_process, None);
+        assert_eq!(editor.preview.as_ref().unwrap().scene().post_process, None);
+
+        let undo = editor.ai_command(
+            "scene",
+            "scene_undo",
+            &json!({"expected_session_token":"scene", "expected_revision":"3"}),
+        );
+        assert_eq!(undo["ok"], true, "{undo}");
+        assert_eq!(editor.session.scene().post_process, Some(post));
+        assert_eq!(
+            editor.preview.as_ref().unwrap().scene().post_process,
+            Some(post)
+        );
     }
 }

@@ -1708,6 +1708,7 @@ mod tests {
             background: None,
             sky: None,
             fog: None,
+            post_process: None,
             ambient: None,
             sources: BTreeMap::new(),
             script_files: BTreeMap::new(),

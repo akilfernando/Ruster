@@ -3,7 +3,7 @@ use serde_json::{json, Map, Value};
 
 const TOOLS: &[(&str, &str, &[&str])] = &[(
     "scene_display_set",
-    "Set Scene Display (display, background, sky, fog). Omitted fields stay unchanged; null resets. Shared Undo edit.",
+    "Set Scene Display (display, background, sky, fog, post_process). Omitted fields stay unchanged; null resets. Shared Undo edit.",
     &[],
 )];
 
@@ -69,6 +69,38 @@ fn fog_schema() -> Value {
     ]})
 }
 
+fn post_process_schema() -> Value {
+    json!({"anyOf":[
+        super::object_schema(
+            json!({
+                "anti_aliasing":{"enum":["msaa4x","msaa2x","fxaa","off"]},
+                "ssao":super::object_schema(json!({
+                    "enabled":{"type":"boolean"},
+                    "radius":{"type":"number","minimum":0.05,"maximum":5.0},
+                    "intensity":{"type":"number","minimum":0.0,"maximum":4.0},
+                    "bias":{"type":"number","minimum":0.0,"maximum":0.5}
+                }), vec![]),
+                "bloom":super::object_schema(json!({
+                    "enabled":{"type":"boolean"},
+                    "threshold":{"type":"number","minimum":0.0,"maximum":16.0},
+                    "soft_knee":{"type":"number","minimum":0.0,"maximum":1.0},
+                    "intensity":{"type":"number","minimum":0.0,"maximum":2.0}
+                }), vec![]),
+                "grading":super::object_schema(json!({
+                    "tonemapper":{"enum":["pbr_neutral","aces_fitted","reinhard","none"]},
+                    "saturation":{"type":"number","minimum":0.0,"maximum":2.0},
+                    "contrast":{"type":"number","minimum":0.5,"maximum":2.0},
+                    "temperature":{"type":"number","minimum":-1.0,"maximum":1.0},
+                    "tint":{"type":"number","minimum":-1.0,"maximum":1.0},
+                    "vignette":{"type":"number","minimum":0.0,"maximum":1.0}
+                }), vec![])
+            }),
+            vec![]
+        ),
+        {"type":"null"}
+    ]})
+}
+
 fn shape(field: &str) -> Value {
     match field {
         "expected_session_token" => json!({"type":"string","minLength":1,"maxLength":256,
@@ -80,6 +112,7 @@ fn shape(field: &str) -> Value {
             "description":"v23 linear RGB clear, or null for Engine Default."}),
         "sky" => sky_schema(),
         "fog" => fog_schema(),
+        "post_process" => post_process_schema(),
         _ => unreachable!("fixed lighting tool field"),
     }
 }
@@ -94,14 +127,16 @@ pub fn list() -> Vec<Value> {
                 .map(|field| ((*field).into(), shape(field)))
                 .collect();
             properties.extend(
-                ["display", "background", "sky", "fog"].map(|field| (field.into(), shape(field))),
+                ["display", "background", "sky", "fog", "post_process"]
+                    .map(|field| (field.into(), shape(field))),
             );
             let mut schema = super::object_schema(Value::Object(properties), required);
             schema["anyOf"] = json!([
                 {"required":["display"]},
                 {"required":["background"]},
                 {"required":["sky"]},
-                {"required":["fog"]}
+                {"required":["fog"]},
+                {"required":["post_process"]}
             ]);
             json!({"name":name,"description":description,
                 "inputSchema":schema,
@@ -198,6 +233,65 @@ fn valid_fog(value: &Value) -> bool {
         && fog.get("sky_affect").is_none_or(|v| number(v, 0.0, 1.0))
 }
 
+fn valid_post_process(value: &Value) -> bool {
+    if value.is_null() {
+        return true;
+    }
+    let Some(post) = value.as_object() else {
+        return false;
+    };
+    if !super::exact_keys(post, &[], &["ssao", "bloom", "grading", "anti_aliasing"]) {
+        return false;
+    }
+    let aa_ok = post.get("anti_aliasing").is_none_or(|v| {
+        v.as_str()
+            .is_some_and(|s| matches!(s, "msaa4x" | "msaa2x" | "fxaa" | "off"))
+    });
+    let ssao_ok = post.get("ssao").is_none_or(|v| {
+        v.as_object().is_some_and(|m| {
+            super::exact_keys(m, &[], &["enabled", "radius", "intensity", "bias"])
+                && m.get("enabled").is_none_or(Value::is_boolean)
+                && m.get("radius").is_none_or(|x| number(x, 0.05, 5.0))
+                && m.get("intensity").is_none_or(|x| number(x, 0.0, 4.0))
+                && m.get("bias").is_none_or(|x| number(x, 0.0, 0.5))
+        })
+    });
+    let bloom_ok = post.get("bloom").is_none_or(|v| {
+        v.as_object().is_some_and(|m| {
+            super::exact_keys(m, &[], &["enabled", "threshold", "soft_knee", "intensity"])
+                && m.get("enabled").is_none_or(Value::is_boolean)
+                && m.get("threshold").is_none_or(|x| number(x, 0.0, 16.0))
+                && m.get("soft_knee").is_none_or(|x| number(x, 0.0, 1.0))
+                && m.get("intensity").is_none_or(|x| number(x, 0.0, 2.0))
+        })
+    });
+    let grading_ok = post.get("grading").is_none_or(|v| {
+        v.as_object().is_some_and(|m| {
+            super::exact_keys(
+                m,
+                &[],
+                &[
+                    "tonemapper",
+                    "saturation",
+                    "contrast",
+                    "temperature",
+                    "tint",
+                    "vignette",
+                ],
+            ) && m.get("tonemapper").is_none_or(|x| {
+                x.as_str().is_some_and(|s| {
+                    matches!(s, "pbr_neutral" | "aces_fitted" | "reinhard" | "none")
+                })
+            }) && m.get("saturation").is_none_or(|x| number(x, 0.0, 2.0))
+                && m.get("contrast").is_none_or(|x| number(x, 0.5, 2.0))
+                && m.get("temperature").is_none_or(|x| number(x, -1.0, 1.0))
+                && m.get("tint").is_none_or(|x| number(x, -1.0, 1.0))
+                && m.get("vignette").is_none_or(|x| number(x, 0.0, 1.0))
+        })
+    });
+    aa_ok && ssao_ok && bloom_ok && grading_ok
+}
+
 pub fn valid(name: &str, arguments: &Value) -> bool {
     let Some(required) = fields(name) else {
         return false;
@@ -209,21 +303,26 @@ pub fn valid(name: &str, arguments: &Value) -> bool {
         && !args.contains_key("background")
         && !args.contains_key("sky")
         && !args.contains_key("fog")
+        && !args.contains_key("post_process")
     {
         return false;
     }
-    super::exact_keys(args, &required, &["display", "background", "sky", "fog"])
-        && args.iter().all(|(field, value)| match field.as_str() {
-            "expected_revision" => super::canonical_u64(value),
-            "expected_session_token" => value
-                .as_str()
-                .is_some_and(|token| !token.is_empty() && token.len() <= 256),
-            "display" => valid_display(value),
-            "background" => value.is_null() || vector(value, 0.0, 1.0),
-            "sky" => valid_sky(value),
-            "fog" => valid_fog(value),
-            _ => false,
-        })
+    super::exact_keys(
+        args,
+        &required,
+        &["display", "background", "sky", "fog", "post_process"],
+    ) && args.iter().all(|(field, value)| match field.as_str() {
+        "expected_revision" => super::canonical_u64(value),
+        "expected_session_token" => value
+            .as_str()
+            .is_some_and(|token| !token.is_empty() && token.len() <= 256),
+        "display" => valid_display(value),
+        "background" => value.is_null() || vector(value, 0.0, 1.0),
+        "sky" => valid_sky(value),
+        "fog" => valid_fog(value),
+        "post_process" => valid_post_process(value),
+        _ => false,
+    })
 }
 
 #[cfg(test)]
@@ -324,6 +423,24 @@ mod tests {
         ] {
             let args =
                 json!({"expected_session_token":"scene","expected_revision":"0","fog":bad_fog});
+            assert!(!valid("scene_display_set", &args), "{args}");
+        }
+        for post in [
+            json!({"anti_aliasing":"fxaa"}),
+            json!({"ssao":{"enabled":true,"radius":0.6,"intensity":1.2,"bias":0.03},"bloom":{"enabled":true,"threshold":1.0,"soft_knee":0.5,"intensity":0.2},"grading":{"tonemapper":"aces_fitted","saturation":1.1,"contrast":1.05,"temperature":0.1,"tint":0.0,"vignette":0.2},"anti_aliasing":"msaa4x"}),
+            Value::Null,
+        ] {
+            let args = json!({"expected_session_token":"scene","expected_revision":"0","post_process":post});
+            assert!(valid("scene_display_set", &args), "{args}");
+        }
+        for bad_post in [
+            json!({"anti_aliasing":"taa"}),
+            json!({"ssao":{"radius":0.01}}),
+            json!({"bloom":{"intensity":3.0}}),
+            json!({"grading":{"tonemapper":"unknown"}}),
+            json!({"extra":1}),
+        ] {
+            let args = json!({"expected_session_token":"scene","expected_revision":"0","post_process":bad_post});
             assert!(!valid("scene_display_set", &args), "{args}");
         }
     }

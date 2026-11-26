@@ -361,6 +361,7 @@ impl Clipboard {
             background: None,
             sky: None,
             fog: None,
+            post_process: None,
             player_view: None,
             animations: Default::default(),
             id: "clipboard".into(),

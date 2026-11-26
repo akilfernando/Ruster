@@ -523,6 +523,7 @@ mod tests {
                 background: Some(rot_scene::BackgroundColor::new([0., 0., 0.]).unwrap()),
                 sky: None,
                 fog: None,
+                post_process: None,
                 camera: (proj * view).to_cols_array(),
                 inv_camera: (proj * view).inverse().to_cols_array(),
                 cluster_camera: ClusterCamera::from_matrices(view, proj),

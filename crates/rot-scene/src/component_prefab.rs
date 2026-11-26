@@ -702,6 +702,7 @@ impl PrefabSource {
             background: None,
             sky: None,
             fog: None,
+            post_process: None,
             ambient: None,
             sources,
             script_files: BTreeMap::new(),
@@ -719,6 +720,7 @@ impl PrefabSource {
             || scene.background.is_some()
             || scene.sky.is_some()
             || scene.fog.is_some()
+            || scene.post_process.is_some()
             || scene.ambient.is_some()
             || !scene.actions.is_empty()
             || scene.hud != Default::default()

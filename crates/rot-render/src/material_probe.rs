@@ -862,6 +862,7 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
             background: None,
             sky: None,
             fog: None,
+            post_process: None,
             inv_camera: Mat4::IDENTITY.to_cols_array(),
             show_editor_grid: false,
             groups: vec![DrawGroup {
@@ -1299,38 +1300,15 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
                 lighting.direction_to_light = [-1., 0., 0.00001, 0.];
                 let r = resources.get_mut::<Resources>().unwrap();
                 let color = grazing_image.create_view(&Default::default());
-                let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                    mag_filter: wgpu::FilterMode::Linear,
-                    min_filter: wgpu::FilterMode::Linear,
-                    ..Default::default()
-                });
-                let composite_layout = r.composite.get_bind_group_layout(0);
-                let display_binding = r.display_uniform.as_entire_binding();
+                let initial_post = r.post.initial_outputs();
                 let target = r.target.as_mut().unwrap();
-                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("grazing production composite binding"),
-                    layout: &composite_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&color),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::Sampler(&sampler),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: display_binding,
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: wgpu::BindingResource::TextureView(&target.selection_mask),
-                        },
-                    ],
-                });
                 target.color = color;
-                target.bind = bind;
+                target.rebuild_composite_bind(
+                    device,
+                    &r.composite_layout,
+                    &r.display_uniform,
+                    &initial_post,
+                );
             }
             let mapped_case = name.starts_with("map-");
             let map_source = match name {
@@ -1346,6 +1324,7 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
                 background: None,
                 sky: None,
                 fog: None,
+                post_process: None,
                 inv_camera: Mat4::IDENTITY.to_cols_array(),
                 show_editor_grid: false,
                 groups: (0..if mapped_case { 2 } else { 1 })
@@ -1818,6 +1797,7 @@ fn verify_pbr_maps(device: &wgpu::Device, queue: &wgpu::Queue) {
             background: None,
             sky: None,
             fog: None,
+            post_process: None,
             inv_camera: Mat4::IDENTITY.to_cols_array(),
             show_editor_grid: false,
             groups: vec![group],
@@ -2100,6 +2080,7 @@ fn verify_sky_and_ibl(device: &wgpu::Device, queue: &wgpu::Queue) {
                 background: Some(BackgroundColor::new([0., 0., 0.]).unwrap()),
                 sky,
                 fog: None,
+                post_process: None,
                 inv_camera: vp.inverse().to_cols_array(),
                 show_editor_grid: false,
                 groups,
@@ -2484,6 +2465,7 @@ pub(super) fn verify_cube_material(device: &wgpu::Device, queue: &wgpu::Queue) {
             background: None,
             sky: None,
             fog: None,
+            post_process: None,
             inv_camera: Mat4::IDENTITY.to_cols_array(),
             show_editor_grid: false,
             groups: vec![DrawGroup {
@@ -2678,6 +2660,7 @@ fn verify_alpha_transparency(device: &wgpu::Device, queue: &wgpu::Queue) {
             background: None,
             sky: None,
             fog: None,
+            post_process: None,
             inv_camera: Mat4::IDENTITY.to_cols_array(),
             show_editor_grid: false,
             groups,
@@ -2956,6 +2939,7 @@ fn verify_frustum_and_dirty_instancing(device: &wgpu::Device, queue: &wgpu::Queu
             background: None,
             sky: None,
             fog: None,
+            post_process: None,
             inv_camera: vp.inverse().to_cols_array(),
             show_editor_grid: false,
             groups,

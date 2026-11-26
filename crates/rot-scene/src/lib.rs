@@ -49,7 +49,10 @@ pub use authoring::*;
 pub use collider::{Collider, ColliderRole, ColliderShape, ResolvedCollider, ResolvedShape};
 pub use lighting::*;
 pub use lighting_authoring::LightingEdit;
-pub use surface::{BackgroundColor, DisplayProfile, Fog, FogMode, MaterialResponse, Sky};
+pub use surface::{
+    AntiAliasing, BackgroundColor, BloomSettings, ColorGradingSettings, DisplayProfile, Fog,
+    FogMode, MaterialResponse, PostProcess, Sky, SsaoSettings, Tonemapper,
+};
 pub const MAX_OBJECTS: usize = 256;
 pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 pub const HISTORY_LIMIT: usize = 32;
@@ -478,6 +481,9 @@ pub struct Scene {
     /// Scene-wide atmospheric distance and height fog carried by a runtime projection.
     #[serde(skip)]
     pub fog: Option<Fog>,
+    /// Scene-wide post-processing stack carried by a runtime projection.
+    #[serde(skip)]
+    pub post_process: Option<PostProcess>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub player_view: Option<PlayerView>,
     /// Imported clip bindings keyed by their placement root Group ID.
@@ -498,6 +504,7 @@ impl Scene {
             background: None,
             sky: None,
             fog: None,
+            post_process: None,
             player_view: None,
             animations: BTreeMap::new(),
         }
@@ -522,6 +529,7 @@ impl Scene {
             background: None,
             sky: None,
             fog: None,
+            post_process: None,
             player_view: None,
             animations: BTreeMap::new(),
             objects: [
@@ -1444,6 +1452,7 @@ impl From<LegacyDocument> for Document {
                 background: None,
                 sky: None,
                 fog: None,
+                post_process: None,
                 player_view: None,
                 animations: BTreeMap::new(),
                 objects: old
@@ -1539,6 +1548,7 @@ impl From<V2Document> for Document {
                 background: None,
                 sky: None,
                 fog: None,
+                post_process: None,
                 player_view: None,
                 animations: BTreeMap::new(),
                 objects: old
