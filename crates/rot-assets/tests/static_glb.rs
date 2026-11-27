@@ -519,11 +519,11 @@ fn sampler_approximation_warns_without_changing_texture_identity() {
 fn import_refuses_unplaceable_materials_and_transforms_before_publication() {
     use serde_json::json;
     let depth_chain = |mesh_parent: bool| {
-        let mut nodes: Vec<_> = (0..7)
+        let mut nodes: Vec<_> = (0..63)
             .map(|i| json!({"name":format!("Group{i}"),"children":[i + 1]}))
             .collect();
         if mesh_parent {
-            nodes.push(json!({"name":"Wrapper","mesh":0,"children":[8]}));
+            nodes.push(json!({"name":"Wrapper","mesh":0,"children":[64]}));
             nodes.push(json!({"name":"EmptyChild"}));
         } else {
             nodes.push(json!({"name":"Leaf","mesh":0,"scale":[1,2,3]}));
@@ -555,7 +555,7 @@ fn import_refuses_unplaceable_materials_and_transforms_before_publication() {
         (
             depth_chain(true),
             0.6,
-            "eight Group levels with the placement root",
+            "64 Group levels with the placement root",
         ),
         (
             vec![

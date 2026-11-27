@@ -168,7 +168,8 @@ pub(super) fn merge_live_into_authored(authored: &ObjectNode, live: &ObjectNode)
             | (Component::Camera { .. }, Component::Camera { .. })
             | (Component::RigidBody { .. }, Component::RigidBody { .. })
             | (Component::Joint { .. }, Component::Joint { .. })
-            | (Component::CharacterController { .. }, Component::CharacterController { .. }) => {
+            | (Component::CharacterController { .. }, Component::CharacterController { .. })
+            | (Component::Skin { .. }, Component::Skin { .. }) => {
                 auth_comp.enabled = live_comp.enabled;
                 auth_comp.kind = live_comp.kind.clone();
             }
@@ -294,6 +295,7 @@ pub(super) fn show(
                         | Component::RigidBody { .. }
                         | Component::Joint { .. }
                         | Component::CharacterController { .. }
+                        | Component::Skin { .. }
                 );
                 if !collapsible_open {
                     return;
@@ -311,6 +313,7 @@ pub(super) fn show(
                                 | Component::RigidBody { .. }
                                 | Component::Joint { .. }
                                 | Component::CharacterController { .. }
+                                | Component::Skin { .. }
                         );
                         if supports_toggle {
                             ui.checkbox(
@@ -460,6 +463,13 @@ pub(super) fn show(
                                         }
                                     }
                                 }
+                            }
+                            Component::Skin { joints, .. } => {
+                                let scene_objects = frame
+                                    .component_scene
+                                    .as_deref()
+                                    .map_or(&[][..], |scene| &scene.objects);
+                                component_inspector::skin_fields(ui, joints, scene_objects);
                             }
                             _ => {}
                         }

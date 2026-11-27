@@ -831,6 +831,8 @@ fn verify_alpha_shadows(device: &wgpu::Device, queue: &wgpu::Queue) {
                 builtins: &r.builtins,
                 materials: &r.materials,
                 zero_uv: &r.zero_uv,
+                default_skin: &r.default_skin,
+                skin_matrices: &[],
                 instance_bind: &r.instance_bind,
             },
             shadow_gpu::Request {

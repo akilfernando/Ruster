@@ -1197,6 +1197,8 @@ struct DrawScene<'a> {
     scene: &'a Scene,
     prepared: Option<&'a rot_scene::HierarchyDraw>,
     matrices: Option<&'a [Mat4]>,
+    skin_matrices: &'a [Mat4],
+    skin_ranges: &'a [(u32, u32)],
     unpickable: Option<&'a BTreeSet<String>>,
     transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
 }
@@ -1207,6 +1209,8 @@ impl<'a> From<&'a Scene> for DrawScene<'a> {
             scene,
             prepared: None,
             matrices: None,
+            skin_matrices: &[],
+            skin_ranges: &[],
             unpickable: None,
             transform_camera: None,
         }
@@ -2002,6 +2006,8 @@ pub fn render_viewport_draw_frame(
         DrawScene {
             prepared,
             matrices: prepared.map(rot_scene::HierarchyDraw::matrices),
+            skin_matrices: prepared.map_or(&[][..], rot_scene::HierarchyDraw::skin_matrices),
+            skin_ranges: prepared.map_or(&[][..], rot_scene::HierarchyDraw::skin_ranges),
             transform_camera: surface.transform_camera.or(frame.transform_camera()),
             ..frame.scene().into()
         },
@@ -2399,6 +2405,7 @@ fn render_draw_scene(
             SceneCallback {
                 receipt: receipt.clone(),
                 groups,
+                skin_matrices: draw.skin_matrices.to_vec(),
                 camera: view_projection.to_cols_array(),
                 inv_camera,
                 cluster_camera: ClusterCamera::from_matrices(view, projection),
@@ -2498,6 +2505,8 @@ fn build_draw_groups(
 ) -> (Vec<DrawGroup>, usize, u64) {
     let frustum = frustum::Frustum::from_view_projection(view_projection);
     let mut mesh_bounds: BTreeMap<&str, Option<(Vec3, Vec3)>> = BTreeMap::new();
+    type JointBoundsCache<'a> = BTreeMap<&'a str, Option<Vec<Option<(Vec3, Vec3)>>>>;
+    let mut mesh_joint_bounds: JointBoundsCache<'_> = BTreeMap::new();
     let mut culled_objects = 0usize;
     let mut grouped = BTreeMap::new();
     let mut blended = Vec::new();
@@ -2506,6 +2515,7 @@ fn build_draw_groups(
     let is_perspective = camera_eye_mode[3] > 0.5;
     let make_instance = |object: &Object,
                          matrix: Mat4,
+                         skin_range: (u32, u32),
                          material: Option<&rot_scene::OpaqueMaterial>,
                          binding: &BindingKey<&str>,
                          base_color: [f32; 4],
@@ -2522,9 +2532,12 @@ fn build_draw_groups(
             Some(rot_scene::AlphaMode::Blend) => -2.0,
             _ => -1.0,
         };
+        let mut normal_rows = normal.to_cols_array_2d().map(|c| [c[0], c[1], c[2], 0.0]);
+        normal_rows[0][3] = f32::from_bits(skin_range.0);
+        normal_rows[1][3] = f32::from_bits(skin_range.1);
         Instance {
             model: matrix.to_cols_array_2d(),
-            normal: normal.to_cols_array_2d().map(|c| [c[0], c[1], c[2], 0.0]),
+            normal: normal_rows,
             color,
             base_color,
             emission_color: material.map_or([0.0; 4], |material| {
@@ -2646,22 +2659,52 @@ fn build_draw_groups(
         let mesh = object_mesh(object, meshes);
         let key = mesh.and(object.mesh.as_deref());
         let primitive = object.mesh.is_none().then_some(object.primitive).flatten();
+        let raw_skin = draw.skin_ranges.get(order_idx).copied().unwrap_or((0, 0));
+        let skin_range = if raw_skin.1 > 0
+            && mesh.is_some_and(|m| m.has_complete_skinning())
+            && (raw_skin.0 as usize)
+                .checked_add(raw_skin.1 as usize)
+                .is_some_and(|end| end <= draw.skin_matrices.len())
+        {
+            raw_skin
+        } else {
+            (0, 0)
+        };
+        let skinned_aabb = if skin_range.1 > 0 {
+            if let (Some(id), Some(mesh)) = (key, mesh) {
+                let jb = mesh_joint_bounds
+                    .entry(id)
+                    .or_insert_with(|| frustum::mesh_joint_bounds(mesh))
+                    .as_deref();
+                let end = skin_range.0 as usize + skin_range.1 as usize;
+                jb.and_then(|jb| {
+                    frustum::skinned_world_aabb(jb, &draw.skin_matrices[skin_range.0 as usize..end])
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         let material = object
             .material
             .as_ref()
             .and_then(|id| scene.materials.get(id));
         let alpha_mode = material.map_or(rot_scene::AlphaMode::Opaque, |m| m.alpha_mode);
         let visible = frustum.as_ref().is_none_or(|frustum| {
-            let local_bounds = match (key, mesh, primitive) {
-                (Some(id), Some(mesh), _) => mesh_bounds
-                    .entry(id)
-                    .or_insert_with(|| frustum::mesh_local_bounds(mesh))
-                    .unwrap_or(primitives::CUBE_BOUNDS),
-                (_, _, Some(primitive)) => primitives::builtin_bounds(primitive),
-                _ => primitives::CUBE_BOUNDS,
+            let (world_center, world_extents) = if let Some(skinned) = skinned_aabb {
+                skinned
+            } else {
+                let local_bounds = match (key, mesh, primitive) {
+                    (Some(id), Some(mesh), _) => mesh_bounds
+                        .entry(id)
+                        .or_insert_with(|| frustum::mesh_local_bounds(mesh))
+                        .unwrap_or(primitives::CUBE_BOUNDS),
+                    (_, _, Some(primitive)) => primitives::builtin_bounds(primitive),
+                    _ => primitives::CUBE_BOUNDS,
+                };
+                frustum::world_aabb(matrix, local_bounds.0, local_bounds.1)
             };
-            let (world_center, world_extents) =
-                frustum::world_aabb(matrix, local_bounds.0, local_bounds.1);
             frustum.intersects_aabb(world_center, world_extents)
         });
         if !visible {
@@ -2683,9 +2726,17 @@ fn build_draw_groups(
         }
         let is_selected = visible && !selected.is_empty() && selected.contains(&object.id.as_str());
         base_color[3] = if is_selected { 0.35 } else { 0.0 };
-        let instance = make_instance(object, matrix, material, &binding, base_color, is_selected);
+        let instance = make_instance(
+            object,
+            matrix,
+            skin_range,
+            material,
+            &binding,
+            base_color,
+            is_selected,
+        );
         if alpha_mode == rot_scene::AlphaMode::Blend {
-            let world_pos = matrix.w_axis.truncate();
+            let world_pos = skinned_aabb.map_or_else(|| matrix.w_axis.truncate(), |(c, _)| c);
             let depth = if is_perspective {
                 (world_pos - eye_vec).length_squared()
             } else {
@@ -2895,26 +2946,63 @@ fn pick<'a>(
     }
     let direction = (far - near) / length;
     let draw = draw.into();
-    draw.pickable_objects()
-        .filter_map(|(object, matrix)| {
-            let matrix = matrix.as_dmat4();
-            if !matrix.is_finite() || matrix.determinant() == 0.0 {
-                return None;
-            }
-            let inverse = matrix.inverse();
-            let origin = inverse.transform_point3(near);
-            // Do not normalize this local direction. Its t remains a world
-            // distance from the near point across differently scaled objects.
-            let ray = inverse.transform_vector3(direction);
-            if !origin.is_finite() || !ray.is_finite() {
-                return None;
-            }
+    draw.objects()
+        .enumerate()
+        .filter(move |(_, (object, _))| draw.unpickable.is_none_or(|ids| !ids.contains(&object.id)))
+        .filter_map(|(order_idx, (object, matrix))| {
+            let raw_skin = draw.skin_ranges.get(order_idx).copied().unwrap_or((0, 0));
             if let Some(mesh) = object_mesh(object, meshes) {
                 let double_sided = object
                     .material
                     .as_ref()
                     .and_then(|id| draw.scene.materials.get(id))
                     .is_some_and(|material| material.double_sided);
+                if raw_skin.1 > 0
+                    && mesh.has_complete_skinning()
+                    && (raw_skin.0 as usize)
+                        .checked_add(raw_skin.1 as usize)
+                        .is_some_and(|end| end <= draw.skin_matrices.len())
+                {
+                    let joints = mesh.skin_joints.as_ref()?;
+                    let weights = mesh.skin_weights.as_ref()?;
+                    let matrices = &draw.skin_matrices
+                        [raw_skin.0 as usize..(raw_skin.0 + raw_skin.1) as usize];
+                    let skin_vertex = |idx: usize| -> Option<DVec3> {
+                        let p = Vec3::from(mesh.vertices.get(idx)?.position);
+                        let j = joints.get(idx)?;
+                        let w = weights.get(idx)?;
+                        let last = matrices.len() - 1;
+                        let m = matrices[usize::from(j[0]).min(last)] * w[0]
+                            + matrices[usize::from(j[1]).min(last)] * w[1]
+                            + matrices[usize::from(j[2]).min(last)] * w[2]
+                            + matrices[usize::from(j[3]).min(last)] * w[3];
+                        Some(m.transform_point3(p).as_dvec3())
+                    };
+                    return mesh
+                        .indices
+                        .as_chunks::<3>()
+                        .0
+                        .iter()
+                        .filter_map(|triangle| {
+                            let a = skin_vertex(triangle[0] as usize)?;
+                            let b = skin_vertex(triangle[1] as usize)?;
+                            let c = skin_vertex(triangle[2] as usize)?;
+                            ray_triangle(near, direction, a, b, c, double_sided)
+                        })
+                        .filter(|distance| *distance <= length)
+                        .min_by(f64::total_cmp)
+                        .map(|distance| (distance, &object.id));
+                }
+                let matrix = matrix.as_dmat4();
+                if !matrix.is_finite() || matrix.determinant() == 0.0 {
+                    return None;
+                }
+                let inverse = matrix.inverse();
+                let origin = inverse.transform_point3(near);
+                let ray = inverse.transform_vector3(direction);
+                if !origin.is_finite() || !ray.is_finite() {
+                    return None;
+                }
                 return mesh
                     .indices
                     .as_chunks::<3>()
@@ -2932,6 +3020,18 @@ fn pick<'a>(
                     .filter(|distance| *distance <= length)
                     .min_by(f64::total_cmp)
                     .map(|distance| (distance, &object.id));
+            }
+            let matrix = matrix.as_dmat4();
+            if !matrix.is_finite() || matrix.determinant() == 0.0 {
+                return None;
+            }
+            let inverse = matrix.inverse();
+            let origin = inverse.transform_point3(near);
+            // Do not normalize this local direction. Its t remains a world
+            // distance from the near point across differently scaled objects.
+            let ray = inverse.transform_vector3(direction);
+            if !origin.is_finite() || !ray.is_finite() {
+                return None;
             }
             let mut enter = 0.0_f64;
             let mut exit = length;
@@ -3001,6 +3101,12 @@ fn ray_triangle(
 struct Vertex {
     position: [f32; 3],
     normal: [f32; 3],
+}
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct SkinVertex {
+    joints: [u16; 4],
+    weights: [f32; 4],
 }
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -3296,6 +3402,7 @@ struct Resources {
     builtins: BuiltinMeshes,
     zero_uv: wgpu::Buffer,
     default_tangent: wgpu::Buffer,
+    default_skin: wgpu::Buffer,
     meshes: BTreeMap<String, GpuMesh>,
     pipeline_layout: wgpu::PipelineLayout,
     materials: MaterialGpu,
@@ -3311,6 +3418,8 @@ struct Resources {
     instance_layout: wgpu::BindGroupLayout,
     instance_bind: wgpu::BindGroup,
     capacity: usize,
+    skin_matrices: wgpu::Buffer,
+    skin_capacity: usize,
     camera: wgpu::Buffer,
     camera_layout: wgpu::BindGroupLayout,
     editor_grid_sdr: Option<wgpu::RenderPipeline>,
@@ -3350,6 +3459,16 @@ impl Resources {
             },
             count: None,
         };
+        let skin_entry = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::VERTEX,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: wgpu::BufferSize::new(size_of::<Mat4>() as u64),
+            },
+            count: None,
+        };
         let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("fixed scene camera ABI"),
             entries: &[
@@ -3364,11 +3483,12 @@ impl Resources {
                     count: None,
                 },
                 instance_entry(1),
+                skin_entry(2),
             ],
         });
         let instance_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("shared storage instances"),
-            entries: &[instance_entry(0)],
+            entries: &[instance_entry(0), skin_entry(1)],
         });
         let materials = MaterialGpu::new(device, queue);
         let ibl = ibl_gpu::IblGpu::new(device, queue);
@@ -3479,7 +3599,16 @@ impl Resources {
             contents: bytemuck::bytes_of(&[1.0_f32, 0.0, 0.0, 1.0]),
             usage: wgpu::BufferUsages::VERTEX,
         });
-        let mesh_bytes = builtins.bytes() + zero_uv.size() + default_tangent.size();
+        let default_skin = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("shared constant default skin"),
+            contents: bytemuck::bytes_of(&SkinVertex {
+                joints: [0; 4],
+                weights: [1.0, 0.0, 0.0, 0.0],
+            }),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let mesh_bytes =
+            builtins.bytes() + zero_uv.size() + default_tangent.size() + default_skin.size();
         let camera = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("scene camera"),
             size: 80,
@@ -3487,8 +3616,11 @@ impl Resources {
             mapped_at_creation: false,
         });
         let instances = instance_buffer(device, 1);
-        let camera_bind = camera_bind_group(device, &camera_layout, &camera, &instances);
-        let instance_bind = instance_bind_group(device, &instance_layout, &instances);
+        let skin_matrices = skin_matrices_buffer(device, 1);
+        let camera_bind =
+            camera_bind_group(device, &camera_layout, &camera, &instances, &skin_matrices);
+        let instance_bind =
+            instance_bind_group(device, &instance_layout, &instances, &skin_matrices);
         let display_packet = [[0.; 4]; 4];
         let display_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("fixed display packet"),
@@ -3548,6 +3680,7 @@ impl Resources {
             builtins,
             zero_uv,
             default_tangent,
+            default_skin,
             meshes: BTreeMap::new(),
             pipeline_layout,
             materials,
@@ -3563,6 +3696,8 @@ impl Resources {
             instance_layout,
             instance_bind,
             capacity: 1,
+            skin_matrices,
+            skin_capacity: 1,
             camera,
             camera_layout,
             editor_grid_sdr: None,
@@ -3589,9 +3724,39 @@ impl Resources {
         self.capacity = count.next_power_of_two();
         self.instances = instance_buffer(device, self.capacity);
         self.instance_uploads.clear();
-        self.camera_bind =
-            camera_bind_group(device, &self.camera_layout, &self.camera, &self.instances);
-        self.instance_bind = instance_bind_group(device, &self.instance_layout, &self.instances);
+        self.camera_bind = camera_bind_group(
+            device,
+            &self.camera_layout,
+            &self.camera,
+            &self.instances,
+            &self.skin_matrices,
+        );
+        self.instance_bind = instance_bind_group(
+            device,
+            &self.instance_layout,
+            &self.instances,
+            &self.skin_matrices,
+        );
+    }
+    fn ensure_skin_capacity(&mut self, device: &wgpu::Device, count: usize) {
+        if count <= self.skin_capacity {
+            return;
+        }
+        self.skin_capacity = count.next_power_of_two();
+        self.skin_matrices = skin_matrices_buffer(device, self.skin_capacity);
+        self.camera_bind = camera_bind_group(
+            device,
+            &self.camera_layout,
+            &self.camera,
+            &self.instances,
+            &self.skin_matrices,
+        );
+        self.instance_bind = instance_bind_group(
+            device,
+            &self.instance_layout,
+            &self.instances,
+            &self.skin_matrices,
+        );
     }
     fn enable_hdr(&mut self, device: &wgpu::Device, samples: u32) {
         self.hdr_samples = Some(samples);
@@ -3849,6 +4014,7 @@ fn camera_bind_group(
     layout: &wgpu::BindGroupLayout,
     camera: &wgpu::Buffer,
     instances: &wgpu::Buffer,
+    skin_matrices: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("camera"),
@@ -3862,6 +4028,10 @@ fn camera_bind_group(
                 binding: 1,
                 resource: instances.as_entire_binding(),
             },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: skin_matrices.as_entire_binding(),
+            },
         ],
     })
 }
@@ -3869,14 +4039,32 @@ fn instance_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     instances: &wgpu::Buffer,
+    skin_matrices: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("shared storage instances"),
         layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: instances.as_entire_binding(),
-        }],
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: instances.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: skin_matrices.as_entire_binding(),
+            },
+        ],
+    })
+}
+fn skin_matrices_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
+    let mut data = vec![Mat4::IDENTITY.to_cols_array(); capacity];
+    if data.is_empty() {
+        data.push(Mat4::IDENTITY.to_cols_array());
+    }
+    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("scene skin matrices"),
+        contents: bytemuck::cast_slice(&data),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
     })
 }
 fn instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
@@ -3889,11 +4077,11 @@ fn instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
 }
 #[derive(Clone)]
 struct SelectionPipelines {
-    sided: [wgpu::RenderPipeline; 2],
+    sided: [[wgpu::RenderPipeline; 2]; 2],
 }
 impl SelectionPipelines {
-    fn for_sided(&self, double_sided: bool) -> &wgpu::RenderPipeline {
-        &self.sided[usize::from(double_sided)]
+    fn for_sided(&self, double_sided: bool, has_skin: bool) -> &wgpu::RenderPipeline {
+        &self.sided[usize::from(double_sided)][usize::from(has_skin)]
     }
 }
 fn selection_pipelines(
@@ -3908,53 +4096,63 @@ fn selection_pipelines(
     });
     let shader = device.create_shader_module(wgpu::include_wgsl!("selection_mask.wgsl"));
     let attributes = wgpu::vertex_attr_array![0 => Float32x3];
+    let skin_attributes = wgpu::vertex_attr_array![4 => Uint16x4, 5 => Float32x4];
     SelectionPipelines {
         sided: [false, true].map(|double_sided| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Rot Engine decoupled selection mask"),
-                layout: Some(&layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs"),
-                    compilation_options: Default::default(),
-                    buffers: &[Some(wgpu::VertexBufferLayout {
-                        array_stride: size_of::<Vertex>() as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &attributes,
-                    })],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(SELECTION_MASK.into())],
-                }),
-                primitive: wgpu::PrimitiveState {
-                    cull_mode: (!double_sided).then_some(wgpu::Face::Back),
-                    ..Default::default()
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DEPTH,
-                    depth_write_enabled: Some(false),
-                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
-                    stencil: Default::default(),
-                    bias: Default::default(),
-                }),
-                multisample: wgpu::MultisampleState {
-                    count: sample_count,
-                    ..Default::default()
-                },
-                multiview_mask: None,
-                cache: None,
+            [0_u64, size_of::<SkinVertex>() as u64].map(|skin_stride| {
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("Rot Engine decoupled selection mask"),
+                    layout: Some(&layout),
+                    vertex: wgpu::VertexState {
+                        module: &shader,
+                        entry_point: Some("vs"),
+                        compilation_options: Default::default(),
+                        buffers: &[
+                            Some(wgpu::VertexBufferLayout {
+                                array_stride: size_of::<Vertex>() as u64,
+                                step_mode: wgpu::VertexStepMode::Vertex,
+                                attributes: &attributes,
+                            }),
+                            Some(wgpu::VertexBufferLayout {
+                                array_stride: skin_stride,
+                                step_mode: wgpu::VertexStepMode::Vertex,
+                                attributes: &skin_attributes,
+                            }),
+                        ],
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &shader,
+                        entry_point: Some("fs"),
+                        compilation_options: Default::default(),
+                        targets: &[Some(SELECTION_MASK.into())],
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        cull_mode: (!double_sided).then_some(wgpu::Face::Back),
+                        ..Default::default()
+                    },
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: DEPTH,
+                        depth_write_enabled: Some(false),
+                        depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                        stencil: Default::default(),
+                        bias: Default::default(),
+                    }),
+                    multisample: wgpu::MultisampleState {
+                        count: sample_count,
+                        ..Default::default()
+                    },
+                    multiview_mask: None,
+                    cache: None,
+                })
             })
         }),
     }
 }
 #[derive(Clone)]
 struct ScenePipelines {
-    // Indexed by [double_sided][has_uv][has_tangent].
-    sided: [[[wgpu::RenderPipeline; 2]; 2]; 2],
-    blend: [[[wgpu::RenderPipeline; 2]; 2]; 2],
+    // Indexed by [double_sided][has_uv][has_tangent][has_skin].
+    sided: [[[[wgpu::RenderPipeline; 2]; 2]; 2]; 2],
+    blend: [[[[wgpu::RenderPipeline; 2]; 2]; 2]; 2],
 }
 impl ScenePipelines {
     fn for_mesh(
@@ -3969,7 +4167,7 @@ impl ScenePipelines {
             &self.sided
         };
         &bank[usize::from(double_sided)][usize::from(mesh.uvs.is_some())]
-            [usize::from(mesh.tangents.is_some())]
+            [usize::from(mesh.tangents.is_some())][usize::from(mesh.skin.is_some())]
     }
 }
 
@@ -4070,8 +4268,9 @@ fn scene_pipeline_format_mode(
     let mesh_attributes = used(&wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3]);
     let uv_attributes = used(&wgpu::vertex_attr_array![2=>Float32x2]);
     let tangent_attributes = used(&wgpu::vertex_attr_array![3=>Float32x4]);
+    let skin_attributes = used(&wgpu::vertex_attr_array![4=>Uint16x4,5=>Float32x4]);
     let builtin = source == default_shader() || source == surface_shader();
-    let create = |uv_stride, tangent_stride, double_sided, alpha_blend| {
+    let create = |uv_stride, tangent_stride, skin_stride, double_sided, alpha_blend| {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(if alpha_blend {
                 "Rot Engine blended depth-tested instanced meshes"
@@ -4098,6 +4297,11 @@ fn scene_pipeline_format_mode(
                         array_stride: tangent_stride,
                         step_mode: wgpu::VertexStepMode::Vertex,
                         attributes: &tangent_attributes,
+                    }),
+                    Some(wgpu::VertexBufferLayout {
+                        array_stride: skin_stride,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &skin_attributes,
                     }),
                 ],
             },
@@ -4139,7 +4343,15 @@ fn scene_pipeline_format_mode(
         [false, true].map(|double_sided| {
             [0, size_of::<[f32; 2]>() as u64].map(|uv_stride| {
                 [0, size_of::<[f32; 4]>() as u64].map(|tangent_stride| {
-                    create(uv_stride, tangent_stride, double_sided, alpha_blend)
+                    [0, size_of::<SkinVertex>() as u64].map(|skin_stride| {
+                        create(
+                            uv_stride,
+                            tangent_stride,
+                            skin_stride,
+                            double_sided,
+                            alpha_blend,
+                        )
+                    })
                 })
             })
         })
@@ -4199,10 +4411,12 @@ struct GpuMesh {
     vertices: wgpu::Buffer,
     uvs: Option<wgpu::Buffer>,
     tangents: Option<wgpu::Buffer>,
+    skin: Option<wgpu::Buffer>,
     indices: wgpu::Buffer,
     count: u32,
     bytes: u64,
     bounds: [Vec3; 2],
+    joint_bounds: Vec<Option<(Vec3, Vec3)>>,
 }
 impl GpuMesh {
     fn matches(&self, mesh: &Arc<rot_assets::Mesh>) -> bool {
@@ -4236,9 +4450,34 @@ impl GpuMesh {
             low = Vec3::ZERO;
             high = Vec3::ZERO;
         }
+        let skin = match (&mesh.skin_joints, &mesh.skin_weights) {
+            (Some(joints), Some(weights))
+                if joints.len() == mesh.vertices.len() && weights.len() == mesh.vertices.len() =>
+            {
+                let skin_vertices: Vec<SkinVertex> = joints
+                    .iter()
+                    .zip(weights)
+                    .map(|(&joints, &weights)| SkinVertex { joints, weights })
+                    .collect();
+                Some(
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("retained scene skin attributes"),
+                        contents: bytemuck::cast_slice(&skin_vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    }),
+                )
+            }
+            _ => None,
+        };
+        let joint_bounds = if skin.is_some() {
+            frustum::mesh_joint_bounds(mesh).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         Self {
             source,
             bounds: [low, high],
+            joint_bounds,
             vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("retained scene vertices"),
                 contents: bytemuck::cast_slice(&vertices),
@@ -4258,6 +4497,7 @@ impl GpuMesh {
                     usage: wgpu::BufferUsages::VERTEX,
                 })
             }),
+            skin,
             indices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("retained scene indices"),
                 contents: bytemuck::cast_slice(&mesh.indices),
@@ -4348,6 +4588,7 @@ impl DrawGroup {
 struct SceneCallback {
     receipt: FrameReceipt,
     groups: Vec<DrawGroup>,
+    skin_matrices: Vec<Mat4>,
     camera: [f32; 16],
     inv_camera: [f32; 16],
     cluster_camera: ClusterCamera,
@@ -4580,6 +4821,11 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             .map(|group| group.instances.len())
             .sum::<usize>();
         r.ensure_instance_capacity(device, instance_count);
+        if !self.skin_matrices.is_empty() {
+            r.ensure_skin_capacity(device, self.skin_matrices.len());
+            let raw: Vec<[f32; 16]> = self.skin_matrices.iter().map(Mat4::to_cols_array).collect();
+            queue.write_buffer(&r.skin_matrices, 0, bytemuck::cast_slice(&raw));
+        }
         let upload_refs: Vec<(&[Instance], u32)> = self
             .groups
             .iter()
@@ -4649,6 +4895,8 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 builtins: &r.builtins,
                 materials: &r.materials,
                 zero_uv: &r.zero_uv,
+                default_skin: &r.default_skin,
+                skin_matrices: &self.skin_matrices,
                 instance_bind: &r.instance_bind,
             },
             shadow_gpu::Request {
@@ -4732,6 +4980,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                         .unwrap_or(&r.default_tangent)
                         .slice(..),
                 );
+                pass.set_vertex_buffer(3, mesh.skin.as_ref().unwrap_or(&r.default_skin).slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..mesh.count, 0, group.visible_range.clone());
             };
@@ -4802,8 +5051,11 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                     continue;
                 }
                 let mesh = r.builtins.group_mesh(group, &r.meshes);
-                pass.set_pipeline(selection_pipelines.for_sided(group.double_sided));
+                pass.set_pipeline(
+                    selection_pipelines.for_sided(group.double_sided, mesh.skin.is_some()),
+                );
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                pass.set_vertex_buffer(1, mesh.skin.as_ref().unwrap_or(&r.default_skin).slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                 let mut cursor = 0;
                 while let Some(rel_start) = visible[cursor..]
@@ -6308,6 +6560,8 @@ mod tests {
             let mesh = rot_assets::Mesh {
                 texcoords: None,
                 tangents: None,
+                skin_joints: None,
+                skin_weights: None,
                 indices: vec![0, 1, 2],
                 vertices: positions
                     .map(|position| rot_assets::Vertex {
@@ -6549,6 +6803,8 @@ mod tests {
             Arc::new(rot_assets::Mesh {
                 texcoords: None,
                 tangents: None,
+                skin_joints: None,
+                skin_weights: None,
                 vertices: [[-1.0, -1.0, 0.0], [1.0, -1.0, 0.0], [0.0, 1.0, 0.0]]
                     .map(|point| rot_assets::Vertex {
                         position: point.map(|coordinate| coordinate * unit),
@@ -6758,6 +7014,8 @@ mod tests {
         let mesh = Arc::new(rot_assets::Mesh {
             texcoords: None,
             tangents: None,
+            skin_joints: None,
+            skin_weights: None,
             vertices: [[2.0, -1.0, 0.0], [4.0, -1.0, 0.0], [2.0, 1.0, 0.0]]
                 .into_iter()
                 .map(|position| rot_assets::Vertex {
@@ -6815,6 +7073,8 @@ mod tests {
             let mesh = rot_assets::Mesh {
                 texcoords: None,
                 tangents: None,
+                skin_joints: None,
+                skin_weights: None,
                 vertices: [[-0.5, -0.5, 0.0], [0.5, -0.5, 0.0], [0.0, 0.5, 0.0]]
                     .map(|point| rot_assets::Vertex {
                         position: point.map(|coordinate| coordinate * unit),
@@ -7098,6 +7358,7 @@ mod tests {
                             .unwrap_or(&r.default_tangent)
                             .slice(..),
                     );
+                    pass.set_vertex_buffer(3, r.default_skin.slice(..));
                     pass.set_index_buffer(
                         r.builtins.cube.indices.slice(..),
                         wgpu::IndexFormat::Uint32,

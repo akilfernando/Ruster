@@ -1154,4 +1154,100 @@ mod tests {
             "expected walker to advance +X, got {walker_x}"
         );
     }
+
+    #[test]
+    fn player_evaluates_skinned_mesh_across_runtime_ticks() {
+        let mut scene = rot_scene::component_scene::ComponentScene::from_legacy(
+            &rot_scene::Session::new(rot_scene::Scene::empty("skinned-player")).unwrap(),
+        )
+        .unwrap();
+        scene.script_files.insert(
+            "move-bone".into(),
+            rot_scene::component_scene::ScriptFile {
+                asset_id: "move-bone".into(),
+                path: "Scripts/move_bone.lua".into(),
+                text: r#"return {
+    on_update = function(transform, props, dt, host)
+        transform.translation[1] = transform.translation[1] + 2.0 * dt
+    end,
+}"#
+                .into(),
+            },
+        );
+        scene.objects.push(rot_scene::component_scene::ObjectNode {
+            id: "bone".into(),
+            name: "Bone".into(),
+            enabled: true,
+            parent: None,
+            transform: rot_scene::Transform::default(),
+            components: vec![rot_scene::component_scene::ComponentInstance {
+                id: "bone-script".into(),
+                enabled: true,
+                kind: rot_scene::component_scene::Component::Script {
+                    binding: rot_scene::BehaviorBinding {
+                        target: rot_scene::BindingTarget::Object("bone".into()),
+                        source_id: "move-bone".into(),
+                        enabled: true,
+                        properties: std::collections::BTreeMap::new(),
+                        state_defaults: std::collections::BTreeMap::new(),
+                        commands: std::collections::BTreeMap::new(),
+                    },
+                    source_kind: None,
+                    movement: rot_scene::component_scene::ScriptMovement::Ordinary,
+                },
+            }],
+        });
+        scene.objects.push(rot_scene::component_scene::ObjectNode {
+            id: "body".into(),
+            name: "Body".into(),
+            enabled: true,
+            parent: None,
+            transform: rot_scene::Transform::default(),
+            components: vec![
+                rot_scene::component_scene::ComponentInstance {
+                    id: "body-mesh".into(),
+                    enabled: true,
+                    kind: rot_scene::component_scene::Component::MeshRenderer {
+                        geometry: rot_scene::component_scene::Geometry::Cube,
+                        tint: [1.0; 4],
+                        material: None,
+                    },
+                },
+                rot_scene::component_scene::ComponentInstance {
+                    id: "body-skin".into(),
+                    enabled: true,
+                    kind: rot_scene::component_scene::Component::Skin {
+                        joints: vec!["bone".into()],
+                        inverse_bind_matrices: vec![[
+                            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
+                            0.0, 1.0,
+                        ]],
+                    },
+                },
+            ],
+        });
+        let dt = rot_behavior::DEFAULT_FIXED_TICK;
+        let app = PlayerApp::from_component_scene(
+            "SkinnedPlayer".into(),
+            Box::new(scene),
+            MeshMap::new(),
+            TextureMap::new(),
+            dt,
+        )
+        .unwrap();
+        let mut runtime = rot_app::Runtime::new(app, dt).unwrap();
+        runtime.reset().unwrap();
+        runtime.set_running(true);
+        for _ in 0..30 {
+            runtime.advance(dt).unwrap();
+        }
+        let draw_frame = runtime.app().runtime.as_ref().unwrap().draw_frame();
+        let skin_mats = draw_frame.hierarchy().unwrap().skin_matrices();
+        assert_eq!(skin_mats.len(), 1);
+        assert!(
+            skin_mats[0].w_axis.x > 0.5,
+            "expected Skin matrix translation to advance with animated bone, got {:?}",
+            skin_mats[0].w_axis
+        );
+    }
 }

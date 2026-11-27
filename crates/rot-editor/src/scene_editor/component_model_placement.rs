@@ -167,6 +167,35 @@ impl ComponentWorkspace {
                     },
                 });
             }
+            if let Some(skin_index) = node.skin {
+                let skin = model
+                    .skins
+                    .get(skin_index)
+                    .ok_or_else(|| invalid("A model skin binding is missing."))?;
+                let joints = skin
+                    .joints
+                    .iter()
+                    .map(|joint_path| {
+                        node_ids
+                            .get(joint_path.as_str())
+                            .cloned()
+                            .ok_or_else(|| invalid("A model skin joint node is missing."))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                if skin.inverse_bind_matrices.len() != joints.len() {
+                    return Err(invalid(
+                        "A model skin inverse bind matrix count does not match its joints.",
+                    ));
+                }
+                components.push(ComponentInstance {
+                    id: format!("{id}-skin"),
+                    enabled: true,
+                    kind: Component::Skin {
+                        joints,
+                        inverse_bind_matrices: skin.inverse_bind_matrices.clone(),
+                    },
+                });
+            }
             if let Some(light) = node.light {
                 let (color, intensity, kind) = match light {
                     ModelLight::Point {
@@ -679,5 +708,134 @@ mod tests {
         workspace.session.redo(2).unwrap();
         workspace.session.save(&path).unwrap();
         assert_eq!(ComponentSession::open(path).unwrap().scene(), &placed);
+    }
+
+    #[test]
+    fn places_skinned_glb_with_skin_component_and_joint_bindings() {
+        use rot_scene::component_scene::ObjectHierarchy;
+        use serde_json::json;
+
+        let project = tempfile::tempdir().unwrap();
+        let path = project.path().join("scene.json");
+
+        let mut bin = Vec::new();
+        let push_f32 = |buf: &mut Vec<u8>, data: &[f32]| {
+            let offset = buf.len();
+            for &v in data {
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+            (offset, buf.len() - offset)
+        };
+        let push_bytes = |buf: &mut Vec<u8>, data: &[u8]| {
+            let offset = buf.len();
+            buf.extend_from_slice(data);
+            (offset, buf.len() - offset)
+        };
+        let (p_off, p_len) = push_f32(&mut bin, &[0.0_f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+        let (n_off, n_len) = push_f32(&mut bin, &[0.0_f32, 0.0, 1.0].repeat(3));
+        let (j_off, j_len) = push_bytes(&mut bin, &[0_u8, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0]);
+        let (w_off, w_len) = push_bytes(&mut bin, &[255_u8, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0]);
+        let ibms = [
+            glam::Mat4::IDENTITY.to_cols_array(),
+            glam::Mat4::from_translation(glam::Vec3::new(-1.0, 0.0, 0.0)).to_cols_array(),
+        ];
+        let (ibm_off, ibm_len) = push_f32(&mut bin, ibms.as_flattened());
+        let doc = json!({
+            "asset": {"version": "2.0"},
+            "buffers": [{"byteLength": bin.len()}],
+            "bufferViews": [
+                {"buffer": 0, "byteOffset": p_off, "byteLength": p_len},
+                {"buffer": 0, "byteOffset": n_off, "byteLength": n_len},
+                {"buffer": 0, "byteOffset": j_off, "byteLength": j_len},
+                {"buffer": 0, "byteOffset": w_off, "byteLength": w_len},
+                {"buffer": 0, "byteOffset": ibm_off, "byteLength": ibm_len}
+            ],
+            "accessors": [
+                {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3", "min": [0,0,0], "max": [1,1,0]},
+                {"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"},
+                {"bufferView": 2, "componentType": 5121, "count": 3, "type": "VEC4"},
+                {"bufferView": 3, "componentType": 5121, "normalized": true, "count": 3, "type": "VEC4"},
+                {"bufferView": 4, "componentType": 5126, "count": 2, "type": "MAT4"}
+            ],
+            "meshes": [{"primitives": [{"attributes": {"POSITION": 0, "NORMAL": 1, "JOINTS_0": 2, "WEIGHTS_0": 3}}]}],
+            "skins": [{"joints": [0, 1], "inverseBindMatrices": 4}],
+            "nodes": [
+                {"name": "Hip", "children": [1]},
+                {"name": "Shoulder", "translation": [1.0, 2.0, 0.0]},
+                {"name": "Body", "mesh": 0, "skin": 0}
+            ],
+            "scenes": [{"nodes": [0, 2]}],
+            "scene": 0
+        });
+        let mut json_bytes = serde_json::to_vec(&doc).unwrap();
+        while !json_bytes.len().is_multiple_of(4) {
+            json_bytes.push(b' ');
+        }
+        while !bin.len().is_multiple_of(4) {
+            bin.push(0);
+        }
+        let total = 12 + 8 + json_bytes.len() + 8 + bin.len();
+        let mut glb = Vec::with_capacity(total);
+        glb.extend_from_slice(b"glTF");
+        glb.extend_from_slice(&2u32.to_le_bytes());
+        glb.extend_from_slice(&(total as u32).to_le_bytes());
+        glb.extend_from_slice(&(json_bytes.len() as u32).to_le_bytes());
+        glb.extend_from_slice(b"JSON");
+        glb.extend_from_slice(&json_bytes);
+        glb.extend_from_slice(&(bin.len() as u32).to_le_bytes());
+        glb.extend_from_slice(b"BIN\0");
+        glb.extend_from_slice(&bin);
+        fs::write(project.path().join("Character.glb"), &glb).unwrap();
+
+        let mut assets = AssetStore::open(project.path()).unwrap();
+        let model = assets
+            .import_glb_at(0, "character", "Character.glb")
+            .unwrap();
+        assert_eq!(model.skins.len(), 1);
+        let scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("stage")).unwrap()).unwrap();
+        let mut workspace = ComponentWorkspace::new(path, ComponentSession::new(scene).unwrap());
+        workspace.meshes = assets.mesh_snapshots();
+        workspace.assets = Some(assets);
+        workspace.place_model(&model.id, None, None).unwrap();
+
+        let placed = workspace.session.scene();
+        let hip = placed
+            .objects
+            .iter()
+            .find(|object| object.name == "Hip")
+            .unwrap();
+        let shoulder = placed
+            .objects
+            .iter()
+            .find(|object| object.name == "Shoulder")
+            .unwrap();
+        let body = placed
+            .objects
+            .iter()
+            .find(|object| object.name == "Body")
+            .unwrap();
+        let skin_comp = body
+            .components
+            .iter()
+            .find(|comp| matches!(comp.kind, Component::Skin { .. }))
+            .expect("Body should carry Component::Skin");
+        let Component::Skin {
+            joints,
+            inverse_bind_matrices,
+        } = &skin_comp.kind
+        else {
+            unreachable!()
+        };
+        assert_eq!(joints, &[hip.id.clone(), shoulder.id.clone()]);
+        assert_eq!(inverse_bind_matrices.len(), 2);
+
+        ObjectHierarchy::build(&placed.objects).unwrap();
+        let frame = rot_scene::ComponentDrawPlan::build_initial_frame(placed, 1).unwrap();
+        let skin_mats = frame.hierarchy().unwrap().skin_matrices();
+        assert_eq!(skin_mats.len(), 2);
+        // Joint 1 ("Shoulder") sits at (1, 2, 0) with IBM translating -1 in X -> maps (1, 0, 0) to (1, 2, 0).
+        let mapped = skin_mats[1].transform_point3(glam::Vec3::new(1.0, 0.0, 0.0));
+        assert!((mapped - glam::Vec3::new(1.0, 2.0, 0.0)).length() < 1e-5);
     }
 }

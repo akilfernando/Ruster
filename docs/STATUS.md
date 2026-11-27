@@ -13,7 +13,7 @@ Updated 2026-11-27. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
-## Current phase — Phase 4: Play (`P4-04` Done, Next: `P4-05`)
+## Current phase — Phase 4: Play (`P4-05` Done, Next: `P4-06`)
 
 - **Done (earlier phases):** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`,
   `A-01`–`A-07`, `P-01`–`P-02`), `P-03` platform seams & Windows CI, Phase 2 Core
@@ -41,8 +41,13 @@ Updated 2026-11-27. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   `on_collision_enter`/`exit` & `on_trigger_enter`/`exit` with atomic rollback, `Component::Joint`
   [`Fixed`/`Hinge`/`Slider`/`Ball`/`Spring`] & `Component::CharacterController` with
   Inspector/`Play Values`/MCP/`rot-player`; 1k rigid bodies solver p50 `0.553 ms` /
-  engine p50 `0.793 ms`, 10k scripts logic p50 `1.620 ms` / transform-write p50 `1.934 ms`).
-- **Next:** `P4-05` glTF skeletal skinning & GPU skinning (`P4-05`–`P4-06`), and
+  engine p50 `0.793 ms`, 10k scripts logic p50 `1.620 ms` / transform-write p50 `1.934 ms`),
+  `P4-05` (2026-11-27: glTF `JOINTS_0`/`WEIGHTS_0`/`inverseBindMatrices`/`ModelSkin` + bit-29 mesh
+  cache + lifted 64-level/768-track/4 MiB clip limits, `Component::Skin` + placement/Inspector/
+  `Play Values`/MCP/runtime remapping, GPU joint-palette skinning across surface/`scene`/shadow/
+  selection shaders + picking/bounds/`ComponentPreview`; RTX 4060 Vulkan GPU skinning probe passed,
+  5k release bench p50 `1.553 ms` / steady `0 B`).
+- **Next:** `P4-06` animation state machine & blending, and
   audio/input/UI/cameras/particles/save (`P4-07`–`P4-EXIT`). See [backlog](BACKLOG.md).
 
 ## What a creator can do today

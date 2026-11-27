@@ -91,6 +91,8 @@ pub(crate) fn cube() -> Mesh {
         indices,
         texcoords: Some(texcoords),
         tangents: Some(tangents),
+        skin_joints: None,
+        skin_weights: None,
     }
 }
 
@@ -111,6 +113,8 @@ fn plane() -> Mesh {
         indices,
         texcoords: Some(texcoords),
         tangents: Some(tangents),
+        skin_joints: None,
+        skin_weights: None,
     }
 }
 
@@ -170,6 +174,8 @@ fn cylinder() -> Mesh {
         indices,
         texcoords: Some(texcoords),
         tangents: Some(tangents),
+        skin_joints: None,
+        skin_weights: None,
     }
 }
 
@@ -214,6 +220,8 @@ fn triangular_prism() -> Mesh {
         texcoords: Some(texcoords),
         tangents: Some(tangents),
         indices,
+        skin_joints: None,
+        skin_weights: None,
     }
 }
 
@@ -330,6 +338,8 @@ fn revolve(rows: &[Row]) -> Mesh {
         indices,
         texcoords: Some(texcoords),
         tangents: Some(tangents),
+        skin_joints: None,
+        skin_weights: None,
     }
 }
 

@@ -258,6 +258,10 @@ pub(super) fn read_accepted(root: &Path, info: &ModelInfo) -> Result<DecodedMode
             .materials
             .keys()
             .any(|name| material_warning(info, name, "alpha rendered opaque")));
+    let skeletal_skinning = !info
+        .warnings
+        .iter()
+        .any(|warning| warning == "Skeletal skinning omitted; meshes imported in bind pose.");
     let decoded = glb::decode_accepted(
         &info.id,
         &info.source,
@@ -271,6 +275,7 @@ pub(super) fn read_accepted(root: &Path, info: &ModelInfo) -> Result<DecodedMode
             emission,
             double_sided,
             uv_transforms,
+            skeletal_skinning,
         },
     )?;
     if &decoded.info != info {
@@ -388,6 +393,29 @@ impl Registry {
                 {
                     return Err(error("invalid static model animation clip catalog entry"));
                 }
+            }
+            if model.skins.len() > MAX_MODEL_ITEMS
+                || model.skins.iter().any(|skin| {
+                    skin.joints.is_empty()
+                        || skin.joints.len() > MAX_SKIN_JOINTS
+                        || skin.inverse_bind_matrices.len() != skin.joints.len()
+                        || skin.joints.iter().any(|j| !model.nodes.contains_key(j))
+                        || skin
+                            .skeleton
+                            .as_deref()
+                            .is_some_and(|s| !model.nodes.contains_key(s))
+                        || skin
+                            .inverse_bind_matrices
+                            .iter()
+                            .flatten()
+                            .any(|v| !v.is_finite())
+                })
+                || model
+                    .nodes
+                    .values()
+                    .any(|n| n.skin.is_some_and(|s| s >= model.skins.len()))
+            {
+                return Err(error("invalid static model skin catalog entry"));
             }
         }
         Ok(())
@@ -799,6 +827,7 @@ mod tests {
                 emission: false,
                 double_sided: false,
                 uv_transforms: false,
+                skeletal_skinning: false,
             },
         )
         .unwrap();
@@ -1266,6 +1295,7 @@ mod tests {
                 emission: true,
                 double_sided: true,
                 uv_transforms: true,
+                skeletal_skinning: false,
             },
         )
         .unwrap();
@@ -1375,6 +1405,7 @@ mod tests {
                 emission: true,
                 double_sided: false,
                 uv_transforms: false,
+                skeletal_skinning: false,
             },
         )
         .unwrap();

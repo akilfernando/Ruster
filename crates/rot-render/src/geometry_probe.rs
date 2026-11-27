@@ -77,6 +77,8 @@ fn mesh(uv: bool, vertices: usize, indices: usize) -> rot_assets::Mesh {
         indices: vec![3; indices],
         texcoords: uv.then(|| vec![[0.; 2]; vertices]),
         tangents: None,
+        skin_joints: None,
+        skin_weights: None,
     };
     for (vertex, position) in
         mesh.vertices
@@ -176,6 +178,7 @@ fn verify_case(
     resources.insert(r);
     let callback = SceneCallback {
         background: None,
+        skin_matrices: Vec::new(),
         sky: None,
         fog: None,
         post_process: None,

@@ -17,6 +17,7 @@ struct Instance {
 };
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(0) @binding(1) var<storage, read> instances: array<Instance>;
+@group(0) @binding(2) var<storage, read> skin_matrices: array<mat4x4<f32>>;
 @group(1) @binding(0) var base_color_texture: texture_2d<f32>;
 @group(1) @binding(1) var base_color_sampler: sampler;
 @group(1) @binding(2) var roughness_texture: texture_2d<f32>;
@@ -257,6 +258,8 @@ struct Vertex {
     @location(1) normal: vec3<f32>,
     @location(2) uv: vec2<f32>,
     @location(3) tangent: vec4<f32>,
+    @location(4) joints: vec4<u32>,
+    @location(5) weights: vec4<f32>,
 };
 struct Output {
     @builtin(position) position: vec4<f32>,
@@ -274,18 +277,43 @@ struct Output {
 @vertex fn vs(v: Vertex, @builtin(instance_index) instance_index: u32) -> Output {
     var o: Output;
     let inst = instances[instance_index];
-    let model = mat4x4<f32>(inst.model0, inst.model1, inst.model2, inst.model3);
-    let normal = mat3x3<f32>(inst.normal0.xyz, inst.normal1.xyz, inst.normal2.xyz);
-    o.position = camera.view_projection * model * vec4<f32>(v.position, 1.0);
-    o.normal = normal * v.normal;
+    let skin_count = bitcast<u32>(inst.normal1.w);
+    var world_pos = vec3<f32>(0.0);
+    var world_normal = vec3<f32>(0.0);
+    var world_tangent = vec3<f32>(0.0);
+    if skin_count > 0u {
+        let base = bitcast<u32>(inst.normal0.w);
+        let limit = skin_count - 1u;
+        let skin_mat = skin_matrices[base + min(v.joints.x, limit)] * v.weights.x
+            + skin_matrices[base + min(v.joints.y, limit)] * v.weights.y
+            + skin_matrices[base + min(v.joints.z, limit)] * v.weights.z
+            + skin_matrices[base + min(v.joints.w, limit)] * v.weights.w;
+        world_pos = (skin_mat * vec4<f32>(v.position, 1.0)).xyz;
+        let c0 = skin_mat[0].xyz;
+        let c1 = skin_mat[1].xyz;
+        let c2 = skin_mat[2].xyz;
+        let cofactor = mat3x3<f32>(cross(c1, c2), cross(c2, c0), cross(c0, c1));
+        let det = dot(c0, cross(c1, c2));
+        let inv_det = select(1.0 / det, 1.0, abs(det) < 1e-20);
+        world_normal = cofactor * (v.normal * inv_det);
+        world_tangent = (skin_mat * vec4<f32>(v.tangent.xyz, 0.0)).xyz;
+    } else {
+        let model = mat4x4<f32>(inst.model0, inst.model1, inst.model2, inst.model3);
+        let normal = mat3x3<f32>(inst.normal0.xyz, inst.normal1.xyz, inst.normal2.xyz);
+        world_pos = (model * vec4<f32>(v.position, 1.0)).xyz;
+        world_normal = normal * v.normal;
+        world_tangent = (model * vec4<f32>(v.tangent.xyz, 0.0)).xyz;
+    }
+    o.position = camera.view_projection * vec4<f32>(world_pos, 1.0);
+    o.normal = world_normal;
     o.color = inst.color;
     // OBJ V grows upward; decoded PNG rows grow downward. Convert once here.
     o.uv = vec2<f32>(v.uv.x, 1.0 - v.uv.y) * inst.uv_transform.xy + inst.uv_transform.zw;
     o.base_color = inst.base_color;
     o.response = inst.response;
     o.emission_color = inst.emission_color;
-    o.world_position = (model * vec4<f32>(v.position, 1.0)).xyz;
-    o.tangent = vec4<f32>(safe_unit((model * vec4<f32>(v.tangent.xyz, 0.0)).xyz), v.tangent.w);
+    o.world_position = world_pos;
+    o.tangent = vec4<f32>(safe_unit(world_tangent), v.tangent.w);
     o.pbr_params = inst.pbr_params;
     o.pbr_maps = inst.pbr_maps;
     return o;

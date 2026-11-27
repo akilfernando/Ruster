@@ -68,6 +68,79 @@ pub(crate) fn mesh_local_bounds(mesh: &rot_assets::Mesh) -> Option<(Vec3, Vec3)>
     (!mesh.vertices.is_empty()).then_some(((low + high) * 0.5, (high - low) * 0.5))
 }
 
+/// Compute per-joint local-space `(center, half_extents)` bounds from vertices influenced
+/// with weight `> 0.0` by each joint.
+pub(crate) fn mesh_joint_bounds(mesh: &rot_assets::Mesh) -> Option<Vec<Option<(Vec3, Vec3)>>> {
+    let joints = mesh.skin_joints.as_ref()?;
+    let weights = mesh.skin_weights.as_ref()?;
+    if joints.len() != mesh.vertices.len() || weights.len() != mesh.vertices.len() {
+        return None;
+    }
+    let max_joint = joints
+        .iter()
+        .zip(weights)
+        .flat_map(|(j, w)| {
+            j.iter()
+                .zip(w.iter())
+                .filter(|(_, w)| **w > 0.0)
+                .map(|(j, _)| *j)
+        })
+        .max()?;
+    let mut mins = vec![Vec3::splat(f32::INFINITY); usize::from(max_joint) + 1];
+    let mut maxs = vec![Vec3::splat(f32::NEG_INFINITY); usize::from(max_joint) + 1];
+    let mut active = vec![false; usize::from(max_joint) + 1];
+    for ((vertex, j4), w4) in mesh.vertices.iter().zip(joints).zip(weights) {
+        let p = Vec3::from(vertex.position);
+        if !p.is_finite() {
+            return None;
+        }
+        for k in 0..4 {
+            if w4[k] > 0.0 {
+                let idx = usize::from(j4[k]);
+                mins[idx] = mins[idx].min(p);
+                maxs[idx] = maxs[idx].max(p);
+                active[idx] = true;
+            }
+        }
+    }
+    Some(
+        mins.into_iter()
+            .zip(maxs)
+            .zip(active)
+            .map(|((lo, hi), used)| used.then_some(((lo + hi) * 0.5, (hi - lo) * 0.5)))
+            .collect(),
+    )
+}
+
+/// Compute an enclosing world-space AABB for a skinned draw instance by transforming each
+/// active joint's local bounds by `skin_matrices[joint]` and unioning the results.
+pub(crate) fn skinned_world_aabb(
+    joint_bounds: &[Option<(Vec3, Vec3)>],
+    skin_matrices: &[Mat4],
+) -> Option<(Vec3, Vec3)> {
+    if joint_bounds.is_empty() || skin_matrices.is_empty() {
+        return None;
+    }
+    let last = skin_matrices.len() - 1;
+    let mut lo = Vec3::splat(f32::INFINITY);
+    let mut hi = Vec3::splat(f32::NEG_INFINITY);
+    let mut any = false;
+    for (joint_index, bounds) in joint_bounds.iter().enumerate() {
+        let Some((local_center, local_extents)) = *bounds else {
+            continue;
+        };
+        let matrix = skin_matrices[joint_index.min(last)];
+        if !matrix.is_finite() {
+            return None;
+        }
+        let (wc, we) = world_aabb(matrix, local_center, local_extents);
+        lo = lo.min(wc - we);
+        hi = hi.max(wc + we);
+        any = true;
+    }
+    any.then_some(((lo + hi) * 0.5, (hi - lo) * 0.5))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,5 +199,27 @@ mod tests {
         let frustum = Frustum::from_view_projection(perspective_vp()).unwrap();
         assert!(frustum.intersects_aabb(Vec3::new(f32::INFINITY, 0.0, 0.0), Vec3::ONE));
         assert!(frustum.intersects_aabb(Vec3::ZERO, Vec3::new(f32::NAN, 1.0, 1.0)));
+    }
+
+    #[test]
+    fn skinned_world_aabb_tracks_moved_bones() {
+        let mut mesh = rot_assets::parse_obj(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap();
+        mesh.skin_joints = Some(vec![[0, 0, 0, 0], [1, 0, 0, 0], [0, 0, 0, 0]]);
+        mesh.skin_weights = Some(vec![
+            [1.0, 0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+        ]);
+        let jb = mesh_joint_bounds(&mesh).unwrap();
+        assert_eq!(jb.len(), 2);
+        let skins = [
+            Mat4::IDENTITY,
+            Mat4::from_translation(Vec3::new(50.0, 0.0, 0.0)),
+        ];
+        let (center, extents) = skinned_world_aabb(&jb, &skins).unwrap();
+        assert!((center.x - 25.5).abs() < 1e-4);
+        assert!(extents.x >= 25.0);
+        assert!((center - extents).x <= 0.001);
+        assert!((center + extents).x >= 50.999);
     }
 }

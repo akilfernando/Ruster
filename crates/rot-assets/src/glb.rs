@@ -13,16 +13,27 @@ pub use camera::{ModelCamera, ModelOrthographicCamera, ModelPerspectiveCamera};
 
 pub const MAX_GLB_SOURCE_BYTES: usize = 64 * 1024 * 1024;
 pub(super) const MAX_JSON_BYTES: usize = 2 * 1024 * 1024;
-// Match the scene hierarchy qualification bound, including the creator root
-// and the Group placed around an imported mesh that also has children.
-const MAX_GROUP_LEVELS: usize = 8;
+// Match the hierarchy depth limit for complex skeletons and nested assemblies.
+const MAX_GROUP_LEVELS: usize = 64;
 const MIN_DIELECTRIC_ROUGHNESS: f32 = 0.08;
 pub const MAX_MODEL_CLIPS: usize = 8;
-const MAX_CLIP_TRACKS: usize = 96;
+const MAX_CLIP_TRACKS: usize = 768;
 const MAX_TRACK_KEYS: usize = 1024;
-const MAX_CLIP_KEYS: usize = 8192;
+const MAX_CLIP_KEYS: usize = 65_536;
 const MAX_CLIP_SECONDS: f32 = 600.0;
-pub const MAX_CLIP_BYTES: usize = 1024 * 1024;
+pub const MAX_CLIP_BYTES: usize = 4 * 1024 * 1024;
+type SkinAttributes = (Vec<[u16; 4]>, Vec<[f32; 4]>);
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelSkin {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skeleton: Option<String>,
+    pub joints: Vec<String>,
+    pub inverse_bind_matrices: Vec<[f32; 16]>,
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -38,6 +49,9 @@ pub struct ModelInfo {
     /// Named node-transform clips. Present only in catalog version 7.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub clips: BTreeMap<String, ModelClip>,
+    /// Resolved skeletal skin bindings referenced by `ModelNode::skin`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skins: Vec<ModelSkin>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -103,6 +117,12 @@ pub struct ModelNode {
         deserialize_with = "present"
     )]
     pub camera: Option<ModelCamera>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub skin: Option<usize>,
 }
 
 impl ModelNode {
@@ -114,6 +134,7 @@ impl ModelNode {
             && self.scale == other.scale
             && self.mesh_id == other.mesh_id
             && self.material == other.material
+            && self.skin == other.skin
     }
 }
 
@@ -410,7 +431,17 @@ struct Document<'a> {
     #[serde(default)]
     animations: Vec<Animation>,
     #[serde(default)]
-    skins: Vec<serde::de::IgnoredAny>,
+    skins: Vec<SourceSkin>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SourceSkin {
+    #[serde(default)]
+    name: String,
+    inverse_bind_matrices: Option<usize>,
+    skeleton: Option<usize>,
+    joints: Vec<usize>,
 }
 
 #[derive(Deserialize)]
@@ -489,6 +520,10 @@ struct Attributes {
     secondary_uv: Option<usize>,
     #[serde(rename = "COLOR_0")]
     color: Option<usize>,
+    #[serde(rename = "JOINTS_0")]
+    joints: Option<usize>,
+    #[serde(rename = "WEIGHTS_0")]
+    weights: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -1178,6 +1213,7 @@ impl Node<'_> {
             material: None,
             light: None,
             camera: None,
+            skin: None,
         };
         if let Some(matrix) = matrix {
             if !matrix_close(matrix, PlacementPose::from_local(&definition).matrix()) {
@@ -1322,6 +1358,7 @@ struct Decoder<'a> {
     emission: bool,
     double_sided: bool,
     uv_transforms: bool,
+    skeletal_skinning: bool,
     required_uv_transform: bool,
     mesh_bytes: usize,
     texture_bytes: usize,
@@ -1330,6 +1367,8 @@ struct Decoder<'a> {
     recomputed_normals: bool,
     generated_default_uvs: bool,
     has_skins: bool,
+    omitted_skins: bool,
+    skinned_meshes: Vec<(String, usize, String)>,
     has_morph_targets: bool,
     has_vertex_colors: bool,
     light_definitions: Vec<punctual::AdmittedLight>,
@@ -1382,18 +1421,19 @@ impl Decoder<'_> {
         Ok((view, bytes))
     }
 
-    fn rows(
+    fn raw_rows(
         &self,
         index: usize,
         shape: &str,
         components: usize,
         component_type: u32,
+        expected_normalized: Option<bool>,
         max_count: usize,
     ) -> Result<impl ExactSizeIterator<Item = &[u8]>, AssetError> {
         let accessor = at(&self.doc.accessors, index, "accessor")?;
         if accessor.shape != shape
             || accessor.component_type != component_type
-            || accessor.normalized
+            || expected_normalized.is_some_and(|n| accessor.normalized != n)
             || accessor.count == 0
             || accessor.count > max_count
         {
@@ -1434,6 +1474,24 @@ impl Decoder<'_> {
         Ok(range.chunks(stride).map(move |row| &row[..width]))
     }
 
+    fn rows(
+        &self,
+        index: usize,
+        shape: &str,
+        components: usize,
+        component_type: u32,
+        max_count: usize,
+    ) -> Result<impl ExactSizeIterator<Item = &[u8]>, AssetError> {
+        self.raw_rows(
+            index,
+            shape,
+            components,
+            component_type,
+            Some(false),
+            max_count,
+        )
+    }
+
     fn vectors<const N: usize>(
         &self,
         index: usize,
@@ -1453,6 +1511,108 @@ impl Decoder<'_> {
                 Ok(values)
             })
             .collect()
+    }
+
+    fn decode_skin_attributes(
+        &self,
+        joints_idx: Option<usize>,
+        weights_idx: Option<usize>,
+        vertex_count: usize,
+    ) -> Result<Option<SkinAttributes>, AssetError> {
+        if !self.skeletal_skinning {
+            return Ok(None);
+        }
+        match (joints_idx, weights_idx) {
+            (None, None) => Ok(None),
+            (Some(_), None) | (None, Some(_)) => Err(error(
+                "GLB skinned primitive requires both JOINTS_0 and WEIGHTS_0",
+            )),
+            (Some(j_acc), Some(w_acc)) => {
+                let j_meta = at(&self.doc.accessors, j_acc, "JOINTS_0 accessor")?;
+                let mut joints: Vec<[u16; 4]> = match j_meta.component_type {
+                    5121 => self
+                        .raw_rows(j_acc, "VEC4", 4, 5121, Some(false), MAX_MESH_VERTICES)?
+                        .map(|r| {
+                            [
+                                u16::from(r[0]),
+                                u16::from(r[1]),
+                                u16::from(r[2]),
+                                u16::from(r[3]),
+                            ]
+                        })
+                        .collect(),
+                    5123 => self
+                        .raw_rows(j_acc, "VEC4", 4, 5123, Some(false), MAX_MESH_VERTICES)?
+                        .map(|r| {
+                            [
+                                u16::from_le_bytes([r[0], r[1]]),
+                                u16::from_le_bytes([r[2], r[3]]),
+                                u16::from_le_bytes([r[4], r[5]]),
+                                u16::from_le_bytes([r[6], r[7]]),
+                            ]
+                        })
+                        .collect(),
+                    _ => {
+                        return Err(error(
+                            "GLB JOINTS_0 requires UNSIGNED_BYTE or UNSIGNED_SHORT",
+                        ))
+                    }
+                };
+                if joints.len() != vertex_count {
+                    return Err(error("GLB JOINTS_0 count must match POSITION"));
+                }
+
+                let w_meta = at(&self.doc.accessors, w_acc, "WEIGHTS_0 accessor")?;
+                let mut weights: Vec<[f32; 4]> = match w_meta.component_type {
+                    5126 => self
+                        .raw_rows(w_acc, "VEC4", 4, 5126, Some(false), MAX_MESH_VERTICES)?
+                        .map(|r| std::array::from_fn(|i| f32::from_bits(u32_at(r, i * 4))))
+                        .collect(),
+                    5121 => self
+                        .raw_rows(w_acc, "VEC4", 4, 5121, Some(true), MAX_MESH_VERTICES)?
+                        .map(|r| {
+                            [
+                                f32::from(r[0]) / 255.0,
+                                f32::from(r[1]) / 255.0,
+                                f32::from(r[2]) / 255.0,
+                                f32::from(r[3]) / 255.0,
+                            ]
+                        })
+                        .collect(),
+                    5123 => self
+                        .raw_rows(w_acc, "VEC4", 4, 5123, Some(true), MAX_MESH_VERTICES)?
+                        .map(|r| {
+                            [
+                                f32::from(u16::from_le_bytes([r[0], r[1]])) / 65535.0,
+                                f32::from(u16::from_le_bytes([r[2], r[3]])) / 65535.0,
+                                f32::from(u16::from_le_bytes([r[4], r[5]])) / 65535.0,
+                                f32::from(u16::from_le_bytes([r[6], r[7]])) / 65535.0,
+                            ]
+                        })
+                        .collect(),
+                    _ => return Err(error(
+                        "GLB WEIGHTS_0 requires FLOAT or normalized UNSIGNED_BYTE/UNSIGNED_SHORT",
+                    )),
+                };
+                if weights.len() != vertex_count {
+                    return Err(error("GLB WEIGHTS_0 count must match POSITION"));
+                }
+                for (j, w) in joints.iter_mut().zip(&mut weights) {
+                    if !w.iter().all(|v| v.is_finite()) {
+                        return Err(error("GLB WEIGHTS_0 contains nonfinite values"));
+                    }
+                    let clamped = w.map(|v| v.max(0.0));
+                    let sum: f32 = clamped.iter().sum();
+                    if sum > 1e-6 {
+                        *w = clamped.map(|v| v / sum);
+                    } else {
+                        *j = [0, 0, 0, 0];
+                        *w = [1.0, 0.0, 0.0, 0.0];
+                    }
+                }
+                Ok(Some((joints, weights)))
+            }
+        }
     }
 
     fn mesh(&mut self, primitive: &Primitive, textured: bool) -> Result<ModelResource, AssetError> {
@@ -1511,6 +1671,15 @@ impl Decoder<'_> {
         if let Some(index) = primitive.attributes.secondary_uv {
             at(&self.doc.accessors, index, "TEXCOORD_1 accessor")?;
         }
+        let skin_attrs = self.decode_skin_attributes(
+            primitive.attributes.joints,
+            primitive.attributes.weights,
+            positions.len(),
+        )?;
+        let (src_joints, src_weights) = match skin_attrs {
+            Some((j, w)) => (Some(j), Some(w)),
+            None => (None, None),
+        };
         let mut uv = primitive
             .attributes
             .uv
@@ -1604,7 +1773,14 @@ impl Decoder<'_> {
             corners
         };
         let expect_tangents = authored_tangents.is_some() || uv.is_some();
-        binary_mesh_length(vertices, corners, uv.is_some(), expect_tangents)?;
+        let expect_skinning = src_joints.is_some();
+        binary_mesh_length(
+            vertices,
+            corners,
+            uv.is_some(),
+            expect_tangents,
+            expect_skinning,
+        )?;
         let mut mesh = Mesh {
             vertices: Vec::with_capacity(vertices),
             indices: Vec::with_capacity(corners),
@@ -1612,6 +1788,8 @@ impl Decoder<'_> {
             tangents: authored_tangents
                 .as_ref()
                 .map(|_| Vec::with_capacity(vertices)),
+            skin_joints: src_joints.as_ref().map(|_| Vec::with_capacity(vertices)),
+            skin_weights: src_weights.as_ref().map(|_| Vec::with_capacity(vertices)),
         };
         const UNUSED: u32 = u32::MAX;
         let mut remap = normal.as_ref().map(|_| vec![UNUSED; positions.len()]);
@@ -1637,6 +1815,12 @@ impl Decoder<'_> {
                         target.push(source[index as usize]);
                     }
                     if let (Some(source), Some(target)) = (&authored_tangents, &mut mesh.tangents) {
+                        target.push(source[index as usize]);
+                    }
+                    if let (Some(source), Some(target)) = (&src_joints, &mut mesh.skin_joints) {
+                        target.push(source[index as usize]);
+                    }
+                    if let (Some(source), Some(target)) = (&src_weights, &mut mesh.skin_weights) {
                         target.push(source[index as usize]);
                     }
                 }
@@ -1683,6 +1867,12 @@ impl Decoder<'_> {
                     target.push(source[index]);
                 }
                 if let (Some(source), Some(target)) = (&authored_tangents, &mut mesh.tangents) {
+                    target.push(source[index]);
+                }
+                if let (Some(source), Some(target)) = (&src_joints, &mut mesh.skin_joints) {
+                    target.push(source[index]);
+                }
+                if let (Some(source), Some(target)) = (&src_weights, &mut mesh.skin_weights) {
                     target.push(source[index]);
                 }
             }
@@ -2225,7 +2415,7 @@ impl Decoder<'_> {
         path: &str,
         primitive: &Primitive,
         material: Option<String>,
-    ) -> Result<(), AssetError> {
+    ) -> Result<(String, bool), AssetError> {
         let textured = material.as_ref().is_some_and(|material| {
             let material = &self.model.info.materials[material];
             TextureRole::ALL
@@ -2235,11 +2425,15 @@ impl Decoder<'_> {
         let resource = self
             .mesh(primitive, textured)
             .map_err(|failure| error(format!("GLB primitive at {path:?}: {failure}")))?;
+        let has_skinning = matches!(
+            &resource.payload,
+            Payload::Mesh(mesh) if mesh.has_complete_skinning()
+        );
         let id = resource_id(&self.model.info.id, "mesh", path);
         self.retain(id.clone(), resource)?;
-        node.mesh_id = Some(id);
+        node.mesh_id = Some(id.clone());
         node.material = material;
-        Ok(())
+        Ok((id, has_skinning))
     }
 
     fn siblings(
@@ -2317,7 +2511,7 @@ impl Decoder<'_> {
         let becomes_group = split || surface_primitives.is_empty() || !node.children.is_empty();
         let group_levels = 1 + ancestors.len() + usize::from(becomes_group);
         if group_levels > MAX_GROUP_LEVELS {
-            return Err(error(format!("GLB node {path:?} exceeds eight Group levels with the placement root; simplify the source hierarchy")));
+            return Err(error(format!("GLB node {path:?} exceeds {MAX_GROUP_LEVELS} Group levels with the placement root; simplify the source hierarchy")));
         }
         let mut definition = node
             .placement(index, parent, becomes_group)
@@ -2342,6 +2536,7 @@ impl Decoder<'_> {
         world
             .validate_world()
             .map_err(|e| error(format!("GLB node {path:?}: {e}")))?;
+        let node_skin = node.skin;
         let children = node.children.clone();
         let mut occurrences = BTreeMap::new();
         for primitive in surface_primitives {
@@ -2367,11 +2562,29 @@ impl Decoder<'_> {
                     material: None,
                     light: None,
                     camera: None,
+                    skin: None,
                 };
-                self.attach_primitive(&mut child, &child_path, &primitive, material)?;
+                let (mesh_id, has_skinning) =
+                    self.attach_primitive(&mut child, &child_path, &primitive, material)?;
+                if let Some(skin_idx) = node_skin {
+                    if self.skeletal_skinning && has_skinning {
+                        self.skinned_meshes
+                            .push((child_path.clone(), skin_idx, mesh_id));
+                    } else {
+                        self.omitted_skins = true;
+                    }
+                }
                 self.model.info.nodes.insert(child_path, child);
             } else {
-                self.attach_primitive(&mut definition, &path, &primitive, material)?;
+                let (mesh_id, has_skinning) =
+                    self.attach_primitive(&mut definition, &path, &primitive, material)?;
+                if let Some(skin_idx) = node_skin {
+                    if self.skeletal_skinning && has_skinning {
+                        self.skinned_meshes.push((path.clone(), skin_idx, mesh_id));
+                    } else {
+                        self.omitted_skins = true;
+                    }
+                }
             }
         }
         self.model.info.nodes.insert(path.clone(), definition);
@@ -2668,7 +2881,7 @@ impl Decoder<'_> {
             })?;
             if bytes.len() > MAX_CLIP_BYTES {
                 return Err(error(format!(
-                    "GLB animation {name:?} exceeds the 1 MiB clip payload limit"
+                    "GLB animation {name:?} exceeds the 4 MiB clip payload limit"
                 )));
             }
             let id = resource_id(&self.model.info.id, "clip", &name);
@@ -2690,6 +2903,97 @@ impl Decoder<'_> {
         }
         Ok(())
     }
+    fn resolve_skins(&mut self) -> Result<(), AssetError> {
+        if !self.skeletal_skinning || self.skinned_meshes.is_empty() {
+            return Ok(());
+        }
+        let assignments = std::mem::take(&mut self.skinned_meshes);
+        let mut skin_map: BTreeMap<usize, usize> = BTreeMap::new();
+        for (node_path, src_skin_idx, mesh_id) in assignments {
+            let out_idx = if let Some(&existing) = skin_map.get(&src_skin_idx) {
+                existing
+            } else {
+                let source = at(&self.doc.skins, src_skin_idx, "skin")?;
+                if source.joints.is_empty() || source.joints.len() > MAX_SKIN_JOINTS {
+                    return Err(error(format!(
+                        "GLB skin #{src_skin_idx} requires 1..={MAX_SKIN_JOINTS} joints"
+                    )));
+                }
+                let mut joints = Vec::with_capacity(source.joints.len());
+                for &joint_node_idx in &source.joints {
+                    let path = self.paths.get(&joint_node_idx).ok_or_else(|| {
+                        error(format!(
+                            "GLB skin #{src_skin_idx} references unreachable joint node #{joint_node_idx}"
+                        ))
+                    })?;
+                    joints.push(path.clone());
+                }
+                let skeleton = source
+                    .skeleton
+                    .and_then(|idx| self.paths.get(&idx).cloned());
+                let inverse_bind_matrices = if let Some(acc_idx) = source.inverse_bind_matrices {
+                    let matrices: Vec<[f32; 16]> = self
+                        .raw_rows(acc_idx, "MAT4", 16, 5126, Some(false), MAX_SKIN_JOINTS)?
+                        .map(|bytes| {
+                            let m = std::array::from_fn(|i| f32::from_bits(u32_at(bytes, i * 4)));
+                            if !m.iter().all(|v| v.is_finite()) {
+                                return Err(error(
+                                    "GLB inverseBindMatrices contain nonfinite values",
+                                ));
+                            }
+                            Ok(m)
+                        })
+                        .collect::<Result<_, _>>()?;
+                    if matrices.len() < joints.len() {
+                        return Err(error(format!(
+                            "GLB skin #{src_skin_idx} inverseBindMatrices count smaller than joint count"
+                        )));
+                    }
+                    matrices.into_iter().take(joints.len()).collect()
+                } else {
+                    vec![
+                        [
+                            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
+                            0.0, 1.0,
+                        ];
+                        joints.len()
+                    ]
+                };
+                let idx = self.model.info.skins.len();
+                self.model.info.skins.push(ModelSkin {
+                    name: source.name.trim().to_owned(),
+                    skeleton,
+                    joints,
+                    inverse_bind_matrices,
+                });
+                skin_map.insert(src_skin_idx, idx);
+                idx
+            };
+            let joint_count = self.model.info.skins[out_idx].joints.len();
+            if let Some(ModelResource {
+                payload: Payload::Mesh(mesh),
+                ..
+            }) = self.model.resources.get(&mesh_id)
+            {
+                if let (Some(j), Some(w)) = (&mesh.skin_joints, &mesh.skin_weights) {
+                    if j.iter().zip(w).any(|(indices, weights)| {
+                        indices
+                            .iter()
+                            .zip(weights)
+                            .any(|(&ji, &wi)| wi > 0.0 && usize::from(ji) >= joint_count)
+                    }) {
+                        return Err(error(format!(
+                            "GLB mesh {mesh_id:?} references out-of-range joint index for skin #{src_skin_idx}"
+                        )));
+                    }
+                }
+            }
+            if let Some(node) = self.model.info.nodes.get_mut(&node_path) {
+                node.skin = Some(out_idx);
+            }
+        }
+        Ok(())
+    }
 }
 
 pub(super) struct ImportFeatures {
@@ -2701,6 +3005,7 @@ pub(super) struct ImportFeatures {
     pub emission: bool,
     pub double_sided: bool,
     pub uv_transforms: bool,
+    pub skeletal_skinning: bool,
 }
 
 impl ImportFeatures {
@@ -2713,6 +3018,7 @@ impl ImportFeatures {
         emission: true,
         double_sided: true,
         uv_transforms: true,
+        skeletal_skinning: true,
     };
 }
 
@@ -2735,6 +3041,7 @@ pub(super) fn decode_accepted(
         emission,
         double_sided,
         uv_transforms,
+        skeletal_skinning,
     } = features;
     let (json, bin) = chunks(bytes)?;
     let doc: Document<'_> = serde_json::from_slice(json)
@@ -2780,6 +3087,7 @@ pub(super) fn decode_accepted(
         .into_iter()
         .any(|n| n > MAX_MODEL_ITEMS)
         || doc.animations.len() > MAX_MODEL_ITEMS
+        || doc.skins.len() > MAX_MODEL_ITEMS
     {
         return Err(error(
             "GLB scene, buffer or resource counts exceed the static subset",
@@ -2799,6 +3107,12 @@ pub(super) fn decode_accepted(
         {
             return Err(error(format!(
                 "GLB node #{index} {:?} references a missing camera",
+                node.name
+            )));
+        }
+        if node.skin.is_some_and(|skin| skin >= doc.skins.len()) {
+            return Err(error(format!(
+                "GLB node #{index} {:?} references a missing skin",
                 node.name
             )));
         }
@@ -2826,6 +3140,7 @@ pub(super) fn decode_accepted(
         emission,
         double_sided,
         uv_transforms,
+        skeletal_skinning,
         required_uv_transform,
         mesh_bytes: 0,
         texture_bytes: 0,
@@ -2834,6 +3149,8 @@ pub(super) fn decode_accepted(
         recomputed_normals: false,
         generated_default_uvs: false,
         has_skins: false,
+        omitted_skins: false,
+        skinned_meshes: Vec::new(),
         has_morph_targets: false,
         has_vertex_colors: false,
         light_definitions,
@@ -2851,6 +3168,7 @@ pub(super) fn decode_accepted(
                 materials: BTreeMap::new(),
                 warnings: Vec::new(),
                 clips: BTreeMap::new(),
+                skins: Vec::new(),
             },
             resources: BTreeMap::new(),
             clips: BTreeMap::new(),
@@ -2858,6 +3176,7 @@ pub(super) fn decode_accepted(
     };
     let mut ancestors = Vec::with_capacity(MAX_GROUP_LEVELS);
     decoder.siblings(&roots, None, &mut ancestors)?;
+    decoder.resolve_skins()?;
     let has_mesh = decoder
         .model
         .resources
@@ -2896,7 +3215,12 @@ pub(super) fn decode_accepted(
             ignored_extensions.join(", ")
         ));
     }
-    if !decoder.doc.skins.is_empty() || decoder.has_skins {
+    if (!decoder.skeletal_skinning && (!decoder.doc.skins.is_empty() || decoder.has_skins))
+        || decoder.omitted_skins
+        || (decoder.skeletal_skinning
+            && !decoder.doc.skins.is_empty()
+            && decoder.model.info.skins.is_empty())
+    {
         decoder
             .model
             .info
@@ -3367,5 +3691,185 @@ mod tests {
         let gen_mesh = model_mesh(&generated);
         assert!(gen_mesh.has_complete_tangents());
         assert_ne!(gen_mesh.tangents.as_deref(), Some(&tangents[..]));
+    }
+
+    #[test]
+    fn glb_decodes_skeletal_skinning_joints_weights_and_inverse_bind_matrices() {
+        let mut bin = Vec::new();
+        let push_f32 = |buf: &mut Vec<u8>, data: &[f32]| {
+            let offset = buf.len();
+            for &v in data {
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+            (offset, buf.len() - offset)
+        };
+        let push_bytes = |buf: &mut Vec<u8>, data: &[u8]| {
+            let offset = buf.len();
+            buf.extend_from_slice(data);
+            (offset, buf.len() - offset)
+        };
+
+        let positions = [0.0_f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+        let normals = [0.0_f32, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+        let (p_off, p_len) = push_f32(&mut bin, &positions);
+        let (n_off, n_len) = push_f32(&mut bin, &normals);
+        // u8 JOINTS_0 (VEC4 UNSIGNED_BYTE = 5121)
+        let joints_u8: [u8; 12] = [0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0];
+        let (j8_off, j8_len) = push_bytes(&mut bin, &joints_u8);
+        // u8 normalized WEIGHTS_0 (VEC4 normalized UNSIGNED_BYTE = 5121)
+        let weights_u8: [u8; 12] = [128, 127, 0, 0, 255, 0, 0, 0, 64, 191, 0, 0];
+        let (w8_off, w8_len) = push_bytes(&mut bin, &weights_u8);
+        // u16 JOINTS_0 (VEC4 UNSIGNED_SHORT = 5123)
+        let joints_u16: Vec<u8> = [0_u16, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]
+            .into_iter()
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        let (j16_off, j16_len) = push_bytes(&mut bin, &joints_u16);
+        // u16 normalized WEIGHTS_0 (VEC4 normalized UNSIGNED_SHORT = 5123)
+        let weights_u16: Vec<u8> = [32768_u16, 32767, 0, 0, 65535, 0, 0, 0, 0, 65535, 0, 0]
+            .into_iter()
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        let (w16_off, w16_len) = push_bytes(&mut bin, &weights_u16);
+        // inverseBindMatrices (2x MAT4 column-major): bone1 offset translated back by (-1, 0, 0)
+        #[rustfmt::skip]
+        let ibms: [f32; 32] = [
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 0.0, 0.0, 1.0,
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            -1.0, 0.0, 0.0, 1.0,
+        ];
+        let (ibm_off, ibm_len) = push_f32(&mut bin, &ibms);
+
+        // Include a 10-level skeleton hierarchy (>8 levels) to verify lifted MAX_GROUP_LEVELS = 64.
+        let mut nodes = vec![
+            serde_json::json!({"name":"RootJoint","children":[1]}),
+            serde_json::json!({"name":"TipJoint","translation":[1.0,0.0,0.0],"children":[4]}),
+            serde_json::json!({"name":"SkinnedA","mesh":0,"skin":0}),
+            serde_json::json!({"name":"SkinnedB","mesh":1,"skin":1}),
+        ];
+        // Chain nodes 4..13 for depth > 8
+        for i in 4..14 {
+            if i < 13 {
+                nodes.push(serde_json::json!({"name":format!("Chain{i}"),"children":[i + 1]}));
+            } else {
+                nodes.push(serde_json::json!({"name":format!("Chain{i}")}));
+            }
+        }
+
+        let doc = serde_json::json!({
+            "asset":{"version":"2.0"},
+            "buffers":[{"byteLength":bin.len()}],
+            "bufferViews":[
+                {"buffer":0,"byteOffset":p_off,"byteLength":p_len},
+                {"buffer":0,"byteOffset":n_off,"byteLength":n_len},
+                {"buffer":0,"byteOffset":j8_off,"byteLength":j8_len},
+                {"buffer":0,"byteOffset":w8_off,"byteLength":w8_len},
+                {"buffer":0,"byteOffset":j16_off,"byteLength":j16_len},
+                {"buffer":0,"byteOffset":w16_off,"byteLength":w16_len},
+                {"buffer":0,"byteOffset":ibm_off,"byteLength":ibm_len}
+            ],
+            "accessors":[
+                {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]},
+                {"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},
+                {"bufferView":2,"componentType":5121,"count":3,"type":"VEC4"},
+                {"bufferView":3,"componentType":5121,"normalized":true,"count":3,"type":"VEC4"},
+                {"bufferView":4,"componentType":5123,"count":3,"type":"VEC4"},
+                {"bufferView":5,"componentType":5123,"normalized":true,"count":3,"type":"VEC4"},
+                {"bufferView":6,"componentType":5126,"count":2,"type":"MAT4"}
+            ],
+            "meshes":[
+                {"primitives":[{"attributes":{"POSITION":0,"NORMAL":1,"JOINTS_0":2,"WEIGHTS_0":3}}]},
+                {"primitives":[{"attributes":{"POSITION":0,"NORMAL":1,"JOINTS_0":4,"WEIGHTS_0":5}}]}
+            ],
+            "skins":[
+                {"name":"Armature","skeleton":0,"joints":[0,1],"inverseBindMatrices":6},
+                {"name":"NoIbmSkin","joints":[0,1]}
+            ],
+            "nodes":nodes,
+            "scenes":[{"nodes":[0,2,3]}],
+            "scene":0,
+        });
+        let mut json_bytes = serde_json::to_vec(&doc).unwrap();
+        while !json_bytes.len().is_multiple_of(4) {
+            json_bytes.push(b' ');
+        }
+        while !bin.len().is_multiple_of(4) {
+            bin.push(0);
+        }
+        let total = 12 + 8 + json_bytes.len() + 8 + bin.len();
+        let mut glb = Vec::with_capacity(total);
+        glb.extend_from_slice(b"glTF");
+        glb.extend_from_slice(&2u32.to_le_bytes());
+        glb.extend_from_slice(&(total as u32).to_le_bytes());
+        glb.extend_from_slice(&(json_bytes.len() as u32).to_le_bytes());
+        glb.extend_from_slice(b"JSON");
+        glb.extend_from_slice(&json_bytes);
+        glb.extend_from_slice(&(bin.len() as u32).to_le_bytes());
+        glb.extend_from_slice(b"BIN\0");
+        glb.extend_from_slice(&bin);
+
+        let prepared = decode_accepted(
+            "rig",
+            "rig.glb",
+            &glb,
+            ImportFeatures {
+                packed_roughness: false,
+                pbr_maps: false,
+                alpha_transparency: false,
+                place_spots: false,
+                place_orthographic: false,
+                emission: false,
+                double_sided: false,
+                uv_transforms: false,
+                skeletal_skinning: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(prepared.info.skins.len(), 2);
+        assert_eq!(
+            prepared.info.skins[0].joints,
+            vec!["RootJoint".to_owned(), "RootJoint/TipJoint".to_owned()]
+        );
+        assert_eq!(prepared.info.skins[0].inverse_bind_matrices[1][12], -1.0);
+        assert_eq!(
+            prepared.info.skins[1].inverse_bind_matrices[1],
+            glam::Mat4::IDENTITY.to_cols_array()
+        );
+        assert_eq!(prepared.info.nodes["SkinnedA"].skin, Some(0));
+        assert_eq!(prepared.info.nodes["SkinnedB"].skin, Some(1));
+
+        let mesh_a_id = prepared.info.nodes["SkinnedA"].mesh_id.as_ref().unwrap();
+        let mesh_b_id = prepared.info.nodes["SkinnedB"].mesh_id.as_ref().unwrap();
+        let find_mesh = |id: &str| match &prepared
+            .resources
+            .iter()
+            .find(|(res_id, _)| res_id.as_str() == id)
+            .unwrap()
+            .1
+            .payload
+        {
+            Payload::Mesh(mesh) => mesh.clone(),
+            _ => unreachable!(),
+        };
+        let mesh_a = find_mesh(mesh_a_id);
+        assert!(mesh_a.has_complete_skinning());
+        assert_eq!(
+            mesh_a.skin_joints.as_deref(),
+            Some(&[[0, 1, 0, 0], [1, 0, 0, 0], [0, 1, 0, 0]][..])
+        );
+        let w0 = mesh_a.skin_weights.as_ref().unwrap()[0];
+        assert!((w0.iter().sum::<f32>() - 1.0).abs() < 1e-5);
+
+        let mesh_b = find_mesh(mesh_b_id);
+        assert!(mesh_b.has_complete_skinning());
+        assert_eq!(
+            mesh_b.skin_weights.as_ref().unwrap()[1],
+            [1.0, 0.0, 0.0, 0.0]
+        );
     }
 }

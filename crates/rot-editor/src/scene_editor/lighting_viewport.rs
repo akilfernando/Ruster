@@ -444,6 +444,8 @@ mod tests {
                 indices: vec![0, 1, 2],
                 texcoords: None,
                 tangents: None,
+                skin_joints: None,
+                skin_weights: None,
             }),
         )]);
         let mixed = [sun_id.clone(), "geometry".into()];
@@ -496,6 +498,8 @@ mod tests {
             Arc::new(rot_assets::Mesh {
                 texcoords: None,
                 tangents: None,
+                skin_joints: None,
+                skin_weights: None,
                 indices: vec![0, 1, 2],
                 vertices: [
                     [999_999.0, 0.0, 0.0],

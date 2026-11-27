@@ -1019,6 +1019,9 @@ impl ComponentSession {
                         Component::Animator { binding, .. } => {
                             binding.targets.values_mut().for_each(remap)
                         }
+                        Component::Skin { joints, .. } => {
+                            joints.iter_mut().for_each(remap);
+                        }
                         _ => {}
                     }
                 }

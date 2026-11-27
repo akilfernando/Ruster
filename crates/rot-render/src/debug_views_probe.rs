@@ -116,6 +116,7 @@ fn shading_debug_views_gpu_probe() {
             .drop_without_applying_deltas();
         let cb = SceneCallback {
             background: Some(BackgroundColor::new([0.0, 0.0, 0.0]).unwrap()),
+            skin_matrices: Vec::new(),
             sky: None,
             fog: None,
             post_process: post,

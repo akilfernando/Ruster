@@ -1704,6 +1704,9 @@ impl ComponentWorkspace {
                 summary["source_id"] = json!(&binding.source_id);
                 summary["movement"] = json!(movement);
             }
+            if let Component::Skin { joints, .. } = &component.kind {
+                summary["joints_count"] = json!(joints.len());
+            }
             summary
         }).collect();
         let mut response = json!({
@@ -1929,6 +1932,7 @@ fn component_type(component: &Component) -> &'static str {
         Component::Camera { .. } => "camera",
         Component::Light { .. } => "light",
         Component::Animator { .. } => "animator",
+        Component::Skin { .. } => "skin",
         Component::Script { .. } => "script",
     }
 }
@@ -3320,5 +3324,71 @@ mod tests {
                         } if (slope_limit_degrees - 45.0).abs() < 1e-6
                     )
             }));
+    }
+
+    #[test]
+    fn mcp_inspect_and_edit_support_skin_component() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.objects.push(ObjectNode {
+            id: "bone".into(),
+            name: "Bone".into(),
+            enabled: true,
+            parent: None,
+            transform: Transform::default(),
+            components: vec![],
+        });
+        scene.objects.push(ObjectNode {
+            id: "hero".into(),
+            name: "Hero".into(),
+            enabled: true,
+            parent: None,
+            transform: Transform::default(),
+            components: vec![ComponentInstance {
+                id: "hero-mesh".into(),
+                enabled: true,
+                kind: Component::MeshRenderer {
+                    geometry: Geometry::Cube,
+                    tint: [1.0; 4],
+                    material: None,
+                },
+            }],
+        });
+        scene.save_new(&path).unwrap();
+        let session = ComponentSession::open(&path).unwrap();
+        let mut editor = ComponentWorkspace::new(path, session);
+        let token = "skin-mcp-token";
+
+        let added = editor.ai_command(
+            token,
+            "scene_components_edit",
+            &json!({
+                "expected_session_token": token,
+                "expected_revision": "0",
+                "edits": [{
+                    "operation": "add",
+                    "object_id": "hero",
+                    "component": {
+                        "id": "hero-skin",
+                        "enabled": true,
+                        "type": "skin",
+                        "joints": ["bone"],
+                        "inverse_bind_matrices": [glam::Mat4::IDENTITY.to_cols_array()]
+                    }
+                }]
+            }),
+        );
+        assert_eq!(added["result"]["revision"], "1");
+
+        let inspected = editor.ai_command(
+            token,
+            "scene_components_inspect",
+            &json!({ "object_id": "hero" }),
+        );
+        let comps = inspected["result"]["components"].as_array().unwrap();
+        assert!(comps
+            .iter()
+            .any(|c| c["id"] == "hero-skin" && c["type"] == "skin" && c["joints_count"] == 1));
     }
 }

@@ -19,7 +19,8 @@ pub const MAX_TRIANGLES: usize = 262_144;
 pub const MAX_VERTICES: usize = MAX_TRIANGLES * 3;
 const MAX_MESH_TRIANGLES: usize = 524_288;
 const MAX_MESH_VERTICES: usize = MAX_MESH_TRIANGLES * 3;
-const MAX_MODEL_ITEMS: usize = 512;
+const MAX_MODEL_ITEMS: usize = 1024;
+pub const MAX_SKIN_JOINTS: usize = 256;
 pub const MAX_RESOLVED_BYTES: usize = 256 * 1024 * 1024;
 mod audio;
 use audio::SOUND_CACHE_VERSION;
@@ -32,8 +33,8 @@ pub use audio::{
 };
 pub use glb::{
     ClipProperty, ClipTarget, ModelAlphaMode, ModelCamera, ModelClip, ModelInfo, ModelLight,
-    ModelMaterial, ModelNode, ModelOrthographicCamera, ModelPerspectiveCamera, MAX_CLIP_BYTES,
-    MAX_GLB_SOURCE_BYTES, MAX_MODEL_CLIPS,
+    ModelMaterial, ModelNode, ModelOrthographicCamera, ModelPerspectiveCamera, ModelSkin,
+    MAX_CLIP_BYTES, MAX_GLB_SOURCE_BYTES, MAX_MODEL_CLIPS,
 };
 #[doc(hidden)]
 pub mod fixtures;
@@ -84,6 +85,12 @@ pub struct Mesh {
     /// Complete glTF-convention tangents `(tx, ty, tz, sign)`, one per vertex.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tangents: Option<Vec<[f32; 4]>>,
+    /// Per-vertex skin joint indices (`JOINTS_0`), one 4-tuple per vertex.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skin_joints: Option<Vec<[u16; 4]>>,
+    /// Per-vertex normalized skin joint weights (`WEIGHTS_0`), one 4-tuple per vertex.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skin_weights: Option<Vec<[f32; 4]>>,
 }
 impl Mesh {
     pub fn has_complete_uvs(&self) -> bool {
@@ -96,12 +103,23 @@ impl Mesh {
             .as_ref()
             .is_some_and(|t| t.len() == self.vertices.len())
     }
+    pub fn has_complete_skinning(&self) -> bool {
+        self.skin_joints
+            .as_ref()
+            .is_some_and(|j| j.len() == self.vertices.len())
+            && self
+                .skin_weights
+                .as_ref()
+                .is_some_and(|w| w.len() == self.vertices.len())
+    }
     /// Logical payload only, excluding container/Arc overhead and retained snapshots.
     pub fn payload_bytes(&self) -> usize {
         self.vertices.len() * 24
             + self.indices.len() * 4
             + self.texcoords.as_ref().map_or(0, |uv| uv.len() * 8)
             + self.tangents.as_ref().map_or(0, |t| t.len() * 16)
+            + self.skin_joints.as_ref().map_or(0, |j| j.len() * 8)
+            + self.skin_weights.as_ref().map_or(0, |w| w.len() * 16)
     }
     pub fn uv_diagnostic(&self) -> Option<&'static str> {
         (!self.has_complete_uvs())
@@ -1353,6 +1371,8 @@ impl AssetStore {
             indices: cache.mesh.indices,
             texcoords: None,
             tangents: None,
+            skin_joints: None,
+            skin_weights: None,
         };
         validate_mesh(&mesh)?;
         Ok(mesh)
@@ -1383,6 +1403,7 @@ fn binary_mesh_length(
     indices: usize,
     uvs: bool,
     tangents: bool,
+    skinning: bool,
 ) -> Result<usize, AssetError> {
     if vertices == 0
         || vertices > MAX_MESH_VERTICES
@@ -1392,7 +1413,10 @@ fn binary_mesh_length(
     {
         return Err(error("invalid binary mesh counts"));
     }
-    let vertex_bytes = 6 * 4 + if uvs { 2 * 4 } else { 0 } + if tangents { 4 * 4 } else { 0 };
+    let vertex_bytes = 6 * 4
+        + if uvs { 2 * 4 } else { 0 }
+        + if tangents { 4 * 4 } else { 0 }
+        + if skinning { 24 } else { 0 };
     vertices
         .checked_mul(vertex_bytes)
         .and_then(|bytes| indices.checked_mul(4).and_then(|n| bytes.checked_add(n)))
@@ -1434,17 +1458,20 @@ fn encode_binary_mesh(
         return Err(error("invalid source SHA-256 for mesh cache"));
     }
     validate_mesh(mesh)?;
+    let has_skinning = mesh.has_complete_skinning();
     let length = binary_mesh_length(
         mesh.vertices.len(),
         mesh.indices.len(),
         mesh.texcoords.is_some(),
         mesh.tangents.is_some(),
+        has_skinning,
     )?;
     let mut bytes = Vec::with_capacity(length);
     bytes.extend_from_slice(magic);
     bytes.extend_from_slice(&version.to_le_bytes());
     let flags = if mesh.texcoords.is_some() { 1 << 31 } else { 0 }
-        | if mesh.tangents.is_some() { 1 << 30 } else { 0 };
+        | if mesh.tangents.is_some() { 1 << 30 } else { 0 }
+        | if has_skinning { 1 << 29 } else { 0 };
     bytes.extend_from_slice(&((mesh.vertices.len() as u32) | flags).to_le_bytes());
     bytes.extend_from_slice(&(mesh.indices.len() as u32).to_le_bytes());
     bytes.extend_from_slice(hash.as_bytes());
@@ -1464,6 +1491,18 @@ fn encode_binary_mesh(
     if let Some(tangents) = &mesh.tangents {
         for tangent in tangents {
             for value in tangent {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+    }
+    if let (Some(joints), Some(weights)) = (&mesh.skin_joints, &mesh.skin_weights) {
+        for j in joints {
+            for value in j {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        for w in weights {
+            for value in w {
                 bytes.extend_from_slice(&value.to_le_bytes());
             }
         }
@@ -1506,13 +1545,14 @@ fn decode_binary_mesh(
     let raw_count = number(&bytes[12..16]);
     let uvs = version >= 3 && raw_count & (1 << 31) != 0;
     let has_tangents = version >= 3 && raw_count & (1 << 30) != 0;
+    let has_skinning = version >= 3 && raw_count & (1 << 29) != 0;
     let vertex_count = (if version >= 3 {
-        raw_count & !(0b11 << 30)
+        raw_count & !(0b111 << 29)
     } else {
         raw_count
     }) as usize;
     let index_count = number(&bytes[16..20]) as usize;
-    let length = binary_mesh_length(vertex_count, index_count, uvs, has_tangents)?;
+    let length = binary_mesh_length(vertex_count, index_count, uvs, has_tangents, has_skinning)?;
     // Reject count overflows, truncation and trailing bytes before mesh allocation.
     if bytes.len() != length
         || cache_checksum(bytes).as_ref() != &bytes[CACHE_SEMANTIC_BYTES..CACHE_HEADER_BYTES]
@@ -1546,9 +1586,41 @@ fn decode_binary_mesh(
             })
             .collect()
     });
-    let index_start = uv_end + if has_tangents { vertex_count * 16 } else { 0 };
+    let tangent_end = uv_end + if has_tangents { vertex_count * 16 } else { 0 };
     let tangents = has_tangents.then(|| {
-        bytes[uv_end..index_start]
+        bytes[uv_end..tangent_end]
+            .as_chunks::<16>()
+            .0
+            .iter()
+            .map(|chunk| {
+                [
+                    f32::from_bits(number(&chunk[..4])),
+                    f32::from_bits(number(&chunk[4..8])),
+                    f32::from_bits(number(&chunk[8..12])),
+                    f32::from_bits(number(&chunk[12..])),
+                ]
+            })
+            .collect()
+    });
+    let skin_joints_end = tangent_end + if has_skinning { vertex_count * 8 } else { 0 };
+    let skin_joints = has_skinning.then(|| {
+        bytes[tangent_end..skin_joints_end]
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|chunk| {
+                [
+                    u16::from_le_bytes([chunk[0], chunk[1]]),
+                    u16::from_le_bytes([chunk[2], chunk[3]]),
+                    u16::from_le_bytes([chunk[4], chunk[5]]),
+                    u16::from_le_bytes([chunk[6], chunk[7]]),
+                ]
+            })
+            .collect()
+    });
+    let index_start = skin_joints_end + if has_skinning { vertex_count * 16 } else { 0 };
+    let skin_weights = has_skinning.then(|| {
+        bytes[skin_joints_end..index_start]
             .as_chunks::<16>()
             .0
             .iter()
@@ -1573,6 +1645,8 @@ fn decode_binary_mesh(
         indices,
         texcoords,
         tangents,
+        skin_joints,
+        skin_weights,
     };
     validate_mesh(&mesh)?;
     Ok(mesh)
@@ -1874,6 +1948,18 @@ pub fn validate_mesh(mesh: &Mesh) -> Result<(), AssetError> {
                         || (t[3] != 1.0 && t[3] != -1.0)
                 })
         })
+        || mesh.skin_joints.is_some() != mesh.skin_weights.is_some()
+        || mesh
+            .skin_joints
+            .as_ref()
+            .is_some_and(|joints| joints.len() != mesh.vertices.len())
+        || mesh.skin_weights.as_ref().is_some_and(|weights| {
+            weights.len() != mesh.vertices.len()
+                || weights.iter().any(|w| {
+                    let sum: f32 = w.iter().sum();
+                    w.iter().any(|c| !c.is_finite() || *c < 0.0) || !(0.001..=1.05).contains(&sum)
+                })
+        })
         || mesh.vertices.iter().any(|v| {
             v.position.iter().chain(&v.normal).any(|c| !c.is_finite())
                 || v.position.iter().any(|c| c.abs() > 1_000_000.0)
@@ -1932,6 +2018,8 @@ pub fn parse_obj_with_normal_policy(
         indices: Vec::new(),
         texcoords: None,
         tangents: None,
+        skin_joints: None,
+        skin_weights: None,
     };
     for (number, line) in source.lines().enumerate() {
         let words: Vec<_> = line
@@ -2303,6 +2391,8 @@ mod tests {
             indices: mapped.indices.clone(),
             texcoords: None,
             tangents: None,
+            skin_joints: None,
+            skin_weights: None,
         };
         assert!(!serde_json::to_string(&legacy)
             .unwrap()
@@ -3040,5 +3130,51 @@ mod tests {
         large.push_str(&"f 1 2 3\n".repeat(40_000));
         let large_mesh = parse_obj(large.as_bytes()).unwrap();
         assert_eq!(large_mesh.indices.len(), 40_000 * 3);
+    }
+
+    #[test]
+    fn skin_attributes_are_validated_cached_and_packaged_backwards_compatibly() {
+        use super::*;
+
+        let source = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n";
+        let base_mesh = parse_obj(source).unwrap();
+        let skinned = Mesh {
+            skin_joints: Some(vec![[0, 1, 0, 0], [1, 2, 0, 0], [2, 0, 0, 0]]),
+            skin_weights: Some(vec![
+                [0.75, 0.25, 0.0, 0.0],
+                [0.5, 0.5, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0],
+            ]),
+            ..base_mesh.clone()
+        };
+        assert!(skinned.has_complete_skinning());
+        validate_mesh(&skinned).unwrap();
+
+        // Validation rejects incomplete pairs, wrong length, non-finite, negative, or zero-sum weights.
+        let mut only_joints = skinned.clone();
+        only_joints.skin_weights = None;
+        assert!(validate_mesh(&only_joints).is_err());
+
+        let mut bad_len = skinned.clone();
+        bad_len.skin_joints.as_mut().unwrap().pop();
+        assert!(validate_mesh(&bad_len).is_err());
+
+        let mut neg_weight = skinned.clone();
+        neg_weight.skin_weights.as_mut().unwrap()[0] = [1.5, -0.5, 0.0, 0.0];
+        assert!(validate_mesh(&neg_weight).is_err());
+
+        let mut zero_weight = skinned.clone();
+        zero_weight.skin_weights.as_mut().unwrap()[1] = [0.0, 0.0, 0.0, 0.0];
+        assert!(validate_mesh(&zero_weight).is_err());
+
+        // Binary cache roundtrip (bit 29) and packaged mesh roundtrip preserve joints and weights.
+        let hash = digest(source);
+        let encoded = encode_cache(&hash, &skinned).unwrap();
+        assert_eq!(decode_cache(&encoded, &hash, 3).unwrap(), skinned);
+
+        let packaged = encode_packaged_mesh(&skinned).unwrap();
+        let unpacked =
+            decode_packaged_mesh(&packaged, MeshNormalPolicy::AuthoredWhenComplete).unwrap();
+        assert_eq!(unpacked, skinned);
     }
 }

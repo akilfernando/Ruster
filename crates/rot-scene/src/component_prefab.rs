@@ -538,6 +538,11 @@ impl PrefabSource {
                             *id = scene_id(id)?;
                         }
                     }
+                    Component::Skin { joints, .. } => {
+                        for id in joints {
+                            *id = scene_id(id)?;
+                        }
+                    }
                     _ => {}
                 }
             }

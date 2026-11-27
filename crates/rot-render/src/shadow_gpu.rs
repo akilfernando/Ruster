@@ -1,6 +1,6 @@
 //! Single-map Sun, 4-cascade CSM, and Spot/Point shadow atlas resources.
 use super::*;
-use crate::frustum::{world_aabb, Frustum};
+use crate::frustum::{skinned_world_aabb, world_aabb, Frustum};
 use crate::lighting_gpu::{LocalLightGpu, LocalShadowCaster};
 use crate::shadow_math::{
     fit_cascaded_directional_shadows, fit_directional_shadow, fit_point_shadow_faces,
@@ -184,6 +184,8 @@ pub(super) struct Geometry<'a> {
     pub instance_bind: &'a wgpu::BindGroup,
     pub materials: &'a super::MaterialGpu,
     pub zero_uv: &'a wgpu::Buffer,
+    pub default_skin: &'a wgpu::Buffer,
+    pub skin_matrices: &'a [Mat4],
 }
 
 impl Geometry<'_> {
@@ -197,6 +199,27 @@ impl Geometry<'_> {
             .filter(|group| group.alpha_mode != rot_scene::AlphaMode::Blend)
     }
 
+    fn instance_world_bounds(&self, mesh: &GpuMesh, instance: &Instance) -> (Vec3, Vec3) {
+        let skin_base = instance.normal[0][3].to_bits() as usize;
+        let skin_count = instance.normal[1][3].to_bits() as usize;
+        if skin_count > 0
+            && !mesh.joint_bounds.is_empty()
+            && skin_base
+                .checked_add(skin_count)
+                .is_some_and(|end| end <= self.skin_matrices.len())
+        {
+            if let Some(skinned) = skinned_world_aabb(
+                &mesh.joint_bounds,
+                &self.skin_matrices[skin_base..skin_base + skin_count],
+            ) {
+                return skinned;
+            }
+        }
+        let [lo, hi] = mesh.bounds;
+        let m = Mat4::from_cols_array_2d(&instance.model);
+        world_aabb(m, (lo + hi) * 0.5, (hi - lo) * 0.5)
+    }
+
     fn collect_corners(&self) -> Vec<Vec3> {
         let mut corners = Vec::new();
         for group in self.shadow_groups() {
@@ -206,11 +229,25 @@ impl Geometry<'_> {
             }
             let [lo, hi] = mesh.bounds;
             for instance in &group.instances {
-                let m = Mat4::from_cols_array_2d(&instance.model);
-                for x in [lo.x, hi.x] {
-                    for y in [lo.y, hi.y] {
-                        for z in [lo.z, hi.z] {
-                            corners.push(m.transform_point3(Vec3::new(x, y, z)));
+                let skin_count = instance.normal[1][3].to_bits() as usize;
+                if skin_count > 0 && !mesh.joint_bounds.is_empty() {
+                    let (center, extents) = self.instance_world_bounds(mesh, instance);
+                    let wlo = center - extents;
+                    let whi = center + extents;
+                    for x in [wlo.x, whi.x] {
+                        for y in [wlo.y, whi.y] {
+                            for z in [wlo.z, whi.z] {
+                                corners.push(Vec3::new(x, y, z));
+                            }
+                        }
+                    }
+                } else {
+                    let m = Mat4::from_cols_array_2d(&instance.model);
+                    for x in [lo.x, hi.x] {
+                        for y in [lo.y, hi.y] {
+                            for z in [lo.z, hi.z] {
+                                corners.push(m.transform_point3(Vec3::new(x, y, z)));
+                            }
                         }
                     }
                 }
@@ -225,14 +262,24 @@ impl Geometry<'_> {
             let mesh = self.mesh(group);
             let extent = mesh.bounds[1] - mesh.bounds[0];
             for instance in &group.instances {
-                let m = Mat4::from_cols_array_2d(&instance.model);
-                for size in [
-                    extent.x * m.x_axis.truncate().length(),
-                    extent.y * m.y_axis.truncate().length(),
-                    extent.z * m.z_axis.truncate().length(),
-                ] {
-                    if size > 0. {
-                        smallest = smallest.min(f64::from(size));
+                let skin_count = instance.normal[1][3].to_bits() as usize;
+                if skin_count > 0 && !mesh.joint_bounds.is_empty() {
+                    let (_, extents) = self.instance_world_bounds(mesh, instance);
+                    for size in (extents * 2.0).to_array() {
+                        if size > 0. {
+                            smallest = smallest.min(f64::from(size));
+                        }
+                    }
+                } else {
+                    let m = Mat4::from_cols_array_2d(&instance.model);
+                    for size in [
+                        extent.x * m.x_axis.truncate().length(),
+                        extent.y * m.y_axis.truncate().length(),
+                        extent.z * m.z_axis.truncate().length(),
+                    ] {
+                        if size > 0. {
+                            smallest = smallest.min(f64::from(size));
+                        }
                     }
                 }
             }
@@ -271,8 +318,8 @@ pub(super) struct ShadowGpu {
     bound_ids: (u64, u64, u64),
     next_id: u64,
     depth_bind: wgpu::BindGroup,
-    pipeline: wgpu::RenderPipeline,
-    mask_pipelines: [wgpu::RenderPipeline; 2],
+    pipelines: [wgpu::RenderPipeline; 2],
+    mask_pipelines: [[wgpu::RenderPipeline; 2]; 2],
     active: Option<Map>,
     retiring: Option<RetiredSlot<Map>>,
     csm_active: Option<CsmMap>,
@@ -479,52 +526,13 @@ impl ShadowGpu {
             immediate_size: 0,
         });
         let shader = device.create_shader_module(wgpu::include_wgsl!("shadow_depth.wgsl"));
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("retained opaque Sun depth pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs"),
-                compilation_options: Default::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: size_of::<Vertex>() as u64,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0=>Float32x3],
-                })],
-            },
-            fragment: None,
-            primitive: wgpu::PrimitiveState {
-                cull_mode: None,
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::LessEqual),
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
-            multisample: Default::default(),
-            multiview_mask: None,
-            cache: None,
-        });
-        let mask_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Sun depth mask ABI"),
-            bind_group_layouts: &[
-                Some(&depth_layout),
-                Some(instance_layout),
-                Some(material_layout),
-            ],
-            immediate_size: 0,
-        });
-        let mask_shader =
-            device.create_shader_module(wgpu::include_wgsl!("shadow_depth_mask.wgsl"));
-        let mask_pipelines = [0_u64, size_of::<[f32; 2]>() as u64].map(|uv_stride| {
+        let skin_attributes = wgpu::vertex_attr_array![4 => Uint16x4, 5 => Float32x4];
+        let pipelines = [0_u64, size_of::<SkinVertex>() as u64].map(|skin_stride| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("retained cutout Sun depth pipeline"),
-                layout: Some(&mask_pipeline_layout),
+                label: Some("retained opaque Sun depth pipeline"),
+                layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
-                    module: &mask_shader,
+                    module: &shader,
                     entry_point: Some("vs"),
                     compilation_options: Default::default(),
                     buffers: &[
@@ -534,18 +542,13 @@ impl ShadowGpu {
                             attributes: &wgpu::vertex_attr_array![0=>Float32x3],
                         }),
                         Some(wgpu::VertexBufferLayout {
-                            array_stride: uv_stride,
+                            array_stride: skin_stride,
                             step_mode: wgpu::VertexStepMode::Vertex,
-                            attributes: &wgpu::vertex_attr_array![2=>Float32x2],
+                            attributes: &skin_attributes,
                         }),
                     ],
                 },
-                fragment: Some(wgpu::FragmentState {
-                    module: &mask_shader,
-                    entry_point: Some("fs"),
-                    compilation_options: Default::default(),
-                    targets: &[],
-                }),
+                fragment: None,
                 primitive: wgpu::PrimitiveState {
                     cull_mode: None,
                     ..Default::default()
@@ -560,6 +563,67 @@ impl ShadowGpu {
                 multisample: Default::default(),
                 multiview_mask: None,
                 cache: None,
+            })
+        });
+        let mask_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Sun depth mask ABI"),
+            bind_group_layouts: &[
+                Some(&depth_layout),
+                Some(instance_layout),
+                Some(material_layout),
+            ],
+            immediate_size: 0,
+        });
+        let mask_shader =
+            device.create_shader_module(wgpu::include_wgsl!("shadow_depth_mask.wgsl"));
+        let mask_pipelines = [0_u64, size_of::<[f32; 2]>() as u64].map(|uv_stride| {
+            [0_u64, size_of::<SkinVertex>() as u64].map(|skin_stride| {
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("retained cutout Sun depth pipeline"),
+                    layout: Some(&mask_pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &mask_shader,
+                        entry_point: Some("vs"),
+                        compilation_options: Default::default(),
+                        buffers: &[
+                            Some(wgpu::VertexBufferLayout {
+                                array_stride: size_of::<Vertex>() as u64,
+                                step_mode: wgpu::VertexStepMode::Vertex,
+                                attributes: &wgpu::vertex_attr_array![0=>Float32x3],
+                            }),
+                            Some(wgpu::VertexBufferLayout {
+                                array_stride: uv_stride,
+                                step_mode: wgpu::VertexStepMode::Vertex,
+                                attributes: &wgpu::vertex_attr_array![2=>Float32x2],
+                            }),
+                            Some(wgpu::VertexBufferLayout {
+                                array_stride: skin_stride,
+                                step_mode: wgpu::VertexStepMode::Vertex,
+                                attributes: &skin_attributes,
+                            }),
+                        ],
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &mask_shader,
+                        entry_point: Some("fs"),
+                        compilation_options: Default::default(),
+                        targets: &[],
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        cull_mode: None,
+                        ..Default::default()
+                    },
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: DEPTH,
+                        depth_write_enabled: Some(true),
+                        depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                        stencil: Default::default(),
+                        bias: Default::default(),
+                    }),
+                    multisample: Default::default(),
+                    multiview_mask: None,
+                    cache: None,
+                })
             })
         });
 
@@ -581,7 +645,7 @@ impl ShadowGpu {
             bound_ids: (0, 0, 0),
             next_id: 1,
             depth_bind,
-            pipeline,
+            pipelines,
             mask_pipelines,
             active: None,
             retiring: None,
@@ -798,26 +862,39 @@ impl ShadowGpu {
             if mesh.count == 0 || group.instances.is_empty() {
                 continue;
             }
+            let has_skin = mesh.skin.is_some();
             if group.alpha_mode == rot_scene::AlphaMode::Mask {
-                pass.set_pipeline(&self.mask_pipelines[usize::from(mesh.uvs.is_some())]);
+                pass.set_pipeline(
+                    &self.mask_pipelines[usize::from(mesh.uvs.is_some())][usize::from(has_skin)],
+                );
                 pass.set_bind_group(2, geometry.materials.bind(&group.binding), &[]);
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_vertex_buffer(1, mesh.uvs.as_ref().unwrap_or(geometry.zero_uv).slice(..));
+                pass.set_vertex_buffer(
+                    2,
+                    mesh.skin
+                        .as_ref()
+                        .unwrap_or(geometry.default_skin)
+                        .slice(..),
+                );
             } else {
-                pass.set_pipeline(&self.pipeline);
+                pass.set_pipeline(&self.pipelines[usize::from(has_skin)]);
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                pass.set_vertex_buffer(
+                    1,
+                    mesh.skin
+                        .as_ref()
+                        .unwrap_or(geometry.default_skin)
+                        .slice(..),
+                );
             }
             pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
 
             if let Some(frustum) = frustum {
-                let [lo, hi] = mesh.bounds;
-                let local_center = (lo + hi) * 0.5;
-                let local_extents = (hi - lo) * 0.5;
                 let mut cursor = 0_usize;
                 let visible = &group.instances;
                 let mut hits = |inst: &Instance| {
-                    let m = Mat4::from_cols_array_2d(&inst.model);
-                    let (c, e) = world_aabb(m, local_center, local_extents);
+                    let (c, e) = geometry.instance_world_bounds(mesh, inst);
                     frustum.intersects_aabb(c, e)
                 };
                 while cursor < visible.len() {
@@ -1472,6 +1549,7 @@ mod tests {
                 .drop_without_applying_deltas();
             let cb = SceneCallback {
                 background: Some(BackgroundColor::new([0., 0., 0.]).unwrap()),
+                skin_matrices: Vec::new(),
                 sky: None,
                 fog: None,
                 post_process: None,
@@ -1971,6 +2049,227 @@ mod tests {
         let p95 = frame_ms[((frame_ms.len() * 95) / 100).min(frame_ms.len() - 1)];
         eprintln!(
             "GPU probe: csm_and_local_shadow_atlas_gpu_probe passed (CSM 4-cascade + Spot + Point 6-face + Mask/Blend 60f p50={p50:.3} ms p95={p95:.3} ms)"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires GPU Vulkan adapter"]
+    fn gpu_skinning_probe() {
+        let mut setup = egui_wgpu::WgpuSetupCreateNew::without_display_handle();
+        setup.instance_descriptor.backends = wgpu::Backends::VULKAN;
+        configure_setup(&mut setup);
+        let instance = wgpu::Instance::new(setup.instance_descriptor);
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..Default::default()
+        }))
+        .expect("Vulkan adapter");
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&(setup.device_descriptor)(&adapter)))
+                .expect("Vulkan device");
+        let (device, queue) = (&device, &queue);
+        let mut r = Resources::new(device, queue, COLOR, 1);
+        r.enable_hdr(device, 1);
+        let mut resources = egui_wgpu::CallbackResources::default();
+        resources.insert(r);
+        let context = egui::Context::default();
+
+        // Single quad in bind pose around X in [-0.6, 0.6], Y = 1.5, Z in [-0.6, 0.6],
+        // skinned 100% to bone 1. Moving bone 1 to +X = +2.5 must move rendered color pixels,
+        // cast directional shadow, and selection outline from X=0 to X=+2.5.
+        let mut quad = rot_assets::parse_obj(
+            b"v -0.6 1.5 -0.6\nv 0.6 1.5 -0.6\nv 0.6 1.5 0.6\nv -0.6 1.5 0.6\nvt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nf 1/1 2/2 3/3\nf 1/1 3/3 4/4\n",
+        )
+        .unwrap();
+        quad.skin_joints = Some(vec![[1, 0, 0, 0]; quad.vertices.len()]);
+        quad.skin_weights = Some(vec![[1.0, 0.0, 0.0, 0.0]; quad.vertices.len()]);
+        let quad = Arc::new(quad);
+
+        let mut floor_inst = Instance {
+            model: Mat4::from_scale_rotation_translation(
+                Vec3::new(12.0, 0.2, 12.0),
+                Quat::IDENTITY,
+                Vec3::new(0.0, -0.1, 0.0),
+            )
+            .to_cols_array_2d(),
+            normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
+            color: [1.0; 4],
+            base_color: [1.0, 1.0, 1.0, 0.0],
+            response: [1.0, 0.9, 0.0, 0.0],
+            emission_color: [0.0; 4],
+            uv_transform: [1.0, 1.0, 0.0, 0.0],
+            pbr_params: [0.0, 1.0, 1.0, 1.0],
+            pbr_maps: [0.0, 0.0, 0.0, -1.0],
+        };
+        floor_inst.normal[0][3] = f32::from_bits(0);
+        floor_inst.normal[1][3] = f32::from_bits(0);
+
+        let mut skinned_inst = Instance {
+            model: Mat4::IDENTITY.to_cols_array_2d(),
+            normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
+            color: [0.2, 0.9, 0.3, 1.0],
+            base_color: [0.2, 0.9, 0.3, 0.35],
+            response: [1.0, 0.5, 0.0, 1.0],
+            emission_color: [0.0; 4],
+            uv_transform: [1.0, 1.0, 0.0, 0.0],
+            pbr_params: [0.0, 1.0, 1.0, 1.0],
+            pbr_maps: [0.0, 0.0, 0.0, -1.0],
+        };
+        skinned_inst.normal[0][3] = f32::from_bits(0);
+        skinned_inst.normal[1][3] = f32::from_bits(2);
+
+        let skin_matrices = vec![
+            Mat4::IDENTITY,
+            Mat4::from_translation(Vec3::new(2.5, 0.0, 0.0)),
+        ];
+
+        let mut sun = Light::directional(None);
+        sun.intensity = 3.0;
+        sun.transform.rotation = [-0.95, 0.0, 0.0];
+        let packed = PackedLighting::try_pack(&Lighting::Authored {
+            ambient: Ambient {
+                color: [1.0; 3],
+                intensity: 0.02,
+            },
+            lights: BTreeMap::from([("sun".into(), sun)]),
+        })
+        .unwrap();
+
+        let width = 320_u32;
+        let height = 240_u32;
+        let eye = Vec3::new(1.25, 4.5, 5.0);
+        let view = Mat4::look_at_rh(eye, Vec3::new(1.25, 0.25, 0.0), Vec3::Y);
+        let proj =
+            Mat4::perspective_rh(45_f32.to_radians(), width as f32 / height as f32, 0.1, 50.0);
+        let vp = proj * view;
+
+        let groups = vec![
+            DrawGroup {
+                alpha_mode: AlphaMode::Opaque,
+                double_sided: false,
+                key: None,
+                primitive: None,
+                binding: BindingKey::default(),
+                texture: None,
+                roughness: None,
+                metallic: None,
+                normal: None,
+                emissive: None,
+                occlusion: None,
+                mesh: None,
+                range: 0..1,
+                visible_range: 0..1,
+                instances: vec![floor_inst],
+            },
+            DrawGroup {
+                alpha_mode: AlphaMode::Opaque,
+                double_sided: true,
+                key: Some("skinned-quad".into()),
+                primitive: None,
+                binding: BindingKey::default(),
+                texture: None,
+                roughness: None,
+                metallic: None,
+                normal: None,
+                emissive: None,
+                occlusion: None,
+                mesh: Some(quad),
+                range: 1..2,
+                visible_range: 1..2,
+                instances: vec![skinned_inst],
+            },
+        ];
+
+        let mut run_probe = |display: DisplayProfile| {
+            context
+                .run_pass(egui::RawInput::default(), |_| {})
+                .drop_without_applying_deltas();
+            let cb = SceneCallback {
+                background: Some(BackgroundColor::new([0., 0., 0.]).unwrap()),
+                skin_matrices: skin_matrices.clone(),
+                sky: None,
+                fog: None,
+                post_process: None,
+                shading_mode: ShadingMode::Lit,
+                inv_camera: vp.inverse().to_cols_array(),
+                show_editor_grid: false,
+                groups: groups.clone(),
+                camera: vp.to_cols_array(),
+                cluster_camera: ClusterCamera::from_matrices(view, proj),
+                camera_view: view.to_cols_array(),
+                camera_projection: proj.to_cols_array(),
+                camera_eye_mode: eye.extend(1.0).to_array(),
+                display,
+                lighting: packed.clone(),
+                size: egui::vec2(width as f32, height as f32),
+                cpu_us: 0.,
+                culled_objects: 0,
+                shadow: Some(SunShadow {
+                    enabled: true,
+                    ..SunShadow::default()
+                }),
+                context: context.clone(),
+                receipt: FrameReceipt::default(),
+                prepared: AtomicBool::new(false),
+            };
+            selection_probe::render_sized(
+                device,
+                queue,
+                &mut resources,
+                &cb,
+                COLOR,
+                [width, height],
+            )
+        };
+
+        let sample_rgb = |pixels: &[u8], world: Vec3| -> [u8; 3] {
+            let clip = vp * world.extend(1.0);
+            let ndc = clip.truncate() / clip.w;
+            let px = ((ndc.x * 0.5 + 0.5) * width as f32) as usize;
+            let py = ((0.5 - ndc.y * 0.5) * height as f32) as usize;
+            let off = (py * width as usize + px) * 4;
+            [pixels[off], pixels[off + 1], pixels[off + 2]]
+        };
+
+        // Run in HDR mode (first frame settles shadows/assets, second reads settled output).
+        let hdr = DisplayProfile::SurfaceHdr {
+            exposure_stops: 0.0,
+        };
+        let _ = run_probe(hdr);
+        let img = run_probe(hdr);
+        // Posed quad center at (2.5, 1.5, 0.0) should show green-tinted skinned geometry,
+        // while bind-pose (0.0, 1.5, 0.0) sees lit floor and shadow at (2.5, 0.0, -1.07).
+        let posed_rgb = sample_rgb(&img, Vec3::new(2.5, 1.5, 0.0));
+        let bind_floor_rgb = sample_rgb(&img, Vec3::new(0.0, 0.0, -1.07));
+        let posed_shadow_rgb = sample_rgb(&img, Vec3::new(2.5, 0.0, -1.07));
+        assert!(
+            posed_rgb[1] > posed_rgb[0] + 20 && posed_rgb[1] > posed_rgb[2] + 20,
+            "Skinned quad did not render at posed X=+2.5: posed_rgb={posed_rgb:?}"
+        );
+        assert!(
+            bind_floor_rgb[0] > posed_shadow_rgb[0] + 40
+                && bind_floor_rgb[2] > posed_shadow_rgb[2] + 40,
+            "Skinned quad shadow must darken posed floor (bind_floor={bind_floor_rgb:?}, posed_shadow={posed_shadow_rgb:?})"
+        );
+        // Verify Rot red selection outline halo appears around the posed edge at X=+3.1, not bind pose X=+0.6.
+        let mut red_outline_posed = false;
+        let clip_edge = vp * Vec3::new(3.1, 1.5, 0.0).extend(1.0);
+        let ndc_edge = clip_edge.truncate() / clip_edge.w;
+        let ex = ((ndc_edge.x * 0.5 + 0.5) * width as f32) as usize;
+        let ey = ((0.5 - ndc_edge.y * 0.5) * height as f32) as usize;
+        for dx in -5_isize..=5 {
+            let x = (ex as isize + dx).clamp(0, width as isize - 1) as usize;
+            let p = &img[(ey * width as usize + x) * 4..];
+            if p[0] > 180 && p[1] < 90 && p[2] < 90 {
+                red_outline_posed = true;
+            }
+        }
+        assert!(
+            red_outline_posed,
+            "Selection outline halo did not track posed skinned edge at X=+3.1"
+        );
+        eprintln!(
+            "GPU skinning probe HDR passed: posed={posed_rgb:?}, bind_floor={bind_floor_rgb:?}, posed_shadow={posed_shadow_rgb:?}"
         );
     }
 }

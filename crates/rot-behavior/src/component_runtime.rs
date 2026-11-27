@@ -1077,6 +1077,7 @@ impl Engine {
                             table,
                         });
                     }
+                    Component::Skin { .. } => {}
                 }
                 *existing = updated.clone();
             }

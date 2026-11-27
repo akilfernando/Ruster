@@ -497,6 +497,7 @@ impl ComponentScene {
         for (owner, object) in self.objects.iter().enumerate() {
             let mut rigid_body_count = 0usize;
             let mut cc_count = 0usize;
+            let mut skin_count = 0usize;
             for component in &object.components {
                 validate_id(&component.id)?;
                 if !ids.insert(component.id.as_str()) {
@@ -767,6 +768,49 @@ impl ComponentScene {
                             *skin_width,
                             *snap_to_ground,
                         )?;
+                    }
+                    Component::Skin {
+                        joints,
+                        inverse_bind_matrices,
+                    } => {
+                        skin_count += 1;
+                        if skin_count > 1 {
+                            return Err(SceneError::Invalid(format!(
+                                "object {} cannot have more than one Skin component",
+                                object.id
+                            )));
+                        }
+                        if joints.is_empty() || joints.len() > MAX_SKIN_JOINTS {
+                            return Err(SceneError::Invalid(format!(
+                                "Skin {} must reference between 1 and {MAX_SKIN_JOINTS} joints",
+                                component.id
+                            )));
+                        }
+                        if inverse_bind_matrices.len() != joints.len() {
+                            return Err(SceneError::Invalid(format!(
+                                "Skin {} inverse_bind_matrices length ({}) does not match joints length ({})",
+                                component.id,
+                                inverse_bind_matrices.len(),
+                                joints.len()
+                            )));
+                        }
+                        for joint in joints {
+                            validate_id(joint)?;
+                            if !object_indices.contains_key(joint.as_str()) {
+                                return Err(SceneError::Invalid(format!(
+                                    "Skin {} references missing joint {joint}",
+                                    component.id
+                                )));
+                            }
+                        }
+                        for (joint_index, matrix) in inverse_bind_matrices.iter().enumerate() {
+                            if !matrix.iter().all(|value| value.is_finite()) {
+                                return Err(SceneError::Invalid(format!(
+                                    "Skin {} inverse_bind_matrices[{joint_index}] contains non-finite values",
+                                    component.id
+                                )));
+                            }
+                        }
                     }
                 }
             }
@@ -1857,7 +1901,13 @@ pub enum Component {
         )]
         snap_to_ground: f32,
     },
+    Skin {
+        joints: Vec<String>,
+        inverse_bind_matrices: Vec<[f32; 16]>,
+    },
 }
+
+pub const MAX_SKIN_JOINTS: usize = 256;
 
 /// An omitted script source kind keeps the embedded source interpretation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2785,5 +2835,107 @@ mod tests {
             };
             assert!(bad.validate().is_err());
         }
+    }
+
+    #[test]
+    fn skin_component_roundtrips_json_and_validates_joint_constraints() {
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(crate::Scene::empty("skinned")).unwrap())
+                .unwrap();
+        scene.objects = vec![
+            ObjectNode {
+                id: "armature-root".into(),
+                name: "Root".into(),
+                parent: None,
+                transform: Transform::default(),
+                enabled: true,
+                components: vec![],
+            },
+            ObjectNode {
+                id: "bone-1".into(),
+                name: "Bone1".into(),
+                parent: Some("armature-root".into()),
+                transform: Transform {
+                    translation: [0.0, 1.0, 0.0],
+                    ..Transform::default()
+                },
+                enabled: true,
+                components: vec![],
+            },
+            ObjectNode {
+                id: "body".into(),
+                name: "Body".into(),
+                parent: None,
+                transform: Transform::default(),
+                enabled: true,
+                components: vec![
+                    ComponentInstance {
+                        id: "body-mesh".into(),
+                        enabled: true,
+                        kind: Component::MeshRenderer {
+                            geometry: Geometry::Cube,
+                            tint: [1.0, 1.0, 1.0, 1.0],
+                            material: None,
+                        },
+                    },
+                    ComponentInstance {
+                        id: "body-skin".into(),
+                        enabled: true,
+                        kind: Component::Skin {
+                            joints: vec!["armature-root".into(), "bone-1".into()],
+                            inverse_bind_matrices: vec![
+                                glam::Mat4::IDENTITY.to_cols_array(),
+                                glam::Mat4::from_translation(glam::Vec3::new(0.0, -1.0, 0.0))
+                                    .to_cols_array(),
+                            ],
+                        },
+                    },
+                ],
+            },
+        ];
+
+        let json = serde_json::to_string(&scene).unwrap();
+        assert!(json.contains("\"type\":\"skin\""));
+        let decoded: ComponentScene = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, scene);
+        decoded.validate().unwrap();
+
+        // Missing joint reference fails validation.
+        let mut missing_joint = scene.clone();
+        if let Component::Skin { joints, .. } = &mut missing_joint.objects[2].components[1].kind {
+            joints[1] = "missing-bone".into();
+        }
+        assert!(missing_joint.validate().is_err());
+
+        // Mismatched IBM length fails validation.
+        let mut bad_ibm_len = scene.clone();
+        if let Component::Skin {
+            inverse_bind_matrices,
+            ..
+        } = &mut bad_ibm_len.objects[2].components[1].kind
+        {
+            inverse_bind_matrices.pop();
+        }
+        assert!(bad_ibm_len.validate().is_err());
+
+        // Non-finite IBM fails validation.
+        let mut nan_ibm = scene.clone();
+        if let Component::Skin {
+            inverse_bind_matrices,
+            ..
+        } = &mut nan_ibm.objects[2].components[1].kind
+        {
+            inverse_bind_matrices[0][0] = f32::NAN;
+        }
+        assert!(nan_ibm.validate().is_err());
+
+        // Duplicate Skin on the same object fails validation.
+        let dup_kind = scene.objects[2].components[1].kind.clone();
+        scene.objects[2].components.push(ComponentInstance {
+            id: "body-skin-2".into(),
+            enabled: true,
+            kind: dup_kind,
+        });
+        assert!(scene.validate().is_err());
     }
 }

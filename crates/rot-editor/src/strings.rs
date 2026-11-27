@@ -134,6 +134,8 @@ editor_text! {
     AnimatorClipUnavailable => "Clip unavailable. Refresh the source model.",
     AnimatorMissingTargets => "This clip needs additional nodes. Place the model again.",
     ComponentAnimator => "Animator",
+    ComponentSkin => "Skin",
+    ComponentJoints => "Joints",
     ComponentScript => "Script",
     ScriptNumberProperties => "Number Properties",
     ScriptNumberAdd => "Add Number Property",

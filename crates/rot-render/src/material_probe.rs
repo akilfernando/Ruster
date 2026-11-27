@@ -351,6 +351,8 @@ fn verify_mesh_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue) {
             indices: (0..count).map(|index| (index % 3) as u32).collect(),
             texcoords: Some(vec![[0.; 2]; count]),
             tangents: None,
+            skin_joints: None,
+            skin_weights: None,
         })
     };
     let large = mesh(rot_assets::MAX_VERTICES);
@@ -860,6 +862,7 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
         let normal = Mat3::from_mat4(matrix).inverse().transpose();
         let callback = SceneCallback {
             background: None,
+            skin_matrices: Vec::new(),
             sky: None,
             fog: None,
             post_process: None,
@@ -1323,6 +1326,7 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
             let before = metrics.lock().unwrap().clone();
             let callback = SceneCallback {
                 background: None,
+                skin_matrices: Vec::new(),
                 sky: None,
                 fog: None,
                 post_process: None,
@@ -1797,6 +1801,7 @@ fn verify_pbr_maps(device: &wgpu::Device, queue: &wgpu::Queue) {
         };
         let callback = SceneCallback {
             background: None,
+            skin_matrices: Vec::new(),
             sky: None,
             fog: None,
             post_process: None,
@@ -2081,6 +2086,7 @@ fn verify_sky_and_ibl(device: &wgpu::Device, queue: &wgpu::Queue) {
             });
             let callback = SceneCallback {
                 background: Some(BackgroundColor::new([0., 0., 0.]).unwrap()),
+                skin_matrices: Vec::new(),
                 sky,
                 fog: None,
                 post_process: None,
@@ -2467,6 +2473,7 @@ pub(super) fn verify_cube_material(device: &wgpu::Device, queue: &wgpu::Queue) {
         assert!(!binding.missing && !binding.missing_roughness);
         let callback = SceneCallback {
             background: None,
+            skin_matrices: Vec::new(),
             sky: None,
             fog: None,
             post_process: None,
@@ -2663,6 +2670,7 @@ fn verify_alpha_transparency(device: &wgpu::Device, queue: &wgpu::Queue) {
         complete_submitted_assets(device, queue, &context, &mut resources);
         let callback = SceneCallback {
             background: None,
+            skin_matrices: Vec::new(),
             sky: None,
             fog: None,
             post_process: None,
@@ -2943,6 +2951,7 @@ fn verify_frustum_and_dirty_instancing(device: &wgpu::Device, queue: &wgpu::Queu
         complete_submitted_assets(device, queue, &context, &mut resources);
         let callback = SceneCallback {
             background: None,
+            skin_matrices: Vec::new(),
             sky: None,
             fog: None,
             post_process: None,

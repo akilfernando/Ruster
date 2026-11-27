@@ -101,6 +101,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue) {
                 .collect();
             let callback = SceneCallback {
                 background: None,
+                skin_matrices: Vec::new(),
                 sky: None,
                 fog: None,
                 post_process: None,

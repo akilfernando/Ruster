@@ -103,7 +103,8 @@ impl ObjectSession {
                     Component::MeshRenderer { .. }
                     | Component::Light { .. }
                     | Component::Collider { .. }
-                    | Component::RigidBody { .. } => continue,
+                    | Component::RigidBody { .. }
+                    | Component::Skin { .. } => continue,
                 };
                 return Err(format!(
                     "cannot spawn template containing {kind} {} on {}",
@@ -130,10 +131,12 @@ impl ObjectSession {
             }
         };
         let mut assigned = HashMap::<usize, String>::with_capacity(indices.len());
+        let mut id_remap = HashMap::<String, String>::with_capacity(indices.len());
         let mut objects = Vec::with_capacity(indices.len());
         for (row, index) in indices.into_iter().enumerate() {
             let mut object = authored.objects[index].clone();
-            object.id = format!("rot-spawn-{nonce}-o{row}");
+            let old_id = std::mem::replace(&mut object.id, format!("rot-spawn-{nonce}-o{row}"));
+            id_remap.insert(old_id, object.id.clone());
             for (column, component) in object.components.iter_mut().enumerate() {
                 component.id = format!("{}-c{column}", object.id);
             }
@@ -147,6 +150,17 @@ impl ObjectSession {
             }
             assigned.insert(index, object.id.clone());
             objects.push(object);
+        }
+        for object in &mut objects {
+            for component in &mut object.components {
+                if let Component::Skin { joints, .. } = &mut component.kind {
+                    for joint in joints {
+                        if let Some(mapped) = id_remap.get(joint.as_str()) {
+                            joint.clone_from(mapped);
+                        }
+                    }
+                }
+            }
         }
         Ok(objects)
     }

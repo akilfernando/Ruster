@@ -385,6 +385,8 @@ fn content_rejects_missing_references_and_invalid_mesh_before_rendering() {
             .collect(),
         texcoords: Some(vec![[0.0; 2]; rot_assets::MAX_VERTICES]),
         tangents: None,
+        skin_joints: None,
+        skin_weights: None,
     });
     let large_count = rot_assets::MAX_RESOLVED_BYTES / large_mesh.payload_bytes();
     let remaining = rot_assets::MAX_RESOLVED_BYTES - large_count * large_mesh.payload_bytes();
@@ -401,6 +403,8 @@ fn content_rejects_missing_references_and_invalid_mesh_before_rendering() {
         indices: [0, 1, 2].repeat(8),
         texcoords: Some(vec![[0.0; 2]; tail_vertex_count]),
         tangents: None,
+        skin_joints: None,
+        skin_weights: None,
     });
     let mut meshes: MeshMap = (0..large_count)
         .map(|index| (format!("large-{index:02}"), large_mesh.clone()))

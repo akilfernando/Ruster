@@ -7,9 +7,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 pub const MAX_ANIMATIONS: usize = 16;
 pub const MAX_ANIMATION_TARGETS: usize = 64;
-pub const MAX_CLIP_BYTES: usize = 1024 * 1024;
-const MAX_CLIP_TRACKS: usize = 96;
-const MAX_CLIP_KEYS: usize = 8192;
+pub const MAX_CLIP_BYTES: usize = 4 * 1024 * 1024;
+const MAX_CLIP_TRACKS: usize = 768;
+const MAX_CLIP_KEYS: usize = 65_536;
 const MAX_CLIP_SECONDS: f32 = 600.0;
 const MAX_NODE_PATH_BYTES: usize = 8 * 129;
 

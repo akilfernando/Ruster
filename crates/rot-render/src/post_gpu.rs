@@ -837,6 +837,7 @@ mod tests {
                 .drop_without_applying_deltas();
             let cb = SceneCallback {
                 background: Some(BackgroundColor::new(bg).unwrap()),
+                skin_matrices: Vec::new(),
                 sky: None,
                 fog: None,
                 post_process: post,

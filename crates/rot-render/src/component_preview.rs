@@ -18,9 +18,25 @@ use std::sync::Arc;
 /// Render-only draw data. The matrices stay aligned with the draw rows even
 /// when several mesh components belong to one object.
 #[derive(Clone, Debug)]
+struct PreviewSkinBinding {
+    joint_indices: Vec<usize>,
+    inverse_bind_matrices: Vec<DMat4>,
+}
+
+#[derive(Clone, Debug)]
+struct PreviewSkin {
+    object_worlds: Vec<DMat4>,
+    draw_skins: Vec<Option<usize>>,
+    skin_bindings: Vec<PreviewSkinBinding>,
+    skin_matrices: Vec<Mat4>,
+    skin_ranges: Vec<(u32, u32)>,
+}
+
+#[derive(Clone, Debug)]
 pub struct ComponentPreview {
     scene: Arc<Scene>,
     matrices: Vec<Mat4>,
+    skin: Option<Box<PreviewSkin>>,
     unpickable: BTreeSet<String>,
     light_budget_exceeded: bool,
     transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
@@ -178,11 +194,78 @@ impl ComponentPreview {
         self.light_budget_exceeded
     }
 
+    pub fn has_skinning(&self) -> bool {
+        self.skin.is_some()
+    }
+
+    /// Recompute GPU skin matrices from updated world transforms for all scene objects.
+    pub fn set_skin_poses(&mut self, world: &[DMat4]) -> Result<(), SceneError> {
+        let Some(skin) = self.skin.as_deref_mut() else {
+            return Ok(());
+        };
+        skin.object_worlds.clear();
+        skin.object_worlds.extend_from_slice(world);
+        evaluate_preview_skins(
+            &skin.draw_skins,
+            &skin.skin_bindings,
+            &skin.object_worlds,
+            &mut skin.skin_matrices,
+            &mut skin.skin_ranges,
+        )
+    }
+
+    /// Update only the touched scene object world transforms and refresh skin matrices.
+    pub fn update_skin_worlds(
+        &mut self,
+        updates: impl Iterator<Item = (usize, DMat4)>,
+    ) -> Result<(), SceneError> {
+        let Some(skin) = self.skin.as_deref_mut() else {
+            return Ok(());
+        };
+        for (object_index, world) in updates {
+            if let Some(slot) = skin.object_worlds.get_mut(object_index) {
+                *slot = world;
+            }
+        }
+        evaluate_preview_skins(
+            &skin.draw_skins,
+            &skin.skin_bindings,
+            &skin.object_worlds,
+            &mut skin.skin_matrices,
+            &mut skin.skin_ranges,
+        )
+    }
+
+    /// Translate scene objects by `displacement` relative to stored `originals` and refresh skin matrices.
+    pub fn translate_skin_worlds(
+        &mut self,
+        originals: &[(usize, DVec3)],
+        displacement: DVec3,
+    ) -> Result<(), SceneError> {
+        let Some(skin) = self.skin.as_deref_mut() else {
+            return Ok(());
+        };
+        for &(object_index, original) in originals {
+            if let Some(slot) = skin.object_worlds.get_mut(object_index) {
+                slot.w_axis = (original + displacement).extend(1.0);
+            }
+        }
+        evaluate_preview_skins(
+            &skin.draw_skins,
+            &skin.skin_bindings,
+            &skin.object_worlds,
+            &mut skin.skin_matrices,
+            &mut skin.skin_ranges,
+        )
+    }
+
     fn draw_scene(&self) -> DrawScene<'_> {
         DrawScene {
             scene: &self.scene,
             prepared: None,
             matrices: Some(&self.matrices),
+            skin_matrices: self.skin.as_deref().map_or(&[][..], |s| &s.skin_matrices),
+            skin_ranges: self.skin.as_deref().map_or(&[][..], |s| &s.skin_ranges),
             unpickable: (!self.unpickable.is_empty()).then_some(&self.unpickable),
             transform_camera: self.transform_camera,
         }
@@ -406,6 +489,14 @@ pub fn project_editor_with_world(
     };
     let mut lights = BTreeMap::new();
     let mut matrices = Vec::new();
+    let mut draw_skins = Vec::new();
+    let mut skin_bindings = Vec::new();
+    let object_indices: BTreeMap<&str, usize> = component_scene
+        .objects
+        .iter()
+        .enumerate()
+        .map(|(index, object)| (object.id.as_str(), index))
+        .collect();
     let mut point_lights = 0;
     let mut directional_lights = 0;
     let mut light_budget_exceeded = false;
@@ -420,6 +511,32 @@ pub fn project_editor_with_world(
         {
             continue;
         }
+        let object_skin = object
+            .components
+            .iter()
+            .filter(|item| item.enabled)
+            .find_map(|item| match &item.kind {
+                Component::Skin {
+                    joints,
+                    inverse_bind_matrices,
+                } => Some((joints, inverse_bind_matrices)),
+                _ => None,
+            })
+            .and_then(|(joints, inverse_bind_matrices)| {
+                let joint_indices = joints
+                    .iter()
+                    .map(|id| object_indices.get(id.as_str()).copied())
+                    .collect::<Option<Vec<_>>>()?;
+                let binding_index = skin_bindings.len();
+                skin_bindings.push(PreviewSkinBinding {
+                    joint_indices,
+                    inverse_bind_matrices: inverse_bind_matrices
+                        .iter()
+                        .map(|m| DMat4::from_cols_array(&m.map(f64::from)))
+                        .collect(),
+                });
+                Some(binding_index)
+            });
         for component in object.components.iter().filter(|item| item.enabled) {
             match &component.kind {
                 Component::MeshRenderer {
@@ -430,6 +547,7 @@ pub fn project_editor_with_world(
                     let mut draw = Object::cube(object.id.clone(), Some(object.name.clone()));
                     draw.transform = object.transform.clone();
                     matrices.push(draw_matrix(world[index], &object.id)?);
+                    draw_skins.push(object_skin);
                     draw.color = *tint;
                     draw.material.clone_from(material);
                     match geometry {
@@ -478,6 +596,7 @@ pub fn project_editor_with_world(
                 | Component::Joint { .. }
                 | Component::CharacterController { .. }
                 | Component::Animator { .. }
+                | Component::Skin { .. }
                 | Component::Script { .. } => {}
             }
         }
@@ -489,6 +608,26 @@ pub fn project_editor_with_world(
         };
     }
     scene.lighting.validate_clustered()?;
+    let skin = if skin_bindings.is_empty() {
+        None
+    } else {
+        let mut skin_matrices = Vec::new();
+        let mut skin_ranges = Vec::new();
+        evaluate_preview_skins(
+            &draw_skins,
+            &skin_bindings,
+            &world,
+            &mut skin_matrices,
+            &mut skin_ranges,
+        )?;
+        Some(Box::new(PreviewSkin {
+            object_worlds: world.clone(),
+            draw_skins,
+            skin_bindings,
+            skin_matrices,
+            skin_ranges,
+        }))
+    };
     Ok((
         ComponentPreview {
             static_hud: (component_scene.hud.enabled
@@ -504,12 +643,52 @@ pub fn project_editor_with_world(
             }),
             scene: Arc::new(scene),
             matrices,
+            skin,
             unpickable,
             light_budget_exceeded,
             transform_camera,
         },
         world,
     ))
+}
+
+fn evaluate_preview_skins(
+    draw_skins: &[Option<usize>],
+    skin_bindings: &[PreviewSkinBinding],
+    world: &[DMat4],
+    skin_matrices: &mut Vec<Mat4>,
+    skin_ranges: &mut Vec<(u32, u32)>,
+) -> Result<(), SceneError> {
+    skin_matrices.clear();
+    skin_ranges.clear();
+    skin_ranges.reserve(draw_skins.len());
+    for skin_idx in draw_skins {
+        let Some(skin_idx) = *skin_idx else {
+            skin_ranges.push((0, 0));
+            continue;
+        };
+        let binding = &skin_bindings[skin_idx];
+        let base = skin_matrices.len() as u32;
+        let count = binding.joint_indices.len() as u32;
+        for (&joint_index, &ibm) in binding
+            .joint_indices
+            .iter()
+            .zip(&binding.inverse_bind_matrices)
+        {
+            let world_matrix = world
+                .get(joint_index)
+                .ok_or_else(|| SceneError::Invalid("skin joint index out of bounds".into()))?;
+            let mat = (*world_matrix * ibm).as_mat4();
+            if !mat.is_finite() {
+                return Err(SceneError::Invalid(
+                    "skin matrix exceeds renderer precision".into(),
+                ));
+            }
+            skin_matrices.push(mat);
+        }
+        skin_ranges.push((base, count));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -787,6 +966,8 @@ mod tests {
             scene: preview.scene(),
             prepared: None,
             matrices: Some(&preview.matrices),
+            skin_matrices: &[],
+            skin_ranges: &[],
             unpickable: None,
             transform_camera: None,
         };
@@ -877,5 +1058,93 @@ mod tests {
         assert_eq!(preview.scene().objects[0].color, legacy.objects[0].color);
         assert!(preview.scene().hierarchy.is_empty());
         assert_eq!(fs::read(&component_file).unwrap(), original);
+    }
+
+    #[test]
+    fn skinned_preview_updates_world_matrices_and_picks_posed_triangle() {
+        use rot_scene::component_scene::{ComponentInstance, ObjectNode};
+
+        let mut mesh = rot_assets::parse_obj(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap();
+        mesh.skin_joints = Some(vec![[0, 0, 0, 0]; 3]);
+        mesh.skin_weights = Some(vec![[1.0, 0.0, 0.0, 0.0]; 3]);
+        let meshes = BTreeMap::from([("tri".into(), Arc::new(mesh))]);
+
+        let mut components =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("skinned-preview")).unwrap())
+                .unwrap();
+        components.objects = vec![
+            ObjectNode {
+                id: "bone".into(),
+                name: "Bone".into(),
+                parent: None,
+                transform: Transform {
+                    translation: [4.0, 0.0, 0.0],
+                    ..Transform::default()
+                },
+                enabled: true,
+                components: vec![],
+            },
+            ObjectNode {
+                id: "mesh-obj".into(),
+                name: "Mesh".into(),
+                parent: None,
+                transform: Transform::default(),
+                enabled: true,
+                components: vec![
+                    ComponentInstance {
+                        id: "mesh".into(),
+                        enabled: true,
+                        kind: Component::MeshRenderer {
+                            geometry: Geometry::Imported {
+                                asset: "tri".into(),
+                            },
+                            tint: [1.0; 4],
+                            material: None,
+                        },
+                    },
+                    ComponentInstance {
+                        id: "skin".into(),
+                        enabled: true,
+                        kind: Component::Skin {
+                            joints: vec!["bone".into()],
+                            inverse_bind_matrices: vec![Mat4::IDENTITY.to_cols_array()],
+                        },
+                    },
+                ],
+            },
+        ];
+
+        let mut preview = project(&components).unwrap();
+        assert!(preview.has_skinning());
+        let vp = Mat4::orthographic_rh(-10.0, 10.0, -10.0, 10.0, -10.0, 10.0);
+        let ndc_posed = vp.project_point3(Vec3::new(4.2, 0.2, 0.0));
+        let ndc_bind = vp.project_point3(Vec3::new(0.2, 0.2, 0.0));
+        assert_eq!(
+            super::super::pick(preview.draw_scene(), &meshes, vp, ndc_posed.x, ndc_posed.y)
+                .as_deref(),
+            Some("mesh-obj")
+        );
+        assert_eq!(
+            super::super::pick(preview.draw_scene(), &meshes, vp, ndc_bind.x, ndc_bind.y),
+            None
+        );
+
+        // Scrubbing bone live moves the skin without rebuilding the preview.
+        preview
+            .update_skin_worlds(std::iter::once((
+                0,
+                DMat4::from_translation(DVec3::new(-4.0, 0.0, 0.0)),
+            )))
+            .unwrap();
+        let ndc_moved = vp.project_point3(Vec3::new(-3.8, 0.2, 0.0));
+        assert_eq!(
+            super::super::pick(preview.draw_scene(), &meshes, vp, ndc_moved.x, ndc_moved.y)
+                .as_deref(),
+            Some("mesh-obj")
+        );
+        assert_eq!(
+            super::super::pick(preview.draw_scene(), &meshes, vp, ndc_posed.x, ndc_posed.y),
+            None
+        );
     }
 }

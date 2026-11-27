@@ -13,6 +13,7 @@ struct Probe {
     shadows: ShadowGpu,
     materials: MaterialGpu,
     zero_uv: wgpu::Buffer,
+    default_skin: wgpu::Buffer,
     builtins: BuiltinMeshes,
     meshes: BTreeMap<String, GpuMesh>,
     instance_bind: wgpu::BindGroup,
@@ -38,22 +39,44 @@ impl Probe {
         queue.write_buffer(&instances, 0, bytemuck::bytes_of(&instance));
         let instance_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("probe storage instances"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: wgpu::BufferSize::new(size_of::<Instance>() as u64),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(size_of::<Instance>() as u64),
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(size_of::<Mat4>() as u64),
+                    },
+                    count: None,
+                },
+            ],
         });
-        let instance_bind = instance_bind_group(device, &instance_layout, &instances);
+        let skin_matrices = skin_matrices_buffer(device, 1);
+        let instance_bind =
+            instance_bind_group(device, &instance_layout, &instances, &skin_matrices);
         let materials = MaterialGpu::new(device, queue);
         let zero_uv = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("probe zero uv"),
             contents: bytemuck::bytes_of(&[0.0_f32; 2]),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let default_skin = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("probe default skin"),
+            contents: bytemuck::bytes_of(&SkinVertex {
+                joints: [0; 4],
+                weights: [1.0, 0.0, 0.0, 0.0],
+            }),
             usage: wgpu::BufferUsages::VERTEX,
         });
         let context = egui::Context::default();
@@ -66,6 +89,7 @@ impl Probe {
             shadows: ShadowGpu::new(device, queue, &instance_layout, &materials.layout),
             materials,
             zero_uv,
+            default_skin,
             builtins: BuiltinMeshes {
                 cube: GpuMesh::new(device, None, &primitives::cube()),
                 sphere: GpuMesh::new(device, None, builtin_mesh(rot_scene::Primitive::Sphere)),
@@ -131,6 +155,8 @@ impl Probe {
                         instance_bind: &self.instance_bind,
                         materials: &self.materials,
                         zero_uv: &self.zero_uv,
+                        default_skin: &self.default_skin,
+                        skin_matrices: &[],
                     },
                     Request {
                         settings,
@@ -523,6 +549,7 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
     };
     let first = SceneCallback {
         background: None,
+        skin_matrices: Vec::new(),
         sky: None,
         fog: None,
         post_process: None,
@@ -566,6 +593,7 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
     };
     let second = SceneCallback {
         background: None,
+        skin_matrices: Vec::new(),
         sky: None,
         fog: None,
         post_process: None,
@@ -983,6 +1011,7 @@ fn verify_asset_submission_backpressure(
         });
         SceneCallback {
             background: None,
+            skin_matrices: Vec::new(),
             sky: None,
             fog: None,
             post_process: None,

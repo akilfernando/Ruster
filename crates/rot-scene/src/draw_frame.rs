@@ -252,6 +252,8 @@ pub struct HierarchyDraw {
     lighting: Arc<Lighting>,
     player_view: Option<ResolvedPlayerView>,
     has_attached_lights: bool,
+    skin_matrices: Arc<Vec<Mat4>>,
+    skin_ranges: Arc<Vec<(u32, u32)>>,
 }
 
 impl HierarchyDraw {
@@ -277,6 +279,8 @@ impl HierarchyDraw {
             lighting: Arc::new(lighting),
             player_view,
             has_attached_lights: false,
+            skin_matrices: Arc::new(Vec::new()),
+            skin_ranges: Arc::new(Vec::new()),
         }
     }
 
@@ -296,6 +300,18 @@ impl HierarchyDraw {
         self.player_view
     }
 
+    pub fn skin_matrices(&self) -> &[Mat4] {
+        &self.skin_matrices
+    }
+
+    pub fn skin_ranges(&self) -> &[(u32, u32)] {
+        &self.skin_ranges
+    }
+
+    pub fn skin_range(&self, draw_index: usize) -> (u32, u32) {
+        self.skin_ranges.get(draw_index).copied().unwrap_or((0, 0))
+    }
+
     /// Construct prepared draw rows, lighting and resolved player view directly for a component frame.
     pub fn from_component_frame(
         matrices: Vec<Mat4>,
@@ -307,6 +323,26 @@ impl HierarchyDraw {
             lighting,
             player_view,
             has_attached_lights: true,
+            skin_matrices: Arc::new(Vec::new()),
+            skin_ranges: Arc::new(Vec::new()),
+        }
+    }
+
+    /// Construct prepared draw rows together with evaluated world-space skin matrices.
+    pub fn from_component_frame_with_skins(
+        matrices: Vec<Mat4>,
+        skin_matrices: Vec<Mat4>,
+        skin_ranges: Vec<(u32, u32)>,
+        lighting: Arc<Lighting>,
+        player_view: Option<ResolvedPlayerView>,
+    ) -> Self {
+        Self {
+            matrices: Arc::new(matrices),
+            lighting,
+            player_view,
+            has_attached_lights: true,
+            skin_matrices: Arc::new(skin_matrices),
+            skin_ranges: Arc::new(skin_ranges),
         }
     }
 
@@ -379,12 +415,20 @@ struct LightOwner {
     is_directional: bool,
 }
 
+#[derive(Clone, Debug)]
+struct SkinBinding {
+    joint_indices: Vec<usize>,
+    inverse_bind_matrices: Vec<DMat4>,
+}
+
 /// Precomputed draw topology for a component scene; per-tick updates rebuild only matrices, lights, and camera pose.
 #[derive(Clone, Debug)]
 pub struct ComponentDrawPlan {
     base_scene: Arc<Scene>,
     draw_owners: Vec<usize>,
     draw_component_ids: Vec<String>,
+    draw_skins: Vec<Option<usize>>,
+    skin_bindings: Vec<SkinBinding>,
     light_owners: Vec<LightOwner>,
     camera: RuntimeCamera,
     light_budget_exceeded: bool,
@@ -424,6 +468,8 @@ impl ComponentDrawPlan {
         };
         let mut draw_owners = Vec::new();
         let mut draw_component_ids = Vec::new();
+        let mut draw_skins = Vec::new();
+        let mut skin_bindings = Vec::new();
         let mut light_owners = Vec::new();
         let mut lights = BTreeMap::new();
         let mut point_lights = 0;
@@ -438,6 +484,39 @@ impl ComponentDrawPlan {
             if !hierarchy.effectively_enabled[index] {
                 continue;
             }
+            let object_skin = if let Some((skin_id, joints, inverse_bind_matrices)) = object
+                .components
+                .iter()
+                .filter(|item| item.enabled)
+                .find_map(|item| match &item.kind {
+                    Component::Skin {
+                        joints,
+                        inverse_bind_matrices,
+                    } => Some((&item.id, joints, inverse_bind_matrices)),
+                    _ => None,
+                }) {
+                let joint_indices = joints
+                    .iter()
+                    .map(|id| {
+                        indices.get(id.as_str()).copied().ok_or_else(|| {
+                            SceneError::Invalid(format!(
+                                "Skin {skin_id} references missing joint {id}"
+                            ))
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let binding_index = skin_bindings.len();
+                skin_bindings.push(SkinBinding {
+                    joint_indices,
+                    inverse_bind_matrices: inverse_bind_matrices
+                        .iter()
+                        .map(|m| DMat4::from_cols_array(&m.map(f64::from)))
+                        .collect(),
+                });
+                Some(binding_index)
+            } else {
+                None
+            };
             for component in object.components.iter().filter(|item| item.enabled) {
                 match &component.kind {
                     Component::MeshRenderer {
@@ -457,6 +536,7 @@ impl ComponentDrawPlan {
                         base.objects.push(draw);
                         draw_owners.push(index);
                         draw_component_ids.push(component.id.clone());
+                        draw_skins.push(object_skin);
                     }
                     Component::Light {
                         color,
@@ -500,6 +580,7 @@ impl ComponentDrawPlan {
                     | Component::Joint { .. }
                     | Component::CharacterController { .. }
                     | Component::Animator { .. }
+                    | Component::Skin { .. }
                     | Component::Script { .. } => {}
                 }
             }
@@ -515,6 +596,8 @@ impl ComponentDrawPlan {
             base_scene: Arc::new(base),
             draw_owners,
             draw_component_ids,
+            draw_skins,
+            skin_bindings,
             light_owners,
             camera,
             light_budget_exceeded,
@@ -602,6 +685,13 @@ impl ComponentDrawPlan {
             .unwrap_or(&hierarchy.effectively_enabled);
 
         let needs_mesh_scene = !overrides.meshes.is_empty() || custom_enabled.is_some();
+        let has_skins = !self.skin_bindings.is_empty();
+        let mut skin_matrices = Vec::new();
+        let mut skin_ranges = if has_skins {
+            Vec::with_capacity(self.draw_owners.len())
+        } else {
+            Vec::new()
+        };
         let (draw_scene, matrices) = if needs_mesh_scene {
             let mut custom_scene = (*self.base_scene).clone();
             let mut kept_objects = Vec::with_capacity(self.draw_owners.len());
@@ -635,16 +725,36 @@ impl ComponentDrawPlan {
                     world[owner],
                     &scene.objects[owner].id,
                 )?);
+                if has_skins {
+                    push_draw_skin(
+                        self.draw_skins[slot],
+                        &self.skin_bindings,
+                        world,
+                        &scene.objects[owner].id,
+                        &mut skin_matrices,
+                        &mut skin_ranges,
+                    )?;
+                }
             }
             custom_scene.objects = kept_objects;
             (Arc::new(custom_scene), matrices)
         } else {
             let mut matrices = Vec::with_capacity(self.draw_owners.len());
-            for &owner in &self.draw_owners {
+            for (slot, &owner) in self.draw_owners.iter().enumerate() {
                 matrices.push(component_draw_matrix(
                     world[owner],
                     &scene.objects[owner].id,
                 )?);
+                if has_skins {
+                    push_draw_skin(
+                        self.draw_skins[slot],
+                        &self.skin_bindings,
+                        world,
+                        &scene.objects[owner].id,
+                        &mut skin_matrices,
+                        &mut skin_ranges,
+                    )?;
+                }
             }
             (Arc::clone(&self.base_scene), matrices)
         };
@@ -743,8 +853,10 @@ impl ComponentDrawPlan {
 
         Ok(SceneDrawFrame::component_frame(
             draw_scene,
-            Arc::new(HierarchyDraw::from_component_frame(
+            Arc::new(HierarchyDraw::from_component_frame_with_skins(
                 matrices,
+                skin_matrices,
+                skin_ranges,
                 Arc::new(lighting),
                 player_view,
             )),
@@ -761,11 +873,28 @@ impl ComponentDrawPlan {
         intensity_for: impl Fn(&str) -> Option<f32>,
     ) -> Result<SceneDrawFrame, SceneError> {
         let mut matrices = Vec::with_capacity(self.draw_owners.len());
-        for &owner in &self.draw_owners {
+        let has_skins = !self.skin_bindings.is_empty();
+        let mut skin_matrices = Vec::new();
+        let mut skin_ranges = if has_skins {
+            Vec::with_capacity(self.draw_owners.len())
+        } else {
+            Vec::new()
+        };
+        for (slot, &owner) in self.draw_owners.iter().enumerate() {
             matrices.push(component_draw_matrix(
                 world[owner],
                 &scene.objects[owner].id,
             )?);
+            if has_skins {
+                push_draw_skin(
+                    self.draw_skins[slot],
+                    &self.skin_bindings,
+                    world,
+                    &scene.objects[owner].id,
+                    &mut skin_matrices,
+                    &mut skin_ranges,
+                )?;
+            }
         }
         let mut lighting = self.base_scene.lighting.clone();
         if !self.light_owners.is_empty() {
@@ -800,14 +929,48 @@ impl ComponentDrawPlan {
         };
         Ok(SceneDrawFrame::component_frame(
             Arc::clone(&self.base_scene),
-            Arc::new(HierarchyDraw::from_component_frame(
+            Arc::new(HierarchyDraw::from_component_frame_with_skins(
                 matrices,
+                skin_matrices,
+                skin_ranges,
                 Arc::new(lighting),
                 player_view,
             )),
             transform_camera,
         ))
     }
+}
+
+fn push_draw_skin(
+    skin_index: Option<usize>,
+    bindings: &[SkinBinding],
+    world: &[DMat4],
+    owner_id: &str,
+    skin_matrices: &mut Vec<Mat4>,
+    skin_ranges: &mut Vec<(u32, u32)>,
+) -> Result<(), SceneError> {
+    let Some(skin_index) = skin_index else {
+        skin_ranges.push((0, 0));
+        return Ok(());
+    };
+    let binding = &bindings[skin_index];
+    let base = skin_matrices.len() as u32;
+    let count = binding.joint_indices.len() as u32;
+    for (&joint_index, &ibm) in binding
+        .joint_indices
+        .iter()
+        .zip(&binding.inverse_bind_matrices)
+    {
+        let matrix = (world[joint_index] * ibm).as_mat4();
+        if !matrix.is_finite() {
+            return Err(SceneError::Invalid(format!(
+                "skin matrix on {owner_id} exceeds renderer precision"
+            )));
+        }
+        skin_matrices.push(matrix);
+    }
+    skin_ranges.push((base, count));
+    Ok(())
 }
 
 fn component_draw_matrix(world: DMat4, id: &str) -> Result<Mat4, SceneError> {
@@ -853,4 +1016,103 @@ fn component_light_transform(
     }
     transform.validate()?;
     Ok(transform)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::component_scene::{Component, ComponentInstance, Geometry, ObjectNode};
+    use crate::Session;
+
+    #[test]
+    fn component_draw_plan_evaluates_world_skin_matrices_and_respects_enabled_state() {
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("skinned-frame")).unwrap())
+                .unwrap();
+        scene.objects = vec![
+            ObjectNode {
+                id: "joint-root".into(),
+                name: "JointRoot".into(),
+                parent: None,
+                transform: Transform {
+                    translation: [1.0, 0.0, 0.0],
+                    ..Transform::default()
+                },
+                enabled: true,
+                components: vec![],
+            },
+            ObjectNode {
+                id: "joint-tip".into(),
+                name: "JointTip".into(),
+                parent: Some("joint-root".into()),
+                transform: Transform {
+                    translation: [0.0, 2.0, 0.0],
+                    rotation: [0.0, 0.0, std::f32::consts::FRAC_PI_2],
+                    ..Transform::default()
+                },
+                enabled: true,
+                components: vec![],
+            },
+            ObjectNode {
+                id: "mesh-node".into(),
+                name: "MeshNode".into(),
+                parent: None,
+                transform: Transform {
+                    translation: [5.0, 0.0, 0.0],
+                    ..Transform::default()
+                },
+                enabled: true,
+                components: vec![
+                    ComponentInstance {
+                        id: "skin".into(),
+                        enabled: true,
+                        kind: Component::Skin {
+                            joints: vec!["joint-root".into(), "joint-tip".into()],
+                            inverse_bind_matrices: vec![
+                                Mat4::IDENTITY.to_cols_array(),
+                                Mat4::from_translation(Vec3::new(-1.0, -2.0, 0.0)).to_cols_array(),
+                            ],
+                        },
+                    },
+                    ComponentInstance {
+                        id: "mesh".into(),
+                        enabled: true,
+                        kind: Component::MeshRenderer {
+                            geometry: Geometry::Cube,
+                            tint: [1.0; 4],
+                            material: None,
+                        },
+                    },
+                ],
+            },
+        ];
+
+        let frame = ComponentDrawPlan::build_initial_frame(&scene, 1).unwrap();
+        let draw = frame.hierarchy().unwrap();
+        assert_eq!(draw.skin_range(0), (0, 2));
+        let skins = draw.skin_matrices();
+        assert_eq!(skins.len(), 2);
+        // joint-root at [1, 0, 0] with identity IBM -> maps origin to (1, 0, 0)
+        assert!((skins[0].transform_point3(Vec3::ZERO) - Vec3::new(1.0, 0.0, 0.0)).length() < 1e-5);
+        // joint-tip is translated to (1, 2, 0) and rotated +90 deg around Z; point at bind pose (1, 2, 0)
+        // maps through IBM to origin in joint local space, then back to (1, 2, 0) in world space.
+        assert!(
+            (skins[1].transform_point3(Vec3::new(1.0, 2.0, 0.0)) - Vec3::new(1.0, 2.0, 0.0))
+                .length()
+                < 1e-5
+        );
+        // Point (2, 2, 0) at bind pose is +X from joint-tip -> rotates +90 deg around Z to (1, 3, 0).
+        assert!(
+            (skins[1].transform_point3(Vec3::new(2.0, 2.0, 0.0)) - Vec3::new(1.0, 3.0, 0.0))
+                .length()
+                < 1e-5
+        );
+
+        // Disabling Skin emits no skin matrices for the draw slot.
+        scene.objects[2].components[0].enabled = false;
+        let disabled = ComponentDrawPlan::build_initial_frame(&scene, 2).unwrap();
+        let disabled_draw = disabled.hierarchy().unwrap();
+        assert_eq!(disabled_draw.skin_range(0), (0, 0));
+        assert!(disabled_draw.skin_matrices().is_empty());
+    }
 }

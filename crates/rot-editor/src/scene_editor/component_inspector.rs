@@ -269,6 +269,7 @@ pub(super) fn component_label(component: &Component) -> Text {
         Component::RigidBody { .. } => Text::ComponentRigidBody,
         Component::Joint { .. } => Text::ComponentJoint,
         Component::CharacterController { .. } => Text::ComponentCharacterController,
+        Component::Skin { .. } => Text::ComponentSkin,
     }
 }
 
@@ -377,6 +378,7 @@ pub(super) fn components(
                 | Component::Camera { .. }
                 | Component::Light { .. }
                 | Component::Animator { .. }
+                | Component::Skin { .. }
                 | Component::Script {
                     source_kind: Some(_),
                     ..
@@ -891,6 +893,12 @@ pub(super) fn components(
                             }
                         }
                     }
+                    Component::Skin { joints, .. } => {
+                        skin_fields(ui, joints, scene_objects);
+                        if ui.button(Text::ComponentRemove.plain()).clicked() {
+                            remove = Some(index);
+                        }
+                    }
                 }
             });
         if editable {
@@ -923,6 +931,30 @@ pub(super) fn components(
         script_property,
         sound_cue,
         sensor_binding,
+    }
+}
+
+pub(super) fn skin_fields(ui: &mut egui::Ui, joints: &[String], scene_objects: &[ObjectNode]) {
+    ui_kit::property_row(ui, Text::ComponentJoints.plain(), |ui| {
+        ui.label(joints.len().to_string());
+    });
+    if !joints.is_empty() {
+        egui::ScrollArea::vertical()
+            .id_salt("skin_joints_list")
+            .max_height(110.0)
+            .show(ui, |ui| {
+                for (slot, joint_id) in joints.iter().enumerate() {
+                    let label = scene_objects
+                        .iter()
+                        .find(|object| object.id == *joint_id)
+                        .map_or(joint_id.as_str(), |object| object.name.as_str());
+                    ui.horizontal(|ui| {
+                        ui.weak(format!("{slot}:"));
+                        ui.add(egui::Label::new(label).truncate())
+                            .on_hover_text(joint_id);
+                    });
+                }
+            });
     }
 }
 

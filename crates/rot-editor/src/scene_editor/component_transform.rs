@@ -105,6 +105,7 @@ struct TransformRoot {
     candidate: Transform,
     nodes: Vec<PreviewNode>,
     draw_rows: Vec<(usize, DVec3)>,
+    object_translations: Vec<(usize, DVec3)>,
     lights: Vec<(String, DVec3)>,
 }
 
@@ -120,6 +121,7 @@ struct Settings {
 }
 
 struct PreviewNode {
+    object_index: usize,
     parent: Option<usize>,
     authored_local: DMat4,
     authored_rotation: [f32; 3],
@@ -184,6 +186,7 @@ struct ScrubRoot {
 }
 
 struct ScrubNode {
+    object_index: usize,
     parent: Option<usize>,
     selected_slot: Option<usize>,
     authored_local: DMat4,
@@ -268,6 +271,18 @@ impl InspectorScrub {
             })
         });
         if self.preview.set_sampled_rows(draws, lights).is_err() {
+            return false;
+        }
+        if self.preview.has_skinning()
+            && self
+                .preview
+                .update_skin_worlds(self.roots.iter().flat_map(|root| {
+                    root.nodes
+                        .iter()
+                        .map(|node| (node.object_index, node.world))
+                }))
+                .is_err()
+        {
             return false;
         }
         self.last_applied.clone_from_slice(candidates);
@@ -355,6 +370,7 @@ impl ComponentWorkspace {
                 }
                 moved.insert(owner.id.as_str(), (root_slot, position));
                 root.nodes.push(ScrubNode {
+                    object_index: index,
                     parent,
                     selected_slot: slot_by_object.get(&index).copied(),
                     authored_local: owner.transform.affine_matrix(),
@@ -464,6 +480,7 @@ impl ComponentWorkspace {
                     original,
                     nodes: Vec::new(),
                     draw_rows: Vec::new(),
+                    object_translations: Vec::new(),
                     lights: Vec::new(),
                 }
             })
@@ -506,6 +523,9 @@ impl ComponentWorkspace {
                 moved.insert(owner.id.as_str(), (root, position, world.w_axis.truncate()));
                 if moving {
                     selected
+                        .object_translations
+                        .push((index, world.w_axis.truncate()));
+                    selected
                         .lights
                         .extend(lights.map(|(id, _)| (id, world.w_axis.truncate())));
                 } else {
@@ -524,6 +544,7 @@ impl ComponentWorkspace {
                         );
                     }
                     selected.nodes.push(PreviewNode {
+                        object_index: index,
                         parent,
                         authored_local: owner.transform.affine_matrix(),
                         authored_rotation: owner.transform.rotation,
@@ -942,6 +963,13 @@ impl TransformRoot {
             {
                 return false;
             }
+            if preview.has_skinning()
+                && preview
+                    .translate_skin_worlds(&self.object_translations, displacement)
+                    .is_err()
+            {
+                return false;
+            }
         } else {
             let local = candidate.affine_matrix();
             let world = self.parent_world.map_or(local, |parent| parent * local);
@@ -978,6 +1006,17 @@ impl TransformRoot {
                 })
             });
             if preview.set_transformed_rows(draws, lights).is_err() {
+                return false;
+            }
+            if preview.has_skinning()
+                && preview
+                    .update_skin_worlds(
+                        self.nodes
+                            .iter()
+                            .map(|node| (node.object_index, node.world)),
+                    )
+                    .is_err()
+            {
                 return false;
             }
         }

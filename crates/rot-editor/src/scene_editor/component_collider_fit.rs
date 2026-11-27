@@ -513,6 +513,8 @@ mod tests {
             indices: vec![0, 1, 2],
             texcoords: None,
             tangents: None,
+            skin_joints: None,
+            skin_weights: None,
         };
         assert_eq!(
             indexed_bounds(&mesh).unwrap(),
@@ -545,6 +547,8 @@ mod tests {
             indices: vec![0, 3, 4, 1, 2, 5],
             texcoords: None,
             tangents: None,
+            skin_joints: None,
+            skin_weights: None,
         };
         let (center, radius, minimum) = indexed_sphere(&mesh).unwrap();
         assert_eq!(center, [3.0, -0.5, 4.0]);

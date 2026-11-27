@@ -82,6 +82,7 @@ pub(super) struct AnimationPreview {
 }
 
 struct Node {
+    object_index: usize,
     parent: Option<usize>,
     parent_world: DMat4,
     parent_rotation: DQuat,
@@ -202,6 +203,7 @@ impl AnimationPreview {
                 })
                 .collect();
             nodes.push(Node {
+                object_index: index,
                 parent,
                 parent_world,
                 parent_rotation: DQuat::IDENTITY,
@@ -326,6 +328,15 @@ impl AnimationPreview {
         self.projection
             .set_sampled_rows(draws, lights)
             .map_err(|error| ("preview_unavailable", error.to_string()))?;
+        if self.projection.has_skinning() {
+            self.projection
+                .update_skin_worlds(
+                    self.nodes
+                        .iter()
+                        .map(|node| (node.object_index, node.world)),
+                )
+                .map_err(|error| ("preview_unavailable", error.to_string()))?;
+        }
         self.seconds = seconds;
         self.adjacent = AdjacentKeys::at(&self.clip, seconds);
         Ok(true)
