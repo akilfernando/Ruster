@@ -5,7 +5,8 @@ use crate::workspace::Action;
 use eframe::egui;
 use rot_scene::component_scene::{
     AnimatorStart, CameraClip, CameraView, Component, ComponentInstance, Geometry, ObjectNode,
-    OrthographicClip, ScriptMovement, ScriptSourceKind, TransformLens, TransformOrthographic,
+    OrthographicClip, RigidBodyType, ScriptMovement, ScriptSourceKind, TransformLens,
+    TransformOrthographic,
 };
 use rot_scene::{
     BehaviorBinding, BindingTarget, ColliderRole, ColliderShape, Light, LightKind, LocalShadow,
@@ -16,6 +17,7 @@ use std::{collections::BTreeMap, ops::RangeInclusive};
 pub(super) enum AddComponent {
     MeshRenderer,
     Collider,
+    RigidBody,
     Camera,
     Light,
     DirectionalLight,
@@ -28,6 +30,7 @@ impl AddComponent {
         match self {
             Self::MeshRenderer => Text::ComponentMeshRenderer,
             Self::Collider => Text::ComponentCollider,
+            Self::RigidBody => Text::ComponentRigidBody,
             Self::Camera => Text::ComponentCamera,
             Self::Light => Text::ComponentLight,
             Self::DirectionalLight => Text::LabelCreateDirectionalLight,
@@ -50,6 +53,16 @@ impl AddComponent {
                     role: ColliderRole::Blocker,
                     offset: [0.0; 3],
                     shape: ColliderShape::default(),
+                },
+                Self::RigidBody => Component::RigidBody {
+                    body_type: RigidBodyType::Dynamic,
+                    mass: 1.0,
+                    linear_damping: 0.0,
+                    angular_damping: 0.05,
+                    gravity_scale: 1.0,
+                    lock_translation: [false; 3],
+                    lock_rotation: [false; 3],
+                    ccd: false,
                 },
                 Self::Camera => Component::Camera {
                     view: CameraView::transform_perspective(45.0),
@@ -228,6 +241,7 @@ pub(super) fn component_label(component: &Component) -> Text {
         } => Text::LabelCreateSpotLight,
         Component::Light { .. } => Text::LabelCreateDirectionalLight,
         Component::Collider { .. } => Text::ComponentCollider,
+        Component::RigidBody { .. } => Text::ComponentRigidBody,
     }
 }
 
@@ -327,6 +341,7 @@ pub(super) fn components(
             component.kind,
             Component::MeshRenderer { .. }
                 | Component::Collider { .. }
+                | Component::RigidBody { .. }
                 | Component::Camera { .. }
                 | Component::Light { .. }
                 | Component::Animator { .. }
@@ -469,6 +484,28 @@ pub(super) fn components(
                             }
                         }
                         submit |= collider_fields(ui, role, offset, shape);
+                    }
+                    Component::RigidBody {
+                        body_type,
+                        mass,
+                        linear_damping,
+                        angular_damping,
+                        gravity_scale,
+                        lock_translation,
+                        lock_rotation,
+                        ccd,
+                    } => {
+                        submit |= rigid_body_fields(
+                            ui,
+                            body_type,
+                            mass,
+                            linear_damping,
+                            angular_damping,
+                            gravity_scale,
+                            lock_translation,
+                            lock_rotation,
+                            ccd,
+                        );
                     }
                     Component::Light {
                         color,
@@ -1481,6 +1518,130 @@ fn collider_fields(
     submit
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(super) fn rigid_body_fields(
+    ui: &mut egui::Ui,
+    body_type: &mut RigidBodyType,
+    mass: &mut f32,
+    linear_damping: &mut f32,
+    angular_damping: &mut f32,
+    gravity_scale: &mut f32,
+    lock_translation: &mut [bool; 3],
+    lock_rotation: &mut [bool; 3],
+    ccd: &mut bool,
+) -> bool {
+    let mut submit = false;
+    ui_kit::property_row_with_label(ui, Text::ComponentBodyType.plain(), |ui, label| {
+        let focus = super::combo_focus::ComboFocus::capture(ui, "rigid_body_type");
+        let mut selected = false;
+        let response = egui::ComboBox::from_id_salt("rigid_body_type")
+            .width(ui.available_width())
+            .truncate()
+            .selected_text(rigid_body_type_label(*body_type).plain())
+            .show_ui(ui, |ui| {
+                for option in [
+                    RigidBodyType::Dynamic,
+                    RigidBodyType::Kinematic,
+                    RigidBodyType::Static,
+                ] {
+                    if ui
+                        .selectable_label(
+                            *body_type == option,
+                            rigid_body_type_label(option).plain(),
+                        )
+                        .clicked()
+                    {
+                        *body_type = option;
+                        selected = true;
+                        ui.close();
+                    }
+                }
+            });
+        focus.restore(ui, &response.response, selected);
+        response.response.labelled_by(label);
+    });
+    match body_type {
+        RigidBodyType::Dynamic => {
+            submit |= number_field(
+                ui,
+                Text::ComponentMass,
+                mass,
+                0.05,
+                0.001..=1_000_000.0,
+                Text::ComponentMass,
+            );
+            submit |= number_field(
+                ui,
+                Text::ComponentLinearDamping,
+                linear_damping,
+                0.01,
+                0.0..=1_000.0,
+                Text::ComponentLinearDamping,
+            );
+            submit |= number_field(
+                ui,
+                Text::ComponentAngularDamping,
+                angular_damping,
+                0.01,
+                0.0..=1_000.0,
+                Text::ComponentAngularDamping,
+            );
+            submit |= number_field(
+                ui,
+                Text::ComponentGravityScale,
+                gravity_scale,
+                0.05,
+                -100.0..=100.0,
+                Text::ComponentGravityScale,
+            );
+            axis_lock_row(ui, Text::ComponentFreezePosition, lock_translation);
+            axis_lock_row(ui, Text::ComponentFreezeRotation, lock_rotation);
+            ui_kit::property_row_with_label(
+                ui,
+                Text::ComponentContinuousCollision.plain(),
+                |ui, label| {
+                    ui.checkbox(ccd, "").labelled_by(label);
+                },
+            );
+        }
+        RigidBodyType::Kinematic => {
+            ui_kit::property_row_with_label(
+                ui,
+                Text::ComponentContinuousCollision.plain(),
+                |ui, label| {
+                    ui.checkbox(ccd, "").labelled_by(label);
+                },
+            );
+        }
+        RigidBodyType::Static => {}
+    }
+    submit
+}
+
+pub(super) fn rigid_body_type_label(body_type: RigidBodyType) -> Text {
+    match body_type {
+        RigidBodyType::Dynamic => Text::ComponentBodyDynamic,
+        RigidBodyType::Kinematic => Text::ComponentBodyKinematic,
+        RigidBodyType::Static => Text::ComponentBodyStatic,
+    }
+}
+
+fn axis_lock_row(ui: &mut egui::Ui, label: Text, flags: &mut [bool; 3]) {
+    ui_kit::property_row(ui, label.plain(), |ui| {
+        ui.horizontal(|ui| {
+            for (axis, flag) in flags.iter_mut().enumerate() {
+                let axis_label = [
+                    Text::ComponentAxisX,
+                    Text::ComponentAxisY,
+                    Text::ComponentAxisZ,
+                ][axis]
+                    .plain();
+                ui.checkbox(flag, axis_label);
+            }
+        });
+    });
+}
+
 #[derive(Default)]
 pub(super) struct ComponentPicker {
     search: String,
@@ -1565,14 +1726,22 @@ impl ComponentPicker {
                 }
                 return;
             }
+            let has_rigid_body = owner
+                .components
+                .iter()
+                .any(|component| matches!(component.kind, Component::RigidBody { .. }));
             for kind in [
                 AddComponent::MeshRenderer,
                 AddComponent::Collider,
+                AddComponent::RigidBody,
                 AddComponent::Camera,
                 AddComponent::Light,
                 AddComponent::DirectionalLight,
                 AddComponent::SpotLight,
             ] {
+                if matches!(kind, AddComponent::RigidBody) && has_rigid_body {
+                    continue;
+                }
                 if kind.label().plain().to_ascii_lowercase().contains(&search)
                     && (ui.button(kind.label().plain()).clicked() || submit && add.is_none())
                 {

@@ -81,6 +81,8 @@ pub struct ComponentScene {
     pub hud: Hud,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gameplay_camera: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gravity: Option<[f32; 3]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -471,6 +473,16 @@ impl ComponentScene {
         }
         validate_action_map(&self.actions)?;
         self.hud.validate()?;
+        if let Some(gravity) = self.gravity {
+            if !gravity
+                .iter()
+                .all(|value| value.is_finite() && (-1_000.0..=1_000.0).contains(value))
+            {
+                return Err(SceneError::Invalid(
+                    "scene gravity components must be finite in -1000..=1000".into(),
+                ));
+            }
+        }
         let object_indices: HashMap<_, _> = self
             .objects
             .iter()
@@ -483,6 +495,7 @@ impl ComponentScene {
         let mut baked_movements = HashMap::new();
         let mut gameplay_camera_found = self.gameplay_camera.is_none();
         for (owner, object) in self.objects.iter().enumerate() {
+            let mut rigid_body_count = 0usize;
             for component in &object.components {
                 validate_id(&component.id)?;
                 if !ids.insert(component.id.as_str()) {
@@ -652,6 +665,31 @@ impl ComponentScene {
                         shape: *shape,
                     }
                     .validate()?,
+                    Component::RigidBody {
+                        body_type: _,
+                        mass,
+                        linear_damping,
+                        angular_damping,
+                        gravity_scale,
+                        lock_translation: _,
+                        lock_rotation: _,
+                        ccd: _,
+                    } => {
+                        rigid_body_count += 1;
+                        if rigid_body_count > 1 {
+                            return Err(SceneError::Invalid(format!(
+                                "object {} cannot have more than one RigidBody component",
+                                object.id
+                            )));
+                        }
+                        validate_rigid_body_fields(
+                            &component.id,
+                            *mass,
+                            *linear_damping,
+                            *angular_damping,
+                            *gravity_scale,
+                        )?;
+                    }
                 }
             }
         }
@@ -848,6 +886,7 @@ impl ComponentScene {
             actions: authoring.actions.clone(),
             hud: authoring.hud.clone(),
             gameplay_camera,
+            gravity: None,
         };
         converted.validate()?;
         Ok(converted)
@@ -1311,6 +1350,87 @@ fn is_default_animator_playback_speed(speed: &f32) -> bool {
     *speed == default_animator_playback_speed()
 }
 
+fn default_rigid_body_mass() -> f32 {
+    1.0
+}
+
+fn is_default_rigid_body_mass(mass: &f32) -> bool {
+    *mass == default_rigid_body_mass()
+}
+
+fn is_zero_f32(value: &f32) -> bool {
+    *value == 0.0
+}
+
+fn default_rigid_body_angular_damping() -> f32 {
+    0.05
+}
+
+fn is_default_rigid_body_angular_damping(damping: &f32) -> bool {
+    *damping == default_rigid_body_angular_damping()
+}
+
+fn default_rigid_body_gravity_scale() -> f32 {
+    1.0
+}
+
+fn is_default_rigid_body_gravity_scale(scale: &f32) -> bool {
+    *scale == default_rigid_body_gravity_scale()
+}
+
+fn is_all_false(flags: &[bool; 3]) -> bool {
+    !flags.iter().any(|&flag| flag)
+}
+
+fn is_false(flag: &bool) -> bool {
+    !*flag
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum RigidBodyType {
+    #[default]
+    Dynamic,
+    Kinematic,
+    Static,
+}
+
+impl RigidBodyType {
+    fn is_dynamic(&self) -> bool {
+        *self == Self::Dynamic
+    }
+}
+
+pub fn validate_rigid_body_fields(
+    component_id: &str,
+    mass: f32,
+    linear_damping: f32,
+    angular_damping: f32,
+    gravity_scale: f32,
+) -> Result<(), SceneError> {
+    if !mass.is_finite() || !(0.001_f32..=1_000_000.0).contains(&mass) {
+        return Err(SceneError::Invalid(format!(
+            "RigidBody {component_id} mass must be finite in 0.001..=1000000"
+        )));
+    }
+    if !linear_damping.is_finite() || !(0.0_f32..=1_000.0).contains(&linear_damping) {
+        return Err(SceneError::Invalid(format!(
+            "RigidBody {component_id} linear damping must be finite in 0..=1000"
+        )));
+    }
+    if !angular_damping.is_finite() || !(0.0_f32..=1_000.0).contains(&angular_damping) {
+        return Err(SceneError::Invalid(format!(
+            "RigidBody {component_id} angular damping must be finite in 0..=1000"
+        )));
+    }
+    if !gravity_scale.is_finite() || !(-100.0_f32..=100.0).contains(&gravity_scale) {
+        return Err(SceneError::Invalid(format!(
+            "RigidBody {component_id} gravity scale must be finite in -100..=100"
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ComponentInstance {
     pub id: String,
@@ -1357,6 +1477,33 @@ pub enum Component {
         role: ColliderRole,
         offset: [f32; 3],
         shape: ColliderShape,
+    },
+    RigidBody {
+        #[serde(default, skip_serializing_if = "RigidBodyType::is_dynamic")]
+        body_type: RigidBodyType,
+        #[serde(
+            default = "default_rigid_body_mass",
+            skip_serializing_if = "is_default_rigid_body_mass"
+        )]
+        mass: f32,
+        #[serde(default, skip_serializing_if = "is_zero_f32")]
+        linear_damping: f32,
+        #[serde(
+            default = "default_rigid_body_angular_damping",
+            skip_serializing_if = "is_default_rigid_body_angular_damping"
+        )]
+        angular_damping: f32,
+        #[serde(
+            default = "default_rigid_body_gravity_scale",
+            skip_serializing_if = "is_default_rigid_body_gravity_scale"
+        )]
+        gravity_scale: f32,
+        #[serde(default, skip_serializing_if = "is_all_false")]
+        lock_translation: [bool; 3],
+        #[serde(default, skip_serializing_if = "is_all_false")]
+        lock_rotation: [bool; 3],
+        #[serde(default, skip_serializing_if = "is_false")]
+        ccd: bool,
     },
 }
 
@@ -1417,7 +1564,9 @@ impl ObjectNode {
                     shape: ColliderShape::Box { .. },
                     ..
                 } if component.enabled => colliders += 1,
-                Component::Collider { .. } | Component::Light { .. } => return false,
+                Component::Collider { .. }
+                | Component::Light { .. }
+                | Component::RigidBody { .. } => return false,
                 Component::Script { binding, .. } if binding.enabled => return false,
                 Component::Animator { .. } if component.enabled => return false,
                 _ => {}
@@ -1886,6 +2035,7 @@ mod tests {
             actions: ActionMap::new(),
             hud: Hud::default(),
             gameplay_camera: None,
+            gravity: None,
         };
         let mut bytes = Vec::new();
         scene.write_json(&mut bytes).unwrap();
@@ -1953,6 +2103,7 @@ mod tests {
             actions: ActionMap::new(),
             hud: Hud::default(),
             gameplay_camera: None,
+            gravity: None,
         };
         let mut bytes = Vec::new();
         scene.write_json(&mut bytes).unwrap();
@@ -1973,5 +2124,88 @@ mod tests {
             object("second".into(), Some("first".into()), true),
         ])
         .is_err());
+    }
+
+    #[test]
+    fn rigid_body_serde_defaults_validation_and_v23_compatibility() {
+        let legacy_v23 = serde_json::json!({
+            "format": "rot-scene",
+            "format_version": 23,
+            "scene": {
+                "id": "legacy",
+                "objects": [{
+                    "id": "box",
+                    "name": "Box",
+                    "enabled": true,
+                    "parent": null,
+                    "transform": {
+                        "translation": [0.0, 2.0, 0.0],
+                        "rotation": [0.0, 0.0, 0.0],
+                        "scale": [1.0, 1.0, 1.0]
+                    },
+                    "components": [{
+                        "id": "rb",
+                        "enabled": true,
+                        "type": "rigid_body"
+                    }]
+                }]
+            }
+        });
+        let parsed = ComponentScene::read_json(legacy_v23.to_string().as_bytes()).unwrap();
+        assert!(parsed.gravity.is_none());
+        assert_eq!(
+            parsed.objects[0].components[0].kind,
+            Component::RigidBody {
+                body_type: RigidBodyType::Dynamic,
+                mass: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.05,
+                gravity_scale: 1.0,
+                lock_translation: [false; 3],
+                lock_rotation: [false; 3],
+                ccd: false,
+            }
+        );
+        // Default fields are omitted from minimal JSON.
+        let mut out = Vec::new();
+        parsed.write_json(&mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(!text.contains("\"mass\""));
+        assert!(!text.contains("\"gravity\""));
+
+        // Validation rejects duplicate RigidBody on the same object and invalid fields.
+        let mut dup = parsed.clone();
+        dup.objects[0].components.push(ComponentInstance {
+            id: "rb2".into(),
+            enabled: true,
+            kind: parsed.objects[0].components[0].kind.clone(),
+        });
+        assert!(dup.validate().is_err());
+
+        for bad_gravity in [[f32::NAN, 0.0, 0.0], [0.0, -1001.0, 0.0]] {
+            let mut bad = parsed.clone();
+            bad.gravity = Some(bad_gravity);
+            assert!(bad.validate().is_err());
+        }
+        for (mass, lin_d, ang_d, g_scale) in [
+            (0.0, 0.0, 0.05, 1.0),
+            (f32::INFINITY, 0.0, 0.05, 1.0),
+            (1.0, -0.1, 0.05, 1.0),
+            (1.0, 0.0, -0.1, 1.0),
+            (1.0, 0.0, 0.05, 101.0),
+        ] {
+            let mut bad = parsed.clone();
+            bad.objects[0].components[0].kind = Component::RigidBody {
+                body_type: RigidBodyType::Dynamic,
+                mass,
+                linear_damping: lin_d,
+                angular_damping: ang_d,
+                gravity_scale: g_scale,
+                lock_translation: [false; 3],
+                lock_rotation: [false; 3],
+                ccd: false,
+            };
+            assert!(bad.validate().is_err());
+        }
     }
 }

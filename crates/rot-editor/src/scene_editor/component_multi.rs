@@ -1,8 +1,12 @@
 //! Mixed values are a view of the selection. Only explicit edits are applied.
-use super::component_inspector::{component_label, geometry_choices, geometry_name, TransformEdit};
+use super::component_inspector::{
+    component_label, geometry_choices, geometry_name, rigid_body_type_label, TransformEdit,
+};
 use crate::{strings::Text, ui_kit};
 use eframe::egui;
-use rot_scene::component_scene::{Component, ComponentInstance, Geometry, ObjectNode};
+use rot_scene::component_scene::{
+    Component, ComponentInstance, Geometry, ObjectNode, RigidBodyType,
+};
 use rot_scene::{ColliderRole, ColliderShape, OpaqueMaterial, SceneError, Transform};
 use std::{collections::BTreeMap, convert::identity, ops::RangeInclusive};
 
@@ -275,6 +279,15 @@ struct ColliderFields {
     size: Vector,
 }
 
+struct RigidBodyFields {
+    body_type: Field<RigidBodyType>,
+    mass: Number,
+    linear_damping: Number,
+    angular_damping: Number,
+    gravity_scale: Number,
+    ccd: Field<bool>,
+}
+
 fn dimensions(shape: ColliderShape) -> (bool, f32, [f32; 3]) {
     match shape {
         ColliderShape::Sphere { radius } => (true, radius, [1.0; 3]),
@@ -287,6 +300,7 @@ fn dimensions(shape: ColliderShape) -> (bool, f32, [f32; 3]) {
 enum Properties {
     Mesh(Box<MeshFields>),
     Collider(Box<ColliderFields>),
+    RigidBody(Box<RigidBodyFields>),
     EnabledOnly,
 }
 
@@ -323,6 +337,22 @@ impl SharedComponent {
                     size: Vector::new(size),
                 }))
             }
+            Component::RigidBody {
+                body_type,
+                mass,
+                linear_damping,
+                angular_damping,
+                gravity_scale,
+                ccd,
+                ..
+            } => Properties::RigidBody(Box::new(RigidBodyFields {
+                body_type: Field::new(*body_type),
+                mass: Number::new(*mass),
+                linear_damping: Number::new(*linear_damping),
+                angular_damping: Number::new(*angular_damping),
+                gravity_scale: Number::new(*gravity_scale),
+                ccd: Field::new(*ccd),
+            })),
             _ => Properties::EnabledOnly,
         };
         Self {
@@ -367,6 +397,25 @@ impl SharedComponent {
                 fields.radius.observe(radius);
                 fields.size.observe(size);
             }
+            (
+                Properties::RigidBody(fields),
+                Component::RigidBody {
+                    body_type,
+                    mass,
+                    linear_damping,
+                    angular_damping,
+                    gravity_scale,
+                    ccd,
+                    ..
+                },
+            ) => {
+                fields.body_type.observe(body_type);
+                fields.mass.observe(*mass);
+                fields.linear_damping.observe(*linear_damping);
+                fields.angular_damping.observe(*angular_damping);
+                fields.gravity_scale.observe(*gravity_scale);
+                fields.ccd.observe(ccd);
+            }
             _ => {}
         }
     }
@@ -388,6 +437,14 @@ impl SharedComponent {
                             Some(false) => fields.size.dirty(),
                             None => false,
                         }
+                }
+                Properties::RigidBody(fields) => {
+                    fields.body_type.edit.is_some()
+                        || fields.mass.dirty()
+                        || fields.linear_damping.dirty()
+                        || fields.angular_damping.dirty()
+                        || fields.gravity_scale.dirty()
+                        || fields.ccd.edit.is_some()
                 }
                 Properties::EnabledOnly => false,
             }
@@ -508,6 +565,61 @@ impl SharedComponent {
                             None => {}
                         }
                     }
+                    Properties::RigidBody(fields) => {
+                        fields.body_type.combo(
+                            ui,
+                            Text::ComponentBodyType,
+                            |bt| rigid_body_type_label(*bt).plain().to_owned(),
+                            [
+                                RigidBodyType::Dynamic,
+                                RigidBodyType::Kinematic,
+                                RigidBodyType::Static,
+                            ],
+                        );
+                        submit |= ui_kit::property_row(ui, Text::ComponentMass.plain(), |ui| {
+                            fields.mass.show(
+                                ui,
+                                Text::ComponentMass.plain(),
+                                ui.available_width(),
+                            )
+                        });
+                        submit |= ui_kit::property_row(
+                            ui,
+                            Text::ComponentLinearDamping.plain(),
+                            |ui| {
+                                fields.linear_damping.show(
+                                    ui,
+                                    Text::ComponentLinearDamping.plain(),
+                                    ui.available_width(),
+                                )
+                            },
+                        );
+                        submit |= ui_kit::property_row(
+                            ui,
+                            Text::ComponentAngularDamping.plain(),
+                            |ui| {
+                                fields.angular_damping.show(
+                                    ui,
+                                    Text::ComponentAngularDamping.plain(),
+                                    ui.available_width(),
+                                )
+                            },
+                        );
+                        submit |= ui_kit::property_row(
+                            ui,
+                            Text::ComponentGravityScale.plain(),
+                            |ui| {
+                                fields.gravity_scale.show(
+                                    ui,
+                                    Text::ComponentGravityScale.plain(),
+                                    ui.available_width(),
+                                )
+                            },
+                        );
+                        fields
+                            .ccd
+                            .checkbox(ui, Text::ComponentContinuousCollision.plain());
+                    }
                     Properties::EnabledOnly => {}
                 }
             });
@@ -564,6 +676,31 @@ impl SharedComponent {
                     }
                     _ => {}
                 }
+            }
+            (
+                Properties::RigidBody(fields),
+                Component::RigidBody {
+                    body_type,
+                    mass,
+                    linear_damping,
+                    angular_damping,
+                    gravity_scale,
+                    ccd,
+                    ..
+                },
+            ) => {
+                fields.body_type.write(body_type);
+                *mass = fields.mass.write(*mass, Text::ComponentMass)?;
+                *linear_damping = fields
+                    .linear_damping
+                    .write(*linear_damping, Text::ComponentLinearDamping)?;
+                *angular_damping = fields
+                    .angular_damping
+                    .write(*angular_damping, Text::ComponentAngularDamping)?;
+                *gravity_scale = fields
+                    .gravity_scale
+                    .write(*gravity_scale, Text::ComponentGravityScale)?;
+                fields.ccd.write(ccd);
             }
             (_, Component::Script { binding, .. }) if self.enabled.edit.is_some() => {
                 binding.enabled = component.enabled

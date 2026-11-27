@@ -22,6 +22,7 @@ use super::lua_component::{
     self, CallbackContext, CallbackWrites, CoroutineScheduler, CurrentCallback, EventBus, Module,
     ModuleProbe, Modules, ObjectLookup, SlotMeta,
 };
+use super::physics::PhysicsState;
 use super::spatial::{world_collider_transform, ComponentColliderSlot};
 use super::spatial_host::{kinematic_owner_component, ComponentQueryInput};
 use super::{
@@ -102,6 +103,7 @@ pub(crate) struct ComponentWorld {
     modules: Option<Rc<RefCell<Modules>>>,
     pub(crate) animations: Vec<ResolvedComponentAnimation>,
     pub(crate) colliders: Arc<Vec<ComponentColliderSlot>>,
+    pub(crate) physics: Option<PhysicsState>,
     pub(crate) draw_plan: Arc<ComponentDrawPlan>,
     pub(crate) audio_emitters: Option<Arc<BTreeMap<String, usize>>>,
     audio_requests: Option<audio::CueRequests>,
@@ -149,7 +151,7 @@ impl RebuiltPopulation {
 
 impl ComponentWorld {
     pub(crate) fn is_static(&self) -> bool {
-        self.scripts.is_empty() && self.animations.is_empty()
+        self.scripts.is_empty() && self.animations.is_empty() && self.physics.is_none()
     }
 
     fn query_snapshot(&self) -> ComponentQueryInput {
@@ -648,6 +650,7 @@ pub struct LiveComponentPatch {
     pub materials: Option<BTreeMap<String, OpaqueMaterial>>,
     pub display: Option<LiveDisplayPatch>,
     pub gameplay_camera: Option<Option<String>>,
+    pub gravity: Option<Option<[f32; 3]>>,
 }
 
 impl LiveComponentPatch {
@@ -659,6 +662,7 @@ impl LiveComponentPatch {
             && self.materials.is_none()
             && self.display.is_none()
             && self.gameplay_camera.is_none()
+            && self.gravity.is_none()
     }
 
     pub fn merge(&mut self, newer: Self) {
@@ -684,6 +688,9 @@ impl LiveComponentPatch {
         }
         if let Some(gameplay_camera) = newer.gameplay_camera {
             self.gameplay_camera = Some(gameplay_camera);
+        }
+        if let Some(gravity) = newer.gravity {
+            self.gravity = Some(gravity);
         }
     }
 
@@ -721,6 +728,9 @@ impl LiveComponentPatch {
         }
         if before.gameplay_camera != after.gameplay_camera {
             patch.gameplay_camera = Some(after.gameplay_camera.clone());
+        }
+        if before.gravity != after.gravity {
+            patch.gravity = Some(after.gravity);
         }
         for (prev, next) in before.objects.iter().zip(after.objects.iter()) {
             if prev.id != next.id
@@ -871,6 +881,7 @@ impl Engine {
         }
 
         let mut staged_local: Option<Vec<Transform>> = None;
+        let mut transformed_owners: Vec<usize> = Vec::new();
         for (object_id, pose) in &patch.transforms {
             let Some(&index) = world.object_indices.get(object_id) else {
                 continue;
@@ -887,6 +898,7 @@ impl Engine {
                 let target = staged_local
                     .get_or_insert_with(|| world.spare_local.clone_from(&world.local_transforms));
                 target[index] = pose.clone();
+                transformed_owners.push(index);
             }
         }
 
@@ -895,7 +907,8 @@ impl Engine {
             || !patch.components.is_empty()
             || patch.materials.is_some()
             || patch.display.is_some()
-            || patch.gameplay_camera.is_some();
+            || patch.gameplay_camera.is_some()
+            || patch.gravity.is_some();
 
         struct ScriptPropUpdate {
             component_id: String,
@@ -909,6 +922,7 @@ impl Engine {
         let mut staged_colliders: Option<Vec<ComponentColliderSlot>> = None;
         let mut staged_draw_plan: Option<Arc<ComponentDrawPlan>> = None;
         let mut staged_overrides: Option<RuntimeVisualOverrides> = None;
+        let mut physics_dirty = false;
         let mut script_prop_updates: Vec<ScriptPropUpdate> = Vec::new();
         let mut animator_updates: Vec<(String, bool, f64)> = Vec::new();
 
@@ -925,6 +939,7 @@ impl Engine {
                 if next_scene.objects[index].enabled != enabled {
                     next_scene.objects[index].enabled = enabled;
                     colliders_dirty = true;
+                    physics_dirty = true;
                 }
                 if next_overrides.object_enabled.remove(&index).is_some() {
                     overrides_changed = true;
@@ -954,6 +969,10 @@ impl Engine {
                     overrides_changed = true;
                 }
             }
+            if let Some(gravity) = &patch.gravity {
+                next_scene.gravity = *gravity;
+                physics_dirty = true;
+            }
 
             for (object_id, updated) in &patch.components {
                 let Some(&index) = world.object_indices.get(object_id) else {
@@ -980,6 +999,10 @@ impl Engine {
                 match &updated.kind {
                     Component::Collider { .. } => {
                         colliders_dirty = true;
+                        physics_dirty = true;
+                    }
+                    Component::RigidBody { .. } => {
+                        physics_dirty = true;
                     }
                     Component::Light { .. } => {
                         if next_overrides.lights.remove(&updated.id).is_some() {
@@ -1117,6 +1140,20 @@ impl Engine {
             eff_local,
             eff_overrides,
         )?;
+        let rebuilt_physics = if physics_dirty {
+            Some(PhysicsState::rebuild_preserving_velocities(
+                world.physics.as_ref(),
+                eff_scene,
+                eff_hierarchy,
+                eff_local,
+                &next_world,
+                &next_rot,
+                eff_colliders,
+                self.limits.fixed_dt,
+            )?)
+        } else {
+            None
+        };
         let next_commit = runtime.commit_revision.checked_add(1).ok_or_else(|| {
             diag(
                 DiagnosticCode::CommitExhausted,
@@ -1162,6 +1199,21 @@ impl Engine {
         let prev_rot = std::mem::replace(&mut world_mut.world_rotations, Arc::new(next_rot));
         if let Ok(vec) = Arc::try_unwrap(prev_rot) {
             world_mut.spare_rotations.put(vec);
+        }
+        if let Some(next_physics) = rebuilt_physics {
+            world_mut.physics = next_physics;
+        } else if !transformed_owners.is_empty() {
+            if let Some(physics) = world_mut.physics.as_mut() {
+                physics.sync_modified_owners(
+                    &world_mut.scene,
+                    &world_mut.hierarchy,
+                    &world_mut.local_transforms,
+                    &world_mut.world_matrices,
+                    &world_mut.world_rotations,
+                    &world_mut.colliders,
+                    &transformed_owners,
+                )?;
+            }
         }
         for (component_id, looping, speed) in animator_updates {
             if let Some(animation) = world_mut
@@ -1371,6 +1423,10 @@ impl Engine {
                 world_matrices: &world.world_matrices,
                 world_rotations: &world.world_rotations,
                 visual_overrides: &world.visual_overrides,
+                physics_velocities: world
+                    .physics
+                    .as_ref()
+                    .map(|p| Rc::new(p.velocity_snapshot())),
                 queries: &queries,
                 audio: audio_cues
                     .as_ref()
@@ -1936,6 +1992,7 @@ impl Engine {
                         world_matrices: &world_matrices,
                         world_rotations: &world_rotations,
                         visual_overrides: &initial_overrides,
+                        physics_velocities: None,
                         queries: queries
                             .as_ref()
                             .expect("component callbacks can run queries"),
@@ -2130,6 +2187,7 @@ impl Engine {
                 modules: built_modules,
                 animations,
                 colliders,
+                physics: None,
                 draw_plan,
                 audio_emitters,
                 audio_requests,
@@ -2176,6 +2234,18 @@ impl Engine {
                     )
                     .map_err(invalid_commit)?;
             }
+            world.physics = PhysicsState::build(
+                &world.scene,
+                &world.hierarchy,
+                &world.local_transforms,
+                &world.world_matrices,
+                &world.world_rotations,
+                &world.colliders,
+                self.limits.fixed_dt,
+            )?;
+            if let (Some(physics), Some(writes)) = (world.physics.as_mut(), reset_writes.as_ref()) {
+                physics.apply_lua_writes(&writes.rigid_bodies);
+            }
         }
         Ok(runtime)
     }
@@ -2216,6 +2286,58 @@ impl Engine {
             runtime.audio_batch = None;
             runtime.query_observations.clear();
             runtime.script_logs.clear();
+            runtime.tick = next;
+            runtime.commit_revision = commit_revision;
+            runtime.last_step_commit_revision = Some(commit_revision);
+            return Ok(());
+        }
+        if world.physics.is_some() && world.scripts.is_empty() && world.animations.is_empty() {
+            self.check_cancelled()?;
+            runtime.audio_batch = None;
+            runtime.query_observations.clear();
+            runtime.script_logs.clear();
+            let world_mut = runtime
+                .component_world
+                .as_mut()
+                .expect("component world checked above");
+            let physics = world_mut.physics.as_mut().expect("physics checked above");
+            physics.step(self.limits.fixed_dt);
+            let mut staged_local: Option<Vec<Transform>> = None;
+            let moved = physics.write_back_transforms(
+                &world_mut.hierarchy,
+                &world_mut.world_matrices,
+                &world_mut.world_rotations,
+                &world_mut.local_transforms,
+                &mut staged_local,
+                |committed| world_mut.spare_local.clone_from(committed),
+            )?;
+            if moved {
+                let next_local = staged_local.expect("moved guarantees staged_local");
+                let (next_world, next_rot, next_draw) = world_mut.resolve_staged_transforms(
+                    &world_mut.scene,
+                    &world_mut.hierarchy,
+                    &world_mut.colliders,
+                    &world_mut.draw_plan,
+                    &next_local,
+                    &world_mut.visual_overrides,
+                )?;
+                runtime.draw_frame = next_draw;
+                let prev_local =
+                    std::mem::replace(&mut world_mut.local_transforms, Arc::new(next_local));
+                if let Ok(vec) = Arc::try_unwrap(prev_local) {
+                    world_mut.spare_local.put(vec);
+                }
+                let prev_world =
+                    std::mem::replace(&mut world_mut.world_matrices, Arc::new(next_world));
+                if let Ok(vec) = Arc::try_unwrap(prev_world) {
+                    world_mut.spare_world.put(vec);
+                }
+                let prev_rot =
+                    std::mem::replace(&mut world_mut.world_rotations, Arc::new(next_rot));
+                if let Ok(vec) = Arc::try_unwrap(prev_rot) {
+                    world_mut.spare_rotations.put(vec);
+                }
+            }
             runtime.tick = next;
             runtime.commit_revision = commit_revision;
             runtime.last_step_commit_revision = Some(commit_revision);
@@ -2339,6 +2461,14 @@ impl Engine {
                     world_matrices: &world.world_matrices,
                     world_rotations: &world.world_rotations,
                     visual_overrides: &world.visual_overrides,
+                    physics_velocities: (!world.scripts.is_empty())
+                        .then(|| {
+                            world
+                                .physics
+                                .as_ref()
+                                .map(|p| Rc::new(p.velocity_snapshot()))
+                        })
+                        .flatten(),
                     queries: queries
                         .as_ref()
                         .expect("component callbacks can run queries"),
@@ -2741,14 +2871,55 @@ impl Engine {
             .as_mut()
             .expect("component world checked above");
         let topology_changed = rebuilt.is_some();
+        let had_pre_physics_transforms = staged_transforms.is_some();
         if let Some(rebuilt) = rebuilt {
             runtime.draw_frame = rebuilt.install(
                 world_mut,
                 modules.as_mut().expect("topology requires Lua modules"),
             );
+            world_mut.physics = PhysicsState::rebuild_preserving_velocities(
+                world_mut.physics.as_ref(),
+                &world_mut.scene,
+                &world_mut.hierarchy,
+                &world_mut.local_transforms,
+                &world_mut.world_matrices,
+                &world_mut.world_rotations,
+                &world_mut.colliders,
+                self.limits.fixed_dt,
+            )?;
         } else if let Some((next_world, next_rot, next_draw)) = staged_frames {
             runtime.draw_frame = next_draw;
-            if let Some(next_local) = staged_transforms {
+            let changed_owners = if had_pre_physics_transforms && world_mut.physics.is_some() {
+                staged_transforms
+                    .as_deref()
+                    .map_or_else(Vec::new, |next_local| {
+                        let mut dirty = vec![false; world_mut.hierarchy.order.len()];
+                        for (idx, (prev, next)) in world_mut
+                            .local_transforms
+                            .iter()
+                            .zip(next_local.iter())
+                            .enumerate()
+                        {
+                            if !same_transform(prev, next) {
+                                dirty[idx] = true;
+                            }
+                        }
+                        let mut owners = Vec::new();
+                        for &idx in &world_mut.hierarchy.order {
+                            if dirty[idx]
+                                || world_mut.hierarchy.parents[idx]
+                                    .is_some_and(|parent| dirty[parent])
+                            {
+                                dirty[idx] = true;
+                                owners.push(idx);
+                            }
+                        }
+                        owners
+                    })
+            } else {
+                Vec::new()
+            };
+            if let Some(next_local) = staged_transforms.take() {
                 let prev_local =
                     std::mem::replace(&mut world_mut.local_transforms, Arc::new(next_local));
                 if let Ok(vec) = Arc::try_unwrap(prev_local) {
@@ -2763,12 +2934,76 @@ impl Engine {
             if let Ok(vec) = Arc::try_unwrap(prev_rot) {
                 world_mut.spare_rotations.put(vec);
             }
+            if !changed_owners.is_empty() {
+                if let Some(physics) = world_mut.physics.as_mut() {
+                    physics.sync_modified_owners(
+                        &world_mut.scene,
+                        &world_mut.hierarchy,
+                        &world_mut.local_transforms,
+                        &world_mut.world_matrices,
+                        &world_mut.world_rotations,
+                        &world_mut.colliders,
+                        &changed_owners,
+                    )?;
+                }
+            }
         } else if let Some(frame) = staged_light_frame {
             runtime.draw_frame = frame;
         }
         if !topology_changed && visual_changed {
             if let Some(next_overrides) = trial_overrides_owned.take() {
                 world_mut.visual_overrides = Arc::new(next_overrides);
+            }
+        }
+        if let Some(mut physics) = world_mut.physics.take() {
+            if let Some(writes) = writes.as_ref() {
+                physics.apply_lua_writes(&writes.rigid_bodies);
+            }
+            physics.step(self.limits.fixed_dt);
+            let mut post_physics_local: Option<Vec<Transform>> = None;
+            let moved = physics.write_back_transforms(
+                &world_mut.hierarchy,
+                &world_mut.world_matrices,
+                &world_mut.world_rotations,
+                &world_mut.local_transforms,
+                &mut post_physics_local,
+                |committed| world_mut.spare_local.clone_from(committed),
+            );
+            let moved = match moved {
+                Ok(moved) => moved,
+                Err(err) => {
+                    world_mut.physics = Some(physics);
+                    return Err(err);
+                }
+            };
+            world_mut.physics = Some(physics);
+            if moved {
+                force_resync = true;
+                let next_local = post_physics_local.expect("moved guarantees local");
+                let (next_world, next_rot, next_draw) = world_mut.resolve_staged_transforms(
+                    &world_mut.scene,
+                    &world_mut.hierarchy,
+                    &world_mut.colliders,
+                    &world_mut.draw_plan,
+                    &next_local,
+                    &world_mut.visual_overrides,
+                )?;
+                runtime.draw_frame = next_draw;
+                let prev_local =
+                    std::mem::replace(&mut world_mut.local_transforms, Arc::new(next_local));
+                if let Ok(vec) = Arc::try_unwrap(prev_local) {
+                    world_mut.spare_local.put(vec);
+                }
+                let prev_world =
+                    std::mem::replace(&mut world_mut.world_matrices, Arc::new(next_world));
+                if let Ok(vec) = Arc::try_unwrap(prev_world) {
+                    world_mut.spare_world.put(vec);
+                }
+                let prev_rot =
+                    std::mem::replace(&mut world_mut.world_rotations, Arc::new(next_rot));
+                if let Ok(vec) = Arc::try_unwrap(prev_rot) {
+                    world_mut.spare_rotations.put(vec);
+                }
             }
         }
         for index in pressed {
@@ -2997,6 +3232,7 @@ mod tests {
             actions: BTreeMap::new(),
             hud: Default::default(),
             gameplay_camera: None,
+            gravity: None,
         }
     }
 

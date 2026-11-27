@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
+Updated 2026-11-27. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 [2026-11-17 archive](archive/STATUS-2026-11-17.md) for earlier entries.
 
 ## Where to work
@@ -13,7 +13,7 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
-## Current phase — Phase 4: Play (`P4-02` Done, Next: `P4-03`)
+## Current phase — Phase 4: Play (`P4-03` Done, Next: `P4-04`)
 
 - **Done (earlier phases):** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`,
   `A-01`–`A-07`, `P-01`–`P-02`), `P-03` platform seams & Windows CI, Phase 2 Core
@@ -32,9 +32,13 @@ Updated 2026-11-26. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   `mlua` pose batch accessors; release 10k bench logic p50 `1.636 ms`, transform-write p50 `1.913 ms`),
   `P4-02` (2026-11-27: live editing during Play without restart via coalesced
   `LiveComponentPatch`, live editable `Play Values` Inspector + `Apply to Scene`,
-  live `Scene Values` scrub/Undo, unlocked live Material/Display/Script Property & MCP edits).
-- **Next:** `P4-03` Rapier3D physics core & `RigidBody`, then physics queries/joints
-  (`P4-04`), skeletal skinning & animation (`P4-05`–`P4-06`), and
+  live `Scene Values` scrub/Undo, unlocked live Material/Display/Script Property & MCP edits),
+  `P4-03` (2026-11-27: Rapier3D physics core replacing direct `parry3d` in one cut,
+  `RigidBody` component + optional scene `gravity`, compound `Collider` sync, Inspector/
+  `Play Values`/`MultiInspector`/MCP, Lua `RigidBody` handle, `rot-player` runtime stepping;
+  release 1k active rigid bodies solver p50 `0.493 ms` / full step p50 `0.720 ms`).
+- **Next:** `P4-04` Physics queries, events, joints & character controller, then
+  skeletal skinning & animation (`P4-05`–`P4-06`), and
   audio/input/UI/cameras/particles/save (`P4-07`–`P4-EXIT`). See [backlog](BACKLOG.md).
 
 ## What a creator can do today

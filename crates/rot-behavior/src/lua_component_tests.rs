@@ -29,6 +29,7 @@ fn empty_component_scene(id: &str) -> ComponentScene {
         actions: BTreeMap::new(),
         hud: Default::default(),
         gameplay_camera: None,
+        gravity: None,
     }
 }
 

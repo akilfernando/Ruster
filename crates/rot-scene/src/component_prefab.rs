@@ -709,6 +709,7 @@ impl PrefabSource {
             actions: BTreeMap::new(),
             hud: Default::default(),
             gameplay_camera: None,
+            gravity: None,
         })
     }
 
@@ -725,6 +726,7 @@ impl PrefabSource {
             || !scene.actions.is_empty()
             || scene.hud != Default::default()
             || scene.gameplay_camera.is_some()
+            || scene.gravity.is_some()
         {
             return Err(invalid(
                 "Scene-wide display, input, HUD, and camera settings do not belong to a prefab.",

@@ -909,4 +909,83 @@ mod tests {
             ActionValue::Button(state) if state == Default::default())
         );
     }
+
+    #[test]
+    fn player_steps_dynamic_rigid_body_under_gravity() {
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("phys")).unwrap()).unwrap();
+        scene.objects.push(rot_scene::component_scene::ObjectNode {
+            id: "crate".into(),
+            name: "Crate".into(),
+            enabled: true,
+            parent: None,
+            transform: rot_scene::Transform {
+                translation: [0.0, 5.0, 0.0],
+                ..Default::default()
+            },
+            components: vec![
+                rot_scene::component_scene::ComponentInstance {
+                    id: "crate-mesh".into(),
+                    enabled: true,
+                    kind: rot_scene::component_scene::Component::MeshRenderer {
+                        geometry: rot_scene::component_scene::Geometry::Cube,
+                        tint: [1.0; 4],
+                        material: None,
+                    },
+                },
+                rot_scene::component_scene::ComponentInstance {
+                    id: "crate-col".into(),
+                    enabled: true,
+                    kind: rot_scene::component_scene::Component::Collider {
+                        role: rot_scene::ColliderRole::Blocker,
+                        offset: [0.0; 3],
+                        shape: rot_scene::ColliderShape::Box {
+                            half_extents: [0.5; 3],
+                        },
+                    },
+                },
+                rot_scene::component_scene::ComponentInstance {
+                    id: "crate-rb".into(),
+                    enabled: true,
+                    kind: rot_scene::component_scene::Component::RigidBody {
+                        body_type: rot_scene::RigidBodyType::Dynamic,
+                        mass: 1.0,
+                        linear_damping: 0.0,
+                        angular_damping: 0.05,
+                        gravity_scale: 1.0,
+                        lock_translation: [false; 3],
+                        lock_rotation: [false; 3],
+                        ccd: false,
+                    },
+                },
+            ],
+        });
+        let dt = rot_behavior::DEFAULT_FIXED_TICK;
+        let app = PlayerApp::from_component_scene(
+            "Physics".into(),
+            Box::new(scene),
+            MeshMap::new(),
+            TextureMap::new(),
+            dt,
+        )
+        .unwrap();
+        let mut runtime = rot_app::Runtime::new(app, dt).unwrap();
+        runtime.reset().unwrap();
+        runtime.set_running(true);
+        for _ in 0..30 {
+            runtime.advance(dt).unwrap();
+        }
+        assert_eq!(runtime.app().runtime_tick(), Some(30));
+        let y = runtime
+            .app()
+            .runtime
+            .as_ref()
+            .unwrap()
+            .object_translation("crate")
+            .unwrap()[1];
+        assert!(
+            y < 4.0,
+            "expected rigid body to fall below y=4.0 after 30 ticks, got y={y}"
+        );
+    }
 }

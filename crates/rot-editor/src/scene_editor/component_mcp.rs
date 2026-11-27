@@ -1923,6 +1923,7 @@ fn component_type(component: &Component) -> &'static str {
     match component {
         Component::MeshRenderer { .. } => "mesh_renderer",
         Component::Collider { .. } => "collider",
+        Component::RigidBody { .. } => "rigid_body",
         Component::Camera { .. } => "camera",
         Component::Light { .. } => "light",
         Component::Animator { .. } => "animator",
@@ -3087,5 +3088,99 @@ mod tests {
             "3"
         );
         assert_eq!(editor.draft.as_ref().unwrap().transform.translation[0], 2.0);
+    }
+
+    #[test]
+    fn mcp_and_editor_rigid_body_edit_undo_and_reopen_roundtrip() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scene.json");
+        let scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.save_new(&path).unwrap();
+        let mut editor =
+            ComponentWorkspace::new(path.clone(), ComponentSession::open(&path).unwrap());
+        let obj_id = scene.objects[0].id.clone();
+        let token = "rb-token";
+
+        let added = editor.ai_command(
+            token,
+            "scene_components_edit",
+            &json!({
+                "expected_session_token": token,
+                "expected_revision": "0",
+                "edits": [{
+                    "operation": "add",
+                    "object_id": obj_id,
+                    "component": {
+                        "id": "cube-rb",
+                        "enabled": true,
+                        "type": "rigid_body",
+                        "body_type": "dynamic",
+                        "mass": 2.5
+                    }
+                }]
+            }),
+        );
+        assert_eq!(added["result"]["revision"], "1");
+
+        let inspected = editor.ai_command(
+            token,
+            "scene_components_inspect",
+            &json!({ "object_id": obj_id }),
+        );
+        let comps = inspected["result"]["components"].as_array().unwrap();
+        assert!(comps
+            .iter()
+            .any(|c| c["id"] == "cube-rb" && c["type"] == "rigid_body"));
+
+        let replaced = editor.ai_command(
+            token,
+            "scene_components_edit",
+            &json!({
+                "expected_session_token": token,
+                "expected_revision": "1",
+                "edits": [{
+                    "operation": "replace",
+                    "object_id": obj_id,
+                    "component": {
+                        "id": "cube-rb",
+                        "enabled": true,
+                        "type": "rigid_body",
+                        "body_type": "kinematic",
+                        "ccd": true
+                    }
+                }]
+            }),
+        );
+        assert_eq!(replaced["result"]["revision"], "2");
+
+        editor.command(Action::Save);
+        let reopened = ComponentSession::open(&path).unwrap();
+        assert!(reopened.scene().objects[0].components.iter().any(|c| {
+            c.id == "cube-rb"
+                && matches!(
+                    c.kind,
+                    Component::RigidBody {
+                        body_type: rot_scene::RigidBodyType::Kinematic,
+                        ccd: true,
+                        ..
+                    }
+                )
+        }));
+
+        editor.command(Action::Undo);
+        assert!(editor.session.scene().objects[0]
+            .components
+            .iter()
+            .any(|c| {
+                c.id == "cube-rb"
+                    && matches!(
+                        c.kind,
+                        Component::RigidBody {
+                            body_type: rot_scene::RigidBodyType::Dynamic,
+                            mass,
+                            ..
+                        } if (mass - 2.5).abs() < 1e-6
+                    )
+            }));
     }
 }

@@ -1,8 +1,8 @@
 //! Invocation-local primitive queries against one immutable authored Scene.
 //! Clearance is a conservative f32 representation margin, not penetration.
-use parry3d::math::{Pose, Rotation, Vector};
-use parry3d::query::{self, Contact, ShapeCastHit, ShapeCastOptions, ShapeCastStatus};
-use parry3d::shape::{Ball, Cuboid, Shape};
+use rapier3d_f64::parry::math::{Pose, Rotation, Vector};
+use rapier3d_f64::parry::query::{self, Contact, ShapeCastHit, ShapeCastOptions, ShapeCastStatus};
+use rapier3d_f64::parry::shape::{Ball, Cuboid, Shape};
 use rot_scene::{Collider, ColliderRole, ResolvedCollider, ResolvedShape, Scene, Transform};
 use serde::Serialize;
 

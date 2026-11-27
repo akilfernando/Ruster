@@ -46,6 +46,7 @@ mod component_runtime;
 pub use component_runtime::{LiveComponentPatch, LiveDisplayPatch};
 mod component_topology;
 mod lua_component;
+mod physics;
 
 /// Exact current editor/Scene11 export quantum (~60Hz). The public Engine
 /// Limits default retains its original numerical dt for API1 callers.

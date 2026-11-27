@@ -10,7 +10,7 @@ use mlua::{
     AnyUserData, Function, Lua, LuaString, Table, Thread, UserData, UserDataFields,
     UserDataMethods, Value,
 };
-use rot_scene::component_scene::{Component, ComponentScene, TransformLens};
+use rot_scene::component_scene::{Component, ComponentScene, RigidBodyType, TransformLens};
 use rot_scene::input::ValidatedActionFrame;
 use rot_scene::{
     BehaviorSource, Light, LightRuntimeOverride, MeshRuntimeOverride, PropertyValue,
@@ -19,6 +19,7 @@ use rot_scene::{
 
 use super::audio::{has_sound_cue, CueContext};
 use super::component_topology::{ObjectSession, TopologyEdits};
+use super::physics::{RigidBodyWrite, VelocityMap};
 use super::spatial_host::QueryInvocation;
 use super::{
     action_axis, action_button, property_value, read_transform, same_transform, transform_table,
@@ -1511,6 +1512,9 @@ pub(super) struct ObjectLookup {
     cameras: Vec<CameraSlot>,
     camera_indices: HashMap<String, usize>,
     first_camera_indices: HashMap<usize, usize>,
+    rigid_bodies: Vec<RigidBodySlot>,
+    rigid_body_indices: HashMap<String, usize>,
+    first_rigid_body_indices: HashMap<usize, usize>,
     pub(super) slots: Arc<Vec<SlotMeta>>,
 }
 
@@ -1540,6 +1544,18 @@ struct CameraSlot {
     is_gameplay_camera: bool,
 }
 
+#[derive(Debug)]
+struct RigidBodySlot {
+    id: String,
+    owner: usize,
+    authored_enabled: bool,
+    body_type: RigidBodyType,
+    mass: f32,
+    linear_damping: f32,
+    angular_damping: f32,
+    gravity_scale: f32,
+}
+
 impl ObjectLookup {
     pub(super) fn new(
         session: Rc<ObjectSession>,
@@ -1561,6 +1577,9 @@ impl ObjectLookup {
         let mut cameras = Vec::new();
         let mut camera_indices = HashMap::new();
         let mut first_camera_indices = HashMap::new();
+        let mut rigid_bodies = Vec::new();
+        let mut rigid_body_indices = HashMap::new();
+        let mut first_rigid_body_indices = HashMap::new();
         let gameplay_camera = scene.gameplay_camera.as_deref();
         for (index, object) in objects.iter().enumerate() {
             names.entry(object.name.clone()).or_insert(index);
@@ -1609,6 +1628,29 @@ impl ObjectLookup {
                             is_gameplay_camera: gameplay_camera == Some(component.id.as_str()),
                         });
                     }
+                    Component::RigidBody {
+                        body_type,
+                        mass,
+                        linear_damping,
+                        angular_damping,
+                        gravity_scale,
+                        ..
+                    } => {
+                        first_rigid_body_indices
+                            .entry(index)
+                            .or_insert(rigid_bodies.len());
+                        rigid_body_indices.insert(component.id.clone(), rigid_bodies.len());
+                        rigid_bodies.push(RigidBodySlot {
+                            id: component.id.clone(),
+                            owner: index,
+                            authored_enabled: component.enabled,
+                            body_type: *body_type,
+                            mass: *mass,
+                            linear_damping: *linear_damping,
+                            angular_damping: *angular_damping,
+                            gravity_scale: *gravity_scale,
+                        });
+                    }
                     _ => {}
                 }
             }
@@ -1638,6 +1680,9 @@ impl ObjectLookup {
             cameras,
             camera_indices,
             first_camera_indices,
+            rigid_bodies,
+            rigid_body_indices,
+            first_rigid_body_indices,
             slots,
         }
     }
@@ -1685,6 +1730,7 @@ pub(super) struct CallbackWrites {
     pub(super) camera_enabled: Option<bool>,
     pub(super) secondary_camera_fovs: BTreeMap<String, f32>,
     pub(super) secondary_camera_enabled: BTreeMap<String, bool>,
+    pub(super) rigid_bodies: BTreeMap<String, RigidBodyWrite>,
 }
 
 pub(super) struct CallbackSnapshot {
@@ -1694,6 +1740,7 @@ pub(super) struct CallbackSnapshot {
     world_matrices: Arc<Vec<DMat4>>,
     world_rotations: Arc<Vec<DQuat>>,
     visual_overrides: Arc<RuntimeVisualOverrides>,
+    physics_velocities: Option<Rc<VelocityMap>>,
     queries: Rc<QueryInvocation>,
     audio: Option<CueContext>,
     events: Option<Rc<RefCell<EventBus>>>,
@@ -1800,6 +1847,7 @@ pub(super) struct CallbackContext<'a> {
     pub(super) world_matrices: &'a Arc<Vec<DMat4>>,
     pub(super) world_rotations: &'a Arc<Vec<DQuat>>,
     pub(super) visual_overrides: &'a Arc<RuntimeVisualOverrides>,
+    pub(super) physics_velocities: Option<Rc<VelocityMap>>,
     pub(super) queries: &'a Rc<QueryInvocation>,
     pub(super) audio: Option<CueContext>,
     pub(super) events: Option<Rc<RefCell<EventBus>>>,
@@ -1818,6 +1866,7 @@ impl CurrentCallback {
             world_matrices: Arc::clone(ctx.world_matrices),
             world_rotations: Arc::clone(ctx.world_rotations),
             visual_overrides: Arc::clone(ctx.visual_overrides),
+            physics_velocities: ctx.physics_velocities,
             queries: Rc::clone(ctx.queries),
             audio: ctx.audio,
             events: ctx.events,
@@ -1927,7 +1976,8 @@ impl CurrentCallback {
             || writes.camera_fov.is_some()
             || writes.camera_enabled.is_some()
             || !writes.secondary_camera_fovs.is_empty()
-            || !writes.secondary_camera_enabled.is_empty();
+            || !writes.secondary_camera_enabled.is_empty()
+            || !writes.rigid_bodies.is_empty();
         has_other.then_some(writes)
     }
 
@@ -2189,6 +2239,20 @@ impl UserData for ObjectHandle {
                         })
                     })
                     .transpose(),
+                    b"RigidBody" => component_index_for_object(
+                        owner,
+                        id,
+                        &lookup.rigid_body_indices,
+                        &lookup.first_rigid_body_indices,
+                        |idx| lookup.rigid_bodies[idx].owner,
+                    )
+                    .map(|idx| {
+                        lua.create_userdata(RigidBodyHandle {
+                            session: Rc::downgrade(&lookup.session),
+                            id: lookup.rigid_bodies[idx].id.clone(),
+                        })
+                    })
+                    .transpose(),
                     _ => Ok(None),
                 }
             },
@@ -2442,6 +2506,209 @@ impl UserData for CameraHandle {
             Ok(())
         });
     }
+}
+
+struct RigidBodyHandle {
+    session: Weak<ObjectSession>,
+    id: String,
+}
+
+impl RigidBodyHandle {
+    fn index_in(&self, snapshot: &CallbackSnapshot) -> Option<usize> {
+        if !snapshot.owns(&self.session) {
+            return None;
+        }
+        snapshot.lookup.rigid_body_indices.get(&self.id).copied()
+    }
+
+    fn current_velocity(&self, snapshot: &CallbackSnapshot) -> [f32; 3] {
+        if let Some(Some(v)) = snapshot
+            .writes
+            .borrow()
+            .rigid_bodies
+            .get(&self.id)
+            .map(|w| w.velocity)
+        {
+            return v;
+        }
+        snapshot
+            .physics_velocities
+            .as_ref()
+            .and_then(|map| map.get(&self.id))
+            .map(|(v, _)| *v)
+            .unwrap_or([0.0; 3])
+    }
+
+    fn current_angular_velocity(&self, snapshot: &CallbackSnapshot) -> [f32; 3] {
+        if let Some(Some(w)) = snapshot
+            .writes
+            .borrow()
+            .rigid_bodies
+            .get(&self.id)
+            .map(|w| w.angular_velocity)
+        {
+            return w;
+        }
+        snapshot
+            .physics_velocities
+            .as_ref()
+            .and_then(|map| map.get(&self.id))
+            .map(|(_, w)| *w)
+            .unwrap_or([0.0; 3])
+    }
+}
+
+impl UserData for RigidBodyHandle {
+    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("body_type", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            Ok(handle.index_in(&snapshot).map(|idx| {
+                match snapshot.lookup.rigid_bodies[idx].body_type {
+                    RigidBodyType::Dynamic => "dynamic",
+                    RigidBodyType::Kinematic => "kinematic",
+                    RigidBodyType::Static => "static",
+                }
+            }))
+        });
+        fields.add_field_method_get("mass", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            Ok(handle
+                .index_in(&snapshot)
+                .map(|idx| snapshot.lookup.rigid_bodies[idx].mass))
+        });
+        fields.add_field_method_get("linear_damping", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            Ok(handle
+                .index_in(&snapshot)
+                .map(|idx| snapshot.lookup.rigid_bodies[idx].linear_damping))
+        });
+        fields.add_field_method_get("angular_damping", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            Ok(handle
+                .index_in(&snapshot)
+                .map(|idx| snapshot.lookup.rigid_bodies[idx].angular_damping))
+        });
+        fields.add_field_method_get("gravity_scale", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            Ok(handle
+                .index_in(&snapshot)
+                .map(|idx| snapshot.lookup.rigid_bodies[idx].gravity_scale))
+        });
+        fields.add_field_method_get("enabled", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            Ok(handle
+                .index_in(&snapshot)
+                .map(|idx| snapshot.lookup.rigid_bodies[idx].authored_enabled))
+        });
+        fields.add_field_method_get("velocity", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            if handle.index_in(&snapshot).is_none() {
+                return Ok(None);
+            }
+            let vel = handle.current_velocity(&snapshot);
+            lua.create_sequence_from(vel.map(f64::from)).map(Some)
+        });
+        fields.add_field_method_get("angular_velocity", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            if handle.index_in(&snapshot).is_none() {
+                return Ok(None);
+            }
+            let vel = handle.current_angular_velocity(&snapshot);
+            lua.create_sequence_from(vel.map(f64::from)).map(Some)
+        });
+    }
+
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("set_velocity", |lua, handle, table: Table| {
+            let snapshot = current_callback(lua)?;
+            handle.index_in(&snapshot).ok_or_else(|| {
+                mlua::Error::runtime(
+                    "set_velocity requires a RigidBody from the current Play session",
+                )
+            })?;
+            let vec = read_physics_vec3(&table, "velocity")?;
+            snapshot.writes_dirty.set(true);
+            snapshot
+                .writes
+                .borrow_mut()
+                .rigid_bodies
+                .entry(handle.id.clone())
+                .or_default()
+                .velocity = Some([vec[0] as f32, vec[1] as f32, vec[2] as f32]);
+            Ok(())
+        });
+        methods.add_method("set_angular_velocity", |lua, handle, table: Table| {
+            let snapshot = current_callback(lua)?;
+            handle.index_in(&snapshot).ok_or_else(|| {
+                mlua::Error::runtime(
+                    "set_angular_velocity requires a RigidBody from the current Play session",
+                )
+            })?;
+            let vec = read_physics_vec3(&table, "angular_velocity")?;
+            snapshot.writes_dirty.set(true);
+            snapshot
+                .writes
+                .borrow_mut()
+                .rigid_bodies
+                .entry(handle.id.clone())
+                .or_default()
+                .angular_velocity = Some([vec[0] as f32, vec[1] as f32, vec[2] as f32]);
+            Ok(())
+        });
+        methods.add_method("add_force", |lua, handle, table: Table| {
+            let snapshot = current_callback(lua)?;
+            handle.index_in(&snapshot).ok_or_else(|| {
+                mlua::Error::runtime("add_force requires a RigidBody from the current Play session")
+            })?;
+            let vec = read_physics_vec3(&table, "force")?;
+            snapshot.writes_dirty.set(true);
+            let mut writes = snapshot.writes.borrow_mut();
+            let entry = writes.rigid_bodies.entry(handle.id.clone()).or_default();
+            entry.force_accum[0] += vec[0];
+            entry.force_accum[1] += vec[1];
+            entry.force_accum[2] += vec[2];
+            entry.has_force = true;
+            Ok(())
+        });
+        methods.add_method("add_impulse", |lua, handle, table: Table| {
+            let snapshot = current_callback(lua)?;
+            handle.index_in(&snapshot).ok_or_else(|| {
+                mlua::Error::runtime(
+                    "add_impulse requires a RigidBody from the current Play session",
+                )
+            })?;
+            let vec = read_physics_vec3(&table, "impulse")?;
+            snapshot.writes_dirty.set(true);
+            let mut writes = snapshot.writes.borrow_mut();
+            let entry = writes.rigid_bodies.entry(handle.id.clone()).or_default();
+            entry.impulse_accum[0] += vec[0];
+            entry.impulse_accum[1] += vec[1];
+            entry.impulse_accum[2] += vec[2];
+            entry.has_impulse = true;
+            Ok(())
+        });
+    }
+}
+
+fn read_physics_vec3(table: &Table, name: &str) -> mlua::Result<[f64; 3]> {
+    if table.raw_len() != 3 {
+        return Err(mlua::Error::runtime(format!(
+            "{name} requires 3 finite numbers {{x, y, z}}"
+        )));
+    }
+    let mut out = [0.0f64; 3];
+    for (idx, slot) in out.iter_mut().enumerate() {
+        let num = match table.raw_get::<Value>((idx + 1) as i64)? {
+            Value::Number(v) => v,
+            Value::Integer(v) => v as f64,
+            _ => return Err(mlua::Error::runtime(format!("{name} requires numbers"))),
+        };
+        if !num.is_finite() {
+            return Err(mlua::Error::runtime(format!("{name} must be finite")));
+        }
+        *slot = num;
+    }
+    Ok(out)
 }
 
 fn read_unit_channel(value: Value, name: &str) -> mlua::Result<f32> {

@@ -165,7 +165,8 @@ pub(super) fn merge_live_into_authored(authored: &ObjectNode, live: &ObjectNode)
         match (&mut auth_comp.kind, &live_comp.kind) {
             (Component::Light { .. }, Component::Light { .. })
             | (Component::MeshRenderer { .. }, Component::MeshRenderer { .. })
-            | (Component::Camera { .. }, Component::Camera { .. }) => {
+            | (Component::Camera { .. }, Component::Camera { .. })
+            | (Component::RigidBody { .. }, Component::RigidBody { .. }) => {
                 auth_comp.enabled = live_comp.enabled;
                 auth_comp.kind = live_comp.kind.clone();
             }
@@ -288,6 +289,7 @@ pub(super) fn show(
                         | Component::MeshRenderer { .. }
                         | Component::Camera { .. }
                         | Component::Script { .. }
+                        | Component::RigidBody { .. }
                 );
                 if !collapsible_open {
                     return;
@@ -302,6 +304,7 @@ pub(super) fn show(
                             Component::Light { .. }
                                 | Component::MeshRenderer { .. }
                                 | Component::Camera { .. }
+                                | Component::RigidBody { .. }
                         );
                         if supports_toggle {
                             ui.checkbox(
@@ -337,6 +340,28 @@ pub(super) fn show(
                                 if matches!(view, CameraView::Transform(_)) {
                                     component_inspector::transform_camera_fields(ui, view);
                                 }
+                            }
+                            Component::RigidBody {
+                                body_type,
+                                mass,
+                                linear_damping,
+                                angular_damping,
+                                gravity_scale,
+                                lock_translation,
+                                lock_rotation,
+                                ccd,
+                            } => {
+                                component_inspector::rigid_body_fields(
+                                    ui,
+                                    body_type,
+                                    mass,
+                                    linear_damping,
+                                    angular_damping,
+                                    gravity_scale,
+                                    lock_translation,
+                                    lock_rotation,
+                                    ccd,
+                                );
                             }
                             Component::Script { binding, .. } => {
                                 let comp_id = component.id.clone();

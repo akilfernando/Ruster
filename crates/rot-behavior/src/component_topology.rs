@@ -100,7 +100,8 @@ impl ObjectSession {
                     Component::Animator { .. } => "Animator",
                     Component::MeshRenderer { .. }
                     | Component::Light { .. }
-                    | Component::Collider { .. } => continue,
+                    | Component::Collider { .. }
+                    | Component::RigidBody { .. } => continue,
                 };
                 return Err(format!(
                     "cannot spawn template containing {kind} {} on {}",

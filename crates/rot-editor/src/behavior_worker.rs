@@ -3887,6 +3887,7 @@ mod tests {
             actions: BTreeMap::new(),
             hud: Default::default(),
             gameplay_camera: None,
+            gravity: None,
         };
         let mut light_obj = ObjectNode {
             id: "lamp".into(),
