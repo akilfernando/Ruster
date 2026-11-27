@@ -7,7 +7,8 @@
 
 Removed with --apply: worktrees with no uncommitted changes whose commit is
 already on the trunk, branches merged into the trunk, and /tmp/rot-* entries
-older than a day. --discard-edits also removes merged worktrees that hold
+and loose .rot-* folders beside the checkout that are older than a day.
+--discard-edits also removes merged worktrees that hold
 uncommitted measurement edits. --build-output also deletes debug build output
 and loose folders under target/. The next build is a full rebuild, and an AI
 app whose MCP entry points at target/debug/rot-mcp cannot start the adapter
@@ -137,6 +138,19 @@ def main():
             else:
                 shutil.rmtree(path, ignore_errors=True)
         freed += stale_bytes
+
+    print("Loose folders")
+    live = {str(entry["path"].resolve()) for entry in worktrees()}
+    candidates = list(ROOT.parent.glob(".rot-*")) + list((ROOT / ".claude" / "worktrees").glob("*"))
+    loose = [p for p in candidates if p.is_dir() and not p.is_symlink() and str(p.resolve()) not in live and p.lstat().st_mtime < cutoff]
+    loose_bytes = sum(size(p) for p in loose)
+    print(f"  {len(loose)} folders that are not worktrees, {human(loose_bytes)} (old measurement logs and build caches)")
+    for path in loose:
+        print(f"    {path}")
+    if args.apply:
+        for path in loose:
+            shutil.rmtree(path, ignore_errors=True)
+        freed += loose_bytes
 
     print("Build output")
     target = ROOT / "target"
