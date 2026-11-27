@@ -4258,6 +4258,7 @@ impl ComponentWorkspace {
                                         &self.material_files,
                                         component_inspector::ComponentControls {
                                             actions: &self.session.scene().actions,
+                                            scene_objects: &self.session.scene().objects,
                                             allow_new_material: allow_new,
                                             allow_light_aim: allow_inspector_actions,
                                             allow_sound_cues: allow_inspector_actions,

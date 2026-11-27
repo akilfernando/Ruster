@@ -497,6 +497,8 @@ impl ComponentDrawPlan {
                     Component::Camera { .. }
                     | Component::Collider { .. }
                     | Component::RigidBody { .. }
+                    | Component::Joint { .. }
+                    | Component::CharacterController { .. }
                     | Component::Animator { .. }
                     | Component::Script { .. } => {}
                 }

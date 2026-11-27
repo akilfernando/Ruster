@@ -166,7 +166,9 @@ pub(super) fn merge_live_into_authored(authored: &ObjectNode, live: &ObjectNode)
             (Component::Light { .. }, Component::Light { .. })
             | (Component::MeshRenderer { .. }, Component::MeshRenderer { .. })
             | (Component::Camera { .. }, Component::Camera { .. })
-            | (Component::RigidBody { .. }, Component::RigidBody { .. }) => {
+            | (Component::RigidBody { .. }, Component::RigidBody { .. })
+            | (Component::Joint { .. }, Component::Joint { .. })
+            | (Component::CharacterController { .. }, Component::CharacterController { .. }) => {
                 auth_comp.enabled = live_comp.enabled;
                 auth_comp.kind = live_comp.kind.clone();
             }
@@ -290,6 +292,8 @@ pub(super) fn show(
                         | Component::Camera { .. }
                         | Component::Script { .. }
                         | Component::RigidBody { .. }
+                        | Component::Joint { .. }
+                        | Component::CharacterController { .. }
                 );
                 if !collapsible_open {
                     return;
@@ -305,6 +309,8 @@ pub(super) fn show(
                                 | Component::MeshRenderer { .. }
                                 | Component::Camera { .. }
                                 | Component::RigidBody { .. }
+                                | Component::Joint { .. }
+                                | Component::CharacterController { .. }
                         );
                         if supports_toggle {
                             ui.checkbox(
@@ -361,6 +367,59 @@ pub(super) fn show(
                                     lock_translation,
                                     lock_rotation,
                                     ccd,
+                                );
+                            }
+                            Component::Joint {
+                                kind,
+                                connected_body,
+                                anchor,
+                                connected_anchor,
+                                axis,
+                                limits,
+                                rest_length,
+                                stiffness,
+                                damping,
+                                collide_connected,
+                            } => {
+                                let scene_objects = frame
+                                    .component_scene
+                                    .as_deref()
+                                    .map_or(&[][..], |scene| &scene.objects);
+                                component_inspector::joint_fields(
+                                    ui,
+                                    &live.id,
+                                    &comp_id,
+                                    scene_objects,
+                                    kind,
+                                    connected_body,
+                                    anchor,
+                                    connected_anchor,
+                                    axis,
+                                    limits,
+                                    rest_length,
+                                    stiffness,
+                                    damping,
+                                    collide_connected,
+                                );
+                            }
+                            Component::CharacterController {
+                                radius,
+                                height,
+                                offset,
+                                slope_limit_degrees,
+                                step_height,
+                                skin_width,
+                                snap_to_ground,
+                            } => {
+                                component_inspector::character_controller_fields(
+                                    ui,
+                                    radius,
+                                    height,
+                                    offset,
+                                    slope_limit_degrees,
+                                    step_height,
+                                    skin_width,
+                                    snap_to_ground,
                                 );
                             }
                             Component::Script { binding, .. } => {

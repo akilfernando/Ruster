@@ -13,7 +13,7 @@ Updated 2026-11-27. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
-## Current phase — Phase 4: Play (`P4-03` Done, Next: `P4-04`)
+## Current phase — Phase 4: Play (`P4-04` Done, Next: `P4-05`)
 
 - **Done (earlier phases):** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`,
   `A-01`–`A-07`, `P-01`–`P-02`), `P-03` platform seams & Windows CI, Phase 2 Core
@@ -36,9 +36,13 @@ Updated 2026-11-27. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   `P4-03` (2026-11-27: Rapier3D physics core replacing direct `parry3d` in one cut,
   `RigidBody` component + optional scene `gravity`, compound `Collider` sync, Inspector/
   `Play Values`/`MultiInspector`/MCP, Lua `RigidBody` handle, `rot-player` runtime stepping;
-  release 1k active rigid bodies solver p50 `0.493 ms` / full step p50 `0.720 ms`).
-- **Next:** `P4-04` Physics queries, events, joints & character controller, then
-  skeletal skinning & animation (`P4-05`–`P4-06`), and
+  release 1k active rigid bodies solver p50 `0.493 ms` / full step p50 `0.720 ms`),
+  `P4-04` (2026-11-27: `host.raycast` / `host.shapecast` + tick-0 broad-phase refresh,
+  `on_collision_enter`/`exit` & `on_trigger_enter`/`exit` with atomic rollback, `Component::Joint`
+  [`Fixed`/`Hinge`/`Slider`/`Ball`/`Spring`] & `Component::CharacterController` with
+  Inspector/`Play Values`/MCP/`rot-player`; 1k rigid bodies solver p50 `0.553 ms` /
+  engine p50 `0.793 ms`, 10k scripts logic p50 `1.620 ms` / transform-write p50 `1.934 ms`).
+- **Next:** `P4-05` glTF skeletal skinning & GPU skinning (`P4-05`–`P4-06`), and
   audio/input/UI/cameras/particles/save (`P4-07`–`P4-EXIT`). See [backlog](BACKLOG.md).
 
 ## What a creator can do today

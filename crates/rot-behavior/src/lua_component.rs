@@ -19,7 +19,9 @@ use rot_scene::{
 
 use super::audio::{has_sound_cue, CueContext};
 use super::component_topology::{ObjectSession, TopologyEdits};
-use super::physics::{RigidBodyWrite, VelocityMap};
+use super::physics::{
+    CastShapeSpec, CharacterMoveWrite, ContactEventKind, PhysicsHit, PhysicsState, RigidBodyWrite,
+};
 use super::spatial_host::QueryInvocation;
 use super::{
     action_axis, action_button, property_value, read_transform, same_transform, transform_table,
@@ -38,6 +40,7 @@ const MAX_COROUTINES_PER_MODULE: usize = 64;
 const MAX_COROUTINES_TOTAL: usize = 4096;
 const MAX_LOGS_PER_TICK: usize = 64;
 const MAX_LOG_MESSAGE_BYTES: usize = 512;
+const MAX_PHYSICS_QUERIES_PER_TICK: u32 = 1024;
 
 /// Before baked files carried explicit provenance, these were identified by
 /// their generated ID and label. Keep old packages on that admission path.
@@ -445,6 +448,39 @@ fn build_host_table(
     host.raw_set("spawn", lua.create_function(spawn_object)?)?;
     host.raw_set("destroy", lua.create_function(destroy_object)?)?;
     host.raw_set(
+        "raycast",
+        lua.create_function(
+            |lua, (origin, direction, max_distance, options): (Table, Table, f64, Option<Table>)| {
+                let snapshot = current_callback(lua)?;
+                raycast_lua(lua, &snapshot, &origin, &direction, max_distance, options.as_ref())
+            },
+        )?,
+    )?;
+    host.raw_set(
+        "shapecast",
+        lua.create_function(
+            |lua,
+             (shape, origin, direction, max_distance, options): (
+                Table,
+                Table,
+                Table,
+                f64,
+                Option<Table>,
+            )| {
+                let snapshot = current_callback(lua)?;
+                shapecast_lua(
+                    lua,
+                    &snapshot,
+                    &shape,
+                    &origin,
+                    &direction,
+                    max_distance,
+                    options.as_ref(),
+                )
+            },
+        )?,
+    )?;
+    host.raw_set(
         "sweep",
         lua.create_function(|lua, (probe, delta): (AnyUserData, Table)| {
             let snapshot = current_callback(lua)?;
@@ -635,10 +671,25 @@ fn build_host_table(
 pub(super) struct Module {
     start: Option<Function>,
     update: Option<Function>,
+    on_collision_enter: Option<Function>,
+    on_collision_exit: Option<Function>,
+    on_trigger_enter: Option<Function>,
+    on_trigger_exit: Option<Function>,
     pub(super) host: Table,
     pub(super) props: Table,
     pub(super) last_attempt: u64,
     pub(super) source_hash: String,
+}
+
+impl Module {
+    pub(super) fn handles_contact_event(&self, kind: ContactEventKind) -> bool {
+        match kind {
+            ContactEventKind::CollisionEnter => self.on_collision_enter.is_some(),
+            ContactEventKind::CollisionExit => self.on_collision_exit.is_some(),
+            ContactEventKind::TriggerEnter => self.on_trigger_enter.is_some(),
+            ContactEventKind::TriggerExit => self.on_trigger_exit.is_some(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1143,7 +1194,7 @@ impl Drop for EventDepthGuard<'_> {
     }
 }
 
-struct ActiveSlotGuard<'a> {
+pub(super) struct ActiveSlotGuard<'a> {
     slot: &'a Cell<usize>,
     prev_slot: usize,
     override_depth: &'a Cell<u32>,
@@ -1156,7 +1207,7 @@ impl Drop for ActiveSlotGuard<'_> {
     }
 }
 
-fn push_slot_override<'a>(
+pub(super) fn push_slot_override<'a>(
     snapshot: &'a CallbackSnapshot,
     module_index: usize,
 ) -> ActiveSlotGuard<'a> {
@@ -1515,6 +1566,9 @@ pub(super) struct ObjectLookup {
     rigid_bodies: Vec<RigidBodySlot>,
     rigid_body_indices: HashMap<String, usize>,
     first_rigid_body_indices: HashMap<usize, usize>,
+    character_controllers: Vec<CharacterControllerSlotMeta>,
+    cc_indices: HashMap<String, usize>,
+    first_cc_indices: HashMap<usize, usize>,
     pub(super) slots: Arc<Vec<SlotMeta>>,
 }
 
@@ -1556,6 +1610,17 @@ struct RigidBodySlot {
     gravity_scale: f32,
 }
 
+#[derive(Debug)]
+struct CharacterControllerSlotMeta {
+    id: String,
+    owner: usize,
+    authored_enabled: bool,
+    radius: f32,
+    height: f32,
+    slope_limit_degrees: f32,
+    step_height: f32,
+}
+
 impl ObjectLookup {
     pub(super) fn new(
         session: Rc<ObjectSession>,
@@ -1580,6 +1645,9 @@ impl ObjectLookup {
         let mut rigid_bodies = Vec::new();
         let mut rigid_body_indices = HashMap::new();
         let mut first_rigid_body_indices = HashMap::new();
+        let mut character_controllers = Vec::new();
+        let mut cc_indices = HashMap::new();
+        let mut first_cc_indices = HashMap::new();
         let gameplay_camera = scene.gameplay_camera.as_deref();
         for (index, object) in objects.iter().enumerate() {
             names.entry(object.name.clone()).or_insert(index);
@@ -1651,6 +1719,27 @@ impl ObjectLookup {
                             gravity_scale: *gravity_scale,
                         });
                     }
+                    Component::CharacterController {
+                        radius,
+                        height,
+                        slope_limit_degrees,
+                        step_height,
+                        ..
+                    } => {
+                        first_cc_indices
+                            .entry(index)
+                            .or_insert(character_controllers.len());
+                        cc_indices.insert(component.id.clone(), character_controllers.len());
+                        character_controllers.push(CharacterControllerSlotMeta {
+                            id: component.id.clone(),
+                            owner: index,
+                            authored_enabled: component.enabled,
+                            radius: *radius,
+                            height: *height,
+                            slope_limit_degrees: *slope_limit_degrees,
+                            step_height: *step_height,
+                        });
+                    }
                     _ => {}
                 }
             }
@@ -1683,6 +1772,9 @@ impl ObjectLookup {
             rigid_bodies,
             rigid_body_indices,
             first_rigid_body_indices,
+            character_controllers,
+            cc_indices,
+            first_cc_indices,
             slots,
         }
     }
@@ -1731,6 +1823,8 @@ pub(super) struct CallbackWrites {
     pub(super) secondary_camera_fovs: BTreeMap<String, f32>,
     pub(super) secondary_camera_enabled: BTreeMap<String, bool>,
     pub(super) rigid_bodies: BTreeMap<String, RigidBodyWrite>,
+    pub(super) character_moves: Vec<CharacterMoveWrite>,
+    pub(super) cc_staged_transforms: HashMap<usize, Transform>,
 }
 
 pub(super) struct CallbackSnapshot {
@@ -1740,7 +1834,9 @@ pub(super) struct CallbackSnapshot {
     world_matrices: Arc<Vec<DMat4>>,
     world_rotations: Arc<Vec<DQuat>>,
     visual_overrides: Arc<RuntimeVisualOverrides>,
-    physics_velocities: Option<Rc<VelocityMap>>,
+    physics: Option<Rc<RefCell<PhysicsState>>>,
+    fixed_dt: f64,
+    physics_queries: Cell<u32>,
     queries: Rc<QueryInvocation>,
     audio: Option<CueContext>,
     events: Option<Rc<RefCell<EventBus>>>,
@@ -1847,7 +1943,8 @@ pub(super) struct CallbackContext<'a> {
     pub(super) world_matrices: &'a Arc<Vec<DMat4>>,
     pub(super) world_rotations: &'a Arc<Vec<DQuat>>,
     pub(super) visual_overrides: &'a Arc<RuntimeVisualOverrides>,
-    pub(super) physics_velocities: Option<Rc<VelocityMap>>,
+    pub(super) physics: Option<Rc<RefCell<PhysicsState>>>,
+    pub(super) fixed_dt: f64,
     pub(super) queries: &'a Rc<QueryInvocation>,
     pub(super) audio: Option<CueContext>,
     pub(super) events: Option<Rc<RefCell<EventBus>>>,
@@ -1866,7 +1963,9 @@ impl CurrentCallback {
             world_matrices: Arc::clone(ctx.world_matrices),
             world_rotations: Arc::clone(ctx.world_rotations),
             visual_overrides: Arc::clone(ctx.visual_overrides),
-            physics_velocities: ctx.physics_velocities,
+            physics: ctx.physics,
+            fixed_dt: ctx.fixed_dt,
+            physics_queries: Cell::new(0),
             queries: Rc::clone(ctx.queries),
             audio: ctx.audio,
             events: ctx.events,
@@ -1977,7 +2076,8 @@ impl CurrentCallback {
             || writes.camera_enabled.is_some()
             || !writes.secondary_camera_fovs.is_empty()
             || !writes.secondary_camera_enabled.is_empty()
-            || !writes.rigid_bodies.is_empty();
+            || !writes.rigid_bodies.is_empty()
+            || !writes.character_moves.is_empty();
         has_other.then_some(writes)
     }
 
@@ -2250,6 +2350,20 @@ impl UserData for ObjectHandle {
                         lua.create_userdata(RigidBodyHandle {
                             session: Rc::downgrade(&lookup.session),
                             id: lookup.rigid_bodies[idx].id.clone(),
+                        })
+                    })
+                    .transpose(),
+                    b"CharacterController" => component_index_for_object(
+                        owner,
+                        id,
+                        &lookup.cc_indices,
+                        &lookup.first_cc_indices,
+                        |idx| lookup.character_controllers[idx].owner,
+                    )
+                    .map(|idx| {
+                        lua.create_userdata(CharacterControllerHandle {
+                            session: Rc::downgrade(&lookup.session),
+                            id: lookup.character_controllers[idx].id.clone(),
                         })
                     })
                     .transpose(),
@@ -2532,10 +2646,10 @@ impl RigidBodyHandle {
             return v;
         }
         snapshot
-            .physics_velocities
+            .physics
             .as_ref()
-            .and_then(|map| map.get(&self.id))
-            .map(|(v, _)| *v)
+            .and_then(|p| p.borrow().component_velocities(&self.id))
+            .map(|(v, _)| v)
             .unwrap_or([0.0; 3])
     }
 
@@ -2550,10 +2664,10 @@ impl RigidBodyHandle {
             return w;
         }
         snapshot
-            .physics_velocities
+            .physics
             .as_ref()
-            .and_then(|map| map.get(&self.id))
-            .map(|(_, w)| *w)
+            .and_then(|p| p.borrow().component_velocities(&self.id))
+            .map(|(_, w)| w)
             .unwrap_or([0.0; 3])
     }
 }
@@ -2711,6 +2825,394 @@ fn read_physics_vec3(table: &Table, name: &str) -> mlua::Result<[f64; 3]> {
     Ok(out)
 }
 
+struct CharacterControllerHandle {
+    session: Weak<ObjectSession>,
+    id: String,
+}
+
+impl CharacterControllerHandle {
+    fn index_in(&self, snapshot: &CallbackSnapshot) -> Option<usize> {
+        if !snapshot.owns(&self.session) {
+            return None;
+        }
+        snapshot.lookup.cc_indices.get(&self.id).copied()
+    }
+}
+
+impl UserData for CharacterControllerHandle {
+    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("grounded", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            if handle.index_in(&snapshot).is_none() {
+                return Ok(None);
+            }
+            if let Some(last) = snapshot
+                .writes
+                .borrow()
+                .character_moves
+                .iter()
+                .rev()
+                .find(|m| m.component_id == handle.id)
+            {
+                return Ok(Some(last.grounded));
+            }
+            Ok(Some(
+                snapshot
+                    .physics
+                    .as_ref()
+                    .and_then(|p| p.borrow().character_info(&handle.id))
+                    .is_some_and(|info| info.grounded),
+            ))
+        });
+        fields.add_field_method_get("is_sliding", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            if handle.index_in(&snapshot).is_none() {
+                return Ok(None);
+            }
+            if let Some(last) = snapshot
+                .writes
+                .borrow()
+                .character_moves
+                .iter()
+                .rev()
+                .find(|m| m.component_id == handle.id)
+            {
+                return Ok(Some(last.is_sliding));
+            }
+            Ok(Some(
+                snapshot
+                    .physics
+                    .as_ref()
+                    .and_then(|p| p.borrow().character_info(&handle.id))
+                    .is_some_and(|info| info.is_sliding),
+            ))
+        });
+        fields.add_field_method_get("radius", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            Ok(handle
+                .index_in(&snapshot)
+                .map(|idx| snapshot.lookup.character_controllers[idx].radius))
+        });
+        fields.add_field_method_get("height", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            Ok(handle
+                .index_in(&snapshot)
+                .map(|idx| snapshot.lookup.character_controllers[idx].height))
+        });
+        fields.add_field_method_get("slope_limit_degrees", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            Ok(handle
+                .index_in(&snapshot)
+                .map(|idx| snapshot.lookup.character_controllers[idx].slope_limit_degrees))
+        });
+        fields.add_field_method_get("step_height", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            Ok(handle
+                .index_in(&snapshot)
+                .map(|idx| snapshot.lookup.character_controllers[idx].step_height))
+        });
+        fields.add_field_method_get("enabled", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            Ok(handle
+                .index_in(&snapshot)
+                .map(|idx| snapshot.lookup.character_controllers[idx].authored_enabled))
+        });
+    }
+
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("move", |lua, handle, delta_table: Table| {
+            let snapshot = current_callback(lua)?;
+            let idx = handle.index_in(&snapshot).ok_or_else(|| {
+                mlua::Error::runtime(
+                    "move requires a CharacterController from the current Play session",
+                )
+            })?;
+            let owner = snapshot.lookup.character_controllers[idx].owner;
+            if let Some(reason) = snapshot.lookup.protected.get(&owner) {
+                return Err(mlua::Error::runtime(reason.clone()));
+            }
+            let desired = read_physics_vec3(&delta_table, "character move")?;
+            let Some(physics_rc) = snapshot.physics.as_ref() else {
+                return Err(mlua::Error::runtime(
+                    "CharacterController requires an enabled component",
+                ));
+            };
+            let current_local = {
+                let writes = snapshot.writes.borrow();
+                writes
+                    .cc_staged_transforms
+                    .get(&owner)
+                    .or_else(|| writes.transforms.get(&owner))
+                    .cloned()
+                    .unwrap_or_else(|| snapshot.transforms[owner].clone())
+            };
+            let (world_pos, world_rot, parent_inv) = match snapshot.lookup.parents[owner] {
+                None => {
+                    let [rx, ry, rz] = current_local.rotation.map(f64::from);
+                    let q = DQuat::from_euler(EulerRot::ZYX, rz, ry, rx).normalize();
+                    (current_local.translation.map(f64::from), q.to_array(), None)
+                }
+                Some(parent) => {
+                    let parent_mat = snapshot.world_matrices[parent];
+                    let parent_rot = snapshot.world_rotations[parent].normalize();
+                    let local_pos =
+                        glam::DVec3::from_array(current_local.translation.map(f64::from));
+                    let [rx, ry, rz] = current_local.rotation.map(f64::from);
+                    let local_q = DQuat::from_euler(EulerRot::ZYX, rz, ry, rx).normalize();
+                    let world_pos = parent_mat.transform_point3(local_pos).to_array();
+                    let world_q = (parent_rot * local_q).normalize();
+                    (world_pos, world_q.to_array(), Some(parent_mat.inverse()))
+                }
+            };
+            let result = physics_rc
+                .borrow()
+                .move_character(&handle.id, world_pos, world_rot, desired, snapshot.fixed_dt)
+                .map_err(mlua::Error::runtime)?;
+
+            let next_local_tr = match parent_inv {
+                None => result.next_world_translation.map(|v| v as f32),
+                Some(inv) => inv
+                    .transform_point3(glam::DVec3::from_array(result.next_world_translation))
+                    .as_vec3()
+                    .to_array(),
+            };
+            let mut next_pose = current_local;
+            next_pose.translation = next_local_tr;
+            next_pose
+                .validate()
+                .map_err(|e| mlua::Error::runtime(e.to_string()))?;
+
+            snapshot.writes_dirty.set(true);
+            snapshot.transforms_dirty.set(true);
+            let cursor = snapshot.current_cursor();
+            {
+                let mut writes = snapshot.writes.borrow_mut();
+                writes.cc_staged_transforms.insert(owner, next_pose.clone());
+                if snapshot.batch_state.is_some() && snapshot.batch_override_depth.get() == 0 {
+                    writes.transform_log.push((cursor, owner, next_pose));
+                } else {
+                    writes.transforms.insert(owner, next_pose);
+                }
+                writes.character_moves.push(CharacterMoveWrite {
+                    component_id: handle.id.clone(),
+                    world_translation: result.next_world_translation,
+                    world_rotation: world_rot,
+                    grounded: result.grounded,
+                    is_sliding: result.is_sliding,
+                    collisions: result.collisions,
+                });
+            }
+
+            let out = lua.create_table_with_capacity(0, 4)?;
+            out.raw_set(
+                "translation",
+                lua.create_sequence_from(result.delta.map(f64::from))?,
+            )?;
+            out.raw_set("grounded", result.grounded)?;
+            out.raw_set("sliding", result.is_sliding)?;
+            let hits = lua.create_table_with_capacity(result.hit_owners.len(), 0)?;
+            for (pos, &hit_owner) in result.hit_owners.iter().enumerate() {
+                if let Some(obj) = snapshot.lookup.scene.objects.get(hit_owner) {
+                    let h = lua.create_userdata(ObjectHandle {
+                        session: Rc::downgrade(&snapshot.lookup.session),
+                        id: obj.id.clone(),
+                    })?;
+                    hits.raw_set((pos + 1) as i64, h)?;
+                }
+            }
+            out.raw_set("hits", hits)?;
+            Ok(out)
+        });
+    }
+}
+
+fn check_physics_query_budget(snapshot: &CallbackSnapshot) -> mlua::Result<()> {
+    let count = snapshot.physics_queries.get() + 1;
+    if count > MAX_PHYSICS_QUERIES_PER_TICK {
+        return Err(mlua::Error::runtime(format!(
+            "physics queries exceeded per-tick budget ({MAX_PHYSICS_QUERIES_PER_TICK})"
+        )));
+    }
+    snapshot.physics_queries.set(count);
+    Ok(())
+}
+
+fn parse_query_options(
+    snapshot: &CallbackSnapshot,
+    options: Option<&Table>,
+) -> mlua::Result<(bool, Option<usize>, bool)> {
+    let mut include_sensors = false;
+    let mut exclude_self = true;
+    let mut explicit_exclude: Option<usize> = None;
+    let mut solid = true;
+    if let Some(opts) = options {
+        if let Value::Boolean(b) = opts.raw_get::<Value>("include_sensors")? {
+            include_sensors = b;
+        }
+        if let Value::Boolean(b) = opts.raw_get::<Value>("exclude_self")? {
+            exclude_self = b;
+        }
+        if let Value::Boolean(b) = opts.raw_get::<Value>("solid")? {
+            solid = b;
+        }
+        match opts.raw_get::<Value>("exclude")? {
+            Value::Nil => {}
+            Value::UserData(ud) => {
+                let obj = ud.borrow::<ObjectHandle>()?;
+                explicit_exclude = obj.index_in(snapshot);
+            }
+            Value::String(s) => {
+                if let Ok(key) = s.to_str() {
+                    explicit_exclude = snapshot.lookup.ids.get(key.as_ref()).copied();
+                }
+            }
+            _ => {
+                return Err(mlua::Error::runtime(
+                    "options.exclude must be an ObjectHandle or ID",
+                ))
+            }
+        }
+    }
+    let exclude_owner = explicit_exclude.or_else(|| {
+        if exclude_self {
+            snapshot
+                .lookup
+                .ids
+                .get(&snapshot.active_slot().owner_id)
+                .copied()
+        } else {
+            None
+        }
+    });
+    Ok((include_sensors, exclude_owner, solid))
+}
+
+fn hit_to_lua(lua: &Lua, snapshot: &CallbackSnapshot, hit: PhysicsHit) -> mlua::Result<Table> {
+    let tbl = lua.create_table_with_capacity(0, 6)?;
+    let obj_id = &snapshot.lookup.scene.objects[hit.owner_index].id;
+    let handle = lua.create_userdata(ObjectHandle {
+        session: Rc::downgrade(&snapshot.lookup.session),
+        id: obj_id.clone(),
+    })?;
+    tbl.raw_set("object", handle)?;
+    tbl.raw_set("object_id", obj_id.as_str())?;
+    tbl.raw_set("distance", hit.distance)?;
+    tbl.raw_set("point", lua.create_sequence_from(hit.point)?)?;
+    tbl.raw_set("normal", lua.create_sequence_from(hit.normal)?)?;
+    tbl.raw_set("is_sensor", hit.is_sensor)?;
+    Ok(tbl)
+}
+
+fn raycast_lua(
+    lua: &Lua,
+    snapshot: &CallbackSnapshot,
+    origin: &Table,
+    direction: &Table,
+    max_distance: f64,
+    options: Option<&Table>,
+) -> mlua::Result<Option<Table>> {
+    check_physics_query_budget(snapshot)?;
+    let origin = read_physics_vec3(origin, "raycast origin")?;
+    let direction = read_physics_vec3(direction, "raycast direction")?;
+    let (include_sensors, exclude_owner, solid) = parse_query_options(snapshot, options)?;
+    let Some(physics_rc) = snapshot.physics.as_ref() else {
+        return Ok(None);
+    };
+    let hit = physics_rc
+        .borrow()
+        .raycast(
+            origin,
+            direction,
+            max_distance,
+            include_sensors,
+            exclude_owner,
+            solid,
+        )
+        .map_err(mlua::Error::runtime)?;
+    hit.map(|h| hit_to_lua(lua, snapshot, h)).transpose()
+}
+
+fn shapecast_lua(
+    lua: &Lua,
+    snapshot: &CallbackSnapshot,
+    shape: &Table,
+    origin: &Table,
+    direction: &Table,
+    max_distance: f64,
+    options: Option<&Table>,
+) -> mlua::Result<Option<Table>> {
+    check_physics_query_budget(snapshot)?;
+    let origin = read_physics_vec3(origin, "shapecast origin")?;
+    let direction = read_physics_vec3(direction, "shapecast direction")?;
+    let kind: LuaString = shape
+        .raw_get("type")
+        .map_err(|_| mlua::Error::runtime("shapecast shape requires a 'type' field"))?;
+    let spec = match kind.to_str()?.as_ref() {
+        "sphere" => {
+            let r: f64 = shape.raw_get("radius")?;
+            CastShapeSpec::Sphere { radius: r }
+        }
+        "box" => {
+            let ext: Table = shape.raw_get("half_extents")?;
+            let half_extents = read_physics_vec3(&ext, "half_extents")?;
+            let rotation = match shape.raw_get::<Value>("rotation")? {
+                Value::Nil => [0.0; 3],
+                Value::Table(rot) => read_physics_vec3(&rot, "rotation")?,
+                _ => {
+                    return Err(mlua::Error::runtime(
+                        "shapecast rotation must be {rx, ry, rz}",
+                    ))
+                }
+            };
+            CastShapeSpec::Box {
+                half_extents,
+                rotation,
+            }
+        }
+        "capsule" => {
+            let r: f64 = shape.raw_get("radius")?;
+            let half_height = match shape.raw_get::<Value>("half_height")? {
+                Value::Number(v) => v,
+                Value::Integer(v) => v as f64,
+                Value::Nil => {
+                    let h: f64 = shape.raw_get("height")?;
+                    ((h - 2.0 * r) * 0.5).max(0.0)
+                }
+                _ => {
+                    return Err(mlua::Error::runtime(
+                        "capsule requires half_height or height",
+                    ))
+                }
+            };
+            CastShapeSpec::Capsule {
+                radius: r,
+                half_height,
+            }
+        }
+        other => {
+            return Err(mlua::Error::runtime(format!(
+                "unsupported shapecast shape type {other:?}"
+            )));
+        }
+    };
+    let (include_sensors, exclude_owner, _) = parse_query_options(snapshot, options)?;
+    let Some(physics_rc) = snapshot.physics.as_ref() else {
+        return Ok(None);
+    };
+    let hit = physics_rc
+        .borrow()
+        .shapecast(
+            spec,
+            origin,
+            direction,
+            max_distance,
+            include_sensors,
+            exclude_owner,
+        )
+        .map_err(mlua::Error::runtime)?;
+    hit.map(|h| hit_to_lua(lua, snapshot, h)).transpose()
+}
+
 fn read_unit_channel(value: Value, name: &str) -> mlua::Result<f32> {
     let n = match value {
         Value::Number(n) => n,
@@ -2852,7 +3354,17 @@ impl Engine {
             }
             let start: Option<Function> = module.raw_get("on_start")?;
             let update: Option<Function> = module.raw_get("on_update")?;
-            if start.is_none() && update.is_none() {
+            let on_collision_enter: Option<Function> = module.raw_get("on_collision_enter")?;
+            let on_collision_exit: Option<Function> = module.raw_get("on_collision_exit")?;
+            let on_trigger_enter: Option<Function> = module.raw_get("on_trigger_enter")?;
+            let on_trigger_exit: Option<Function> = module.raw_get("on_trigger_exit")?;
+            if start.is_none()
+                && update.is_none()
+                && on_collision_enter.is_none()
+                && on_collision_exit.is_none()
+                && on_trigger_enter.is_none()
+                && on_trigger_exit.is_none()
+            {
                 return Ok(None);
             }
             let has_sound = has_sound_cue(properties);
@@ -2865,6 +3377,10 @@ impl Engine {
             Ok(Some(Module {
                 start,
                 update,
+                on_collision_enter,
+                on_collision_exit,
+                on_trigger_enter,
+                on_trigger_exit,
                 host,
                 props,
                 last_attempt: 0,
@@ -2909,7 +3425,7 @@ impl Engine {
             Diagnostic::plain(
                 DiagnosticCode::InvalidOutput,
                 Phase::Module,
-                "A live Lua component must define on_start or on_update",
+                "A live Lua component must define on_start, on_update, or a physics event callback",
             )
         })
     }
@@ -2925,6 +3441,51 @@ impl Module {
             .as_ref()
             .map(|callback| self.invoke_alloc(engine, callback, transform, Phase::Initialize, None))
             .transpose()
+    }
+
+    pub(super) fn invoke_contact_event(
+        &mut self,
+        engine: &Engine,
+        kind: ContactEventKind,
+        transform: &Transform,
+        other_object_id: &str,
+        attempted_tick: u64,
+    ) -> Result<Option<Transform>, Diagnostic> {
+        let callback = match kind {
+            ContactEventKind::CollisionEnter => self.on_collision_enter.as_ref(),
+            ContactEventKind::CollisionExit => self.on_collision_exit.as_ref(),
+            ContactEventKind::TriggerEnter => self.on_trigger_enter.as_ref(),
+            ContactEventKind::TriggerExit => self.on_trigger_exit.as_ref(),
+        };
+        let Some(callback) = callback else {
+            return Ok(None);
+        };
+        self.last_attempt = attempted_tick;
+        engine.debug_phase(Phase::Update);
+        let invoke = || -> mlua::Result<Table> {
+            let tr = transform_table(&engine.lua, transform)?;
+            let other_handle = {
+                let snapshot = current_callback(&engine.lua)?;
+                engine.lua.create_userdata(ObjectHandle {
+                    session: Rc::downgrade(&snapshot.lookup.session),
+                    id: other_object_id.to_owned(),
+                })?
+            };
+            callback.call::<()>((tr.clone(), &self.props, other_handle, &self.host))?;
+            Ok(tr)
+        };
+        let output =
+            invoke().map_err(|e| engine.error(e, Phase::Update, DiagnosticCode::Runtime))?;
+        if let Some(code) = engine.failure.get() {
+            return Err(Diagnostic::plain(
+                code,
+                Phase::Update,
+                "behavior instruction budget or cancellation triggered",
+            ));
+        }
+        read_transform(&output)
+            .map(Some)
+            .map_err(|e| engine.error(e, Phase::Output, DiagnosticCode::InvalidOutput))
     }
 
     pub(super) fn update_fast(

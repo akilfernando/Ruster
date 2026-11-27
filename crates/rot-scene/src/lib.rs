@@ -34,7 +34,7 @@ mod animation;
 mod authoring;
 mod collider;
 pub mod component_scene;
-pub use component_scene::RigidBodyType;
+pub use component_scene::{JointKind, RigidBodyType};
 pub mod hud;
 pub mod input;
 mod lighting;

@@ -475,6 +475,8 @@ pub fn project_editor_with_world(
                 Component::Camera { .. }
                 | Component::Collider { .. }
                 | Component::RigidBody { .. }
+                | Component::Joint { .. }
+                | Component::CharacterController { .. }
                 | Component::Animator { .. }
                 | Component::Script { .. } => {}
             }

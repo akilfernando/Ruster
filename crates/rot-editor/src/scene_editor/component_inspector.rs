@@ -4,8 +4,8 @@ use crate::ui_kit;
 use crate::workspace::Action;
 use eframe::egui;
 use rot_scene::component_scene::{
-    AnimatorStart, CameraClip, CameraView, Component, ComponentInstance, Geometry, ObjectNode,
-    OrthographicClip, RigidBodyType, ScriptMovement, ScriptSourceKind, TransformLens,
+    AnimatorStart, CameraClip, CameraView, Component, ComponentInstance, Geometry, JointKind,
+    ObjectNode, OrthographicClip, RigidBodyType, ScriptMovement, ScriptSourceKind, TransformLens,
     TransformOrthographic,
 };
 use rot_scene::{
@@ -18,6 +18,8 @@ pub(super) enum AddComponent {
     MeshRenderer,
     Collider,
     RigidBody,
+    Joint,
+    CharacterController,
     Camera,
     Light,
     DirectionalLight,
@@ -31,6 +33,8 @@ impl AddComponent {
             Self::MeshRenderer => Text::ComponentMeshRenderer,
             Self::Collider => Text::ComponentCollider,
             Self::RigidBody => Text::ComponentRigidBody,
+            Self::Joint => Text::ComponentJoint,
+            Self::CharacterController => Text::ComponentCharacterController,
             Self::Camera => Text::ComponentCamera,
             Self::Light => Text::ComponentLight,
             Self::DirectionalLight => Text::LabelCreateDirectionalLight,
@@ -63,6 +67,27 @@ impl AddComponent {
                     lock_translation: [false; 3],
                     lock_rotation: [false; 3],
                     ccd: false,
+                },
+                Self::Joint => Component::Joint {
+                    kind: JointKind::Fixed,
+                    connected_body: None,
+                    anchor: [0.0; 3],
+                    connected_anchor: [0.0; 3],
+                    axis: [0.0, 1.0, 0.0],
+                    limits: None,
+                    rest_length: 1.0,
+                    stiffness: 10.0,
+                    damping: 1.0,
+                    collide_connected: false,
+                },
+                Self::CharacterController => Component::CharacterController {
+                    radius: 0.4,
+                    height: 1.8,
+                    offset: [0.0, 0.0, 0.0],
+                    slope_limit_degrees: 45.0,
+                    step_height: 0.35,
+                    skin_width: 0.02,
+                    snap_to_ground: 0.2,
                 },
                 Self::Camera => Component::Camera {
                     view: CameraView::transform_perspective(45.0),
@@ -242,6 +267,8 @@ pub(super) fn component_label(component: &Component) -> Text {
         Component::Light { .. } => Text::LabelCreateDirectionalLight,
         Component::Collider { .. } => Text::ComponentCollider,
         Component::RigidBody { .. } => Text::ComponentRigidBody,
+        Component::Joint { .. } => Text::ComponentJoint,
+        Component::CharacterController { .. } => Text::ComponentCharacterController,
     }
 }
 
@@ -254,6 +281,7 @@ use super::component_workspace::component_animation_preview::{self, PreviewContr
 
 pub(super) struct ComponentControls<'a> {
     pub actions: &'a rot_scene::input::ActionMap,
+    pub scene_objects: &'a [ObjectNode],
     pub reveal: Option<&'a str>,
     pub(super) animation_preview: Option<PreviewControls<'a>>,
     pub(super) allow_animation_preview: bool,
@@ -293,6 +321,7 @@ pub(super) fn components(
 ) -> ComponentEdits {
     let ComponentControls {
         actions,
+        scene_objects,
         allow_new_material,
         allow_light_aim,
         allow_sound_cues,
@@ -328,6 +357,7 @@ pub(super) fn components(
         .count()
         == 2;
     let mut renderer_count = 0;
+    let draft_id = draft.id.clone();
     for (index, component) in draft.components.iter_mut().enumerate() {
         let label = component_label(&component.kind);
         let heading =
@@ -342,6 +372,8 @@ pub(super) fn components(
             Component::MeshRenderer { .. }
                 | Component::Collider { .. }
                 | Component::RigidBody { .. }
+                | Component::Joint { .. }
+                | Component::CharacterController { .. }
                 | Component::Camera { .. }
                 | Component::Light { .. }
                 | Component::Animator { .. }
@@ -505,6 +537,55 @@ pub(super) fn components(
                             lock_translation,
                             lock_rotation,
                             ccd,
+                        );
+                    }
+                    Component::Joint {
+                        kind,
+                        connected_body,
+                        anchor,
+                        connected_anchor,
+                        axis,
+                        limits,
+                        rest_length,
+                        stiffness,
+                        damping,
+                        collide_connected,
+                    } => {
+                        submit |= joint_fields(
+                            ui,
+                            &draft_id,
+                            &component.id,
+                            scene_objects,
+                            kind,
+                            connected_body,
+                            anchor,
+                            connected_anchor,
+                            axis,
+                            limits,
+                            rest_length,
+                            stiffness,
+                            damping,
+                            collide_connected,
+                        );
+                    }
+                    Component::CharacterController {
+                        radius,
+                        height,
+                        offset,
+                        slope_limit_degrees,
+                        step_height,
+                        skin_width,
+                        snap_to_ground,
+                    } => {
+                        submit |= character_controller_fields(
+                            ui,
+                            radius,
+                            height,
+                            offset,
+                            slope_limit_degrees,
+                            step_height,
+                            skin_width,
+                            snap_to_ground,
                         );
                     }
                     Component::Light {
@@ -1626,6 +1707,259 @@ pub(super) fn rigid_body_type_label(body_type: RigidBodyType) -> Text {
     }
 }
 
+fn joint_kind_label(kind: JointKind) -> Text {
+    match kind {
+        JointKind::Fixed => Text::ComponentJointFixed,
+        JointKind::Hinge => Text::ComponentJointHinge,
+        JointKind::Slider => Text::ComponentJointSlider,
+        JointKind::Ball => Text::ComponentJointBall,
+        JointKind::Spring => Text::ComponentJointSpring,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn joint_fields(
+    ui: &mut egui::Ui,
+    owner_id: &str,
+    component_id: &str,
+    scene_objects: &[ObjectNode],
+    kind: &mut JointKind,
+    connected_body: &mut Option<String>,
+    anchor: &mut [f32; 3],
+    connected_anchor: &mut [f32; 3],
+    axis: &mut [f32; 3],
+    limits: &mut Option<[f32; 2]>,
+    rest_length: &mut f32,
+    stiffness: &mut f32,
+    damping: &mut f32,
+    collide_connected: &mut bool,
+) -> bool {
+    let mut submit = false;
+    ui_kit::property_row_with_label(ui, Text::ComponentJointType.plain(), |ui, label| {
+        let salt = format!("joint_kind_{component_id}");
+        let focus = super::combo_focus::ComboFocus::capture(ui, &salt);
+        let mut selected = false;
+        let response = egui::ComboBox::from_id_salt(&salt)
+            .width(ui.available_width())
+            .truncate()
+            .selected_text(joint_kind_label(*kind).plain())
+            .show_ui(ui, |ui| {
+                for option in [
+                    JointKind::Fixed,
+                    JointKind::Hinge,
+                    JointKind::Slider,
+                    JointKind::Ball,
+                    JointKind::Spring,
+                ] {
+                    if ui
+                        .selectable_label(*kind == option, joint_kind_label(option).plain())
+                        .clicked()
+                    {
+                        *kind = option;
+                        selected = true;
+                        ui.close();
+                    }
+                }
+            });
+        focus.restore(ui, &response.response, selected);
+        response.response.labelled_by(label);
+    });
+    ui_kit::property_row_with_label(ui, Text::ComponentConnectedBody.plain(), |ui, label| {
+        let salt = format!("joint_connected_body_{component_id}");
+        let focus = super::combo_focus::ComboFocus::capture(ui, &salt);
+        let mut selected = false;
+        let selected_label = connected_body
+            .as_deref()
+            .and_then(|id| scene_objects.iter().find(|obj| obj.id == id))
+            .map(|obj| obj.name.as_str())
+            .or(connected_body.as_deref())
+            .unwrap_or(Text::ComponentWorldAnchor.plain());
+        let response = egui::ComboBox::from_id_salt(&salt)
+            .width(ui.available_width())
+            .truncate()
+            .selected_text(selected_label)
+            .show_ui(ui, |ui| {
+                if ui
+                    .selectable_label(connected_body.is_none(), Text::ComponentWorldAnchor.plain())
+                    .clicked()
+                {
+                    *connected_body = None;
+                    selected = true;
+                    ui.close();
+                }
+                for obj in scene_objects {
+                    if obj.id == owner_id {
+                        continue;
+                    }
+                    let is_selected = connected_body.as_deref() == Some(obj.id.as_str());
+                    if ui.selectable_label(is_selected, &obj.name).clicked() {
+                        *connected_body = Some(obj.id.clone());
+                        selected = true;
+                        ui.close();
+                    }
+                }
+            });
+        focus.restore(ui, &response.response, selected);
+        response.response.labelled_by(label);
+    });
+    submit |= vector(
+        ui,
+        Text::ComponentAnchor,
+        anchor,
+        0.05,
+        -10_000.0..=10_000.0,
+    )
+    .submit;
+    submit |= vector(
+        ui,
+        Text::ComponentConnectedAnchor,
+        connected_anchor,
+        0.05,
+        -10_000.0..=10_000.0,
+    )
+    .submit;
+    if matches!(kind, JointKind::Hinge | JointKind::Slider) {
+        submit |= vector(ui, Text::ComponentAxis, axis, 0.05, -100.0..=100.0).submit;
+    }
+    if matches!(kind, JointKind::Hinge | JointKind::Slider | JointKind::Ball) {
+        let mut has_limits = limits.is_some();
+        ui_kit::property_row_with_label(ui, Text::ComponentUseLimits.plain(), |ui, label| {
+            if ui
+                .checkbox(&mut has_limits, "")
+                .labelled_by(label)
+                .changed()
+            {
+                *limits = if has_limits { Some([-1.5, 1.5]) } else { None };
+            }
+        });
+        if let Some([min, max]) = limits {
+            let max_limit = *max;
+            submit |= number_field(
+                ui,
+                Text::ComponentMinLimit,
+                min,
+                0.05,
+                -10_000.0..=max_limit,
+                Text::ComponentMinLimit,
+            );
+            let min_limit = *min;
+            submit |= number_field(
+                ui,
+                Text::ComponentMaxLimit,
+                max,
+                0.05,
+                min_limit..=10_000.0,
+                Text::ComponentMaxLimit,
+            );
+        }
+    }
+    if matches!(kind, JointKind::Spring) {
+        submit |= number_field(
+            ui,
+            Text::ComponentRestLength,
+            rest_length,
+            0.05,
+            0.0..=10_000.0,
+            Text::ComponentRestLength,
+        );
+        submit |= number_field(
+            ui,
+            Text::ComponentStiffness,
+            stiffness,
+            1.0,
+            0.0..=1_000_000.0,
+            Text::ComponentStiffness,
+        );
+        submit |= number_field(
+            ui,
+            Text::ComponentDamping,
+            damping,
+            0.1,
+            0.0..=1_000_000.0,
+            Text::ComponentDamping,
+        );
+    }
+    ui_kit::property_row_with_label(ui, Text::ComponentCollideConnected.plain(), |ui, label| {
+        ui.checkbox(collide_connected, "").labelled_by(label);
+    });
+    submit
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn character_controller_fields(
+    ui: &mut egui::Ui,
+    radius: &mut f32,
+    height: &mut f32,
+    offset: &mut [f32; 3],
+    slope_limit_degrees: &mut f32,
+    step_height: &mut f32,
+    skin_width: &mut f32,
+    snap_to_ground: &mut f32,
+) -> bool {
+    let mut submit = false;
+    submit |= number_field(
+        ui,
+        Text::ComponentRadius,
+        radius,
+        0.01,
+        0.05..=100.0,
+        Text::ComponentRadius,
+    );
+    let min_height = (*radius * 2.0).max(0.1);
+    if *height < min_height {
+        *height = min_height;
+    }
+    submit |= number_field(
+        ui,
+        Text::ComponentHeight,
+        height,
+        0.02,
+        min_height..=200.0,
+        Text::ComponentHeight,
+    );
+    submit |= vector(
+        ui,
+        Text::ComponentOffset,
+        offset,
+        0.05,
+        -10_000.0..=10_000.0,
+    )
+    .submit;
+    submit |= number_field(
+        ui,
+        Text::ComponentSlopeLimit,
+        slope_limit_degrees,
+        0.5,
+        0.0..=89.0,
+        Text::ComponentSlopeLimit,
+    );
+    submit |= number_field(
+        ui,
+        Text::ComponentStepHeight,
+        step_height,
+        0.01,
+        0.0..=10.0,
+        Text::ComponentStepHeight,
+    );
+    submit |= number_field(
+        ui,
+        Text::ComponentSkinWidth,
+        skin_width,
+        0.002,
+        0.001..=1.0,
+        Text::ComponentSkinWidth,
+    );
+    submit |= number_field(
+        ui,
+        Text::ComponentSnapToGround,
+        snap_to_ground,
+        0.01,
+        0.0..=10.0,
+        Text::ComponentSnapToGround,
+    );
+    submit
+}
+
 fn axis_lock_row(ui: &mut egui::Ui, label: Text, flags: &mut [bool; 3]) {
     ui_kit::property_row(ui, label.plain(), |ui| {
         ui.horizontal(|ui| {
@@ -1730,16 +2064,25 @@ impl ComponentPicker {
                 .components
                 .iter()
                 .any(|component| matches!(component.kind, Component::RigidBody { .. }));
+            let has_cc = owner
+                .components
+                .iter()
+                .any(|component| matches!(component.kind, Component::CharacterController { .. }));
             for kind in [
                 AddComponent::MeshRenderer,
                 AddComponent::Collider,
                 AddComponent::RigidBody,
+                AddComponent::Joint,
+                AddComponent::CharacterController,
                 AddComponent::Camera,
                 AddComponent::Light,
                 AddComponent::DirectionalLight,
                 AddComponent::SpotLight,
             ] {
-                if matches!(kind, AddComponent::RigidBody) && has_rigid_body {
+                if matches!(kind, AddComponent::RigidBody) && (has_rigid_body || has_cc) {
+                    continue;
+                }
+                if matches!(kind, AddComponent::CharacterController) && (has_cc || has_rigid_body) {
                     continue;
                 }
                 if kind.label().plain().to_ascii_lowercase().contains(&search)

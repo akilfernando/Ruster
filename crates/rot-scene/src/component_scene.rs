@@ -496,6 +496,7 @@ impl ComponentScene {
         let mut gameplay_camera_found = self.gameplay_camera.is_none();
         for (owner, object) in self.objects.iter().enumerate() {
             let mut rigid_body_count = 0usize;
+            let mut cc_count = 0usize;
             for component in &object.components {
                 validate_id(&component.id)?;
                 if !ids.insert(component.id.as_str()) {
@@ -682,12 +683,89 @@ impl ComponentScene {
                                 object.id
                             )));
                         }
+                        if cc_count > 0 {
+                            return Err(SceneError::Invalid(format!(
+                                "object {} cannot combine RigidBody and CharacterController components",
+                                object.id
+                            )));
+                        }
                         validate_rigid_body_fields(
                             &component.id,
                             *mass,
                             *linear_damping,
                             *angular_damping,
                             *gravity_scale,
+                        )?;
+                    }
+                    Component::Joint {
+                        kind: _,
+                        connected_body,
+                        anchor,
+                        connected_anchor,
+                        axis,
+                        limits,
+                        rest_length,
+                        stiffness,
+                        damping,
+                        collide_connected: _,
+                    } => {
+                        if let Some(target) = connected_body {
+                            validate_id(target)?;
+                            if target == &object.id {
+                                return Err(SceneError::Invalid(format!(
+                                    "Joint {} cannot connect {} to itself",
+                                    component.id, object.id
+                                )));
+                            }
+                            if !object_indices.contains_key(target.as_str()) {
+                                return Err(SceneError::Invalid(format!(
+                                    "Joint {} references missing connected_body {target}",
+                                    component.id
+                                )));
+                            }
+                        }
+                        validate_joint_fields(
+                            &component.id,
+                            *anchor,
+                            *connected_anchor,
+                            *axis,
+                            *limits,
+                            *rest_length,
+                            *stiffness,
+                            *damping,
+                        )?;
+                    }
+                    Component::CharacterController {
+                        radius,
+                        height,
+                        offset,
+                        slope_limit_degrees,
+                        step_height,
+                        skin_width,
+                        snap_to_ground,
+                    } => {
+                        cc_count += 1;
+                        if cc_count > 1 {
+                            return Err(SceneError::Invalid(format!(
+                                "object {} cannot have more than one CharacterController component",
+                                object.id
+                            )));
+                        }
+                        if rigid_body_count > 0 {
+                            return Err(SceneError::Invalid(format!(
+                                "object {} cannot combine RigidBody and CharacterController components",
+                                object.id
+                            )));
+                        }
+                        validate_character_controller_fields(
+                            &component.id,
+                            *radius,
+                            *height,
+                            *offset,
+                            *slope_limit_degrees,
+                            *step_height,
+                            *skin_width,
+                            *snap_to_ground,
                         )?;
                     }
                 }
@@ -1386,6 +1464,212 @@ fn is_false(flag: &bool) -> bool {
     !*flag
 }
 
+fn is_zero_vec3(vec: &[f32; 3]) -> bool {
+    *vec == [0.0; 3]
+}
+
+fn default_joint_axis() -> [f32; 3] {
+    [0.0, 1.0, 0.0]
+}
+
+fn is_default_joint_axis(axis: &[f32; 3]) -> bool {
+    *axis == default_joint_axis()
+}
+
+fn default_joint_rest_length() -> f32 {
+    1.0
+}
+
+fn is_default_joint_rest_length(len: &f32) -> bool {
+    *len == default_joint_rest_length()
+}
+
+fn default_joint_stiffness() -> f32 {
+    10.0
+}
+
+fn is_default_joint_stiffness(value: &f32) -> bool {
+    *value == default_joint_stiffness()
+}
+
+fn default_joint_damping() -> f32 {
+    1.0
+}
+
+fn is_default_joint_damping(value: &f32) -> bool {
+    *value == default_joint_damping()
+}
+
+fn default_cc_radius() -> f32 {
+    0.4
+}
+
+fn is_default_cc_radius(value: &f32) -> bool {
+    *value == default_cc_radius()
+}
+
+fn default_cc_height() -> f32 {
+    1.8
+}
+
+fn is_default_cc_height(value: &f32) -> bool {
+    *value == default_cc_height()
+}
+
+fn default_cc_slope_limit() -> f32 {
+    45.0
+}
+
+fn is_default_cc_slope_limit(value: &f32) -> bool {
+    *value == default_cc_slope_limit()
+}
+
+fn default_cc_step_height() -> f32 {
+    0.35
+}
+
+fn is_default_cc_step_height(value: &f32) -> bool {
+    *value == default_cc_step_height()
+}
+
+fn default_cc_skin_width() -> f32 {
+    0.02
+}
+
+fn is_default_cc_skin_width(value: &f32) -> bool {
+    *value == default_cc_skin_width()
+}
+
+fn default_cc_snap_to_ground() -> f32 {
+    0.2
+}
+
+fn is_default_cc_snap_to_ground(value: &f32) -> bool {
+    *value == default_cc_snap_to_ground()
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum JointKind {
+    #[default]
+    Fixed,
+    Hinge,
+    Slider,
+    Ball,
+    Spring,
+}
+
+impl JointKind {
+    fn is_fixed(&self) -> bool {
+        *self == Self::Fixed
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn validate_joint_fields(
+    component_id: &str,
+    anchor: [f32; 3],
+    connected_anchor: [f32; 3],
+    axis: [f32; 3],
+    limits: Option<[f32; 2]>,
+    rest_length: f32,
+    stiffness: f32,
+    damping: f32,
+) -> Result<(), SceneError> {
+    if !anchor
+        .iter()
+        .chain(&connected_anchor)
+        .all(|v| v.is_finite() && (-10_000.0_f32..=10_000.0).contains(v))
+    {
+        return Err(SceneError::Invalid(format!(
+            "Joint {component_id} anchors must be finite in -10000..=10000"
+        )));
+    }
+    let axis_sq = axis
+        .iter()
+        .map(|v| f64::from(*v) * f64::from(*v))
+        .sum::<f64>();
+    if !axis.iter().all(|v| v.is_finite()) || !axis_sq.is_finite() || axis_sq <= 1e-8 {
+        return Err(SceneError::Invalid(format!(
+            "Joint {component_id} axis must be finite and non-zero"
+        )));
+    }
+    if let Some([min, max]) = limits {
+        if !min.is_finite() || !max.is_finite() || min > max {
+            return Err(SceneError::Invalid(format!(
+                "Joint {component_id} limits must be finite and ordered (min <= max)"
+            )));
+        }
+    }
+    if !rest_length.is_finite() || !(0.0_f32..=10_000.0).contains(&rest_length) {
+        return Err(SceneError::Invalid(format!(
+            "Joint {component_id} rest_length must be finite in 0..=10000"
+        )));
+    }
+    if !stiffness.is_finite()
+        || !(0.0_f32..=1_000_000.0).contains(&stiffness)
+        || !damping.is_finite()
+        || !(0.0_f32..=1_000_000.0).contains(&damping)
+    {
+        return Err(SceneError::Invalid(format!(
+            "Joint {component_id} stiffness and damping must be finite in 0..=1000000"
+        )));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn validate_character_controller_fields(
+    component_id: &str,
+    radius: f32,
+    height: f32,
+    offset: [f32; 3],
+    slope_limit_degrees: f32,
+    step_height: f32,
+    skin_width: f32,
+    snap_to_ground: f32,
+) -> Result<(), SceneError> {
+    if !radius.is_finite() || !(0.05_f32..=100.0).contains(&radius) {
+        return Err(SceneError::Invalid(format!(
+            "CharacterController {component_id} radius must be finite in 0.05..=100"
+        )));
+    }
+    if !height.is_finite() || !(0.1_f32..=200.0).contains(&height) || height < 2.0 * radius {
+        return Err(SceneError::Invalid(format!(
+            "CharacterController {component_id} height must be finite in (2*radius)..=200"
+        )));
+    }
+    if !offset
+        .iter()
+        .all(|v| v.is_finite() && (-10_000.0_f32..=10_000.0).contains(v))
+    {
+        return Err(SceneError::Invalid(format!(
+            "CharacterController {component_id} offset must be finite in -10000..=10000"
+        )));
+    }
+    if !slope_limit_degrees.is_finite() || !(0.0_f32..=89.0).contains(&slope_limit_degrees) {
+        return Err(SceneError::Invalid(format!(
+            "CharacterController {component_id} slope limit must be finite in 0..=89 degrees"
+        )));
+    }
+    if !step_height.is_finite() || !(0.0_f32..=10.0).contains(&step_height) {
+        return Err(SceneError::Invalid(format!(
+            "CharacterController {component_id} step height must be finite in 0..=10"
+        )));
+    }
+    if !skin_width.is_finite() || !(0.001_f32..=1.0).contains(&skin_width) {
+        return Err(SceneError::Invalid(format!(
+            "CharacterController {component_id} skin width must be finite in 0.001..=1"
+        )));
+    }
+    if !snap_to_ground.is_finite() || !(0.0_f32..=10.0).contains(&snap_to_ground) {
+        return Err(SceneError::Invalid(format!(
+            "CharacterController {component_id} snap_to_ground must be finite in 0..=10"
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum RigidBodyType {
@@ -1505,6 +1789,74 @@ pub enum Component {
         #[serde(default, skip_serializing_if = "is_false")]
         ccd: bool,
     },
+    Joint {
+        #[serde(default, skip_serializing_if = "JointKind::is_fixed")]
+        kind: JointKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        connected_body: Option<String>,
+        #[serde(default, skip_serializing_if = "is_zero_vec3")]
+        anchor: [f32; 3],
+        #[serde(default, skip_serializing_if = "is_zero_vec3")]
+        connected_anchor: [f32; 3],
+        #[serde(
+            default = "default_joint_axis",
+            skip_serializing_if = "is_default_joint_axis"
+        )]
+        axis: [f32; 3],
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limits: Option<[f32; 2]>,
+        #[serde(
+            default = "default_joint_rest_length",
+            skip_serializing_if = "is_default_joint_rest_length"
+        )]
+        rest_length: f32,
+        #[serde(
+            default = "default_joint_stiffness",
+            skip_serializing_if = "is_default_joint_stiffness"
+        )]
+        stiffness: f32,
+        #[serde(
+            default = "default_joint_damping",
+            skip_serializing_if = "is_default_joint_damping"
+        )]
+        damping: f32,
+        #[serde(default, skip_serializing_if = "is_false")]
+        collide_connected: bool,
+    },
+    CharacterController {
+        #[serde(
+            default = "default_cc_radius",
+            skip_serializing_if = "is_default_cc_radius"
+        )]
+        radius: f32,
+        #[serde(
+            default = "default_cc_height",
+            skip_serializing_if = "is_default_cc_height"
+        )]
+        height: f32,
+        #[serde(default, skip_serializing_if = "is_zero_vec3")]
+        offset: [f32; 3],
+        #[serde(
+            default = "default_cc_slope_limit",
+            skip_serializing_if = "is_default_cc_slope_limit"
+        )]
+        slope_limit_degrees: f32,
+        #[serde(
+            default = "default_cc_step_height",
+            skip_serializing_if = "is_default_cc_step_height"
+        )]
+        step_height: f32,
+        #[serde(
+            default = "default_cc_skin_width",
+            skip_serializing_if = "is_default_cc_skin_width"
+        )]
+        skin_width: f32,
+        #[serde(
+            default = "default_cc_snap_to_ground",
+            skip_serializing_if = "is_default_cc_snap_to_ground"
+        )]
+        snap_to_ground: f32,
+    },
 }
 
 /// An omitted script source kind keeps the embedded source interpretation.
@@ -1566,7 +1918,9 @@ impl ObjectNode {
                 } if component.enabled => colliders += 1,
                 Component::Collider { .. }
                 | Component::Light { .. }
-                | Component::RigidBody { .. } => return false,
+                | Component::RigidBody { .. }
+                | Component::Joint { .. }
+                | Component::CharacterController { .. } => return false,
                 Component::Script { binding, .. } if binding.enabled => return false,
                 Component::Animator { .. } if component.enabled => return false,
                 _ => {}
@@ -2204,6 +2558,230 @@ mod tests {
                 lock_translation: [false; 3],
                 lock_rotation: [false; 3],
                 ccd: false,
+            };
+            assert!(bad.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn joint_serde_defaults_validation_and_v23_compatibility() {
+        let minimal = serde_json::json!({
+            "format": "rot-scene",
+            "format_version": 23,
+            "scene": {
+                "id": "joints",
+                "objects": [
+                    {
+                        "id": "anchor_box",
+                        "name": "Anchor",
+                        "enabled": true,
+                        "parent": null,
+                        "transform": {
+                            "translation": [0.0, 4.0, 0.0],
+                            "rotation": [0.0, 0.0, 0.0],
+                            "scale": [1.0, 1.0, 1.0]
+                        },
+                        "components": [{
+                            "id": "anchor-rb",
+                            "enabled": true,
+                            "type": "rigid_body",
+                            "body_type": "static"
+                        }]
+                    },
+                    {
+                        "id": "door",
+                        "name": "Door",
+                        "enabled": true,
+                        "parent": null,
+                        "transform": {
+                            "translation": [1.0, 4.0, 0.0],
+                            "rotation": [0.0, 0.0, 0.0],
+                            "scale": [1.0, 1.0, 1.0]
+                        },
+                        "components": [
+                            {
+                                "id": "door-rb",
+                                "enabled": true,
+                                "type": "rigid_body"
+                            },
+                            {
+                                "id": "door-joint",
+                                "enabled": true,
+                                "type": "joint"
+                            }
+                        ]
+                    }
+                ]
+            }
+        });
+        let parsed = ComponentScene::read_json(minimal.to_string().as_bytes()).unwrap();
+        assert_eq!(
+            parsed.objects[1].components[1].kind,
+            Component::Joint {
+                kind: JointKind::Fixed,
+                connected_body: None,
+                anchor: [0.0; 3],
+                connected_anchor: [0.0; 3],
+                axis: [0.0, 1.0, 0.0],
+                limits: None,
+                rest_length: 1.0,
+                stiffness: 10.0,
+                damping: 1.0,
+                collide_connected: false,
+            }
+        );
+        let mut out = Vec::new();
+        parsed.write_json(&mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(!text.contains("\"rest_length\""));
+        assert!(!text.contains("\"collide_connected\""));
+
+        for kind in [
+            JointKind::Fixed,
+            JointKind::Hinge,
+            JointKind::Slider,
+            JointKind::Ball,
+            JointKind::Spring,
+        ] {
+            let mut s = parsed.clone();
+            s.objects[1].components[1].kind = Component::Joint {
+                kind,
+                connected_body: Some("anchor_box".into()),
+                anchor: [-0.5, 0.0, 0.0],
+                connected_anchor: [0.5, 0.0, 0.0],
+                axis: [0.0, 0.0, 1.0],
+                limits: Some([-1.0, 1.0]),
+                rest_length: 2.0,
+                stiffness: 50.0,
+                damping: 2.5,
+                collide_connected: true,
+            };
+            s.validate().unwrap();
+            let mut buf = Vec::new();
+            s.write_json(&mut buf).unwrap();
+            let back = ComponentScene::read_json(buf.as_slice()).unwrap();
+            assert_eq!(back.objects[1].components[1], s.objects[1].components[1]);
+        }
+
+        // Self-connection or unknown connected_body fails validation.
+        let mut self_conn = parsed.clone();
+        if let Component::Joint { connected_body, .. } =
+            &mut self_conn.objects[1].components[1].kind
+        {
+            *connected_body = Some("door".into());
+        }
+        assert!(self_conn.validate().is_err());
+
+        let mut missing_conn = parsed.clone();
+        if let Component::Joint { connected_body, .. } =
+            &mut missing_conn.objects[1].components[1].kind
+        {
+            *connected_body = Some("ghost".into());
+        }
+        assert!(missing_conn.validate().is_err());
+
+        let mut zero_axis = parsed.clone();
+        if let Component::Joint { axis, .. } = &mut zero_axis.objects[1].components[1].kind {
+            *axis = [0.0, 0.0, 0.0];
+        }
+        assert!(zero_axis.validate().is_err());
+
+        let mut bad_limits = parsed;
+        if let Component::Joint { limits, .. } = &mut bad_limits.objects[1].components[1].kind {
+            *limits = Some([2.0, 1.0]);
+        }
+        assert!(bad_limits.validate().is_err());
+    }
+
+    #[test]
+    fn character_controller_serde_defaults_and_validation() {
+        let minimal = serde_json::json!({
+            "format": "rot-scene",
+            "format_version": 23,
+            "scene": {
+                "id": "cc-scene",
+                "objects": [{
+                    "id": "player",
+                    "name": "Player",
+                    "enabled": true,
+                    "parent": null,
+                    "transform": {
+                        "translation": [0.0, 0.0, 0.0],
+                        "rotation": [0.0, 0.0, 0.0],
+                        "scale": [1.0, 1.0, 1.0]
+                    },
+                    "components": [{
+                        "id": "player-cc",
+                        "enabled": true,
+                        "type": "character_controller"
+                    }]
+                }]
+            }
+        });
+        let parsed = ComponentScene::read_json(minimal.to_string().as_bytes()).unwrap();
+        assert_eq!(
+            parsed.objects[0].components[0].kind,
+            Component::CharacterController {
+                radius: 0.4,
+                height: 1.8,
+                offset: [0.0, 0.0, 0.0],
+                slope_limit_degrees: 45.0,
+                step_height: 0.35,
+                skin_width: 0.02,
+                snap_to_ground: 0.2,
+            }
+        );
+        let mut out = Vec::new();
+        parsed.write_json(&mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(!text.contains("\"slope_limit_degrees\""));
+        assert!(!text.contains("\"snap_to_ground\""));
+
+        // Duplicate CharacterController on the same object fails.
+        let mut dup = parsed.clone();
+        dup.objects[0].components.push(ComponentInstance {
+            id: "player-cc-2".into(),
+            enabled: true,
+            kind: parsed.objects[0].components[0].kind.clone(),
+        });
+        assert!(dup.validate().is_err());
+
+        // Combining RigidBody + CharacterController on the same object fails.
+        let mut combined = parsed.clone();
+        combined.objects[0].components.push(ComponentInstance {
+            id: "player-rb".into(),
+            enabled: true,
+            kind: Component::RigidBody {
+                body_type: RigidBodyType::Dynamic,
+                mass: 1.0,
+                linear_damping: 0.0,
+                angular_damping: 0.05,
+                gravity_scale: 1.0,
+                lock_translation: [false; 3],
+                lock_rotation: [false; 3],
+                ccd: false,
+            },
+        });
+        assert!(combined.validate().is_err());
+
+        // Invalid dimensions / parameters fail validation.
+        for (radius, height, slope, step, skin, snap) in [
+            (0.01, 1.8, 45.0, 0.3, 0.02, 0.1),
+            (0.6, 1.0, 45.0, 0.3, 0.02, 0.1),
+            (0.4, 1.8, 90.0, 0.3, 0.02, 0.1),
+            (0.4, 1.8, 45.0, -0.1, 0.02, 0.1),
+            (0.4, 1.8, 45.0, 0.3, 0.0, 0.1),
+            (0.4, 1.8, 45.0, 0.3, 0.02, -0.1),
+        ] {
+            let mut bad = parsed.clone();
+            bad.objects[0].components[0].kind = Component::CharacterController {
+                radius,
+                height,
+                offset: [0.0, 0.9, 0.0],
+                slope_limit_degrees: slope,
+                step_height: step,
+                skin_width: skin,
+                snap_to_ground: snap,
             };
             assert!(bad.validate().is_err());
         }

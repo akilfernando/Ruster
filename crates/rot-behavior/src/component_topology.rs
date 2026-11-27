@@ -98,6 +98,8 @@ impl ObjectSession {
                     Component::Script { .. } => "Script",
                     Component::Camera { .. } => "Camera",
                     Component::Animator { .. } => "Animator",
+                    Component::Joint { .. } => "Joint",
+                    Component::CharacterController { .. } => "CharacterController",
                     Component::MeshRenderer { .. }
                     | Component::Light { .. }
                     | Component::Collider { .. }

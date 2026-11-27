@@ -988,4 +988,170 @@ mod tests {
             "expected rigid body to fall below y=4.0 after 30 ticks, got y={y}"
         );
     }
+
+    #[test]
+    fn player_steps_joint_and_character_controller_scene() {
+        let mut scene =
+            ComponentScene::from_legacy(&Session::new(Scene::empty("joint-cc")).unwrap()).unwrap();
+        scene.objects.push(rot_scene::component_scene::ObjectNode {
+            id: "floor".into(),
+            name: "Floor".into(),
+            enabled: true,
+            parent: None,
+            transform: rot_scene::Transform {
+                translation: [0.0, -0.5, 0.0],
+                ..Default::default()
+            },
+            components: vec![rot_scene::component_scene::ComponentInstance {
+                id: "floor-col".into(),
+                enabled: true,
+                kind: rot_scene::component_scene::Component::Collider {
+                    role: rot_scene::ColliderRole::Blocker,
+                    offset: [0.0; 3],
+                    shape: rot_scene::ColliderShape::Box {
+                        half_extents: [10.0, 0.5, 10.0],
+                    },
+                },
+            }],
+        });
+        scene.objects.push(rot_scene::component_scene::ObjectNode {
+            id: "anchored".into(),
+            name: "Anchored".into(),
+            enabled: true,
+            parent: None,
+            transform: rot_scene::Transform {
+                translation: [3.0, 4.0, 0.0],
+                ..Default::default()
+            },
+            components: vec![
+                rot_scene::component_scene::ComponentInstance {
+                    id: "anchored-col".into(),
+                    enabled: true,
+                    kind: rot_scene::component_scene::Component::Collider {
+                        role: rot_scene::ColliderRole::Blocker,
+                        offset: [0.0; 3],
+                        shape: rot_scene::ColliderShape::Box {
+                            half_extents: [0.5; 3],
+                        },
+                    },
+                },
+                rot_scene::component_scene::ComponentInstance {
+                    id: "anchored-rb".into(),
+                    enabled: true,
+                    kind: rot_scene::component_scene::Component::RigidBody {
+                        body_type: rot_scene::RigidBodyType::Dynamic,
+                        mass: 1.0,
+                        linear_damping: 0.0,
+                        angular_damping: 0.05,
+                        gravity_scale: 1.0,
+                        lock_translation: [false; 3],
+                        lock_rotation: [false; 3],
+                        ccd: false,
+                    },
+                },
+                rot_scene::component_scene::ComponentInstance {
+                    id: "anchored-joint".into(),
+                    enabled: true,
+                    kind: rot_scene::component_scene::Component::Joint {
+                        kind: rot_scene::component_scene::JointKind::Fixed,
+                        connected_body: None,
+                        anchor: [0.0; 3],
+                        connected_anchor: [3.0, 4.0, 0.0],
+                        axis: [0.0, 1.0, 0.0],
+                        limits: None,
+                        rest_length: 1.0,
+                        stiffness: 100.0,
+                        damping: 5.0,
+                        collide_connected: false,
+                    },
+                },
+            ],
+        });
+        scene.script_files.insert(
+            "move-cc".into(),
+            rot_scene::component_scene::ScriptFile {
+                asset_id: "move-cc".into(),
+                path: "Scripts/move_cc.lua".into(),
+                text: r#"return {
+    on_update = function(o, props, dt, host)
+        host.self:component("CharacterController"):move({3.0, -1.0, 0.0})
+    end,
+}"#
+                .into(),
+            },
+        );
+        scene.objects.push(rot_scene::component_scene::ObjectNode {
+            id: "walker".into(),
+            name: "Walker".into(),
+            enabled: true,
+            parent: None,
+            transform: rot_scene::Transform::default(),
+            components: vec![
+                rot_scene::component_scene::ComponentInstance {
+                    id: "walker-cc".into(),
+                    enabled: true,
+                    kind: rot_scene::component_scene::Component::CharacterController {
+                        radius: 0.4,
+                        height: 1.8,
+                        offset: [0.0, 0.9, 0.0],
+                        slope_limit_degrees: 45.0,
+                        step_height: 0.3,
+                        skin_width: 0.02,
+                        snap_to_ground: 0.1,
+                    },
+                },
+                rot_scene::component_scene::ComponentInstance {
+                    id: "walker-script".into(),
+                    enabled: true,
+                    kind: rot_scene::component_scene::Component::Script {
+                        binding: rot_scene::BehaviorBinding {
+                            target: rot_scene::BindingTarget::Object("walker".into()),
+                            source_id: "move-cc".into(),
+                            enabled: true,
+                            properties: std::collections::BTreeMap::new(),
+                            state_defaults: std::collections::BTreeMap::new(),
+                            commands: std::collections::BTreeMap::new(),
+                        },
+                        source_kind: None,
+                        movement: rot_scene::component_scene::ScriptMovement::Ordinary,
+                    },
+                },
+            ],
+        });
+        let dt = rot_behavior::DEFAULT_FIXED_TICK;
+        let app = PlayerApp::from_component_scene(
+            "JointAndCC".into(),
+            Box::new(scene),
+            MeshMap::new(),
+            TextureMap::new(),
+            dt,
+        )
+        .unwrap();
+        let mut runtime = rot_app::Runtime::new(app, dt).unwrap();
+        runtime.reset().unwrap();
+        runtime.set_running(true);
+        for _ in 0..30 {
+            runtime.advance(dt).unwrap();
+        }
+        assert_eq!(runtime.app().runtime_tick(), Some(30));
+        let anchored_y = runtime
+            .app()
+            .runtime
+            .as_ref()
+            .unwrap()
+            .object_translation("anchored")
+            .unwrap()[1];
+        assert!((anchored_y - 4.0).abs() < 0.05);
+        let walker_x = runtime
+            .app()
+            .runtime
+            .as_ref()
+            .unwrap()
+            .object_translation("walker")
+            .unwrap()[0];
+        assert!(
+            walker_x > 1.0,
+            "expected walker to advance +X, got {walker_x}"
+        );
+    }
 }

@@ -1924,6 +1924,8 @@ fn component_type(component: &Component) -> &'static str {
         Component::MeshRenderer { .. } => "mesh_renderer",
         Component::Collider { .. } => "collider",
         Component::RigidBody { .. } => "rigid_body",
+        Component::Joint { .. } => "joint",
+        Component::CharacterController { .. } => "character_controller",
         Component::Camera { .. } => "camera",
         Component::Light { .. } => "light",
         Component::Animator { .. } => "animator",
@@ -3180,6 +3182,142 @@ mod tests {
                             mass,
                             ..
                         } if (mass - 2.5).abs() < 1e-6
+                    )
+            }));
+    }
+
+    #[test]
+    fn mcp_and_editor_joint_and_character_controller_edit_undo_and_reopen_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.objects.push(ObjectNode {
+            id: "hero".into(),
+            name: "Hero".into(),
+            enabled: true,
+            parent: None,
+            transform: Transform::default(),
+            components: vec![ComponentInstance {
+                id: "hero-mesh".into(),
+                enabled: true,
+                kind: Component::MeshRenderer {
+                    geometry: Geometry::Cube,
+                    tint: [1.0; 4],
+                    material: None,
+                },
+            }],
+        });
+        scene.save_new(&path).unwrap();
+        let session = ComponentSession::open(&path).unwrap();
+        let mut editor = ComponentWorkspace::new(path.clone(), session);
+        let token = "joint-cc-token";
+
+        let added = editor.ai_command(
+            token,
+            "scene_components_edit",
+            &json!({
+                "expected_session_token": token,
+                "expected_revision": "0",
+                "edits": [
+                    {
+                        "operation": "add",
+                        "object_id": "hero",
+                        "component": {
+                            "id": "hero-cc",
+                            "enabled": true,
+                            "type": "character_controller",
+                            "radius": 0.45,
+                            "step_height": 0.35
+                        }
+                    },
+                    {
+                        "operation": "add",
+                        "object_id": "hero",
+                        "component": {
+                            "id": "hero-joint",
+                            "enabled": true,
+                            "type": "joint",
+                            "kind": "hinge",
+                            "limits": [-1.2, 1.2]
+                        }
+                    }
+                ]
+            }),
+        );
+        assert_eq!(added["result"]["revision"], "1");
+
+        let inspected = editor.ai_command(
+            token,
+            "scene_components_inspect",
+            &json!({ "object_id": "hero" }),
+        );
+        let comps = inspected["result"]["components"].as_array().unwrap();
+        assert!(comps
+            .iter()
+            .any(|c| c["id"] == "hero-cc" && c["type"] == "character_controller"));
+        assert!(comps
+            .iter()
+            .any(|c| c["id"] == "hero-joint" && c["type"] == "joint"));
+
+        let replaced = editor.ai_command(
+            token,
+            "scene_components_edit",
+            &json!({
+                "expected_session_token": token,
+                "expected_revision": "1",
+                "edits": [{
+                    "operation": "replace",
+                    "object_id": "hero",
+                    "component": {
+                        "id": "hero-cc",
+                        "enabled": true,
+                        "type": "character_controller",
+                        "slope_limit_degrees": 55.0
+                    }
+                }]
+            }),
+        );
+        assert_eq!(replaced["result"]["revision"], "2");
+
+        editor.command(Action::Save);
+        let reopened = ComponentSession::open(&path).unwrap();
+        assert!(reopened
+            .scene()
+            .objects
+            .iter()
+            .find(|o| o.id == "hero")
+            .unwrap()
+            .components
+            .iter()
+            .any(|c| {
+                c.id == "hero-cc"
+                    && matches!(
+                        c.kind,
+                        Component::CharacterController {
+                            slope_limit_degrees,
+                            ..
+                        } if (slope_limit_degrees - 55.0).abs() < 1e-6
+                    )
+            }));
+
+        editor.command(Action::Undo);
+        assert!(editor
+            .session
+            .scene()
+            .objects
+            .iter()
+            .find(|o| o.id == "hero")
+            .unwrap()
+            .components
+            .iter()
+            .any(|c| {
+                c.id == "hero-cc"
+                    && matches!(
+                        c.kind,
+                        Component::CharacterController {
+                            slope_limit_degrees,
+                            ..
+                        } if (slope_limit_degrees - 45.0).abs() < 1e-6
                     )
             }));
     }

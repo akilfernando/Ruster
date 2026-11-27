@@ -103,7 +103,7 @@ pub(crate) struct ComponentWorld {
     modules: Option<Rc<RefCell<Modules>>>,
     pub(crate) animations: Vec<ResolvedComponentAnimation>,
     pub(crate) colliders: Arc<Vec<ComponentColliderSlot>>,
-    pub(crate) physics: Option<PhysicsState>,
+    pub(crate) physics: Option<Rc<RefCell<PhysicsState>>>,
     pub(crate) draw_plan: Arc<ComponentDrawPlan>,
     pub(crate) audio_emitters: Option<Arc<BTreeMap<String, usize>>>,
     audio_requests: Option<audio::CueRequests>,
@@ -151,7 +151,12 @@ impl RebuiltPopulation {
 
 impl ComponentWorld {
     pub(crate) fn is_static(&self) -> bool {
-        self.scripts.is_empty() && self.animations.is_empty() && self.physics.is_none()
+        self.scripts.is_empty()
+            && self.animations.is_empty()
+            && !self
+                .physics
+                .as_ref()
+                .is_some_and(|p| p.borrow().has_simulation())
     }
 
     fn query_snapshot(&self) -> ComponentQueryInput {
@@ -1001,7 +1006,9 @@ impl Engine {
                         colliders_dirty = true;
                         physics_dirty = true;
                     }
-                    Component::RigidBody { .. } => {
+                    Component::RigidBody { .. }
+                    | Component::Joint { .. }
+                    | Component::CharacterController { .. } => {
                         physics_dirty = true;
                     }
                     Component::Light { .. } => {
@@ -1141,16 +1148,21 @@ impl Engine {
             eff_overrides,
         )?;
         let rebuilt_physics = if physics_dirty {
-            Some(PhysicsState::rebuild_preserving_velocities(
-                world.physics.as_ref(),
-                eff_scene,
-                eff_hierarchy,
-                eff_local,
-                &next_world,
-                &next_rot,
-                eff_colliders,
-                self.limits.fixed_dt,
-            )?)
+            let prev_physics = world.physics.as_ref().map(|p| p.borrow());
+            Some(
+                PhysicsState::rebuild_preserving_velocities(
+                    prev_physics.as_deref(),
+                    eff_scene,
+                    eff_hierarchy,
+                    eff_local,
+                    &next_world,
+                    &next_rot,
+                    eff_colliders,
+                    self.limits.fixed_dt,
+                    !world.scripts.is_empty(),
+                )?
+                .map(|p| Rc::new(RefCell::new(p))),
+            )
         } else {
             None
         };
@@ -1203,8 +1215,8 @@ impl Engine {
         if let Some(next_physics) = rebuilt_physics {
             world_mut.physics = next_physics;
         } else if !transformed_owners.is_empty() {
-            if let Some(physics) = world_mut.physics.as_mut() {
-                physics.sync_modified_owners(
+            if let Some(physics) = world_mut.physics.as_ref() {
+                physics.borrow_mut().sync_modified_owners(
                     &world_mut.scene,
                     &world_mut.hierarchy,
                     &world_mut.local_transforms,
@@ -1423,10 +1435,8 @@ impl Engine {
                 world_matrices: &world.world_matrices,
                 world_rotations: &world.world_rotations,
                 visual_overrides: &world.visual_overrides,
-                physics_velocities: world
-                    .physics
-                    .as_ref()
-                    .map(|p| Rc::new(p.velocity_snapshot())),
+                physics: world.physics.clone(),
+                fixed_dt: self.limits.fixed_dt,
                 queries: &queries,
                 audio: audio_cues
                     .as_ref()
@@ -1992,7 +2002,8 @@ impl Engine {
                         world_matrices: &world_matrices,
                         world_rotations: &world_rotations,
                         visual_overrides: &initial_overrides,
-                        physics_velocities: None,
+                        physics: None,
+                        fixed_dt: self.limits.fixed_dt,
                         queries: queries
                             .as_ref()
                             .expect("component callbacks can run queries"),
@@ -2234,7 +2245,7 @@ impl Engine {
                     )
                     .map_err(invalid_commit)?;
             }
-            world.physics = PhysicsState::build(
+            if let Some(physics) = PhysicsState::build(
                 &world.scene,
                 &world.hierarchy,
                 &world.local_transforms,
@@ -2242,9 +2253,18 @@ impl Engine {
                 &world.world_rotations,
                 &world.colliders,
                 self.limits.fixed_dt,
-            )?;
-            if let (Some(physics), Some(writes)) = (world.physics.as_mut(), reset_writes.as_ref()) {
-                physics.apply_lua_writes(&writes.rigid_bodies);
+                !world.scripts.is_empty(),
+            )? {
+                let physics_rc = Rc::new(RefCell::new(physics));
+                if let Some(writes) = reset_writes.as_ref() {
+                    let mut phys_mut = physics_rc.borrow_mut();
+                    if !writes.character_moves.is_empty() {
+                        phys_mut
+                            .commit_character_moves(&writes.character_moves, self.limits.fixed_dt);
+                    }
+                    phys_mut.apply_lua_writes(&writes.rigid_bodies);
+                }
+                world.physics = Some(physics_rc);
             }
         }
         Ok(runtime)
@@ -2291,7 +2311,13 @@ impl Engine {
             runtime.last_step_commit_revision = Some(commit_revision);
             return Ok(());
         }
-        if world.physics.is_some() && world.scripts.is_empty() && world.animations.is_empty() {
+        if world
+            .physics
+            .as_ref()
+            .is_some_and(|p| p.borrow().has_simulation())
+            && world.scripts.is_empty()
+            && world.animations.is_empty()
+        {
             self.check_cancelled()?;
             runtime.audio_batch = None;
             runtime.query_observations.clear();
@@ -2300,17 +2326,24 @@ impl Engine {
                 .component_world
                 .as_mut()
                 .expect("component world checked above");
-            let physics = world_mut.physics.as_mut().expect("physics checked above");
-            physics.step(self.limits.fixed_dt);
-            let mut staged_local: Option<Vec<Transform>> = None;
-            let moved = physics.write_back_transforms(
-                &world_mut.hierarchy,
-                &world_mut.world_matrices,
-                &world_mut.world_rotations,
-                &world_mut.local_transforms,
-                &mut staged_local,
-                |committed| world_mut.spare_local.clone_from(committed),
-            )?;
+            let (moved, staged_local) = {
+                let mut physics = world_mut
+                    .physics
+                    .as_ref()
+                    .expect("physics checked above")
+                    .borrow_mut();
+                physics.step(self.limits.fixed_dt);
+                let mut staged_local: Option<Vec<Transform>> = None;
+                let moved = physics.write_back_transforms(
+                    &world_mut.hierarchy,
+                    &world_mut.world_matrices,
+                    &world_mut.world_rotations,
+                    &world_mut.local_transforms,
+                    &mut staged_local,
+                    |committed| world_mut.spare_local.clone_from(committed),
+                )?;
+                (moved, staged_local)
+            };
             if moved {
                 let next_local = staged_local.expect("moved guarantees staged_local");
                 let (next_world, next_rot, next_draw) = world_mut.resolve_staged_transforms(
@@ -2436,21 +2469,6 @@ impl Engine {
             && modules
                 .as_ref()
                 .is_some_and(|modules| modules.batch.is_some());
-        if use_batch {
-            let batch = modules
-                .as_ref()
-                .and_then(|modules| modules.batch.as_ref())
-                .expect("checked batch");
-            if had_animation_writes {
-                batch.resync_poses.set(true);
-            }
-            batch.sync_poses(
-                self,
-                staged_transforms
-                    .as_deref()
-                    .unwrap_or(&world.local_transforms),
-            )?;
-        }
         let mut callback = modules.as_ref().map(|modules| {
             CurrentCallback::new(
                 &self.lua,
@@ -2461,14 +2479,8 @@ impl Engine {
                     world_matrices: &world.world_matrices,
                     world_rotations: &world.world_rotations,
                     visual_overrides: &world.visual_overrides,
-                    physics_velocities: (!world.scripts.is_empty())
-                        .then(|| {
-                            world
-                                .physics
-                                .as_ref()
-                                .map(|p| Rc::new(p.velocity_snapshot()))
-                        })
-                        .flatten(),
+                    physics: world.physics.clone(),
+                    fixed_dt: self.limits.fixed_dt,
                     queries: queries
                         .as_ref()
                         .expect("component callbacks can run queries"),
@@ -2492,7 +2504,113 @@ impl Engine {
                 },
             )
         });
-        let mut force_resync = had_animation_writes;
+        let contact_events = if !world.scripts.is_empty() {
+            world
+                .physics
+                .as_ref()
+                .map_or_else(Vec::new, |p| p.borrow().pending_events().to_vec())
+        } else {
+            Vec::new()
+        };
+        let mut had_contact_writes = false;
+        if !contact_events.is_empty() {
+            if let (Some(mods_mut), Some(cb)) = (modules.as_deref_mut(), callback.as_ref()) {
+                for ev in &contact_events {
+                    for &owner_idx in [ev.owner_a, ev.owner_b].iter() {
+                        let other_idx = if owner_idx == ev.owner_a {
+                            ev.owner_b
+                        } else {
+                            ev.owner_a
+                        };
+                        let other_id = &world.scene.objects[other_idx].id;
+                        for (slot_idx, slot) in world.scripts.iter().enumerate() {
+                            if slot.owner_index != owner_idx {
+                                continue;
+                            }
+                            if !mods_mut.instances[slot_idx]
+                                .as_ref()
+                                .is_some_and(|m| m.handles_contact_event(ev.kind))
+                            {
+                                continue;
+                            }
+                            if debugger_armed {
+                                if let Some(session) = self.debugger.borrow_mut().as_mut() {
+                                    let binding = &runtime.authoring.bindings[&slot.component_id];
+                                    let source_hash = mods_mut.instances[slot_idx]
+                                        .as_ref()
+                                        .map(|m| m.source_hash.clone())
+                                        .unwrap_or_default();
+                                    session.context(super::debug::Context {
+                                        source_id: binding.source_id.clone(),
+                                        source_hash,
+                                        binding_id: slot.component_id.clone(),
+                                        object_id: Some(slot.owner_id.clone()),
+                                        phase: Phase::Update,
+                                    });
+                                }
+                            }
+                            self.binding_count.set(0);
+                            mods_mut.max_attempt = mods_mut.max_attempt.max(next);
+                            let original = staged_transforms
+                                .as_deref()
+                                .unwrap_or(&world.local_transforms)[slot.owner_index]
+                                .clone();
+                            let result = {
+                                let snapshot = cb.snapshot();
+                                let _slot_guard =
+                                    lua_component::push_slot_override(&snapshot, slot_idx);
+                                mods_mut.instances[slot_idx]
+                                    .as_mut()
+                                    .expect("checked module")
+                                    .invoke_contact_event(self, ev.kind, &original, other_id, next)
+                            };
+                            if debugger_armed {
+                                if let Some(session) = self.debugger.borrow_mut().as_mut() {
+                                    session.clear();
+                                }
+                            }
+                            let implicit = match result {
+                                Ok(implicit) => implicit,
+                                Err(error) => {
+                                    let binding = &runtime.authoring.bindings[&slot.component_id];
+                                    return Err(error.context(
+                                        &slot.component_id,
+                                        binding,
+                                        runtime.authoring.sources.get(&binding.source_id),
+                                    ));
+                                }
+                            };
+                            let before_pending = cb.has_pending_transforms();
+                            cb.flush_transform_writes(
+                                &world.local_transforms,
+                                &mut staged_transforms,
+                                slot.owner_index,
+                                implicit,
+                            );
+                            if staged_transforms.is_some() || before_pending {
+                                had_contact_writes = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if use_batch {
+            let batch = modules
+                .as_ref()
+                .and_then(|modules| modules.batch.as_ref())
+                .expect("checked batch");
+            if had_animation_writes || had_contact_writes {
+                batch.resync_poses.set(true);
+            }
+            batch.sync_poses(
+                self,
+                staged_transforms
+                    .as_deref()
+                    .unwrap_or(&world.local_transforms),
+            )?;
+        }
+        let mut force_resync = had_animation_writes || had_contact_writes;
         let mut batch_ran_upto: usize = 0;
         if use_batch {
             let mods_ref = modules.as_deref().expect("checked modules");
@@ -2877,16 +2995,22 @@ impl Engine {
                 world_mut,
                 modules.as_mut().expect("topology requires Lua modules"),
             );
-            world_mut.physics = PhysicsState::rebuild_preserving_velocities(
-                world_mut.physics.as_ref(),
-                &world_mut.scene,
-                &world_mut.hierarchy,
-                &world_mut.local_transforms,
-                &world_mut.world_matrices,
-                &world_mut.world_rotations,
-                &world_mut.colliders,
-                self.limits.fixed_dt,
-            )?;
+            let next_physics = {
+                let prev_physics = world_mut.physics.as_ref().map(|p| p.borrow());
+                PhysicsState::rebuild_preserving_velocities(
+                    prev_physics.as_deref(),
+                    &world_mut.scene,
+                    &world_mut.hierarchy,
+                    &world_mut.local_transforms,
+                    &world_mut.world_matrices,
+                    &world_mut.world_rotations,
+                    &world_mut.colliders,
+                    self.limits.fixed_dt,
+                    !world_mut.scripts.is_empty(),
+                )?
+                .map(|p| Rc::new(RefCell::new(p)))
+            };
+            world_mut.physics = next_physics;
         } else if let Some((next_world, next_rot, next_draw)) = staged_frames {
             runtime.draw_frame = next_draw;
             let changed_owners = if had_pre_physics_transforms && world_mut.physics.is_some() {
@@ -2935,8 +3059,8 @@ impl Engine {
                 world_mut.spare_rotations.put(vec);
             }
             if !changed_owners.is_empty() {
-                if let Some(physics) = world_mut.physics.as_mut() {
-                    physics.sync_modified_owners(
+                if let Some(physics) = world_mut.physics.as_ref() {
+                    physics.borrow_mut().sync_modified_owners(
                         &world_mut.scene,
                         &world_mut.hierarchy,
                         &world_mut.local_transforms,
@@ -2955,28 +3079,32 @@ impl Engine {
                 world_mut.visual_overrides = Arc::new(next_overrides);
             }
         }
-        if let Some(mut physics) = world_mut.physics.take() {
-            if let Some(writes) = writes.as_ref() {
-                physics.apply_lua_writes(&writes.rigid_bodies);
-            }
-            physics.step(self.limits.fixed_dt);
+        if let Some(physics_rc) = world_mut.physics.clone() {
             let mut post_physics_local: Option<Vec<Transform>> = None;
-            let moved = physics.write_back_transforms(
-                &world_mut.hierarchy,
-                &world_mut.world_matrices,
-                &world_mut.world_rotations,
-                &world_mut.local_transforms,
-                &mut post_physics_local,
-                |committed| world_mut.spare_local.clone_from(committed),
-            );
-            let moved = match moved {
-                Ok(moved) => moved,
-                Err(err) => {
-                    world_mut.physics = Some(physics);
-                    return Err(err);
+            let moved = {
+                let mut physics = physics_rc.borrow_mut();
+                physics.clear_pending_events();
+                if let Some(writes) = writes.as_ref() {
+                    if !writes.character_moves.is_empty() {
+                        physics
+                            .commit_character_moves(&writes.character_moves, self.limits.fixed_dt);
+                    }
+                    physics.apply_lua_writes(&writes.rigid_bodies);
+                }
+                if physics.has_simulation() {
+                    physics.step(self.limits.fixed_dt);
+                    physics.write_back_transforms(
+                        &world_mut.hierarchy,
+                        &world_mut.world_matrices,
+                        &world_mut.world_rotations,
+                        &world_mut.local_transforms,
+                        &mut post_physics_local,
+                        |committed| world_mut.spare_local.clone_from(committed),
+                    )?
+                } else {
+                    false
                 }
             };
-            world_mut.physics = Some(physics);
             if moved {
                 force_resync = true;
                 let next_local = post_physics_local.expect("moved guarantees local");
