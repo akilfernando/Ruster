@@ -18,12 +18,11 @@ instructions for a package are in its brief under `docs/briefs/`.
 
 ## Needs the user
 
-- **Clean up this machine.** `python3 scripts/tidy.py` lists what agents
-  left behind: 59 worktrees (55 hold uncommitted measurement edits), 658
-  entries in `/tmp` using 14 GB of memory, and 518 GB of stale build
-  output. `--apply` removes the clean ones; `--discard-edits` and
-  `--build-output` cover the rest. Two branches are not merged:
-  `work/S-08-sweep-scene` and `work/C-EXIT-50mb`.
+- **Two old branches.** The machine was cleaned on 2026-11-27 with the
+  user's go-ahead. Two unmerged branches and their worktrees were left:
+  `work/C-EXIT-50mb` (its code is identical to `428ec9c` on the trunk) and
+  `work/S-08-sweep-scene` (a 2026-11-18 wording pass on the removed editor,
+  with 28 uncommitted files). Say if they can go.
 - **Try the editor by hand** when the UX lane reaches
   [U-EXIT](briefs/U-EXIT.md), and play the sample at
   [P4-EXIT](briefs/P4-EXIT.md). About 20 minutes each.

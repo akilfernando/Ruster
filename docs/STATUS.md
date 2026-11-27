@@ -10,10 +10,10 @@ Earlier pages: [2026-11-27](archive/STATUS-2026-11-27.md),
 - **Trunk:** `main`, on `origin`. Branch from it and merge back to it.
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
-- **Leftovers:** `python3 scripts/tidy.py` lists stale worktrees, temporary
-  folders and build output. Removing them waits for the user. Worktrees
-  under `~/Projects/Ruster-Audits` and `~/Projects/Ruster-Creations` are
-  kept on purpose.
+- **Leftovers:** cleaned on 2026-11-27. Run `python3 scripts/tidy.py` at the
+  end of a package and remove what is yours. Worktrees under
+  `~/Projects/Ruster-Audits` and `~/Projects/Ruster-Creations` are kept on
+  purpose.
 
 ## Now
 
