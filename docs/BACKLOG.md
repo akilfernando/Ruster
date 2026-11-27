@@ -68,7 +68,7 @@ undocumented.
 
 | Package | Outcome | Size | Status |
 | --- | --- | --- | --- |
-| [R-01](briefs/R-01.md) | GPU probes run with one command and all pass | S | open |
+| [R-01](briefs/R-01.md) | GPU probes run with one command and all pass | S | in progress — Claude Code pilot, 2026-11-27 |
 | [R-02](briefs/R-02.md) | Prototype limits on scripts, animation, audio, input lifted | S | open |
 | [R-03](briefs/R-03.md) | Lua reference; AI apps can discover components and script functions | M | open |
 | [R-04](briefs/R-04.md) | 10,000-script budget measured with shipping limits, with headroom | S | open |
@@ -81,7 +81,7 @@ the gaps the user named in their own walkthrough.
 
 | Package | Outcome | Size | Status |
 | --- | --- | --- | --- |
-| [U-01](briefs/U-01.md) | Docked, closable panels and saved layouts | M | open |
+| [U-01](briefs/U-01.md) | Docked, closable panels and saved layouts | M | in progress — Claude Code pilot, 2026-11-27 |
 | [U-02](briefs/U-02.md) | Every command works; Copy, Paste, Select All | M | open |
 | [U-03](briefs/U-03.md) | Standard menus, icon toolbar, readable Hierarchy, status bar | M | open |
 | [U-04](briefs/U-04.md) | Inspector edits apply immediately; no Apply button | M | open |

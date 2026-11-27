@@ -256,7 +256,8 @@ next package.
 - Do not create a worktree for a measurement. Build the before and after in
   the same checkout, one after the other.
 - `python3 scripts/tidy.py` lists leftovers. Run it at the end of a package
-  and remove what is yours.
+  and remove what is yours, by name. Its `--apply` leaves anything younger
+  than a day alone, so it cannot take another session's worktree.
 
 ## 13. Known gotchas
 

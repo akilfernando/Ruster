@@ -14,7 +14,8 @@ and loose folders under target/. The next build is a full rebuild, and an AI
 app whose MCP entry points at target/debug/rot-mcp cannot start the adapter
 until `cargo build -p rot-mcp -p rot-editor` has run.
 
-Never removed: the main checkout, worktrees whose branch is not merged, and
+Never removed: the main checkout, worktrees whose branch is not merged,
+worktrees younger than a day (another session may be using one), and
 worktrees under Ruster-Audits or Ruster-Creations, which are kept on purpose.
 """
 
@@ -96,12 +97,17 @@ def main():
     args = parser.parse_args()
     main_branch = trunk()
     freed = 0
+    cutoff = time.time() - args.older_than_hours * 3600
 
     print(f"Worktrees (trunk: {main_branch})")
     trees = worktrees()
     counts = {}
     for entry in trees:
         state = classify(entry, main_branch)
+        # A worktree made within the age limit may belong to a session that is
+        # still reading or building. It looks merged and clean; leave it alone.
+        if state.startswith("merged") and entry["path"].lstat().st_mtime >= cutoff:
+            state = "recent, left alone"
         counts[state] = counts.get(state, 0) + 1
         removable = state == "merged, clean" or (state == "merged, has edits" and args.discard_edits)
         if state in ("not merged", "merged, has edits"):
@@ -127,7 +133,6 @@ def main():
 
     print("Temporary folders")
     registered = {str(entry["path"]) for entry in trees}
-    cutoff = time.time() - args.older_than_hours * 3600
     stale = [p for p in glob.glob("/tmp/rot-*") if p not in registered and os.lstat(p).st_mtime < cutoff and os.lstat(p).st_uid == os.getuid()]
     stale_bytes = sum(size(p) for p in stale)
     print(f"  {len(stale)} entries in /tmp/rot-* older than {args.older_than_hours:g} h, {human(stale_bytes)} (this is memory when /tmp is tmpfs)")
