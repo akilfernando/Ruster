@@ -199,9 +199,10 @@ fn shading_debug_views_gpu_probe() {
             0.85,
             0.05,
         ),
-        // Far neutral panel for depth comparison (above awning line of sight)
+        // Far neutral panel for depth comparison. Raised so the awning
+        // (y 1.0..1.8, z 2..3) is not between the camera and the sampled point.
         instance(
-            Vec3::new(0.0, 3.0, -14.0),
+            Vec3::new(0.0, 4.5, -14.0),
             Vec3::new(3.0, 2.0, 0.5),
             [0.8, 0.8, 0.8],
             0.5,
@@ -234,7 +235,7 @@ fn shading_debug_views_gpu_probe() {
     let lit_sun = sample_world(&img_lit, size, vp, Vec3::new(0.0, -0.3, 3.5));
     let lit_shad = sample_world(&img_lit, size, vp, Vec3::new(0.0, -0.3, 1.0));
     assert!(
-        lit_sun[0] > lit_shad[0] + 40,
+        i32::from(lit_sun[0]) > i32::from(lit_shad[0]) + 40,
         "Lit mode must show lighting contrast: sun={lit_sun:?} shad={lit_shad:?}"
     );
     let unlit_sun = sample_world(&img_unlit, size, vp, Vec3::new(0.0, -0.3, 3.5));
@@ -317,7 +318,7 @@ fn shading_debug_views_gpu_probe() {
     let r_matte = sample_world(&img_rough, size, vp, Vec3::new(2.5, 0.8, 1.7));
     assert_eq!(r_gloss[0], r_gloss[1]);
     assert!(
-        r_matte[0] > r_gloss[0] + 100,
+        i32::from(r_matte[0]) > i32::from(r_gloss[0]) + 100,
         "Roughness must distinguish glossy={r_gloss:?} vs matte={r_matte:?}"
     );
 
@@ -373,9 +374,10 @@ fn shading_debug_views_gpu_probe() {
         groups,
     );
     let d_near = sample_world(&img_depth, size, vp, Vec3::new(2.5, 0.8, 1.7));
-    let d_far = sample_world(&img_depth, size, vp, Vec3::new(0.0, 3.0, -13.75));
+    let d_far = sample_world(&img_depth, size, vp, Vec3::new(0.0, 4.5, -13.75));
     assert!(
-        d_near[0] > d_far[0] + 60,
+        // 1 - d/(d+10), sRGB-encoded: ~214 at 5 m and ~158 at 20 m, a gap of ~56.
+        i32::from(d_near[0]) > i32::from(d_far[0]) + 40,
         "Depth must brighten nearer surfaces: near={d_near:?} far={d_far:?}"
     );
 
@@ -423,7 +425,7 @@ fn shading_debug_views_gpu_probe() {
     let ao_corner = sample_world(&img_ao, size, vp_ao, Vec3::new(0.0, 0.0, 0.15));
     let ao_open = sample_world(&img_ao, size, vp_ao, Vec3::new(0.0, 0.0, 2.2));
     assert!(
-        ao_open[0] > ao_corner[0] + 25 && ao_corner[0] == ao_corner[1],
+        i32::from(ao_open[0]) > i32::from(ao_corner[0]) + 25 && ao_corner[0] == ao_corner[1],
         "AO mode must show SSAO corner darkening: corner={ao_corner:?} open={ao_open:?}"
     );
 
@@ -471,7 +473,7 @@ fn shading_debug_views_gpu_probe() {
     let cl_empty = sample_world(&img_clusters, size, vp_cl, Vec3::new(-3.2, 0.5, 0.25));
     let cl_dense = sample_world(&img_clusters, size, vp_cl, Vec3::new(3.0, 0.5, 0.25));
     assert!(
-        cl_empty[2] > cl_empty[0] && cl_dense[1] > cl_empty[1] + 100,
+        cl_empty[2] > cl_empty[0] && i32::from(cl_dense[1]) > i32::from(cl_empty[1]) + 100,
         "Clusters heatmap must contrast empty={cl_empty:?} vs dense={cl_dense:?}"
     );
 
@@ -503,7 +505,11 @@ fn shading_debug_views_gpu_probe() {
     let c2 = sample_world(&img_cascades, size, vp_csm, Vec3::new(0.0, -0.3, -18.0));
     let c3 = sample_world(&img_cascades, size, vp_csm, Vec3::new(0.0, -0.3, -44.0));
     assert!(
-        c0[1] > c0[0] && c1[0] > c1[2] && c1[1] > c1[2] && c2[0] > c2[1] && c3[0] > c3[1] + 80,
+        c0[1] > c0[0]
+            && c1[0] > c1[2]
+            && c1[1] > c1[2]
+            && c2[0] > c2[1]
+            && i32::from(c3[0]) > i32::from(c3[1]) + 80,
         "Cascades must color CSM bands distinctly: c0={c0:?} c1={c1:?} c2={c2:?} c3={c3:?}"
     );
 

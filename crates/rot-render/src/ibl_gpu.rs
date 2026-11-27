@@ -1006,15 +1006,16 @@ mod tests {
         let p_mid = sample(&img_a, vp_a, Vec3::new(0.0, 2.0, -9.1));
         let p_far = sample(&img_a, vp_a, Vec3::new(4.0, 2.0, -30.25));
         assert!(
-            p_near[0] > p_near[2] + 80,
+            i32::from(p_near[0]) > i32::from(p_near[2]) + 80,
             "near box before start must stay red: {p_near:?}"
         );
         assert!(
-            p_far[2] > p_far[0] + 100,
+            i32::from(p_far[2]) > i32::from(p_far[0]) + 100,
             "far box past end must take blue fog: {p_far:?}"
         );
         assert!(
-            p_mid[2] > p_near[2] + 40 && p_mid[0] > p_far[0] + 30,
+            i32::from(p_mid[2]) > i32::from(p_near[2]) + 40
+                && i32::from(p_mid[0]) > i32::from(p_far[0]) + 30,
             "mid box must transition smoothly: near={p_near:?} mid={p_mid:?} far={p_far:?}"
         );
 
@@ -1029,7 +1030,7 @@ mod tests {
         );
         let p_far_off = sample(&img_off, vp_a, Vec3::new(4.0, 2.0, -30.25));
         assert!(
-            p_far_off[0] > p_far_off[2] + 80,
+            i32::from(p_far_off[0]) > i32::from(p_far_off[2]) + 80,
             "disabling fog must restore red on far box: {p_far_off:?}"
         );
 
@@ -1068,7 +1069,8 @@ mod tests {
         let low = sample(&img_b, vp_b, Vec3::new(-3.5, -2.0, -23.5));
         let high = sample(&img_b, vp_b, Vec3::new(3.5, 12.0, -23.5));
         assert!(
-            high[0] > low[0] + 60 && low[2] > high[2] + 60,
+            i32::from(high[0]) > i32::from(low[0]) + 60
+                && i32::from(low[2]) > i32::from(high[2]) + 60,
             "height fog must obscure low elevation more than high: low={low:?} high={high:?}"
         );
 
@@ -1112,11 +1114,16 @@ mod tests {
         let horizon_fog = sample(&img_sky_fog, vp_c, Vec3::new(0.0, 2.1, -10.0));
         let zenith_fog = sample(&img_sky_fog, vp_c, Vec3::new(0.0, 7.2, -10.0));
         assert!(
-            horizon_fog[0] > horizon_clear[0] + 80,
+            // The clear horizon is already bright red (186), so +80 was
+            // unreachable (max 255); a red-orange fog adds ~50 red and removes
+            // over 100 of green and blue.
+            i32::from(horizon_fog[0]) > i32::from(horizon_clear[0]) + 40
+                && i32::from(horizon_fog[1]) + 80 < i32::from(horizon_clear[1])
+                && i32::from(horizon_fog[2]) + 100 < i32::from(horizon_clear[2]),
             "sky horizon must blend toward fog color: clear={horizon_clear:?} fog={horizon_fog:?}"
         );
         assert!(
-            zenith_fog[2] > zenith_fog[0] + 40,
+            i32::from(zenith_fog[2]) > i32::from(zenith_fog[0]) + 40,
             "sky zenith must stay blue above horizon fog: zenith={zenith_fog:?}"
         );
 

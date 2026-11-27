@@ -564,6 +564,9 @@ fn render(
                 .unwrap_or(&r.default_tangent)
                 .slice(..),
         );
+        // Skinning stream (P4-05): without it the draw is a validation error
+        // and nothing is drawn.
+        pass.set_vertex_buffer(3, gpu.skin.as_ref().unwrap_or(&r.default_skin).slice(..));
         pass.set_index_buffer(gpu.indices.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..gpu.count, 0, 0..1);
     }
@@ -1868,7 +1871,7 @@ fn verify_pbr_maps(device: &wgpu::Device, queue: &wgpu::Queue) {
     let graze_dielectric = pixel(&graze_dielectric_img, 128, 96);
     let graze_conductor = pixel(&graze_conductor_img, 128, 96);
     assert!(
-        graze_dielectric[1] > graze_conductor[1] + 20,
+        i32::from(graze_dielectric[1]) > i32::from(graze_conductor[1]) + 20,
         "conductor must suppress diffuse response: dielectric={graze_dielectric:?} conductor={graze_conductor:?}"
     );
 
@@ -1909,7 +1912,7 @@ fn verify_pbr_maps(device: &wgpu::Device, queue: &wgpu::Queue) {
     let flat_px = pixel(&render_case(&flat, &top_light), 128, 96);
     let normal_px = pixel(&render_case(&normal_mapped, &top_light), 128, 96);
     assert!(
-        normal_px[0] > flat_px[0] + 60,
+        i32::from(normal_px[0]) > i32::from(flat_px[0]) + 60,
         "normal map tilted toward +Y overhead light must brighten surface: normal={normal_px:?} flat={flat_px:?}"
     );
     let normal_zero_scale = OpaqueMaterial {
@@ -2131,7 +2134,7 @@ fn verify_sky_and_ibl(device: &wgpu::Device, queue: &wgpu::Queue) {
     let upper_sky = pixel(&backdrop_img, 128, 20);
     let lower_sky = pixel(&backdrop_img, 128, 172);
     assert!(
-        upper_sky[2] > upper_sky[0] + 40 && upper_sky[2] > lower_sky[2] + 40,
+        i32::from(upper_sky[2]) > i32::from(upper_sky[0]) + 40 && i32::from(upper_sky[2]) > i32::from(lower_sky[2]) + 40,
         "sky backdrop must render blue zenith above darker ground: upper={upper_sky:?} lower={lower_sky:?}"
     );
     let hidden_sky = Sky {
@@ -2170,7 +2173,7 @@ fn verify_sky_and_ibl(device: &wgpu::Device, queue: &wgpu::Queue) {
         96,
     );
     assert!(
-        reflect_up[2] > reflect_up[0] + 20 && reflect_up[2] > reflect_down[2] + 40,
+        i32::from(reflect_up[2]) > i32::from(reflect_up[0]) + 20 && i32::from(reflect_up[2]) > i32::from(reflect_down[2]) + 40,
         "smooth conductor must reflect zenith sky upward vs darker ground downward: up={reflect_up:?} down={reflect_down:?}"
     );
 
@@ -2237,7 +2240,7 @@ fn verify_sky_and_ibl(device: &wgpu::Device, queue: &wgpu::Queue) {
         96,
     );
     assert!(
-        smooth_sun[0] > rough_sun[0] + 20,
+        i32::from(smooth_sun[0]) > i32::from(rough_sun[0]) + 20,
         "roughness must blur/dim sky sun IBL reflection: smooth={smooth_sun:?} rough={rough_sun:?}"
     );
 
@@ -2588,7 +2591,7 @@ pub(super) fn verify_cube_material(device: &wgpu::Device, queue: &wgpu::Queue) {
     let hdr = DisplayProfile::SurfaceHdr { exposure_stops: 0. };
     let mapped = render(ViewPreset::Front, &surface, &lighting, hdr);
     assert!(
-        pixel(&mapped, 96, 96)[0] > pixel(&mapped, 160, 96)[0] + 25,
+        i32::from(pixel(&mapped, 96, 96)[0]) > i32::from(pixel(&mapped, 160, 96)[0]) + 25,
         "dark roughness texels produce a tighter and brighter frontal highlight"
     );
     let first = metrics.lock().unwrap().clone();

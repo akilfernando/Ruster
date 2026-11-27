@@ -7236,7 +7236,8 @@ mod tests {
             fn flush(&self) {}
         }
         static DIAGNOSTICS: Diagnostics = Diagnostics;
-        log::set_logger(&DIAGNOSTICS).expect("GPU probe diagnostics logger");
+        // Another probe in the same process may have installed a logger already.
+        let _ = log::set_logger(&DIAGNOSTICS);
         log::set_max_level(log::LevelFilter::Warn);
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::VULKAN,

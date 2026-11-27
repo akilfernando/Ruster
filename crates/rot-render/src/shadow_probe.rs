@@ -147,11 +147,19 @@ impl Probe {
                 module: &shader,
                 entry_point: Some("vs"),
                 compilation_options: Default::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: size_of::<Vertex>() as u64,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0=>Float32x3],
-                })],
+                buffers: &[
+                    Some(wgpu::VertexBufferLayout {
+                        array_stride: size_of::<Vertex>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &wgpu::vertex_attr_array![0=>Float32x3],
+                    }),
+                    // Skinning stream (P4-05): stride 0 reads `default_skin` for every vertex.
+                    Some(wgpu::VertexBufferLayout {
+                        array_stride: 0,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &wgpu::vertex_attr_array![4 => Uint16x4, 5 => Float32x4],
+                    }),
+                ],
             },
             fragment: None,
             primitive: wgpu::PrimitiveState {
@@ -357,6 +365,7 @@ impl Probe {
             pass.set_bind_group(0, &self.depth_bind, &[]);
             pass.set_bind_group(1, &self.resources.instance_bind, &[]);
             pass.set_vertex_buffer(0, self.resources.builtins.cube.vertices.slice(..));
+            pass.set_vertex_buffer(1, self.resources.default_skin.slice(..));
             pass.set_index_buffer(
                 self.resources.builtins.cube.indices.slice(..),
                 wgpu::IndexFormat::Uint32,
@@ -424,6 +433,7 @@ impl Probe {
                     .unwrap_or(&self.resources.default_tangent)
                     .slice(..),
             );
+            pass.set_vertex_buffer(3, self.resources.default_skin.slice(..));
             pass.set_index_buffer(
                 self.resources.builtins.cube.indices.slice(..),
                 wgpu::IndexFormat::Uint32,
@@ -549,7 +559,7 @@ fn sun_shadow_depth_readback_probe() {
     let shaded = p.pixel(&on, receiver);
     eprintln!("receiver unshadowed={lit:?}, shadowed={shaded:?}");
     assert!(
-        lit[0] > shaded[0] + 80,
+        i32::from(lit[0]) > i32::from(shaded[0]) + 80,
         "known cube-occluded ground must lose direct Sun"
     );
     assert!(
@@ -918,6 +928,7 @@ fn verify_alpha_shadows(device: &wgpu::Device, queue: &wgpu::Queue) {
                         .unwrap_or(&r.default_tangent)
                         .slice(..),
                 );
+                pass.set_vertex_buffer(3, mesh.skin.as_ref().unwrap_or(&r.default_skin).slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..mesh.count, 0, group.range.clone());
             }

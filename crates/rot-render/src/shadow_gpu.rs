@@ -2243,12 +2243,13 @@ mod tests {
         let bind_floor_rgb = sample_rgb(&img, Vec3::new(0.0, 0.0, -1.07));
         let posed_shadow_rgb = sample_rgb(&img, Vec3::new(2.5, 0.0, -1.07));
         assert!(
-            posed_rgb[1] > posed_rgb[0] + 20 && posed_rgb[1] > posed_rgb[2] + 20,
+            i32::from(posed_rgb[1]) > i32::from(posed_rgb[0]) + 20
+                && i32::from(posed_rgb[1]) > i32::from(posed_rgb[2]) + 20,
             "Skinned quad did not render at posed X=+2.5: posed_rgb={posed_rgb:?}"
         );
         assert!(
-            bind_floor_rgb[0] > posed_shadow_rgb[0] + 40
-                && bind_floor_rgb[2] > posed_shadow_rgb[2] + 40,
+            i32::from(bind_floor_rgb[0]) > i32::from(posed_shadow_rgb[0]) + 40
+                && i32::from(bind_floor_rgb[2]) > i32::from(posed_shadow_rgb[2]) + 40,
             "Skinned quad shadow must darken posed floor (bind_floor={bind_floor_rgb:?}, posed_shadow={posed_shadow_rgb:?})"
         );
         // Verify Rot red selection outline halo appears around the posed edge at X=+3.1, not bind pose X=+0.6.

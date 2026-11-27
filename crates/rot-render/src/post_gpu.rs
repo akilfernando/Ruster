@@ -990,7 +990,7 @@ mod tests {
         let corner_ssao = project_sample(&img_ssao_on, size, vp_b, Vec3::new(0.0, 0.0, 0.15));
         let open_ssao = project_sample(&img_ssao_on, size, vp_b, Vec3::new(0.0, 0.0, 2.2));
         assert!(
-            corner_off[0] > corner_ssao[0] + 20 && open_ssao[0] > corner_ssao[0] + 20,
+            i32::from(corner_off[0]) > i32::from(corner_ssao[0]) + 20 && i32::from(open_ssao[0]) > i32::from(corner_ssao[0]) + 20,
             "SSAO must darken concave corner under MSAA: corner_off={corner_off:?} corner_ssao={corner_ssao:?} open_ssao={open_ssao:?}"
         );
 
@@ -1073,7 +1073,7 @@ mod tests {
             img_gray_vig[(10 * 320 + 10) * 4 + 1],
         ];
         assert!(
-            corner_clear[0] > corner_vig[0] + 40,
+            i32::from(corner_clear[0]) > i32::from(corner_vig[0]) + 40,
             "vignette must darken screen corners: clear={corner_clear:?} vig={corner_vig:?}"
         );
 

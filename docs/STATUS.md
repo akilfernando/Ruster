@@ -18,7 +18,7 @@ Earlier pages: [2026-11-27](archive/STATUS-2026-11-27.md),
 ## Now
 
 Phase 4 (Play) is active, with repairs and editor work ahead of it. The next
-package in each lane: [R-01](briefs/R-01.md), [U-01](briefs/U-01.md),
+package in each lane: [R-02](briefs/R-02.md), [U-01](briefs/U-01.md),
 [P4-S1](briefs/P4-S1.md). The order is in the [backlog](BACKLOG.md).
 
 ## What a creator can do today
@@ -37,7 +37,8 @@ thirteen are usable, nine are prototypes and nine do not exist yet.
 ## Checked on 2026-11-27
 
 - `python3 scripts/check.py --full`: passed. 695 tests, 22 ignored.
-- GPU probes on the RTX 4060: 5 of 8 pass in a debug build.
+- `python3 scripts/check.py --gpu` on the RTX 4060: 10 of 10 pass in a debug
+  build; the seven in the release command also pass in release.
 - Release benchmarks: 1,000 rigid bodies 0.77 ms a step; 10,000 scripts
   1.61 ms for logic and 2.02 ms when writing transforms (budget 2 ms);
   gallery scene 3.32 ms a frame at 1080p.
@@ -48,7 +49,6 @@ thirteen are usable, nine are prototypes and nine do not exist yet.
 - The editor has fixed panels. Docking, saved layouts, the Game tab, the
   Help menu, the status bar and the AI indicator were removed with the old
   editor on 2026-11-26. 31 of 87 commands do nothing.
-- Three GPU probes fail ([R-01](briefs/R-01.md)).
 - Prototype limits remain: 16 KiB per script, 10-second sounds, 16 Animators
   per scene ([R-02](briefs/R-02.md)).
 - The creator guide and the Lua reference do not cover Phases 3 and 4, and

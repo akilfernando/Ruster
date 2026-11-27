@@ -68,7 +68,6 @@ undocumented.
 
 | Package | Outcome | Size | Status |
 | --- | --- | --- | --- |
-| [R-01](briefs/R-01.md) | GPU probes run with one command and all pass | S | in progress — Claude Code pilot, 2026-11-27 |
 | [R-02](briefs/R-02.md) | Prototype limits on scripts, animation, audio, input lifted | S | open |
 | [R-03](briefs/R-03.md) | Lua reference; AI apps can discover components and script functions | M | open |
 | [R-04](briefs/R-04.md) | 10,000-script budget measured with shipping limits, with headroom | S | open |
@@ -138,5 +137,5 @@ Find a package's commits with `git log --grep '^<id>'`.
 - **Phase 3A and 3B — Look**, closed 2026-11-26 (`7283208`, `35ae05c`).
 - **Phase 4:** `P4-01` `df7d23b`, `P4-02` `d3d1316`, `P4-03` `1c02b15`,
   `P4-04` `2fa2bbb`, `P4-05` `0688733`, `P4-06` `c67b7d3`.
-- **Repair lane:** none yet.
+- **Repair lane:** R-01.
 - **UX lane:** none yet.

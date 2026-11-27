@@ -182,10 +182,15 @@ BRIEF_BYTE_LIMIT = 6_000
 
 # Offscreen Vulkan probes in rot-render. They need a GPU, so the ordinary gate
 # and hosted CI skip them. Run in a debug build: overflow checks are on.
+# Every `#[ignore]` GPU test is listed except the manual Khronos sample gate
+# (needs ROT_KHRONOS_DIR); a name filter is a substring match.
 GPU_PROBES = (
     "gpu_probe",
     "phase3b_interior_exit_gate_probe",
     "shader_rejection_preserves_renderable_pipeline",
+    "gpu_skinning_probe",
+    "sun_shadow_gpu_retirement_lifecycle_probe",
+    "sun_shadow_depth_readback_probe",
 )
 
 
