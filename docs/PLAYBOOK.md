@@ -243,6 +243,11 @@ next package.
 
 - One trunk, named in STATUS. Branch `work/<package-id>` from it, merge back
   when the package is done, delete the branch, push.
+- One session at a time works in the main checkout. A second session running
+  at the same time needs its own worktree, or the two overwrite each other's
+  files: `git worktree add ../rot-<lane> -b work/<package-id> main`. Build
+  and test there, merge to the trunk, then `git worktree remove
+  ../rot-<lane>`. Run at most one session per lane and two lanes at once.
 - Commit as you go. Do not rewrite history on the trunk. Do not leave work
   only in a stash or a worktree.
 - Temporary projects and fixtures go under `target/tmp/` in the checkout,

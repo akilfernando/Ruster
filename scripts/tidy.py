@@ -9,7 +9,9 @@ Removed with --apply: worktrees with no uncommitted changes whose commit is
 already on the trunk, branches merged into the trunk, and /tmp/rot-* entries
 older than a day. --discard-edits also removes merged worktrees that hold
 uncommitted measurement edits. --build-output also deletes debug build output
-and loose folders under target/ (the next build is a full rebuild).
+and loose folders under target/. The next build is a full rebuild, and an AI
+app whose MCP entry points at target/debug/rot-mcp cannot start the adapter
+until `cargo build -p rot-mcp -p rot-editor` has run.
 
 Never removed: the main checkout, worktrees whose branch is not merged, and
 worktrees under Ruster-Audits or Ruster-Creations, which are kept on purpose.
@@ -150,6 +152,8 @@ def main():
                 else:
                     path.unlink()
             freed += removable_bytes
+            print("  Debug builds are gone. AI apps configured for target/debug/rot-mcp need:")
+            print("    cargo build -p rot-mcp -p rot-editor")
 
     stashes = git("stash", "list").stdout.strip().splitlines()
     if stashes:
