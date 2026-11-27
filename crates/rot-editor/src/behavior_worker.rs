@@ -2172,6 +2172,17 @@ fn apply_pending_live_patch(
     if !active(shared, key) || shared.cancel.load(Ordering::SeqCst) {
         return None;
     }
+    // This runs on every pass of the worker loop. Debugger controls use try_lock
+    // and answer Busy while this thread holds the debugger lock, so a pass with
+    // nothing to apply must not take it.
+    if shared
+        .live_patch
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .is_none()
+    {
+        return None;
+    }
     let debug_stopped = shared
         .debugger
         .lock()
@@ -3403,6 +3414,28 @@ mod tests {
         worker.set_breakpoints(quiet, vec![point]).unwrap();
         let replaced = worker.advance(2, 0).unwrap();
         assert!(worker.configured_breakpoints(replaced).unwrap().is_empty());
+        close(&mut worker);
+    }
+    // Debugger controls use try_lock and answer Busy while the worker holds the
+    // debugger lock. A pass with no pending live patch must leave that lock alone,
+    // or every control call races the worker's idle loop.
+    #[test]
+    fn idle_pass_does_not_take_the_debugger_lock() {
+        let (mut worker, pulses) = worker(Limits::default());
+        let (scene, authoring) = fixture(false);
+        reset(&mut worker, &pulses, 1, scene, authoring);
+        // Park the worker first, so the next wake is exactly one idle pass.
+        let (parked, release) = gate(&worker.shared.park_gate);
+        worker.wake();
+        parked.recv_timeout(Duration::from_secs(5)).unwrap();
+        let held = worker.shared.debugger.lock().unwrap();
+        let (parked_again, release_again) = gate(&worker.shared.park_gate);
+        release.send(()).unwrap();
+        worker.wake();
+        let idle_pass = parked_again.recv_timeout(Duration::from_secs(2));
+        drop(held);
+        let _ = release_again.send(());
+        idle_pass.expect("an idle pass waited for the debugger lock");
         close(&mut worker);
     }
     // Unique actor boundary: queued controls cannot wake a hook; cancellation
