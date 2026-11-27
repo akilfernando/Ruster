@@ -1369,11 +1369,9 @@ impl ComponentWorkspace {
             let prior = &self.session.scene().objects
                 [self.selected_index.expect("draft requires selection")];
             let check_animation = || {
-                for (id, old, binding) in
-                    super::component_animation::changed_bindings(prior, &draft)
-                {
+                for changed in super::component_animation::changed_bindings(prior, &draft) {
                     if self.assets_loading()
-                        || self.animator_draft_revisions.get(id).copied()
+                        || self.animator_draft_revisions.get(changed.id).copied()
                             != Some(self.material_asset_revision())
                     {
                         return Err(SceneError::Invalid(
@@ -1382,8 +1380,9 @@ impl ComponentWorkspace {
                     }
                     super::component_animation::validate_binding(
                         self.assets.as_ref(),
-                        old,
-                        binding,
+                        changed.prior,
+                        changed.binding,
+                        changed.state_machine,
                     )
                     .map_err(|(_, message)| SceneError::Invalid(message))?;
                 }

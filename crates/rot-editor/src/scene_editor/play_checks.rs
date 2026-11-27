@@ -128,8 +128,17 @@ fn component_check_assets(
         })
     {
         match &component.kind {
-            Component::Animator { binding, .. } => {
+            Component::Animator {
+                binding,
+                state_machine,
+                ..
+            } => {
                 clips.insert(binding.clip.as_str());
+                if let Some(sm) = state_machine {
+                    for state in &sm.states {
+                        clips.insert(state.clip.as_str());
+                    }
+                }
             }
             Component::Script { binding, .. } if binding.enabled => {
                 sounds.extend(binding.properties.values().filter_map(|value| match value {

@@ -1198,6 +1198,7 @@ impl ComponentWorkspace {
                 binding,
                 start_playback,
                 playback_speed,
+                state_machine,
             } = &mut object.components[index].kind
             else {
                 unreachable!()
@@ -1205,7 +1206,12 @@ impl ComponentWorkspace {
             if let Some(clip) = clip {
                 let mut replacement = binding.clone();
                 replacement.clip = clip.to_owned();
-                validate_binding(self.assets.as_ref(), Some(binding), &replacement)?;
+                validate_binding(
+                    self.assets.as_ref(),
+                    Some((binding, state_machine.as_ref())),
+                    &replacement,
+                    state_machine.as_ref(),
+                )?;
                 *binding = replacement;
             }
             if let Some(looping) = looping {
@@ -1226,6 +1232,7 @@ impl ComponentWorkspace {
                 binding,
                 start_playback,
                 *playback_speed,
+                state_machine.as_ref(),
                 actions,
                 owner,
             );
@@ -1646,6 +1653,7 @@ impl ComponentWorkspace {
                 binding,
                 start_playback,
                 playback_speed,
+                state_machine,
             } = &component.kind
             {
                 response["animation"] = component_animation::observe(
@@ -1653,6 +1661,7 @@ impl ComponentWorkspace {
                     binding,
                     start_playback,
                     *playback_speed,
+                    state_machine.as_ref(),
                     &self.session.scene().actions,
                     id,
                 );
@@ -1851,8 +1860,13 @@ impl ComponentWorkspace {
                 super::component_sound::validate_cue(name, cue, self.assets.as_ref())
                     .map_err(|error| ("sound_cue_unavailable", error))?;
             }
-            for (_, old, binding) in animations {
-                component_animation::validate_binding(self.assets.as_ref(), old, binding)?;
+            for changed in animations {
+                component_animation::validate_binding(
+                    self.assets.as_ref(),
+                    changed.prior,
+                    changed.binding,
+                    changed.state_machine,
+                )?;
             }
             if !new_scripts.is_empty() {
                 if !object
@@ -3390,5 +3404,137 @@ mod tests {
         assert!(comps
             .iter()
             .any(|c| c["id"] == "hero-skin" && c["type"] == "skin" && c["joints_count"] == 1));
+    }
+
+    #[test]
+    fn mcp_inspect_and_edit_roundtrip_animator_state_machine_and_reject_invalid_clips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        let mut scene = ComponentScene::from_legacy(&Session::new(Scene::demo()).unwrap()).unwrap();
+        scene.objects.push(ObjectNode {
+            id: "bone".into(),
+            name: "Bone".into(),
+            enabled: true,
+            parent: Some("rig".into()),
+            transform: Transform::default(),
+            components: vec![],
+        });
+        scene.objects.push(ObjectNode {
+            id: "rig".into(),
+            name: "Rig".into(),
+            enabled: true,
+            parent: None,
+            transform: Transform::default(),
+            components: vec![ComponentInstance {
+                id: "rig-anim".into(),
+                enabled: true,
+                kind: Component::Animator {
+                    binding: rot_scene::AnimationBinding {
+                        clip: "clip_idle".into(),
+                        looping: true,
+                        targets: BTreeMap::from([("Bone".into(), "bone".into())]),
+                    },
+                    start_playback: rot_scene::component_scene::AnimatorStart::OnPlay {},
+                    playback_speed: 1.0,
+                    state_machine: None,
+                },
+            }],
+        });
+        scene.save_new(&path).unwrap();
+        let session = ComponentSession::open(&path).unwrap();
+        let mut editor = ComponentWorkspace::new(path, session);
+        let token = "sm-mcp-token";
+
+        // Reject adding state machine referencing an unavailable clip when no assets loaded.
+        let rejected = editor.ai_command(
+            token,
+            "scene_components_edit",
+            &json!({
+                "expected_session_token": token,
+                "expected_revision": "0",
+                "edits": [{
+                    "operation": "put",
+                    "object_id": "rig",
+                    "component": {
+                        "id": "rig-anim",
+                        "enabled": true,
+                        "type": "animator",
+                        "binding": {
+                            "clip": "clip_idle",
+                            "looping": true,
+                            "targets": { "Bone": "bone" }
+                        },
+                        "state_machine": {
+                            "entry_state": "Idle",
+                            "parameters": { "go": { "type": "trigger" } },
+                            "states": [
+                                { "name": "Idle", "clip": "clip_idle", "looping": true },
+                                { "name": "Run", "clip": "missing_clip", "looping": true }
+                            ],
+                            "transitions": [{
+                                "from": "Idle",
+                                "to": "Run",
+                                "duration": 0.2,
+                                "conditions": [{ "op": "triggered", "parameter": "go" }]
+                            }]
+                        }
+                    }
+                }]
+            }),
+        );
+        assert!(
+            rejected.get("error").is_some(),
+            "expected rejection: {rejected}"
+        );
+
+        // Direct session update with valid state machine structure roundtrips via scene_components_inspect.
+        let mut edited =
+            editor.session.scene().objects[editor.session.scene().objects.len() - 1].clone();
+        if let Component::Animator { state_machine, .. } = &mut edited.components[0].kind {
+            *state_machine = Some(rot_scene::AnimatorStateMachine {
+                entry_state: "Idle".into(),
+                parameters: BTreeMap::from([("go".into(), rot_scene::AnimatorParam::Trigger {})]),
+                states: vec![
+                    rot_scene::AnimatorState {
+                        name: "Idle".into(),
+                        clip: "clip_idle".into(),
+                        looping: true,
+                        speed: 1.0,
+                    },
+                    rot_scene::AnimatorState {
+                        name: "Run".into(),
+                        clip: "clip_idle".into(),
+                        looping: true,
+                        speed: 1.5,
+                    },
+                ],
+                transitions: vec![rot_scene::AnimatorTransition {
+                    from: Some("Idle".into()),
+                    to: "Run".into(),
+                    duration: 0.2,
+                    has_exit_time: false,
+                    exit_time: 1.0,
+                    conditions: vec![rot_scene::AnimatorCondition::Triggered {
+                        parameter: "go".into(),
+                    }],
+                }],
+            });
+        }
+        editor.session.put_object(0, edited).unwrap();
+        editor.refresh();
+
+        let inspected = editor.ai_command(
+            token,
+            "scene_components_inspect",
+            &json!({ "object_id": "rig", "component_id": "rig-anim" }),
+        );
+        assert_eq!(
+            inspected["result"]["animation"]["state_machine"]["entry_state"],
+            "Idle"
+        );
+        assert_eq!(
+            inspected["result"]["animation"]["state_machine"]["states"][1]["speed"],
+            1.5
+        );
     }
 }

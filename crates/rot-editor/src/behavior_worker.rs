@@ -50,6 +50,7 @@ pub(super) struct Frame {
     pub component_transforms: Option<Arc<Vec<Transform>>>,
     pub component_world_matrices: Option<Arc<Vec<glam::DMat4>>>,
     pub component_visual_overrides: Option<Arc<rot_scene::RuntimeVisualOverrides>>,
+    pub component_animators: Option<Arc<Vec<rot_behavior::AnimatorRuntimeSnapshot>>>,
     pub resolved_transform_camera: Option<rot_scene::component_scene::TransformCameraPose>,
     pub state: Arc<rot_behavior::RuntimeState>,
     pub input: Option<Arc<LastConsumedInput>>,
@@ -1245,6 +1246,10 @@ fn frame(shared: &Shared, execution: &mut Execution, repaint: &Option<Repaint>, 
             component_transforms: runtime.component_transform_snapshot(),
             component_world_matrices: runtime.world_matrix_snapshot(),
             component_visual_overrides: runtime.visual_overrides_snapshot(),
+            component_animators: {
+                let snapshots = runtime.animator_snapshots();
+                (!snapshots.is_empty()).then(|| Arc::new(snapshots))
+            },
             resolved_transform_camera: runtime.transform_camera(),
             input: execution.last_input.clone(),
             query_observations,

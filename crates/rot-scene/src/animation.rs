@@ -8,6 +8,12 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 pub const MAX_ANIMATIONS: usize = 16;
 pub const MAX_ANIMATION_TARGETS: usize = 64;
 pub const MAX_CLIP_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_ANIMATOR_STATES: usize = 32;
+pub const MAX_ANIMATOR_PARAMS: usize = 32;
+pub const MAX_ANIMATOR_TRANSITIONS: usize = 64;
+pub const MAX_TRANSITION_CONDITIONS: usize = 8;
+pub const MAX_TRANSITION_DURATION_SECS: f32 = 10.0;
+pub const MAX_ANIMATOR_NAME_LEN: usize = 64;
 const MAX_CLIP_TRACKS: usize = 768;
 const MAX_CLIP_KEYS: usize = 65_536;
 const MAX_CLIP_SECONDS: f32 = 600.0;
@@ -320,6 +326,418 @@ impl Clip {
         }
         Ok(())
     }
+
+    fn sample_into_poses(
+        &self,
+        resolved: &[(usize, usize)],
+        object_to_local: &HashMap<usize, usize>,
+        looping: bool,
+        seconds: f64,
+        poses: &mut [PoseTrs],
+    ) {
+        let time = self.local_time(seconds, looping);
+        for &(track_index, object_index) in resolved {
+            let Some(&local_index) = object_to_local.get(&object_index) else {
+                continue;
+            };
+            let track = &self.tracks[track_index];
+            let value = track.sample(time);
+            let pose = &mut poses[local_index];
+            match track.property {
+                ClipProperty::Translation => {
+                    pose.translation = [value[0], value[1], value[2]];
+                }
+                ClipProperty::Scale => {
+                    pose.scale = [value[0], value[1], value[2]];
+                }
+                ClipProperty::Rotation => {
+                    pose.rotation = DQuat::from_array(value).normalize();
+                }
+            }
+        }
+    }
+}
+
+/// Reusable scratch buffers for zero-allocation cross-fade pose blending.
+#[derive(Clone, Debug, Default)]
+pub struct BlendedPoseScratch {
+    from: Vec<PoseTrs>,
+    to: Vec<PoseTrs>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PoseTrs {
+    translation: [f64; 3],
+    rotation: DQuat,
+    scale: [f64; 3],
+}
+
+impl PoseTrs {
+    fn from_transform(transform: &crate::Transform) -> Self {
+        Self {
+            translation: transform.translation.map(f64::from),
+            rotation: DQuat::from_euler(
+                EulerRot::ZYX,
+                f64::from(transform.rotation[2]),
+                f64::from(transform.rotation[1]),
+                f64::from(transform.rotation[0]),
+            )
+            .normalize(),
+            scale: transform.scale.map(f64::from),
+        }
+    }
+
+    fn write_to_transform(self, out: &mut crate::Transform) -> Result<(), SceneError> {
+        let (z, y, x) = self.rotation.normalize().to_euler(EulerRot::ZYX);
+        out.translation = [
+            self.translation[0] as f32,
+            self.translation[1] as f32,
+            self.translation[2] as f32,
+        ];
+        out.rotation = [x as f32, y as f32, z as f32];
+        out.scale = [
+            self.scale[0] as f32,
+            self.scale[1] as f32,
+            self.scale[2] as f32,
+        ];
+        out.validate()
+    }
+}
+
+/// Clip sample inputs for cross-fade pose blending.
+#[derive(Clone, Copy, Debug)]
+pub struct PoseSample<'a> {
+    pub clip: &'a Clip,
+    pub tracks: &'a [(usize, usize)],
+    pub seconds: f64,
+    pub looping: bool,
+}
+
+/// Blend two animation clip poses for a set of touched objects, starting from
+/// authored rest poses so unanimated channels blend cleanly without drift.
+#[allow(clippy::too_many_arguments)]
+pub fn apply_blended_poses(
+    authored: &[crate::Transform],
+    touched_objects: &[usize],
+    object_to_local: &HashMap<usize, usize>,
+    from: Option<PoseSample<'_>>,
+    to: PoseSample<'_>,
+    alpha: f64,
+    scratch: &mut BlendedPoseScratch,
+    out: &mut [crate::Transform],
+) -> Result<(), SceneError> {
+    let alpha = alpha.clamp(0.0, 1.0);
+    scratch.to.clear();
+    scratch.to.extend(
+        touched_objects
+            .iter()
+            .map(|&index| PoseTrs::from_transform(&authored[index])),
+    );
+    to.clip.sample_into_poses(
+        to.tracks,
+        object_to_local,
+        to.looping,
+        to.seconds,
+        &mut scratch.to,
+    );
+
+    if let Some(from_sample) = from.filter(|_| alpha < 1.0) {
+        scratch.from.clear();
+        scratch.from.extend(
+            touched_objects
+                .iter()
+                .map(|&index| PoseTrs::from_transform(&authored[index])),
+        );
+        from_sample.clip.sample_into_poses(
+            from_sample.tracks,
+            object_to_local,
+            from_sample.looping,
+            from_sample.seconds,
+            &mut scratch.from,
+        );
+        for (local_idx, &obj_idx) in touched_objects.iter().enumerate() {
+            let a = scratch.from[local_idx];
+            let b = scratch.to[local_idx];
+            let qa = a.rotation.normalize();
+            let mut qb = b.rotation.normalize();
+            if qa.dot(qb) < 0.0 {
+                qb = -qb;
+            }
+            let blended = PoseTrs {
+                translation: std::array::from_fn(|i| {
+                    a.translation[i] + (b.translation[i] - a.translation[i]) * alpha
+                }),
+                rotation: qa.slerp(qb, alpha).normalize(),
+                scale: std::array::from_fn(|i| a.scale[i] + (b.scale[i] - a.scale[i]) * alpha),
+            };
+            blended.write_to_transform(&mut out[obj_idx])?;
+        }
+    } else {
+        for (local_idx, &obj_idx) in touched_objects.iter().enumerate() {
+            scratch.to[local_idx].write_to_transform(&mut out[obj_idx])?;
+        }
+    }
+    Ok(())
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_state_speed() -> f32 {
+    1.0
+}
+
+fn is_default_state_speed(speed: &f32) -> bool {
+    *speed == default_state_speed()
+}
+
+fn default_exit_time() -> f32 {
+    1.0
+}
+
+/// Typed parameter declared on an [`AnimatorStateMachine`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AnimatorParam {
+    Bool {
+        #[serde(default)]
+        default: bool,
+    },
+    Float {
+        #[serde(default)]
+        default: f32,
+    },
+    Int {
+        #[serde(default)]
+        default: i32,
+    },
+    Trigger {},
+}
+
+/// Condition predicate gating an [`AnimatorTransition`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AnimatorCondition {
+    IsTrue { parameter: String },
+    IsFalse { parameter: String },
+    Triggered { parameter: String },
+    FloatGreater { parameter: String, value: f32 },
+    FloatLess { parameter: String, value: f32 },
+    IntEquals { parameter: String, value: i32 },
+    IntNotEquals { parameter: String, value: i32 },
+    IntGreater { parameter: String, value: i32 },
+    IntLess { parameter: String, value: i32 },
+}
+
+impl AnimatorCondition {
+    pub fn parameter(&self) -> &str {
+        match self {
+            Self::IsTrue { parameter }
+            | Self::IsFalse { parameter }
+            | Self::Triggered { parameter }
+            | Self::FloatGreater { parameter, .. }
+            | Self::FloatLess { parameter, .. }
+            | Self::IntEquals { parameter, .. }
+            | Self::IntNotEquals { parameter, .. }
+            | Self::IntGreater { parameter, .. }
+            | Self::IntLess { parameter, .. } => parameter,
+        }
+    }
+}
+
+/// One named clip state in an [`AnimatorStateMachine`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnimatorState {
+    pub name: String,
+    pub clip: String,
+    #[serde(default = "default_true")]
+    pub looping: bool,
+    #[serde(
+        default = "default_state_speed",
+        skip_serializing_if = "is_default_state_speed"
+    )]
+    pub speed: f32,
+}
+
+/// Conditional / exit-time transition between states in an [`AnimatorStateMachine`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnimatorTransition {
+    /// Source state name, or `None` for Any State.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    pub to: String,
+    /// Cross-fade duration in seconds (`0.0` for immediate switch).
+    #[serde(default)]
+    pub duration: f32,
+    #[serde(default)]
+    pub has_exit_time: bool,
+    #[serde(default = "default_exit_time")]
+    pub exit_time: f32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<AnimatorCondition>,
+}
+
+/// Authored animation state machine attached to a `Component::Animator`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnimatorStateMachine {
+    pub entry_state: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub parameters: BTreeMap<String, AnimatorParam>,
+    pub states: Vec<AnimatorState>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transitions: Vec<AnimatorTransition>,
+}
+
+fn validate_animator_name(name: &str, kind: &str, owner: &str) -> Result<(), SceneError> {
+    let trimmed = name.trim();
+    if trimmed.is_empty()
+        || trimmed != name
+        || name.len() > MAX_ANIMATOR_NAME_LEN
+        || name.chars().any(char::is_control)
+    {
+        return Err(invalid(format!(
+            "Animator on {owner} has malformed {kind} name {name:?}"
+        )));
+    }
+    Ok(())
+}
+
+impl AnimatorStateMachine {
+    pub fn validate(&self, owner: &str) -> Result<(), SceneError> {
+        if self.states.is_empty() || self.states.len() > MAX_ANIMATOR_STATES {
+            return Err(invalid(format!(
+                "Animator state machine on {owner} requires 1..={MAX_ANIMATOR_STATES} states"
+            )));
+        }
+        let mut state_names = BTreeSet::new();
+        for state in &self.states {
+            validate_animator_name(&state.name, "state", owner)?;
+            if !state_names.insert(state.name.as_str()) {
+                return Err(invalid(format!(
+                    "Animator state machine on {owner} has duplicate state {:?}",
+                    state.name
+                )));
+            }
+            validate_id(&state.clip)?;
+            if !(state.speed.is_finite() && state.speed > 0.0 && state.speed <= 100.0) {
+                return Err(invalid(format!(
+                    "Animator state {:?} on {owner} requires finite speed in (0, 100]",
+                    state.name
+                )));
+            }
+        }
+        if !state_names.contains(self.entry_state.as_str()) {
+            return Err(invalid(format!(
+                "Animator entry_state {:?} on {owner} does not name an existing state",
+                self.entry_state
+            )));
+        }
+        if self.parameters.len() > MAX_ANIMATOR_PARAMS {
+            return Err(invalid(format!(
+                "Animator state machine on {owner} exceeds {MAX_ANIMATOR_PARAMS} parameters"
+            )));
+        }
+        for (name, param) in &self.parameters {
+            validate_animator_name(name, "parameter", owner)?;
+            if let AnimatorParam::Float { default } = param {
+                if !default.is_finite() {
+                    return Err(invalid(format!(
+                        "Animator float parameter {name:?} on {owner} must have a finite default"
+                    )));
+                }
+            }
+        }
+        if self.transitions.len() > MAX_ANIMATOR_TRANSITIONS {
+            return Err(invalid(format!(
+                "Animator state machine on {owner} exceeds {MAX_ANIMATOR_TRANSITIONS} transitions"
+            )));
+        }
+        for (index, transition) in self.transitions.iter().enumerate() {
+            if !state_names.contains(transition.to.as_str()) {
+                return Err(invalid(format!(
+                    "Animator transition #{index} destination {:?} on {owner} does not exist",
+                    transition.to
+                )));
+            }
+            if let Some(from) = &transition.from {
+                if !state_names.contains(from.as_str()) {
+                    return Err(invalid(format!(
+                        "Animator transition #{index} source {from:?} on {owner} does not exist"
+                    )));
+                }
+                if from == &transition.to {
+                    return Err(invalid(format!(
+                        "Animator transition #{index} on {owner} cannot transition from {from:?} to itself"
+                    )));
+                }
+            }
+            if !(transition.duration.is_finite()
+                && (0.0..=MAX_TRANSITION_DURATION_SECS).contains(&transition.duration))
+            {
+                return Err(invalid(format!(
+                    "Animator transition #{index} on {owner} requires duration in 0..={MAX_TRANSITION_DURATION_SECS} seconds"
+                )));
+            }
+            if !(transition.exit_time.is_finite() && (0.0..=1.0).contains(&transition.exit_time)) {
+                return Err(invalid(format!(
+                    "Animator transition #{index} on {owner} requires exit_time in 0..=1"
+                )));
+            }
+            if !transition.has_exit_time && transition.conditions.is_empty() {
+                return Err(invalid(format!(
+                    "Animator transition #{index} on {owner} must have Exit Time enabled or at least one condition"
+                )));
+            }
+            if transition.conditions.len() > MAX_TRANSITION_CONDITIONS {
+                return Err(invalid(format!(
+                    "Animator transition #{index} on {owner} exceeds {MAX_TRANSITION_CONDITIONS} conditions"
+                )));
+            }
+            for cond in &transition.conditions {
+                let param_name = cond.parameter();
+                let Some(param) = self.parameters.get(param_name) else {
+                    return Err(invalid(format!(
+                        "Animator transition #{index} condition on {owner} references unknown parameter {param_name:?}"
+                    )));
+                };
+                match (cond, param) {
+                    (
+                        AnimatorCondition::IsTrue { .. } | AnimatorCondition::IsFalse { .. },
+                        AnimatorParam::Bool { .. },
+                    )
+                    | (AnimatorCondition::Triggered { .. }, AnimatorParam::Trigger {}) => {}
+                    (
+                        AnimatorCondition::FloatGreater { value, .. }
+                        | AnimatorCondition::FloatLess { value, .. },
+                        AnimatorParam::Float { .. },
+                    ) => {
+                        if !value.is_finite() {
+                            return Err(invalid(format!(
+                                "Animator condition on {param_name:?} requires a finite threshold"
+                            )));
+                        }
+                    }
+                    (
+                        AnimatorCondition::IntEquals { .. }
+                        | AnimatorCondition::IntNotEquals { .. }
+                        | AnimatorCondition::IntGreater { .. }
+                        | AnimatorCondition::IntLess { .. },
+                        AnimatorParam::Int { .. },
+                    ) => {}
+                    _ => {
+                        return Err(invalid(format!(
+                            "Animator transition #{index} condition operator does not match parameter {param_name:?} type"
+                        )));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Scene {
@@ -500,5 +918,145 @@ mod tests {
         ] {
             assert!(Clip::decode(bytes).is_err());
         }
+    }
+
+    #[test]
+    fn state_machine_validation_and_blended_pose_sampling() {
+        let sm = AnimatorStateMachine {
+            entry_state: "Idle".into(),
+            parameters: BTreeMap::from([
+                ("speed".into(), AnimatorParam::Float { default: 0.0 }),
+                ("jump".into(), AnimatorParam::Trigger {}),
+            ]),
+            states: vec![
+                AnimatorState {
+                    name: "Idle".into(),
+                    clip: "clip_idle".into(),
+                    looping: true,
+                    speed: 1.0,
+                },
+                AnimatorState {
+                    name: "Run".into(),
+                    clip: "clip_run".into(),
+                    looping: true,
+                    speed: 1.5,
+                },
+            ],
+            transitions: vec![
+                AnimatorTransition {
+                    from: Some("Idle".into()),
+                    to: "Run".into(),
+                    duration: 0.2,
+                    has_exit_time: false,
+                    exit_time: 1.0,
+                    conditions: vec![AnimatorCondition::FloatGreater {
+                        parameter: "speed".into(),
+                        value: 0.5,
+                    }],
+                },
+                AnimatorTransition {
+                    from: None,
+                    to: "Run".into(),
+                    duration: 0.1,
+                    has_exit_time: false,
+                    exit_time: 1.0,
+                    conditions: vec![AnimatorCondition::Triggered {
+                        parameter: "jump".into(),
+                    }],
+                },
+            ],
+        };
+        sm.validate("hero").unwrap();
+
+        // Missing entry_state
+        let mut bad = sm.clone();
+        bad.entry_state = "Missing".into();
+        assert!(bad.validate("hero").is_err());
+
+        // Duplicate state
+        let mut bad = sm.clone();
+        bad.states.push(bad.states[0].clone());
+        assert!(bad.validate("hero").is_err());
+
+        // Mismatched condition param type
+        let mut bad = sm.clone();
+        bad.transitions[0].conditions = vec![AnimatorCondition::IsTrue {
+            parameter: "speed".into(),
+        }];
+        assert!(bad.validate("hero").is_err());
+
+        // Unconditional transition without exit time
+        let mut bad = sm.clone();
+        bad.transitions[0].conditions.clear();
+        assert!(bad.validate("hero").is_err());
+
+        // Self transition
+        let mut bad = sm.clone();
+        bad.transitions[0].to = "Idle".into();
+        assert!(bad.validate("hero").is_err());
+
+        // Pose blending: translation lerp, shortest-path rotation slerp (including antipodal quat),
+        // and unanimated channel falling back toward authored rest pose.
+        let clip_a = Clip::decode(
+            br#"{"format":"rot-clip","version":1,"duration":1.0,"tracks":[
+                {"node":"Rig/Arm","property":"translation","interpolation":"step","times":[0.0],"values":[[0.0,0.0,0.0]]},
+                {"node":"Rig/Arm","property":"rotation","interpolation":"step","times":[0.0],"values":[[0.0,0.0,0.0,1.0]]}
+            ]}"#,
+        )
+        .unwrap();
+        let clip_b = Clip::decode(
+            br#"{"format":"rot-clip","version":1,"duration":1.0,"tracks":[
+                {"node":"Rig/Arm","property":"translation","interpolation":"step","times":[0.0],"values":[[4.0,0.0,0.0]]},
+                {"node":"Rig/Arm","property":"rotation","interpolation":"step","times":[0.0],"values":[[0.0,0.0,-0.70710677,-0.70710677]]}
+            ]}"#,
+        )
+        .unwrap();
+        let authored = [crate::Transform {
+            translation: [10.0, 10.0, 10.0],
+            rotation: [0.0, 0.0, 0.0],
+            scale: [2.0, 2.0, 2.0],
+        }];
+        let binding = AnimationBinding {
+            clip: "clip_idle".into(),
+            looping: true,
+            targets: BTreeMap::from([("Rig/Arm".into(), "arm".into())]),
+        };
+        let indices = HashMap::from([("arm".into(), 0usize)]);
+        let tracks_a = clip_a.resolve_indexed_tracks(&binding, &indices).unwrap();
+        let tracks_b = clip_b.resolve_indexed_tracks(&binding, &indices).unwrap();
+        let touched = [0usize];
+        let obj_to_local = HashMap::from([(0usize, 0usize)]);
+        let mut scratch = BlendedPoseScratch::default();
+        let mut out = authored.to_vec();
+
+        apply_blended_poses(
+            &authored,
+            &touched,
+            &obj_to_local,
+            Some(PoseSample {
+                clip: &clip_a,
+                tracks: &tracks_a,
+                seconds: 0.0,
+                looping: true,
+            }),
+            PoseSample {
+                clip: &clip_b,
+                tracks: &tracks_b,
+                seconds: 0.0,
+                looping: true,
+            },
+            0.5,
+            &mut scratch,
+            &mut out,
+        )
+        .unwrap();
+
+        assert!((out[0].translation[0] - 2.0).abs() < 1e-5);
+        assert!(
+            (out[0].rotation[2] - std::f32::consts::FRAC_PI_4).abs() < 1e-4,
+            "shortest-path slerp midpoint should be +45 deg Z, got {:?}",
+            out[0].rotation
+        );
+        assert_eq!(out[0].scale, [2.0, 2.0, 2.0]);
     }
 }

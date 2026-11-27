@@ -17,6 +17,10 @@ use rot_scene::{
     RuntimeVisualOverrides, Transform,
 };
 
+use super::animator::{
+    apply_animator_write, evaluate_transitions, AnimatorWrite, ResolvedAnimatorMode,
+    ResolvedComponentAnimation, RuntimeAnimatorState, RuntimeParamValue,
+};
 use super::audio::{has_sound_cue, CueContext};
 use super::component_topology::{ObjectSession, TopologyEdits};
 use super::physics::{
@@ -1569,6 +1573,9 @@ pub(super) struct ObjectLookup {
     character_controllers: Vec<CharacterControllerSlotMeta>,
     cc_indices: HashMap<String, usize>,
     first_cc_indices: HashMap<usize, usize>,
+    animators: Vec<AnimatorSlotMeta>,
+    animator_indices: HashMap<String, usize>,
+    first_animator_indices: HashMap<usize, usize>,
     pub(super) slots: Arc<Vec<SlotMeta>>,
 }
 
@@ -1621,6 +1628,13 @@ struct CharacterControllerSlotMeta {
     step_height: f32,
 }
 
+#[derive(Debug)]
+struct AnimatorSlotMeta {
+    id: String,
+    owner: usize,
+    authored_enabled: bool,
+}
+
 impl ObjectLookup {
     pub(super) fn new(
         session: Rc<ObjectSession>,
@@ -1648,6 +1662,9 @@ impl ObjectLookup {
         let mut character_controllers = Vec::new();
         let mut cc_indices = HashMap::new();
         let mut first_cc_indices = HashMap::new();
+        let mut animators = Vec::new();
+        let mut animator_indices = HashMap::new();
+        let mut first_animator_indices = HashMap::new();
         let gameplay_camera = scene.gameplay_camera.as_deref();
         for (index, object) in objects.iter().enumerate() {
             names.entry(object.name.clone()).or_insert(index);
@@ -1740,6 +1757,17 @@ impl ObjectLookup {
                             step_height: *step_height,
                         });
                     }
+                    Component::Animator { .. } => {
+                        first_animator_indices
+                            .entry(index)
+                            .or_insert(animators.len());
+                        animator_indices.insert(component.id.clone(), animators.len());
+                        animators.push(AnimatorSlotMeta {
+                            id: component.id.clone(),
+                            owner: index,
+                            authored_enabled: component.enabled,
+                        });
+                    }
                     _ => {}
                 }
             }
@@ -1775,6 +1803,9 @@ impl ObjectLookup {
             character_controllers,
             cc_indices,
             first_cc_indices,
+            animators,
+            animator_indices,
+            first_animator_indices,
             slots,
         }
     }
@@ -1825,6 +1856,7 @@ pub(super) struct CallbackWrites {
     pub(super) rigid_bodies: BTreeMap<String, RigidBodyWrite>,
     pub(super) character_moves: Vec<CharacterMoveWrite>,
     pub(super) cc_staged_transforms: HashMap<usize, Transform>,
+    pub(super) animator_writes: Vec<AnimatorWrite>,
 }
 
 pub(super) struct CallbackSnapshot {
@@ -1834,6 +1866,8 @@ pub(super) struct CallbackSnapshot {
     world_matrices: Arc<Vec<DMat4>>,
     world_rotations: Arc<Vec<DQuat>>,
     visual_overrides: Arc<RuntimeVisualOverrides>,
+    animations: Arc<Vec<ResolvedComponentAnimation>>,
+    animator_states: Arc<Vec<RuntimeAnimatorState>>,
     physics: Option<Rc<RefCell<PhysicsState>>>,
     fixed_dt: f64,
     physics_queries: Cell<u32>,
@@ -1943,6 +1977,8 @@ pub(super) struct CallbackContext<'a> {
     pub(super) world_matrices: &'a Arc<Vec<DMat4>>,
     pub(super) world_rotations: &'a Arc<Vec<DQuat>>,
     pub(super) visual_overrides: &'a Arc<RuntimeVisualOverrides>,
+    pub(super) animations: &'a Arc<Vec<ResolvedComponentAnimation>>,
+    pub(super) animator_states: Arc<Vec<RuntimeAnimatorState>>,
     pub(super) physics: Option<Rc<RefCell<PhysicsState>>>,
     pub(super) fixed_dt: f64,
     pub(super) queries: &'a Rc<QueryInvocation>,
@@ -1963,6 +1999,8 @@ impl CurrentCallback {
             world_matrices: Arc::clone(ctx.world_matrices),
             world_rotations: Arc::clone(ctx.world_rotations),
             visual_overrides: Arc::clone(ctx.visual_overrides),
+            animations: Arc::clone(ctx.animations),
+            animator_states: ctx.animator_states,
             physics: ctx.physics,
             fixed_dt: ctx.fixed_dt,
             physics_queries: Cell::new(0),
@@ -2077,7 +2115,8 @@ impl CurrentCallback {
             || !writes.secondary_camera_fovs.is_empty()
             || !writes.secondary_camera_enabled.is_empty()
             || !writes.rigid_bodies.is_empty()
-            || !writes.character_moves.is_empty();
+            || !writes.character_moves.is_empty()
+            || !writes.animator_writes.is_empty();
         has_other.then_some(writes)
     }
 
@@ -2364,6 +2403,20 @@ impl UserData for ObjectHandle {
                         lua.create_userdata(CharacterControllerHandle {
                             session: Rc::downgrade(&lookup.session),
                             id: lookup.character_controllers[idx].id.clone(),
+                        })
+                    })
+                    .transpose(),
+                    b"Animator" => component_index_for_object(
+                        owner,
+                        id,
+                        &lookup.animator_indices,
+                        &lookup.first_animator_indices,
+                        |idx| lookup.animators[idx].owner,
+                    )
+                    .map(|idx| {
+                        lua.create_userdata(AnimatorHandle {
+                            session: Rc::downgrade(&lookup.session),
+                            id: lookup.animators[idx].id.clone(),
                         })
                     })
                     .transpose(),
@@ -3023,6 +3076,418 @@ impl UserData for CharacterControllerHandle {
             out.raw_set("hits", hits)?;
             Ok(out)
         });
+    }
+}
+
+struct AnimatorHandle {
+    session: Weak<ObjectSession>,
+    id: String,
+}
+
+impl AnimatorHandle {
+    fn slot_index_in(&self, snapshot: &CallbackSnapshot) -> Option<usize> {
+        if !snapshot.owns(&self.session) {
+            return None;
+        }
+        snapshot.lookup.animator_indices.get(&self.id).copied()
+    }
+
+    fn active_index_in(&self, snapshot: &CallbackSnapshot) -> mlua::Result<usize> {
+        let _ = self.slot_index_in(snapshot).ok_or_else(|| {
+            mlua::Error::runtime("Animator handle is no longer valid in this Play session")
+        })?;
+        snapshot
+            .animations
+            .iter()
+            .position(|anim| anim.component_id == self.id)
+            .ok_or_else(|| {
+                mlua::Error::runtime(format!("Animator {:?} is disabled or inactive", self.id))
+            })
+    }
+
+    fn effective_state<'a>(
+        &self,
+        snapshot: &'a CallbackSnapshot,
+        anim_idx: usize,
+    ) -> std::borrow::Cow<'a, RuntimeAnimatorState> {
+        let writes = snapshot.writes.borrow();
+        if !writes
+            .animator_writes
+            .iter()
+            .any(|write| animator_write_index(write) == anim_idx)
+        {
+            return std::borrow::Cow::Borrowed(&snapshot.animator_states[anim_idx]);
+        }
+        let resolved = &snapshot.animations[anim_idx];
+        let mut state = snapshot.animator_states[anim_idx].clone();
+        let mut params_dirty = false;
+        let mut explicit_play = false;
+        for write in &writes.animator_writes {
+            if animator_write_index(write) == anim_idx {
+                let (p, played) = apply_animator_write(resolved, &mut state, write);
+                params_dirty |= p;
+                explicit_play |= played;
+            }
+        }
+        if params_dirty && !explicit_play {
+            if let ResolvedAnimatorMode::StateMachine(sm) = &resolved.mode {
+                evaluate_transitions(sm, &mut state);
+            }
+        }
+        std::borrow::Cow::Owned(state)
+    }
+
+    fn param_info<'a>(
+        resolved: &'a ResolvedComponentAnimation,
+        name: &str,
+    ) -> mlua::Result<(
+        &'a super::animator::ResolvedStateMachine,
+        usize,
+        RuntimeParamValue,
+    )> {
+        let ResolvedAnimatorMode::StateMachine(sm) = &resolved.mode else {
+            return Err(mlua::Error::runtime(format!(
+                "Animator {:?} has no state machine configured",
+                resolved.component_id
+            )));
+        };
+        let &param_idx = sm.param_indices.get(name).ok_or_else(|| {
+            mlua::Error::runtime(format!(
+                "Animator {:?} has no parameter {:?}",
+                resolved.component_id, name
+            ))
+        })?;
+        Ok((sm, param_idx, sm.param_defaults[param_idx]))
+    }
+}
+
+fn animator_write_index(write: &AnimatorWrite) -> usize {
+    match write {
+        AnimatorWrite::SetBool { animator_index, .. }
+        | AnimatorWrite::SetFloat { animator_index, .. }
+        | AnimatorWrite::SetInt { animator_index, .. }
+        | AnimatorWrite::SetTrigger { animator_index, .. }
+        | AnimatorWrite::Play { animator_index, .. }
+        | AnimatorWrite::SetSpeed { animator_index, .. } => *animator_index,
+    }
+}
+
+impl UserData for AnimatorHandle {
+    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+        let state_getter = |lua: &Lua, handle: &Self| {
+            let snapshot = current_callback(lua)?;
+            if handle.slot_index_in(&snapshot).is_none() {
+                return Ok(None);
+            }
+            let Some(anim_idx) = snapshot
+                .animations
+                .iter()
+                .position(|anim| anim.component_id == handle.id)
+            else {
+                return Ok(None);
+            };
+            let resolved = &snapshot.animations[anim_idx];
+            match &resolved.mode {
+                ResolvedAnimatorMode::SingleClip { .. } => Ok(None),
+                ResolvedAnimatorMode::StateMachine(sm) => {
+                    let st = handle.effective_state(&snapshot, anim_idx);
+                    Ok(Some(sm.states[st.current_state].name.clone()))
+                }
+            }
+        };
+        fields.add_field_method_get("state", state_getter);
+        fields.add_field_method_get("current_state", state_getter);
+        fields.add_field_method_get("normalized_time", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            let Some(anim_idx) = handle.slot_index_in(&snapshot).and_then(|_| {
+                snapshot
+                    .animations
+                    .iter()
+                    .position(|a| a.component_id == handle.id)
+            }) else {
+                return Ok(None);
+            };
+            let st = handle.effective_state(&snapshot, anim_idx);
+            Ok(Some(st.normalized_time(&snapshot.animations[anim_idx])))
+        });
+        fields.add_field_method_get("is_transitioning", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            let Some(anim_idx) = handle.slot_index_in(&snapshot).and_then(|_| {
+                snapshot
+                    .animations
+                    .iter()
+                    .position(|a| a.component_id == handle.id)
+            }) else {
+                return Ok(None);
+            };
+            let st = handle.effective_state(&snapshot, anim_idx);
+            Ok(Some(st.blend.is_some()))
+        });
+        fields.add_field_method_get("speed", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            let Some(anim_idx) = handle.slot_index_in(&snapshot).and_then(|_| {
+                snapshot
+                    .animations
+                    .iter()
+                    .position(|a| a.component_id == handle.id)
+            }) else {
+                return Ok(None);
+            };
+            let st = handle.effective_state(&snapshot, anim_idx);
+            Ok(Some(st.playback_speed as f32))
+        });
+        fields.add_field_method_set("speed", |lua, handle, value: f64| {
+            let snapshot = current_callback(lua)?;
+            let anim_idx = handle.active_index_in(&snapshot)?;
+            let speed = value as f32;
+            if !rot_scene::component_scene::valid_animator_playback_speed(speed) {
+                return Err(mlua::Error::runtime(
+                    "Animator speed must be finite and positive",
+                ));
+            }
+            snapshot.writes_dirty.set(true);
+            snapshot
+                .writes
+                .borrow_mut()
+                .animator_writes
+                .push(AnimatorWrite::SetSpeed {
+                    animator_index: anim_idx,
+                    speed: f64::from(speed),
+                });
+            Ok(())
+        });
+        fields.add_field_method_get("enabled", |lua, handle| {
+            let snapshot = current_callback(lua)?;
+            Ok(handle
+                .slot_index_in(&snapshot)
+                .map(|idx| snapshot.lookup.animators[idx].authored_enabled))
+        });
+    }
+
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("get_bool", |lua, handle, name: LuaString| {
+            let snapshot = current_callback(lua)?;
+            let anim_idx = handle.active_index_in(&snapshot)?;
+            let resolved = &snapshot.animations[anim_idx];
+            let name = name.to_str()?;
+            let (_, pid, default) = AnimatorHandle::param_info(resolved, name.as_ref())?;
+            if !matches!(default, RuntimeParamValue::Bool(_)) {
+                return Err(mlua::Error::runtime(format!(
+                    "Animator parameter {:?} is not a Bool",
+                    name.as_ref()
+                )));
+            }
+            let st = handle.effective_state(&snapshot, anim_idx);
+            let RuntimeParamValue::Bool(val) = st.params[pid] else {
+                unreachable!();
+            };
+            Ok(val)
+        });
+        methods.add_method("set_bool", |lua, handle, (name, val): (LuaString, bool)| {
+            let snapshot = current_callback(lua)?;
+            let anim_idx = handle.active_index_in(&snapshot)?;
+            let resolved = &snapshot.animations[anim_idx];
+            let name = name.to_str()?;
+            let (_, pid, default) = AnimatorHandle::param_info(resolved, name.as_ref())?;
+            if !matches!(default, RuntimeParamValue::Bool(_)) {
+                return Err(mlua::Error::runtime(format!(
+                    "Animator parameter {:?} is not a Bool",
+                    name.as_ref()
+                )));
+            }
+            snapshot.writes_dirty.set(true);
+            snapshot
+                .writes
+                .borrow_mut()
+                .animator_writes
+                .push(AnimatorWrite::SetBool {
+                    animator_index: anim_idx,
+                    param_index: pid,
+                    value: val,
+                });
+            Ok(())
+        });
+        methods.add_method("get_float", |lua, handle, name: LuaString| {
+            let snapshot = current_callback(lua)?;
+            let anim_idx = handle.active_index_in(&snapshot)?;
+            let resolved = &snapshot.animations[anim_idx];
+            let name = name.to_str()?;
+            let (_, pid, default) = AnimatorHandle::param_info(resolved, name.as_ref())?;
+            if !matches!(default, RuntimeParamValue::Float(_)) {
+                return Err(mlua::Error::runtime(format!(
+                    "Animator parameter {:?} is not a Float",
+                    name.as_ref()
+                )));
+            }
+            let st = handle.effective_state(&snapshot, anim_idx);
+            let RuntimeParamValue::Float(val) = st.params[pid] else {
+                unreachable!();
+            };
+            Ok(val)
+        });
+        methods.add_method("set_float", |lua, handle, (name, val): (LuaString, f64)| {
+            let snapshot = current_callback(lua)?;
+            let anim_idx = handle.active_index_in(&snapshot)?;
+            let resolved = &snapshot.animations[anim_idx];
+            let name = name.to_str()?;
+            let (_, pid, default) = AnimatorHandle::param_info(resolved, name.as_ref())?;
+            if !matches!(default, RuntimeParamValue::Float(_)) {
+                return Err(mlua::Error::runtime(format!(
+                    "Animator parameter {:?} is not a Float",
+                    name.as_ref()
+                )));
+            }
+            let val = val as f32;
+            if !val.is_finite() {
+                return Err(mlua::Error::runtime(
+                    "Animator float parameter value must be finite",
+                ));
+            }
+            snapshot.writes_dirty.set(true);
+            snapshot
+                .writes
+                .borrow_mut()
+                .animator_writes
+                .push(AnimatorWrite::SetFloat {
+                    animator_index: anim_idx,
+                    param_index: pid,
+                    value: val,
+                });
+            Ok(())
+        });
+        methods.add_method("get_int", |lua, handle, name: LuaString| {
+            let snapshot = current_callback(lua)?;
+            let anim_idx = handle.active_index_in(&snapshot)?;
+            let resolved = &snapshot.animations[anim_idx];
+            let name = name.to_str()?;
+            let (_, pid, default) = AnimatorHandle::param_info(resolved, name.as_ref())?;
+            if !matches!(default, RuntimeParamValue::Int(_)) {
+                return Err(mlua::Error::runtime(format!(
+                    "Animator parameter {:?} is not an Int",
+                    name.as_ref()
+                )));
+            }
+            let st = handle.effective_state(&snapshot, anim_idx);
+            let RuntimeParamValue::Int(val) = st.params[pid] else {
+                unreachable!();
+            };
+            Ok(val)
+        });
+        methods.add_method("set_int", |lua, handle, (name, val): (LuaString, i32)| {
+            let snapshot = current_callback(lua)?;
+            let anim_idx = handle.active_index_in(&snapshot)?;
+            let resolved = &snapshot.animations[anim_idx];
+            let name = name.to_str()?;
+            let (_, pid, default) = AnimatorHandle::param_info(resolved, name.as_ref())?;
+            if !matches!(default, RuntimeParamValue::Int(_)) {
+                return Err(mlua::Error::runtime(format!(
+                    "Animator parameter {:?} is not an Int",
+                    name.as_ref()
+                )));
+            }
+            snapshot.writes_dirty.set(true);
+            snapshot
+                .writes
+                .borrow_mut()
+                .animator_writes
+                .push(AnimatorWrite::SetInt {
+                    animator_index: anim_idx,
+                    param_index: pid,
+                    value: val,
+                });
+            Ok(())
+        });
+        methods.add_method("set_trigger", |lua, handle, name: LuaString| {
+            let snapshot = current_callback(lua)?;
+            let anim_idx = handle.active_index_in(&snapshot)?;
+            let resolved = &snapshot.animations[anim_idx];
+            let name = name.to_str()?;
+            let (_, pid, default) = AnimatorHandle::param_info(resolved, name.as_ref())?;
+            if !matches!(default, RuntimeParamValue::Trigger(_)) {
+                return Err(mlua::Error::runtime(format!(
+                    "Animator parameter {:?} is not a Trigger",
+                    name.as_ref()
+                )));
+            }
+            snapshot.writes_dirty.set(true);
+            snapshot
+                .writes
+                .borrow_mut()
+                .animator_writes
+                .push(AnimatorWrite::SetTrigger {
+                    animator_index: anim_idx,
+                    param_index: pid,
+                    active: true,
+                });
+            Ok(())
+        });
+        methods.add_method("reset_trigger", |lua, handle, name: LuaString| {
+            let snapshot = current_callback(lua)?;
+            let anim_idx = handle.active_index_in(&snapshot)?;
+            let resolved = &snapshot.animations[anim_idx];
+            let name = name.to_str()?;
+            let (_, pid, default) = AnimatorHandle::param_info(resolved, name.as_ref())?;
+            if !matches!(default, RuntimeParamValue::Trigger(_)) {
+                return Err(mlua::Error::runtime(format!(
+                    "Animator parameter {:?} is not a Trigger",
+                    name.as_ref()
+                )));
+            }
+            snapshot.writes_dirty.set(true);
+            snapshot
+                .writes
+                .borrow_mut()
+                .animator_writes
+                .push(AnimatorWrite::SetTrigger {
+                    animator_index: anim_idx,
+                    param_index: pid,
+                    active: false,
+                });
+            Ok(())
+        });
+        methods.add_method(
+            "play",
+            |lua, handle, (state_name, crossfade): (LuaString, Option<f64>)| {
+                let snapshot = current_callback(lua)?;
+                let anim_idx = handle.active_index_in(&snapshot)?;
+                let resolved = &snapshot.animations[anim_idx];
+                let ResolvedAnimatorMode::StateMachine(sm) = &resolved.mode else {
+                    return Err(mlua::Error::runtime(format!(
+                        "Animator {:?} has no state machine configured",
+                        resolved.component_id
+                    )));
+                };
+                let state_name = state_name.to_str()?;
+                let &state_index = sm.state_indices.get(state_name.as_ref()).ok_or_else(|| {
+                    mlua::Error::runtime(format!(
+                        "Animator {:?} has no state {:?}",
+                        resolved.component_id,
+                        state_name.as_ref()
+                    ))
+                })?;
+                let crossfade = crossfade.unwrap_or(0.0);
+                if !crossfade.is_finite()
+                    || !(0.0..=f64::from(rot_scene::MAX_TRANSITION_DURATION_SECS))
+                        .contains(&crossfade)
+                {
+                    return Err(mlua::Error::runtime(format!(
+                        "Animator crossfade must be in 0..={} seconds",
+                        rot_scene::MAX_TRANSITION_DURATION_SECS
+                    )));
+                }
+                snapshot.writes_dirty.set(true);
+                snapshot
+                    .writes
+                    .borrow_mut()
+                    .animator_writes
+                    .push(AnimatorWrite::Play {
+                        animator_index: anim_idx,
+                        state_index,
+                        crossfade,
+                    });
+                Ok(())
+            },
+        );
     }
 }
 

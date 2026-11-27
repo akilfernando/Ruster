@@ -12,11 +12,15 @@ use rot_scene::component_scene::{
 };
 use rot_scene::input::{ActionFrame, ActionValue, ValidatedActionFrame};
 use rot_scene::{
-    Ambient, Authoring, BackgroundColor, BehaviorSource, BindingTarget, Clip, ComponentDrawPlan,
-    DisplayProfile, Fog, OpaqueMaterial, PostProcess, PropertyValue, RuntimeVisualOverrides, Sky,
-    Transform,
+    Ambient, Authoring, BackgroundColor, BehaviorSource, BindingTarget, BlendedPoseScratch,
+    ComponentDrawPlan, DisplayProfile, Fog, OpaqueMaterial, PostProcess, PropertyValue,
+    RuntimeVisualOverrides, Sky, Transform,
 };
 
+use super::animator::{
+    self, AnimatorRuntimeSnapshot, AnimatorWrite, LiveAnimatorParamPatch, ResolvedAnimatorMode,
+    ResolvedComponentAnimation, RuntimeAnimatorState, RuntimeParamValue,
+};
 use super::component_topology::{ObjectSession, Population, TopologyEdits};
 use super::lua_component::{
     self, CallbackContext, CallbackWrites, CoroutineScheduler, CurrentCallback, EventBus, Module,
@@ -38,16 +42,6 @@ pub(super) struct ComponentScriptSlot {
     pub(super) owner_id: String,
     pub(super) has_object_input: bool,
     pub(super) movement: ScriptMovement,
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct ResolvedComponentAnimation {
-    pub(super) component_id: String,
-    pub(super) clip: Arc<Clip>,
-    pub(super) resolved_tracks: Vec<(usize, usize)>,
-    pub(super) looping: bool,
-    pub(super) button: Option<String>,
-    pub(super) speed: f64,
 }
 
 #[derive(Debug)]
@@ -101,7 +95,10 @@ pub(crate) struct ComponentWorld {
     pub(crate) scripts: Vec<ComponentScriptSlot>,
     pub(crate) has_state_scripts: bool,
     modules: Option<Rc<RefCell<Modules>>>,
-    pub(crate) animations: Vec<ResolvedComponentAnimation>,
+    pub(crate) animations: Arc<Vec<ResolvedComponentAnimation>>,
+    pub(crate) animator_states: Vec<RuntimeAnimatorState>,
+    pub(crate) authored_transforms: Arc<Vec<Transform>>,
+    pose_scratch: RefCell<BlendedPoseScratch>,
     pub(crate) colliders: Arc<Vec<ComponentColliderSlot>>,
     pub(crate) physics: Option<Rc<RefCell<PhysicsState>>>,
     pub(crate) draw_plan: Arc<ComponentDrawPlan>,
@@ -110,6 +107,21 @@ pub(crate) struct ComponentWorld {
     spare_local: ScratchPool<Transform>,
     spare_world: ScratchPool<DMat4>,
     spare_rotations: ScratchPool<DQuat>,
+}
+
+impl Runtime {
+    /// Live snapshot of all enabled `Animator` components for `Play Values` inspection.
+    pub fn animator_snapshots(&self) -> Vec<AnimatorRuntimeSnapshot> {
+        let Some(world) = &self.component_world else {
+            return Vec::new();
+        };
+        world
+            .animations
+            .iter()
+            .zip(&world.animator_states)
+            .map(|(resolved, state)| animator::snapshot_for(resolved, state))
+            .collect()
+    }
 }
 
 struct RebuiltPopulation {
@@ -263,11 +275,12 @@ impl ComponentWorld {
         );
         // Authored rows are never removed or moved, so these bindings, animation tracks and
         // positional audio indices survive without recompiling modules or restarting clocks.
-        let animated_objects: HashSet<_> = self
-            .animations
-            .iter()
-            .flat_map(|animation| animation.resolved_tracks.iter().map(|&(_, index)| index))
-            .collect();
+        let mut animated_objects = HashSet::new();
+        for animation in self.animations.iter() {
+            animation.for_each_target_index(|index| {
+                animated_objects.insert(index);
+            });
+        }
         let kinematic =
             kinematic_owner_component(&scene, &hierarchy, &object_indices, &animated_objects)
                 .map_err(|error| topology_diagnostic(authoring, origin, &error))?;
@@ -652,6 +665,7 @@ pub struct LiveComponentPatch {
     pub object_enabled: BTreeMap<String, bool>,
     pub object_names: BTreeMap<String, String>,
     pub components: Vec<(String, ComponentInstance)>,
+    pub animator_params: Vec<LiveAnimatorParamPatch>,
     pub materials: Option<BTreeMap<String, OpaqueMaterial>>,
     pub display: Option<LiveDisplayPatch>,
     pub gameplay_camera: Option<Option<String>>,
@@ -664,6 +678,7 @@ impl LiveComponentPatch {
             && self.object_enabled.is_empty()
             && self.object_names.is_empty()
             && self.components.is_empty()
+            && self.animator_params.is_empty()
             && self.materials.is_none()
             && self.display.is_none()
             && self.gameplay_camera.is_none()
@@ -685,6 +700,7 @@ impl LiveComponentPatch {
                 self.components.push((object_id, component));
             }
         }
+        self.animator_params.extend(newer.animator_params);
         if let Some(materials) = newer.materials {
             self.materials = Some(materials);
         }
@@ -797,16 +813,19 @@ impl LiveComponentPatch {
                             binding: a_prev,
                             start_playback: s_prev,
                             playback_speed: sp_prev,
+                            state_machine: sm_prev,
                         },
                         Component::Animator {
                             binding: a_next,
                             start_playback: s_next,
                             playback_speed: sp_next,
+                            state_machine: sm_next,
                         },
                     ) => {
                         if c_prev.enabled != c_next.enabled
                             || a_prev.clip != a_next.clip
                             || s_prev != s_next
+                            || sm_prev != sm_next
                         {
                             return None;
                         }
@@ -930,6 +949,8 @@ impl Engine {
         let mut physics_dirty = false;
         let mut script_prop_updates: Vec<ScriptPropUpdate> = Vec::new();
         let mut animator_updates: Vec<(String, bool, f64)> = Vec::new();
+        let mut staged_animator_states: Option<Vec<RuntimeAnimatorState>> = None;
+        let mut staged_animations: Option<Vec<ResolvedComponentAnimation>> = None;
 
         if needs_scene {
             let mut next_scene = (*world.scene).clone();
@@ -1095,13 +1116,12 @@ impl Engine {
                     }
                 }
                 if runtime.kinematic_owner.is_some() {
-                    let animated_objects: HashSet<_> = world
-                        .animations
-                        .iter()
-                        .flat_map(|animation| {
-                            animation.resolved_tracks.iter().map(|&(_, index)| index)
-                        })
-                        .collect();
+                    let mut animated_objects = HashSet::new();
+                    for animation in world.animations.iter() {
+                        animation.for_each_target_index(|index| {
+                            animated_objects.insert(index);
+                        });
+                    }
                     kinematic_owner_component(
                         &next_scene,
                         &next_hierarchy,
@@ -1129,7 +1149,138 @@ impl Engine {
             }
         }
 
-        if staged_local.is_none() && staged_scene.is_none() {
+        if !patch.animator_params.is_empty() {
+            let states =
+                staged_animator_states.get_or_insert_with(|| world.animator_states.clone());
+            let mut scratch = world.pose_scratch.borrow_mut();
+            let mut dirty_animators = vec![false; world.animations.len()];
+            let mut dirty_transitions = vec![false; world.animations.len()];
+            for param_patch in &patch.animator_params {
+                let comp_id = param_patch.component_id();
+                let Some(idx) = world
+                    .animations
+                    .iter()
+                    .position(|anim| anim.component_id == comp_id)
+                else {
+                    continue;
+                };
+                let ResolvedAnimatorMode::StateMachine(sm) = &world.animations[idx].mode else {
+                    continue;
+                };
+                let st = &mut states[idx];
+                match param_patch {
+                    LiveAnimatorParamPatch::SetBool {
+                        parameter, value, ..
+                    } => {
+                        if let Some(&pid) = sm.param_indices.get(parameter) {
+                            if matches!(sm.param_defaults[pid], RuntimeParamValue::Bool(_)) {
+                                st.params[pid] = RuntimeParamValue::Bool(*value);
+                                dirty_animators[idx] = true;
+                                dirty_transitions[idx] = true;
+                            }
+                        }
+                    }
+                    LiveAnimatorParamPatch::SetFloat {
+                        parameter, value, ..
+                    } => {
+                        if value.is_finite() {
+                            if let Some(&pid) = sm.param_indices.get(parameter) {
+                                if matches!(sm.param_defaults[pid], RuntimeParamValue::Float(_)) {
+                                    st.params[pid] = RuntimeParamValue::Float(*value);
+                                    dirty_animators[idx] = true;
+                                    dirty_transitions[idx] = true;
+                                }
+                            }
+                        }
+                    }
+                    LiveAnimatorParamPatch::SetInt {
+                        parameter, value, ..
+                    } => {
+                        if let Some(&pid) = sm.param_indices.get(parameter) {
+                            if matches!(sm.param_defaults[pid], RuntimeParamValue::Int(_)) {
+                                st.params[pid] = RuntimeParamValue::Int(*value);
+                                dirty_animators[idx] = true;
+                                dirty_transitions[idx] = true;
+                            }
+                        }
+                    }
+                    LiveAnimatorParamPatch::FireTrigger { parameter, .. } => {
+                        if let Some(&pid) = sm.param_indices.get(parameter) {
+                            if matches!(sm.param_defaults[pid], RuntimeParamValue::Trigger(_)) {
+                                st.params[pid] = RuntimeParamValue::Trigger(true);
+                                dirty_animators[idx] = true;
+                                dirty_transitions[idx] = true;
+                            }
+                        }
+                    }
+                    LiveAnimatorParamPatch::PlayState {
+                        state, crossfade, ..
+                    } => {
+                        if crossfade.is_finite()
+                            && (0.0..=rot_scene::MAX_TRANSITION_DURATION_SECS).contains(crossfade)
+                        {
+                            if let Some(&state_index) = sm.state_indices.get(state) {
+                                animator::apply_play_state(st, state_index, f64::from(*crossfade));
+                                dirty_animators[idx] = true;
+                                dirty_transitions[idx] = false;
+                            }
+                        }
+                    }
+                }
+            }
+            for (idx, &dirty) in dirty_animators.iter().enumerate() {
+                if !dirty {
+                    continue;
+                }
+                if dirty_transitions[idx] {
+                    if let ResolvedAnimatorMode::StateMachine(sm) = &world.animations[idx].mode {
+                        animator::evaluate_transitions(sm, &mut states[idx]);
+                    }
+                }
+                let target = staged_local
+                    .get_or_insert_with(|| world.spare_local.clone_from(&world.local_transforms));
+                if let ResolvedAnimatorMode::StateMachine(sm) = &world.animations[idx].mode {
+                    animator::sample_state_machine(
+                        sm,
+                        &states[idx],
+                        &world.authored_transforms,
+                        &mut scratch,
+                        target,
+                    )
+                    .map_err(|error| {
+                        diag(
+                            DiagnosticCode::InvalidOutput,
+                            Phase::Commit,
+                            &error.to_string(),
+                        )
+                    })?;
+                    sm.touched_objects.iter().for_each(|&obj| {
+                        transformed_owners.push(obj);
+                    });
+                }
+            }
+        }
+        for (component_id, looping, speed) in &animator_updates {
+            let animations = staged_animations.get_or_insert_with(|| (*world.animations).clone());
+            let states =
+                staged_animator_states.get_or_insert_with(|| world.animator_states.clone());
+            if let Some((idx, animation)) = animations
+                .iter_mut()
+                .enumerate()
+                .find(|(_, anim)| anim.component_id == *component_id)
+            {
+                if let ResolvedAnimatorMode::SingleClip { looping: l, .. } = &mut animation.mode {
+                    *l = *looping;
+                }
+                states[idx].playback_speed = *speed;
+            }
+        }
+
+        if staged_local.is_none()
+            && staged_scene.is_none()
+            && staged_animator_states.is_none()
+            && staged_animations.is_none()
+        {
             return Ok(false);
         }
 
@@ -1228,16 +1379,13 @@ impl Engine {
                 )?;
             }
         }
-        for (component_id, looping, speed) in animator_updates {
-            if let Some(animation) = world_mut
-                .animations
-                .iter_mut()
-                .find(|anim| anim.component_id == component_id)
-            {
-                animation.looping = looping;
-                animation.speed = speed;
-            }
+        if let Some(next_anim_states) = staged_animator_states {
+            world_mut.animator_states = next_anim_states;
         }
+        if let Some(next_anims) = staged_animations {
+            world_mut.animations = Arc::new(next_anims);
+        }
+        let _ = animator_updates;
         if !script_prop_updates.is_empty() {
             let authoring_mut = Arc::make_mut(&mut runtime.authoring);
             for update in &script_prop_updates {
@@ -1297,10 +1445,10 @@ impl Engine {
                                     &world_mut.colliders,
                                 )
                             });
-                    for animation in &world_mut.animations {
-                        for &(_, idx) in &animation.resolved_tracks {
+                    for animation in world_mut.animations.iter() {
+                        animation.for_each_target_index(|idx| {
                             p.insert(idx, "an Animator controls this Transform");
-                        }
+                        });
                     }
                     p
                 } else {
@@ -1427,6 +1575,8 @@ impl Engine {
             world.scripts.len(),
             modules.coroutines.borrow().next_id(),
         )));
+        let animator_states_empty =
+            (!world.animations.is_empty()).then(|| world.animator_states.clone());
         let callback = CurrentCallback::new(
             &self.lua,
             CallbackContext {
@@ -1436,6 +1586,8 @@ impl Engine {
                 world_matrices: &world.world_matrices,
                 world_rotations: &world.world_rotations,
                 visual_overrides: &world.visual_overrides,
+                animations: &world.animations,
+                animator_states: Arc::new(animator_states_empty.unwrap_or_default()),
                 physics: world.physics.clone(),
                 fixed_dt: self.limits.fixed_dt,
                 queries: &queries,
@@ -1648,6 +1800,7 @@ impl Engine {
         );
 
         let mut animations = Vec::new();
+        let mut animator_states = Vec::new();
         let mut animated_objects = HashSet::new();
         for (owner_index, object) in scene.objects.iter().enumerate() {
             if !hierarchy.effectively_enabled[owner_index] {
@@ -1658,6 +1811,7 @@ impl Engine {
                     binding,
                     start_playback,
                     playback_speed,
+                    state_machine,
                 } = &component.kind
                 else {
                     continue;
@@ -1674,42 +1828,67 @@ impl Engine {
                             &error.to_string(),
                         )
                     })?;
-                let clip = self.clips.get(&binding.clip).ok_or_else(|| {
-                    diag(
-                        DiagnosticCode::InvalidAuthoring,
-                        Phase::Setup,
-                        &format!(
-                            "animation on {} uses clip {}, which has no accepted content; Refresh its model or remove the animation",
-                            object.id, binding.clip
-                        ),
-                    )
-                })?;
-                let resolved_tracks = clip
-                    .resolve_indexed_tracks(binding, &object_indices)
-                    .map_err(|error| {
-                        diag(
-                            DiagnosticCode::InvalidAuthoring,
-                            Phase::Setup,
-                            &error.to_string(),
-                        )
-                    })?;
-                for &(_, target_index) in &resolved_tracks {
-                    animated_objects.insert(target_index);
-                }
                 let button = match start_playback {
                     AnimatorStart::OnPlay {} => None,
                     AnimatorStart::OnButtonPress { action_id } => Some(action_id.clone()),
                 };
-                animations.push(ResolvedComponentAnimation {
+                let mode = if let Some(sm) = state_machine {
+                    let resolved_sm = animator::resolve_state_machine(
+                        &object.id,
+                        sm,
+                        binding,
+                        &self.clips,
+                        &object_indices,
+                    )
+                    .map_err(|message| {
+                        diag(DiagnosticCode::InvalidAuthoring, Phase::Setup, &message)
+                    })?;
+                    for &target_index in &resolved_sm.touched_objects {
+                        animated_objects.insert(target_index);
+                    }
+                    ResolvedAnimatorMode::StateMachine(Box::new(resolved_sm))
+                } else {
+                    let clip = self.clips.get(&binding.clip).ok_or_else(|| {
+                        diag(
+                            DiagnosticCode::InvalidAuthoring,
+                            Phase::Setup,
+                            &format!(
+                                "animation on {} uses clip {}, which has no accepted content; Refresh its model or remove the animation",
+                                object.id, binding.clip
+                            ),
+                        )
+                    })?;
+                    let resolved_tracks = clip
+                        .resolve_indexed_tracks(binding, &object_indices)
+                        .map_err(|error| {
+                            diag(
+                                DiagnosticCode::InvalidAuthoring,
+                                Phase::Setup,
+                                &error.to_string(),
+                            )
+                        })?;
+                    for &(_, target_index) in &resolved_tracks {
+                        animated_objects.insert(target_index);
+                    }
+                    ResolvedAnimatorMode::SingleClip {
+                        clip: Arc::clone(clip),
+                        resolved_tracks,
+                        looping: binding.looping,
+                    }
+                };
+                let resolved = ResolvedComponentAnimation {
+                    object_id: object.id.clone(),
                     component_id: component.id.clone(),
-                    clip: Arc::clone(clip),
-                    resolved_tracks,
-                    looping: binding.looping,
                     button,
-                    speed: f64::from(*playback_speed),
-                });
+                    mode,
+                };
+                let state =
+                    RuntimeAnimatorState::from_resolved(&resolved, f64::from(*playback_speed));
+                animations.push(resolved);
+                animator_states.push(state);
             }
         }
+        let animations = Arc::new(animations);
 
         let mut scripts = Vec::new();
         let mut colliders = Vec::new();
@@ -1772,22 +1951,37 @@ impl Engine {
             .iter()
             .map(|object| object.transform.clone())
             .collect();
-        for animation in &animations {
-            animation
-                .clip
-                .apply_indexed(
-                    &animation.resolved_tracks,
-                    animation.looping,
-                    0.0,
+        let authored_transforms: Arc<Vec<Transform>> = if animations
+            .iter()
+            .any(ResolvedComponentAnimation::has_state_machine)
+        {
+            Arc::new(local_transforms.clone())
+        } else {
+            Arc::default()
+        };
+        let mut pose_scratch = BlendedPoseScratch::default();
+        for (animation, state) in animations.iter().zip(&animator_states) {
+            match &animation.mode {
+                ResolvedAnimatorMode::SingleClip {
+                    clip,
+                    resolved_tracks,
+                    looping,
+                } => clip.apply_indexed(resolved_tracks, *looping, 0.0, &mut local_transforms),
+                ResolvedAnimatorMode::StateMachine(sm) => animator::sample_state_machine(
+                    sm,
+                    state,
+                    &authored_transforms,
+                    &mut pose_scratch,
                     &mut local_transforms,
+                ),
+            }
+            .map_err(|error| {
+                diag(
+                    DiagnosticCode::InvalidOutput,
+                    Phase::Setup,
+                    &error.to_string(),
                 )
-                .map_err(|error| {
-                    diag(
-                        DiagnosticCode::InvalidOutput,
-                        Phase::Setup,
-                        &error.to_string(),
-                    )
-                })?;
+            })?;
         }
         let mut local_transforms = Arc::new(local_transforms);
         let mut world_matrices = Vec::with_capacity(local_transforms.len());
@@ -1865,6 +2059,7 @@ impl Engine {
         let mut host_per_slot = None;
         let mut reset_writes = None;
         let mut reset_logs = Vec::new();
+        let reset_anim_states = Arc::new(animator_states.clone());
         if !scripts.is_empty() {
             let input = Rc::new(ValidatedActionFrame::neutral(&authoring.actions).map_err(
                 |error| {
@@ -2003,6 +2198,8 @@ impl Engine {
                         world_matrices: &world_matrices,
                         world_rotations: &world_rotations,
                         visual_overrides: &initial_overrides,
+                        animations: &animations,
+                        animator_states: Arc::clone(&reset_anim_states),
                         physics: None,
                         fixed_dt: self.limits.fixed_dt,
                         queries: queries
@@ -2102,6 +2299,55 @@ impl Engine {
                         )
                     })?;
             }
+            if let Some(writes) = reset_writes
+                .as_ref()
+                .filter(|w| !w.animator_writes.is_empty())
+            {
+                let mut dirty = vec![(false, false); animations.len()];
+                for write in &writes.animator_writes {
+                    let idx = match write {
+                        AnimatorWrite::SetBool { animator_index, .. }
+                        | AnimatorWrite::SetFloat { animator_index, .. }
+                        | AnimatorWrite::SetInt { animator_index, .. }
+                        | AnimatorWrite::SetTrigger { animator_index, .. }
+                        | AnimatorWrite::Play { animator_index, .. }
+                        | AnimatorWrite::SetSpeed { animator_index, .. } => *animator_index,
+                    };
+                    let (p, played) = animator::apply_animator_write(
+                        &animations[idx],
+                        &mut animator_states[idx],
+                        write,
+                    );
+                    dirty[idx].0 |= p;
+                    dirty[idx].1 |= played;
+                }
+                let transforms =
+                    start_transforms.get_or_insert_with(|| local_transforms.as_ref().clone());
+                for (idx, (params_dirty, explicit_play)) in dirty.into_iter().enumerate() {
+                    if !params_dirty && !explicit_play {
+                        continue;
+                    }
+                    if let ResolvedAnimatorMode::StateMachine(sm) = &animations[idx].mode {
+                        if params_dirty && !explicit_play {
+                            animator::evaluate_transitions(sm, &mut animator_states[idx]);
+                        }
+                        animator::sample_state_machine(
+                            sm,
+                            &animator_states[idx],
+                            &authored_transforms,
+                            &mut pose_scratch,
+                            transforms,
+                        )
+                        .map_err(|error| {
+                            diag(
+                                DiagnosticCode::InvalidOutput,
+                                Phase::Commit,
+                                &error.to_string(),
+                            )
+                        })?;
+                    }
+                }
+            }
             trial_state.validate_total()?;
             if let Some(start_transforms) = start_transforms {
                 local_transforms = Arc::new(start_transforms);
@@ -2198,6 +2444,9 @@ impl Engine {
                 has_state_scripts,
                 modules: built_modules,
                 animations,
+                animator_states,
+                authored_transforms,
+                pose_scratch: RefCell::new(pose_scratch),
                 colliders,
                 physics: None,
                 draw_plan,
@@ -2424,43 +2673,97 @@ impl Engine {
             runtime.kinematic_owner.as_ref(),
         )?;
         let mut staged_transforms: Option<Vec<Transform>> = None;
+        let mut staged_animator_states =
+            (!world.animations.is_empty()).then(|| world.animator_states.clone());
+        let mut single_clip_ticks = if world.animations.is_empty() {
+            Vec::new()
+        } else {
+            vec![None; world.animations.len()]
+        };
         let mut staged_state = if world.has_state_scripts {
             Some(runtime.state.clone())
         } else {
             None
         };
         let mut pressed = Vec::new();
-        for (index, animation) in world.animations.iter().enumerate() {
-            let ticks = if let Some(action) = &animation.button {
-                if matches!(validated.get(action), Some(ActionValue::Button(state)) if state.pressed)
-                {
-                    pressed.push(index);
-                    0
-                } else if let Some(start) = runtime.animation_starts[index] {
-                    next - start
-                } else {
-                    continue;
+        if let Some(anim_states) = staged_animator_states.as_mut() {
+            let mut scratch = world.pose_scratch.borrow_mut();
+            for (index, animation) in world.animations.iter().enumerate() {
+                match &animation.mode {
+                    ResolvedAnimatorMode::SingleClip {
+                        clip,
+                        resolved_tracks,
+                        looping,
+                    } => {
+                        let ticks = if let Some(action) = &animation.button {
+                            if matches!(validated.get(action), Some(ActionValue::Button(state)) if state.pressed)
+                            {
+                                pressed.push(index);
+                                0
+                            } else if let Some(start) = runtime.animation_starts[index] {
+                                next - start
+                            } else {
+                                continue;
+                            }
+                        } else {
+                            next
+                        };
+                        single_clip_ticks[index] = Some(ticks);
+                        let transforms = staged_transforms
+                            .get_or_insert_with(|| world.local_transforms.as_ref().clone());
+                        clip.apply_indexed(
+                            resolved_tracks,
+                            *looping,
+                            ticks as f64 * self.limits.fixed_dt * anim_states[index].playback_speed,
+                            transforms,
+                        )
+                        .map_err(|error| {
+                            diag(
+                                DiagnosticCode::InvalidOutput,
+                                Phase::Commit,
+                                &error.to_string(),
+                            )
+                        })?;
+                    }
+                    ResolvedAnimatorMode::StateMachine(sm) => {
+                        let st = &mut anim_states[index];
+                        if let Some(action) = &animation.button {
+                            if matches!(validated.get(action), Some(ActionValue::Button(state)) if state.pressed)
+                            {
+                                pressed.push(index);
+                                st.started = true;
+                                st.current_state = sm.entry_state;
+                                st.state_time = 0.0;
+                                st.blend = None;
+                            } else if st.started {
+                                animator::step_state_machine(sm, st, self.limits.fixed_dt);
+                            } else {
+                                continue;
+                            }
+                        } else if st.started {
+                            animator::step_state_machine(sm, st, self.limits.fixed_dt);
+                        } else {
+                            continue;
+                        }
+                        let transforms = staged_transforms
+                            .get_or_insert_with(|| world.local_transforms.as_ref().clone());
+                        animator::sample_state_machine(
+                            sm,
+                            st,
+                            &world.authored_transforms,
+                            &mut scratch,
+                            transforms,
+                        )
+                        .map_err(|error| {
+                            diag(
+                                DiagnosticCode::InvalidOutput,
+                                Phase::Commit,
+                                &error.to_string(),
+                            )
+                        })?;
+                    }
                 }
-            } else {
-                next
-            };
-            let transforms =
-                staged_transforms.get_or_insert_with(|| world.local_transforms.as_ref().clone());
-            animation
-                .clip
-                .apply_indexed(
-                    &animation.resolved_tracks,
-                    animation.looping,
-                    ticks as f64 * self.limits.fixed_dt * animation.speed,
-                    transforms,
-                )
-                .map_err(|error| {
-                    diag(
-                        DiagnosticCode::InvalidOutput,
-                        Phase::Commit,
-                        &error.to_string(),
-                    )
-                })?;
+            }
         }
 
         let had_animation_writes = staged_transforms.is_some();
@@ -2470,6 +2773,9 @@ impl Engine {
             && modules
                 .as_ref()
                 .is_some_and(|modules| modules.batch.is_some());
+        let callback_animator_states = staged_animator_states
+            .as_ref()
+            .map_or_else(Arc::default, |states| Arc::new(states.clone()));
         let mut callback = modules.as_ref().map(|modules| {
             CurrentCallback::new(
                 &self.lua,
@@ -2480,6 +2786,8 @@ impl Engine {
                     world_matrices: &world.world_matrices,
                     world_rotations: &world.world_rotations,
                     visual_overrides: &world.visual_overrides,
+                    animations: &world.animations,
+                    animator_states: callback_animator_states,
                     physics: world.physics.clone(),
                     fixed_dt: self.limits.fixed_dt,
                     queries: queries
@@ -2872,6 +3180,87 @@ impl Engine {
         } else {
             (None, TopologyEdits::default(), Vec::new(), false)
         };
+        if let Some(writes) = writes.as_ref().filter(|w| !w.animator_writes.is_empty()) {
+            if let Some(anim_states) = staged_animator_states.as_mut() {
+                let mut dirty = vec![(false, false); world.animations.len()];
+                for write in &writes.animator_writes {
+                    let idx = match write {
+                        AnimatorWrite::SetBool { animator_index, .. }
+                        | AnimatorWrite::SetFloat { animator_index, .. }
+                        | AnimatorWrite::SetInt { animator_index, .. }
+                        | AnimatorWrite::SetTrigger { animator_index, .. }
+                        | AnimatorWrite::Play { animator_index, .. }
+                        | AnimatorWrite::SetSpeed { animator_index, .. } => *animator_index,
+                    };
+                    let (p, played) = animator::apply_animator_write(
+                        &world.animations[idx],
+                        &mut anim_states[idx],
+                        write,
+                    );
+                    dirty[idx].0 |= p;
+                    dirty[idx].1 |= played;
+                }
+                let mut scratch = world.pose_scratch.borrow_mut();
+                for (idx, (params_dirty, explicit_play)) in dirty.into_iter().enumerate() {
+                    if !params_dirty && !explicit_play {
+                        continue;
+                    }
+                    match &world.animations[idx].mode {
+                        ResolvedAnimatorMode::SingleClip {
+                            clip,
+                            resolved_tracks,
+                            looping,
+                        } => {
+                            if let Some(ticks) = single_clip_ticks[idx] {
+                                let transforms = staged_transforms
+                                    .get_or_insert_with(|| world.local_transforms.as_ref().clone());
+                                clip.apply_indexed(
+                                    resolved_tracks,
+                                    *looping,
+                                    ticks as f64
+                                        * self.limits.fixed_dt
+                                        * anim_states[idx].playback_speed,
+                                    transforms,
+                                )
+                                .map_err(|error| {
+                                    diag(
+                                        DiagnosticCode::InvalidOutput,
+                                        Phase::Commit,
+                                        &error.to_string(),
+                                    )
+                                })?;
+                            }
+                        }
+                        ResolvedAnimatorMode::StateMachine(sm) => {
+                            if params_dirty && !explicit_play {
+                                animator::evaluate_transitions(sm, &mut anim_states[idx]);
+                            }
+                            if anim_states[idx].started {
+                                let transforms = staged_transforms
+                                    .get_or_insert_with(|| world.local_transforms.as_ref().clone());
+                                animator::sample_state_machine(
+                                    sm,
+                                    &anim_states[idx],
+                                    &world.authored_transforms,
+                                    &mut scratch,
+                                    transforms,
+                                )
+                                .map_err(|error| {
+                                    diag(
+                                        DiagnosticCode::InvalidOutput,
+                                        Phase::Commit,
+                                        &error.to_string(),
+                                    )
+                                })?;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if !writes.as_ref().is_none_or(|w| w.animator_writes.is_empty()) {
+            force_resync = true;
+        }
         if has_external_xform {
             force_resync = true;
         }
@@ -3138,6 +3527,9 @@ impl Engine {
         for index in pressed {
             runtime.animation_starts[index] = Some(next);
         }
+        if let Some(next_anim_states) = staged_animator_states {
+            world_mut.animator_states = next_anim_states;
+        }
         runtime.tick = next;
         runtime.commit_revision = commit_revision;
         runtime.last_step_commit_revision = Some(commit_revision);
@@ -3330,7 +3722,7 @@ mod tests {
         AnimatorStart, CameraView, ComponentInstance, ComponentScene, Geometry, ObjectNode,
     };
     use rot_scene::{
-        AnimationBinding, BehaviorBinding, BehaviorSource, ColliderRole, ColliderShape,
+        AnimationBinding, BehaviorBinding, BehaviorSource, Clip, ColliderRole, ColliderShape,
         DisplayProfile, LightKind,
     };
     use std::sync::atomic::AtomicBool;
@@ -4820,6 +5212,7 @@ mod tests {
                         action_id: "slide".into(),
                     },
                     playback_speed: 1.0,
+                    state_machine: None,
                 },
             }],
         );
@@ -5097,6 +5490,7 @@ mod tests {
                         },
                         start_playback: AnimatorStart::OnPlay {},
                         playback_speed: 1.0,
+                        state_machine: None,
                     },
                 },
                 ComponentInstance {
@@ -5320,6 +5714,7 @@ mod tests {
                     },
                     start_playback: AnimatorStart::OnPlay {},
                     playback_speed: 1.0,
+                    state_machine: None,
                 },
             }],
         });

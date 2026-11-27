@@ -41,8 +41,11 @@ mod lighting;
 mod lighting_authoring;
 mod material_asset;
 pub use animation::{
-    AnimationBinding, Clip, ClipInterpolation, ClipProperty, ClipTrack, MAX_ANIMATIONS,
-    MAX_ANIMATION_TARGETS, MAX_CLIP_BYTES,
+    apply_blended_poses, AnimationBinding, AnimatorCondition, AnimatorParam, AnimatorState,
+    AnimatorStateMachine, AnimatorTransition, BlendedPoseScratch, Clip, ClipInterpolation,
+    ClipProperty, ClipTrack, PoseSample, MAX_ANIMATIONS, MAX_ANIMATION_TARGETS,
+    MAX_ANIMATOR_NAME_LEN, MAX_ANIMATOR_PARAMS, MAX_ANIMATOR_STATES, MAX_ANIMATOR_TRANSITIONS,
+    MAX_CLIP_BYTES, MAX_TRANSITION_CONDITIONS, MAX_TRANSITION_DURATION_SECS,
 };
 pub use material_asset::MaterialSource;
 mod player_view;

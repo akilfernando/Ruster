@@ -1250,4 +1250,177 @@ mod tests {
             skin_mats[0].w_axis
         );
     }
+
+    #[test]
+    fn player_executes_lua_triggered_animator_state_machine_crossfade() {
+        let mut scene = rot_scene::component_scene::ComponentScene::from_legacy(
+            &rot_scene::Session::new(rot_scene::Scene::empty("sm-player")).unwrap(),
+        )
+        .unwrap();
+        scene.script_files.insert(
+            "anim-ctrl".into(),
+            rot_scene::component_scene::ScriptFile {
+                asset_id: "anim-ctrl".into(),
+                path: "Scripts/anim_ctrl.lua".into(),
+                text: r#"local triggered = false
+return {
+    on_update = function(_transform, _props, _dt, host)
+        if not triggered then
+            local anim = host.self:component("Animator")
+            assert(anim ~= nil and anim.state == "Idle")
+            anim:set_trigger("go")
+            triggered = true
+        end
+    end,
+}"#
+                .into(),
+            },
+        );
+        scene.objects.push(rot_scene::component_scene::ObjectNode {
+            id: "rig".into(),
+            name: "Rig".into(),
+            enabled: true,
+            parent: None,
+            transform: rot_scene::Transform::default(),
+            components: vec![
+                rot_scene::component_scene::ComponentInstance {
+                    id: "rig-anim".into(),
+                    enabled: true,
+                    kind: rot_scene::component_scene::Component::Animator {
+                        binding: rot_scene::AnimationBinding {
+                            clip: "clip_idle".into(),
+                            looping: true,
+                            targets: std::collections::BTreeMap::from([(
+                                "Rig/Bone".into(),
+                                "bone".into(),
+                            )]),
+                        },
+                        start_playback: rot_scene::component_scene::AnimatorStart::OnPlay {},
+                        playback_speed: 1.0,
+                        state_machine: Some(rot_scene::AnimatorStateMachine {
+                            entry_state: "Idle".into(),
+                            parameters: std::collections::BTreeMap::from([(
+                                "go".into(),
+                                rot_scene::AnimatorParam::Trigger {},
+                            )]),
+                            states: vec![
+                                rot_scene::AnimatorState {
+                                    name: "Idle".into(),
+                                    clip: "clip_idle".into(),
+                                    looping: true,
+                                    speed: 1.0,
+                                },
+                                rot_scene::AnimatorState {
+                                    name: "Run".into(),
+                                    clip: "clip_run".into(),
+                                    looping: true,
+                                    speed: 1.0,
+                                },
+                            ],
+                            transitions: vec![rot_scene::AnimatorTransition {
+                                from: Some("Idle".into()),
+                                to: "Run".into(),
+                                duration: 0.25,
+                                has_exit_time: false,
+                                exit_time: 1.0,
+                                conditions: vec![rot_scene::AnimatorCondition::Triggered {
+                                    parameter: "go".into(),
+                                }],
+                            }],
+                        }),
+                    },
+                },
+                rot_scene::component_scene::ComponentInstance {
+                    id: "rig-script".into(),
+                    enabled: true,
+                    kind: rot_scene::component_scene::Component::Script {
+                        binding: rot_scene::BehaviorBinding {
+                            target: rot_scene::BindingTarget::Object("rig".into()),
+                            source_id: "anim-ctrl".into(),
+                            enabled: true,
+                            properties: std::collections::BTreeMap::new(),
+                            state_defaults: std::collections::BTreeMap::new(),
+                            commands: std::collections::BTreeMap::new(),
+                        },
+                        source_kind: None,
+                        movement: rot_scene::component_scene::ScriptMovement::Ordinary,
+                    },
+                },
+            ],
+        });
+        scene.objects.push(rot_scene::component_scene::ObjectNode {
+            id: "bone".into(),
+            name: "Bone".into(),
+            enabled: true,
+            parent: Some("rig".into()),
+            transform: rot_scene::Transform::default(),
+            components: vec![],
+        });
+        let hierarchy = scene.validate().unwrap();
+        assert_eq!(
+            scene.active_animation_clip_ids(&hierarchy),
+            std::collections::BTreeSet::from(["clip_idle", "clip_run"])
+        );
+        let raw_clips = std::collections::BTreeMap::from([
+            (
+                "clip_idle".to_owned(),
+                Arc::new(
+                    br#"{"format":"rot-clip","version":1,"duration":1.0,"tracks":[
+                        {"node":"Rig/Bone","property":"translation","interpolation":"step","times":[0.0],"values":[[0.0,0.0,0.0]]}]}"#
+                        .to_vec(),
+                ),
+            ),
+            (
+                "clip_run".to_owned(),
+                Arc::new(
+                    br#"{"format":"rot-clip","version":1,"duration":1.0,"tracks":[
+                        {"node":"Rig/Bone","property":"translation","interpolation":"step","times":[0.0],"values":[[4.0,0.0,0.0]]}]}"#
+                        .to_vec(),
+                ),
+            ),
+        ]);
+        let clips = rot_behavior::decode_clips(&raw_clips).unwrap();
+
+        let dt = std::time::Duration::from_millis(125);
+        let mut app = PlayerApp::from_component_scene(
+            "StateMachinePlayer".into(),
+            Box::new(scene),
+            MeshMap::new(),
+            TextureMap::new(),
+            dt,
+        )
+        .unwrap();
+        app.set_clips(clips);
+        let mut runtime = rot_app::Runtime::new(app, dt).unwrap();
+        runtime.reset().unwrap();
+        runtime.set_running(true);
+        // Tick 1: Lua sets trigger -> transition begins (elapsed=0, x=0).
+        runtime.advance(dt).unwrap();
+        // Tick 2: midpoint crossfade (elapsed=0.125/0.25 -> alpha=0.5 -> x=2.0).
+        runtime.advance(dt).unwrap();
+        let mid_x = runtime
+            .app()
+            .runtime
+            .as_ref()
+            .unwrap()
+            .object_translation("bone")
+            .unwrap()[0];
+        assert!(
+            (mid_x - 2.0).abs() < 1e-4,
+            "expected mid crossfade x=2.0, got {mid_x}"
+        );
+        // Tick 3: blend completes (x=4.0).
+        runtime.advance(dt).unwrap();
+        let end_x = runtime
+            .app()
+            .runtime
+            .as_ref()
+            .unwrap()
+            .object_translation("bone")
+            .unwrap()[0];
+        assert!(
+            (end_x - 4.0).abs() < 1e-4,
+            "expected final Run pose x=4.0, got {end_x}"
+        );
+    }
 }

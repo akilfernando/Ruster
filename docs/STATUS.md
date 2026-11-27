@@ -13,7 +13,7 @@ Updated 2026-11-27. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
-## Current phase — Phase 4: Play (`P4-05` Done, Next: `P4-06`)
+## Current phase — Phase 4: Play (`P4-06` Done, Next: `P4-07`)
 
 - **Done (earlier phases):** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`,
   `A-01`–`A-07`, `P-01`–`P-02`), `P-03` platform seams & Windows CI, Phase 2 Core
@@ -46,9 +46,14 @@ Updated 2026-11-27. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
   cache + lifted 64-level/768-track/4 MiB clip limits, `Component::Skin` + placement/Inspector/
   `Play Values`/MCP/runtime remapping, GPU joint-palette skinning across surface/`scene`/shadow/
   selection shaders + picking/bounds/`ComponentPreview`; RTX 4060 Vulkan GPU skinning probe passed,
-  5k release bench p50 `1.553 ms` / steady `0 B`).
-- **Next:** `P4-06` animation state machine & blending, and
-  audio/input/UI/cameras/particles/save (`P4-07`–`P4-EXIT`). See [backlog](BACKLOG.md).
+  5k release bench p50 `1.553 ms` / steady `0 B`), `P4-06` (2026-11-27: animation state machine
+  & cross-fade blending with `AnimatorStateMachine` [`Bool`/`Float`/`Int`/`Trigger` parameters,
+  `has_exit_time`/`AnyState`/conditional transitions, TRS + shortest-path slerp blending], Lua
+  `Animator` handle with atomic rollback, Inspector State Machine UI & live `Play Values` controls,
+  MCP & `rot-player` runtime cross-fade; release 10k scripts bench logic p50 `1.728 ms` /
+  transform-write p50 `1.973 ms`).
+- **Next:** `P4-07` spatial/streamed audio & mixer, and
+  input/UI/cameras/particles/save (`P4-08`–`P4-EXIT`). See [backlog](BACKLOG.md).
 
 ## What a creator can do today
 

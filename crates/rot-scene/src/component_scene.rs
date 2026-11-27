@@ -12,11 +12,11 @@ use serde::{Deserialize, Serialize};
 use crate::{
     hud::Hud,
     input::{validate_action_map, ActionMap},
-    strict_json, validate_id, validate_name, Ambient, AnimationBinding, BackgroundColor,
-    BehaviorBinding, BehaviorSource, BindingTarget, Collider, ColliderRole, ColliderShape,
-    DisplayProfile, Fog, Light, LightKind, Lighting, OpaqueMaterial, PlayerView, PostProcess,
-    Primitive, PropertyValue, SceneError, Session, Sky, SoundAssetReferences, Transform,
-    MAX_SOURCES, MAX_SOURCE_BYTES,
+    strict_json, validate_id, validate_name, Ambient, AnimationBinding, AnimatorStateMachine,
+    BackgroundColor, BehaviorBinding, BehaviorSource, BindingTarget, Collider, ColliderRole,
+    ColliderShape, DisplayProfile, Fog, Light, LightKind, Lighting, OpaqueMaterial, PlayerView,
+    PostProcess, Primitive, PropertyValue, SceneError, Session, Sky, SoundAssetReferences,
+    Transform, MAX_SOURCES, MAX_SOURCE_BYTES,
 };
 
 #[path = "component_session.rs"]
@@ -615,6 +615,7 @@ impl ComponentScene {
                         binding,
                         start_playback,
                         playback_speed,
+                        state_machine,
                     } => {
                         if !valid_animator_playback_speed(*playback_speed) {
                             return Err(SceneError::Invalid(format!(
@@ -626,6 +627,9 @@ impl ComponentScene {
                             validate_id(action_id)?;
                         }
                         binding.validate_settings()?;
+                        if let Some(sm) = state_machine {
+                            sm.validate(&object.id)?;
+                        }
                         for id in binding.targets.values() {
                             let mut ancestor = object_indices
                                 .get(id.as_str())
@@ -970,6 +974,7 @@ impl ComponentScene {
                     playback_speed: 1.0,
                     start_playback: Default::default(),
                     binding: binding.clone(),
+                    state_machine: None,
                 },
             });
         }
@@ -1058,29 +1063,51 @@ impl ComponentScene {
 
     /// Clip IDs required by active Animator components on effectively-enabled objects.
     pub fn active_animation_clip_ids(&self, hierarchy: &ObjectHierarchy) -> BTreeSet<&str> {
-        self.objects
+        let mut clips = BTreeSet::new();
+        for component in self
+            .objects
             .iter()
             .enumerate()
             .filter(|(index, _)| hierarchy.effectively_enabled[*index])
             .flat_map(|(_, object)| &object.components)
             .filter(|component| component.enabled)
-            .filter_map(|component| match &component.kind {
-                Component::Animator { binding, .. } => Some(binding.clip.as_str()),
-                _ => None,
-            })
-            .collect()
+        {
+            if let Component::Animator {
+                binding,
+                state_machine,
+                ..
+            } = &component.kind
+            {
+                clips.insert(binding.clip.as_str());
+                if let Some(sm) = state_machine {
+                    for state in &sm.states {
+                        clips.insert(state.clip.as_str());
+                    }
+                }
+            }
+        }
+        clips
     }
 
     /// Clip IDs referenced by any Animator component in the scene (including disabled ones).
     pub fn all_animation_clip_ids(&self) -> BTreeSet<&str> {
-        self.objects
-            .iter()
-            .flat_map(|object| &object.components)
-            .filter_map(|component| match &component.kind {
-                Component::Animator { binding, .. } => Some(binding.clip.as_str()),
-                _ => None,
-            })
-            .collect()
+        let mut clips = BTreeSet::new();
+        for component in self.objects.iter().flat_map(|object| &object.components) {
+            if let Component::Animator {
+                binding,
+                state_machine,
+                ..
+            } = &component.kind
+            {
+                clips.insert(binding.clip.as_str());
+                if let Some(sm) = state_machine {
+                    for state in &sm.states {
+                        clips.insert(state.clip.as_str());
+                    }
+                }
+            }
+        }
+        clips
     }
 
     /// Resolve world affine matrices into a reusable flat buffer in parent-first order.
@@ -1782,6 +1809,8 @@ pub enum Component {
             skip_serializing_if = "is_default_animator_playback_speed"
         )]
         playback_speed: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        state_machine: Option<AnimatorStateMachine>,
     },
     Script {
         binding: BehaviorBinding,
@@ -2046,6 +2075,9 @@ impl ObjectHierarchy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        AnimatorCondition, AnimatorParam, AnimatorState, AnimatorStateMachine, AnimatorTransition,
+    };
 
     fn object(id: String, parent: Option<String>, enabled: bool) -> ObjectNode {
         ObjectNode {
@@ -2277,6 +2309,7 @@ mod tests {
                 binding: animation,
                 start_playback: AnimatorStart::OnPlay {},
                 playback_speed: 1.0,
+                state_machine: None,
             }
         );
         let camera = &migrated.objects.last().unwrap().components[0];
@@ -2292,16 +2325,61 @@ mod tests {
         assert!(!std::str::from_utf8(&json)
             .unwrap()
             .contains("playback_speed"));
+        assert!(!std::str::from_utf8(&json)
+            .unwrap()
+            .contains("state_machine"));
         let mut changed = migrated.clone();
         let animator = changed
             .objects
             .iter_mut()
             .find(|object| object.id == "rig")
             .unwrap();
-        let Component::Animator { playback_speed, .. } = &mut animator.components[0].kind else {
+        let Component::Animator {
+            playback_speed,
+            state_machine,
+            ..
+        } = &mut animator.components[0].kind
+        else {
             unreachable!();
         };
         *playback_speed = 0.5;
+        *state_machine = Some(AnimatorStateMachine {
+            entry_state: "Idle".into(),
+            parameters: BTreeMap::from([("go".into(), AnimatorParam::Bool { default: false })]),
+            states: vec![
+                AnimatorState {
+                    name: "Idle".into(),
+                    clip: "clip_idle".into(),
+                    looping: true,
+                    speed: 1.0,
+                },
+                AnimatorState {
+                    name: "Run".into(),
+                    clip: "clip_run".into(),
+                    looping: true,
+                    speed: 1.2,
+                },
+            ],
+            transitions: vec![AnimatorTransition {
+                from: Some("Idle".into()),
+                to: "Run".into(),
+                duration: 0.25,
+                has_exit_time: false,
+                exit_time: 1.0,
+                conditions: vec![AnimatorCondition::IsTrue {
+                    parameter: "go".into(),
+                }],
+            }],
+        });
+        let hierarchy = changed.validate().unwrap();
+        assert_eq!(
+            changed.active_animation_clip_ids(&hierarchy),
+            BTreeSet::from(["clip_idle", "clip_run", "walk"])
+        );
+        assert_eq!(
+            changed.all_animation_clip_ids(),
+            BTreeSet::from(["clip_idle", "clip_run", "walk"])
+        );
         let mut bytes = Vec::new();
         changed.write_json(&mut bytes).unwrap();
         assert_eq!(

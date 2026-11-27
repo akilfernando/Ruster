@@ -9,8 +9,11 @@ use rot_scene::component_scene::{
     TransformOrthographic,
 };
 use rot_scene::{
+    AnimatorCondition, AnimatorParam, AnimatorState, AnimatorStateMachine, AnimatorTransition,
     BehaviorBinding, BindingTarget, ColliderRole, ColliderShape, Light, LightKind, LocalShadow,
-    OpaqueMaterial, Primitive, ShadowQuality, SunShadow,
+    OpaqueMaterial, Primitive, ShadowQuality, SunShadow, MAX_ANIMATOR_NAME_LEN,
+    MAX_ANIMATOR_PARAMS, MAX_ANIMATOR_STATES, MAX_ANIMATOR_TRANSITIONS, MAX_TRANSITION_CONDITIONS,
+    MAX_TRANSITION_DURATION_SECS,
 };
 use std::{collections::BTreeMap, ops::RangeInclusive};
 
@@ -653,6 +656,7 @@ pub(super) fn components(
                         binding,
                         start_playback,
                         playback_speed,
+                        state_machine,
                     } => {
                         animator_start_fields(ui, start_playback, actions);
                         if let Some(revision) = animator_fields(ui, binding, assets) {
@@ -680,6 +684,15 @@ pub(super) fn components(
                                 .on_hover_text(Text::AnimatorPlaybackSpeedHint.plain());
                             },
                         );
+                        if let Some(revision) = animator_state_machine_fields(
+                            ui,
+                            &component.id,
+                            binding,
+                            state_machine,
+                            assets,
+                        ) {
+                            animator_revision = Some((component.id.clone(), revision));
+                        }
                         if let Some(edit) = component_animation_preview::controls(
                             ui,
                             &component.id,
@@ -1097,6 +1110,739 @@ fn animator_fields(
     }
     ui.checkbox(&mut binding.looping, Text::Loop.plain())
         .on_hover_text(Text::AnimationRepeatTheClipOtherwise.plain());
+    draft_revision
+}
+
+fn sanitize_animator_name(raw: &str, fallback: &str) -> String {
+    let cleaned: String = raw
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_ANIMATOR_NAME_LEN)
+        .collect();
+    if cleaned.trim().is_empty() {
+        fallback.to_owned()
+    } else {
+        cleaned.trim().to_owned()
+    }
+}
+
+fn unique_state_name(existing: &[AnimatorState], base: &str) -> String {
+    let base = sanitize_animator_name(base, "State");
+    if !existing.iter().any(|s| s.name == base) {
+        return base;
+    }
+    let stem: String = base
+        .chars()
+        .take(MAX_ANIMATOR_NAME_LEN.saturating_sub(4))
+        .collect();
+    for i in 2.. {
+        let candidate = format!("{stem}_{i}");
+        if !existing.iter().any(|s| s.name == candidate) {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
+fn default_condition_for(param_name: &str, param: &AnimatorParam) -> AnimatorCondition {
+    match param {
+        AnimatorParam::Bool { .. } => AnimatorCondition::IsTrue {
+            parameter: param_name.to_owned(),
+        },
+        AnimatorParam::Float { .. } => AnimatorCondition::FloatGreater {
+            parameter: param_name.to_owned(),
+            value: 0.5,
+        },
+        AnimatorParam::Int { .. } => AnimatorCondition::IntEquals {
+            parameter: param_name.to_owned(),
+            value: 0,
+        },
+        AnimatorParam::Trigger {} => AnimatorCondition::Triggered {
+            parameter: param_name.to_owned(),
+        },
+    }
+}
+
+fn condition_op_label(cond: &AnimatorCondition) -> &'static str {
+    match cond {
+        AnimatorCondition::IsTrue { .. } => "is true",
+        AnimatorCondition::IsFalse { .. } => "is false",
+        AnimatorCondition::Triggered { .. } => "triggered",
+        AnimatorCondition::FloatGreater { .. } | AnimatorCondition::IntGreater { .. } => ">",
+        AnimatorCondition::FloatLess { .. } | AnimatorCondition::IntLess { .. } => "<",
+        AnimatorCondition::IntEquals { .. } => "==",
+        AnimatorCondition::IntNotEquals { .. } => "!=",
+    }
+}
+
+fn animator_state_machine_fields(
+    ui: &mut egui::Ui,
+    component_id: &str,
+    binding: &rot_scene::AnimationBinding,
+    state_machine: &mut Option<AnimatorStateMachine>,
+    assets: Option<&rot_assets::AssetStore>,
+) -> Option<u64> {
+    let mut draft_revision = None;
+    let source = assets.and_then(|store| store.clip_owner(&binding.clip));
+    let compatible_clips: Vec<(String, String, f32)> = if let Some((model, _)) = source {
+        model
+            .clips
+            .iter()
+            .filter(|(_, clip)| {
+                clip.targets
+                    .iter()
+                    .all(|target| binding.targets.contains_key(&target.node))
+            })
+            .map(|(name, clip)| (name.clone(), clip.id.clone(), clip.duration))
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let Some(sm) = state_machine else {
+        if ui.button(Text::AnimatorAddStateMachine.plain()).clicked() {
+            let mut states = Vec::new();
+            for (name, clip_id, _) in compatible_clips.iter().take(MAX_ANIMATOR_STATES) {
+                let state_name = unique_state_name(&states, name);
+                states.push(AnimatorState {
+                    name: state_name,
+                    clip: clip_id.clone(),
+                    looping: binding.looping,
+                    speed: 1.0,
+                });
+            }
+            if states.is_empty() {
+                states.push(AnimatorState {
+                    name: "Idle".into(),
+                    clip: binding.clip.clone(),
+                    looping: binding.looping,
+                    speed: 1.0,
+                });
+            }
+            let entry_state = states[0].name.clone();
+            *state_machine = Some(AnimatorStateMachine {
+                entry_state,
+                parameters: BTreeMap::new(),
+                states,
+                transitions: Vec::new(),
+            });
+            draft_revision = assets.map(rot_assets::AssetStore::revision);
+        }
+        return draft_revision;
+    };
+
+    let mut remove_sm = false;
+    egui::CollapsingHeader::new(Text::AnimatorStateMachine.plain())
+        .id_salt((component_id, "state_machine"))
+        .default_open(true)
+        .show(ui, |ui| {
+            // Entry State
+            ui_kit::property_row_with_label(ui, Text::AnimatorEntryState.plain(), |ui, label| {
+                let salt = format!("{component_id}_sm_entry_state");
+                let focus = super::combo_focus::ComboFocus::capture(ui, &salt);
+                let mut selected = false;
+                let response = egui::ComboBox::from_id_salt(&salt)
+                    .selected_text(&sm.entry_state)
+                    .show_ui(ui, |ui| {
+                        for state in &sm.states {
+                            if ui
+                                .selectable_label(sm.entry_state == state.name, &state.name)
+                                .clicked()
+                            {
+                                sm.entry_state.clone_from(&state.name);
+                                selected = true;
+                                ui.close();
+                            }
+                        }
+                    });
+                focus.restore(ui, &response.response, selected);
+                response.response.labelled_by(label);
+            });
+
+            // Parameters
+            egui::CollapsingHeader::new(format!(
+                "{} ({})",
+                Text::AnimatorParameters.plain(),
+                sm.parameters.len()
+            ))
+            .id_salt((component_id, "sm_params"))
+            .default_open(true)
+            .show(ui, |ui| {
+                let param_names: Vec<String> = sm.parameters.keys().cloned().collect();
+                let mut remove_param: Option<String> = None;
+                for name in &param_names {
+                    let Some(param) = sm.parameters.get_mut(name) else {
+                        continue;
+                    };
+                    ui.horizontal(|ui| {
+                        ui.label(name);
+                        match param {
+                            AnimatorParam::Bool { default } => {
+                                ui.weak("Bool");
+                                ui.checkbox(default, "");
+                            }
+                            AnimatorParam::Float { default } => {
+                                ui.weak("Float");
+                                ui.add(egui::DragValue::new(default).speed(0.05));
+                            }
+                            AnimatorParam::Int { default } => {
+                                ui.weak("Int");
+                                ui.add(egui::DragValue::new(default).speed(0.2));
+                            }
+                            AnimatorParam::Trigger {} => {
+                                ui.weak("Trigger");
+                            }
+                        }
+                        if ui.small_button("×").clicked() {
+                            remove_param = Some(name.clone());
+                        }
+                    });
+                }
+                if let Some(removed) = remove_param {
+                    sm.parameters.remove(&removed);
+                    for transition in &mut sm.transitions {
+                        transition
+                            .conditions
+                            .retain(|cond| cond.parameter() != removed);
+                        if transition.conditions.is_empty() && !transition.has_exit_time {
+                            transition.has_exit_time = true;
+                        }
+                    }
+                }
+                if sm.parameters.len() < MAX_ANIMATOR_PARAMS {
+                    let draft_id = ui.make_persistent_id((component_id, "new_param_draft"));
+                    let (mut new_name, mut kind_idx) = ui
+                        .data_mut(|d| d.get_temp::<(String, usize)>(draft_id))
+                        .unwrap_or_default();
+                    let mut submit = false;
+                    ui.horizontal(|ui| {
+                        let edit = ui.add(
+                            egui::TextEdit::singleline(&mut new_name)
+                                .desired_width(92.0)
+                                .hint_text("param"),
+                        );
+                        if enter_commits(ui, &edit) {
+                            submit = true;
+                        }
+                        const KINDS: [&str; 4] = ["Float", "Bool", "Int", "Trigger"];
+                        egui::ComboBox::from_id_salt((component_id, "new_param_kind"))
+                            .selected_text(KINDS[kind_idx.min(3)])
+                            .width(68.0)
+                            .show_ui(ui, |ui| {
+                                for (idx, label) in KINDS.iter().enumerate() {
+                                    ui.selectable_value(&mut kind_idx, idx, *label);
+                                }
+                            });
+                        let trimmed = new_name.trim();
+                        let valid_new = !trimmed.is_empty()
+                            && trimmed.len() <= MAX_ANIMATOR_NAME_LEN
+                            && !trimmed.chars().any(char::is_control)
+                            && !sm.parameters.contains_key(trimmed);
+                        if ui
+                            .add_enabled(valid_new, egui::Button::new("+"))
+                            .on_hover_text(Text::AnimatorAddParameter.plain())
+                            .clicked()
+                        {
+                            submit = true;
+                        }
+                        if submit && valid_new {
+                            let param = match kind_idx {
+                                1 => AnimatorParam::Bool { default: false },
+                                2 => AnimatorParam::Int { default: 0 },
+                                3 => AnimatorParam::Trigger {},
+                                _ => AnimatorParam::Float { default: 0.0 },
+                            };
+                            sm.parameters.insert(trimmed.to_owned(), param);
+                            new_name.clear();
+                        }
+                    });
+                    ui.data_mut(|d| d.insert_temp(draft_id, (new_name, kind_idx)));
+                }
+            });
+
+            // States
+            egui::CollapsingHeader::new(format!(
+                "{} ({})",
+                Text::AnimatorStates.plain(),
+                sm.states.len()
+            ))
+            .id_salt((component_id, "sm_states"))
+            .default_open(true)
+            .show(ui, |ui| {
+                let mut remove_state: Option<usize> = None;
+                let mut pending_rename: Option<(usize, String)> = None;
+                let state_count = sm.states.len();
+                for (state_idx, state) in sm.states.iter_mut().enumerate() {
+                    let rename_id =
+                        ui.make_persistent_id((component_id, "state_rename", state_idx));
+                    let mut name_buf = ui
+                        .data_mut(|d| d.get_temp::<String>(rename_id))
+                        .unwrap_or_else(|| state.name.clone());
+                    ui.push_id(("sm_state_row", state_idx), |ui| {
+                        ui.group(|ui| {
+                            ui.horizontal(|ui| {
+                                let name_resp = ui.add(
+                                    egui::TextEdit::singleline(&mut name_buf).desired_width(88.0),
+                                );
+                                if enter_commits(ui, &name_resp) || name_resp.lost_focus() {
+                                    let candidate = sanitize_animator_name(&name_buf, &state.name);
+                                    if candidate != state.name {
+                                        pending_rename = Some((state_idx, candidate));
+                                    }
+                                    ui.data_mut(|d| d.remove::<String>(rename_id));
+                                } else if name_resp.has_focus() {
+                                    ui.data_mut(|d| d.insert_temp(rename_id, name_buf));
+                                } else {
+                                    ui.data_mut(|d| d.remove::<String>(rename_id));
+                                }
+                                let clip_label = compatible_clips
+                                    .iter()
+                                    .find(|(_, id, _)| id == &state.clip)
+                                    .map(|(n, _, dur)| format!("{n} ({dur:.2}s)"))
+                                    .unwrap_or_else(|| state.clip.clone());
+                                egui::ComboBox::from_id_salt((
+                                    component_id,
+                                    "sm_state_clip",
+                                    state_idx,
+                                ))
+                                .selected_text(clip_label)
+                                .width(104.0)
+                                .show_ui(ui, |ui| {
+                                    for (name, clip_id, dur) in &compatible_clips {
+                                        if ui
+                                            .selectable_label(
+                                                &state.clip == clip_id,
+                                                format!("{name} ({dur:.2}s)"),
+                                            )
+                                            .clicked()
+                                        {
+                                            if &state.clip != clip_id {
+                                                state.clip.clone_from(clip_id);
+                                                draft_revision =
+                                                    assets.map(rot_assets::AssetStore::revision);
+                                            }
+                                            ui.close();
+                                        }
+                                    }
+                                });
+                                if ui
+                                    .add_enabled(state_count > 1, egui::Button::new("×"))
+                                    .clicked()
+                                {
+                                    remove_state = Some(state_idx);
+                                }
+                            });
+                            ui.horizontal(|ui| {
+                                ui.checkbox(&mut state.looping, Text::Loop.plain());
+                                ui.label(Text::AnimatorPlaybackSpeed.plain());
+                                ui.add(
+                                    egui::DragValue::new(&mut state.speed)
+                                        .range(0.01..=100.0)
+                                        .speed(0.05)
+                                        .suffix("×"),
+                                );
+                            });
+                        });
+                    });
+                }
+                if let Some((idx, new_name)) = pending_rename {
+                    if !sm
+                        .states
+                        .iter()
+                        .enumerate()
+                        .any(|(i, s)| i != idx && s.name == new_name)
+                    {
+                        let old_name = sm.states[idx].name.clone();
+                        sm.states[idx].name.clone_from(&new_name);
+                        if sm.entry_state == old_name {
+                            sm.entry_state.clone_from(&new_name);
+                        }
+                        for transition in &mut sm.transitions {
+                            if transition.from.as_deref() == Some(old_name.as_str()) {
+                                transition.from = Some(new_name.clone());
+                            }
+                            if transition.to == old_name {
+                                transition.to.clone_from(&new_name);
+                            }
+                        }
+                        let rm_id = ui.make_persistent_id((component_id, "state_rename", idx));
+                        ui.data_mut(|d| {
+                            d.remove::<String>(rm_id);
+                        });
+                    }
+                }
+                if let Some(idx) = remove_state {
+                    let removed = sm.states.remove(idx);
+                    if sm.entry_state == removed.name {
+                        sm.entry_state = sm.states[0].name.clone();
+                    }
+                    sm.transitions.retain(|t| {
+                        t.from.as_deref() != Some(removed.name.as_str()) && t.to != removed.name
+                    });
+                    let rm_ids: Vec<_> = (0..=sm.states.len())
+                        .map(|i| ui.make_persistent_id((component_id, "state_rename", i)))
+                        .collect();
+                    ui.data_mut(|d| {
+                        for id in rm_ids {
+                            d.remove::<String>(id);
+                        }
+                    });
+                }
+                if ui
+                    .add_enabled(
+                        sm.states.len() < MAX_ANIMATOR_STATES,
+                        egui::Button::new(format!("+ {}", Text::AnimatorAddState.plain())),
+                    )
+                    .clicked()
+                {
+                    let (clip_id, base_name) = compatible_clips
+                        .first()
+                        .map(|(n, id, _)| (id.clone(), n.clone()))
+                        .unwrap_or_else(|| (binding.clip.clone(), "State".into()));
+                    let name = unique_state_name(&sm.states, &base_name);
+                    sm.states.push(AnimatorState {
+                        name,
+                        clip: clip_id,
+                        looping: true,
+                        speed: 1.0,
+                    });
+                    draft_revision = assets.map(rot_assets::AssetStore::revision);
+                }
+            });
+
+            // Transitions
+            egui::CollapsingHeader::new(format!(
+                "{} ({})",
+                Text::AnimatorTransitions.plain(),
+                sm.transitions.len()
+            ))
+            .id_salt((component_id, "sm_transitions"))
+            .default_open(true)
+            .show(ui, |ui| {
+                let mut remove_transition: Option<usize> = None;
+                let param_list: Vec<(String, AnimatorParam)> = sm
+                    .parameters
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                for (t_idx, transition) in sm.transitions.iter_mut().enumerate() {
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            let from_label = transition
+                                .from
+                                .as_deref()
+                                .unwrap_or(Text::AnimatorAnyState.plain());
+                            egui::ComboBox::from_id_salt((component_id, "tr_from", t_idx))
+                                .selected_text(from_label)
+                                .width(84.0)
+                                .show_ui(ui, |ui| {
+                                    if ui
+                                        .selectable_label(
+                                            transition.from.is_none(),
+                                            Text::AnimatorAnyState.plain(),
+                                        )
+                                        .clicked()
+                                    {
+                                        transition.from = None;
+                                        ui.close();
+                                    }
+                                    for st in &sm.states {
+                                        if st.name != transition.to
+                                            && ui
+                                                .selectable_label(
+                                                    transition.from.as_deref()
+                                                        == Some(st.name.as_str()),
+                                                    &st.name,
+                                                )
+                                                .clicked()
+                                        {
+                                            transition.from = Some(st.name.clone());
+                                            ui.close();
+                                        }
+                                    }
+                                });
+                            ui.label("->");
+                            egui::ComboBox::from_id_salt((component_id, "tr_to", t_idx))
+                                .selected_text(&transition.to)
+                                .width(84.0)
+                                .show_ui(ui, |ui| {
+                                    for st in &sm.states {
+                                        if transition.from.as_deref() != Some(st.name.as_str())
+                                            && ui
+                                                .selectable_label(
+                                                    transition.to == st.name,
+                                                    &st.name,
+                                                )
+                                                .clicked()
+                                        {
+                                            transition.to.clone_from(&st.name);
+                                            ui.close();
+                                        }
+                                    }
+                                });
+                            if ui.small_button("×").clicked() {
+                                remove_transition = Some(t_idx);
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(Text::AnimatorTransitionDuration.plain());
+                            ui.add(
+                                egui::DragValue::new(&mut transition.duration)
+                                    .range(0.0..=MAX_TRANSITION_DURATION_SECS)
+                                    .speed(0.02)
+                                    .suffix(" s"),
+                            );
+                            let can_disable_exit = !transition.conditions.is_empty();
+                            ui.add_enabled(
+                                can_disable_exit || !transition.has_exit_time,
+                                egui::Checkbox::new(
+                                    &mut transition.has_exit_time,
+                                    Text::AnimatorHasExitTime.plain(),
+                                ),
+                            );
+                            if transition.has_exit_time {
+                                ui.add(
+                                    egui::DragValue::new(&mut transition.exit_time)
+                                        .range(0.0..=1.0)
+                                        .speed(0.02),
+                                );
+                            }
+                        });
+                        let mut remove_cond: Option<usize> = None;
+                        for (c_idx, cond) in transition.conditions.iter_mut().enumerate() {
+                            ui.horizontal(|ui| {
+                                let current_param = cond.parameter().to_owned();
+                                egui::ComboBox::from_id_salt((
+                                    component_id,
+                                    "tr_c_param",
+                                    t_idx,
+                                    c_idx,
+                                ))
+                                .selected_text(&current_param)
+                                .width(76.0)
+                                .show_ui(ui, |ui| {
+                                    for (pname, pdef) in &param_list {
+                                        if ui
+                                            .selectable_label(pname == &current_param, pname)
+                                            .clicked()
+                                        {
+                                            if pname != &current_param {
+                                                *cond = default_condition_for(pname, pdef);
+                                            }
+                                            ui.close();
+                                        }
+                                    }
+                                });
+                                let param_def = sm.parameters.get(cond.parameter());
+                                egui::ComboBox::from_id_salt((
+                                    component_id,
+                                    "tr_c_op",
+                                    t_idx,
+                                    c_idx,
+                                ))
+                                .selected_text(condition_op_label(cond))
+                                .width(68.0)
+                                .show_ui(ui, |ui| match param_def {
+                                    Some(AnimatorParam::Bool { .. }) => {
+                                        let p = cond.parameter().to_owned();
+                                        if ui
+                                            .selectable_label(
+                                                matches!(cond, AnimatorCondition::IsTrue { .. }),
+                                                "is true",
+                                            )
+                                            .clicked()
+                                        {
+                                            *cond = AnimatorCondition::IsTrue { parameter: p };
+                                            ui.close();
+                                        } else if ui
+                                            .selectable_label(
+                                                matches!(cond, AnimatorCondition::IsFalse { .. }),
+                                                "is false",
+                                            )
+                                            .clicked()
+                                        {
+                                            *cond = AnimatorCondition::IsFalse {
+                                                parameter: cond.parameter().to_owned(),
+                                            };
+                                            ui.close();
+                                        }
+                                    }
+                                    Some(AnimatorParam::Float { .. }) => {
+                                        let p = cond.parameter().to_owned();
+                                        let current = match cond {
+                                            AnimatorCondition::FloatGreater { value, .. }
+                                            | AnimatorCondition::FloatLess { value, .. } => *value,
+                                            _ => 0.0,
+                                        };
+                                        if ui
+                                            .selectable_label(
+                                                matches!(
+                                                    cond,
+                                                    AnimatorCondition::FloatGreater { .. }
+                                                ),
+                                                ">",
+                                            )
+                                            .clicked()
+                                        {
+                                            *cond = AnimatorCondition::FloatGreater {
+                                                parameter: p,
+                                                value: current,
+                                            };
+                                            ui.close();
+                                        } else if ui
+                                            .selectable_label(
+                                                matches!(cond, AnimatorCondition::FloatLess { .. }),
+                                                "<",
+                                            )
+                                            .clicked()
+                                        {
+                                            *cond = AnimatorCondition::FloatLess {
+                                                parameter: p,
+                                                value: current,
+                                            };
+                                            ui.close();
+                                        }
+                                    }
+                                    Some(AnimatorParam::Int { .. }) => {
+                                        let p = cond.parameter().to_owned();
+                                        let current = match cond {
+                                            AnimatorCondition::IntEquals { value, .. }
+                                            | AnimatorCondition::IntNotEquals { value, .. }
+                                            | AnimatorCondition::IntGreater { value, .. }
+                                            | AnimatorCondition::IntLess { value, .. } => *value,
+                                            _ => 0,
+                                        };
+                                        for (label, candidate) in [
+                                            (
+                                                "==",
+                                                AnimatorCondition::IntEquals {
+                                                    parameter: p.clone(),
+                                                    value: current,
+                                                },
+                                            ),
+                                            (
+                                                "!=",
+                                                AnimatorCondition::IntNotEquals {
+                                                    parameter: p.clone(),
+                                                    value: current,
+                                                },
+                                            ),
+                                            (
+                                                ">",
+                                                AnimatorCondition::IntGreater {
+                                                    parameter: p.clone(),
+                                                    value: current,
+                                                },
+                                            ),
+                                            (
+                                                "<",
+                                                AnimatorCondition::IntLess {
+                                                    parameter: p,
+                                                    value: current,
+                                                },
+                                            ),
+                                        ] {
+                                            if ui
+                                                .selectable_label(cond == &candidate, label)
+                                                .clicked()
+                                            {
+                                                *cond = candidate;
+                                                ui.close();
+                                            }
+                                        }
+                                    }
+                                    Some(AnimatorParam::Trigger {}) | None => {}
+                                });
+                                match cond {
+                                    AnimatorCondition::FloatGreater { value, .. }
+                                    | AnimatorCondition::FloatLess { value, .. } => {
+                                        ui.add(egui::DragValue::new(value).speed(0.05));
+                                    }
+                                    AnimatorCondition::IntEquals { value, .. }
+                                    | AnimatorCondition::IntNotEquals { value, .. }
+                                    | AnimatorCondition::IntGreater { value, .. }
+                                    | AnimatorCondition::IntLess { value, .. } => {
+                                        ui.add(egui::DragValue::new(value).speed(0.2));
+                                    }
+                                    AnimatorCondition::IsTrue { .. }
+                                    | AnimatorCondition::IsFalse { .. }
+                                    | AnimatorCondition::Triggered { .. } => {}
+                                }
+                                if ui.small_button("×").clicked() {
+                                    remove_cond = Some(c_idx);
+                                }
+                            });
+                        }
+                        if let Some(c_idx) = remove_cond {
+                            transition.conditions.remove(c_idx);
+                            if transition.conditions.is_empty() && !transition.has_exit_time {
+                                transition.has_exit_time = true;
+                            }
+                        }
+                        if ui
+                            .add_enabled(
+                                !param_list.is_empty()
+                                    && transition.conditions.len() < MAX_TRANSITION_CONDITIONS,
+                                egui::Button::new(format!(
+                                    "+ {}",
+                                    Text::AnimatorAddCondition.plain()
+                                )),
+                            )
+                            .clicked()
+                        {
+                            if let Some((pname, pdef)) = param_list.first() {
+                                transition
+                                    .conditions
+                                    .push(default_condition_for(pname, pdef));
+                            }
+                        }
+                    });
+                }
+                if let Some(t_idx) = remove_transition {
+                    sm.transitions.remove(t_idx);
+                }
+                let can_add_transition = sm.transitions.len() < MAX_ANIMATOR_TRANSITIONS
+                    && (sm.states.len() >= 2 || !sm.parameters.is_empty());
+                if ui
+                    .add_enabled(
+                        can_add_transition,
+                        egui::Button::new(format!("+ {}", Text::AnimatorAddTransition.plain())),
+                    )
+                    .clicked()
+                {
+                    if sm.states.len() >= 2 {
+                        sm.transitions.push(AnimatorTransition {
+                            from: Some(sm.states[0].name.clone()),
+                            to: sm.states[1].name.clone(),
+                            duration: 0.2,
+                            has_exit_time: true,
+                            exit_time: 1.0,
+                            conditions: Vec::new(),
+                        });
+                    } else if let Some((pname, pdef)) = sm.parameters.iter().next() {
+                        sm.transitions.push(AnimatorTransition {
+                            from: None,
+                            to: sm.states[0].name.clone(),
+                            duration: 0.2,
+                            has_exit_time: false,
+                            exit_time: 1.0,
+                            conditions: vec![default_condition_for(pname, pdef)],
+                        });
+                    }
+                }
+            });
+
+            if ui
+                .button(Text::AnimatorRemoveStateMachine.plain())
+                .clicked()
+            {
+                remove_sm = true;
+            }
+        });
+    if remove_sm {
+        *state_machine = None;
+    }
     draft_revision
 }
 

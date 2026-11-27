@@ -4,7 +4,7 @@ use super::component_workspace::viewport_transform::PointerRelease;
 use crate::behavior_worker::{Frame, RunKey};
 use crate::{strings::Text, ui_kit};
 use eframe::egui;
-use rot_behavior::LiveComponentPatch;
+use rot_behavior::{LiveAnimatorParamPatch, LiveComponentPatch, RuntimeParamValue};
 use rot_scene::component_scene::{CameraView, Component, ObjectNode, TransformLens};
 use rot_scene::{PropertyValue, StateValue, Transform};
 use std::collections::HashSet;
@@ -291,6 +291,7 @@ pub(super) fn show(
                     Component::Light { .. }
                         | Component::MeshRenderer { .. }
                         | Component::Camera { .. }
+                        | Component::Animator { .. }
                         | Component::Script { .. }
                         | Component::RigidBody { .. }
                         | Component::Joint { .. }
@@ -348,6 +349,159 @@ pub(super) fn show(
                             Component::Camera { view } => {
                                 if matches!(view, CameraView::Transform(_)) {
                                     component_inspector::transform_camera_fields(ui, view);
+                                }
+                            }
+                            Component::Animator {
+                                binding,
+                                playback_speed,
+                                state_machine,
+                                ..
+                            } => {
+                                if state_machine.is_none() {
+                                    ui.checkbox(&mut binding.looping, Text::Loop.plain());
+                                }
+                                ui_kit::property_row_with_label(
+                                    ui,
+                                    Text::AnimatorPlaybackSpeed.plain(),
+                                    |ui, label| {
+                                        let current = f64::from(*playback_speed);
+                                        ui.add(
+                                            egui::DragValue::new(playback_speed)
+                                                .range(f32::from_bits(1)..=f32::MAX)
+                                                .speed(0.01)
+                                                .suffix("×")
+                                                .custom_parser(move |input| {
+                                                    input
+                                                        .trim()
+                                                        .parse::<f64>()
+                                                        .ok()
+                                                        .or_else(|| {
+                                                            ui_kit::eval_number(input, Some(current))
+                                                        })
+                                                        .filter(|&speed| {
+                                                            rot_scene::component_scene::valid_animator_playback_speed(speed as f32)
+                                                        })
+                                                }),
+                                        )
+                                        .labelled_by(label);
+                                    },
+                                );
+                                if let Some(snap) = frame
+                                    .component_animators
+                                    .as_deref()
+                                    .and_then(|snaps| snaps.iter().find(|s| s.component_id == comp_id))
+                                    .filter(|snap| snap.has_state_machine)
+                                {
+                                    ui.separator();
+                                    let status = if snap.is_transitioning {
+                                        format!("{} (blending)", snap.current_state)
+                                    } else {
+                                        snap.current_state.clone()
+                                    };
+                                    ui_kit::property_row(
+                                        ui,
+                                        Text::AnimatorCurrentState.plain(),
+                                        |ui| {
+                                            ui.label(status);
+                                        },
+                                    );
+                                    let progress = snap.normalized_time.fract().clamp(0.0, 1.0);
+                                    ui.add(
+                                        egui::ProgressBar::new(progress)
+                                            .desired_height(12.0)
+                                            .text(format!("{:.0}%", progress * 100.0)),
+                                    );
+                                    ui_kit::property_row(
+                                        ui,
+                                        Text::AnimatorPlayState.plain(),
+                                        |ui| {
+                                            egui::ComboBox::from_id_salt(("live_anim_state", &comp_id))
+                                                .selected_text(&snap.current_state)
+                                                .show_ui(ui, |ui| {
+                                                    for state_name in &snap.states {
+                                                        if ui
+                                                            .selectable_label(
+                                                                state_name == &snap.current_state,
+                                                                state_name,
+                                                            )
+                                                            .clicked()
+                                                        {
+                                                            patch.animator_params.push(
+                                                                LiveAnimatorParamPatch::PlayState {
+                                                                    component_id: comp_id.clone(),
+                                                                    state: state_name.clone(),
+                                                                    crossfade: 0.25,
+                                                                },
+                                                            );
+                                                            patch_dirty = true;
+                                                            ui.close();
+                                                        }
+                                                    }
+                                                });
+                                        },
+                                    );
+                                    for (param_name, &param_val) in &snap.params {
+                                        ui_kit::property_row(ui, param_name, |ui| match param_val {
+                                            RuntimeParamValue::Bool(mut val) => {
+                                                if ui.checkbox(&mut val, "").changed() {
+                                                    patch.animator_params.push(
+                                                        LiveAnimatorParamPatch::SetBool {
+                                                            component_id: comp_id.clone(),
+                                                            parameter: param_name.clone(),
+                                                            value: val,
+                                                        },
+                                                    );
+                                                    patch_dirty = true;
+                                                }
+                                            }
+                                            RuntimeParamValue::Float(mut val) => {
+                                                if ui
+                                                    .add(
+                                                        egui::DragValue::new(&mut val).speed(0.05),
+                                                    )
+                                                    .changed()
+                                                {
+                                                    patch.animator_params.push(
+                                                        LiveAnimatorParamPatch::SetFloat {
+                                                            component_id: comp_id.clone(),
+                                                            parameter: param_name.clone(),
+                                                            value: val,
+                                                        },
+                                                    );
+                                                    patch_dirty = true;
+                                                }
+                                            }
+                                            RuntimeParamValue::Int(mut val) => {
+                                                if ui
+                                                    .add(egui::DragValue::new(&mut val).speed(0.2))
+                                                    .changed()
+                                                {
+                                                    patch.animator_params.push(
+                                                        LiveAnimatorParamPatch::SetInt {
+                                                            component_id: comp_id.clone(),
+                                                            parameter: param_name.clone(),
+                                                            value: val,
+                                                        },
+                                                    );
+                                                    patch_dirty = true;
+                                                }
+                                            }
+                                            RuntimeParamValue::Trigger(_) => {
+                                                if ui
+                                                    .button(Text::AnimatorFireTrigger.plain())
+                                                    .clicked()
+                                                {
+                                                    patch.animator_params.push(
+                                                        LiveAnimatorParamPatch::FireTrigger {
+                                                            component_id: comp_id.clone(),
+                                                            parameter: param_name.clone(),
+                                                        },
+                                                    );
+                                                    patch_dirty = true;
+                                                }
+                                            }
+                                        });
+                                    }
                                 }
                             }
                             Component::RigidBody {

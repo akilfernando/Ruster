@@ -581,3 +581,404 @@ fn button_animators_wait_restart_per_placement_and_keep_the_clock_on_rejection()
     assert_eq!(rollback.tick(), 2);
     assert_eq!(position(&rollback, "other-arm"), 1.);
 }
+
+fn build_sm_scene(
+    lua_script: Option<&str>,
+    with_skin: bool,
+) -> (rot_scene::component_scene::ComponentScene, Engine) {
+    use rot_scene::component_scene::{
+        AnimatorStart, Component, ComponentInstance, ComponentScene, Geometry, ObjectNode,
+        ScriptMovement,
+    };
+    use rot_scene::{
+        AnimatorCondition, AnimatorParam, AnimatorState, AnimatorStateMachine, AnimatorTransition,
+    };
+
+    let clip_idle = Clip::decode(
+        br#"{"format":"rot-clip","version":1,"duration":1.0,"tracks":[
+            {"node":"Rig/Arm","property":"translation","interpolation":"linear","times":[0.0,1.0],"values":[[0.0,0.0,0.0],[0.0,0.0,0.0]]},
+            {"node":"Rig/Arm","property":"rotation","interpolation":"step","times":[0.0],"values":[[0.0,0.0,0.0,1.0]]}
+        ]}"#,
+    )
+    .unwrap();
+    let clip_run = Clip::decode(
+        br#"{"format":"rot-clip","version":1,"duration":1.0,"tracks":[
+            {"node":"Rig/Arm","property":"translation","interpolation":"linear","times":[0.0,1.0],"values":[[4.0,0.0,0.0],[4.0,0.0,0.0]]},
+            {"node":"Rig/Arm","property":"rotation","interpolation":"step","times":[0.0],"values":[[0.0,0.0,0.70710677,0.70710677]]}
+        ]}"#,
+    )
+    .unwrap();
+    let clip_attack = Clip::decode(
+        br#"{"format":"rot-clip","version":1,"duration":0.5,"tracks":[
+            {"node":"Rig/Arm","property":"translation","interpolation":"linear","times":[0.0,0.5],"values":[[10.0,0.0,0.0],[10.0,0.0,0.0]]}
+        ]}"#,
+    )
+    .unwrap();
+    let clip_dash = Clip::decode(
+        br#"{"format":"rot-clip","version":1,"duration":0.5,"tracks":[
+            {"node":"Rig/Arm","property":"translation","interpolation":"linear","times":[0.0,0.5],"values":[[20.0,0.0,0.0],[20.0,0.0,0.0]]}
+        ]}"#,
+    )
+    .unwrap();
+
+    let mut rig_components = vec![ComponentInstance {
+        id: "rig-anim".into(),
+        enabled: true,
+        kind: Component::Animator {
+            binding: AnimationBinding {
+                clip: "clip_idle".into(),
+                looping: true,
+                targets: BTreeMap::from([("Rig/Arm".into(), "arm".into())]),
+            },
+            start_playback: AnimatorStart::OnPlay {},
+            playback_speed: 1.0,
+            state_machine: Some(AnimatorStateMachine {
+                entry_state: "Idle".into(),
+                parameters: BTreeMap::from([
+                    ("speed".into(), AnimatorParam::Float { default: 0.0 }),
+                    ("crouching".into(), AnimatorParam::Bool { default: false }),
+                    ("combo".into(), AnimatorParam::Int { default: 0 }),
+                    ("attack".into(), AnimatorParam::Trigger {}),
+                    ("dash".into(), AnimatorParam::Trigger {}),
+                ]),
+                states: vec![
+                    AnimatorState {
+                        name: "Idle".into(),
+                        clip: "clip_idle".into(),
+                        looping: true,
+                        speed: 1.0,
+                    },
+                    AnimatorState {
+                        name: "Run".into(),
+                        clip: "clip_run".into(),
+                        looping: true,
+                        speed: 1.0,
+                    },
+                    AnimatorState {
+                        name: "Attack".into(),
+                        clip: "clip_attack".into(),
+                        looping: false,
+                        speed: 1.0,
+                    },
+                    AnimatorState {
+                        name: "Dash".into(),
+                        clip: "clip_dash".into(),
+                        looping: false,
+                        speed: 1.0,
+                    },
+                ],
+                transitions: vec![
+                    AnimatorTransition {
+                        from: Some("Idle".into()),
+                        to: "Run".into(),
+                        duration: 0.25,
+                        has_exit_time: false,
+                        exit_time: 1.0,
+                        conditions: vec![
+                            AnimatorCondition::FloatGreater {
+                                parameter: "speed".into(),
+                                value: 0.5,
+                            },
+                            AnimatorCondition::IsFalse {
+                                parameter: "crouching".into(),
+                            },
+                        ],
+                    },
+                    AnimatorTransition {
+                        from: Some("Run".into()),
+                        to: "Idle".into(),
+                        duration: 0.0,
+                        has_exit_time: false,
+                        exit_time: 1.0,
+                        conditions: vec![AnimatorCondition::FloatLess {
+                            parameter: "speed".into(),
+                            value: 0.5,
+                        }],
+                    },
+                    AnimatorTransition {
+                        from: Some("Idle".into()),
+                        to: "Attack".into(),
+                        duration: 0.0,
+                        has_exit_time: false,
+                        exit_time: 1.0,
+                        conditions: vec![
+                            AnimatorCondition::Triggered {
+                                parameter: "attack".into(),
+                            },
+                            AnimatorCondition::IntGreater {
+                                parameter: "combo".into(),
+                                value: 0,
+                            },
+                        ],
+                    },
+                    AnimatorTransition {
+                        from: Some("Attack".into()),
+                        to: "Idle".into(),
+                        duration: 0.0,
+                        has_exit_time: true,
+                        exit_time: 1.0,
+                        conditions: Vec::new(),
+                    },
+                    AnimatorTransition {
+                        from: None,
+                        to: "Dash".into(),
+                        duration: 0.0,
+                        has_exit_time: false,
+                        exit_time: 1.0,
+                        conditions: vec![AnimatorCondition::Triggered {
+                            parameter: "dash".into(),
+                        }],
+                    },
+                ],
+            }),
+        },
+    }];
+
+    let mut script_files = BTreeMap::new();
+    let sources = BTreeMap::new();
+    if let Some(script_text) = lua_script {
+        script_files.insert(
+            "ctrl_script".into(),
+            rot_scene::component_scene::ScriptFile {
+                asset_id: "asset-lua-ctrl".into(),
+                path: "Assets/ctrl.lua".into(),
+                text: script_text.into(),
+            },
+        );
+        rig_components.push(ComponentInstance {
+            id: "rig-script".into(),
+            enabled: true,
+            kind: Component::Script {
+                binding: rot_scene::BehaviorBinding {
+                    source_id: "ctrl_script".into(),
+                    target: BindingTarget::Object("rig".into()),
+                    enabled: true,
+                    properties: BTreeMap::new(),
+                    state_defaults: BTreeMap::new(),
+                    commands: BTreeMap::new(),
+                },
+                source_kind: None,
+                movement: ScriptMovement::Ordinary,
+            },
+        });
+    }
+
+    let mut arm_components = Vec::new();
+    if with_skin {
+        arm_components.push(ComponentInstance {
+            id: "arm-mesh".into(),
+            enabled: true,
+            kind: Component::MeshRenderer {
+                geometry: Geometry::Cube,
+                tint: [1.0; 4],
+                material: None,
+            },
+        });
+        arm_components.push(ComponentInstance {
+            id: "arm-skin".into(),
+            enabled: true,
+            kind: Component::Skin {
+                joints: vec!["arm".into()],
+                inverse_bind_matrices: vec![glam::Mat4::IDENTITY.to_cols_array()],
+            },
+        });
+    }
+
+    let scene = ComponentScene {
+        id: "sm-test".into(),
+        prefabs: BTreeMap::new(),
+        objects: vec![
+            ObjectNode {
+                id: "rig".into(),
+                name: "Rig".into(),
+                enabled: true,
+                parent: None,
+                transform: Transform::default(),
+                components: rig_components,
+            },
+            ObjectNode {
+                id: "arm".into(),
+                name: "Arm".into(),
+                enabled: true,
+                parent: Some("rig".into()),
+                transform: Transform {
+                    translation: [0.0, 0.0, 0.0],
+                    rotation: [0.0, 0.0, 0.0],
+                    scale: [1.0, 1.0, 1.0],
+                },
+                components: arm_components,
+            },
+        ],
+        sources,
+        script_files,
+        materials: BTreeMap::new(),
+        hud: Default::default(),
+        display: Default::default(),
+        background: None,
+        sky: None,
+        fog: None,
+        post_process: None,
+        ambient: None,
+        actions: Default::default(),
+        gameplay_camera: None,
+        gravity: None,
+    };
+
+    let mut engine = Engine::new(Limits {
+        fixed_dt: 0.125,
+        ..Limits::default()
+    })
+    .unwrap();
+    engine.set_clips(BTreeMap::from([
+        ("clip_idle".into(), Arc::new(clip_idle)),
+        ("clip_run".into(), Arc::new(clip_run)),
+        ("clip_attack".into(), Arc::new(clip_attack)),
+        ("clip_dash".into(), Arc::new(clip_dash)),
+    ]));
+    (scene, engine)
+}
+
+#[test]
+fn state_machine_transitions_crossfade_exit_time_anystate_and_skinning() {
+    let (scene, mut engine) = build_sm_scene(None, true);
+    let mut runtime = engine.reset_component(&scene, 0).unwrap();
+    let arm_pos = |rt: &Runtime| rt.component_transforms().unwrap()[1].translation[0];
+    let arm_rot_z = |rt: &Runtime| rt.component_transforms().unwrap()[1].rotation[2];
+
+    assert_eq!(runtime.animator_snapshots()[0].current_state, "Idle");
+    assert_eq!(arm_pos(&runtime), 0.0);
+
+    // Live patch Float parameter to trigger Idle -> Run (crossfade 0.25s, dt = 0.125s).
+    let mut patch = LiveComponentPatch::default();
+    patch
+        .animator_params
+        .push(LiveAnimatorParamPatch::SetFloat {
+            component_id: "rig-anim".into(),
+            parameter: "speed".into(),
+            value: 1.0,
+        });
+    assert!(engine.apply_live_patch(&mut runtime, &patch).unwrap());
+    let snap = &runtime.animator_snapshots()[0];
+    assert_eq!(snap.current_state, "Run");
+    assert!(snap.is_transitioning);
+    assert_eq!(arm_pos(&runtime), 0.0, "alpha=0.0 at start of crossfade");
+
+    // Step 1: elapsed = 0.125 / 0.25 -> alpha = 0.5 midpoint translation + shortest-path rotation + skin matrix.
+    engine.step(&mut runtime).unwrap();
+    assert!(runtime.animator_snapshots()[0].is_transitioning);
+    assert!((arm_pos(&runtime) - 2.0).abs() < 1e-5);
+    assert!((arm_rot_z(&runtime) - std::f32::consts::FRAC_PI_4).abs() < 1e-4);
+    let mid_skin = runtime.draw_frame.hierarchy().unwrap().skin_matrices()[0];
+    assert!(
+        (mid_skin.w_axis.x - 2.0).abs() < 1e-4,
+        "GPU skin matrix should track crossfaded translation: {:?}",
+        mid_skin
+    );
+
+    // Step 2: elapsed = 0.25 -> blend finishes, full Run pose (x = 4.0, rot_z = 90 deg).
+    engine.step(&mut runtime).unwrap();
+    assert!(!runtime.animator_snapshots()[0].is_transitioning);
+    assert!((arm_pos(&runtime) - 4.0).abs() < 1e-5);
+    assert!((arm_rot_z(&runtime) - std::f32::consts::FRAC_PI_2).abs() < 1e-4);
+
+    // Trigger AnyState -> Dash via live trigger patch, verify AnyState fires and doesn't re-trigger while in Dash.
+    let mut dash_patch = LiveComponentPatch::default();
+    dash_patch
+        .animator_params
+        .push(LiveAnimatorParamPatch::FireTrigger {
+            component_id: "rig-anim".into(),
+            parameter: "dash".into(),
+        });
+    engine.apply_live_patch(&mut runtime, &dash_patch).unwrap();
+    assert_eq!(runtime.animator_snapshots()[0].current_state, "Dash");
+    assert!((arm_pos(&runtime) - 20.0).abs() < 1e-5);
+    // Verify AnyState -> Dash stays idle without re-triggering self while already in Dash.
+    engine.step(&mut runtime).unwrap();
+    assert_eq!(runtime.animator_snapshots()[0].current_state, "Dash");
+
+    // Play Attack via PlayState live patch and let has_exit_time (duration 0.5s = 4 ticks @ 0.125s) return to Idle.
+    let mut play_patch = LiveComponentPatch::default();
+    play_patch
+        .animator_params
+        .push(LiveAnimatorParamPatch::PlayState {
+            component_id: "rig-anim".into(),
+            state: "Attack".into(),
+            crossfade: 0.0,
+        });
+    engine.apply_live_patch(&mut runtime, &play_patch).unwrap();
+    assert_eq!(runtime.animator_snapshots()[0].current_state, "Attack");
+    for _ in 0..4 {
+        engine.step(&mut runtime).unwrap();
+    }
+    assert_eq!(
+        runtime.animator_snapshots()[0].current_state,
+        "Idle",
+        "exit_time = 1.0 automatically transitions Attack -> Idle"
+    );
+}
+
+#[test]
+fn lua_animator_handle_parameters_triggers_play_and_atomic_rollback() {
+    let script = r#"
+        local step = 0
+        return {
+            on_update = function(_transform, _props, _dt, host)
+                step = step + 1
+                local anim = host.self:component("Animator")
+                assert(anim ~= nil)
+                if step == 1 then
+                    assert(anim.state == "Idle")
+                    assert(anim:get_float("speed") == 0.0)
+                    anim:set_int("combo", 2)
+                    assert(anim:get_int("combo") == 2)
+                    anim:set_trigger("attack")
+                    -- Read-your-own-writes observes transition inside the same tick.
+                    assert(anim.current_state == "Attack")
+                elseif step == 2 then
+                    -- Trigger must have been consumed automatically on transition.
+                    assert(anim.state == "Attack")
+                    anim:set_bool("crouching", false)
+                    assert(anim:get_bool("crouching") == false)
+                    anim:play("Run", 0.25)
+                    assert(anim.is_transitioning == true)
+                    assert(anim.state == "Run")
+                    anim.speed = 2.0
+                    assert(anim.speed == 2.0)
+                elseif step == 3 then
+                    -- Verify error after mutation rolls back all animator state atomically.
+                    anim:play("Dash", 0.0)
+                    error("abort tick")
+                end
+            end
+        }
+    "#;
+
+    let (scene, mut engine) = build_sm_scene(Some(script), false);
+    let mut runtime = engine.reset_component(&scene, 0).unwrap();
+
+    // Tick 1: trigger Attack immediately.
+    engine.step(&mut runtime).unwrap();
+    assert_eq!(runtime.animator_snapshots()[0].current_state, "Attack");
+    assert_eq!(
+        runtime.animator_snapshots()[0].params["attack"],
+        RuntimeParamValue::Trigger(false),
+        "consumed trigger must auto-reset"
+    );
+    assert!((runtime.component_transforms().unwrap()[1].translation[0] - 10.0).abs() < 1e-5);
+
+    // Tick 2: script calls play("Run", 0.25) and sets speed = 2.0.
+    engine.step(&mut runtime).unwrap();
+    let snap2 = runtime.animator_snapshots()[0].clone();
+    assert_eq!(snap2.current_state, "Run");
+    assert!(snap2.is_transitioning);
+    assert_eq!(snap2.playback_speed, 2.0);
+    let x_before_fail = runtime.component_transforms().unwrap()[1].translation[0];
+
+    // Tick 3: script errors after anim:play("Dash", 0.0); state and transforms must roll back atomically!
+    assert!(engine.step(&mut runtime).is_err());
+    assert_eq!(runtime.animator_snapshots()[0], snap2);
+    assert_eq!(
+        runtime.component_transforms().unwrap()[1].translation[0],
+        x_before_fail
+    );
+}

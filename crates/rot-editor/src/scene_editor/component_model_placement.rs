@@ -107,6 +107,7 @@ impl ComponentWorkspace {
                     kind: Component::Animator {
                         start_playback: Default::default(),
                         playback_speed: 1.0,
+                        state_machine: None,
                         binding: AnimationBinding {
                             clip: clip.id.clone(),
                             looping: true,

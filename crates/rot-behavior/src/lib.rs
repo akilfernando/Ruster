@@ -42,6 +42,8 @@ use spatial_host::{
     install_kinematic, install_spatial, kinematic_owner, KinematicOwner, QueryInvocation,
 };
 pub use spatial_host::{validate_kinematic_component_scene, QueryObservation, QueryResult};
+mod animator;
+pub use animator::{AnimatorRuntimeSnapshot, LiveAnimatorParamPatch, RuntimeParamValue};
 mod component_runtime;
 pub use component_runtime::{LiveComponentPatch, LiveDisplayPatch};
 mod component_topology;
