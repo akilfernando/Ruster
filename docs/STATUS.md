@@ -1,88 +1,70 @@
 # Status
 
-Updated 2026-11-27. See the [2026-11-25 log](archive/STATUS-2026-11-25.md) and
-[2026-11-17 archive](archive/STATUS-2026-11-17.md) for earlier entries.
+Updated 2026-11-27, after a review of the plan against the code at `c67b7d3`.
+Earlier pages: [2026-11-27](archive/STATUS-2026-11-27.md),
+[2026-11-25](archive/STATUS-2026-11-25.md),
+[2026-11-17](archive/STATUS-2026-11-17.md).
 
 ## Where to work
 
 - **Trunk:** `main`, on `origin`. Branch from it and merge back to it.
-- **One checkout:** `/home/akilf/Projects/rot_engine`. Older branch tips are
-  `archive/<name>` tags on `origin`. Two git stashes hold small status notes
-  from older sessions. Detached worktrees under `~/Projects/Ruster-Audits` and
-  `~/Projects/Ruster-Creations` are retained evidence; leave them.
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
+- **Leftovers:** `python3 scripts/tidy.py` lists stale worktrees, temporary
+  folders and build output. Removing them waits for the user. Worktrees
+  under `~/Projects/Ruster-Audits` and `~/Projects/Ruster-Creations` are
+  kept on purpose.
 
-## Current phase — Phase 4: Play (`P4-06` Done, Next: `P4-07`)
+## Now
 
-- **Done (earlier phases):** Phase 1 Shell (`S-01`–`S-13`, `T-01`–`T-02`,
-  `A-01`–`A-07`, `P-01`–`P-02`), `P-03` platform seams & Windows CI, Phase 2 Core
-  (`C-00a`, `C-01`–`C-12`, `C-13`–`C-61`, Phase 4 HUD labels, `C-EXIT` gate
-  against [Rot Yard](../examples/rot-yard/README.md) with workspace-2
-  [UI checklist](UX-STANDARDS.md#10-ui-review-checklist) and refreshed release
-  install), Phase 3A Look (`L-01` `71aacda`, `L-02` `611a640`, `L-03` `93d7390`,
-  `L-04` `16a3859`, `L-05` `4f8e16d`, `L-06` `3264a4e`, `L-EXIT` Khronos PBR
-  gate `7283208`), and Phase 3B Look — Lighting & Post (`L-07`–`L-11`,
-  `L-3B-EXIT` `35ae05c`: [gallery.scene.json](../examples/rot-yard/gallery.scene.json)
-  `1080p` `4× MSAA` p50 `3.095 ms` / p95 `3.794 ms`, 5k `1080p` p50 `1.445 ms` /
-  p95 `1.900 ms`, steady `0 B`).
-- **Done in Phase 4:** `P4-01` (2026-11-26: unified persistent Lua events,
-  coroutines + `wait`/`wait_frames`, live `Light`/`MeshRenderer`/`Camera`/hierarchy/`enabled`
-  handles, editor `Console` panel + `host.log`/`warn`, batched 10k runner + vendored
-  `mlua` pose batch accessors; release 10k bench logic p50 `1.636 ms`, transform-write p50 `1.913 ms`),
-  `P4-02` (2026-11-27: live editing during Play without restart via coalesced
-  `LiveComponentPatch`, live editable `Play Values` Inspector + `Apply to Scene`,
-  live `Scene Values` scrub/Undo, unlocked live Material/Display/Script Property & MCP edits),
-  `P4-03` (2026-11-27: Rapier3D physics core replacing direct `parry3d` in one cut,
-  `RigidBody` component + optional scene `gravity`, compound `Collider` sync, Inspector/
-  `Play Values`/`MultiInspector`/MCP, Lua `RigidBody` handle, `rot-player` runtime stepping;
-  release 1k active rigid bodies solver p50 `0.493 ms` / full step p50 `0.720 ms`),
-  `P4-04` (2026-11-27: `host.raycast` / `host.shapecast` + tick-0 broad-phase refresh,
-  `on_collision_enter`/`exit` & `on_trigger_enter`/`exit` with atomic rollback, `Component::Joint`
-  [`Fixed`/`Hinge`/`Slider`/`Ball`/`Spring`] & `Component::CharacterController` with
-  Inspector/`Play Values`/MCP/`rot-player`; 1k rigid bodies solver p50 `0.553 ms` /
-  engine p50 `0.793 ms`, 10k scripts logic p50 `1.620 ms` / transform-write p50 `1.934 ms`),
-  `P4-05` (2026-11-27: glTF `JOINTS_0`/`WEIGHTS_0`/`inverseBindMatrices`/`ModelSkin` + bit-29 mesh
-  cache + lifted 64-level/768-track/4 MiB clip limits, `Component::Skin` + placement/Inspector/
-  `Play Values`/MCP/runtime remapping, GPU joint-palette skinning across surface/`scene`/shadow/
-  selection shaders + picking/bounds/`ComponentPreview`; RTX 4060 Vulkan GPU skinning probe passed,
-  5k release bench p50 `1.553 ms` / steady `0 B`), `P4-06` (2026-11-27: animation state machine
-  & cross-fade blending with `AnimatorStateMachine` [`Bool`/`Float`/`Int`/`Trigger` parameters,
-  `has_exit_time`/`AnyState`/conditional transitions, TRS + shortest-path slerp blending], Lua
-  `Animator` handle with atomic rollback, Inspector State Machine UI & live `Play Values` controls,
-  MCP & `rot-player` runtime cross-fade; release 10k scripts bench logic p50 `1.728 ms` /
-  transform-write p50 `1.973 ms`).
-- **Next:** `P4-07` spatial/streamed audio & mixer, and
-  input/UI/cameras/particles/save (`P4-08`–`P4-EXIT`). See [backlog](BACKLOG.md).
+Phase 4 (Play) is active, with repairs and editor work ahead of it. The next
+package in each lane: [R-01](briefs/R-01.md), [U-01](briefs/U-01.md),
+[P4-S1](briefs/P4-S1.md). The order is in the [backlog](BACKLOG.md).
 
 ## What a creator can do today
 
-In v23, create projects and scenes, assemble component hierarchies and prefabs,
-and edit transforms, lighting, cameras, colliders and PBR/alpha materials. Import
-OBJ, PNG, WAV, GLB and glTF assets. Attach Lua files, set per-object
-number, Boolean and Vector3 properties, and test gameplay in Play. Build
-packages supported scenes as a runnable Linux folder or `.tar.gz` archive.
-Approved AI apps work alongside the editor through MCP and share Undo. Supported
-v1–v22 scenes upgrade in place to v23 on open.
-See the [historical inventory](PARITY-PLAN.md#2-where-we-are) and
-[backlog](BACKLOG.md).
+Create a project and scenes; build object hierarchies and prefabs; import
+OBJ, glTF, PNG and WAV; edit PBR materials, lights, shadows, sky, fog and
+post-processing; attach Lua scripts with coroutines and events; add rigid
+bodies, joints and a character controller; play imported animation through a
+state machine; test in Play with live editing; build a Linux game folder.
+An approved AI app can do the scene editing through MCP and shares Undo.
+
+How far each area is from Unity and Unreal is in the
+[scorecard](PARITY-PLAN.md#2-where-we-are): of 32 areas, one is solid,
+thirteen are usable, nine are prototypes and nine do not exist yet.
+
+## Checked on 2026-11-27
+
+- `python3 scripts/check.py --full`: passed. 695 tests, 22 ignored.
+- GPU probes on the RTX 4060: 5 of 8 pass in a debug build.
+- Release benchmarks: 1,000 rigid bodies 0.77 ms a step; 10,000 scripts
+  1.61 ms for logic and 2.02 ms when writing transforms (budget 2 ms);
+  gallery scene 3.32 ms a frame at 1080p.
+- The editor, opened on `gallery.scene.json` and viewed in screenshots.
+
+## Known problems
+
+- The editor has fixed panels. Docking, saved layouts, the Game tab, the
+  Help menu, the status bar and the AI indicator were removed with the old
+  editor on 2026-11-26. 31 of 87 commands do nothing.
+- Three GPU probes fail ([R-01](briefs/R-01.md)).
+- Prototype limits remain: 16 KiB per script, 10-second sounds, 16 Animators
+  per scene ([R-02](briefs/R-02.md)).
+- The creator guide and the Lua reference do not cover Phases 3 and 4, and
+  an AI app cannot discover the newer components ([R-03](briefs/R-03.md)).
+- No skinned model has been used in a project. Sound works on Linux only.
+- An editor serves one AI adapter at a time.
+
+## Not verified
+
+- Nothing has been tried by a person since the user's walkthrough of the
+  previous editor on 2026-11-19.
+- Windows: the workspace compiles in CI. Nothing has been run there.
+- Physical pointer-to-display latency for gizmos.
 
 ## Installed on this machine
 
-The **Rot Engine** launcher uses the 2026-11-26 release build (`rot-editor`,
-`rot-mcp`, and `rot-player` built with Phase 3A/3B PBR, Sky/IBL, clustered
-many-lights, 4-cascade CSM & local shadow atlas, atmospheric fog,
-SSAO/bloom/ACES/AA post-processing, 11 viewport shading/debug modes, alpha
-transparency, frustum culling, instancing, `4096` px textures, and unified
-persistent Lua). Reinstall with `python3 scripts/install_local.py`; the
-previous build is in `~/.local/share/rot-engine/previous` for `--rollback`.
-
-## Known problems & Not verified
-
-- An editor serves one AI adapter at a time; a second waits or fails.
-- External leftovers outside this repo still use pre-rename names: two MCP
-  entries in `~/.codex/config.toml` and `~/Projects/Ruster-Creations`.
-- Unverified physical pointer/gizmo display latency. Note on empty-player memory:
-  warm windowed launch reaches `127.0 MiB` median peak RSS (< `150 MB` target),
-  while a cold empty Vulkan shader-cache launch reached `163.6 MiB`. Windows
-  compilation is checked on `windows-latest` in CI (not locally compiled).
+The **Rot Engine** launcher runs the 2026-11-26 release build, which is
+older than all of Phase 4. Reinstall with `python3 scripts/install_local.py`;
+`--rollback` restores the previous build.

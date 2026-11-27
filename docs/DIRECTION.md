@@ -26,6 +26,20 @@ The user also wants to minimize the cost of maintaining Rot and Plain.
 They share the editor's functional paths. Verification covers shared
 behavior once and checks presentation differences where affected.
 
+## Plan review and cost-efficient implementation — 2026-11-27
+
+The user asked for an evaluation of the status, backlog and roadmap against
+feature parity with Unity and Unreal, asked that any weakness found in the
+plan or in how the project is managed be put right, and asked that
+cost-efficient models (the user named Sol 6.2) be able to carry out
+implementation properly. The findings are in the
+[scorecard](PARITY-PLAN.md#2-where-we-are). The remedies are agent choices,
+listed for veto under
+[changing this plan](PARITY-PLAN.md#7-changing-this-plan): a Repair lane and
+a UX lane, one brief per package in `docs/briefs/`, a code map with recipes,
+a sample game that grows with every Phase 4 package, and phase exits that
+end in a review and a hands-on check.
+
 ## Roadmap realignment and legacy retirement — 2026-11-25
 
 Confirmed by the user on 2026-11-25 following an architecture and roadmap review:

@@ -1,192 +1,148 @@
 # Backlog
 
-The ordered work for the [parity plan](PARITY-PLAN.md). Take the first open
-package in your lane under **Now**. How to work is in [PLAYBOOK](PLAYBOOK.md);
-UI rules are in [UX-STANDARDS](UX-STANDARDS.md). Completed Phase 1 (`S-01`–`P-02`)
-and Phase 2 slices (`C-05a`–`d`, `C-09a`, `C-11a`, `C-13`–`C-61`) are archived in
-[BACKLOG-2026-11-25](archive/BACKLOG-2026-11-25.md).
+The ordered work for the [parity plan](PARITY-PLAN.md). How to work is in the
+[PLAYBOOK](PLAYBOOK.md). This file is an index: one line per package. The
+instructions for a package are in its brief under `docs/briefs/`.
 
-- **Size.** S is half a session, M is one session, L must be split into M
-  packages before starting.
-- **Brief.** *ready* means implement as written. *brief needed* means the
-  strongest available model writes the Do and Done-when lists first.
-- **Status.** `open`, `in progress — who, date`, or `done — date, commit`.
+- **Pick.** Take the first `open` package in your lane, top to bottom. Skip
+  one whose brief names a dependency that is not done. With no lane given:
+  the Repair lane until it is empty, then the UX lane.
+- **Read.** Its brief, and nothing else in `docs/briefs/`.
+- **Status.** `open`, `open — from step N`, `in progress — who, date`, or
+  `review — commit`. Keep it to that one phrase. What you did and how you
+  checked it go in the commit message. A finished package leaves the table:
+  delete its brief and add its id under Done.
+- **Size.** S is half a session. M is one session.
+- **A package with no brief** is not ready. Do not start it. See
+  [who writes briefs](PLAYBOOK.md#10-briefs).
 
 ## Needs the user
 
-- **External pre-rename leftovers.** Two MCP entries in `~/.codex/config.toml`
-  and projects in `~/Projects/Ruster-Creations` still use pre-rename names.
+- **Clean up this machine.** `python3 scripts/tidy.py` lists what agents
+  left behind: 59 worktrees (55 hold uncommitted measurement edits), 658
+  entries in `/tmp` using 14 GB of memory, and 518 GB of stale build
+  output. `--apply` removes the clean ones; `--discard-edits` and
+  `--build-output` cover the rest. Two branches are not merged:
+  `work/S-08-sweep-scene` and `work/C-EXIT-50mb`.
+- **Try the editor by hand** when the UX lane reaches
+  [U-EXIT](briefs/U-EXIT.md), and play the sample at
+  [P4-EXIT](briefs/P4-EXIT.md). About 20 minutes each.
+- **Veto window.** The 2026-11-27 review reordered work inside Phase 4 and
+  chose designs listed under "Agent choices" in the
+  [plan](PARITY-PLAN.md#7-changing-this-plan). Say so if any is wrong.
+- **External leftovers.** Two MCP entries in `~/.codex/config.toml` and the
+  projects in `~/Projects/Ruster-Creations` still use pre-rename names.
 
 ## Inbox
 
-One line each. Anyone may add; the user or a planning pass orders them.
+One line each. Anyone may add. The user or a planning pass orders them.
 
-- CI efficiency (2026-11-24): Benchmark `Swatinem/rust-cache` or slimmer target
-  caching once legacy crates are removed (`C-00a`).
-- AI-assisted authoring: Surface project/scene context, generic component
-  schemas, and brief optional best-practice hints so MCP clients guess less;
-  repeat the village workflow with a real client.
-- Flaky test under parallel load: `conflict_never_reads_back_and_mismatched_readback_fails_closed`
-  (`connection/worker.rs`) failed once (likely `ETXTBSY` on a freshly written script).
-- Idle repaints: an open scene repaints ~3 frames per 10 s (0.2% CPU); track under
-  Phase 3A/5A polish.
+- Flaky under load: `conflict_never_reads_back_and_mismatched_readback_fails_closed`
+  (`connection/worker.rs`) failed once, likely `ETXTBSY` on a fresh script.
+- Idle repaints: an open scene repaints about 3 frames per 10 s.
+- CI: try `Swatinem/rust-cache` or a slimmer target cache.
+- AI authoring: repeat the village workflow with a real client after `R-03`.
+- `rot-mcp` adapters stay alive under a long-running AI app (17 idle under
+  one Codex process on 2026-11-27). Confirm an idle adapter holds no editor
+  connection.
+- `Component::Skin` stores inverse bind matrices in the scene file for every
+  instance. Reference the model's skin so reimport updates them.
+- A new scene uses the Legacy SDR display. HDR, sky and post-processing are
+  opt-in. Decide the default a creator should get.
+- About 320 `cfg(unix)` and `cfg(target_os = "linux")` gates remain in
+  `rot-editor`, 102 of them in `component_workspace.rs`. Passing
+  `cargo check` on Windows does not mean a feature exists there.
+- Legacy code still compiled: the v1 to v22 `Scene`, `update()` scripts with
+  numbered host APIs, legacy MCP operations. Plan its removal once the
+  examples use only module scripts.
+- Six source files are over 4,000 lines. Split one by moving code only when
+  a package is about to change it heavily.
+- No gate test loaded an example project before `P4-S1`. Add the Rot Yard
+  lift Play Check to the gate the same way.
 
-## Now — Phase 4: Play
+## Now
 
-Phase 3A (`L-01`–`L-EXIT`) and Phase 3B (`L-07`–`L-3B-EXIT`) shipped on `2026-11-26`. Next up in strict [parity plan](PARITY-PLAN.md#3-phases) order: **Phase 4 — Play**.
+Three lanes. They mostly touch different files and can run at the same
+time. Files several packages edit: `rot-editor/src/strings.rs`,
+`scene_editor/component_workspace.rs` and `component_inspector.rs`. Keep
+changes there small and merge often.
 
-| Package | Outcome | Status & remaining gap |
-| --- | --- | --- |
-| `P4-01` Unified Lua API (events, coroutines, component access & 10k scale) | Persistent-VM `coroutine` + `host.start_coroutine`/`wait`/`wait_frames`, `host.on`/`off`/`emit`, `host.self`/`log`/`warn`, live `Light`/`MeshRenderer`/`Camera`/`enabled` access, `≤ 2 ms` for 10k scripts/frame (Size M, *ready*). | `done — 2026-11-26` (events/coroutines/handles/`Console` logging; release 10k bench: logic p50 `1.636 ms` / p95 `1.705 ms`, transform-write p50 `1.913 ms` / p95 `2.233 ms`) |
-| `P4-02` Live editing during Play | Deferred from `C-05`: edit scene transforms & component values live while Play runs without forced Stop/Restart (Size M, *ready*). | `done — 2026-11-27` (coalesced `LiveComponentPatch` in `rot-behavior`/worker/`RuntimeUi`, live editable `Play Values` with `Apply to Scene` & Escape scrub, live `Scene Values` scrub & Undo/Redo, unlocked `Scene Display…`/`Material`/Script Properties & MCP live edits during Play; structural edits still cleanly restart Play) |
-| `P4-03` Rapier3D physics core & `RigidBody` | Replace `parry3d` in one cut; Rapier3D `PhysicsWorld`, `RigidBody` (Dynamic/Kinematic/Static, mass, damping, constraints), `Collider` sync, Inspector/MCP (Size M, *brief needed*). | `done — 2026-11-27` (replaced direct `parry3d` with `rapier3d-f64 0.36.1`; `PhysicsState` wrapping Rapier `PhysicsWorld`, `Component::RigidBody` & optional `ComponentScene::gravity`, compound `Collider` sync, Inspector/`Play Values`/`MultiInspector`/MCP, Lua `RigidBody` handle & atomic rollback, `rot-player` stepping; release 1k active rigid bodies bench solver p50 `0.493 ms` / p95 `1.355 ms`, full `Engine` step p50 `0.720 ms` / p95 `1.611 ms`) |
-| `P4-04` Physics queries, events, joints & character controller | Collision/trigger events into Lua, raycasts/shapecasts, joints, and kinematic `CharacterController` (Size M, *brief needed*). | `done — 2026-11-27` (`host.raycast` / `host.shapecast` with sphere/box/capsule + sensor/exclude filters + tick-0 broad-phase refresh, `on_collision_enter`/`exit` & `on_trigger_enter`/`exit` with atomic rollback, `Component::Joint` [`Fixed`/`Hinge`/`Slider`/`Ball`/`Spring`] & `Component::CharacterController` [grounding, walls, step climbing, slope limits/sliding, dynamic impulses] with Inspector/`Play Values`/MCP/`rot-player`; 1k rigid bodies solver p50 `0.553 ms` / engine p50 `0.793 ms`, 10k scripts logic p50 `1.620 ms` / transform-write p50 `1.934 ms`) |
-| `P4-05` glTF skeletal skinning & GPU skinning | Import glTF `skins`/joints/IBM & vertex weights/indices; GPU joint-palette skinning in `rot-render` (Size M, *brief needed*). | `done — 2026-11-27` (glTF `JOINTS_0`/`WEIGHTS_0`/`inverseBindMatrices`/`ModelSkin` + bit-29 mesh cache + lifted 64-level hierarchy/768-track/4 MiB clip limits in `rot-assets`/`rot-scene`, `Component::Skin` with Inspector/`Play Values`/MCP/runtime remapping/placement, world-space joint palette GPU skinning across PBR/`scene`/shadow/selection shaders + `pick()` + frustum/shadow bounds + `ComponentPreview` live skin deformation; Vulkan RTX 4060 GPU skinning probe passed [color/shadow/selection outline], 5k release render bench p50 `1.553 ms` / CPU `0.642 ms` / GPU `0.324 ms` / steady `0 B`) |
-| `P4-06` Animation state machine & blending | `Animator` states, parameter transitions, cross-fade blending, Lua triggers (Size M, *brief needed*). | `done — 2026-11-27` (backwards-compatible `AnimatorStateMachine` [states, `Bool`/`Float`/`Int`/`Trigger` parameters, conditional + `has_exit_time` + `AnyState` transitions, linear/shortest-path quaternion cross-fade pose blending via `apply_blended_poses`] on `rot-scene` v23, `rot-behavior` state machine evaluator & Lua `host.self:component("Animator")` handle with atomic rollback + skeletal cross-fade skin matrix tests, Inspector State Machine authoring UI + `Play Values` live parameter/trigger/state controls, `rot-editor` validation/MCP/Play export & `rot-player` runtime cross-fade test; release 10k scripts bench logic p50 `1.728 ms` / transform-write p50 `1.973 ms`) |
-| `P4-07` Spatial/streamed audio & mixer | Cross-platform `AudioSource` / `AudioListener`, spatial attenuation, buses/mixer, streamed clips (Size M, *brief needed*). | `open` |
-| `P4-08` Mouse, gamepad & action rebinding | Mouse look/buttons, gamepad sticks/triggers (`gilrs`), runtime/editor action rebinding (Size M, *brief needed*). | `open` |
-| `P4-09` Runtime UI layout & multi-camera | Flexible runtime UI widgets/anchors/layout and multiple switchable cameras with priority/Lua switching (Size M, *brief needed*). | `open` |
-| `P4-10` Runtime scene loading, particles & save data | Async/Lua scene loading, GPU billboard particle emitter component, safe versioned save slots (Size M, *brief needed*). | `open` |
-| `P4-EXIT` Phase 4 exit gate | Third-person platformer sample in `examples/` (skinned character, enemies, pickups, menus, sound, gamepad), budget verification & release install (Size M, *brief needed*). | `open` |
+### Repair lane
 
-## Later
+Work reported done that the 2026-11-27 review found broken, unverified or
+undocumented.
 
-One line each until their phase is active. See [phases](PARITY-PLAN.md#3-phases).
+| Package | Outcome | Size | Status |
+| --- | --- | --- | --- |
+| [R-01](briefs/R-01.md) | GPU probes run with one command and all pass | S | open |
+| [R-02](briefs/R-02.md) | Prototype limits on scripts, animation, audio, input lifted | S | open |
+| [R-03](briefs/R-03.md) | Lua reference; AI apps can discover components and script functions | M | open |
+| [R-04](briefs/R-04.md) | 10,000-script budget measured with shipping limits, with headroom | S | open |
+| [R-05](briefs/R-05.md) | Creator guide matches the editor | M | open |
 
-- **Phase 5A — Ship and scale.** Windows editor and builds, profiler and script
-  debugger polish, cooked binary runtime/cache assets for large scenes, LOD and
-  occlusion culling, and 50,000-object scenes at 60 fps.
-- **Phase 5B — Production world tools.** Terrain, navigation, timeline, light
-  probes or baking, editor extensions, localization.
-- **Phase 6 — High end.** Ray tracing, virtualized geometry, streamed worlds,
-  networking, further platforms.
+### UX lane
+
+The editor shell that Phase 1 built and the Phase 2 cutover removed, plus
+the gaps the user named in their own walkthrough.
+
+| Package | Outcome | Size | Status |
+| --- | --- | --- | --- |
+| [U-01](briefs/U-01.md) | Docked, closable panels and saved layouts | M | open |
+| [U-02](briefs/U-02.md) | Every command works; Copy, Paste, Select All | M | open |
+| [U-03](briefs/U-03.md) | Standard menus, icon toolbar, readable Hierarchy, status bar | M | open |
+| [U-04](briefs/U-04.md) | Inspector edits apply immediately; no Apply button | M | open |
+| [U-05](briefs/U-05.md) | Game view with aspect and Maximize on Play | M | open |
+| [U-06](briefs/U-06.md) | Console opens source; Script Debugger panel | M | open |
+| [U-EXIT](briefs/U-EXIT.md) | UI checklist on every surface, then the user's walkthrough | M | open |
+
+### Play lane (Phase 4)
+
+`P4-01` to `P4-06` are done. The rest, in the order that builds the sample
+game soonest.
+
+| Package | Outcome | Size | Status |
+| --- | --- | --- | --- |
+| [P4-S1](briefs/P4-S1.md) | Platformer sample, first playable, from existing features | M | open |
+| [P4-11](briefs/P4-11.md) | Capsule and mesh colliders, friction, bounciness, contact points | M | open |
+| [P4-12a](briefs/P4-12a.md) | `require`, random, time, `on_destroy`, destroy any object | M | open |
+| [P4-12b](briefs/P4-12b.md) | Declared script properties, references, tags, prefab spawn | M | open |
+| [P4-08a](briefs/P4-08a.md) | Mouse look, scroll, cursor lock, modifier keys | M | open |
+| [P4-08b](briefs/P4-08b.md) | Gamepad and runtime rebinding | M | open |
+| [P4-09b](briefs/P4-09b.md) | Camera priority, switching and blending | S | open |
+| [P4-07a](briefs/P4-07a.md) | Audio Source and Listener, cross-platform, live 3D sound | M | open |
+| [P4-07b](briefs/P4-07b.md) | OGG and MP3, streaming, mixer buses | M | open |
+| [P4-09a](briefs/P4-09a.md) | Game UI as objects: Canvas, Text, Image, bars | M | open |
+| [P4-09c](briefs/P4-09c.md) | Game UI buttons, focus, gamepad menus | M | open |
+| [P4-10a](briefs/P4-10a.md) | Load scenes, pause, time scale, quit | M | open |
+| [P4-10b](briefs/P4-10b.md) | Particle System | M | open |
+| [P4-10c](briefs/P4-10c.md) | Save data and settings | S | open |
+| [P4-13](briefs/P4-13.md) | Locomotion blend tree and animation events | M | open |
+| [P4-14](briefs/P4-14.md) | Collision layers and matrix | M | open |
+| [P4-EXIT](briefs/P4-EXIT.md) | Sample game complete, reviewed, played by the user | M | open |
+
+## Next
+
+No briefs yet. The reviewer of `P4-EXIT` writes them. Contents are listed
+under each phase in the [plan](PARITY-PLAN.md#3-phases).
+
+- **Phase 5A — Ship and scale.** Windows editor and builds, profiler, cooked
+  assets and texture compression, LOD, occlusion culling, several 3D views
+  per frame, 50,000 objects at 60 fps.
+- **Phase 5B — Production tools.** World, look, motion and tool depth.
+- **Phase 6 — High end and reach.**
 
 ## Done
 
-See [BACKLOG-2026-11-25](archive/BACKLOG-2026-11-25.md) for full details on
-completed packages:
+Details are in `git log` and the archives:
+[2026-11-27](archive/BACKLOG-2026-11-27.md),
+[2026-11-25](archive/BACKLOG-2026-11-25.md).
 
-  - **Phase 1 — Shell (done 2026-11-17–19):** `S-01`–`S-13`, `T-01`–`T-02`,
-  `A-01`–`A-07`, `P-01`–`P-02`.
-- **Cross-phase hardening:** `P-03` (`2026-11-26`: extracted `rustix`, socket
-  IPC, `inotify` watcher, `rfd` features, file manager open, and OS dirs into
-  `rot_support::platform::{dirs,ipc}`, `rot_editor::platform::{shell,dialogs,watcher}`,
-  and `rot-mcp` child detachment; added `windows-latest` `cargo check --workspace --locked` CI job).
-- **Phase 3A — Look:** `L-01` (`2026-11-26`, `71aacda`: versioned `rot-material`
-  JSON format, `.material.json` + `.rotmeta` assets in `rot-assets`, watcher live
-  reload with last-good fallback, Assets/Inspector create/drag-drop/modal edit/
-  `Save as Asset…`, double-extension Rename/Duplicate safety, and MCP
-  `asset_inspect`/`material_inspect`/`scene_material_assign` alignment), `L-02`
-  (`2026-11-26`, `611a640`: GPU storage-buffer instances via
-  `@builtin(instance_index)`, glTF/MikkTSpace-style vertex tangents & bit-30
-  cache across `rot-assets`/`rot-render`/`surface.wgsl`, decoupled `R8Unorm`
-  `selection_mask` pass + `composite.wgsl`, lifted `rot-assets`/512 MiB target
-  caps, RTX 4060 GPU probes passed, 5k benchmark GPU p50 `321.5 → 245.8 us`,
-  CPU p50 `648.7 → 627.8 us`), and `L-03` (`2026-11-26`, `93d7390`: full
-  metallic-roughness PBR with `metallic`, tangent-space `normal_texture`,
-  `emissive_texture`, `occlusion_texture`, tangent +Y UV fix, 6-role
-  `TextureRole`, glTF/editor/MCP wiring, RTX 4060 probes green, headless 5k
-  1080p 4× MSAA CPU p50 `0.442 ms` / GPU p50 `0.294 ms` / frame p50
-  `1.114 ms`), and `L-04` (`2026-11-26`, `16a3859`: procedural physical `Sky`
-  backdrop + Daylight/Studio/Sunset presets, lazy GPU `64×64` GGX BRDF LUT +
-  `64×64×6` 5-mip prefiltered specular cubemap, L2 SH diffuse irradiance,
-  multiscattering split-sum IBL in `surface.wgsl`, Scene Display UI +
-  `scene_display_set` MCP wiring, RTX 4060 probes green, headless 5k 1080p
-  4× MSAA CPU p50 `0.423 ms` / GPU p50 `0.292 ms` / frame p50 `0.980 ms`), and `L-05`
-  (`2026-11-26`, `4f8e16d`: `Opaque`/`Mask` cutout/`Blend` back-to-front sorted pass,
-  straight-alpha `BaseColor` PNG/mip preservation, glTF `alphaMode`/`alphaCutoff`/
-  `opacity`, `shadow_depth_mask.wgsl` cutout shadows + `Blend` exclusion, material UI
-  & MCP `opacity`/`alpha_mode`/`alpha_cutoff`, RTX 4060 probes green, headless 5k
-  1080p 4× MSAA CPU p50 `0.458 ms` / GPU p50 `0.292 ms` / frame p50 `1.213 ms`), and `L-06`
-  (`2026-11-26`, `3264a4e`: Gribb-Hartmann wgpu `[0, 1]` world-AABB frustum culling
-  retaining off-camera shadow casters via `visible_range` vs `range`,
-  `InstanceUploadTracker` dirty-range GPU uploads with gap coalescing, RTX 4060
-  probes green, steady `0 B` instance upload; 5k CPU p50 `0.554 ms` / GPU p50
-  `0.291 ms` / frame p50 `1.211 ms` / p95 `1.557 ms`; 50k CPU p50 `3.976 ms` /
-  GPU p50 `0.520 ms` / frame p50 `4.942 ms` / p95 `5.647 ms`), and `L-EXIT`
-  (`2026-11-26`, `7283208`: Phase 3A Khronos PBR sample gate verified visually and
-  on RTX 4060 at `1280×720` 4× MSAA — `DamagedHelmet` frame p50 `0.395 ms` / p95
-  `0.610 ms`, `MetalRoughSpheres` p50 `1.654 ms` / p95 `2.023 ms`,
-  `AlphaBlendModeTest` p50 `0.277 ms` / p95 `0.628 ms`, steady `0 B` upload).
-- **Phase 3B — Look completed packages:** `L-07` (`2026-11-26`, `bbd7075`:
-  GPU compute `16×9×24` clustered forward local lighting up to `1024` Point/Spot
-  lights in `cluster_cull.wgsl` + `cluster_gpu.rs` + `surface.wgsl` +
-  `PackedLighting`, lifted v23 `ComponentDrawPlan`/`ComponentPreview`/`rot-app`
-  limit with dirty-skip compute & `0 B` steady uploads, 64-light Persp+Ortho RTX
-  4060 probe green p50 `0.361 ms` / p95 `0.530 ms`, 5k 1080p 4× MSAA CPU p50
-  `0.504 ms` / GPU p50 `0.295 ms` / frame p50 `1.062 ms` / p95 `1.771 ms`), and
-  `L-08` (`2026-11-26`, `9801f4c`: 4-cascade directional CSM with Practical
-  Split Scheme + `2048×2048` `4×4` spot/point cubemap shadow atlas in
-  `shadow_math.rs`/`shadow_gpu.rs`/`surface.wgsl`, `LocalShadow` per-light toggle
-  and bias controls in `rot-scene`/Inspector/MCP, dynamic-offset per-cascade/tile
-  frustum culling, RTX 4060 CSM+Spot+Point+Mask probe p50 `0.264 ms` / p95
-  `0.534 ms`, 5k 1080p 4× MSAA CPU p50 `0.320 ms` / GPU p50 `0.290 ms` / frame
-  p50 `0.788 ms` / p95 `0.886 ms` / steady `0 B`), and `L-09` (`2026-11-26`,
-  `eb31118`: `Fog`/`FogMode` linear/exponential/exp² & analytic height fog in
-  `rot-scene`/`ibl_gpu.rs`/`surface.wgsl`/`sky.wgsl`, Scene Display Fog UI &
-  presets, `scene_display_set`/`material_inspect` MCP support keeping
-  `tools/list` at `14,457` B, RTX 4060 `atmospheric_fog_gpu_probe` green, 5k
-  1080p 4× MSAA CPU p50 `0.316 ms` / GPU p50 `0.291 ms` / frame p50
-  `0.838 ms` / p95 `0.974 ms` / steady `0 B`), and `L-10` (`2026-11-26`,
-  `5b163b4`: half-res spiral SSAO + cross-bilateral blur, 5-mip Karis bloom,
-  color grading + PBR Neutral/ACES Fitted/Reinhard/None tonemappers, and
-  `Msaa4x`/`Msaa2x`/`Fxaa`/`Off` in `post_gpu.rs`/`post_ssao.wgsl`/
-  `post_bloom.wgsl`/`composite.wgsl`, Scene Display UI & presets, MCP
-  `scene_display_set`/`material_inspect` keeping `tools/list` at `14,457` B, all
-  7 RTX 4060 GPU probes green including Cinematic `1280×720` p50 `1.670 ms` /
-  p95 `2.387 ms`, 5k 1080p 4× MSAA CPU p50 `0.386 ms` / GPU p50 `0.284 ms` /
-  frame p50 `1.075 ms` / p95 `1.527 ms` / steady `0 B`), and `L-11` (`2026-11-26`,
-  `34dc485`: `ShadingMode` 11 viewport shading & debug view modes `Lit`, `Unlit`,
-  `Wireframe` via optional `POLYGON_MODE_LINE` with fallback, `Normals`,
-  `Roughness`, `Metallic`, `Albedo`, `AO`, `Depth`, `Clusters` heatmap, and
-  `Cascades` CSM palette across `rot-render`/`surface.wgsl`/`composite.wgsl`/
-  `ibl_gpu.rs`, viewport overlay dropdown, remappable `Alt+2..5` shortcuts &
-  Command Palette actions in `rot-editor`, all 8 RTX 4060 GPU probes green
-  including `shading_debug_views_gpu_probe`, 5k 1080p 4× MSAA CPU p50 `0.510 ms` /
-  GPU p50 `0.284 ms` / frame p50 `1.264 ms` / p95 `1.567 ms` / steady `0 B`), and
-  `L-3B-EXIT` (`2026-11-26`, `35ae05c`: multi-light interior reference scene
-  [gallery.scene.json](../examples/rot-yard/gallery.scene.json) combining
-  Surface HDR, 4-cascade CSM Sun, 3 shadow-casting Spot/Point atlas lights,
-  12 clustered lights, exp² height fog, SSAO/bloom/ACES/`4× MSAA`, and
-  frosted glass; fixed SSAO texel-center UV alignment in `post_ssao.wgsl`;
-  verified visually across `Lit` and debug views; RTX 4060 `720p` `4× MSAA`
-  frame p50 `1.953 ms` / p95 `2.554 ms`, `1080p` `4× MSAA` GPU p50 `1.668 ms` /
-  frame p50 `3.095 ms` / p95 `3.794 ms`, steady `0 B` upload; 5k 1080p `4× MSAA`
-  CPU p50 `0.707 ms` / GPU p50 `0.284 ms` / frame p50 `1.445 ms` / p95 `1.900 ms`;
-  refreshed local release install via `scripts/install_local.py`).
-- **Phase 2 — Core completed packages:** `C-00a` (retired legacy logistics
-  crates, Rhai mode, editor logistics UI, and superseded MCP
-  enrollment/registry plumbing; promoted `crates/rot-support`), `C-01` (v23
-  design), `C-02` (v23-only editor cutover, automatic v1–v22 → v23 upgrade on
-  open, tracked `examples/` scenes migrated to v23, and deletion of pre-v23
-  editor UI paths, `creation_export.rs`, and `scripts/package_creation.py`),
-  `C-03` (native flat-array `ComponentRuntime` & `ComponentDrawPlan`, unified `rot-app`
-  / `rot-editor` / `rot-motion-lab` / `rot-behavior` execution, and deletion of
-  `component_behavior.rs`, `RuntimeScene::Behavior`, and `behavior_projection()`),
-  `C-04` (files-first `Assets/`), `C-05` (Hierarchy & Inspector with
-  live single/multi-object axis scrubbing, parented descendants & lights preview,
-  Escape cancel, and one-step Undo; live editing during Play deferred to
-  Phase 4), `C-06` (retired 35 legacy/logistics MCP tools, orphaned
-  `workspace_server.py`, and `Save As`/`filename` wire fallbacks; shared
-  v23 `ComponentWorkspace` rename/delete/history helpers; enforced `tools/list`
-  at `14,352` bytes < 15 KB with 66 live tools), `C-07` (linked prefabs),
-  `C-08` (non-refusal `.glb`/`.gltf`
-  import with external `.bin`/image & `data:` URI packing, JPEG textures, and
-  warnings on real-world CC0/Blender fallbacks; full PBR maps, animated
-  lenses, and animated lights tracked in Phase 3A/3B), `C-09` (dedicated
-  `rot-player` binary crate extracted from `examples/motion-lab`, wired to
-  editor Build and `scripts/install_local.py`, and measured in release for
-  small-project Build and empty-player budgets), `C-10` (unified persistent-VM
-  file-backed Lua component API with `on_start`/`on_update`, live reload on
-  save, `host.find` with `id`/`name`/`transform`/`set_transform`, `Light`
-  component access, `spawn`/`destroy`, `sweep`/`overlap`, `play_sound`,
-  `move_and_slide`/`sensor_crossing`, and versionless file script baking while
-  preserving legacy `update` scripts), `C-11` &
-  `C-11a` (multi-scene projects & crash recovery), `C-12` (5k/50k benchmark
-  scenes), `C-EXIT` (Phase 2 gate closed `2026-11-26`: [Rot Yard](../examples/rot-yard/README.md)
-  5,000-object desktop pan `190.2`/`217.7 fps`, 50.7 MB GLB import `251–314 ms`,
-  `4096` px texture caps, workspace-2 [UI checklist](UX-STANDARDS.md#10-ui-review-checklist)
-  pass with `Edit → Preferences…`, live theme/scale sync, 1.5× overlay wrap, and
-  status icons, warm `127.0 MiB` / cold `163.6 MiB` empty player RSS, and local
-  install refresh), `C-05a`–`d`, `C-09a`, and slices `C-13`–`C-61`.
-- **Phase 4 — Early slice:** Game HUD labels (`2026-11-23`, `607fc96`).
+Find a package's commits with `git log --grep '^<id>'`.
+
+- **Phase 1 — Shell**, 2026-11-17 to 19. Reopened: see the UX lane.
+- **Phase 2 — Core**, closed 2026-11-26 (`62fe99c`).
+- **Phase 3A and 3B — Look**, closed 2026-11-26 (`7283208`, `35ae05c`).
+- **Phase 4:** `P4-01` `df7d23b`, `P4-02` `d3d1316`, `P4-03` `1c02b15`,
+  `P4-04` `2fa2bbb`, `P4-05` `0688733`, `P4-06` `c67b7d3`.
+- **Repair lane:** none yet.
+- **UX lane:** none yet.

@@ -147,6 +147,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a change. [AGENTS.md](AGE
 | --- | --- |
 | Current implementation, verification and limitations | [Status](docs/STATUS.md) |
 | Plan and ordered work | [Parity plan](docs/PARITY-PLAN.md), [backlog](docs/BACKLOG.md) |
+| Where code lives and how to change it | [Architecture](docs/ARCHITECTURE.md) |
 | Editor UI standards | [UX standards](docs/UX-STANDARDS.md) |
 | Create, modify and package an application | [Application kit](crates/rot-app/README.md), [distribution](docs/DISTRIBUTION.md), [M7 evidence](docs/evidence/M7.md) |
 | Product direction | [Direction](docs/DIRECTION.md) |

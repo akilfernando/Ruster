@@ -8,7 +8,8 @@ This skill is a pointer. The way of working is in the repository:
 
 1. Read `AGENTS.md` at the repository root.
 2. Read `docs/PLAYBOOK.md` and follow it.
-3. Take the first open package in `docs/BACKLOG.md`.
+3. Take the first open package in your lane in `docs/BACKLOG.md` and follow
+   its brief in `docs/briefs/`. Do not start a package that has no brief.
 
 When the user requests persistent goal tracking, use Astra's acceptance
 criteria to set one active goal for the authorized scope. Track each Sol

@@ -211,14 +211,44 @@ class RunnerTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     check.validate_markdown(self.root, {"docs/broken.md"})
 
-    def test_markdown_doc_line_limits(self):
-        for rel, limit in check.DOC_LINE_LIMITS.items():
+    def test_markdown_page_byte_limits(self):
+        limits = dict(check.DOC_BYTE_LIMITS)
+        limits["docs/briefs/X-01.md"] = check.BRIEF_BYTE_LIMIT
+        for rel, limit in limits.items():
             with self.subTest(path=rel):
-                self.write(rel, "".join(f"line {i}\n" for i in range(limit)))
+                self.write(rel, "x" * (limit - 1) + "\n")
                 check.validate_markdown(self.root, {rel})
-                self.write(rel, "".join(f"line {i}\n" for i in range(limit + 1)))
+                # One long line must not slip under a line count.
+                self.write(rel, "x" * limit + "\n")
                 with self.assertRaisesRegex(RuntimeError, f"exceeds limit of {limit}"):
                     check.validate_markdown(self.root, {rel})
+        self.write("docs/other.md", "x" * 50_000 + "\n")
+        check.validate_markdown(self.root, {"docs/other.md"})
+
+    def test_code_commits_need_a_message_body(self):
+        base = self.git("rev-parse", "HEAD").decode().strip()
+        self.write("docs/note.md", "# Note\n")
+        self.commit()
+        self.assertEqual(check.commits_without_body(self.root, base), [])
+        self.write("crates/rot-core/src/lib.rs", "// Core changed\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "X-01: explained", "-m", "Verified: cargo test -p rot-core")
+        self.assertEqual(check.commits_without_body(self.root, base), [])
+        self.write("crates/rot-core/src/lib.rs", "// Core changed again\n")
+        self.commit()
+        missing = check.commits_without_body(self.root, base)
+        self.assertEqual(len(missing), 1)
+        self.assertTrue(missing[0].endswith(" fixture"))
+
+    def test_gpu_mode_runs_only_the_probes(self):
+        command = check.gpu_command()
+        self.assertEqual(command[:4], ["cargo", "test", "-p", "rot-render"])
+        self.assertIn("--ignored", command)
+        self.assertIn("gpu_probe", command)
+        with contextlib.redirect_stdout(io.StringIO()), patch.object(check, "cargo_binary", return_value="cargo"), patch.object(check.subprocess, "run") as run:
+            self.assertEqual(check.main(["--gpu"]), 0)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.args[0][1:4], ["test", "-p", "rot-render"])
 
     def test_commands_include_doc_tests_and_fail_fast(self):
         plan = check.Plan("packages", "fixture", ("rot-cli",))

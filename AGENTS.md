@@ -7,15 +7,18 @@ an AI app that edits the open project through MCP.
 
 ## Start here
 
-1. [docs/PLAYBOOK.md](docs/PLAYBOOK.md): how to work. Short. Read it every
-   session.
+1. [docs/PLAYBOOK.md](docs/PLAYBOOK.md): how to work. Read it every session.
 2. [docs/STATUS.md](docs/STATUS.md): where things stand. One page.
 3. [docs/BACKLOG.md](docs/BACKLOG.md): what to do next. Find the first open
-   package in your lane and read only that package.
-4. [docs/UX-STANDARDS.md](docs/UX-STANDARDS.md): read before any editor UI
+   package in your lane, then read its brief in `docs/briefs/` and no other.
+   The brief is your instruction. A package without a brief is not ready.
+4. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): where code lives and the
+   recipe for each common change. Read it before your first code change.
+5. [docs/UX-STANDARDS.md](docs/UX-STANDARDS.md): read before any editor UI
    work.
-5. [docs/PARITY-PLAN.md](docs/PARITY-PLAN.md): the phases, the architecture
-   decisions and the performance budgets, when you need the reasons.
+6. [docs/PARITY-PLAN.md](docs/PARITY-PLAN.md): how far each area is from
+   parity, the phases, the architecture decisions and the performance
+   budgets, when you need the reasons.
 
 Do not read `docs/archive/`, `docs/evidence/`, `docs/HISTORY.md`,
 `docs/ROADMAP.md`, `docs/ROADMAP-REVIEW.md`, `docs/workflow/` or old files in
@@ -42,6 +45,9 @@ These are confirmed by the user. Do not trade them away.
   available.
 - Spend effort on features and fixes that change the product. Do not build
   elaborate supporting process.
+- Cost-efficient models must be able to implement the plan properly
+  (2026-11-27). Every package therefore has a brief with verified facts,
+  ordered steps and checks that can fail.
 - Rust, Vulkan, an open project, creators own their own game logic, and
   lighting, shaders and textures are core, with LOD and ray tracing later.
 - Be honest in every report: say what was verified and how, and never present
@@ -71,8 +77,10 @@ instead of launching the editor yourself.
 ## Commands
 
 ```sh
-python3 scripts/check.py                      # the gate: format, Clippy, tests, docs links
+python3 scripts/check.py --base main          # the gate: format, Clippy, tests, docs
+python3 scripts/check.py --gpu                # offscreen Vulkan probes; needs the GPU
 cargo test -p <crate> <test-name>             # one test while iterating
 cargo build -p rot-editor --features inspection
 python3 scripts/ui_drive.py --help            # drive and screenshot the editor
+python3 scripts/tidy.py                       # list leftovers; removes nothing by default
 ```

@@ -1,132 +1,98 @@
 # Playbook: how to work on Rot Engine
 
 Adopted 2026-11-17 at the user's request for a lean way of working that any
-agent (Claude Code or Codex, strong model or mid-tier) can follow. It replaces
-the earlier process rules. If another document disagrees with this one about
-*how to work*, this one wins.
+agent (Claude Code or Codex, strong model or mid-tier) can follow. Revised
+2026-11-27, at the user's request, so that cost-efficient models can
+implement packages on their own. If another document disagrees with this one
+about *how to work*, this one wins.
 
 The user's instruction in one line: **spend effort on features and fixes that
 change the product, not on supporting process.**
 
-## 1. Start of a session (5 minutes, no more)
+## 1. Start of a session (10 minutes, no more)
 
-1. `git status`, `git log --oneline -5`. The **trunk** is the branch named
-   under "Where to work" in [STATUS](STATUS.md). Run `git worktree list` if
-   anything looks odd; this repository has had stale checkouts.
-2. Read the current work and known gaps in [STATUS](STATUS.md). Look up
-   earlier results when they affect the package.
-3. Open [BACKLOG](BACKLOG.md). Take the first open package in your lane
-   under **Now**, unless the user asked for something specific. With no lane
-   given, use the UX lane. Read only that package, and do only that package.
-4. If the package touches the editor UI, read [UX-STANDARDS](UX-STANDARDS.md).
-5. Claim the package: change its status line to
-   `in progress — <agent/model>, <date>` and commit that one-line change
-   directly on the trunk, before you branch, so other agents see it.
+1. `git status`, `git log --oneline -5`. The **trunk** is named under "Where
+   to work" in [STATUS](STATUS.md).
+2. Read "Now" and "Known problems" in [STATUS](STATUS.md).
+3. Open [BACKLOG](BACKLOG.md). Take the first `open` package in your lane,
+   unless the user asked for something specific. With no lane given: the
+   Repair lane until it is empty, then the UX lane.
+4. Read that package's brief in `docs/briefs/`. Read no other brief.
+5. Read [ARCHITECTURE](ARCHITECTURE.md) before your first code change. If the
+   package touches the editor UI, read [UX-STANDARDS](UX-STANDARDS.md).
+6. Check the brief's **Facts** against the code. If one is wrong, correct
+   the brief in its own commit, then go on. If the brief's design no longer
+   fits the code, stop and follow [section 10](#10-briefs).
+7. Claim the package: set its status to `in progress — <model>, <date>` and
+   commit that one line on the trunk, so other agents see it.
 
 Do not read `docs/archive/`, `docs/evidence/`, `docs/HISTORY.md`, old plans or
-the old roadmap unless your package links to a specific section. They are
+the old roadmap unless your brief links to a specific section. They are
 history and cost tens of thousands of tokens.
 
 ## 2. The loop for one package
 
-1. **Look at the reference.** Reuse an established convention from the
-   [UX standards](UX-STANDARDS.md) or the package brief. For a new or
-   disputed interaction, use official Unity and Unreal documentation to
-   check placement, names, defaults and shortcuts. The
-   [editor comparison](research/EDITOR-WORKFLOW-COMPARISON.md) links
-   the main editor pages.
+1. **Follow the brief.** Do its steps in order. It names the reference
+   behavior, the files and the checks.
 2. **Look at what exists.** Run the editor with
    [`scripts/ui_drive.py`](../scripts/ui_drive.py) and view the screenshots.
-   Read the code the package lists under *Touch*.
-3. **Build a thin end-to-end version first.** Data → engine → editor control →
-   MCP → save and reopen → built game, in that order, as far as the package
+   Read the code the brief names.
+3. **Build a thin end-to-end version first.** Data, runtime, editor control,
+   MCP, save and reopen, built game, in that order, as far as the package
    reaches. Get one real example working through all of it before widening.
-4. **Use it and look at it.** Run the changed journey in a disposable project
-   in one representative appearance. Use a second size for layout or scaling
-   risk. Check a second appearance only when an affected palette, wording,
-   artwork or control state gives a concrete reason. See
-   [testing appearance](TESTING.md#risk-specific-evidence).
-5. **Protect it.** Add one to three tests that would catch a real regression.
-   Run the gate.
-6. **Finish.** Tick the package in BACKLOG, update STATUS, update the user
-   guide if behavior changed, commit, merge. Report in a short paragraph:
-   what a creator can now do, how you checked, what you did not check.
+4. **Use it.** Add the feature to the sample project the brief names and run
+   it in the editor and in the built player.
+5. **Protect it.** Write the tests the brief lists. Run the gate.
+6. **Finish.**
+   - Go down the brief's **Done when** list. Every item is met, or the
+     package is not done.
+   - Delete the brief file. Remove the package's row from its lane and add
+     its id to the phase's line under Done in BACKLOG.
+   - Update STATUS if what a creator can do, or a known problem, changed.
+   - Commit, merge, push. Report in a short paragraph: what a creator can
+     now do, how you checked, what you did not check.
 
-A package should fit in one working session. If it will not, split it by
-user-visible steps and do the first one completely.
-
-### Autonomous runs
-
-For an authorized autonomous run, repeat this loop while the user’s run
-limit permits new work.
-
-1. **Astra defines the goal.** Check the backlog and current code. Pick one
-   bounded creator workflow, with a clear starting point, a usable outcome,
-   an acceptance scenario, and a stopping point. **Phase-Exit Priority Rule:**
-   while any core package or exit criterion for the active phase is open,
-   every selected slice must close a named gap in an open core package or
-   exit criterion — do not invent new convenience slices. Exercise the phase's
-   tracked reference project in `examples/` where applicable instead of
-   one-off throwaway fixtures. Rotate to another underdeveloped area once the
-   current area can serve the chosen workflow. Connect related slices through
-   the parity plan's reference projects.
-2. **Sol implements the slice.** Give Sol the base commit, scope, acceptance
-   scenario, relevant risks, and stopping point. Agree on the question and
-   measurement boundary before building a performance check. Share fixtures
-   and builds, coordinate Cargo use, and keep competing work away from
-   timed measurements.
-3. **Terra reviews substantial visual work.** Share screenshots or an
-   isolated app-scoped test of the candidate build. Name the changed
-   controls, appearances and sizes that matter. Ask for concrete findings
-   about layout, states and focus. For a small visual change, the
-   coordinator can review the screenshots directly. Follow AGENTS.md for
-   all desktop interaction.
-4. **The coordinator reviews and integrates.** Review the diff against the
-   goal, reuse applicable verification, close gaps, run the integration
-   gate, and verify the merged revision before claiming the next package.
-
-Use the closest available model or handle that role in the current session
-if a preferred model is unavailable.
-
-Use hosted CI waits for independent review or the next read-only brief when
-authorized. Use the final hosted result for the integrated revision. Check
-any user-set run limit before starting another goal.
+A package should fit in one working session. If it will not, do its steps in
+order as far as you get, commit, set the status back to `open`, and say in
+the commit which step is next.
 
 ## 3. Definition of done
 
-A package is done when all of these that apply to it are true. Skip the
-items that cannot apply (a transport change has no screenshots; a visual
-change has no MCP tool) and name what you skipped in the handoff. If an item
-applies and cannot be met, say so instead of quietly skipping it.
+A package is done when its brief's **Done when** list is met and all of
+these that apply are true. Name what you skipped in the commit message. If
+an item applies and cannot be met, the package stays open.
 
 - A creator can do the thing in the editor, in the place and with the name a
   Unity or Unreal user would expect.
 - It is reachable by keyboard, and Undo reverses it as one step.
 - It survives Save, close, reopen. It works in a built game if it is a
   runtime feature.
-- An AI client can do the same thing through MCP (see §6), unless the package
-  is purely visual.
-- It works on representative content. Include a real asset for asset-facing
-  changes and a large scene for features that change how work scales with
-  scene size. It warns and continues where it can instead of refusing.
-- It stays inside the [performance budgets](PARITY-PLAN.md#5-performance-budgets)
-  for its phase. If you touched a hot path, measure in a release build
-  before and after and put both numbers in the commit message.
+- An AI client can do the same thing through MCP and can discover it, unless
+  the package is purely visual.
+- The active phase's sample project in `examples/` uses it.
+- Nothing a creator could do before is gone. If the package removes or
+  replaces a surface, the commit lists what was removed and where each
+  capability went.
+- It stays inside the [performance budgets](PARITY-PLAN.md#5-performance-budgets).
+  If you touched a hot path, measure in a release build before and after.
 - You looked at the screenshots and it passes the
   [UI review checklist](UX-STANDARDS.md#10-ui-review-checklist).
-- `python3 scripts/check.py --base <trunk>` passes.
-- BACKLOG and STATUS are updated.
+- The creator guide and `docs/LUA-API.md` say how to use it.
+- `python3 scripts/check.py --base <trunk>` passes, and
+  `python3 scripts/check.py --gpu` if you changed what is drawn.
 
 ## 4. Quality bars, with the mistakes this project has already made
 
 | Bar | What it means | The mistake to avoid |
 | --- | --- | --- |
-| Match the reference | Unity and Unreal conventions are the spec for names, placement, shortcuts and defaults. | Inventing terms and flows ("Reset" before Play, "Control runtime", "accepted generation"). |
-| Whole slices | A feature is engine + editor + MCP + save + build. | Engine-only features with no usable editor route, or a UI over a one-off demo. |
-| General, not bounded | Build for real projects. Limits are large and soft. | "One clip", "one sphere", 64 assets, 256 objects, refusing a model because it has a normal map. |
-| Show, do not explain | The UI makes state obvious. Detail goes in tooltips and the Console. | Paragraphs of contract text under panels and in the status bar. |
-| Fast | Interactions feel instant; idle costs nothing. | Shipping a feature without ever running it in release on a large scene. |
-| Honest | Say what was verified and how. | Calling injected-input tests a human walkthrough. |
+| Match the reference | Unity and Unreal conventions are the spec for names, placement, shortcuts and defaults. | Inventing terms and flows. An Apply button on the Inspector. |
+| Whole slices | A feature is engine, editor, MCP, save, build and guide. | Components an AI app cannot discover. Features no guide mentions. |
+| General, not bounded | Build for real projects. Limits are large and soft. | 16 KiB scripts, 10-second sounds, 16 Animators, box and sphere colliders only. |
+| Nothing lost | A rewrite keeps what worked. | The editor cutover that deleted docking, layouts and the Game tab while STATUS still said done. |
+| Checks that can fail | A test proves something only if it fails when the feature breaks. | Pixel checks that pass by `u8` wraparound. A benchmark run with ten times the shipping limits. |
+| Show, do not explain | The UI makes state obvious. Detail goes in tooltips and the Console. | Paragraphs of text under panels and in the status bar. |
+| Fast | Interactions feel instant; idle costs nothing. | Each package adding per-tick work until the budget is gone. |
+| Honest | Say what was verified and how. | Calling injected-input tests a human walkthrough. Marking a phase done on the implementer's word. |
 
 ## 5. Stop signs
 
@@ -134,20 +100,22 @@ If you catch yourself doing one of these, stop and do the thing on the right.
 
 | You are about to… | Do this instead |
 | --- | --- |
+| Start a package that has no brief | Stop. See [section 10](#10-briefs). |
+| Mark a package done with a Done-when item unmet | Leave it open and say which item is missing. |
+| Write a paragraph in BACKLOG or STATUS | One status phrase. The detail goes in the commit message. |
+| Commit code with an empty message body | Write what changed, the commands you ran and their results. |
 | Write hash manifests, receipts, audit folders or "evidence" documents | Put the commands you ran and their result in the commit message. |
-| Record failed attempts and harness retries in documentation | Fix it and move on. Mention only failures the next person must know about. |
-| Add a new scene or catalog format version, capability flag or "kit profile" for a feature | Add an optional field with a default. See the [format policy](PARITY-PLAN.md#4-architecture-decisions). |
-| Add a refusal for content you do not support yet | Import what you can, show one warning in the Console, keep going. Refuse only corrupt or unsafe input. |
+| Add a new scene or catalog format version or capability flag | Add an optional field with a default. See [A2](PARITY-PLAN.md#4-architecture-decisions). |
+| Add a refusal for content you do not support yet | Import what you can, show one warning in the Console, keep going. |
+| Add a fixed limit a normal project could hit | Use a generous safety limit. See [A12](PARITY-PLAN.md#4-architecture-decisions). |
 | Add helper text to explain a control | Rename or redesign the control. Use a tooltip if detail is still needed. |
-| Add a toolbar row, a top-level button or a new panel for one feature | Put it where the reference engines put it: a component in the Inspector, a context menu, an existing menu. |
-| Spend more than a day with nothing visible to show | Cut scope to the smallest visible step and ship that. |
-| Ask another agent to review routine work | Review your own screenshots and diff. Ask for review only for data-loss risk, the AI trust boundary or a format change. |
-| Build a framework, a generic abstraction or a harness "for later" | Write the direct code for today's feature. Extract on the third use. |
-| Keep a long-lived branch or a new worktree | Merge when the package is done. Delete the branch. |
+| Add a toolbar row, a top-level button or a new panel for one feature | Put it where the reference engines put it. |
+| Grow a file that is already over 3,000 lines | Put the new system in its own module. |
+| Build a framework or a harness "for later" | Write the direct code for today's feature. Extract on the third use. |
+| Leave fixtures in `/tmp`, or a worktree, or a branch | Use `target/tmp/`, delete it when done, merge and delete the branch. |
 | Start the next package's work inside this one | Finish and merge yours. Then claim the next. |
-| Change how AI apps are trusted, or weaken an approval step, as a side effect | Only in a package that says so, with a decision note and a review by the strongest model. |
-| Write a long STATUS entry | Eight lines. What works now, what is still missing. |
-| Ask the user to choose an implementation detail | Choose what Unity does, note it in the package, continue. |
+| Change how AI apps are trusted as a side effect | Only in a package that says so, with a decision note and a review by the strongest model. |
+| Ask the user to choose an implementation detail | Choose what Unity does, note it in the commit, continue. |
 
 ## 6. Two workflows, one editor
 
@@ -162,118 +130,137 @@ Every authoring feature serves both of these:
 Rules that keep the second workflow good:
 
 - New editor commands go through the shared command layer so the menu item,
-  the shortcut and the MCP tool are the same code path. Do not write a
-  parallel MCP-only implementation.
+  the shortcut and the MCP tool are the same code path.
 - Prefer a few general MCP tools over one tool per feature. A new component
-  type must not need a new tool.
-- Project data lives in readable files (scenes, prefabs, materials, scripts)
-  that an AI coding tool can also edit directly; the editor reloads them.
-- Test the AI route with a real client at least once per package that adds
-  authoring surface, not only through unit tests. Use a throwaway project
-  with a project-level MCP config for this. Do not edit the user's own AI
-  app configuration without asking.
+  type must not need a new tool, and must appear in the component catalog
+  that `rot_tools` serves.
+- Project data lives in readable files that an AI coding tool can also edit
+  directly; the editor reloads them.
+- Test the AI route with a real client once per package that adds authoring
+  surface. Use a throwaway project with a project-level MCP config. Do not
+  edit the user's own AI app configuration without asking.
 
 ## 7. What to verify, and with what
 
 | Check | Command | When |
 | --- | --- | --- |
-| Gate: format, Clippy, affected tests, Markdown links | `python3 scripts/check.py --base <trunk>` | Before every merge. Without `--base` it only checks uncommitted changes, so after committing it checks nothing. |
-| Focused regression while iterating | `cargo test -p <crate> <name>` | When the affected behavior changes |
-| See and drive the editor UI | `cargo build -p rot-editor --features inspection` then `python3 scripts/ui_drive.py --help` | Every UI change |
-| Keyboard reach | `python3 scripts/ui_drive.py … tabwalk:60` and read the order; add `shot:` steps to see the focus ring | Every new panel or dialog |
-| Speed | Measure the changed path in release. Use `scripts/measure_budgets.py` for its relevant workloads and observe the desktop isolation rules | When changing a hot path or making a performance claim |
-| AI transport | `python3 scripts/mcp_smoke.py` or a focused equivalent | When changing the bridge, approval, routing or wire behavior. Reuse a real-client journey that covers the same contract |
-| Real AI client | Claude Code or Codex against a running editor with a private config in a throwaway project | Once per package that adds an authoring surface. Check discovery and the changed action, including shared Undo where applicable |
+| Gate: format, Clippy, affected tests, Markdown | `python3 scripts/check.py --base <trunk>` | Before every merge. Without `--base` it checks only uncommitted changes. |
+| GPU probes | `python3 scripts/check.py --gpu` | When you change `rot-render`, a shader, or what goes into a draw frame. Needs the Vulkan GPU. |
+| One test while iterating | `cargo test -p <crate> <name>` | While the behavior is changing |
+| See and drive the editor | `cargo build -p rot-editor --features inspection` then `python3 scripts/ui_drive.py --help` | Every UI change. View the PNGs. |
+| Keyboard reach | `python3 scripts/ui_drive.py … tabwalk:60` | Every new panel or dialog |
+| Runtime speed | `cargo test --release -p rot-behavior --locked -- --ignored --nocapture bench_10k_script_updates_per_frame bench_1k_active_rigid_bodies` | When you change the tick, Lua, physics or animation |
+| Render speed | The benchmark commands in `crates/rot-render/README.md` | When you change the renderer |
+| AI transport | `python3 scripts/mcp_smoke.py` | When you change the bridge, approval or wire behavior |
+| Real AI client | Claude Code or Codex against a running editor, private config, throwaway project | Once per package that adds authoring surface |
 
-Tests: write the few that protect behavior a creator depends on. Prefer one
-test through the real command path over many unit tests of internals. Do not
-add tests to demonstrate diligence. [TESTING](TESTING.md) has the detail.
+Tests: write the ones the brief lists, and any other that protects behavior
+a creator depends on. Prefer one test through the real command path over
+many unit tests of internals. [TESTING](TESTING.md) has the detail.
 
 The editor test window opens on Hyprland workspace 2 without taking focus;
-`ui_drive.py` does this for you, and it opens a disposable copy of the scene
-you give it (for example `--scene examples/arrangement.scene.json`). Never
-send global keyboard or mouse input and never touch the user's clipboard or
-their open windows.
+`ui_drive.py` does this for you and opens a disposable copy of the scene.
+Never send global keyboard or mouse input and never touch the user's
+clipboard or their open windows. Timings from the hidden workspace are
+throttled and are not performance evidence.
 
 ## 8. Documentation you maintain
 
 | File | What you write | Limit |
 | --- | --- | --- |
-| [BACKLOG](BACKLOG.md) | Status line of your package; new findings as one-line items under **Inbox** | One line each; enforced `< 300` lines by `scripts/check.py` |
-| [STATUS](STATUS.md) | What works now, what is in progress, known problems | Enforced `< 120` lines (target `< 100`) by `scripts/check.py`; archive old entries out |
-| User guides (`docs/CREATOR-WORKFLOW.md`, crate READMEs) | How a creator uses the feature | Only when behavior changed |
-| `docs/decisions/` | A decision that changes architecture, a file format or the AI trust model | Under 40 lines: context, decision, why, what it costs |
-| Commit message | What changed, how you verified it, and any benchmark timings | A few lines; never put benchmark paragraphs in `STATUS.md` |
+| [BACKLOG](BACKLOG.md) | Your package's status phrase; new findings as one line under Inbox | 14 KB, enforced by the gate |
+| [STATUS](STATUS.md) | What works now, known problems, what is not verified | 6 KB, enforced by the gate |
+| Creator guide and `docs/LUA-API.md` | How a creator uses the feature | When behavior changed |
+| [ARCHITECTURE](ARCHITECTURE.md) | The map and recipes | When you add a crate, a system or a step to a recipe |
+| `docs/decisions/` | A decision that changes architecture, a file format or the AI trust model | Under 40 lines |
+| Commit message | Subject starting with the package id. Body: what changed, the commands you ran with their results, benchmark numbers, what you did not check | Required for every commit that touches `crates/` |
 
-Nothing else is required. No per-package plan documents, evidence documents,
-delegation logs or model-routing records. Write dates as `2026-11-17`. Mark
-who decided: *user* or *agent*. Never state that the user approved something
+Nothing else. No per-package plan documents, evidence documents, delegation
+logs or model-routing records. Write dates as `2026-11-17`. Mark who
+decided: *user* or *agent*. Never state that the user approved something
 they did not.
 
 ## 9. Who decides what
 
-- **You decide** implementation, API shapes, UI details inside the standards,
-  defaults and limits. Follow the reference engines. Note anything a later
-  agent would otherwise have to rediscover.
+- **You decide** implementation details inside the brief, following the
+  reference engines. Note anything a later agent would otherwise have to
+  rediscover.
+- **The brief decides** names, API shapes, fields, defaults and what is out
+  of scope. Do not change those on your own.
 - **Ask the user** before: anything destructive to their files or projects,
   installing system software, editing their own AI app configuration,
   changing brand assets, or reordering the phases of the plan. Git work
   needs no permission: the user asked on 2026-11-17 for fully autonomous
   pushing, pull requests, reviews, merging and branch hygiene.
 - **Changing the plan.** Add a line under **Inbox** in BACKLOG with your
-  reason. Do not reorder **Now** yourself unless a package is blocked.
+  reason. Do not reorder a lane yourself unless a package is blocked.
 
-## 10. Models and helpers
+## 10. Briefs
+
+A brief is the whole instruction for one package: Outcome, Why, Facts, Do,
+Done when, Not now, and the Sample line. It is one file in `docs/briefs/`,
+under 6 KB, and it is deleted when the package is done.
+
+- **Who writes them.** The strongest available model (Fable in Claude Code,
+  Astra in Codex), from the code, after the phase before it is reviewed.
+- **A mid-tier model may write a brief** only for a package whose whole
+  shape is a recipe in [ARCHITECTURE](ARCHITECTURE.md): one new component,
+  one new Lua function, one new command. Copy the structure of an existing
+  brief. Anything that adds a system, changes a file format, changes the AI
+  trust model or redesigns a surface waits for the strongest model.
+- **When no ready brief is left in your lane,** take another lane. When none
+  is left at all, stop and tell the user a planning pass is needed.
+- **When a brief is wrong.** A wrong fact: fix it and continue. A wrong
+  design: stop, set the status to `open`, add an Inbox line saying what does
+  not fit, and take the next package.
+- **Exit packages** end at `review`. A different session, on the strongest
+  model, reruns the checks and sets them done. The implementer never closes
+  a phase.
+
+## 11. Models and helpers
 
 Use what your host offers. Do not research or benchmark models.
 
 | Work | Claude Code | Codex |
 | --- | --- | --- |
-| Writing or revising a package brief, architecture, a hard bug, review of a risky change | Fable | Astra |
-| Implementing a package | Opus | Sol |
-| Mechanical edits, renames, fixtures | Sonnet or Haiku | Luna |
-| Substantial visual verification | A visual-capable model | Terra |
+| Briefs, architecture, a hard bug, review of a phase exit or a risky change | Fable | Astra |
+| Implementing a package from its brief | Opus or Sonnet | Sol |
+| Code motion, renames, fixtures | Haiku | Luna |
+| Looking at many screenshots | A visual-capable model | Terra |
 
-Packages marked **brief needed** must get their brief from the strongest model
-available before anyone implements them. Implementers follow the brief; if it
-is wrong, fix the brief first.
+Helpers (subagents): use a read-only search agent to map unfamiliar code.
+Use at most two implementing helpers at once, on different lanes, each told
+its package id and the commit to start from. Review a helper's diff against
+the brief's Done-when list before merging it.
 
-Helpers (subagents): use a read-only search agent to map unfamiliar code. Use
-at most two implementing helpers at once, on files that do not overlap, each
-in its own worktree, each told the exact commit to start from, its files, and
-its done-when list. Otherwise work in the main session.
-Helpers that cannot write to the main checkout (sandboxed worktrees) push
-their branch instead; the coordinating session merges it.
+**Autonomous runs** (user, 2026-11-22). Repeat the loop in section 2 while
+the user's run limit permits. The goal of each round is the next brief; do
+not invent slices. A coordinator, when there is one, checks the Done-when
+list itself, runs the gate on the merged trunk, and only then starts the
+next package.
 
-## 11. Git
+## 12. Git and the machine
 
-- One trunk, named in STATUS. Branch `work/<package-id>-<short-name>` from
-  it, merge back into it locally when the package is done, delete the
-  branch. Merging into the trunk needs no permission; pushing follows the
-  policy in STATUS. Standalone 1-line `Claim` commits on trunk are only
-  needed when multiple concurrent agents share the backlog; single-agent
-  sessions may skip them.
-- Commit as you go. One package may be several commits.
-- Do not rewrite history on the trunk. Do not leave work only in a stash or a
-  worktree.
-- The push policy is the user's and is recorded in STATUS.
-- Tool-created worktrees (`.claude/worktrees/`, `.codex-attachments/`) are
-  local leftovers. Once their branch is merged or pushed, remove them with
-  `git worktree remove --force <path>`.
-- After acceptance, retire redundant binaries and delivery copies created
-  for the slice. Keep the fixture, useful logs and any artifact needed for a
-  reproducible result or an open failure.
+- One trunk, named in STATUS. Branch `work/<package-id>` from it, merge back
+  when the package is done, delete the branch, push.
+- Commit as you go. Do not rewrite history on the trunk. Do not leave work
+  only in a stash or a worktree.
+- Temporary projects and fixtures go under `target/tmp/` in the checkout,
+  never in `/tmp` (it is memory on this machine) and never beside the
+  repository. Delete them when the package is done.
+- Do not create a worktree for a measurement. Build the before and after in
+  the same checkout, one after the other.
+- `python3 scripts/tidy.py` lists leftovers. Run it at the end of a package
+  and remove what is yours.
 
-## 11a. Known gotchas (found in Phase 1)
+## 13. Known gotchas
 
 - **`ui_drive.py` on the hidden workspace.** The test window never has OS
   focus, so the editor ignores keyboard shortcuts there; test shortcuts
-  in-process (see `workspace.rs` tests). Screenshots taken after key-only
-  input can be stale frames; use `--foreground` only when the user is away,
-  or check focus in-process. `click:` matches the first control with that
-  exact label (use `LABEL#2`); menu items' labels include their shortcut
-  text (`"Command Palette… Ctrl+K"`). Pointer drags cannot be sent; use
-  in-process egui event tests.
+  in-process (see the `workspace.rs` tests). Screenshots taken after
+  key-only input can be stale frames. `click:` matches the first control
+  with that exact label (use `LABEL#2`); menu items' labels include their
+  shortcut text. Pointer drags cannot be sent; use in-process egui tests.
 - **egui focus.** A widget sensed without `FOCUSABLE` drops focus, and
   allocating an extra widget shifts auto ids so the focused one loses
   focus next frame; give helper widgets explicit ids (`ui.interact`). A
@@ -281,16 +268,17 @@ their branch instead; the coordinating session merges it.
   frame's start (`focus::move_on_next_frame`).
 - **Fonts.** Inter and the egui fallbacks lack some symbols (▾ ⋯ ✖ ⓘ).
   Check a glyph with `fontTools` before using it, or paint it.
+- **Pixel comparisons.** Convert `u8` channels to `i32` before adding or
+  subtracting. A debug build panics on overflow; a release build wraps and
+  the assertion passes for the wrong reason.
+- **Benchmarks.** Use `Limits::default()`. Close other heavy programs.
 - **Flaky tests under load.** `connection/worker.rs`
-  `conflict_never_reads_back…` and `bridge.rs`
-  `enrolled_local_transport…` failed once each under heavy parallel load;
-  if the gate fails only there, rerun once and add an Inbox line if it
-  repeats.
-- **Vendored crates.** `third_party/egui_tiles` and
-  `third_party/transform-gizmo*` carry small patches; read their
-  `ROT-PATCH.md` before upgrading.
+  `conflict_never_reads_back…` and `bridge.rs` `enrolled_local_transport…`
+  failed once each under heavy parallel load; if the gate fails only there,
+  rerun once and add an Inbox line if it repeats.
+- **Vendored crates.** Read `ROT-PATCH.md` in the crate before upgrading.
 
-## 12. When the user gives feedback
+## 14. When the user gives feedback
 
 Treat it as the highest-priority input. Fix small things immediately. For
 anything larger, add a one-line **Inbox** item in BACKLOG quoting the user's

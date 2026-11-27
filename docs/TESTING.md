@@ -18,6 +18,8 @@ Protect behavior, not test counts. Select checks by changed behavior and depende
 | Risk-specific | Change touches a sensitive boundary | Additional checks from the matrix below, required for that change before acceptance. |
 | Broad validation | Release candidate, toolchain/dependency changes, structural changes; periodic CI once introduced | Full workspace plus supported platform/feature/hardware coverage relevant to release. Avoid exhaustive feature cross-products. |
 
+With `--base`, a local run also fails when a commit that changes `crates/` has an empty message body; hosted runs skip that check because trunk commits cannot be amended. `docs/STATUS.md`, `docs/BACKLOG.md` and each brief have byte limits.
+
 The Linux GitHub Actions workflow in `.github/workflows/ci.yml` calls the same runner against the actual PR base SHA or previous push SHA, with full scope for initial publication/manual dispatch. Report hosted results in the commit or handoff; configuration alone is not a pass. There is no merge queue, GPU suite, scheduled job or supported release matrix. CI does not duplicate overlapping checks by default. Full validation is not automatically a GPU/performance/platform audit.
 
 When only Markdown under `docs/` changed, the hosted job runs the Markdown
@@ -38,6 +40,9 @@ python3 scripts/check.py --base origin/main
 
 # Conservative full workspace verification
 python3 scripts/check.py --full
+
+# Offscreen Vulkan probes in rot-render, in a debug build; needs a GPU
+python3 scripts/check.py --gpu
 
 # Runner regression checks when selection/execution tooling changes
 python3 -m unittest discover -s scripts/tests -v

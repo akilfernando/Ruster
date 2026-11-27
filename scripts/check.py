@@ -172,10 +172,29 @@ def choose_plan(root, paths, full_reason=None, workspace=None):
 # Inline and reference-style Markdown links. This intentionally does not fetch URLs
 # or validate headings; link targets with spaces should use Markdown's <...> form.
 LINK = re.compile(r"!?\[[^\]\n]*\]\(\s*(<[^>]+>|[^\s)]+)(?:\s+[^)]*)?\)|^\s*\[[^\]\n]+\]:\s*(<[^>]+>|\S+)", re.MULTILINE)
-DOC_LINE_LIMITS = {
-    "docs/STATUS.md": 120,
-    "docs/BACKLOG.md": 300,
+# Byte limits keep the pages every session reads cheap. Line counts were not
+# enough: a status line can hold a thousand characters.
+DOC_BYTE_LIMITS = {
+    "docs/STATUS.md": 6_000,
+    "docs/BACKLOG.md": 14_000,
 }
+BRIEF_BYTE_LIMIT = 6_000
+
+# Offscreen Vulkan probes in rot-render. They need a GPU, so the ordinary gate
+# and hosted CI skip them. Run in a debug build: overflow checks are on.
+GPU_PROBES = (
+    "gpu_probe",
+    "phase3b_interior_exit_gate_probe",
+    "shader_rejection_preserves_renderable_pipeline",
+)
+
+
+def byte_limit(relative):
+    if relative in DOC_BYTE_LIMITS:
+        return DOC_BYTE_LIMITS[relative]
+    if relative.startswith("docs/briefs/"):
+        return BRIEF_BYTE_LIMIT
+    return None
 
 
 def validate_markdown(root, paths):
@@ -191,12 +210,12 @@ def validate_markdown(root, paths):
                 errors.append(f"{relative}:{number}: trailing whitespace")
         if content and not content.endswith("\n"):
             errors.append(f"{relative}: missing final newline")
-        if relative in DOC_LINE_LIMITS:
-            limit = DOC_LINE_LIMITS[relative]
-            if len(lines) > limit:
-                errors.append(
-                    f"{relative}: {len(lines)} lines exceeds limit of {limit} (archive older entries)"
-                )
+        limit = byte_limit(relative)
+        size = len(content.encode("utf-8"))
+        if limit is not None and size > limit:
+            errors.append(
+                f"{relative}: {size} bytes exceeds limit of {limit} (put detail in the commit message)"
+            )
         # Fenced examples are not actual document links.
         prose = re.sub(r"(?ms)^\s*(`{3,}|~{3,})[^\n]*\n.*?^\s*\1\s*$", "", content)
         for match in LINK.finditer(prose):
@@ -209,6 +228,26 @@ def validate_markdown(root, paths):
                 errors.append(f"{relative}: missing relative link target: {target}")
     if errors:
         raise RuntimeError("\n".join(errors))
+
+
+def commits_without_body(root, base):
+    """Commits since BASE that change crates/ and say nothing about how they were checked."""
+    ancestor = git(root, "merge-base", base, "HEAD").decode().strip()
+    log = git(
+        root, "log", "--no-merges", "--format=%h%x1f%s%x1f%b%x1e", f"{ancestor}..HEAD", "--", "crates",
+    ).decode("utf-8", "replace")
+    missing = []
+    for record in log.split("\x1e"):
+        if not record.strip():
+            continue
+        commit, subject, body = (record.strip("\n").split("\x1f") + ["", ""])[:3]
+        if not body.strip():
+            missing.append(f"{commit} {subject}")
+    return missing
+
+
+def gpu_command():
+    return ["cargo", "test", "-p", "rot-render", "--locked", "--", "--ignored", "--test-threads=1", *GPU_PROBES]
 
 
 def commands(plan):
@@ -234,10 +273,18 @@ def main(argv=None):
     parser.add_argument("--full", action="store_true", help="run all workspace checks")
     parser.add_argument("--dry-run", action="store_true", help="print checks without executing them")
     parser.add_argument("--ci-setup", action="store_true", help="print docs or rust setup scope without invoking Cargo")
+    parser.add_argument("--gpu", action="store_true", help="run only the offscreen Vulkan probes in rot-render (needs a GPU)")
     args = parser.parse_args(argv)
     root = Path(__file__).resolve().parent.parent
     started = time.monotonic()
     try:
+        if args.gpu:
+            command = gpu_command()
+            print("Check: " + " ".join(command), flush=True)
+            if not args.dry_run:
+                subprocess.run([cargo_binary(), *command[1:]], cwd=root, check=True)
+            print(f"{'Planned' if args.dry_run else 'Passed'} in {time.monotonic() - started:.2f}s", flush=True)
+            return 0
         paths, reason = changed_files(root, args.base)
         full_reason = "explicit --full" if args.full else reason
         if args.ci_setup:
@@ -248,9 +295,17 @@ def main(argv=None):
         if plan.packages:
             print("Packages: " + ", ".join(plan.packages), flush=True)
         if plan.scope != "none":
-            print("Check: Markdown whitespace and relative links", flush=True)
+            print("Check: Markdown whitespace, relative links and page sizes", flush=True)
             if not args.dry_run:
                 validate_markdown(root, markdown_files(root))
+        # Hosted runs see commits that are already on the trunk and cannot be amended.
+        if args.base and not os.environ.get("CI"):
+            print("Check: commits that change crates/ have a message body", flush=True)
+            missing = commits_without_body(root, args.base)
+            if missing and not args.dry_run:
+                raise RuntimeError(
+                    "write what changed and how it was checked in the body of:\n  " + "\n  ".join(missing)
+                )
         for command in commands(plan):
             print("Check: " + " ".join(command), flush=True)
             if not args.dry_run:
